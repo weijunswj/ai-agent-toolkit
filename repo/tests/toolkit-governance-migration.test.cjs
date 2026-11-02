@@ -156,7 +156,7 @@ test('M-01: one batched question; the evidence store is disabled, the no-origin 
   // The governed block and binding are not the user's answer: the typed yes records it.
   assert.match(result.stdout, /governed: enable \(its working tree carries a programme binding that still has to be merged\)/);
   assert.match(result.stdout, /governed: governance is on and the working tree carries the programme binding, but it is not merged on the default branch yet/);
-  assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'ENABLED', plain: 'DISABLED', noOrigin: 'UNDECIDED', store: 'DISABLED' });
+  assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'ENABLED', plain: 'DISABLED', noOrigin: 'DISABLED', store: 'DISABLED' });
   assert.deepEqual(treeDigest(ctx.projects), before, 'no repository file was written');
   // The block-only repository is enabled without a binding: reported with the template, not written.
   assert.match(result.stdout, /block-only: governance is on but the programme binding is missing\. Copy skills\/repository-agent-rules\/repo-local\/toolkit-programme\.template\.json/);
@@ -174,7 +174,7 @@ test('M-01: answers can be changed in the same reply; anything else writes nothi
   // `decline` is the older word for `disable` and is still understood.
   const changed = await migrate(ctx, { answers: ['yes 5=enable 1=decline', 'no'] });
   assert.equal(changed.code, 0, changed.stdout);
-  assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'DISABLED', plain: 'ENABLED', noOrigin: 'UNDECIDED', store: 'DISABLED' });
+  assert.deepEqual(states(ctx, repos), { governed: 'ENABLED', blockOnly: 'DISABLED', plain: 'ENABLED', noOrigin: 'DISABLED', store: 'DISABLED' });
   const refused = await migrate(ctx, { interactive: false });
   assert.equal(refused.code, 2);
   assert.match(refused.stderr, /Run this yourself in a terminal/);

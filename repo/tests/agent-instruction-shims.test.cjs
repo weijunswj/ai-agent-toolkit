@@ -176,7 +176,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /retry in a fresh session with a clearer request/,
     /A lower option may win when much better for one operation/,
     /switches only GitHub governance/,
-    /No git: DISABLED automatically\. Git not on github\.com: DISABLED once the user says ok\./,
+    /No git: DISABLED automatically\. Git not on github\.com: DISABLED automatically, with no question or hold\./,
     /"Enable Toolkit's automated GitHub tracking governance for this repository\?" \(yes, no, later\)/,
     /Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks/,
   ]) assert.match(text, rule);

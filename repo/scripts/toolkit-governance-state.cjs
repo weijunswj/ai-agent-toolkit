@@ -14,18 +14,12 @@
 //   registry   the user's own decision for that identity in
 //              ~/.ai-agent-toolkit/user-state/repository-governance.v1.json (U), stored and
 //              written only by toolkit-capability-registry.cjs. It decides only where nothing is
-//              merged, and is never deleted or rewritten here;
-//   ok         the user's ok that GitHub governance is off in a git repository that is not on
-//              github.com (K), in governance-not-github.v1.json next to the registry, written only
-//              by the hook gate from the user's own reply.
+//              merged, and is never deleted or rewritten here.
 //
 // GitHub governance (programme records, decision traces, evidence custody, the governed block)
 // works only for github.com repositories. States, first matching rule wins:
 //   R1 no git root                                  DISABLED       automatically, never held
-//   not GitHub (no usable origin, or another host):
-//     R2 U declined or disabled                     DISABLED
-//     R8 K present                                  DISABLED       the user said ok; nothing to enable here
-//     R9 K absent                                   UNDECIDED      held until the user says ok
+//   R8 not GitHub (no usable origin, or another host) DISABLED   automatically, never held
 //   github.com, by the merged binding:
 //     M0 merged binding malformed or unknown schema ERROR          not held; governed effects hold (A2)
 //     M2 merged v2 binding says disabled            DISABLED       only an owner-merged PR changes it (A3)
@@ -74,9 +68,6 @@ const SCHEMA = 'toolkit.governance-state.v1';
 const TRACKING_HOST = 'github.com';
 const trackingHost = programmeState.isGitHubHost;
 const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED', 'ERROR']);
-const NOT_GITHUB_BASENAME = 'governance-not-github.v1.json';
-const NOT_GITHUB_SCHEMA = 'toolkit.governance-not-github.v1';
-const NOT_GITHUB_READ_LIMIT = 256 * 1024;
 const GOVERNANCE_CAPABILITY = 'repository.governance';
 const GOVERNED_BLOCK = 'TOOLKIT-GOVERNED-RULES';
 const LEGACY_GOVERNED_BLOCK = 'GLOBAL-AGENTS.MD-TEMPLATE';
@@ -424,22 +415,6 @@ function localRepositoryId(root) {
   return `path:${crypto.createHash('sha256').update(process.platform === 'win32' ? real.toLowerCase() : real).digest('hex')}`;
 }
 
-// Whether the user said ok to GitHub governance being off for this key. A missing, unreadable or
-// damaged file counts as no ok: the repository stays held and asks again, which is safe.
-function readNotGitHubOk(key, options = {}) {
-  let parsed = null;
-  try {
-    const file = path.join(path.dirname(registryPathFor(options)), NOT_GITHUB_BASENAME);
-    const stat = fs.lstatSync(file);
-    if (stat.isFile() && stat.size <= NOT_GITHUB_READ_LIMIT) parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (error) {
-    if (error && error.code === 'REGISTRY_PATH_OVERRIDE_FORBIDDEN') throw error;
-    parsed = null;
-  }
-  const entries = parsed && parsed.schema === NOT_GITHUB_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories) ? parsed.repositories : {};
-  return Object.hasOwn(entries, key) && entries[key] !== null && typeof entries[key] === 'object';
-}
-
 // ---- evidence stores and scratch clones -------------------------------------------------------
 
 // An evidence store by name: `TRANSPORT-<name>`, as the attribution guard and merge hold read it.
@@ -560,32 +535,29 @@ function judgeMerged(entry, identity, now) {
 }
 
 class GovernanceState {
-  #readIdentity; #readMaterials; #readDecision; #readOk; #readMerged; #readStores; #now;
+  #readIdentity; #readMaterials; #readDecision; #readMerged; #readStores; #now;
 
   // Readers are injectable so the derivation can be tested on its own; the defaults read the
   // real repository, the real user-state files and this computer's cache of the merged binding.
-  constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, okReader = readNotGitHubOk, mergedReader = null, storeReader = null, registryOptions = {}, now = () => new Date() } = {}) {
+  constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, mergedReader = null, storeReader = null, registryOptions = {}, now = () => new Date() } = {}) {
     this.#readIdentity = identityReader;
     this.#readMaterials = materialsReader;
     this.#readDecision = (identity) => decisionReader(identity.repository_id, registryOptions, identity.legacy_repository_ids || []);
-    this.#readOk = key => okReader(key, registryOptions);
     this.#readMerged = mergedReader || (identity => bindingCache.readBindingCache(identity, registryPathFor(registryOptions)));
     this.#readStores = storeReader || (() => evidenceStoreRepositories(registryOptions, now()));
     this.#now = now;
   }
 
-  // The pure rule table over already-read inputs. `ok` is whether the user said ok to GitHub
-  // governance being off (read only for a repository that is not on GitHub); `merged` is
-  // judgeMerged's view of the default-branch binding (read only for a github.com repository).
+  // The pure rule table over already-read inputs. `merged` is judgeMerged's view of the
+  // default-branch binding (read only for a github.com repository).
   // `store` is evidenceStoreOf's answer and `scratch` whether the repository is a clone of another
   // repository in a decided repository's ignored `.tmp/` folder (both read only for github.com).
-  static derive({ identity, materials, decision, ok = false, merged = { status: 'unknown', fresh: false }, store = null, scratch = false }) {
+  static derive({ identity, materials, decision, merged = { status: 'unknown', fresh: false }, store = null, scratch = false }) {
     const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, legacy_key: decision.legacy_key === true, materials };
     const notGitHub = notGitHubOf(identity);
     if (notGitHub) {
-      if (decision.state === 'disabled') return result({ ...base, state: 'DISABLED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined' });
       const fields = { ...base, host: notGitHub.host, reason: notGitHub.reason };
-      return ok ? result({ ...fields, state: 'DISABLED', rule: 'R8' }) : result({ ...fields, state: 'UNDECIDED', rule: 'R9' });
+      return result({ ...fields, persistable: false, state: 'DISABLED', rule: 'R8' });
     }
     const view = { status: merged.status, version: merged.version || null, commit: merged.commit || null, fetched_at: merged.fetched_at || null, fresh: merged.fresh === true, foreign_repository: merged.foreign_repository || null, problems: merged.problems || [] };
     const withMerged = { ...base, merged: view, merged_fresh: view.fresh };
@@ -632,19 +604,15 @@ class GovernanceState {
     if (!identity.valid) {
       // No usable origin: the repository is known on this computer by its path, and never by a remote.
       const local = { ...identity, repository_id: localRepositoryId(identity.root), legacy_repository_ids: [] };
-      let ok;
-      try { ok = this.#readOk(local.repository_id); } catch (error) {
-        return result({ root: identity.root, repository_id: local.repository_id, state: 'UNDECIDED', rule: 'ERROR', reason: 'registry-unreadable', error_code: codeOf(error) });
-      }
-      return GovernanceState.derive({ identity: local, materials: EMPTY_MATERIALS, decision: { state: 'unresolved', decision_kind: null }, ok });
+      return GovernanceState.derive({ identity: local, materials: EMPTY_MATERIALS, decision: { state: 'unresolved', decision_kind: null } });
     }
+    // GitHub-only decisions, materials and binding caches cannot affect an unsupported host.
+    if (notGitHubOf(identity)) return GovernanceState.derive({ identity, materials: EMPTY_MATERIALS, decision: { state: 'unresolved', decision_kind: null } });
     const partial = { root: identity.root, repository_id: identity.repository_id, persistable: true };
     let decision;
     let materials;
-    let ok = false;
     try {
       decision = this.#readDecision(identity);
-      if (notGitHubOf(identity)) ok = this.#readOk(identity.repository_id);
     } catch (error) {
       return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'registry-unreadable', error_code: codeOf(error) });
     }
@@ -653,19 +621,16 @@ class GovernanceState {
     } catch (error) {
       return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'materials-unreadable', error_code: codeOf(error), recorded_decision: decision.state });
     }
-    let merged = { status: 'unknown', fresh: false };
     let store = null;
     let scratch = false;
-    if (!notGitHubOf(identity)) {
-      let entry = null;
-      try { entry = this.#readMerged(identity); } catch { entry = null; }
-      merged = judgeMerged(entry, identity, this.#now());
-      if (!['invalid', 'disabled', 'enabled'].includes(merged.status)) {
-        try { store = evidenceStoreOf(identity, this.#readStores()); } catch { store = null; }
-        if (!store) scratch = this.#scratchClone(identity, depth);
-      }
+    let entry = null;
+    try { entry = this.#readMerged(identity); } catch { entry = null; }
+    const merged = judgeMerged(entry, identity, this.#now());
+    if (!['invalid', 'disabled', 'enabled'].includes(merged.status)) {
+      try { store = evidenceStoreOf(identity, this.#readStores()); } catch { store = null; }
+      if (!store) scratch = this.#scratchClone(identity, depth);
     }
-    return GovernanceState.derive({ identity, materials, decision, ok, merged, store, scratch });
+    return GovernanceState.derive({ identity, materials, decision, merged, store, scratch });
   }
 
   // Whether `identity` is a clone of a different repository inside the ignored top-level `.tmp/`
@@ -767,10 +732,7 @@ module.exports = Object.freeze({
   SCHEMA,
   STATES,
   TRACKING_HOST,
-  NOT_GITHUB_BASENAME,
-  NOT_GITHUB_SCHEMA,
   localRepositoryId,
-  readNotGitHubOk,
   evidenceStoreRepositories,
   evidenceStoreOf,
   GOVERNANCE_CAPABILITY,

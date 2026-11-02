@@ -298,9 +298,9 @@ test('A19: a repository with the Toolkit-governed rules block is governed on Cod
     const spawn = cwd => ({ tool_name: 'collaborationspawn_agent', hook_event_name: 'PreToolUse', cwd, tool_input: { fork_turns: 'none' } });
     const r = run(spawn(plain));
     assert.equal(r.status, 0); assert.deepEqual(r.output, {}, 'plain folder: no decision');
-    // A git repository that is not on github.com waits for the user's ok before anything runs.
+    // A git repository without a GitHub origin has no governance hold.
     const waiting = run(spawn(noOrigin));
-    assert.equal(waiting.status, 2); assert.match(waiting.stderr, /nothing runs until the user says ok/);
+    assert.equal(waiting.status, 0); assert.deepEqual(waiting.output, {});
     // Same predicate as the Claude hook: the managed block makes the repository governed.
     assert.equal(require('../scripts/toolkit-governed-repo.cjs').governedRepo(nested, {}).governed, true);
     // In a gate run there the named-helper policy holds; outside one the main session's launch runs.
