@@ -4,9 +4,9 @@
 
 ### Fixed
 
-- Automatically recover missing PR links for completed tasks from merged PR body references, closing links and timeline references. Select the latest merge, then the higher PR number on an exact timestamp tie.
-- Bound discovery requests, report missing or incomplete evidence, and preserve existing findings while reads are incomplete. Recheck eligibility through the guarded state writer before saving.
-- Keep retired tasks out of discovery and show their PR cell as a dash without discarding historical state.
+- Let free-wording replies outside github.com use a one-use ticket that can only acknowledge governance being off. Bare typed answers remain usable when reply-ticket state is damaged.
+- Require eligible, fresh Projects deliveries with independent hashed replay receipts for governance and merge approvals. Preserve live tickets, confirmations and spent ids during reply-ticket conversion and keep launched sessions unable to answer governance questions. Both checks accept host timestamps up to 2 minutes ahead and retain receipts for 24 hours and 2 minutes.
+- Explain why adding a GitHub remote asks the question again, and prepare Remote Control lanes by creating the remote repository before cloning it.
 
 ## 3.42.0 (keys open in your .env editor)
 
