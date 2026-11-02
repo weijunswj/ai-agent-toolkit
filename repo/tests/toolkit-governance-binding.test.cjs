@@ -172,7 +172,7 @@ test('A: the merged binding decides on every computer; the local file decides on
   assert.ok(unread.notes.includes('merged-binding-unknown'));
 
   const gitlab = row('gitlab', { repo: { remote: 'https://gitlab.com/example-owner/example-repo.git' } });
-  assert.deepEqual([gitlab.state, gitlab.rule, gitlab.merged], ['UNDECIDED', 'R9', null], 'not github.com: unchanged');
+  assert.deepEqual([gitlab.state, gitlab.rule, gitlab.merged], ['DISABLED', 'R8', null], 'not github.com: unchanged');
 });
 
 test('A3: a merged disabled is not flipped by the CLI, discovery or migration', async (t) => {

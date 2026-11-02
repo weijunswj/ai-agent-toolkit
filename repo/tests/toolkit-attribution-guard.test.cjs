@@ -731,8 +731,7 @@ test('push check: with no git on PATH the check still finds git and refuses; whe
   const notAProgram = path.join(scratch, 'not-git.txt');
   fs.writeFileSync(notAProgram, 'not a program\n');
   const env = { ...noPath, TOOLKIT_GIT_PATH: notAProgram };
-  // The Codex hook's own run of this case is in toolkit-codex-helper-hook.test.cjs: this fixture is
-  // not on github.com, so the governance check holds it there first.
+  // The Codex hook's own run of this case is in toolkit-codex-helper-hook.test.cjs.
   const result = runHook(claudeHook, 'Bash', repos['settings-secret'], 'git push', env);
   assert.equal(result.status, 0, result.stderr);
   assert.match(JSON.parse(result.stdout).systemMessage, /^Toolkit could not check this push for credentials, so it was let through: git could not run \(\w+\)\.$/);

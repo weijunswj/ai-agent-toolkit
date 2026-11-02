@@ -463,12 +463,13 @@
       "event": "UserPromptSubmit",
       "steps": [
         {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"Please prepare this work."},"expect":{"decision":"deny"}}
+        {"event":"UserPromptSubmit","payload":{"prompt":"Please prepare this work."},"expect":{"decision":"allow"}}
       ],
       "payload": {"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><thread ts=\"cmsg_thread\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_owner_reply\" sent-at=\"{now}\" mention=\"true\">ur rec</message></thread></project></wake>"},
       "fixture": {"repo":{"governance":"none","branch":"feature"}},
       "expect": {"decision":"allow"},
-      "status": "pass"
+      "status": "pass",
+      "note": "A folder without a GitHub origin is automatically DISABLED. Its first prompt now passes; free wording is ordinary work and needs no reply ticket. GitHub reply-ticket provenance remains checked in the GitHub closure matrix."
     },
     {
       "id": "GOV.off-replayed-delivery",
@@ -478,13 +479,14 @@
       "event": "UserPromptSubmit",
       "steps": [
         {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"Please prepare this work."},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Please prepare this work."},"expect":{"decision":"allow"}},
         {"event":"UserPromptSubmit","payload":{"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><thread ts=\"cmsg_thread\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_owner_reply\" sent-at=\"{now}\" mention=\"true\">ur rec</message></thread></project></wake>"},"expect":{"decision":"allow"}}
       ],
       "payload": {"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><thread ts=\"cmsg_thread\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_owner_reply\" sent-at=\"{now}\" mention=\"true\">ur rec</message></thread></project></wake>"},
       "fixture": {"repo":{"governance":"none","branch":"feature"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
+      "expect": {"decision":"allow"},
+      "status": "pass",
+      "note": "A folder without a GitHub origin has no governance question or answer to replay. Both the first prompt and repeated delivery pass as ordinary work; replay protection remains required for GitHub answers and merge approvals."
     },
     {
       "id": "GOV.off-ineligible-wake",
@@ -493,13 +495,158 @@
       "hosts": ["claude","codex"],
       "steps": [
         {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"Prepare this work."},"expect":{"decision":"deny"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"<wake reason=\"notification\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><message trigger=\"true\" from=\"human\" trust=\"principal\" id=\"cmsg_notification\" sent-at=\"{now}\" mention=\"true\">no</message></project></wake>"},"expect":{"decision":"deny"}}
+        {"event":"UserPromptSubmit","payload":{"prompt":"Prepare this work."},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"<wake reason=\"notification\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><message trigger=\"true\" from=\"human\" trust=\"principal\" id=\"cmsg_notification\" sent-at=\"{now}\" mention=\"true\">no</message></project></wake>"},"expect":{"decision":"allow"}}
       ],
       "payload": {"tool_name":"Bash","tool_input":{"command":"git status"}},
       "fixture": {"repo":{"governance":"none","branch":"feature"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
+      "expect": {"decision":"allow"},
+      "status": "pass",
+      "note": "A notification in a folder without a GitHub origin grants no authority and needs none for ordinary work. The first prompt, notification and git status now pass because governance is automatically DISABLED; GitHub and merge provenance checks remain unchanged."
+    },
+    {
+      "id": "GOV.automatic-off-no-origin",
+      "source": "owner decision: no GitHub origin means governance is automatically off",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "steps": [
+        {
+          "event": "SessionStart",
+          "payload": {
+            "source": "startup"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "Please inspect this folder."
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The first prompt and ordinary tool pass without any acknowledgement. Governance cannot operate without one usable github.com origin. The unchanged governance owner-answer and merge guards still protect their own effects."
+    },
+    {
+      "id": "GOV.automatic-off-several-origins",
+      "source": "owner decision: no GitHub origin means governance is automatically off",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "steps": [
+        {
+          "event": "SessionStart",
+          "payload": {
+            "source": "startup"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "Please inspect this folder."
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/config": "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[remote \"origin\"]\n\turl = https://github.com/example-owner/first.git\n\turl = https://github.com/example-owner/second.git\n"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The first prompt and ordinary tool pass without any acknowledgement. Governance cannot operate without one usable github.com origin. The unchanged governance owner-answer and merge guards still protect their own effects."
+    },
+    {
+      "id": "GOV.automatic-off-other-host",
+      "source": "owner decision: no GitHub origin means governance is automatically off",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "steps": [
+        {
+          "event": "SessionStart",
+          "payload": {
+            "source": "startup"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "Please inspect this folder."
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/config": "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[remote \"origin\"]\n\turl = https://gitlab.com/example-owner/example-repo.git\n"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "The first prompt and ordinary tool pass without any acknowledgement. Governance cannot operate without one usable github.com origin. The unchanged governance owner-answer and merge guards still protect their own effects."
     }
   ]
 }

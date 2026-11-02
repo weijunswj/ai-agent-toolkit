@@ -9,8 +9,8 @@
 //     state lives only in the user-state files: nothing is written into the repository or folder.
 //   - PromptHold is the UserPromptSubmit core. In a held repository every prompt is blocked and kept
 //     on this computer. On github.com the block asks a plain question: enable Toolkit's GitHub
-//     governance, yes, no or later ("not now" also works). In a git repository that is not on
-//     github.com it says GitHub governance is off there and asks for an ok. The user's own reply is
+//     governance, yes, no or later ("not now" also works). Outside github.com governance is off
+//     automatically. For the github.com question, the user's own reply is
 //     the answer (`toolkit governance enable` or `disable` also work, and `decline` is the older word
 //     for disable); it is recorded, read back and then let through with the held prompts attached,
 //     oldest first. An answer counts only in the run of the session that was shown the question
@@ -52,9 +52,6 @@ const HELD_BASENAME = 'held-prompts.v1.json';
 const HELD_SCHEMA = 'toolkit.held-prompts.v1';
 const NOT_NOW_BASENAME = 'governance-not-now.v1.json';
 const NOT_NOW_SCHEMA = 'toolkit.governance-not-now.v1';
-const NOT_GITHUB_BASENAME = governance.NOT_GITHUB_BASENAME;
-const NOT_GITHUB_SCHEMA = governance.NOT_GITHUB_SCHEMA;
-const MAX_NOT_GITHUB = 500;
 const MAX_HELD = 20;
 const MAX_HELD_CHARS = 4000;
 const MAX_HELD_BYTES = 512 * 1024;
@@ -82,9 +79,6 @@ const ANSWER = /^\s*toolkit governance (enable|disable|decline)\.?\s*$/i;
 // (ReplyTickets).
 const SHORT_ANSWER = /^\s*(yes|y|no|n|not now|later)[.!]?\s*$/i;
 const SHORT_COMMANDS = Object.freeze({ yes: 'enable', y: 'enable', no: 'disable', n: 'disable', 'not now': 'not-now', later: 'not-now' });
-// The replies that say ok to GitHub governance being off in a repository that is not on github.com.
-// Every one of them has the same effect, so a plain "yes" or "no" works too.
-const OK_ANSWER = /^\s*(ok|okay|yes|y|no|n|not now|later)[.!]?\s*$/i;
 // The reply the answers above are read from. Claude Code and Codex hand the hook what the user typed,
 // bare. A Claude Projects thread hands a Remote Control session each message the user sends there
 // wrapped in one `<wake>` envelope; the user's own words are the one message in it marked as the
@@ -249,15 +243,13 @@ class GovernanceGate {
   }
 
   // { hold, reason, state } where reason is one of 'no-git' (a plain folder, DISABLED
-  // automatically), 'decided', 'undecided' (the github.com question), 'not-github' (a git repository
-  // not on github.com, waiting for the user's ok), 'not-now' (the user said later in this run of the session)
-  // or 'state-unreadable'. Only the user-state files decide, and nothing is written into the repository or folder. "Not now"
-  // lasts for the run of the session that said it (its session mark).
+  // automatically), 'decided', 'undecided' (the github.com question), 'not-now' (the user said later in this run of the session)
+  // or 'state-unreadable'. Identity and the state module decide; nothing is written into the
+  // repository or folder. "Not now" lasts for the run of the session that said it (its session mark).
   evaluate(cwd, { sessionId = null } = {}) {
     const state = this.#stateReader(cwd);
     const verdict = (hold, reason) => Object.freeze({ hold, reason, state });
     if (state.state === 'UNDECIDED' && state.rule === 'ERROR') return verdict(true, 'state-unreadable');
-    if (state.state === 'UNDECIDED' && state.rule === 'R9') return verdict(true, 'not-github');
     if (state.state === 'UNDECIDED') return this.#notNow.has(state.repository_id, sessionId, this.#epochs.get(sessionId)) ? verdict(false, 'not-now') : verdict(true, 'undecided');
     return verdict(false, state.rule === 'R1' ? 'no-git' : 'decided');
   }
@@ -685,35 +677,6 @@ class NotNow {
   }
 }
 
-// The user's ok that GitHub governance is off in a git repository that is not on github.com, kept
-// next to the registry (the state module reads it). Only PromptHold, from the user's own reply, and
-// the terminal command write it.
-class NotGitHubOk {
-  #file; #now;
-
-  constructor({ registryOptions = {}, now = () => new Date() } = {}) {
-    this.#file = path.join(path.dirname(governance.registryPathFor(registryOptions)), NOT_GITHUB_BASENAME);
-    this.#now = now;
-  }
-
-  set(repositoryId) {
-    let parsed = null;
-    try { parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8')); } catch { parsed = null; }
-    const usable = parsed && parsed.schema === NOT_GITHUB_SCHEMA && parsed.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories);
-    const repositories = usable ? { ...parsed.repositories } : {};
-    repositories[repositoryId] = { at: this.#now().toISOString() };
-    const newest = Object.entries(repositories).sort((a, b) => String(b[1] && b[1].at).localeCompare(String(a[1] && a[1].at))).slice(0, MAX_NOT_GITHUB);
-    fs.mkdirSync(path.dirname(this.#file), { recursive: true });
-    const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
-    try {
-      fs.writeFileSync(temp, `${JSON.stringify({ schema: NOT_GITHUB_SCHEMA, repositories: Object.fromEntries(newest) })}\n`, { mode: 0o600 });
-      fs.renameSync(temp, this.#file);
-    } finally {
-      fs.rmSync(temp, { force: true });
-    }
-  }
-}
-
 // Reply tickets (owner decision of 28 Oct: the agent reads what the user means, Toolkit only checks
 // it is the user's own reply). When the user's own message arrives in a run that was shown the
 // question and is not one of the exact answers, Toolkit hands that message to the agent with a
@@ -892,8 +855,8 @@ class ReplyTickets {
 // What the agent is told when the user's own message may be their reply to the question.
 function ticketContext(repositories, ticket) {
   return [
-    `Toolkit governance: the user's message above came after Toolkit asked them ${repositories[0]?.reason === 'not-github' ? 'to acknowledge that GitHub governance will be off' : 'whether to turn on GitHub governance'} for the repository ${repositoryNames(repositories)}. Read what they mean before anything else.`,
-    `- If it clearly answers ${repositories[0]?.reason === 'not-github' ? 'ok to governance being off' : 'yes, no or later'} (in any words, such as "ur rec" after your recommendation of no), record it by running exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" ANSWER ${ticket}\n  Then tell the user in plain words what Toolkit recorded.`,
+    `Toolkit governance: the user's message above came after Toolkit asked them whether to turn on GitHub governance for the repository ${repositoryNames(repositories)}. Read what they mean before anything else.`,
+    `- If it clearly answers yes, no or later (in any words, such as "ur rec" after your recommendation of no), record it by running exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" ANSWER ${ticket}\n  Then tell the user in plain words what Toolkit recorded.`,
     `- If you think they mean one answer but are not sure, record nothing yet: run exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" confirm-ANSWER ${ticket}\n  Toolkit then gives you the question to ask, naming exactly what it would record; their reply to it comes with a ticket that can record only that answer.`,
     `- If it is unclear, a question, or about something else, record nothing: ask again in plain words, "${listedQuestion(repositories).replace(/^Toolkit: t/, 'T')}", and end your turn.`,
     `The ticket works once, only in this session, and only for this message. ${NEVER_OWNER}`,
@@ -903,7 +866,7 @@ function ticketContext(repositories, ticket) {
 // The confirmation question for one answer: what Toolkit would record, for which repositories.
 const ANSWER_EFFECTS = Object.freeze({ enable: 'turn on GitHub governance', disable: 'keep GitHub governance off (never ask again)', 'not-now': 'leave GitHub governance undecided until next session' });
 function confirmQuestion(repositories, command) {
-  return `Toolkit will ${repositories[0]?.reason === 'not-github' ? 'record your acknowledgement that GitHub governance is off' : ANSWER_EFFECTS[command]} for ${repositoryNames(repositories)}. Is that right?`;
+  return `Toolkit will ${ANSWER_EFFECTS[command]} for ${repositoryNames(repositories)}. Is that right?`;
 }
 
 // What the agent is told when a bare yes, no or later arrives for a question asked from a folder
@@ -935,19 +898,6 @@ function ticketCommand(text, sessionId, tickets) {
   if (!match || typeof sessionId !== 'string' || sessionId === '') return false;
   if (!sameScript(match[1] ?? match[2] ?? match[3])) return false;
   try { return tickets.peek(match[5], sessionId) !== null; } catch { return false; }
-}
-
-// Records the user's ok for a repository that is not on github.com and reads it back through the
-// gate. Throws GovernanceGateError unless the result is DISABLED (R8).
-function writeNotGitHubOk(cwd, { registryOptions = {}, now } = {}) {
-  const gate = new GovernanceGate({ registryOptions, now });
-  const before = gate.evaluate(cwd);
-  if (before.state.state === 'DISABLED' && ['R2', 'R8'].includes(before.state.rule)) return before;
-  if (before.state.rule !== 'R9' || !before.state.repository_id) throw new GovernanceGateError('NOT_WAITING_FOR_OK');
-  new NotGitHubOk({ registryOptions, now }).set(before.state.repository_id);
-  const after = gate.evaluate(cwd);
-  if (after.state.state !== 'DISABLED' || after.state.rule !== 'R8' || after.state.repository_id !== before.state.repository_id) throw new GovernanceGateError('READBACK_MISMATCH');
-  return after;
 }
 
 // ---- messages ---------------------------------------------------------------------------------
@@ -1016,19 +966,10 @@ function whereText(state) {
   return state.reason === 'origin-ambiguous' ? 'has more than one origin remote' : 'has no github.com origin remote';
 }
 
-const OK_ASK = 'Reply ok to continue.';
 // Said to the agent wherever it meets the question: only the user answers.
 const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';
 // The same rule in the short form the held-message notices end with.
 const NEVER_OWNER_SHORT = 'only the user answers; never answer, script or click it for them.';
-
-function notGitHubText(verdict, held) {
-  if (held > 1) return `Toolkit: still waiting for your ok (${held} messages held). ${OK_ASK}`;
-  return [
-    `Toolkit: message held. This repository ${whereText(verdict.state)}, so GitHub governance will be off here; the coding rules still apply.`,
-    `${OK_ASK} Held messages follow your answer.`,
-  ].join('\n');
-}
 
 function unreadableText(state, registryOptions) {
   const hint = governance.repairHint(state, registryOptions);
@@ -1044,11 +985,9 @@ function replayContext(state, prompts, { notNow = false, elsewhere = false } = {
   const label = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED (materials incomplete)' : state.state;
   const lines = [notNow
     ? 'The user answered "later" to the Toolkit GitHub governance question. Nothing is decided: for the rest of this session follow the global rules (coding gates included) without GitHub governance, and Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.'
-    : state.rule === 'R8'
-      ? 'Toolkit GitHub governance is now DISABLED for this repository: it is not on github.com and the user said ok. Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.'
-      : elsewhere
-        ? `Toolkit governance is now ${label} for this repository; it was decided outside this session.`
-        : `Toolkit governance is now ${label} for this repository; the user just answered the governance question.`];
+    : elsewhere
+      ? `Toolkit governance is now ${label} for this repository; it was decided outside this session.`
+      : `Toolkit governance is now ${label} for this repository; the user just answered the governance question.`];
   if (!notNow && state.state === 'ENABLED' && state.materials_complete === false) lines.push(`${SETUP_ASK} Handle the held messages below after that question.`);
   if (prompts.length > 0) {
     // Runs of one session share its id, so when several sent messages, or one was a resume or fork, an
@@ -1064,7 +1003,6 @@ function replayContext(state, prompts, { notNow = false, elsewhere = false } = {
 // The one folder a reply ticket covers, named so the user knows which.
 function repositoryNames(repositories) { return repositories.map(item => path.basename(item.root) || item.root).join(', '); }
 function listedQuestion(repositories) {
-  if (repositories[0]?.reason === 'not-github') return `Toolkit: GitHub governance will be off for ${repositoryNames(repositories)} because it is not on github.com. Reply ok to continue.`;
   return `Toolkit: turn on GitHub governance (issues, records, evidence store) for the repository ${repositoryNames(repositories)}? Reply yes, no or later.`;
 }
 const LAUNCHED_TEXT = `Toolkit: an automated session cannot answer the governance question. Answer it in your own chat, or run the command in your own terminal. ${NEVER_OWNER}`;
@@ -1073,7 +1011,6 @@ function noMarkText(commands) {
 }
 const RESUMED_LINE = 'Toolkit: this session was resumed, or another session started in this repository, so Toolkit asks again and your reply was held.';
 const REPEAT_TEXT = 'Toolkit: this Projects reply is repeated, too old, from before this question, or has an invalid delivery time. Nothing was recorded. Send a fresh reply after the question.';
-const REMOTE_CHANGED_LINE = 'Toolkit: adding the GitHub origin remote changed this folder into a github.com repository, so Toolkit asks the governance question again. The earlier question covered only governance being off before that remote existed.';
 const REASK_LINE ='Toolkit: your reply could not be matched to the confirmation question, so nothing was recorded and Toolkit asks again.';
 const MOVED_LINE ='Toolkit: another session started in this repository since you said "later", so Toolkit asks again and your reply was held.';
 const LAUNCHED_HOLD_TEXT = `Toolkit: this repository is waiting for the user's governance answer, and this session was started by another session or a Toolkit launcher, so its message was not sent and not kept. The user answers in their own chat; start this again after that. ${NEVER_OWNER}`;
@@ -1226,7 +1163,7 @@ class PromptHold {
     if (!verdict.hold) return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId);
     if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state, this.#registryOptions) };
     // A session another session or a launcher started never answers and never adds to what is held.
-    if (this.#launched(sessionId)) return { action: 'block', reason: answer || OK_ANSWER.test(reply) ? LAUNCHED_TEXT : LAUNCHED_HOLD_TEXT };
+    if (this.#launched(sessionId)) return { action: 'block', reason: answer || SHORT_ANSWER.test(reply) ? LAUNCHED_TEXT : LAUNCHED_HOLD_TEXT };
     const marks = this.#marks(verdict, sessionId);
     // Only the run of the session that was shown the question answers it, in either form.
     const id = verdict.state.repository_id;
@@ -1240,34 +1177,30 @@ class PromptHold {
     // included, is read only as the reply to that question.
     if (asked && ownTyped(message)) {
       const confirmed = this.#confirmReply(sessionId, marks.session);
-      if (confirmed && !(confirmed.lost && !message.wrapped && (verdict.reason === 'not-github' ? OK_ANSWER : SHORT_ANSWER).test(reply))) {
+      if (confirmed && !(confirmed.lost && !message.wrapped && SHORT_ANSWER.test(reply))) {
         this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
         return confirmed.hold ? { action: 'block', reason: PromptHold.reask(confirmed) } : confirmed;
       }
     }
-    const local = verdict.reason === 'not-github';
-    const short = (local ? OK_ANSWER : SHORT_ANSWER).exec(reply);
-    if (short && asked && ownTyped(message)) { this.#dropTicket(sessionId); return this.#answer(cwd, local ? 'disable' : SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId, marks); }
+    const short = SHORT_ANSWER.exec(reply);
+    if (short && asked && ownTyped(message)) { this.#dropTicket(sessionId); return this.#answer(cwd, SHORT_COMMANDS[short[1].toLowerCase()], verdict, sessionId, marks); }
     const unmarked = this.#unmarked(sessionId, marks, answer || short);
-    if (unmarked) return local ? { action: 'block', reason: noMarkText(['disable']) } : unmarked;
+    if (unmarked) return unmarked;
     // Any other message of the user's own in the run that was asked may be their reply in other
     // words: it is kept like any held message and handed to the agent with a reply ticket.
     if (asked && !answer && !short && ownTyped(message)) {
-      const ticketed = this.#ticket(sessionId, marks.session, [{ id, root: verdict.state.root, mark: marks.repository || null, reason: verdict.reason }]);
+      const ticketed = this.#ticket(sessionId, marks.session, [{ id, root: verdict.state.root, mark: marks.repository || null }]);
       if (ticketed) { this.#held.add(id, prompt, sessionId, marks, verdict.state.root); return ticketed; }
     }
     const resumed = Boolean(answer || short) && this.#held.count(id, sessionId) > 0;
     const held = this.#held.add(id, prompt, sessionId, marks, verdict.state.root);
-    const question = count => local ? notGitHubText(verdict, count) : questionText(verdict, count);
-    const ask = notice => local ? { action: 'block', reason: notice } : this.#ask(notice, sessionId, marks);
+    const question = count => questionText(verdict, count);
+    const ask = notice => this.#ask(notice, sessionId, marks);
     // Even a first, pre-question delivery must stay spent if the host delivers it again. It cannot
     // answer now; keeping its id also covers hosts whose timestamps have only second precision.
     if (!asked && message.wrapped && ownTyped(message)) {
       const claim = this.#claim(message, null, sessionId, marks);
       if (claim && !claim.reason.startsWith(REPEAT_TEXT)) return ask(`${claim.reason}\n${question(1)}`);
-    }
-    if (!asked && verdict.reason === 'undecided' && governance.readNotGitHubOk(governance.localRepositoryId(verdict.state.root), this.#registryOptions)) {
-      return ask(`${REMOTE_CHANGED_LINE}\n${question(1)}`);
     }
     if (resumed) return ask(`${RESUMED_LINE}\n${question(1)}`);
     // A session sees the whole question on its first held message, even when another session is waiting too.
@@ -1378,19 +1311,17 @@ class PromptHold {
     for (const item of asked) {
       let verdict;
       try { verdict = this.#gate.evaluate(item.root, { sessionId }); } catch { verdict = null; }
-      if (!verdict || !verdict.hold || !['undecided', 'not-github'].includes(verdict.reason) || verdict.state.repository_id !== item.id) { moved.push(item); continue; }
+      if (!verdict || !verdict.hold || verdict.reason !== 'undecided' || verdict.state.repository_id !== item.id) { moved.push(item); continue; }
       const marks = this.#marks(verdict, sessionId);
       if (marks.session !== epoch || (marks.repository || null) !== item.mark) { moved.push(item); continue; }
-      const result = this.#answer(item.root, verdict.reason === 'not-github' ? 'disable' : command, verdict, sessionId, marks);
+      const result = this.#answer(item.root, command, verdict, sessionId, marks);
       (result.action === 'pass' ? done : failed).push({ item, result });
     }
     if (failed.length > 0) {
       const recorded = done.length > 0 ? ` It was recorded for ${repositoryNames(done.map(({ item }) => item))}.` : '';
       return { action: 'block', reason: `${failed.map(({ item, result }) => `${repositoryNames([item])}: ${result.reason}`).join('\n')}${recorded}` };
     }
-    const lines = [asked[0].reason === 'not-github'
-      ? `The user's message acknowledges that GitHub governance is off for ${repositoryNames(asked)}.`
-      : `The user's message is their answer (${command === 'not-now' ? 'later' : command === 'enable' ? 'yes' : 'no'}) to Toolkit's GitHub governance question for ${repositoryNames(asked)}; it is not a reply to anything else.`];
+    const lines = [`The user's message is their answer (${command === 'not-now' ? 'later' : command === 'enable' ? 'yes' : 'no'}) to Toolkit's GitHub governance question for ${repositoryNames(asked)}; it is not a reply to anything else.`];
     for (const { item, result } of done) lines.push(`${repositoryNames([item])} (${item.root}): ${result.context}`);
     if (moved.length > 0) lines.push(`Nothing was recorded for ${repositoryNames(moved)}: it was decided elsewhere, its origin changed, or a session started there since the question, so Toolkit asks again there.`);
     return { action: 'pass', context: lines.join('\n'), recorded: done.length };
@@ -1433,16 +1364,6 @@ class PromptHold {
 
   #answer(cwd, command, verdict, sessionId, marks) {
     if (this.#launched(sessionId)) return { action: 'block', reason: LAUNCHED_TEXT };
-    // Off acknowledgements never call the capability writer, even for a ticket saying yes/later.
-    if (verdict.reason === 'not-github') {
-      if (command === 'enable') return { action: 'block', reason: `Toolkit: GitHub governance cannot be enabled here, because this repository ${whereText(verdict.state)}. ${OK_ASK}` };
-      try {
-        const decided = writeNotGitHubOk(cwd, { registryOptions: this.#registryOptions, now: this.#now });
-        return { action: 'pass', context: replayContext(decided.state, this.#held.take(verdict.state.repository_id, sessionId)) };
-      } catch (error) {
-        return { action: 'block', reason: `Toolkit: your ok could not be recorded (${codeOf(error)}), so this repository is still held. Reply ok again, or run ${terminalCommand('disable')} in your own terminal.` };
-      }
-    }
     if (command === 'not-now') {
       if (typeof sessionId !== 'string' || sessionId === '') {
         return { action: 'block', reason: `Toolkit: this app does not say which session this is, so "later" cannot be kept. ${ASK.replace(', no or later', ' or no')}` };
@@ -1529,7 +1450,7 @@ function sessionIdOf(input) {
 
 // The host-neutral PreToolUse decision: null (no decision) or { deny: reason }.
 class ToolGate {
-  #gate; #epochs; #notes; #tickets; #notNow; #held; #registryOptions;
+  #gate; #epochs; #notes; #tickets; #notNow; #registryOptions;
 
   // host is set by the hook entry point ('claude' or 'codex'), never read from the payload.
   constructor({ registryOptions = {}, stateReader = null, now } = {}) {
@@ -1538,7 +1459,6 @@ class ToolGate {
     this.#notes = new PickerNotes({ registryOptions, now });
     this.#tickets = new ReplyTickets({ registryOptions, now });
     this.#notNow = new NotNow({ registryOptions, now });
-    this.#held = new HeldPrompts({ registryOptions, now });
     this.#registryOptions = registryOptions;
   }
 
@@ -1548,8 +1468,6 @@ class ToolGate {
   #picker(input, sessionId) {
     const verdict = this.#gate.evaluate(input && input.cwd, { sessionId });
     if (!verdict.hold) return null;
-    const changed = this.#remoteAdded(verdict, sessionId);
-    if (changed) return changed;
     const refused = { deny: `Toolkit: while this repository waits for the governance answer, AskUserQuestion runs only as Toolkit's own card, exactly as given and with no answer filled in. End your turn; the user can reply yes, no or later as a message. ${NEVER_OWNER}` };
     if (verdict.reason !== 'undecided' || !pickerInput(input.tool_input)) return refused;
     const toolUseId = input.tool_use_id;
@@ -1559,31 +1477,16 @@ class ToolGate {
     return null;
   }
 
-  // Explain the remote flip in this repository's own chat, without binding a tool refusal.
-  #remoteAdded(verdict, sessionId) {
-    if (verdict.reason !== 'undecided') return null;
-    if (!governance.readNotGitHubOk(governance.localRepositoryId(verdict.state.root), this.#registryOptions)) return null;
-    const marks = { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(verdict.state.repository_id) };
-    if (this.#held.asked(verdict.state.repository_id, sessionId, marks)) return null;
-    return { deny: `${REMOTE_CHANGED_LINE}\n${listedQuestion([{ root: verdict.state.root }]).replace('turn on', 'Turn on')}\n${NEVER_OWNER}` };
-  }
-
   decide(input) {
     const tool = String(input && (input.tool_name || input.toolName) || '');
     const sessionId = sessionIdOf(input);
     if (SHELL_TOOLS.test(tool)) {
       const text = toolText(input);
-      const cwd = path.resolve(String(input.cwd || process.cwd()));
       // Recording the answer the agent read from the user's own reply, with this session's live
       // ticket, runs wherever the session is; the script checks the ticket again as it records.
       if (tool !== 'Monitor' && ticketCommand(text, sessionId, this.#tickets)) return null;
       if (answerCommand(text)) {
-        // The session folder, the folder the command runs in and the folders it moves into.
-        const call = ShellCall.from(input);
-        const notGitHub = [cwd, ...call.folders, ...commandTargets(text, call.folder)].some(target => this.#verdict(target, sessionId)?.reason === 'not-github');
-        return { deny: notGitHub
-          ? `Toolkit: only the user can say ok to GitHub governance being off in a repository that is not on github.com. Ask them in chat to reply ok; Toolkit records their own reply. ${NEVER_OWNER}`
-          : `Toolkit: only the user answers the governance question. Ask them in chat instead: "${ASK}" Toolkit records their own reply. ${NEVER_OWNER}` };
+        return { deny: `Toolkit: only the user answers the governance question. Ask them in chat instead: "${ASK}" Toolkit records their own reply. ${NEVER_OWNER}` };
       }
     }
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => USER_STATE_PATH.test(resolveTarget(input, target)))) {
@@ -1601,9 +1504,6 @@ class ToolGate {
     const verdict = this.#gate.evaluate(input && input.cwd, { sessionId });
     if (verdict.hold) {
       if (verdict.reason === 'state-unreadable') return { deny: [`Toolkit: the governance state of this repository could not be read (${verdict.state.error_code}), so nothing runs here until it can.`, governance.repairHint(verdict.state, this.#registryOptions), NEVER_OWNER].filter(Boolean).join(' ') };
-      const changed = this.#remoteAdded(verdict, sessionId);
-      if (changed) return changed;
-      if (verdict.reason === 'not-github') return { deny: `Toolkit: this repository ${whereText(verdict.state)}, so GitHub governance will be off here, and nothing runs until the user says ok. Ask them in plain words to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}` };
       return { deny: `Toolkit: this repository has no governance decision yet, so nothing runs here. Ask the user in plain words: "${ASK}" Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}` };
     }
     // From a folder that is not held, a command or edit may still reach into one that is.
@@ -1655,7 +1555,6 @@ function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessi
   if (verdict.reason === 'not-now') return 'Toolkit governance: not decided yet; the user said "later" for this session. Follow the global rules (coding gates included) without GitHub governance; Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.';
   if (verdict.hold) {
     if (verdict.reason === 'state-unreadable') return [`Toolkit governance: the state of this repository could not be read (${state.error_code}). Every user message is held until it can; do not try to work around it.`, governance.repairHint(state, registryOptions), NEVER_OWNER].filter(Boolean).join(' ');
-    if (verdict.reason === 'not-github') return `Toolkit governance: this repository ${whereText(state)}, so GitHub governance will be DISABLED here once the user says ok. Every user message is held until then. If you need to raise it, ask the user to reply ok; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}`;
     return `Toolkit governance: this repository has no GitHub governance decision yet. Every user message is held until the user answers Toolkit's question. If you need to raise it, ask "${ASK}"; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}`;
   }
   const decided = decidedLine(state);
@@ -1704,7 +1603,7 @@ function decidedLine(state) {
   if (state.rule === 'S1') return "Toolkit governance: DISABLED here: this repository is an evidence store (agent-managed, not governed). Follow the global rules; the evidence-store rules in the governed repository's AGENTS.md apply.";
   if (state.rule === 'R1s') return "Toolkit governance: DISABLED here: this repository is a scratch clone in another repository's ignored .tmp folder (not governed). Follow the global rules, coding gates included.";
   if (state.rule === 'R1') return 'Toolkit governance: DISABLED automatically (this folder is not a git repository, so there is no GitHub governance). Follow the global rules, coding gates included.';
-  if (state.rule === 'R8') return `Toolkit governance: DISABLED for this repository (not on github.com: it ${whereText(state)}; the user said ok). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
+  if (state.rule === 'R8') return `Toolkit governance: DISABLED automatically (it ${whereText(state)}, so GitHub governance cannot run here). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
   if (state.state === 'ERROR') return 'Toolkit governance: ERROR for this repository (the programme binding merged on the default branch cannot be used). Follow the global rules, coding gates included; ordinary work continues, but programme records, gate admission and finality hold until a pull request fixes the binding. Never treat this as ENABLED or as DISABLED.';
   if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository (no GitHub governance). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
   if (state.materials_complete === false) return `Toolkit governance: ENABLED, setup not finished (\`.github/toolkit-programme.json\` is not merged on the default branch yet). Follow the global rules, coding gates included; GitHub governance starts once the setup pull request with the binding merges. ${SETUP_ASK}`;
@@ -1729,8 +1628,6 @@ module.exports = Object.freeze({
   ReplyTickets,
   TICKETS_BASENAME,
   ANSWER_SCRIPT,
-  NOT_GITHUB_BASENAME,
-  OK_ANSWER,
   ownerReply,
   ownerMessage,
   hasFrameMarkup,
@@ -1754,7 +1651,6 @@ module.exports = Object.freeze({
   sessionLine,
   terminalCommand,
   writeGovernanceDecision,
-  writeNotGitHubOk,
   PICKER_INPUT,
   PICKER_QUESTION,
   pickerInput,
