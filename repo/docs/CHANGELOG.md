@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Make every merging agent responsible for reconciling open Toolkit versions after a merge, using a computer lane when needed.
+- Env editing now says the editor is opening and tells you to open the file yourself if no window appears.
 
 ## 3.43.0 (hook review leftovers)
 

@@ -892,7 +892,7 @@ class ToolkitEnv {
     const where = this.#paths.show(created.file);
     const label = editor.appLabel(app.name);
     if (!launch) out.push(`Edit file: ${created.file}`);
-    else if (opened) out.push(`Opened ${where} with your ${created.count} key${created.count === 1 ? '' : 's'}${label ? ` in a new ${label} window` : ''}. Close any older Toolkit env tab.`);
+    else if (opened) out.push(`Opening ${where} with your ${created.count} key${created.count === 1 ? '' : 's'}${label ? ` in a new ${label} window` : ''}. If no window appears, open that file yourself. Close any older Toolkit env tab.`);
     else out.push(`Could not open an editor. Open this file yourself: ${created.file}`);
     if (launch && opened && !app.name) out.push('If Windows asks which app to use, pick your editor for .env files.');
     out.push(watching
