@@ -17,5 +17,5 @@
   ],
   "skills": "./skills",
   "hooks": "./.claude-plugin/hooks/hooks.json",
-  "version": "3.43.2"
+  "version": "3.44.0"
 }
