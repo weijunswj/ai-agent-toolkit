@@ -64,8 +64,10 @@ test('the Projects controller skill fits a claude.ai skill card, with room for l
   // stricter 48,000-byte reading of the body (the text after the frontmatter) and is never raised.
   // The budget keeps the raw file about 4 KB under it, for lanes already in flight: detail goes into
   // the reference files beside it. Raise the budget only with a reason recorded here, and never above 47,000.
+  // Raised from 44,000 to 44,200 for the owner's same-turn call-to-action ping and its read-on-restart
+  // pointer, which must load every turn; their detail and the recovery sweep live in reference files.
   const skill = fs.readFileSync(path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/SKILL.md'));
-  assert.ok(skill.length <= 44000, `Projects skill ${skill.length} bytes`);
+  assert.ok(skill.length <= 44200, `Projects skill ${skill.length} bytes`);
   const body = skill.toString('utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
   assert.ok(Buffer.byteLength(body) < 48000, `Projects skill body ${Buffer.byteLength(body)} bytes`);
 });
