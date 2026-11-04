@@ -4,7 +4,8 @@
 
 ### Fixed
 
-- Fresh Claude Projects coordinators automatically bootstrap their guidebook and guided setup on appointment, only when the host identifies the top-level coordinator and provides native project tools and library access. Other hosts and executor threads keep their assigned roles, and failed bootstrap holds takeover.
+- Correct Windows Codex review guidance for pinned model and effort, worktree dependencies, per-run temp grants and measured limits; assign hook-pack evidence and cleanup to the unsandboxed launch lane, and restore the shared-record rule for project memory.
+- Document the qualified Windows Codex review launch with read-only source, one pre-created writable temp root and network refusal. Require an already elevated backend and set temp variables inside review commands. Keep required suite and hook-pack evidence separate from permission qualification; add explicit-root nested runner and grandchild cleanup coverage.
 
 ## 3.44.1
 
