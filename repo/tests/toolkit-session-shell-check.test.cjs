@@ -88,3 +88,27 @@ test('the exact absolute shell check passes existing merge and governance decisi
     assert.equal(new gate.ToolGate({ registryOptions }).decide(input), null, `${host} ${tool_name}: governance gate`);
   }
 });
+
+test('the absolute shell check in a separate installed repository respects its governance decision', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-installed-shell-check-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const home = path.join(root, 'home');
+  const cwd = makeGoverned(path.join(root, 'work'), 'shell-check-work', { home });
+  const registryOptions = { registryPath: path.join(home, '.ai-agent-toolkit/user-state/repository-governance.v1.json'), testOnly: true, home };
+  const environment = {};
+  gate.startSession({ cwd, session_id: 'fixture-session', source: 'startup' }, { registryOptions, environment });
+  for (const enabled of [true, false]) {
+    const installed = makeGoverned(path.join(root, enabled ? 'installed-enabled' : 'installed-undecided'), `shell-check-installed-${enabled}`, { home, enable: enabled });
+    const installedScript = path.join(installed, 'repo/scripts/toolkit-session-shell-check.cjs');
+    fs.mkdirSync(path.dirname(installedScript), { recursive: true });
+    fs.copyFileSync(script, installedScript);
+    const command = `node "${installedScript.replace(/\\/g, '/')}"`;
+    for (const host of ['claude', 'codex']) for (const tool_name of ['Bash', 'PowerShell']) {
+      const input = { cwd, session_id: 'fixture-session', tool_name, tool_input: { command } };
+      assert.equal(hold.decide(input, { registryOptions, environment, host }), null, `${host} ${tool_name}: merge hold`);
+      const result = new gate.ToolGate({ registryOptions }).decide(input);
+      if (enabled) assert.equal(result, null, `${host} ${tool_name}: enabled installed repository`);
+      else assert.match(result.deny, /waiting for the user's governance answer/, `${host} ${tool_name}: undecided installed repository`);
+    }
+  }
+});

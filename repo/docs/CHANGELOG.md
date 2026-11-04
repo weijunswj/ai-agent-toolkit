@@ -4,11 +4,11 @@
 
 ### Added
 
-- A small shell session check prints only whether the Toolkit session entry exists and whether it equals the shell's own non-empty session ID. It grants no authority; installed delivery still needs checks in both real shells.
+- A small Claude Code shell session check prints only whether the Toolkit session entry exists and whether it equals the shell's own non-empty session ID. It grants no authority; installed delivery still needs checks in both real shells. Missing delivery needs fixing and does not switch task auto-merge off; select Off in this app's setup until fixed. Codex does not deliver the variable, so its absent result is expected.
 
 ### Fixed
 
-- Merge guidance now says typing here works in a fresh eligible chat, while keeping reconnected and revoked chats excluded.
+- Merge guidance offers typing in a fresh eligible chat, while reconnected and revoked chat reasons offer only the other approval routes.
 
 ## 3.45.1
 
