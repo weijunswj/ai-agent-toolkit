@@ -434,6 +434,25 @@ test('E3: sessionLine adds the Programme sweep line when this computer\'s hourly
   assert.doesNotMatch(evaluate({ ...programmeDeps, home: undefined }, { testOnly: true }), /Programme sweep:/, 'a test registry without its own home reads nothing');
   tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 0, status: 'ok', summary: [] }, home);
   assert.doesNotMatch(evaluate(), /Programme sweep:/, 'gone after a good run');
+  tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 0, status: 'held', summary: ['Private diagnostic'] }, home);
+  const expected = /Programme sweep: held at \d\d:\d\dZ; see toolkit tasks\./;
+  const adapter = { startSession: () => {}, sessionIdOf: gate.sessionIdOf, sessionLine: () => evaluate() };
+  const input = { cwd: root, session_id: 'held-session' };
+  const claude = require('../scripts/toolkit-governance-hook.cjs').respond('SessionStart', input, { gate: adapter, environment: {} });
+  const codexHook = require('../scripts/toolkit-codex-session-start.cjs');
+  let codex = '';
+  const originalLog = console.log;
+  const originalRoot = process.env.PLUGIN_ROOT;
+  try {
+    console.log = text => { codex += text; };
+    assert.equal(codexHook.main(codexHook.HOOK_ARGS, { input, gate: adapter, bridge: { run: () => ({ status: 0 }) } }), 0);
+  } finally {
+    console.log = originalLog;
+    if (originalRoot === undefined) delete process.env.PLUGIN_ROOT; else process.env.PLUGIN_ROOT = originalRoot;
+  }
+  assert.match(claude.hookSpecificOutput.additionalContext, expected);
+  assert.match(codex, expected);
+  assert.doesNotMatch(codex, /Private diagnostic/);
 });
 
 test('E3: attention reports gh signed out as unknown, never clear', () => {
