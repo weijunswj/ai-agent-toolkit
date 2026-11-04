@@ -5,7 +5,7 @@
 ### Fixed
 
 - The CI check-up now reports a failing command hidden by a later `exit 0` line in PowerShell and cmd steps.
-- The CI check-up decides whether a job runs on Windows only from its runner labels or the matrix values it names, so a step called "windows documentation" no longer makes a Linux job look like a Windows job. A runner it cannot resolve is reported for a person to check.
+- The CI check-up decides whether a job runs on Windows only from its runner labels or the matrix values it names, so a step called "windows documentation" no longer makes a Linux job look like a Windows job. An unresolved runner produces a CHECK for the agent to judge only when a step ends in `exit 0` and sets no shell.
 
 ### Tests
 

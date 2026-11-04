@@ -572,7 +572,7 @@ test('remaining secret patterns and key names refuse without echoing values; ref
     ['Google API key', `AIza${'f'.repeat(24)}`],
     ['bearer token', `bEaReR ${'g'.repeat(24)}`],
     ['JWT', `eyJ${'h'.repeat(12)}.${'i'.repeat(16)}.${'j'.repeat(16)}`],
-    ['private key', '-----BEGIN RSA PRIVATE KEY-----'],
+    ['private key', ['-----BEGIN', 'RSA PRIVATE KEY-----'].join(' ')],
   ];
   const keys = ['passwd', 'passphrase', 'secret', 'apiKey', 'apikey', 'private_key', 'privateKey', 'credential', 'passwords', 'tokens', 'api_keys', 'credentials'];
   const rows = [

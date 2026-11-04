@@ -571,6 +571,10 @@ test('hygiene: a separate executable exit 0 masks only in PowerShell and cmd', a
     ['pwsh', 'npm test\nexit 0', true],
     ['powershell', 'npm test\n  exit 0 # force success', true],
     ['cmd', 'npm test\nexit 0', true],
+    ['cmd', 'npm test\nexit /b 0', true],
+    ['pwsh', 'npm test\nexit 0;', true],
+    ['cmd', 'npm test\n@exit 0', true],
+    ['pwsh', "@'\nx\n'@ | Set-Content f\nnpm test\nexit 0", true],
     ['pwsh', "npm test\nWrite-Output @'\nexit 0\n'@\nexit 0", true],
     ['bash', 'npm test\nexit 0', false],
     ['sh', 'npm test\nexit 0', false],
@@ -581,6 +585,11 @@ test('hygiene: a separate executable exit 0 masks only in PowerShell and cmd', a
     ['pwsh', 'npm test\n<#\nexit 0\n#>', false],
     ['pwsh', "npm test\nWrite-Output @'\nexit 0\n'@", false],
     ['pwsh', 'npm test\nWrite-Output @"\nexit 0\n"@', false],
+    ['pwsh', "npm test\nWrite-Output @'\n  '@\nexit 0\n'@", false],
+    ['pwsh', 'npm test\nWrite-Output "{"\nexit 0', true],
+    ['pwsh', 'npm test\n# if ($LASTEXITCODE -ne 0) { exit 1 }\nexit 0', true],
+    ['cmd', 'npm test\necho "("\nexit 0', true],
+    ['pwsh', 'npm test; exit 0\nif ($LASTEXITCODE -ne 0) { exit 1 }\nexit 0', true],
     ['pwsh', 'npm test\nWrite-Output "a message\nexit 0\n"', false],
     ['pwsh', 'npm test\nWrite-Output `\nexit 0', false],
     ['pwsh', 'npm test\r\nWrite-Output `\r\nexit 0', false],
@@ -595,11 +604,30 @@ test('hygiene: a separate executable exit 0 masks only in PowerShell and cmd', a
   }
 });
 
+test('hygiene: exit 0 in a block or after failure handling needs judgement', async (t) => {
+  const rows = [
+    ['pwsh', 'npm test\nif ($LASTEXITCODE -ne 0) { exit 1 }\nexit 0'],
+    ['pwsh', 'if (-not (Test-Path dist)) {\nexit 0\n}\nnpm test'],
+    ['cmd', 'call npm test\nif errorlevel 1 exit /b 1\nexit 0'],
+    ['pwsh', '$PSNativeCommandUseErrorActionPreference = $true\nnpm test\nexit 0'],
+    ['cmd', 'if not exist dist (\nexit /b 0\n)\ncall npm test'],
+  ];
+  for (const [shell, run] of rows) {
+    await t.test(`${shell}: ${JSON.stringify(run)}`, () => {
+      const workflow = WORKFLOW(`|\n${run.split('\n').map((line) => `          ${line}`).join('\n')}`, `        shell: ${shell}\n`);
+      assert.deepEqual(hits(report({ '.github/workflows/ci.yml': workflow }), 'hygiene.masked').map((entry) => entry.level), ['CHECK']);
+    });
+  }
+});
+
 test('hygiene: only runner labels and referenced matrix values determine the default shell', async (t) => {
   const rows = [
     { name: 'Linux matrix with windows documentation', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os: [ubuntu-latest]\n        docs: [windows]\n', levels: [] },
     { name: 'Windows matrix', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os:\n          - ubuntu-latest\n          - windows-latest\n', levels: ['GAP'] },
     { name: 'literal Windows labels', runner: '[self-hosted, Windows, X64]', levels: ['GAP'] },
+    ...['acme-windows-16core', 'windows_x64', 'self-hosted-windows'].map((runner) => ({ name: `custom Windows label ${runner}`, runner, levels: ['GAP'] })),
+    { name: 'comment on matrix axis key', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os: # images\n          - windows-latest\n', levels: ['GAP'] },
+    { name: 'comment on runner key', runner: '# note\n      - windows-latest', levels: ['GAP'] },
     { name: 'literal Windows block labels', runner: '\n      - self-hosted\n      - Windows', levels: ['GAP'] },
     { name: 'comment after matrix reference', runner: '${{ matrix.os }} # selected image', strategy: '    strategy:\n      matrix:\n        os: [windows-latest]\n', levels: ['GAP'] },
     { name: 'Windows matrix with Bash override', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os: [windows-latest]\n', shell: 'bash', levels: [] },

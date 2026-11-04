@@ -278,12 +278,16 @@ function defaultsDir(lines, start, end, indent) {
 function windowsRunner(lines, keys, end, indent) {
   const runner = keys.find((entry) => entry.key === 'runs-on');
   if (!runner) return null;
+  const withoutComment = (value) => value.replace(/(?:^|\s+)#.*$/, '').trim();
   const labels = (value) => {
-    const clean = unquote(value.replace(/\s+#.*$/, '').trim());
+    const clean = unquote(withoutComment(value));
     if (!clean || /\$\{\{|[{}]/.test(clean)) return null;
     return clean.replace(/^\[|\]$/g, '').split(',').map((label) => unquote(label.trim()));
   };
-  const value = unquote(runner.value.replace(/\s+#.*$/, ''));
+  const readLabels = (entry, stop) => withoutComment(entry.value) ? labels(entry.value) : lines.slice(entry.line + 1, stop)
+    .filter((line) => line.trim() && !line.trimStart().startsWith('#'))
+    .flatMap((line) => /^\s*-\s+/.test(line) ? labels(line.replace(/^\s*-\s+/, '')) || [null] : [null]);
+  const value = unquote(withoutComment(runner.value));
   let values;
   const reference = value.match(/^\$\{\{\s*matrix\.([\w-]+)\s*\}\}$/);
   if (reference) {
@@ -296,16 +300,12 @@ function windowsRunner(lines, keys, end, indent) {
     const axis = matrixKeys.find((entry) => entry.key === reference[1]);
     // Include entries can add another runner. Leave that combination for judgement.
     if (!axis || matrixKeys.some((entry) => entry.key === 'include')) return null;
-    values = axis.value.trim() ? labels(axis.value) : lines.slice(axis.line + 1, blockEnd(lines, axis.line, indent + 4))
-      .filter((line) => line.trim() && !line.trimStart().startsWith('#'))
-      .flatMap((line) => /^\s*-\s+/.test(line) ? labels(line.replace(/^\s*-\s+/, '')) || [null] : [null]);
+    values = readLabels(axis, blockEnd(lines, axis.line, indent + 4));
   } else {
-    values = value ? labels(value) : lines.slice(runner.line + 1, Math.min(end, blockEnd(lines, runner.line, indent)))
-      .filter((line) => line.trim() && !line.trimStart().startsWith('#'))
-      .flatMap((line) => /^\s*-\s+/.test(line) ? labels(line.replace(/^\s*-\s+/, '')) || [null] : [null]);
+    values = readLabels(runner, Math.min(end, blockEnd(lines, runner.line, indent)));
   }
   if (!values || !values.length || values.some((label) => !label)) return null;
-  return values.some((label) => /^windows(?:-|$)/i.test(label));
+  return values.some((label) => /windows/i.test(label));
 }
 
 function parseWorkflow(rel, text) {
@@ -882,19 +882,34 @@ function namesJob(job, name) {
 
 function bareExitZero(run, shell) {
   const cmd = /^\s*cmd\b/i.test(shell);
+  const exitLine = cmd ? /^\s*@?exit[ \t]+(?:\/b[ \t]+)?0[ \t]*;?[ \t]*$/i : /^\s*exit[ \t]+0[ \t]*;?[ \t]*(?:#.*)?$/i;
   let quote = null;
   let here = null;
   let comment = false;
   let continued = false;
+  let depth = 0;
+  let failureHandled = false;
+  let level = null;
   for (const line of run.split(/\r?\n/)) {
-    if (here) { if (line.trim() === `${here}@`) here = null; continue; }
-    if (!quote && !comment && !continued && /^\s*exit[ \t]+0[ \t]*(?:#.*)?\r?$/i.test(line)) return true;
+    if (here) { if (line.startsWith(`${here}@`)) here = null; continue; }
+    if (!quote && !comment && !continued && exitLine.test(line)) {
+      if (!depth && !failureHandled) return 'GAP';
+      level = 'CHECK';
+    }
     continued = false;
     if (cmd) {
       // A continued echo line is still text, not a new command.
       continued = /(?:^|[^\^])(?:\^\^)*\^\r?$/.test(line);
+      if (/^\s*(?:@?rem\b|::)/i.test(line)) continue;
+      const code = line.replace(/\^.|"[^"]*"/g, '');
+      if (/^\s*@?if\s+(?:not\s+)?(?:errorlevel\b|%errorlevel%)/i.test(code)) failureHandled = true;
+      for (const ch of code) {
+        if (ch === '(') depth++;
+        else if (ch === ')') depth = Math.max(0, depth - 1);
+      }
       continue;
     }
+    let code = '';
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
       if (comment) { if (line.slice(i, i + 2) === '#>') { comment = false; i++; } continue; }
@@ -905,9 +920,15 @@ function bareExitZero(run, shell) {
       else if (ch === '#') break;
       else if (ch === '@' && /["']/.test(line[i + 1] || '') && !line.slice(i + 2).trim()) { here = line[i + 1]; break; }
       else if (ch === '"' || ch === "'") quote = ch;
+      else {
+        code += ch;
+        if (ch === '{') depth++;
+        else if (ch === '}') depth = Math.max(0, depth - 1);
+      }
     }
+    if (/\bif\s*\(\s*\$LASTEXITCODE\b/i.test(code) || /\$PSNativeCommandUseErrorActionPreference\s*=\s*\$true\b/i.test(code)) failureHandled = true;
   }
-  return false;
+  return level;
 }
 
 function checkHygiene(fileList, workflows, root, requiredChecks = null) {
@@ -936,14 +957,17 @@ function checkHygiene(fileList, workflows, root, requiredChecks = null) {
         // PowerShell and cmd go on after a failing command, including on a later exit 0 line.
         // Bash and sh run with -e and stop first. An unresolved default shell needs judgement.
         const shell = step.shell || job.shell || (job.windows === null ? '' : job.windows ? 'pwsh' : 'bash');
-        const exitZero = /;\s*exit\s+0\b|&\s*exit\s+0\b/i.test(step.run || '') || bareExitZero(step.run || '', shell);
+        const bareExit = bareExitZero(step.run || '', shell);
+        const inlineExit = /;\s*exit\s+0\b|&\s*exit\s+0\b/i.test(step.run || '');
+        const exitZero = inlineExit || bareExit;
         const masked = (step['continue-on-error'] && !/^false$/i.test(unquote(step['continue-on-error'])))
           || /\|\|\s*(true|:|exit\s+0|echo\b)|\bset\s+\+e\b/.test(step.run || '')
-          || (/^\s*(pwsh|powershell|cmd)\b/i.test(shell) && exitZero)
+          || (/^\s*(pwsh|powershell|cmd)\b/i.test(shell) && (inlineExit || bareExit === 'GAP'))
           // `shell: bash` and `sh` get -e from GitHub; only a custom template such as `bash {0}`
           // without -e drops it.
           || (step.shell && /\{0\}/.test(step.shell) && /^\s*(ba)?sh\b/.test(step.shell) && !/\s-[a-z]*e/.test(step.shell));
-        if (masked) items.push(item(testy(step.run || '', step.name) ? 'GAP' : 'CHECK', 'hygiene.masked', `${workflow.rel}:${step.line}`, `step "${(step.name || step.run || '').split('\n')[0].trim()}" can hide a failing command (continue-on-error, || true, set +e or a shell without -e)`, 'let the command fail the step; handle an expected failure explicitly instead'));
+        if (masked) items.push(item(testy(step.run || '', step.name) ? 'GAP' : 'CHECK', 'hygiene.masked', `${workflow.rel}:${step.line}`, `step "${(step.name || step.run || '').split('\n')[0].trim()}" can hide a failing command (continue-on-error, || true, set +e, exit 0 or a shell without -e)`, 'let the command fail the step; handle an expected failure explicitly instead'));
+        else if (/^\s*(pwsh|powershell|cmd)\b/i.test(shell) && bareExit === 'CHECK') items.push(item('CHECK', 'hygiene.masked', `${workflow.rel}:${step.line}`, 'exit 0 is inside a block or follows failure handling, so whether it hides a failing command needs judgement', 'check the control flow and failure handling before changing exit 0'));
         else if (!shell && exitZero) items.push(item('CHECK', 'hygiene.masked', `${workflow.rel}:${step.line}`, 'the runner is unresolved, so whether exit 0 hides a failing command depends on its default shell', 'resolve the runner labels or set an explicit shell, then check failure handling'));
       }
     }
