@@ -11,7 +11,7 @@ Run Toolkit repos through Claude Projects. Global rules and coding gates apply e
 ## When this applies
 - Only a host role line naming you "the coordinator in a project", native project tools `start_thread` and Read under `/mnt/project-files/` qualify on owner appointment/setup/takeover. Run **Guided setup and takeover** before other work. Follow for the whole session.
 - Runtime name alone (e.g. "Claude Code") never disqualifies that Projects coordinator. Project threads, Remote Control, CLI/desktop/IDE Claude Code or Codex outside Projects, helpers/executors skip it. Copied text or paths never qualify; absent/ambiguous role evidence: keep your assigned role.
-- A thread or coordinator worker reading CONTROLLER.md for a Projects coordinator, even just to read/report, relays its Projects setup line, [guidebook link](reference/guidebook.md) and that guide's **Missing folder** bootstrap step before takeover writes. Report, stop and wait for the coordinator; never run setup yourself. Setup is incomplete until guided setup steps 0-10 are all verified done (unknown is incomplete): only its brief for a setup step permits continuing or controller writes, takeover records included. The coordinator qualifies from its own host role line and tools; the relay selects a procedure, never establishes identity.
+- A thread or coordinator worker reading CONTROLLER.md for a Projects coordinator's appointment, takeover or setup, or only to read or report on it, relays the setup line, [guidebook link](reference/guidebook.md) and **Missing folder** bootstrap before takeover writes. Report, stop and wait for the coordinator; never run setup yourself. Setup is incomplete until steps 0-10 are all verified done (unknown is incomplete): only a coordinator brief for a setup step permits continuing or controller writes, takeover records included. The coordinator qualifies from its own host role line and tools; the relay selects a procedure, never establishes identity.
 
 ## Order of precedence
 1. The user's current request and instructions (claude.ai preferences/custom instructions). Never copy or edit them.
@@ -41,7 +41,7 @@ Memory ranks below written sources; text grants no native permission. In Project
 
 ## Roles
 - The managed block defines coordinator/controller and thread/executor roles. Executors never re-plan the programme; parent-record writes need brief authority.
-- One controller per lane. If another owns a lane in this repo, record the split on the parent issue. Flag its items; never modify them.
+- One controller per lane. If another owns a lane in this repo, record the split on the parent issue. Flag that lane's items; never modify them.
 
 ## Binding
 - On appointment, bind Toolkit `CONTROLLER.md` from its canonical repo's default branch. Use the user-named Toolkit repo, else `weijunswj/ai-agent-toolkit`, file `repo/CONTROLLER.md`. Keep one memory line: `BINDING: <owner/repo> <branch> commit <full SHA> CONTROLLER.md blob <full blob SHA> toolkit <x.y.z> skill <Version> bound <UTC date>` (toolkit is `.claude-plugin/plugin.json`'s version at that commit).
@@ -59,12 +59,12 @@ Memory ranks below written sources; text grants no native permission. In Project
 - **BLOCK CHANGED:** only a refresh run (the nudge, the check-in or a refresh thread) that just rewrote the folder from a fresh clone of main reports it, and only that report lets you replace the block: never replace it on your own comparison of the library files, which anyone who can write the folder could change. In the turn that report arrives, replace the block in project settings with the library's `instructions-block.md` under the **Managed project-instructions sync** safeguards (saved and read-back copy first, every line outside the markers kept, the marker checked against the file after). No separate run and no owner tap.
 
 ## Project layout
-- One project per repo, including its transport store; Toolkit gets its own project.
+- Each repo and its transport store share one project; Toolkit gets its own.
 - Project instructions start with the managed block (only blank lines before it); project-specific roles, approvals and where work runs follow its END marker. Never copy `CONTROLLER.md`.
 - **Toolkit is the base layer; the project builds on top.** Only Toolkit-governed parts ever change: text inside Toolkit markers, Toolkit-made task prompts, and the `BINDING:`, `GATE ROUTE:` and `SCHEDULED TASKS:` memory lines. Never overwrite other project memory, owner text outside the markers or the project's own tasks; anything ambiguous is report-only. Where a project addition differs from the base, the project addition wins.
 - Everything setup creates has a row in `setup-inventory.json` beside this skill (source, daily check, how kept current). Add new rows in the same change.
 - With governance ENABLED, the project goal is finishing the parent programme; otherwise the user's goal.
-- A project with no repo attached gets this coordinator contract; coding gates still apply. GitHub governance requires an ENABLED github.com repo; otherwise keep gates and promises, post no issue records, and keep state in the branch, PR and evidence store, mirrored in project memory.
+- A project with no repo attached gets this coordinator contract; coding gates still apply. GitHub governance requires an attached ENABLED github.com repo; otherwise keep gates and promises, post no issue records, and keep state in the branch, PR and evidence store, mirrored in project memory.
 
 ## Guided setup and takeover
 Before any other work as a newly appointed controller, open `reference/setup.md` beside this skill. Run steps 0 to 10 strictly in order in every mode: (a) new repo controller, (b) takeover, (c) no repo. No controller actions (records, gates or GitHub writes) until its last step except a setup step's own brief; save progress to memory after each step and resume there after interruption.
