@@ -476,7 +476,7 @@ function startSession(input, { registryOptions = {}, now, environment = process.
   try {
     let repositoryId = null;
     if (input && typeof input.cwd === 'string' && input.cwd && input.source !== 'clear' && input.source !== 'compact') {
-      // The one place a hook reads the network: the merged binding, bounded, into this computer's cache.
+      // Refresh the merged binding with bounded network reads into this computer's cache.
       try { (refreshBinding || governance.refreshMergedBinding)(input.cwd, registryOptions); } catch { /* offline keeps the last read */ }
       let current = null;
       try { current = governance.governanceState(input.cwd, registryOptions); repositoryId = current.repository_id || null; } catch { repositoryId = null; }
