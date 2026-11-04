@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.48.1
+
+### Fixes
+
+- Page large comment traces directly into bounded directory comments with a separate line per topic, preventing notification floods while retaining hand-written prose and decision links. Small moves use at most five topic comments per pass. Interrupted passes verify and reuse pages. The audit rejects missing, cyclic or unrelated links in generated indexes within two hops; hand-made indexes retain their one-hop reading and ignore foreign references.
+- A deleted comment linked from a generated decision index no longer stops the programme page redrawing; the comments it no longer reaches are listed in the body again, and the audit finding says how to clear the dead link. Index links match the repository in any letter case.
+- Keep recovery holds for unchecked writes when attention findings change. Hand-nested directories return as body links so their decisions stay reachable, and index-limit holds explain the correct recovery step.
+
 ## 3.48.0
 
 ### Changed

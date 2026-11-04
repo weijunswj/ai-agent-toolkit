@@ -24,9 +24,9 @@ const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const { resolveExecutable } = require('./resolve-executable.cjs');
 const { OTHER_COMMENTS, splitTag, groupByTag } = require('./decision-tags.cjs');
+const { INDEX_COMMENT_MARKER } = require('./decision-trace-audit.cjs');
 
 const CONFIRMATION_TAG = 'SCOPE-CONFIRMED';
-const INDEX_COMMENT_MARKER = '<!-- decision-trace-index -->';
 const SUPERSEDES = /SUPERSEDES=([A-Za-z0-9._-]+)/g;
 const RECORD_PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
 const DEFAULT_MAX = 10;
@@ -69,7 +69,9 @@ function mentions(text) {
   return [...new Set([...String(text || '').matchAll(/(?:^|[^\w&/])#(\d+)\b/g)].map(match => Number(match[1])))];
 }
 
-// One trace entry per person comment. Bots and reconciler index comments are counted, not entries.
+// One trace entry per person comment. Both topic indexes and directory pages carry the shared
+// index marker, so G0 counts them without treating directory labels as decisions. All original
+// comments are read separately; history does not depend on the number of index hops.
 function entriesFromComments(issue, comments, { repo = '', prefix = null } = {}) {
   const counts = { comments: comments.length, bots: 0, index_comments: 0 };
   const entries = [];

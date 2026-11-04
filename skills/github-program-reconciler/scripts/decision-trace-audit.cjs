@@ -4,7 +4,7 @@
 // Decision-trace audit for a programme issue. The issue body is the canonical record: every
 // decision comment (one with a tag on its first line or a record ID) must be reachable from it,
 // either linked directly (<issue URL>#issuecomment-<id>, or the bare fragment) or listed in an index comment that
-// the body links (one hop). Other comments need no index entry: they are listed as unlinked, never
+// the body links, optionally through a directory (at most two index hops). Other comments need no index entry: they are listed as unlinked, never
 // a failure. Fails on any unlinked decision comment, a SUPERSEDES= reference to an unknown record,
 // a superseded record that is not marked "superseded by" or "replaced by" (in its own comment, or
 // right after a link to it in the body or an index comment), or a body at or over the threshold (default 60,000 characters; GitHub's limit is 65,536).
@@ -27,12 +27,92 @@ const { commentTag, commentTagLabel, splitTag } = require('./decision-tags.cjs')
 
 const DEFAULT_THRESHOLD = 60000;
 const INDEX_COMMENT_MARKER = '<!-- decision-trace-index -->';
+const DIRECTORY_COMMENT_MARKER = '<!-- decision-trace-directory -->';
+const MAX_INDEX_DEPTH = 2;
+const MAX_INDEX_COMMENTS = 1024;
 const INDEX_BEGIN = '<!-- decision-index:begin -->';
 const INDEX_END = '<!-- decision-index:end -->';
 const LINK = /#issuecomment-(\d+)/g;
 const SUPERSEDES = /SUPERSEDES=([A-Za-z0-9._-]+)/g;
 
 function linkedIds(text) { return new Set([...String(text || '').matchAll(LINK)].map(match => match[1])); }
+
+// Generated indexes have strict edges. Hand-made indexes retain their original one-hop meaning:
+// foreign and missing references are prose, and references to other indexes are not traversed.
+// Only local links can supply coverage. Never follow a link with another read.
+function indexGraph({ body = '', comments, repository = '', issue = null, all = false }) {
+  const people = comments.filter(comment => !isBot(comment));
+  const byId = new Map(people.map(comment => [String(comment.id), comment]));
+  const indexes = people.filter(comment => String(comment.body || '').includes(INDEX_COMMENT_MARKER));
+  const indexIds = new Set(indexes.map(comment => String(comment.id)));
+  const strictIds = new Set(indexes.filter(comment => String(comment.body).includes('programme-trace intent=')
+    || String(comment.body).includes(DIRECTORY_COMMENT_MARKER)).map(comment => String(comment.id)));
+  const base = issueUrl(repository, issue);
+  const errors = [];
+  const links = text => {
+    const source = String(text || '');
+    return [...source.matchAll(LINK)].map(match => {
+      let start = match.index;
+      // Look back only at actual anchors. A greedy optional URL prefix rescans long prose once
+      // per character; this bounded scan also refuses oversized or malformed link targets.
+      while (start > 0 && match.index - start < 2048 && !/[\s()<>\[\]]/.test(source[start - 1])) start -= 1;
+      const target = source.slice(start, match.index + match[0].length);
+      // GitHub owner and repository names are case-insensitive, as the binding comparison is.
+      return { id: match[1], local: target === match[0] || !base || target.toLowerCase() === commentLink(base, match[1]).toLowerCase() };
+    });
+  };
+  const children = new Set();
+  const localLinks = new Map(indexes.map(index => [String(index.id), links(index.body).filter(link => link.local && byId.has(link.id)
+    && !(String(index.body).includes(DIRECTORY_COMMENT_MARKER) && String(byId.get(link.id).body).includes(DIRECTORY_COMMENT_MARKER)))]));
+  for (const index of indexes.filter(index => strictIds.has(String(index.id)))) {
+    for (const link of localLinks.get(String(index.id))) if (indexIds.has(link.id)) children.add(link.id);
+  }
+  const roots = indexes.filter(comment => !children.has(String(comment.id)));
+  const reachable = new Set();
+  const visited = new Map();
+  const linkedIndexes = [];
+  let strictVisits = 0;
+  const visit = (id, depth, path) => {
+    if (path.has(id)) { errors.push({ code: 'INDEX_CYCLE', id }); return; }
+    if (depth > MAX_INDEX_DEPTH) { errors.push({ code: 'INDEX_DEPTH', id }); return; }
+    if ((visited.get(id) || 0) >= depth) return;
+    if (!visited.has(id) && strictIds.has(id) && strictVisits >= MAX_INDEX_COMMENTS) { errors.push({ code: 'INDEX_LIMIT', id }); return; }
+    const firstVisit = !visited.has(id);
+    if (firstVisit && strictIds.has(id)) strictVisits += 1;
+    visited.set(id, depth);
+    const index = byId.get(id);
+    if (firstVisit) linkedIndexes.push(index);
+    const nextPath = new Set([...path, id]);
+    const directory = String(index.body).includes(DIRECTORY_COMMENT_MARKER);
+    const strict = strictIds.has(id);
+    for (const link of links(index.body)) {
+      if (!link.local) { if (strict) errors.push({ code: 'INDEX_UNRELATED', id, target: link.id }); continue; }
+      if (!byId.has(link.id)) { if (strict) errors.push({ code: 'INDEX_MISSING', id, target: link.id }); continue; }
+      if (directory && String(byId.get(link.id).body).includes(DIRECTORY_COMMENT_MARKER)) { errors.push({ code: 'INDEX_UNRELATED', id, target: link.id }); continue; }
+      reachable.add(link.id);
+      if (strict && indexIds.has(link.id)) visit(link.id, depth + 1, nextPath);
+    }
+  };
+  if (all) {
+    // Include disconnected components too: a cycle has no root, and must never hide comments.
+    for (const index of [...roots, ...indexes]) {
+      const id = String(index.id);
+      if (!visited.has(id)) { reachable.add(id); visit(id, 1, new Set()); }
+    }
+  } else {
+    for (const link of links(body)) {
+      if (!link.local) continue;
+      reachable.add(link.id);
+      if (indexIds.has(link.id)) visit(link.id, 1, new Set());
+    }
+    // A missing body link labelled as an index cannot masquerade as a missing ordinary note.
+    for (const match of String(body || '').matchAll(/\[(?:list|topic directory) \d+\]\(([^)]*#issuecomment-(\d+))\)/g)) {
+      if (!indexIds.has(match[2])) errors.push({ code: byId.has(match[2]) ? 'INDEX_UNRELATED' : 'INDEX_MISSING', id: match[2] });
+      else if (base && match[1].toLowerCase() !== commentLink(base, match[2]).toLowerCase() && match[1] !== `#issuecomment-${match[2]}`) errors.push({ code: 'INDEX_UNRELATED', id: match[2] });
+    }
+  }
+  return { indexes, roots, reachable, linkedIndexes, errors, localLinks, strictIds };
+}
 
 // Comment IDs whose link is marked as replaced: "superseded by" or "replaced by" between the link
 // and the next comment link on the same line (or the line's end).
@@ -105,14 +185,41 @@ function entryFor(comment, facts, index) {
 // index entries in comment order, every comment none of them lists, each with its tag (null for
 // "Other comments"). `marks` names superseded records that an index comment lists without
 // "superseded by", with the tag of the record's comment.
-function traceEntries(comments, recordPrefix = null) {
+// A dead or foreign link in a generated index covers nothing, so the comments it no longer reaches
+// return to the body trace and the page keeps redrawing; the audit still reports the link. Only a
+// structural fault (a cycle, too many hops or too many pages) stops the redraw.
+const PROJECTION_TOLERATED = new Set(['INDEX_MISSING', 'INDEX_UNRELATED']);
+
+// Plain recovery text for an index fault, shared by the audit finding and any hold.
+function indexRecoveryText(codes) {
+  const steps = [];
+  if (codes.some(code => PROJECTION_TOLERATED.has(code))) steps.push('A linked comment was deleted or points to another issue, repository or directory; the page still redraws and lists the comments it no longer reaches in the body; to clear this, remove that link from the named index comment.');
+  if (codes.some(code => code === 'INDEX_CYCLE' || code === 'INDEX_DEPTH')) steps.push('An index comment links in a loop or too deep; edit or delete the named index comment to remove the loop or extra hop, then run again.');
+  if (codes.includes('INDEX_LIMIT')) steps.push(`Too many generated index pages: the limit is ${MAX_INDEX_COMMENTS} per issue; compact or delete obsolete index comments to stay within it, then run again. If only the planned new pages would exceed it, shorten retained body prose to avoid adding pages.`);
+  return steps.join(' ');
+}
+
+function indexErrorText(errors) {
+  const list = errors.map(entry => `${entry.code} ${entry.id}${entry.target ? ` -> ${entry.target}` : ''}`).join(', ');
+  return `Invalid comment index: ${list}. ${indexRecoveryText(errors.map(entry => entry.code))}`;
+}
+
+function traceEntries(comments, recordPrefix = null, repository = '', issue = null) {
   const people = comments.filter(comment => !isBot(comment));
-  const indexes = people.filter(comment => String(comment.body || '').includes(INDEX_COMMENT_MARKER));
+  const graph = indexGraph({ comments, repository, issue, all: true });
+  const blocking = graph.errors.filter(entry => !PROJECTION_TOLERATED.has(entry.code));
+  if (blocking.length) {
+    const error = new Error(indexErrorText(blocking));
+    error.code = 'TRACE_INDEX_INVALID';
+    throw error;
+  }
+  const { indexes } = graph;
   const covered = new Set();
   const markedInIndex = new Set();
   for (const index of indexes) {
-    for (const id of linkedIds(index.body)) covered.add(id);
-    for (const id of markedIds(index.body)) markedInIndex.add(id);
+    const local = new Set(graph.localLinks.get(String(index.id)).map(link => link.id));
+    for (const id of local) covered.add(id);
+    for (const id of markedIds(index.body)) if (local.has(id)) markedInIndex.add(id);
   }
   const facts = recordFacts(people, recordPrefix);
   const entries = people.filter(comment => !indexes.includes(comment) && !covered.has(String(comment.id))).map(comment => entryFor(comment, facts, false));
@@ -121,18 +228,17 @@ function traceEntries(comments, recordPrefix = null) {
     tag: commentTag(bodyOf(facts.commentOf.get(record))), tag_label: commentTagLabel(bodyOf(facts.commentOf.get(record))) }))
     .filter(entry => covered.has(entry.id) && !markedInIndex.has(entry.id)
       && !/superseded by/i.test(String(people.find(comment => String(comment.id) === entry.id)?.body || '')));
-  return { indexes: indexes.map(comment => ({ id: String(comment.id), tag: commentTag(comment.body), tag_label: commentTagLabel(comment.body), date: String(comment.created_at || '').slice(0, 10) || null })), entries, marks };
+  const entry = comment => ({ id: String(comment.id), tag: commentTag(comment.body), tag_label: commentTagLabel(comment.body), date: String(comment.created_at || '').slice(0, 10) || null });
+  const ids = new Set(indexes.map(comment => String(comment.id)));
+  return { strict_count: graph.strictIds.size, directories: graph.roots.filter(comment => String(comment.body).includes(DIRECTORY_COMMENT_MARKER)).map(entry),
+    indexes: graph.roots.filter(comment => !String(comment.body).includes(DIRECTORY_COMMENT_MARKER)).map(comment => ({ ...entry(comment), nested: graph.strictIds.has(String(comment.id)) && graph.localLinks.get(String(comment.id)).some(link => ids.has(link.id)) })), entries, marks };
 }
 
 // body: the issue body. comments: GitHub issue comments ({ id, user, body }).
-function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = DEFAULT_THRESHOLD }) {
+function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = DEFAULT_THRESHOLD, repository = '', issue = null }) {
   if (recordPrefix !== null && !RECORD_PREFIX.test(recordPrefix)) throw new Error('--record-prefix must be 1-40 letters, digits, dots, underscores or hyphens');
-  const fromBody = linkedIds(body);
   const people = comments.filter(comment => !isBot(comment));
-  const indexes = people.filter(comment => String(comment.body || '').includes(INDEX_COMMENT_MARKER));
-  const linkedIndexes = indexes.filter(comment => fromBody.has(String(comment.id)));
-  const reachable = new Set(fromBody);
-  for (const index of linkedIndexes) for (const id of linkedIds(index.body)) reachable.add(id);
+  const { indexes, linkedIndexes, reachable, errors } = indexGraph({ body, comments, repository, issue });
   const facts = recordFacts(people, recordPrefix);
   const { records, commentOf, supersededBy } = facts;
   const knownIds = new Set([...records.values()].filter(Boolean));
@@ -157,11 +263,11 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   const bodyLength = String(body || '').length;
   const overThreshold = bodyLength >= threshold;
   return {
-    ok: !unlinkedDecisions.length && !unknownSupersedes.length && !supersededUnmarked.length && !overThreshold,
+    ok: !errors.length && !unlinkedDecisions.length && !unknownSupersedes.length && !supersededUnmarked.length && !overThreshold,
     comments: people.length, linked: people.length - unlinked.length, unlinked, unlinked_decisions: unlinkedDecisions, unknown_supersedes: unknownSupersedes,
     superseded_unmarked: supersededUnmarked,
     unlabelled, body_length: bodyLength, threshold, over_threshold: overThreshold,
-    index_comments: linkedIndexes.map(comment => String(comment.id))
+    index_comments: linkedIndexes.map(comment => String(comment.id)), index_errors: errors
   };
 }
 
@@ -268,7 +374,7 @@ function ledgerTopics(ledger) {
 function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const { body, comments } = fetchIssue(args.repo, args.issue);
-  const result = auditDecisionTraces({ body, comments, recordPrefix: args.recordPrefix, threshold: args.threshold });
+  const result = auditDecisionTraces({ body, comments, recordPrefix: args.recordPrefix, threshold: args.threshold, repository: args.repo, issue: args.issue });
   if (args.repair) {
     const topics = args.ledger ? ledgerTopics(JSON.parse(fs.readFileSync(args.ledger, 'utf8').replace(/^\uFEFF/, ''))) : new Map();
     fs.writeFileSync(args.out, repairedBody(body, result.unlinked, result.superseded_unmarked, topics, issueUrl(args.repo, args.issue)));
@@ -283,4 +389,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });
+module.exports = Object.freeze({ indexErrorText, indexRecoveryText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });
