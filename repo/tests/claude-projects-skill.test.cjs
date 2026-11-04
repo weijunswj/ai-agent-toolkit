@@ -110,11 +110,17 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   // Setup reads the guidebook first, refreshing it when missing or not current.
   assert.match(text, /Read the guidebook's `VERSION` \(\*\*Guidebook copy\*\* in the skill\)\./);
   assert.match(text, /the guidebook's `VERSION` line, and the next work item\./);
-  // Plugin lag: Check for updates first, then removing the plugin alone, then the marketplace re-add, then an app restart.
-  assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
-  // One plugin card where the owner reads.
-  assert.match(text, /No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps/);
-  assert.match(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`\./);
+  // Genuine lag is measured against the check-in session baseline, with an explicit today fallback.
+  assert.match(text, /`PLUGIN BEHIND`: this check-in's observed Toolkit plugin copy is strictly more than 24 hours behind main as it was when this check-in's own session started/);
+  assert.match(text, /main today only when the report explicitly says "session start unavailable; comparing with main today"/);
+  assert.match(text, /No agent can update it: once per selected baseline version, post one plugin card in the project chat with the check-in's steps/);
+  assert.match(text, /Keep a genuine gap pending until a check-in verifies current, pinned or ahead/);
+  assert.match(text, /A verified `\*\*Plugin:\*\* home thread copy pinned at <date>` means its copy was current or newer at session start; post no plugin card or owner update steps/);
+  assert.match(text, /Retire an obsolete pending card, including a legacy card caused by comparing a pinned copy with main today, without claiming the account was updated/);
+  assert.match(text, /Missing copy, missing history or other unverified evidence never clears a card/);
+  assert.match(text, /A hook-change advisory is one plain note only, with no prefix, card or automatic thread rotation/);
+  assert.match(text, /confirm the account copy using a fresh session's observation against main today; an old session's pinned report cannot confirm the release reached the account/);
+  assert.doesNotMatch(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`/);
   assert.match(text, /Only the plugin \(two clicks\) needs the owner: no agent can update it\./);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
   assert.ok(text.includes('Relay each hourly nudge run too, one line when nothing needs the owner (**Communication**).'));
