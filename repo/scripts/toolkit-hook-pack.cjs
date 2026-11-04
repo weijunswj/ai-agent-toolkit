@@ -145,7 +145,8 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
     if (!spec || typeof spec !== 'object' || Array.isArray(spec)
@@ -361,7 +362,15 @@ class Fixture {
       fs.writeFileSync(file, spec.repo.legacy_answer === 'damaged' ? '{damaged' : fs.readFileSync(path.join(ROOT, 'repo', 'tests', 'fixtures', 'governance-legacy-' + spec.repo.legacy_answer + '.json')));
     }
     if (spec.evidence_merge) this.#evidenceMerge(spec.evidence_merge);
-    else this.#githubFixture({});
+    else this.#githubFixture({}, spec.slow_proposal === true);
+    if (spec.slow_proposal) {
+      const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
+      const repository = `toolkit-test-fixture/${spec.repo.name || 'fixture'}`;
+      new GovernanceProposals({ registryOptions: { userHome: this.home, testOnly: true }, transport: { list: () => [{
+        repository, number: 1, head: this.head, answer: 'no', state: 'open', url: `https://github.com/${repository}/pull/1`,
+      }] } }).refresh(this.work);
+      delete this.env.TOOLKIT_GOVERNANCE_OFFLINE;
+    }
     if (spec.owner_session) this.#ownerSession();
     this.#files(this.work, spec.files || {});
     if (spec.transcript) fs.writeFileSync(this.transcript, spec.transcript.map(entry => JSON.stringify(this.expand(entry))).join('\n') + '\n');
@@ -458,16 +467,19 @@ class Fixture {
     this.#githubFixture({ [`repos/${store}`]: repo, [`repos/${store}/pulls/5`]: pr });
   }
 
-  #githubFixture(responses) {
+  #githubFixture(responses, slowProposal = false) {
     const bin = path.join(this.dir, 'fake-github');
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, process.platform === 'win32' ? 'gh.exe' : 'gh'), '');
+    const slow = path.join(bin, 'slow.cjs');
+    if (slowProposal) fs.writeFileSync(slow, 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000);');
     const preload = path.join(bin, 'transport.cjs');
     fs.writeFileSync(preload, `const cp = require('node:child_process');
 const original = cp.spawnSync;
 const responses = ${JSON.stringify(responses)};
 cp.spawnSync = function(file, args, options) {
   if (!/^gh(?:\\.exe)?$/i.test(require('node:path').basename(file))) return original(file, args, options);
+  if (${slowProposal}) return original(process.execPath, [${JSON.stringify(slow)}, ...args], options);
   const body = args[0] === 'api' && args[3] === 'GET' && responses[args[4]];
   const status = body ? 200 : 404;
   return {status: status === 200 ? 0 : 1, stdout: 'HTTP/2.0 ' + status + '\\n\\n' + JSON.stringify(body || {}), stderr: ''};

@@ -121,6 +121,7 @@ function checkEvidenceAuthority(t, name, spec, allowed) {
   if (['name', 'off'].includes(spec.binding)) binding.store.repository = 'owner/TRANSPORT-unrelated';
   const text = spec.binding === 'malformed' ? '{broken' : JSON.stringify(binding);
   const registryPath = ctx.options.registryOptions.registryPath;
+  const stateDirectory = governance.userStateDirectory(ctx.options.registryOptions);
   if (!['absent', 'local'].includes(spec.binding)) {
     recordMerged(spec.binding === 'self' ? ctx.repo : ctx.other, { registryPath, text,
       ...(spec.binding === 'stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
@@ -134,17 +135,17 @@ function checkEvidenceAuthority(t, name, spec, allowed) {
       store: { ...binding.store, repository: 'owner/other-store' } }),
     ...(spec.targetBinding === 'stale-enabled' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
   if (spec.targetBinding === 'unlisted-enabled') {
-    const targetFile = path.basename(cache.cacheFileFor(registryPath, governance.readIdentity(ctx.repo).repository_id));
+    const targetFile = path.basename(cache.cacheFileFor(stateDirectory, governance.readIdentity(ctx.repo).repository_id));
     const readDirectory = fs.readdirSync;
     t.mock.method(fs, 'readdirSync', (folder, ...args) => {
       const names = readDirectory(folder, ...args);
-      return folder === cache.cacheDirFor(registryPath) ? names.filter(name => name !== targetFile) : names;
+      return folder === cache.cacheDirFor(stateDirectory) ? names.filter(name => name !== targetFile) : names;
     });
   }
-  if (spec.binding === 'off') gate.writeGovernanceDecision(ctx.repo, 'disable', ctx.options);
+  if (spec.binding === 'off') recordMerged(ctx.repo, { registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'owner/a', governance: 'disabled' }) });
   if (spec.binding === 'removed') {
-    const entry = cache.readBindingCache(governance.readIdentity(ctx.other), registryPath);
-    cache.writeCache(registryPath, { ...entry, status: 'absent', text: null, bytes_sha256: null });
+    const entry = cache.readBindingCache(governance.readIdentity(ctx.other), stateDirectory);
+    cache.writeCache(stateDirectory, { ...entry, status: 'absent', text: null, bytes_sha256: null });
   }
   if (spec.taskOff) for (const host of ['codex', 'claude-code']) {
     const { TaskAutoMergePreferences } = require('../scripts/toolkit-task-auto-merge-preferences.cjs');

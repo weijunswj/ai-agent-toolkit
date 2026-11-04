@@ -7,7 +7,7 @@
 //   refresh   asks the origin remote for its default branch (`git ls-remote --symref origin HEAD`),
 //             fetches that one branch (bounded), reads `.github/toolkit-programme.json` at its tip
 //             and writes the result to this computer's cache. Only `toolkit governance status`
-//             and the session-start hook refresh.
+//             and the session-start hook refresh; prompts refresh after a known proposal closes.
 //   read      returns the cached result for one repository identity, or null. Every other caller,
 //             every hook on every tool call included, reads only the cache: no network per tool use.
 //
@@ -98,9 +98,13 @@ function parseSymref(text) {
 // these is held as 'remote-redirected' and nothing is fetched (A1). The fetch runs with hooks pointed
 // at `hooksDir`, an empty folder the refresh owns, so no repository hook can move the tracking ref,
 // and the ref must then be the commit the remote itself reported.
-function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, expectedRemote = null, hooksDir = null, environment = process.env } = {}) {
+function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, deadline = null, expectedRemote = null, hooksDir = null, environment = process.env } = {}) {
   const git = args => {
-    try { return runGit(args, { cwd: root, timeout }); } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
+    try {
+      const remaining = deadline === null ? timeout : Math.min(timeout, deadline - Date.now());
+      if (remaining <= 0) throw new Error('read budget exhausted');
+      return runGit(args, { cwd: root, timeout: remaining });
+    } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
   };
   const set = name => typeof environment[name] === 'string' && environment[name] !== '' && !(name === 'GIT_CONFIG_COUNT' && environment[name] === '0');
   if (HELD_CONFIG_ENVIRONMENT.some(set)) return { status: 'unknown', error: 'remote-redirected' };
@@ -195,11 +199,11 @@ function writeCache(stateDirectory, entry) {
 // Refreshes the cache for one identity (from toolkit-governance-state readIdentity). A failed read
 // keeps the existing entry: offline narrows (see freshness), it never erases what was merged.
 // Returns { refreshed, entry, error }.
-function refreshBindingCache(identity, stateDirectory, { runGit, timeout, now = () => new Date(), environment = process.env } = {}) {
+function refreshBindingCache(identity, stateDirectory, { runGit, timeout, deadline, now = () => new Date(), environment = process.env } = {}) {
   if (!identity || !identity.valid || !identity.root || !identity.repository_id) return { refreshed: false, entry: null, error: 'identity-invalid' };
   const hooksDir = path.join(cacheDirFor(stateDirectory), NO_HOOKS_DIR);
   try { fs.mkdirSync(hooksDir, { recursive: true }); } catch { /* emptyFolder holds the read */ }
-  const read = readDefaultBranchBinding(identity.root, { runGit, timeout, expectedRemote: identity.remote.canonical, hooksDir, environment });
+  const read = readDefaultBranchBinding(identity.root, { runGit, timeout, deadline, expectedRemote: identity.remote.canonical, hooksDir, environment });
   if (read.status === 'unknown') {
     const previous = readBindingCache(identity, stateDirectory);
     if (previous) { try { writeCache(stateDirectory, { ...previous, refresh_error: read.error }); } catch { /* no new authority */ } }

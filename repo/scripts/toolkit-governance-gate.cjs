@@ -238,7 +238,7 @@ class GovernanceGate {
     const { GovernanceProposals, GitHubProposalTransport } = require('./toolkit-governance-proposal.cjs');
     this.#transport = proposalTransport || (registryOptions.testOnly || environment.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
     this.#proposals = new GovernanceProposals({ registryOptions, now, transport: this.#transport });
-    this.#refreshBinding = refreshBinding || (cwd => governance.refreshMergedBinding(cwd, registryOptions));
+    this.#refreshBinding = refreshBinding || ((cwd, budget) => governance.refreshMergedBinding(cwd, registryOptions, budget));
     this.#stateReader = stateReader || (cwd => governance.governanceState(cwd, registryOptions));
     this.#notNow = new NotNow({ registryOptions, now });
     this.#epochs = new SessionEpochs({ registryOptions, now });
@@ -252,15 +252,17 @@ class GovernanceGate {
     let state = this.#stateReader(cwd);
     // Only a new prompt rechecks a known published proposal, never every tool call.
     if (refreshPending && this.#transport && state.state === 'UNDECIDED') {
-      const pending = this.#proposals.pending(cwd);
-      if (pending?.proposals?.length) {
-        const checked = this.#proposals.refresh(cwd);
-        if (checked.ok && !checked.proposals.length) {
-          this.#refreshBinding(cwd);
+      const deadline = Date.now() + require('./toolkit-governance-proposal.cjs').PROMPT_BUDGET_MS;
+      try {
+        const checked = this.#proposals.refreshPrompt(cwd, deadline);
+        if (!checked.ok) return Object.freeze({ hold: false, reason: 'unavailable', state });
+        if (checked.closed) {
+          const refreshed = this.#refreshBinding(cwd, { deadline });
+          if (Date.now() >= deadline || refreshed?.refreshed === false) return Object.freeze({ hold: false, reason: 'unavailable', state });
           state = this.#stateReader(cwd);
           this.#proposals.settle(cwd, state);
         }
-      }
+      } catch { return Object.freeze({ hold: false, reason: 'unavailable', state }); }
     }
     const verdict = (hold, reason, pending = null) => Object.freeze({ hold, reason, state, pending });
     if (state.state === 'UNAVAILABLE') return verdict(false, 'unavailable');

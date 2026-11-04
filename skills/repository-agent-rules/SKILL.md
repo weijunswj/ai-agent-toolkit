@@ -83,6 +83,8 @@ Reading files does not reload native hooks, tools or permissions; when one of th
 
 **Carry the refresh to a pull request.** When the refresh wrote files in a Git repository that has a GitHub remote, and no in-flight task already carries those files on its own authorised branch, do not leave them uncommitted:
 
+For an accepted pending governance yes, keep these files in the one adoption proposal. Run `toolkit-governance.cjs publish --run <pending receipt>` after preparing the binding and rules; do not open a separate instruction pull request. After merge, compare prepared untracked files with the merged copies, preserve local differences and clear only verified duplicates with permission before pulling.
+
 1. Create a new non-main branch from the current base. Stage only the files this refresh wrote (the instruction files and shims it created, repaired or refreshed, and any personal-data guard or plain-text check files it installed); never stage dirty, unrelated or backup files.
 2. Run the sync check where it exists, commit, push the branch, and open a pull request that lists the refreshed files.
 3. Watch every check on the pull request's exact head, then stop at the open pull request: report its link, head and check results for the owner to merge. This skill never merges.

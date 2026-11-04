@@ -306,6 +306,15 @@ test('first yes goes from the owner prompt through discovery and real publicatio
   assert.equal(await cli.main(['publish', '--run', pending.run]), 2, 'a binding alone cannot publish adoption');
   assert.equal(github.read().calls.filter(call => call.input).length, 0);
   fs.writeFileSync(path.join(f.cwd, 'AGENTS.md'), rules);
+  require('node:child_process').execFileSync('git', ['init', '--quiet', f.cwd], { stdio: 'ignore', windowsHide: true });
+  const installed = () => require('node:child_process').execFileSync('git', ['ls-files', '--others', '--exclude-standard', '.github'], { cwd: f.cwd, encoding: 'utf8', windowsHide: true }).trim().split(/\r?\n/);
+  const beforeInstall = new Set(installed());
+  const installerOptions = { repo: f.cwd, out: { write() {} } };
+  new (require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs').PlainTextInstaller)(installerOptions).install({ workflow: true });
+  new (require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs').GuardInstaller)(installerOptions).install({ identity: 'excluded', identityReason: 'Fixture identity excluded', workflow: true });
+  const installerFiles = installed().filter(name => !beforeInstall.has(name));
+  assert.equal(installerFiles.length, 7, 'both installers prepared all seven repository files');
+  fs.writeFileSync(path.join(f.cwd, 'AGENTS.md'), rules.toString().replace(/\r?\n/g, '\r\n'));
   fs.writeFileSync(path.join(f.cwd, 'product.txt'), 'Unrelated work\n');
   assert.equal(await cli.main(['publish', '--run', pending.run]), 0);
   assert.equal(await cli.main(['publish', '--run', pending.run]), 0, 'retry reuses the same proposal');
@@ -313,9 +322,11 @@ test('first yes goes from the owner prompt through discovery and real publicatio
   assert.equal(published.commits, 1);
   assert.equal(published.calls.filter(call => call.args[1].endsWith('/pulls') && call.input).length, 1);
   assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
-  assert.deepEqual(Object.keys(published.files).sort(), ['.github/toolkit-programme.json', 'AGENTS.md', 'CLAUDE.md', 'docs/agent-playbooks/INDEX.md'].sort());
+  assert.deepEqual(Object.keys(published.files).sort(), ['.github/toolkit-programme.json', 'AGENTS.md', 'CLAUDE.md', 'docs/agent-playbooks/INDEX.md', ...installerFiles].sort());
+  for (const name of installerFiles) assert.equal(published.files[name], fs.readFileSync(path.join(f.cwd, name), 'utf8').replace(/\r\n/g, '\n'), name);
   assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), binding);
-  assert.equal(published.files['AGENTS.md'], fs.readFileSync(path.join(f.cwd, 'AGENTS.md'), 'utf8'));
+  assert.equal(published.files['AGENTS.md'], rules.toString().replace(/\r\n/g, '\n'));
+  assert.match(stdout.join(''), /Before pulling after merge.*untracked files/);
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'UNDECIDED');
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).programme_records_bind, false);
   const other = new GovernanceProposals({ registryOptions: { registryPath: path.join(f.root, 'other-home/state.json'), testOnly: true }, transport: github.transport });
@@ -334,13 +345,18 @@ for (const permission of ['write', 'read-only', 'unavailable']) test(`startup pe
   const verdict = new gate.GovernanceGate(options).evaluate(f.cwd, { sessionId: 'owner' });
   assert.equal(verdict.hold, permission === 'write');
   assert.equal(verdict.state.programme_records_bind, false);
-  if (permission === 'read-only') assert.match(gate.sessionLine(f.cwd, options), /account cannot write/);
+  if (permission === 'read-only') {
+    assert.match(gate.sessionLine(f.cwd, options), /account cannot write/);
+    const report = require('../scripts/toolkit-governance-conformance.cjs').checkConformance(f.cwd, { ...f.registryOptions, offline: true });
+    assert.equal(report.exit_code, 0);
+    assert.deepEqual(report.findings.map(item => item.id), ['READ_ONLY_ACCOUNT']);
+  }
   if (permission === 'unavailable') assert.match(gate.sessionLine(f.cwd, options), /couldn't check/);
 });
 
 for (const closed of ['merged', 'unmerged']) test(`next prompt after ${closed} closure stops the old merge request, without network on tools`, t => {
   let open = [proposal()], reads = 0, refreshes = 0;
-  const transport = { list() { reads++; return open; }, publish: () => proposal(), read: () => proposal() };
+  const transport = { list() { reads++; return open; }, state() { reads++; return open.length ? 'open' : 'closed'; }, publish: () => proposal(), read: () => proposal() };
   const f = fixture(t, transport);
   const request = f.owner.request(f.cwd, 'no', run);
   f.owner.publish(f.cwd, request.run);
@@ -354,9 +370,49 @@ for (const closed of ['merged', 'unmerged']) test(`next prompt after ${closed} c
   open = [];
   const result = new gate.PromptHold(options).decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Continue the work' });
   assert.equal(refreshes, 1);
+  assert.equal(reads, initialReads + 1, 'prompt reads only the known PR state');
   assert.ok(!JSON.stringify(result).includes('merge this pull request now'));
   assert.equal(result.action, closed === 'merged' ? 'pass' : 'block');
   assert.equal(f.owner.pending(f.cwd, run), null);
+});
+
+for (const delayMs of [0, 15000]) test(`real prompt runner: ${delayMs ? 'slow GitHub times out with a note' : 'open PR uses one state read'}, throttled across chats`, t => {
+  const f = fixture(t, { list: () => [proposal()] });
+  f.owner.refresh(f.cwd);
+  const github = fakeGitHub(f, { pr: { state: 'open' }, delayMs });
+  let refreshes = 0;
+  const options = { registryOptions: f.registryOptions, environment: {}, proposalTransport: github.transport,
+    refreshBinding() { refreshes++; throw Error('open proposals never refresh the branch'); } };
+  const started = performance.now();
+  const result = new gate.PromptHold(options).decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'merge 1' });
+  assert.ok(performance.now() - started < 5000, 'prompt remains well inside the host ten-second limit');
+  assert.equal(result.action, 'pass');
+  assert.match(result.context, delayMs ? /couldn't check/ : /merge this pull request now/);
+  assert.equal(refreshes, 0);
+  const second = new gate.PromptHold(options).decide({ cwd: f.cwd, sessionId: 'other', prompt: 'Continue' });
+  assert.equal(second.action, 'pass');
+  const calls = github.read().calls;
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].args, ['api', 'repos/example-owner/example-repo/pulls/1', '--jq', '.state']);
+  assert.equal(governance.governanceState(f.cwd, f.registryOptions).programme_records_bind, false);
+  if (delayMs) {
+    const later = new GovernanceProposals({ registryOptions: f.registryOptions, transport: { state: () => 'open' }, now: () => new Date(Date.now() + 61000) });
+    assert.equal(later.refreshPrompt(f.cwd, Date.now() + 3000).ok, true);
+    assert.equal(later.pending(f.cwd).kind, 'published', 'a later successful read clears the timeout note');
+  }
+});
+
+test('a busy proposal lock allows the prompt with a note, keeping the receipt intact', t => {
+  const f = fixture(t, { list: () => [proposal()] });
+  f.owner.refresh(f.cwd);
+  const directory = path.join(f.home, '.ai-agent-toolkit/user-state/governance-proposals');
+  const file = path.join(directory, fs.readdirSync(directory)[0]), before = fs.readFileSync(file);
+  fs.writeFileSync(`${file}.lock`, '');
+  const result = new gate.PromptHold({ registryOptions: f.registryOptions, environment: {}, proposalTransport: { state() { throw Error('must not query while locked'); } } })
+    .decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'merge 1' });
+  assert.equal(result.action, 'pass');
+  assert.match(result.context, /couldn't check/);
+  assert.deepEqual(fs.readFileSync(file), before);
 });
 
 test('an enabled repository missing its rules is told to prepare them, never follow an absent block', t => {
@@ -375,6 +431,31 @@ test('pending conformance reports the existing proposal rather than asking for a
   const pending = report.findings.find(item => item.id === 'DECISION_PENDING');
   assert.match(pending.message, /governance decision pending/);
   assert.ok(!pending.message.includes('You have not decided'));
+});
+
+test('publication errors explain read-only access, conflicting proposals and expired receipts plainly', async t => {
+  const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
+  for (const [code, pattern] of [
+    ['PROPOSAL_WRITE_REQUIRED', /account cannot write/],
+    ['PROPOSAL_CONFLICT', /Conflicting governance proposals/],
+    ['PROPOSAL_RECEIPT_REQUIRED', /No live pending owner answer/],
+  ]) {
+    const transport = { canWrite: () => code !== 'PROPOSAL_WRITE_REQUIRED', list: () => code === 'PROPOSAL_CONFLICT' ? [proposal(), proposal('yes', 2)] : [] };
+    const f = fixture(t, transport), request = f.owner.request(f.cwd, 'no', run);
+    if (code === 'PROPOSAL_RECEIPT_REQUIRED') {
+      const directory = path.join(f.home, '.ai-agent-toolkit/user-state/governance-proposals');
+      const file = path.join(directory, fs.readdirSync(directory)[0]);
+      const value = JSON.parse(fs.readFileSync(file));
+      value.requests[0].proposal = 1;
+      fs.writeFileSync(file, JSON.stringify(value));
+    }
+    const stdout = [], stderr = [];
+    const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: transport,
+      stdout: { write: text => stdout.push(text) }, stderr: { write: text => stderr.push(text) } });
+    assert.equal(await cli.main(['publish', '--run', request.run]), 2);
+    assert.match(stderr.join(''), pattern, code);
+    assert.doesNotMatch(stderr.join(''), /unexpected problem|Restore GitHub access|PROPOSAL_/);
+  }
 });
 
 test('shallow binding reads still refuse symlinks, non-files and truncated trees', () => {

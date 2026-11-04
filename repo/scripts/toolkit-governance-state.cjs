@@ -569,12 +569,12 @@ function governanceState(cwd, options = {}) {
 // With TOOLKIT_GOVERNANCE_OFFLINE=1 (set for test runs), or for a test registry, nothing reads the
 // network unless a git runner is passed in: the last read stays, so governed effects hold once it is
 // over 24 hours old.
-function refreshMergedBinding(cwd, options = {}, { runGit, timeout, now, environment = process.env } = {}) {
+function refreshMergedBinding(cwd, options = {}, { runGit, timeout, deadline, now, environment = process.env } = {}) {
   if (!runGit && (environment.TOOLKIT_GOVERNANCE_OFFLINE === '1' || options.testOnly === true)) return { refreshed: false, error: 'offline' };
   try {
     const identity = readIdentity(cwd);
     if (!identity.root || !identity.valid || notGitHubOf(identity)) return { refreshed: false, error: 'not-applicable' };
-    const outcome = bindingCache.refreshBindingCache(identity, userStateDirectory(options), { runGit, timeout, now, environment });
+    const outcome = bindingCache.refreshBindingCache(identity, userStateDirectory(options), { runGit, timeout, deadline, now, environment });
     return { refreshed: outcome.refreshed, error: outcome.error };
   } catch (error) { return { refreshed: false, error: codeOf(error) }; }
 }

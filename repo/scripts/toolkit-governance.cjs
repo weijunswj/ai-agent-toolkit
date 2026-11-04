@@ -24,6 +24,11 @@ const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
 const ADOPTION_NOT_READY = 'The adoption proposal is not ready. Run toolkit governance discover, resolve missing parent, separate private evidence store or checks, then use repository-agent-rules to prepare the binding and governed rules. Publish them together in one setup pull request.';
+const PROPOSAL_ERRORS = Object.freeze({
+  PROPOSAL_WRITE_REQUIRED: 'This GitHub account cannot write to this repository. Continue with global rules, without governance effects or standing task auto-merge. An owner with write access can publish the proposal.',
+  PROPOSAL_CONFLICT: 'Conflicting governance proposals are open. Show their links and ask the owner which to keep before publishing again. None decides governance.',
+  PROPOSAL_RECEIPT_REQUIRED: 'No live pending owner answer remains for this run. Check the existing decision pull request; if it closed, ask the owner again in this chat before preparing another.',
+});
 
 const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'reopen', 'check', 'catalogue', 'publish', 'security', 'migrate']);
 const ALIASES = Object.freeze({ decline: 'disable' });
@@ -37,7 +42,7 @@ const RULES_TEXT = Object.freeze({
   UNAVAILABLE: "Couldn't check governance. Continue with global rules and coding gates; no governance effects or standing task auto-merge until it can be checked.",
   ERROR: 'Global rules and coding gates. The binding merged on the default branch cannot be used, so governed records, gate admission and finality hold until a pull request fixes it.',
   DISABLED: 'Global rules and coding gates, without GitHub governance. A governed block in AGENTS.md is not followed.',
-  UNDECIDED: `GitHub governance is not decided yet. After Toolkit shows the question, answer yes, no or later in that repository's own chat run. Other wording uses a one-use reply ticket; in your own terminal, ${CMD('enable')} or ${CMD('disable')} also works.`,
+  UNDECIDED: `GitHub governance is not decided yet. A verified read-only account continues with global rules, without governance effects or standing task auto-merge. If this account can write, answer yes, no or later after Toolkit shows the question in this chat run. Other wording uses a one-use reply ticket; in your own terminal, ${CMD('enable')} or ${CMD('disable')} also works.`,
 });
 
 class GovernanceCliError extends Error {
@@ -116,6 +121,10 @@ class ToolkitGovernanceCli {
       if (command === 'publish') return this.#publish(json, requestedRun);
       return await this.#decide(command, json);
     } catch (error) {
+      if (PROPOSAL_ERRORS[error.code]) {
+        this.#stderr.write(`${PROPOSAL_ERRORS[error.code]}\n`);
+        return 2;
+      }
       if (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE') {
         this.#stderr.write(`${ADOPTION_NOT_READY}\n`);
         return 2;
@@ -203,7 +212,7 @@ class ToolkitGovernanceCli {
   // is recorded with what GitHub showed before.
   #security(json) {
     const state = this.#state();
-    if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}). ${''}`.trim());
+    if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}).`);
     if (state.state !== 'ENABLED' || !state.materials || !state.materials.binding) {
       this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. Toolkit turns on dependency and security settings only in a governed repository with a programme binding; this one is ${label(state)}.`]);
       return 1;
@@ -239,7 +248,7 @@ class ToolkitGovernanceCli {
 
   #reopen(json) {
     const state = this.#state();
-    if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}). ${''}`.trim());
+    if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}).`);
     if (['M0', 'M1', 'M2'].includes(state.rule)) {
       this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. This repository is ${label(state)} by the programme binding merged on its default branch, on every computer.`, 'To change it, merge a pull request that changes .github/toolkit-programme.json.']);
       return 0;
@@ -289,7 +298,7 @@ class ToolkitGovernanceCli {
     try { return this.#publish(json, request.run); }
     catch (error) {
       this.#print(json, { state: before.state, pending: true, run: request.run, error: error.code || 'PROPOSAL_UNAVAILABLE' }, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
-        error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Restore GitHub access, check matching open proposals, then publish the pending proposal. No local governance decision was written.']);
+        PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);
       return 2;
     }
   }

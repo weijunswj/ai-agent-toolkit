@@ -13,6 +13,8 @@ const SCHEMA = 'toolkit.governance-proposals.v1';
 const MARKER = '<!-- toolkit-governance-decision -->';
 const LIMIT = 256 * 1024;
 const GITHUB_LIMIT = 8 * 1024 * 1024;
+const PROMPT_BUDGET_MS = 3000;
+const PROMPT_INTERVAL_MS = 60000;
 const SHA = /^[a-f0-9]{40}$/;
 const EPOCH = /^[a-f0-9]{32}$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
@@ -27,7 +29,7 @@ function adoptionFiles(cwd, text) {
   const playbooks = fs.readdirSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/docs/agent-playbooks')).filter(name => name.endsWith('.md'));
   const names = ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md',
     ...playbooks.map(name => `docs/agent-playbooks/${name}`),
-    ...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json'];
+    ...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json'];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
     const file = path.join(cwd, name);
@@ -39,13 +41,13 @@ function adoptionFiles(cwd, text) {
     }
     const stat = fs.lstatSync(file);
     if (!stat.isFile() || stat.size > LIMIT) fail('PROPOSAL_ADOPTION_INCOMPLETE');
-    files[name] = fs.readFileSync(file, 'utf8');
+    files[name] = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   }
   return files;
 }
 function proposalText(proposals) {
   if (proposals.length > 1) return `Toolkit: conflicting governance proposals are waiting: ${proposals.map(item => item.url).join(', ')}. Ask the owner which proposal to keep. None decides governance.`;
-  return `Toolkit: governance decision pending. ${proposals[0].url} changes the repository's governance to ${proposals[0].answer === 'yes' ? 'enabled' : 'disabled'} on every computer once merged. Ask the owner to merge this pull request now, with its external effects and current checks. This answer grants no merge permission.`;
+  return `Toolkit: governance decision pending. ${proposals[0].url} changes the repository's governance to ${proposals[0].answer === 'yes' ? 'enabled' : 'disabled'} on every computer once merged. Ask the owner to merge this pull request now, with its external effects and current checks. This answer grants no merge permission.${proposals[0].answer === 'yes' ? ' Before pulling after merge, compare prepared untracked files with the merged copies. Preserve local differences and clear only verified duplicates with permission, so git pull can bring in the tracked files.' : ''}`;
 }
 
 class GovernanceProposals {
@@ -120,6 +122,36 @@ class GovernanceProposals {
     return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${ADOPTION_HELP} ` : ''}Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and ask the owner to merge it now. Governance stays as merged on the default branch.` };
   }
   // A failed query is unknown, never "there are no proposals". Closed unmerged PRs end requests.
+  // One PR-state read per minute across chats. Claim before I/O, so even a killed hook is throttled.
+  refreshPrompt(cwd, deadline) {
+    const identity = this.#identity(cwd), slug = require('./toolkit-governance-state.cjs').remoteSlug(identity.remote);
+    const prior = this.#read(identity.repository_id);
+    if (prior?.proposals.length !== 1) return { ok: true, closed: false };
+    let proposal = null;
+    this.#update(identity.repository_id, value => {
+      if (value.proposals.length !== 1 || !validProposal(value.proposals[0], slug)) return;
+      const age = this.#now() - new Date(value.prompt_checked_at);
+      if (age >= 0 && age < PROMPT_INTERVAL_MS) return;
+      value.prompt_checked_at = this.#now().toISOString();
+      proposal = value.proposals[0];
+    });
+    if (!proposal) return { ok: true, closed: false };
+    try {
+      const state = this.#transport.state(slug, proposal.number, { deadline });
+      if (Date.now() >= deadline || !['open', 'closed'].includes(state)) fail('PROPOSAL_GITHUB_UNAVAILABLE');
+      this.#update(identity.repository_id, value => {
+        value.error = null;
+        if (state === 'closed') {
+          value.proposals = value.proposals.filter(item => item.number !== proposal.number);
+          value.requests = value.requests.filter(item => item.proposal !== proposal.number);
+        }
+      });
+      return { ok: true, closed: state === 'closed' };
+    } catch {
+      this.#update(identity.repository_id, value => { value.error = 'could-not-check-proposals'; });
+      return { ok: false, closed: false };
+    }
+  }
   refresh(cwd) {
     const identity = this.#identity(cwd), governance = require('./toolkit-governance-state.cjs');
     const slug = governance.remoteSlug(identity.remote);
@@ -198,8 +230,10 @@ class GitHubProposalTransport {
   #run;
   constructor({ run = null, command = null } = {}) {
     // A command dependency lets offline tests exercise the actual child-process runner.
-    this.#run = run || ((args, input) => {
-      const result = spawnSync(command ? command[0] : resolvePathExecutable('gh'), [...(command ? command.slice(1) : []), ...args], { input: input === undefined ? undefined : JSON.stringify(input), encoding: 'utf8', timeout: 15000, windowsHide: true, maxBuffer: GITHUB_LIMIT });
+    this.#run = run || ((args, input, { deadline } = {}) => {
+      const timeout = deadline === undefined ? 15000 : Math.min(15000, deadline - Date.now());
+      if (timeout <= 0) fail('PROPOSAL_GITHUB_UNAVAILABLE');
+      const result = spawnSync(command ? command[0] : resolvePathExecutable('gh'), [...(command ? command.slice(1) : []), ...args], { input: input === undefined ? undefined : JSON.stringify(input), encoding: 'utf8', timeout, windowsHide: true, maxBuffer: GITHUB_LIMIT });
       if (result.error || result.status !== 0) fail(/\(HTTP 404\)/.test(result.stderr || '') ? 'PROPOSAL_NOT_FOUND' : 'PROPOSAL_GITHUB_UNAVAILABLE');
       return result.stdout;
     });
@@ -218,6 +252,9 @@ class GitHubProposalTransport {
     const permissions = this.#api(`repos/${repository}`, undefined, null, '.permissions');
     if (typeof permissions?.push !== 'boolean') fail('PROPOSAL_PERMISSION_UNAVAILABLE');
     return permissions.push;
+  }
+  state(repository, number, { deadline }) {
+    return JSON.parse(this.#run(['api', `repos/${repository}/pulls/${number}`, '--jq', '.state'], undefined, { deadline }));
   }
   // Walk only the root and .github trees, retaining the regular-file check without enumerating the repository.
   #bindingEntry(repository, treeSha) {
@@ -299,4 +336,4 @@ class GitHubProposalTransport {
     return { number: pr.number, head: headSha };
   }
 }
-module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, proposalText, SCHEMA, MARKER });
+module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, proposalText, SCHEMA, MARKER, PROMPT_BUDGET_MS });

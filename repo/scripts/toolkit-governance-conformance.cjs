@@ -103,6 +103,8 @@ function checkConformance(cwd, options = {}) {
   }
   if (state.state === 'UNDECIDED') {
     const pending = new (require('./toolkit-governance-proposal.cjs').GovernanceProposals)({ registryOptions: options }).pending(cwd);
+    if (['read-only', 'unavailable'].includes(pending?.kind)) return report(pending.kind === 'read-only' ? 0 : 2, state,
+      [finding(pending.kind === 'read-only' ? 'READ_ONLY_ACCOUNT' : 'GOVERNANCE_UNAVAILABLE', pending.kind === 'read-only' ? 'info' : 'unverified', pending.text)], toolkitRoot);
     findings.push(finding('DECISION_PENDING', 'drift', pending?.text || `No governance decision is merged on the default branch. Answer Toolkit's question in chat (yes, no or later), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`));
   }
   if (state.state === 'DISABLED') {

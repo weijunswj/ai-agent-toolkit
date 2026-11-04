@@ -121,7 +121,7 @@ const governance = require('./toolkit-governance-state.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
 const mergeScope = require('./toolkit-auto-merge-eligible.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
-const { validateRemoteIdentity, repositoryIdForCanonicalRemote } = require('./toolkit-capability-registry.cjs');
+const { validateRemoteIdentity, repositoryIdForCanonicalRemote } = require('./toolkit-repository-identity.cjs');
 const { GitHubTransport } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const { resolveExecutable } = require('../../skills/github-program-reconciler/scripts/resolve-executable.cjs');
 
@@ -980,13 +980,13 @@ class EvidenceStoreMerges {
     let bindings;
     let ownBinding;
     try {
-      const registryPath = governance.registryPathFor(this.registryOptions);
-      bindings = bindingCache.readAllBindingCaches(registryPath).map(({ entry, identity }) =>
+      const stateDirectory = governance.userStateDirectory(this.registryOptions);
+      bindings = bindingCache.readAllBindingCaches(stateDirectory).map(({ entry, identity }) =>
         governance.judgeMerged(entry, identity, this.now()));
       // Read the exact target separately: the bounded scan may not include its own binding.
       const remote = validateRemoteIdentity(`https://github.com/${target}.git`);
       const identity = { remote, repository_id: repositoryIdForCanonicalRemote(remote.canonical) };
-      ownBinding = governance.judgeMerged(bindingCache.readBindingCache(identity, registryPath), identity, this.now());
+      ownBinding = governance.judgeMerged(bindingCache.readBindingCache(identity, stateDirectory), identity, this.now());
     } catch { return null; }
     // A naming binding at any freshness supplies recovery text only, never merge authority.
     const naming = bindings.filter(judged => judged.status === 'enabled'

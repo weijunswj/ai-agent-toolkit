@@ -3,6 +3,17 @@
   "family": "governance",
   "rows": [
     {
+      "id": "GOV.slow-proposal-allows-prompt",
+      "source": "delta review: proposal discovery exceeded the prompt hook timeout",
+      "kind": "fault",
+      "hosts": ["claude"],
+      "event": "UserPromptSubmit",
+      "fixture": { "repo": { "governance": "undecided", "branch": "feature" }, "slow_proposal": true },
+      "payload": { "prompt": "merge 1" },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
       "id": "GOV.read-only-account-continues",
       "source": "governance review: third-party clones must not hold every new chat",
       "kind": "state",

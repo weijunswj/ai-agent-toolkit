@@ -217,6 +217,22 @@ process.on('exit', () => fs.rmSync(NO_HOOKS, { recursive: true, force: true }));
 const GUARDED = Object.freeze({ expectedRemote: REMOTE, hooksDir: NO_HOOKS, environment: {} });
 const SHA = 'b'.repeat(40);
 
+test('prompt refresh shares one remaining deadline across every git read', () => {
+  let clock = Date.now(), calls = 0;
+  const original = Date.now;
+  Date.now = () => clock;
+  try {
+    const result = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, deadline: clock + 50, runGit(args, { timeout }) {
+      calls++;
+      assert.equal(timeout, 50);
+      clock += 51;
+      return ok(REMOTE);
+    } });
+    assert.equal(result.status, 'unknown');
+    assert.equal(calls, 1, 'no git call starts after the shared budget ends');
+  } finally { Date.now = original; }
+});
+
 test('reader: default branch from the symref, then the binding at its tip; hostile answers never become a binding', () => {
   const base = { 'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`), fetch: ok(''), 'rev-parse': ok(`${SHA}\n`) };
   const text = JSON.stringify(v2());
