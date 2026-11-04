@@ -3,6 +3,17 @@
   "family": "governance",
   "rows": [
     {
+      "id": "GOV.read-only-account-continues",
+      "source": "governance review: third-party clones must not hold every new chat",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "fixture": {"repo": {"governance": "undecided", "branch": "feature", "can_write": false}},
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "git status"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "no-local-decision-write",
+      "status": "pass"
+    },
+    {
       "id": "GOV.session-shell-resume-answer",
       "source": "resume review: revoking merge origin must still rotate governance question marks",
       "kind": "state",

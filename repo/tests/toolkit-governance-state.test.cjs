@@ -138,7 +138,7 @@ test('derive: the rule table, first match wins', () => {
   ];
   for (const identity of identities) for (const decision of ['enabled', 'disabled', 'unresolved']) {
     const result = governance.GovernanceState.derive({ identity, materials: materials(true, true), decision: { state: decision }, merged: fresh('enabled') });
-    assert.deepEqual([result.state, result.rule, result.governed_rules_bind, result.hold, result.persistable], ['DISABLED', 'R8', false, false, false]);
+    assert.deepEqual([result.state, result.rule, result.governed_rules_bind, result.hold], ['DISABLED', 'R8', false, false]);
   }
 });
 

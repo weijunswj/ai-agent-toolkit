@@ -107,8 +107,8 @@ function repositoryIdForCanonicalRemote(remoteValue) {
 
 // The keys earlier Toolkit versions stored for the same repository, before clone forms were
 // folded into one identity: the remote exactly as cloned, and the usual https, scp and ssh forms
-// with and without .git, in the path's own case and lowercased. Decisions under these keys are
-// still honoured; a new decision is written under the normalised key.
+// with and without .git, in the path's own case and lowercased. These aliases locate historical
+// operational state; historical governance decisions grant no authority.
 function legacyRepositoryIdsForCanonicalRemote(remoteValue) {
   const remote = validatedCanonicalRemote(remoteValue);
   const base = remote.path.replace(/\/+$/, '').replace(/\.git$/i, '');

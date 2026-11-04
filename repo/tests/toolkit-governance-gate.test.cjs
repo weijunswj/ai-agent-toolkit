@@ -662,6 +662,8 @@ test('accepted yes stays pending, replays only this session and writes no reposi
   assert.equal(answered.action, 'pass');
   assert.match(answered.context, /yes is pending/);
   assert.match(answered.context, /missing parent, separate evidence store or required checks/);
+  assert.match(answered.context, /toolkit governance discover/);
+  assert.match(answered.context, /repository-agent-rules/);
   assert.match(answered.context, /1\. first request\n2\. second request/);
   assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /yes is pending/);
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');

@@ -149,7 +149,8 @@ function fixtureErrors(fixture) {
   if (repo !== undefined) {
     if (!repo || typeof repo !== 'object') errors.push('fixture.repo must be an object');
     else {
-      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status', 'can_write'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      if (repo.can_write !== undefined && (repo.can_write !== false || repo.governance !== 'undecided')) errors.push('fixture.repo.can_write needs governance undecided and is false or left out');
       if (repo.owner !== undefined && (repo.governance !== 'undecided' || !/^[A-Za-z0-9-]+$/.test(repo.owner))) errors.push('fixture.repo.owner needs governance undecided and is a plain owner name');
       if (repo.cached_binding_store !== undefined && (repo.cached_binding_store !== true || repo.governance !== 'undecided')) errors.push('fixture.repo.cached_binding_store needs governance undecided and is true or left out');
       if (repo.nested_worktrees !== undefined && (!Array.isArray(repo.nested_worktrees) || repo.nested_worktrees.some(tree => !tree || !/^[a-z0-9-]+$/.test(tree.branch || '')
@@ -373,6 +374,10 @@ class Fixture {
       if (spec.governance === 'undecided') {
         this.#git(this.work, ['remote', 'add', 'origin', `https://github.com/${spec.owner || 'toolkit-test-fixture'}/${name}.git`]);
         if (spec.binding_status !== 'unavailable') require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs')).recordAbsent(this.work, { home: this.home });
+        if (spec.can_write === false) {
+          const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
+          new GovernanceProposals({ registryOptions: { userHome: this.home, testOnly: true }, transport: { canWrite: () => false, list: () => [] } }).refresh(this.work);
+        }
       }
       if (spec.cached_binding_store) this.#bindingNamingStore(`toolkit-test-fixture/${name}`);
     }

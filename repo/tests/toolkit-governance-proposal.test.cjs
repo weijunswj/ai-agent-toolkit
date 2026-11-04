@@ -23,6 +23,23 @@ function fixture(t, transport = null) {
 }
 const proposal = (answer = 'no', number = 1) => ({ repository: 'example-owner/example-repo', number, head: 'a'.repeat(40), url: `https://github.com/example-owner/example-repo/pull/${number}`, state: 'open', answer });
 const run = { sessionId: 'owner', epoch: 'e'.repeat(32) };
+function fakeGitHub(f, extra = {}) {
+  const file = path.join(f.root, 'github.json');
+  fs.writeFileSync(file, JSON.stringify({ repository: 'example-owner/example-repo', calls: [], files: {}, ...extra }));
+  return { transport: new GitHubProposalTransport({ command: [process.execPath, path.join(__dirname, 'support/governance-fake-github.cjs'), file] }), read: () => JSON.parse(fs.readFileSync(file, 'utf8')) };
+}
+function prepareAdoption(f) {
+  const binding = { schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'enabled',
+    parents: [{ issue: 1, record_prefix: 'INT-FX-' }], store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' },
+    required_checks: ['validate'], dependency_updates: { auto_merge: 'off', github_actions: 'owner' } };
+  fs.mkdirSync(path.join(f.cwd, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(f.cwd, governance.BINDING_FILE), JSON.stringify(binding));
+  fs.copyFileSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), path.join(f.cwd, 'AGENTS.md'));
+  fs.writeFileSync(path.join(f.cwd, 'CLAUDE.md'), '@AGENTS.md\n');
+  fs.mkdirSync(path.join(f.cwd, 'docs/agent-playbooks'), { recursive: true });
+  fs.writeFileSync(path.join(f.cwd, 'docs/agent-playbooks/INDEX.md'), '# Project playbooks\n');
+  return binding;
+}
 for (const answer of ['yes', 'no']) test(`${answer}: accepted answer remains pending, isolated from other chats and effective state`, t => {
   const f = fixture(t);
   f.owner.request(f.cwd, answer, run);
@@ -49,7 +66,9 @@ test('publication discovers, writes once and reads back; another chat sees the p
   assert.equal(writes, 1);
   assert.equal(f.owner.pending(f.cwd, { ...run, sessionId: 'new-chat' }).kind, 'published');
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'UNDECIDED');
-  open = []; f.owner.refresh(f.cwd);
+  open = [];
+  assert.throws(() => f.owner.publish(f.cwd, request.run), /RECEIPT_REQUIRED/);
+  assert.equal(writes, 1, 'rerunning publication after closure never reopens the proposal');
   assert.equal(f.owner.pending(f.cwd, run), null, 'closed unmerged proposal ends the run request too');
 });
 test('conflicting proposals require the owner choice, never newest wins', t => {
@@ -171,7 +190,8 @@ test('PR discovery refuses incomplete pagination, a foreign head and an invalid 
     { state: 'open', changed_files: 1, body: '<!-- toolkit-governance-decision -->', head: { repo: { full_name: repository }, sha: 'a'.repeat(40) }, base: { ref: 'main' } },
     { default_branch: 'main' },
     { tree: { sha: 'b'.repeat(40) } },
-    { truncated: false, tree: [{ path: '.github/toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] },
+    { truncated: false, tree: [{ path: '.github', type: 'tree', mode: '040000', sha: 'd'.repeat(40) }] },
+    { truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] },
     { type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: 2, content: Buffer.from('{}').toString('base64') },
   ];
   const badBinding = new GitHubProposalTransport({ run: () => JSON.stringify(responses.shift()) });
@@ -184,7 +204,8 @@ test('a marked off PR with unrelated changes cannot be reused as a minimal decis
     { state: 'open', changed_files: 2, body: '<!-- toolkit-governance-decision -->', head: { repo: { full_name: repository }, sha: 'a'.repeat(40) }, base: { ref: 'main' } },
     { default_branch: 'main' },
     { tree: { sha: 'b'.repeat(40) } },
-    { truncated: false, tree: [{ path: '.github/toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] },
+    { truncated: false, tree: [{ path: '.github', type: 'tree', mode: '040000', sha: 'd'.repeat(40) }] },
+    { truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] },
     { type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: 100, content: Buffer.from(JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' })).toString('base64') },
     [{ filename: '.github/toolkit-programme.json', status: 'modified' }, { filename: 'src/index.js', status: 'modified' }],
   ];
@@ -202,7 +223,8 @@ for (const answer of ['no', 'yes']) test(`transport reads a complete ${answer} p
     { number: expected.number, html_url: expected.url, state: 'open', changed_files: answer === 'no' ? 1 : 2, body: '<!-- toolkit-governance-decision -->', head: { repo: { full_name: repository }, sha: expected.head }, base: { ref: 'main' } },
     { default_branch: 'main' },
     { tree: { sha: 'b'.repeat(40) } },
-    { truncated: false, tree: [{ path: '.github/toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] },
+    { truncated: false, tree: [{ path: '.github', type: 'tree', mode: '040000', sha: 'd'.repeat(40) }] },
+    { truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] },
     { type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: Buffer.byteLength(text), content: Buffer.from(text).toString('base64') },
     [{ filename: '.github/toolkit-programme.json', status: 'added' }],
   ];
@@ -238,5 +260,133 @@ test('interrupted publication reuses only its exact unchanged proposal branch', 
     assert.equal(calls.filter(item => item.input?.ref).length, 0, 'existing branch is never recreated or reset');
     assert.equal(calls.filter(item => item.input?.content).length, stage === 'branch-only' ? 1 : 0);
     if (stage === 'changed') assert.equal(calls.filter(item => item.input).length, 0, 'foreign changes receive no writes');
+  }
+});
+
+test('real runner handles large GitHub responses, projects the PR list and reads only shallow trees', t => {
+  const f = fixture(t), github = fakeGitHub(f, { large: true });
+  const owner = new GovernanceProposals({ registryOptions: f.registryOptions, transport: github.transport });
+  const request = owner.request(f.cwd, 'no', run);
+  assert.equal(owner.publish(f.cwd, request.run).proposal.answer, 'no');
+  assert.equal(owner.refresh(f.cwd).proposals.length, 1);
+  const calls = github.read().calls;
+  const lists = calls.filter(call => call.args[1].includes('/pulls?'));
+  assert.ok(lists.length >= 2);
+  assert.ok(lists.every(call => call.args.includes('--jq') && call.args.at(-1).includes('marked')));
+  assert.ok(calls.some(call => call.args[1].includes('/contents/.github/toolkit-programme.json?ref=')));
+  assert.ok(!calls.some(call => call.args.join(' ').includes('recursive=')));
+});
+
+test('first yes goes from the owner prompt through discovery and real publication as one complete marked adoption', async t => {
+  const f = fixture(t), github = fakeGitHub(f);
+  const options = { registryOptions: f.registryOptions, environment: {}, proposalTransport: github.transport };
+  gate.startSession({ cwd: f.cwd, session_id: 'owner', source: 'startup' }, options);
+  const hold = new gate.PromptHold(options);
+  assert.equal(hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Do this work' }).action, 'block');
+  const answer = hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'yes' });
+  assert.equal(answer.action, 'pass');
+  assert.match(answer.context, /governance discover/);
+  assert.match(answer.context, /repository-agent-rules/);
+  const epoch = new gate.SessionEpochs(options).get('owner');
+  const pending = f.owner.pending(f.cwd, { sessionId: 'owner', epoch });
+  const stdout = [], stderr = [];
+  const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
+  const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport,
+    stdout: { write: text => stdout.push(text) }, stderr: { write: text => stderr.push(text) },
+    discoveryGh: () => ({ ok: false, reason: 'offline' }) });
+  assert.equal(await cli.main(['discover']), 0);
+  assert.match(stdout.join(''), /Adoption proposal/);
+  assert.equal(await cli.main(['publish', '--run', pending.run]), 2);
+  assert.match(stderr.join(''), /adoption proposal is not ready/i);
+  assert.ok(!stderr.join('').includes('PROPOSAL_ADOPTION_INCOMPLETE'));
+  assert.equal(github.read().calls.filter(call => call.input).length, 0, 'missing materials cause no GitHub writes');
+  const binding = prepareAdoption(f);
+  const rules = fs.readFileSync(path.join(f.cwd, 'AGENTS.md'));
+  fs.rmSync(path.join(f.cwd, 'AGENTS.md'));
+  assert.equal(await cli.main(['publish', '--run', pending.run]), 2, 'a binding alone cannot publish adoption');
+  assert.equal(github.read().calls.filter(call => call.input).length, 0);
+  fs.writeFileSync(path.join(f.cwd, 'AGENTS.md'), rules);
+  fs.writeFileSync(path.join(f.cwd, 'product.txt'), 'Unrelated work\n');
+  assert.equal(await cli.main(['publish', '--run', pending.run]), 0);
+  assert.equal(await cli.main(['publish', '--run', pending.run]), 0, 'retry reuses the same proposal');
+  const published = github.read();
+  assert.equal(published.commits, 1);
+  assert.equal(published.calls.filter(call => call.args[1].endsWith('/pulls') && call.input).length, 1);
+  assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
+  assert.deepEqual(Object.keys(published.files).sort(), ['.github/toolkit-programme.json', 'AGENTS.md', 'CLAUDE.md', 'docs/agent-playbooks/INDEX.md'].sort());
+  assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), binding);
+  assert.equal(published.files['AGENTS.md'], fs.readFileSync(path.join(f.cwd, 'AGENTS.md'), 'utf8'));
+  assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'UNDECIDED');
+  assert.equal(governance.governanceState(f.cwd, f.registryOptions).programme_records_bind, false);
+  const other = new GovernanceProposals({ registryOptions: { registryPath: path.join(f.root, 'other-home/state.json'), testOnly: true }, transport: github.transport });
+  other.refresh(f.cwd);
+  assert.equal(other.pending(f.cwd).kind, 'published', 'another computer discovers the complete adoption');
+  recordMerged(f.cwd, { registryPath: f.registryPath });
+  assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'ENABLED');
+  assert.match(gate.sessionLine(f.cwd, options), /Follow.*TOOLKIT-GOVERNED-RULES/);
+});
+
+for (const permission of ['write', 'read-only', 'unavailable']) test(`startup permission ${permission}: only a verified writer holds for a decision`, t => {
+  const f = fixture(t);
+  const transport = { canWrite() { if (permission === 'unavailable') throw Error('no login'); return permission === 'write'; }, list: () => [] };
+  const options = { registryOptions: f.registryOptions, environment: {}, proposalTransport: transport };
+  gate.startSession({ cwd: f.cwd, session_id: 'owner', source: 'startup' }, options);
+  const verdict = new gate.GovernanceGate(options).evaluate(f.cwd, { sessionId: 'owner' });
+  assert.equal(verdict.hold, permission === 'write');
+  assert.equal(verdict.state.programme_records_bind, false);
+  if (permission === 'read-only') assert.match(gate.sessionLine(f.cwd, options), /account cannot write/);
+  if (permission === 'unavailable') assert.match(gate.sessionLine(f.cwd, options), /couldn't check/);
+});
+
+for (const closed of ['merged', 'unmerged']) test(`next prompt after ${closed} closure stops the old merge request, without network on tools`, t => {
+  let open = [proposal()], reads = 0, refreshes = 0;
+  const transport = { list() { reads++; return open; }, publish: () => proposal(), read: () => proposal() };
+  const f = fixture(t, transport);
+  const request = f.owner.request(f.cwd, 'no', run);
+  f.owner.publish(f.cwd, request.run);
+  const options = { registryOptions: f.registryOptions, environment: {}, proposalTransport: transport, refreshBinding() {
+    refreshes++;
+    if (closed === 'merged') seedMerged(f.cwd, 'disable', f.options);
+  } };
+  const initialReads = reads;
+  new gate.GovernanceGate(options).evaluate(f.cwd);
+  assert.equal(reads, initialReads, 'tool evaluation uses the cached observation');
+  open = [];
+  const result = new gate.PromptHold(options).decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Continue the work' });
+  assert.equal(refreshes, 1);
+  assert.ok(!JSON.stringify(result).includes('merge this pull request now'));
+  assert.equal(result.action, closed === 'merged' ? 'pass' : 'block');
+  assert.equal(f.owner.pending(f.cwd, run), null);
+});
+
+test('an enabled repository missing its rules is told to prepare them, never follow an absent block', t => {
+  const f = fixture(t);
+  seedMerged(f.cwd, 'enable', f.options);
+  const line = gate.sessionLine(f.cwd, f.options);
+  assert.match(line, /no governed rules block/);
+  assert.match(line, /repository-agent-rules/);
+  assert.doesNotMatch(line, /Follow.*and the TOOLKIT-GOVERNED-RULES block/);
+});
+
+test('pending conformance reports the existing proposal rather than asking for another answer', t => {
+  const f = fixture(t, { list: () => [proposal()] });
+  f.owner.refresh(f.cwd);
+  const report = require('../scripts/toolkit-governance-conformance.cjs').checkConformance(f.cwd, { ...f.registryOptions, offline: true });
+  const pending = report.findings.find(item => item.id === 'DECISION_PENDING');
+  assert.match(pending.message, /governance decision pending/);
+  assert.ok(!pending.message.includes('You have not decided'));
+});
+
+test('shallow binding reads still refuse symlinks, non-files and truncated trees', () => {
+  const repository = 'example-owner/example-repo';
+  for (const damage of ['directory-symlink', 'binding-symlink', 'binding-tree', 'truncated']) {
+    const responses = [
+      { state: 'open', body: '<!-- toolkit-governance-decision -->', head: { repo: { full_name: repository }, sha: 'a'.repeat(40) }, base: { ref: 'main' } },
+      { default_branch: 'main' }, { tree: { sha: 'b'.repeat(40) } },
+      { tree: [{ path: '.github', type: damage === 'directory-symlink' ? 'blob' : 'tree', mode: damage === 'directory-symlink' ? '120000' : '040000', sha: 'd'.repeat(40) }], truncated: damage === 'truncated' },
+      { tree: [{ path: 'toolkit-programme.json', type: damage === 'binding-tree' ? 'tree' : 'blob', mode: damage === 'binding-symlink' ? '120000' : '040000' }], truncated: false },
+    ];
+    const transport = new GitHubProposalTransport({ run: () => JSON.stringify(responses.shift()) });
+    assert.throws(() => transport.read(repository, 1), /PROPOSAL_(BINDING_NOT_REGULAR|TREE_UNREADABLE)/, damage);
   }
 });

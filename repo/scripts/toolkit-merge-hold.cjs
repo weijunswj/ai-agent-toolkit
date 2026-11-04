@@ -196,7 +196,7 @@ class MergeHoldError extends Error {
   constructor(code) { super(code); this.name = 'MergeHoldError'; this.code = code; }
 }
 
-// The user-typed approvals, kept next to the governance decisions on this computer.
+// The user-typed approvals, kept in this computer's private operational state.
 class MergeApprovals {
   #file; #now;
 
@@ -691,7 +691,7 @@ function judge(merge, approvals, standing = null) {
 // A refusal for a shell command that could make an approval without the user, or merges outside
 // what an approval can allow; '' when there is none.
 function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
-  if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
+  if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
   if (clearedHostEnvironment(text)) return refuse('starting Claude or Codex with an empty environment hides the running session, so this launch is refused.');
   // Search arguments and test files are not hook invocations. Read the common command wrappers
   // and Node's harmless warning flag; Codex's start script writes a mark without any event flag.

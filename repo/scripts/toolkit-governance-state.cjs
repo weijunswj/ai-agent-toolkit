@@ -392,7 +392,6 @@ function result(fields) {
     rule: fields.rule,
     reason: fields.reason,
     hold: state === 'UNDECIDED' && fields.hold !== false,
-    persistable: fields.persistable === true,
     materials_complete: state === 'ENABLED' ? complete : null,
     governed_rules_bind: complete,
     // Gate admission, finality and governed writes (programme records): only on a fresh read of
@@ -454,11 +453,11 @@ class GovernanceState {
   // `store` is evidenceStoreOf's answer and `scratch` whether the repository is a clone of another
   // repository in a decided repository's ignored `.tmp/` folder (both read only for github.com).
   static derive({ identity, materials, merged = { status: 'unknown', fresh: false }, store = null, scratch = false }) {
-    const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, materials };
+    const base = { root: identity.root, repository_id: identity.repository_id, materials };
     const notGitHub = notGitHubOf(identity);
     if (notGitHub) {
       const fields = { ...base, host: notGitHub.host, reason: notGitHub.reason };
-      return result({ ...fields, persistable: false, state: 'DISABLED', rule: 'R8' });
+      return result({ ...fields, state: 'DISABLED', rule: 'R8' });
     }
     const view = { status: merged.status, version: merged.version || null, commit: merged.commit || null, fetched_at: merged.fetched_at || null, fresh: merged.fresh === true, foreign_repository: merged.foreign_repository || null, problems: merged.problems || [] };
     const withMerged = { ...base, merged: view, merged_fresh: view.fresh };
@@ -501,11 +500,10 @@ class GovernanceState {
     if (!identity.valid) {
       // No usable origin: the repository is known on this computer by its path, and never by a remote.
       const local = { ...identity, repository_id: localRepositoryId(identity.root), legacy_repository_ids: [] };
-      return GovernanceState.derive({ identity: local, materials: EMPTY_MATERIALS, decision: { state: 'unresolved', decision_kind: null } });
+      return GovernanceState.derive({ identity: local, materials: EMPTY_MATERIALS });
     }
     // GitHub-only decisions, materials and binding caches cannot affect an unsupported host.
-    if (notGitHubOf(identity)) return GovernanceState.derive({ identity, materials: EMPTY_MATERIALS, decision: { state: 'unresolved', decision_kind: null } });
-    const partial = { root: identity.root, repository_id: identity.repository_id, persistable: true };
+    if (notGitHubOf(identity)) return GovernanceState.derive({ identity, materials: EMPTY_MATERIALS });
     let materials;
     try { materials = this.#readMaterials(identity.root, identity); }
     catch { materials = EMPTY_MATERIALS; } // Instruction damage never erases a repository decision.

@@ -23,6 +23,7 @@ const hookCapability = require('./toolkit-hook-capability.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
+const ADOPTION_NOT_READY = 'The adoption proposal is not ready. Run toolkit governance discover, resolve missing parent, separate private evidence store or checks, then use repository-agent-rules to prepare the binding and governed rules. Publish them together in one setup pull request.';
 
 const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'reopen', 'check', 'catalogue', 'publish', 'security', 'migrate']);
 const ALIASES = Object.freeze({ decline: 'disable' });
@@ -115,6 +116,10 @@ class ToolkitGovernanceCli {
       if (command === 'publish') return this.#publish(json, requestedRun);
       return await this.#decide(command, json);
     } catch (error) {
+      if (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE') {
+        this.#stderr.write(`${ADOPTION_NOT_READY}\n`);
+        return 2;
+      }
       if (error instanceof GovernanceCliError) {
         this.#stderr.write(`${error.message}\n`);
         return error.exitCode;
@@ -138,7 +143,7 @@ class ToolkitGovernanceCli {
     // Why the merged binding was not read just now, in plain words (nothing to say when it was, or
     // when the repository is not a github.com one).
     const reason = refresh.refreshed === false ? bindingCache.refreshReason(refresh.error) : null;
-    const lines = describe(state, this.#registryOptions);
+    const lines = describe(state);
     const pending = state.state === 'UNDECIDED' ? this.#proposals.pending(this.#cwd) : null;
     if (pending) lines.push(pending.text);
     if (reason) lines.push(`Refresh held: ${reason}. The last read on this computer is kept.`);
@@ -284,7 +289,7 @@ class ToolkitGovernanceCli {
     try { return this.#publish(json, request.run); }
     catch (error) {
       this.#print(json, { state: before.state, pending: true, run: request.run, error: error.code || 'PROPOSAL_UNAVAILABLE' }, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
-        'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Complete missing adoption settings or restore GitHub access, check matching open proposals, then publish the pending proposal. No local governance decision was written.']);
+        error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Restore GitHub access, check matching open proposals, then publish the pending proposal. No local governance decision was written.']);
       return 2;
     }
   }
@@ -294,9 +299,7 @@ function label(state) {
   return state.state.replace(/_/g, ' ');
 }
 
-function describe(state, registryOptions = {}) {
-  const hint = '';
-  if (state.rule === 'ERROR') return [`State: UNDECIDED (the state could not be read: ${state.error_code}). Prompts in this repository are held until it can.`, ...(hint ? [hint] : [])];
+function describe(state) {
   if (state.state === 'ERROR') return ['State: ERROR', `Rules: ${RULES_TEXT.ERROR}`, `Problem: ${(state.merged && state.merged.problems.join(', ')) || 'unreadable'}`, ...(state.root ? [`Repository: ${state.root}`] : [])];
   const key = state.state;
   const lines = [`State: ${label(state)}`, `Rules: ${RULES_TEXT[key]}`];
@@ -315,10 +318,8 @@ const NOTE_TEXT = Object.freeze({
   'could-not-check-governance': () => "Couldn't check governance. Ordinary work continues without governance effects or standing task auto-merge until it can be checked.",
   'binding-v2-migration-offered': () => 'The merged binding is version 1; the next setup pull request moves it to version 2.',
   'merged-binding-stale': () => 'The last read of the merged binding is over 24 hours old, so governed records, gate admission and finality hold until it is read again online.',
-  'merged-binding-unknown': () => 'The binding merged on the default branch has not been read on this computer yet, so governed effects hold until it is.',
   'binding-belongs-to-other-repository': state => `The default branch's binding belongs to ${state.merged.foreign_repository}, so it does not apply here.`,
   'pending-binding-merge': () => 'Pending: the working tree has a programme binding; merge it on the default branch to apply it.',
-  'setup-pr-offered': () => `Setup is not finished: run ${CMD('discover')} for the adoption proposal and its one setup pull request.`,
 });
 
 function isInteractiveTerminal() {
