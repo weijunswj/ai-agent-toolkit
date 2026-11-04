@@ -73,6 +73,7 @@ Before any other work as a newly appointed controller, open `reference/setup.md`
 When the skill or Toolkit updates, a guidebook refresh reports BLOCK CHANGED, or the daily check-in reports BLOCK OUTDATED, follow `reference/instructions-sync.md` beside this skill. You read the project settings yourself (threads cannot), apply the change yourself under its safeguards (a saved and read-back copy first, base layer only, conflicts left as they are, a `current` check after, one short note with an undo line), and record the block version in project memory.
 
 ## Keep moving
+- **Start or queue every open item.** Every open item you list that does not need the owner starts in the same turn if a lane is free; otherwise queue it and add it to the promise list for the hourly nudge to check.
 - **Never end a turn idle with work pending.** Wakes are user/thread messages, PR events or scheduled runs. Before ending, start every unblocked step: records, briefs, cloud checks, next-release planning.
 - **Check waits:** approval, credentials, typed device lines, UAT or unreachable settings hold only dependent work.
 - **Always leave a wake queued:** running thread, subscribed PR or verified armed nudge. Never rely on another user message.

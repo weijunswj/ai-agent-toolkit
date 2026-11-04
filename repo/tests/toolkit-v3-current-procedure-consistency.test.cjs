@@ -138,7 +138,8 @@ test('every documented profile row projects the registry routes and complete rev
     assert.deepEqual(profile.routes.DISCOVERY_HELPER, profile.routes.BUILDER_HELPER);
     assert.equal(profile.reviewers.length, 1);
     const gatekeeper = profile.routes.GATEKEEPER ? label(profile.routes.GATEKEEPER) : 'None';
-    const expected = `| \`${id}\` | ${gatekeeper} | ${label(profile.routes.DISCOVERY)} | ${label(profile.routes.DISCOVERY_HELPER)} | ${label(profile.routes.DESIGN_CHALLENGE)} | One ${label(profile.reviewers[0])} review |`;
+    const projects = id === 'claude-projects-stack';
+    const expected = `| \`${id}\` | ${gatekeeper}${projects ? ' (launch only)' : ''} | ${label(profile.routes.DISCOVERY)}${projects ? ' (Codex; fix rounds are G1)' : ''} | ${label(profile.routes.DISCOVERY_HELPER)}${projects ? ' (Codex)' : ''} | ${label(profile.routes.DESIGN_CHALLENGE)}${projects ? ' (Codex)' : ''} | One ${projects ? 'fresh ' : ''}${label(profile.reviewers[0])} review |`;
     assert.equal(rows.filter(row => row === expected).length, 1, expected);
   }
 });

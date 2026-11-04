@@ -236,6 +236,49 @@ test('synthetic captured sources resolve every non-helper role while documented 
   assert.match(controller, /This rule supplies no launcher or hook enforcement/);
 });
 
+// Written routing is the operator surface: these checks pin its complete matrix without
+// pretending the prose supplies a cross-host launcher or installed qualification.
+test('Projects stack routes all work except coordination and G2 through Codex', () => {
+  const controller = fs.readFileSync(path.join(ROOT, 'repo/CONTROLLER.md'), 'utf8');
+  const delivery = fs.readFileSync(path.join(ROOT, 'repo/docs/TOOLKIT-DELIVERY.md'), 'utf8');
+  const policy = delivery.split('\n').find(line => line.includes('Under `claude-projects-stack`'));
+  const gatekeeper = controller.split('\n').find(line => line.startsWith('- One gatekeeper per lane'));
+  const row = delivery.split('\n').find(line => line.startsWith('| `claude-projects-stack`'));
+  const captured = capturedStack('claude-projects-stack');
+  const matrix = [
+    ['G0', 'DISCOVERY', /OpenAI routes: G0, G1/],
+    ['research', 'DISCOVERY', /re-bumps, research and any build task/],
+    ['G1', 'BUILDER', /OpenAI routes: G0, G1/],
+    ['fix rounds', 'BUILDER', /fix rounds \(G1 work\)/],
+    ['re-bumps', 'BUILDER', /re-bumps, research and any build task/],
+    ['builds', 'BUILDER', /any build task/],
+    ['G0 helpers', 'DISCOVERY_HELPER', /Luna Max \(Codex\)/],
+    ['G1 helpers', 'BUILDER_HELPER', /Luna Max \(Codex\)/],
+    ['design challenge', 'DESIGN_CHALLENGE', /Sol 6\.1 XHigh \(Codex\)/],
+  ];
+  for (const [task, role, wording] of matrix) {
+    assert.match(policy + row, wording, task);
+    assert.equal(captured.selection.routes[role].provider, 'openai', task);
+    assert.equal(HostDialect.for('codex').supports(captured.selection.routes[role]), true, task);
+    assert.equal(HostDialect.for('claude-code').supports(captured.selection.routes[role]), false, task);
+  }
+  for (const text of [gatekeeper, policy]) {
+    assert.match(text, /every task except coordinator\/orchestrator work and G2 (?:uses|runs on) Codex/);
+  }
+  assert.match(policy, /These tasks must never go to a Claude lane; the Sonnet gatekeeper only launches them/);
+  assert.match(row, /Sonnet 5\.5 Medium \(launch only\)/);
+  assert.match(row, /fix rounds are G1/);
+  assert.equal(captured.selection.routes.GATEKEEPER.model, 'sonnet-5.5');
+  assert.match(gatekeeper, /starts gate runs, waits in one blocking call.*relays the report verbatim/);
+  assert.match(gatekeeper, /never judges findings, merges, closes, takes controller authority or a gate's verdict/);
+  assert.match(policy, /G2 is a fresh Opus xhigh session.*without helpers/);
+  assert.deepEqual(captured.selection.reviewers.map(({ provider, model, reasoning }) => ({ provider, model, reasoning })),
+    [{ provider: 'anthropic', model: 'opus-5.5', reasoning: 'xhigh' }]);
+  assert.match(controller, /inherited, missing or mismatched model\/effort refuses start/);
+  assert.match(controller, /No unavailable route authorises a model\/effort\/provider fallback/);
+  assert.match(delivery, /An absent exact route is reported, never substituted/);
+});
+
 test('synthetic Projects stack G2 requests cannot delegate through either host guard', async () => {
   const captured = capturedStack('claude-projects-stack'), dispatches = [];
   const hostCases = [

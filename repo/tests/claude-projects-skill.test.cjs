@@ -796,6 +796,21 @@ test('Projects catches up a moved task through its home thread and never fire_tr
   assert.match(text, /Never catch up a task whose entry says `stopped by owner`\./);
 });
 
+test('listed open work starts in the same turn or joins the queue and nudge promises', () => {
+  const text = read(SKILL_REL);
+  const moving = text.slice(text.indexOf('## Keep moving'), text.indexOf('## Threads'));
+  const rule = moving.split('\n').find(line => line.startsWith('- **Start or queue every open item.**'));
+  assert.ok(rule, 'Keep moving carries the same-turn rule');
+  const cases = [
+    ['scope', /Every open item you list that does not need the owner/],
+    ['free lane', /starts in the same turn if a lane is free/],
+    ['busy lanes', /otherwise queue it and add it to the promise list/],
+    ['wake', /for the hourly nudge to check/],
+  ];
+  for (const [label, pattern] of cases) assert.match(rule, pattern, label);
+  assert.match(text, /The hourly nudge reads it and lists each item whose trigger already happened/);
+});
+
 // The coordinator once held an unrelated PR behind another and left lanes idle; the skill and the
 // block both carry the never-hold rule and the lane cap, since the coordinator reads only the block.
 test('independent lanes run side by side under the owner\'s lane cap', () => {
