@@ -37,7 +37,7 @@ If meaningful host-harness drift is found, open a separate PR with evidence, rat
 - Source ref: `main`
 - Adopted commit: `10d6ca310541d3ffeee6dceda0a29e373796f321`
 - Reviewed-through commit: `bf41cbc3ce63e30c922e58ef48741ba6133f9aa9`
-- Latest observed commit: `713eef51b04efc98d6fa565323b495f7c9c89fd4`
+- Latest observed commit: `dd9a1b4cf9f67ca2e326f646d93e101b2778db30`
 - Why a new review is required: The latest observed upstream commit differs from the human-reviewed-through commit.
 - Prior disposition: `NO_ACTION`
 - Tracker at last review (history; find the current owner at triage): `#473`
