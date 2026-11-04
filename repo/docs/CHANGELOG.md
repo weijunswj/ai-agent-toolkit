@@ -2,14 +2,14 @@
 
 ## 3.48.2
 
-### Added
+### Fixed
 
-- A programme page redraw that is refused for being too large now leaves a lasting attention finding that names the total size, the limit, the reduction needed and the largest sections. It stays open until a complete redraw is written and read back.
-- The session-start sweep line now names a recently held scheduled sweep, in addition to skipped, failed and overdue runs.
+- The CI check-up now reports a failing command hidden by a later `exit 0` line in PowerShell and cmd steps.
+- The CI check-up decides whether a job runs on Windows only from its runner labels or the matrix values it names, so a step called "windows documentation" no longer makes a Linux job look like a Windows job. An unresolved runner produces a CHECK for the agent to judge only when a step ends in `exit 0` and sets no shell.
 
 ### Tests
 
-- A new test proves that taking over a programme reads the same bounded set of resources whether the history is short or long.
+- The external operation preflight tests now cover blank authority fields, empty target lists, secret patterns and key names, and secrets nested under secret-looking keys, and check that no secret value is echoed.
 
 ## 3.48.1
 

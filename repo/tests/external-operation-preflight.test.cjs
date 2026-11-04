@@ -517,6 +517,14 @@ test('plan shape and secrets fail closed', async (t) => {
     { name: 'wrong schema', plan: plan({ schema: 'other' }), code: REASONS.PLAN_INVALID },
     { name: 'no environment', plan: plan({ operation: { action: 'deploy', targets: ['app'] } }), code: REASONS.PLAN_INVALID },
     { name: 'unknown target', plan: plan({ operation: { action: 'deploy', environment: 'alpha', targets: ['ghost'] } }), code: REASONS.PLAN_INVALID },
+    ...['resource', 'action', 'scope', 'effect'].flatMap((field) => ['', ' \t'].map((value) => ({
+      name: `blank authority ${field}: ${JSON.stringify(value)}`,
+      plan: plan({ authority: [{ ...allow('app', 'deploy', 'alpha'), [field]: value }] }),
+      code: REASONS.PLAN_INVALID,
+      detail: 'authority entry 1 needs resource, action, scope and effect (allow or deny)'
+    }))),
+    { name: 'empty operation target list', plan: plan({ operation: { action: 'deploy', environment: 'alpha', targets: [] } }), code: REASONS.PLAN_INVALID, detail: 'operation.targets must name at least one target id' },
+    { name: 'empty declared target list', plan: plan({ targets: [], bindings: [] }), code: REASONS.PLAN_INVALID, detail: 'operation.targets entry 1 is not a declared target' },
     { name: 'resource with no provider read-back', plan: plan({ resources: [{ id: 'db', name_environment: 'alpha', temporary: false }, resource('bucket', 'alpha')] }), code: REASONS.PLAN_INVALID },
     { name: 'resource with temporary left out', plan: plan({ resources: [{ ...resource('db', 'alpha'), temporary: undefined }, resource('bucket', 'alpha')] }), code: REASONS.PLAN_INVALID },
     { name: 'target with temporary written as "yes"', plan: plan({ targets: [target('app', 'alpha', 'alpha', { temporary: 'yes' })] }), code: REASONS.PLAN_INVALID },
@@ -540,6 +548,7 @@ test('plan shape and secrets fail closed', async (t) => {
       const result = checkPlan(row.plan, { now: NOW });
       assert.equal(result.verdict, 'HOLD');
       assert.ok(codes(result).includes(row.code), JSON.stringify(result.reasons));
+      if (row.detail) assert.deepEqual(result.reasons, [{ code: row.code, detail: row.detail }]);
     });
   }
   await t.test('a key name under a secret-named key is a reference, not a value', () => {
@@ -550,6 +559,56 @@ test('plan shape and secrets fail closed', async (t) => {
     const result = checkPlan(plan({ operation: { action: 'deploy', environment: 'alpha', targets: [token] } }), { now: NOW });
     assert.deepEqual(codes(result), [REASONS.SECRET_IN_PLAN]);
     assert.equal(JSON.stringify(result).includes(token), false);
+  });
+});
+
+test('remaining secret patterns and key names refuse without echoing values; references allow', async (t) => {
+  const patterns = [
+    ['model API key', `sk-${'a'.repeat(24)}`],
+    ...['o', 'u', 's', 'r'].map((kind) => [`GitHub ${kind} token`, `gh${kind}_${'b'.repeat(36)}`]),
+    ['fine-grained GitHub token', `github_pat_${'c'.repeat(30)}`],
+    ...['a', 'b', 'p', 'r', 's'].map((kind) => [`Slack ${kind} token`, `xox${kind}-${'d'.repeat(20)}`]),
+    ['AWS access key', `AKIA${'E'.repeat(16)}`],
+    ['Google API key', `AIza${'f'.repeat(24)}`],
+    ['bearer token', `bEaReR ${'g'.repeat(24)}`],
+    ['JWT', `eyJ${'h'.repeat(12)}.${'i'.repeat(16)}.${'j'.repeat(16)}`],
+    ['private key', ['-----BEGIN', 'RSA PRIVATE KEY-----'].join(' ')],
+  ];
+  const keys = ['passwd', 'passphrase', 'secret', 'apiKey', 'apikey', 'private_key', 'privateKey', 'credential', 'passwords', 'tokens', 'api_keys', 'credentials'];
+  const rows = [
+    ...patterns.map(([name, value]) => ({ name, value, extra: { note: value }, where: 'note' })),
+    ...keys.map((key) => ({ name: `secret key ${key}`, value: 'synthetic-value-for-tests', extra: { [key]: 'synthetic-value-for-tests' }, where: key })),
+    ...[
+      ['object under secret key', (value) => ({ api_token: { value } }), 'api_token.value'],
+      ['array under secret key', (value) => ({ credentials: [value] }), 'credentials[0]'],
+      ['object in array under secret key', (value) => ({ privateKey: [{ value }] }), 'privateKey[0].value'],
+      ['array in object under secret key', (value) => ({ clientSecret: { values: [value] } }), 'clientSecret.values[0]'],
+    ].map(([name, wrap, where]) => ({ name, value: `sk-${'k'.repeat(24)}`, extra: wrap(`sk-${'k'.repeat(24)}`), where })),
+  ];
+  for (const row of rows) {
+    await t.test(row.name, () => {
+      const result = checkPlan(plan(row.extra), { now: NOW });
+      const output = JSON.stringify(result);
+      assert.equal(result.verdict, 'HOLD');
+      assert.deepEqual(result.reasons, [{ code: REASONS.SECRET_IN_PLAN, detail: `${row.where} looks like a secret value; plans carry key names and references only` }]);
+      assert.equal(output.includes(row.value), false, 'the result must not echo the secret value');
+      const cli = spawnSync(process.execPath, [checkerPath, '--stdin', '--now', '2026-10-25'], { encoding: 'utf8', input: JSON.stringify(plan(row.extra)) });
+      assert.equal(cli.status, 2, cli.stderr);
+      assert.deepEqual(JSON.parse(cli.stdout).reasons, result.reasons);
+      assert.equal(`${cli.stdout}${cli.stderr}`.includes(row.value), false, 'stdout and stderr must not echo the secret value');
+    });
+  }
+  for (const key of keys) {
+    await t.test(`key-name reference under ${key}`, () => {
+      const result = checkPlan(plan({ [key]: 'PLATFORM_ALPHA_TOKEN' }), { now: NOW });
+      assert.equal(result.verdict, 'ALLOW');
+      assert.deepEqual(result.reasons, []);
+    });
+  }
+  await t.test('references nested in objects and arrays under secret keys', () => {
+    const result = checkPlan(plan({ credentials: [{ apiKey: 'PLATFORM_ALPHA_TOKEN' }], privateKey: { names: ['PLATFORM_ALPHA_KEY'] } }), { now: NOW });
+    assert.equal(result.verdict, 'ALLOW');
+    assert.deepEqual(result.reasons, []);
   });
 });
 
