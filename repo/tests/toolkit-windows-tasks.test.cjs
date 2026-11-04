@@ -2,7 +2,7 @@
 
 // Windows scheduled tasks under \<schedule_folder>\, the no-AI job runner and `toolkit tasks`.
 // Everything runs against a fake Task Scheduler; the one real-registration test runs only when the
-// owner sets TOOLKIT_REAL_TASK_SCHEDULER_TEST=1 on Windows, because agents do not create tasks.
+// owner explicitly authorises the scratch-folder test and sets TOOLKIT_REAL_TASK_SCHEDULER_TEST=1.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,6 +15,7 @@ const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
 const job = require('../scripts/toolkit-scheduled-job.cjs');
 const tasks = require('../scripts/toolkit-tasks.cjs');
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+const shards = require('../scripts/ci-test-shards.cjs');
 
 const NODE = 'C:\\Program Files\\nodejs\\node.exe';
 const TOOLKIT_ROOT = 'C:\\Toolkit\\ai-agent-toolkit';
@@ -25,17 +26,24 @@ function tempHome(t) {
   return home;
 }
 
-// A checkout folder; `shards` adds the two files only the Toolkit repository has.
+// A checkout folder; `shards` adds the Toolkit shard contract, not a local refresher script.
 function checkout(t, { shards = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-checkout-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   if (shards) {
-    fs.mkdirSync(path.join(root, 'repo', 'contracts', 'ci'), { recursive: true });
-    fs.mkdirSync(path.join(root, 'repo', 'scripts'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'repo', 'contracts', 'ci', 'test-shards.json'), '{}');
-    fs.writeFileSync(path.join(root, 'repo', 'scripts', 'refresh-shard-timings.cjs'), '');
+    addShards(root);
   }
   return root;
+}
+
+function addShards(root) {
+  fs.mkdirSync(path.join(root, 'repo', 'contracts', 'ci'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'repo', 'tests'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'repo', 'tests', 'example.test.cjs'), '// fixture\n');
+  fs.writeFileSync(path.join(root, ...shards.MANIFEST_REL.split('/')), JSON.stringify({
+    schema: shards.MANIFEST_SCHEMA,
+    systems: Object.fromEntries(shards.SYSTEMS.map(system => [system, { shards: [{ id: `${system}-1`, rest: true }] }])),
+  }));
 }
 
 function governance({ state = 'ENABLED', folder = 'TOOLKIT', repository = 'weijunswj/ai-agent-toolkit', binding = true } = {}) {
@@ -117,14 +125,42 @@ test('G: an ENABLED Toolkit checkout gets both tasks in \\TOOLKIT\\, recorded in
   assert.match(sweep.description, /^TOOLKIT: PROGRAMME SWEEP\. .*\[toolkit-task v1 id=toolkit-programme-sweep def=[0-9a-f]{12}\]$/);
 });
 
-test('G: a repository that is not ENABLED gets no programme sweep, and the report says why', (t) => {
-  for (const state of ['DISABLED', 'UNDECIDED', 'ERROR']) {
-    const plan = windowsTasks.planTasks(desired(t, { state, shards: false }), { scheduler: fakeScheduler(), home: tempHome(t) });
-    assert.deepEqual(plan.items, []);
-    const text = windowsTasks.describePlan(plan, { command: 'node x apply' }).join('\n');
-    assert.match(text, new RegExp(`PROGRAMME SWEEP: not registered, because GitHub governance is ${state} here`));
-    assert.match(text, /SHARD TIMINGS: not registered, because only the Toolkit repository has CI shards to time/);
-    assert.doesNotMatch(text, /paste this line/);
+test('G: both fixed jobs require ENABLED governance and a merged binding, with or without shards', (t) => {
+  const cases = [
+    { state: 'ENABLED', binding: true, allowed: true },
+    ...['DISABLED', 'UNDECIDED', 'ERROR', null].flatMap(state => [true, false].map(binding => ({ state, binding, allowed: false }))),
+    { state: 'ENABLED', binding: false, allowed: false },
+  ];
+  for (const row of cases) for (const hasShards of [false, true]) {
+    const scheduler = fakeScheduler();
+    const wanted = desired(t, { ...row, shards: hasShards, repository: 'example/widget', folder: 'WIDGET' });
+    const result = windowsTasks.applyTasks(wanted, { scheduler, home: tempHome(t) });
+    assert.deepEqual(result.items.map(item => item.definition.job), row.allowed ? ['programme-sweep', 'shard-timings'] : [], JSON.stringify({ ...row, hasShards }));
+    assert.equal(scheduler.calls.filter(call => call[0] === 'register').length, row.allowed ? 2 : 0);
+    if (!row.allowed) {
+      assert.equal(result.skipped.length, 2);
+      for (const item of result.skipped) assert.match(item.reason, row.state === 'ENABLED' ? /binding merged on the default branch could not be read/ : /GitHub governance is .* so Toolkit tasks are not registered/);
+      assert.doesNotMatch(windowsTasks.describePlan(result, { command: 'node x apply' }).join('\n'), /Run this command/);
+    }
+  }
+});
+
+test('G: binding folder or repository default selects both jobs; unreadable evidence grants nothing', (t) => {
+  const root = checkout(t, { shards: false });
+  for (const [folder, expected] of [['BOUND', 'BOUND'], [null, 'WIDGET']]) {
+    const wanted = desired(t, { root, repository: 'example/widget', folder });
+    assert.equal(wanted.folder, expected);
+    assert.ok(wanted.wanted.every(item => item.folder === expected));
+    const command = windowsTasks.applyCommand(wanted, { toolkitRoot: TOOLKIT_ROOT, home: tempHome(t) });
+    assert.equal(command, `node "${TOOLKIT_ROOT}\\repo\\scripts\\toolkit-windows-tasks.cjs" apply --repo-root "${root}"`);
+    assert.doesNotMatch(command, /--folder|--no-first-run/);
+  }
+  for (const failing of ['mergedBinding', 'governanceState']) {
+    const reader = governance();
+    reader[failing] = () => { throw new Error('unreadable'); };
+    const wanted = windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, deps: { governance: reader } });
+    assert.deepEqual(wanted.wanted, [], failing);
+    assert.equal(wanted.skipped.length, 2);
   }
 });
 
@@ -152,12 +188,14 @@ test('G: setup run again unchanged changes nothing; a changed definition is upda
 test('G: the owner\'s own same-named task without the marker is untouched and Toolkit refuses', (t) => {
   const home = tempHome(t);
   const own = unmarked('TOOLKIT - PROGRAMME SWEEP');
-  const scheduler = fakeScheduler({ TOOLKIT: [own] });
+  const ownShards = unmarked('TOOLKIT - SHARD TIMINGS');
+  const scheduler = fakeScheduler({ TOOLKIT: [own, ownShards] });
   const wanted = desired(t, { shards: false });
   const result = windowsTasks.applyTasks(wanted, { scheduler, home });
   assert.equal(result.items[0].action, 'refused');
   assert.match(result.items[0].reason, /is already in \\TOOLKIT\\ and is not Toolkit's .* leaves it alone/);
-  assert.deepEqual(scheduler.folders.get('TOOLKIT'), [own]);
+  assert.deepEqual(result.items.map(item => item.action), ['refused', 'refused']);
+  assert.deepEqual(scheduler.folders.get('TOOLKIT'), [own, ownShards]);
   assert.deepEqual(tasks.readRegistry(home).tasks, []);
   assert.equal(scheduler.calls.some(call => call[0] === 'register'), false);
   // A marked task this computer did not record is not Toolkit's either.
@@ -186,6 +224,42 @@ test('G: root-folder n8n backups and other repositories\' folders are never chan
   assert.equal(row.state, 'outside the folder (not changed)');
 });
 
+test('G: adopted fixed-job conflicts and a corrupt registry keep their refusals', (t) => {
+  const home = tempHome(t);
+  const wanted = desired(t, { shards: false });
+  const scheduler = fakeScheduler({ TOOLKIT: wanted.wanted.map(item => unmarked(item.name)) });
+  for (const item of wanted.wanted) windowsTasks.adoptTask({ folder: item.folder, task: item.name, id: item.id, purpose: item.purpose }, { scheduler, home });
+  // Even adding a marker cannot turn an adopted record into Toolkit ownership.
+  scheduler.folders.get('TOOLKIT').forEach((item, index) => { item.description = wanted.wanted[index].description; });
+  const before = fs.readFileSync(tasks.registryPath(home));
+  scheduler.calls.length = 0;
+  assert.deepEqual(windowsTasks.applyTasks(wanted, { scheduler, home }).items.map(item => item.action), ['refused', 'refused']);
+  assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), before);
+  assert.deepEqual(scheduler.calls.map(call => call[0]), ['list']);
+
+  fs.writeFileSync(tasks.registryPath(home), '{broken');
+  scheduler.calls.length = 0;
+  assert.throws(() => windowsTasks.applyTasks(wanted, { scheduler, home }), /registry .* could not be read, so no task was changed/);
+  assert.equal(fs.readFileSync(tasks.registryPath(home), 'utf8'), '{broken');
+  assert.deepEqual(scheduler.calls.map(call => call[0]), ['list']);
+});
+
+test('G: a native denial is reported without a second route or task effect', (t) => {
+  let attempts = 0;
+  assert.throws(() => windowsTasks.runPowerShell('list', { folder: 'TOOLKIT' }, { run: () => {
+    attempts += 1;
+    return { status: 1, stderr: 'Access is denied' };
+  } }), /Access is denied/);
+  assert.equal(attempts, 1);
+  const scheduler = fakeScheduler();
+  scheduler.list = () => { attempts += 1; throw new Error('Access is denied'); };
+  const errors = [];
+  assert.equal(windowsTasks.main(['apply', '--repo-root', checkout(t)], { platform: 'win32', scheduler, home: tempHome(t), checkoutDeps: { governance: governance() }, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, stderr: text => errors.push(text), stdout: () => {} }), 1);
+  assert.equal(attempts, 2);
+  assert.match(errors.join(''), /Access is denied/);
+  assert.deepEqual(scheduler.calls, []);
+});
+
 test('G: --remove-toolkit-tasks removes only marked and recorded tasks; the folder only when empty', (t) => {
   const home = tempHome(t);
   const scheduler = fakeScheduler();
@@ -210,7 +284,7 @@ test('G: --remove-toolkit-tasks removes only marked and recorded tasks; the fold
   windowsTasks.applyTasks(desired(t, { shards: false }), { scheduler: edited, home: home3 });
   edited.folders.get('TOOLKIT')[0].description = 'changed by hand';
   assert.equal(windowsTasks.removeTasks({ scheduler: edited, home: home3 }).items[0].action, 'refused');
-  assert.equal(edited.folders.get('TOOLKIT').length, 1);
+  assert.deepEqual(edited.folders.get('TOOLKIT').map(item => item.name), ['TOOLKIT - PROGRAMME SWEEP']);
 });
 
 test('G: a name with a colon, a reserved character or a stray space is refused before any PowerShell call', () => {
@@ -235,13 +309,14 @@ test('G: on any computer but Windows every command reports not-windows and chang
   assert.deepEqual(scheduler.calls, []);
 });
 
-test('G: plan prints the PowerShell line to paste, with the profile folder as $env:USERPROFILE', (t) => {
+test('G: plan prints the exact apply command and approval guidance, with the profile folder as $env:USERPROFILE', (t) => {
   const home = 'C:\\Users\\someone';
   const wanted = desired(t, { root: 'C:\\Users\\someone\\.ai-agent-toolkit\\source\\ai-agent-toolkit' });
   const command = windowsTasks.applyCommand(wanted, { toolkitRoot: 'C:\\Users\\someone\\.ai-agent-toolkit\\source\\ai-agent-toolkit', home });
   assert.equal(command, 'node "$env:USERPROFILE\\.ai-agent-toolkit\\source\\ai-agent-toolkit\\repo\\scripts\\toolkit-windows-tasks.cjs" apply --repo-root "$env:USERPROFILE\\.ai-agent-toolkit\\source\\ai-agent-toolkit"');
   const text = windowsTasks.describePlan(windowsTasks.planTasks(wanted, { scheduler: fakeScheduler(), home: tempHome(t) }), { command }).join('\n');
-  assert.match(text, /Agents do not create scheduled tasks, so paste this line into PowerShell yourself/);
+  assert.match(text, /Run this command under the Toolkit task standing approval, or obtain approval when it does not apply/);
+  assert.doesNotMatch(text, /paste.*yourself|agents do not create scheduled tasks/i);
 });
 
 test('G: the registered task runs headless as the logged-on user, ignores a second start and stops at 30 minutes', () => {
@@ -319,7 +394,7 @@ test('G: setup only plans and reports the tasks, and --remove-toolkit-tasks remo
   assert.deepEqual(plan.items.map(item => item.action), ['create', 'create']);
   const text = lines.join('\n');
   assert.match(text, /## Windows scheduled tasks\nWindows scheduled tasks for weijunswj\/ai-agent-toolkit in \\TOOLKIT\\:/);
-  assert.match(text, /paste this line into PowerShell yourself[\s\S]*toolkit-windows-tasks\.cjs" apply --repo-root /);
+  assert.match(text, /Run this command under the Toolkit task standing approval[\s\S]*toolkit-windows-tasks\.cjs" apply --repo-root /);
   assert.deepEqual(scheduler.calls.map(call => call[0]), ['list'], 'setup never registers, starts or removes a task');
   assert.deepEqual(tasks.readRegistry(home).tasks, [], 'setup records nothing');
   assert.equal(core.printWindowsTasks({ repoRoot: root }, { platform: 'linux', scheduler, log: line => lines.push(line) }), null);
@@ -464,14 +539,92 @@ test('J: a footer sweep MISMATCH fails the run with its code, and the next run r
   assert.equal(second.record.footer_sweep_since, '2026-10-29T10:00:00.000Z');
 });
 
-test('J: the shard job runs only the checkout\'s shard refresh with --open-pr', (t) => {
+test('J: Toolkit shard timing still uses its fixed refresher with --open-pr and fresh governance', (t) => {
   const root = checkout(t);
-  const fake = fakeRun({ 'refresh-shard-timings.cjs': { status: 0, stdout: 'No refresh trigger crossed; nothing opened.\n' } });
+  const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'refresh-shard-timings.cjs': { status: 0, stdout: 'No refresh trigger crossed; nothing opened.\n' } });
   const record = job.runJob({ job: 'shard-timings', repoRoot: root, taskId: 'toolkit-shard-timings' }, { home: tempHome(t), run: fake.run, ghPath: GH, nodePath: NODE, now: () => new Date('2026-10-26T01:15:00Z') });
   assert.equal(record.status, 'ok');
-  assert.deepEqual(fake.log, [[GH, 'auth', 'status'], [NODE, path.join(root, 'repo', 'scripts', 'refresh-shard-timings.cjs'), '--open-pr']]);
-  const bare = job.runJob({ job: 'shard-timings', repoRoot: checkout(t, { shards: false }), taskId: 'x-shard-timings' }, { home: tempHome(t), run: fakeRun().run, ghPath: GH, nodePath: NODE });
-  assert.deepEqual(bare.summary, ['skipped: this checkout has no CI shards to time']);
+  assert.equal(job.SCRIPT.shardTimings, path.join(ROOT, 'repo', 'scripts', 'refresh-shard-timings.cjs'));
+  assert.deepEqual(fake.log, [[NODE, job.SCRIPT.governance, 'status', '--json'], [GH, 'auth', 'status'], [NODE, job.SCRIPT.shardTimings, '--repo-root', root, '--open-pr']]);
+});
+
+function snapshot(root) {
+  return Object.fromEntries(fs.readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile()).map(entry => {
+      const file = path.join(entry.parentPath, entry.name);
+      return [path.relative(root, file), fs.readFileSync(file).toString('base64')];
+    }));
+}
+
+test('J: a governed repository registers without shards, no-ops, then times newly added shards', (t) => {
+  const root = checkout(t, { shards: false });
+  const home = tempHome(t);
+  const scheduler = fakeScheduler();
+  fs.writeFileSync(path.join(root, 'README.md'), 'A repository without shards.\n');
+  const registered = windowsTasks.applyTasks(desired(t, { root, repository: 'example/widget', folder: 'WIDGET' }), { scheduler, home });
+  assert.deepEqual(registered.items.map(item => [item.definition.job, item.done]), [['programme-sweep', true], ['shard-timings', true]]);
+  const before = snapshot(root);
+  const beforeHome = snapshot(home);
+  const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED });
+  const args = { job: 'shard-timings', repoRoot: root, taskId: 'widget-shard-timings' };
+  const deps = { home, run: fake.run, ghPath: GH, nodePath: NODE, now: () => new Date('2026-10-26T01:15:00Z') };
+  const bare = job.runJob(args, deps);
+  assert.deepEqual([bare.status, bare.exit, bare.summary], ['skipped', 0, ['skipped: no shards yet']]);
+  assert.deepEqual(fake.log, [], 'no processes, network calls or repository effects without shards');
+  assert.deepEqual(snapshot(root), before);
+  assert.deepEqual(tasks.readLastRun(args.taskId, home), bare);
+  assert.deepEqual(Object.keys(snapshot(home)).filter(file => !(file in beforeHome)), [path.relative(home, tasks.lastRunPath(args.taskId, home))]);
+  for (const [file, bytes] of Object.entries(beforeHome)) assert.equal(snapshot(home)[file], bytes);
+
+  addShards(root);
+  const withShards = snapshot(root);
+  assert.equal(fs.existsSync(path.join(root, 'repo', 'scripts', 'refresh-shard-timings.cjs')), false);
+  const next = job.runJob(args, { ...deps, now: () => new Date('2026-11-02T01:15:00Z') });
+  assert.equal(next.status, 'ok');
+  assert.deepEqual(fake.log, [[NODE, job.SCRIPT.governance, 'status', '--json'], [GH, 'auth', 'status'], [NODE, job.SCRIPT.shardTimings, '--repo-root', root, '--open-pr']]);
+  assert.deepEqual(snapshot(root), withShards, 'fake child does not modify the target');
+});
+
+test('J: invalid or unreadable shard configuration fails visibly before any process', (t) => {
+  for (const contents of ['{broken', '{}', 'directory', 'EACCES']) {
+    const root = checkout(t, { shards: contents !== 'directory' });
+    const manifest = path.join(root, ...shards.MANIFEST_REL.split('/'));
+    fs.mkdirSync(path.dirname(manifest), { recursive: true });
+    if (contents === 'directory') fs.mkdirSync(manifest);
+    else if (contents !== 'EACCES') fs.writeFileSync(manifest, contents);
+    const read = fs.readFileSync;
+    const mock = contents === 'EACCES' ? t.mock.method(fs, 'readFileSync', (file, ...args) => {
+      if (file === manifest) throw Object.assign(new Error('Access is denied'), { code: 'EACCES' });
+      return read(file, ...args);
+    }) : null;
+    const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED });
+    const record = job.runJob({ job: 'shard-timings', repoRoot: root, taskId: 'x-shard-timings' }, { home: tempHome(t), run: fake.run, ghPath: GH, nodePath: NODE });
+    if (mock) mock.mock.restore();
+    assert.deepEqual([record.status, record.exit], ['failed', 1], contents);
+    assert.match(record.summary.join('\n'), /The job stopped:/);
+    assert.doesNotMatch(record.summary.join('\n'), /no shards yet/);
+    assert.deepEqual(fake.log, []);
+  }
+});
+
+test('J: shards still require fresh enabled governance and sign-in; child failure is visible', (t) => {
+  const rows = [
+    ...['DISABLED', 'UNDECIDED', 'ERROR'].map(state => ({ answers: { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state }) } }, reason: `governance is ${state}` })),
+    { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{broken' } }, reason: 'governance status could not be read' },
+    { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{"state":"ENABLED","merged":{"fresh":false}}' } }, reason: 'binding not read in 24 h' },
+    { answers: { 'gh auth': { status: 1 } }, reason: 'gh not signed in' },
+    { answers: { 'gh auth': { status: 1 }, 'reach github': { status: 3 } }, reason: 'offline' },
+    { answers: { 'refresh-shard-timings.cjs': { status: 2, stderr: 'invalid manifest' } }, failed: true },
+  ];
+  for (const row of rows) {
+    const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, ...row.answers });
+    const record = job.runJob({ job: 'shard-timings', repoRoot: checkout(t), taskId: 'x-shard-timings' }, { home: tempHome(t), run: fake.run, ghPath: GH, nodePath: NODE });
+    assert.equal(record.status, row.failed ? 'failed' : 'skipped');
+    assert.equal(record.exit, row.failed ? 1 : 0);
+    if (row.reason) assert.deepEqual(record.summary, [`skipped: ${row.reason}`]);
+    else assert.match(record.summary.join('\n'), /invalid manifest/);
+    assert.equal(fake.log.some(entry => entry[1] === job.SCRIPT.shardTimings), !!row.failed);
+  }
 });
 
 test('J: every job starts only node and gh, and the runner names no model command line', (t) => {
@@ -552,6 +705,16 @@ test('L: skipped runs show their reason and count in toolkit tasks', (t) => {
   const row = result.rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP');
   assert.deepEqual([row.result, row.skipped_streak, row.skipped_since], ['skipped (offline), 3 runs in a row since 2026-11-01 04:00Z', 3, '2026-11-01T04:00:05.000Z']);
   assert.match(tasks.formatList(result), /last run 2026-11-01 06:00 skipped \(offline\), 3 runs in a row since 2026-11-01 04:00Z\./);
+});
+
+test('L: shard skips show the new reason and retain the reason in installed older records', (t) => {
+  const { home, scheduler } = listedHome(t);
+  for (const reason of ['no shards yet', 'this checkout has no CI shards to time']) {
+    tasks.writeLastRun('toolkit-shard-timings', { started: '2026-11-01T06:00:05.000Z', finished: '2026-11-01T06:00:20.000Z', exit: 0, status: 'skipped', reason,
+      skipped_streak: 1, skipped_since: '2026-11-01T06:00:05.000Z', summary: [`skipped: ${reason}`] }, home);
+    const row = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null }).rows.find(item => item.name === 'TOOLKIT - SHARD TIMINGS');
+    assert.equal(row.result, `skipped (${reason}), 1 run in a row since 2026-11-01 06:00Z`);
+  }
 });
 
 test('L: the session sweep line names a skip, a failure or a gap of over 2 hours, in fixed words only', (t) => {

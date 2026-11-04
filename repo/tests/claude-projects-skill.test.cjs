@@ -723,7 +723,7 @@ test('device steps go to the Remote Control session, not the owner', () => {
   const text = read(SKILL_REL);
   // The owner was once asked to create a local scheduled task that a Remote Control session could create.
   assert.match(text, /installs, setup checks and device tasks \(such as a local scheduled task\), which the Remote Control session on the user's computer does itself; hand the user a step on their computer only when its safety check blocks the session;/);
-  assert.match(read('repo/contracts/agent-rules/global-rules.md'), /never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it\./);
+  assert.match(read('repo/contracts/agent-rules/global-rules.md'), /Ask plainly; do device steps and commands yourself unless a safety check blocks you\./);
 });
 
 test('Toolkit text says computer or Remote Control session, not laptop', () => {
@@ -772,8 +772,9 @@ test('on a Windows device every governed repository gets its own programme sweep
   // Setup plans tasks only for the managed Toolkit checkout, so another governed repository's line
   // comes from the read-only plan command run against that repository's checkout.
   const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
-  assert.match(recurring, /Toolkit setup on the device lists it for the Toolkit repository only\. For any other governed repository, the device's local Remote Control thread runs `node <Toolkit checkout>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <that repository's checkout>`, which is read-only/);
-  assert.match(recurring, /Hand the user that exact line, for that repository's checkout, and put "paste the programme sweep line for <owner\/repo>" on the owner's pending list/);
+  assert.match(recurring, /Toolkit setup lists the managed checkout's tasks; for another repository, its local Remote Control thread runs `node <Toolkit checkout>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <checkout>`, read-only/);
+  assert.match(recurring, /that local session checks the eligibility table below, then runs exactly `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>` under the global Toolkit task standing approval/);
+  assert.match(recurring, /hand the user a device step only when the host blocks the session/);
   assert.doesNotMatch(recurring, /paste the programme sweep line from setup/);
   assert.match(read('skills/github-program-reconciler/SKILL.md'), /the line that setup prints for the Toolkit repository, or that `toolkit-windows-tasks\.cjs plan --repo-root <checkout>` prints, read-only, for any other governed repository/);
   const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');

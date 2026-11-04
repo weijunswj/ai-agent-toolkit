@@ -128,7 +128,8 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers/,
     /Put scratch first in a gitignored repo\/worktree temp folder[^\n]*use a user-profile folder only for an outside path or more permission, never a drive root/,
     // Run streams were once deleted before their archive was read back.
-    /needs no approval once its report and any evidence kept \(a run stream or log kept for a FAIL or disputed verdict\) are stored and read back; delete it then/,
+    /Delete task scratch you created \(worktrees, briefs, outputs, test runs\/repos\) without approval only after storing and reading back its report and evidence \(run stream\/log for FAIL or dispute\)/,
+    /Never delete sole evidence, user data or others' scratch/,
     // Delivery assumes neither GitHub nor a remote.
     /After requested edits in a git repository with a remote, unless the user asked for local-only work/,
     /Then offer to delete branches of closed unmerged PRs \(not default, protected or in use\)\./,
@@ -185,6 +186,48 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
   // Toolkit-improvement feedback is the owner's own rule, kept in their instructions, never Toolkit's.
   assert.doesNotMatch(text, /TOOLKIT_FEEDBACK|Toolkit feedback/);
   for (const phrase of forbiddenDefaultPromptPhrases) assert.ok(!text.includes(phrase), phrase);
+});
+
+test('Windows task standing approval stays narrow on every changed approval surface', () => {
+  const global = readText(globalPath);
+  const approval = global.split('**Toolkit task standing approval:**')[1].split('\n\n')[0];
+  for (const rule of [
+    /agents may run `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>` without asking only in ENABLED Toolkit-governed repos with verified merged bindings/,
+    /register\/update Toolkit's fixed PROGRAMME SWEEP and SHARD TIMINGS, with first sweep, in the binding's task folder/,
+    /Keep ownership checks and owner stops; verify results/,
+    /Other scheduler commands, folder overrides and custom tasks need approval; native denials stop/,
+  ]) assert.match(approval, rule);
+  assert.match(global, /Approval\/assignment\/custody\/capability never grant host permission/);
+  assert.match(readText('AGENTS.md'), /except the global Toolkit task standing approval/);
+  assert.match(readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit task standing approval/);
+  for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/safety-gates.md`]) {
+    assert.match(readText(file), /global Safety Gates' Toolkit task standing approval covers only the exact `toolkit-windows-tasks\.cjs apply --repo-root <repo>` command under its eligibility, folder, ownership, owner-stop and native-permission checks, including result verification/);
+  }
+  const reference = readText('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
+  const matrix = [
+    ['Exact apply command + ENABLED governance + verified merged binding + default folder', 'No ask; register/update fixed jobs, including first sweep; verify results'],
+    ['Missing or unreadable binding, or governance not ENABLED', 'No standing permission; obtain approval before any effect'],
+    ['Other script or subcommand, folder override, extra flags or custom task definition', 'Approval still needed; outside this standing permission'],
+    ['Either task is `stopped by owner`', 'Stop; never re-arm or ask again'],
+    ['Host denies', 'Stop; never retry another route'],
+    ['Existing unowned or adopted task, or corrupt registry', 'Keep existing refusal; do not overwrite or bypass it'],
+  ];
+  const table = reference.split('| Command and state | Result |')[1].split('**Shard timings on Windows.**')[0];
+  const rows = table.split('\n').filter(line => /^\| .+ \| .+ \|$/.test(line)).slice(1);
+  assert.deepEqual(rows, matrix.map(([state, result]) => `| ${state} | ${result} |`));
+  for (const rule of [
+    /Use its `schedule_folder`, else the repository's default folder, with no `--folder` override/,
+    /A working-tree binding alone is not verified/,
+    /Read governance status and the merged binding on the device before acting; missing or unreadable evidence grants nothing/,
+    /since apply covers both jobs, a stop on either holds the whole command until the owner changes that stop/,
+    /never adopt or delete a conflicting task to get past a refusal/,
+    /only the job's own last-run record proves the sweep ended well/,
+    /A failed, held, skipped or missing result stays visible for recovery/,
+    /Apply registers SHARD TIMINGS in every eligible repository, even without shards/,
+    /`no shards yet` means no repository or external changes \(only the local last-run record\)/,
+    /next run starts timing automatically using Toolkit's fixed refresher; no repository-local script is needed/,
+    /Invalid or unreadable shard configuration fails visibly/,
+  ]) assert.match(reference, rule);
 });
 
 test('the controller removes a merged lane worktree and branch without --force or -D and keeps what it cannot prove', () => {
