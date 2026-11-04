@@ -389,7 +389,7 @@ test('mixed synthetic Codex helper closure preserves every guard and never retri
   ];
   for (const entry of entries) for (const item of [...matrix, ...extra]) {
     await t.test(`${entry.entry_id}/${entry.caller_role}/${item.id}`, async () => {
-      const f = makeFixture(entry, { selected_profile_id: 'owner-mixed', timeout_ms: item.id === '08-guard-timeout-fails-closed' ? 5 : 20 });
+      const f = makeFixture(entry, { selected_profile_id: 'claude-projects-stack', timeout_ms: item.id === '08-guard-timeout-fails-closed' ? 5 : 20 });
       assert.deepEqual(f.leafRoute, { provider: 'openai', model: 'gpt-6-luna', reasoning: 'max' });
       const call = alterCase(f, item.id);
       if (item.call) item.call(call);
@@ -400,7 +400,7 @@ test('mixed synthetic Codex helper closure preserves every guard and never retri
       assert.equal(result.host_qualification, 'PREPARATION_ONLY');
       if (item.expected === 'ALLOW') {
         assert.equal(result.decision, 'ALLOW'); assert.equal(result.code, 'ROUTE_VERIFIED');
-        assert.equal(f.dispatchCalls, 1); assert.equal(result.profile_id, 'owner-mixed');
+        assert.equal(f.dispatchCalls, 1); assert.equal(result.profile_id, 'claude-projects-stack');
         assert.deepEqual(result.effective_route, f.leafRoute);
         assert.equal(result.registry_revision, f.resolved.registry_digest);
         assert.deepEqual(result.downstream_result.request.registry_reference, f.resolved.registry_reference);

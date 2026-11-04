@@ -504,6 +504,7 @@
           "enum": [
             "owner-gpt",
             "owner-claude",
+            "claude-projects-stack",
             "owner-mixed"
           ]
         },
@@ -511,32 +512,72 @@
           "$ref": "#/$defs/builder_qualification"
         },
         "routes": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "DISCOVERY",
-            "DISCOVERY_HELPER",
-            "BUILDER",
-            "BUILDER_HELPER",
-            "DESIGN_CHALLENGE"
-          ],
-          "properties": {
-            "DISCOVERY": {
-              "$ref": "#/$defs/route"
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "DISCOVERY",
+                "DISCOVERY_HELPER",
+                "BUILDER",
+                "BUILDER_HELPER",
+                "DESIGN_CHALLENGE"
+              ],
+              "properties": {
+                "DISCOVERY": {
+                  "$ref": "#/$defs/route"
+                },
+                "DISCOVERY_HELPER": {
+                  "$ref": "#/$defs/route"
+                },
+                "BUILDER": {
+                  "$ref": "#/$defs/route"
+                },
+                "BUILDER_HELPER": {
+                  "$ref": "#/$defs/route"
+                },
+                "DESIGN_CHALLENGE": {
+                  "$ref": "#/$defs/route"
+                }
+              }
             },
-            "DISCOVERY_HELPER": {
-              "$ref": "#/$defs/route"
-            },
-            "BUILDER": {
-              "$ref": "#/$defs/route"
-            },
-            "BUILDER_HELPER": {
-              "$ref": "#/$defs/route"
-            },
-            "DESIGN_CHALLENGE": {
-              "$ref": "#/$defs/route"
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "DISCOVERY",
+                "DISCOVERY_HELPER",
+                "BUILDER",
+                "BUILDER_HELPER",
+                "DESIGN_CHALLENGE",
+                "GATEKEEPER"
+              ],
+              "properties": {
+                "DISCOVERY": {
+                  "$ref": "#/$defs/route"
+                },
+                "DISCOVERY_HELPER": {
+                  "$ref": "#/$defs/route"
+                },
+                "BUILDER": {
+                  "$ref": "#/$defs/route"
+                },
+                "BUILDER_HELPER": {
+                  "$ref": "#/$defs/route"
+                },
+                "DESIGN_CHALLENGE": {
+                  "$ref": "#/$defs/route"
+                },
+                "GATEKEEPER": {
+                  "const": {
+                    "provider": "anthropic",
+                    "model": "sonnet-5.5",
+                    "reasoning": "medium"
+                  }
+                }
+              }
             }
-          }
+          ]
         },
         "discovery_bound": {
           "type": "integer",
