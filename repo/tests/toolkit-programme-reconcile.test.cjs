@@ -58,8 +58,10 @@ const codes = report => report.findings.map(finding => `${finding.code} #${findi
 const kinds = report => report.effects.map(effect => `${effect.kind} #${effect.target.issue}`);
 const patchCount = (github, number) => github.calls.filter(call => call.method === 'PATCH' && call.path.endsWith(`/issues/${number}`)).length;
 
-function directoryFixture({ repository = 'example.test/programme', parentIssue = 71, topics = 122, proseSize = 41347 } = {}) {
-  const fixture = setup({ repository, parentIssue, outcomes: [], issues: () => {} });
+function directoryFixture({ repository = 'example.test/programme', parentIssue = 71, topics = 122, proseSize = 41347, outcomes = [] } = {}) {
+  const fixture = setup({ repository, parentIssue, outcomes, issues: github => {
+    for (const outcome of outcomes) github.addIssue(outcome.issue);
+  } });
   const prose = `## Owner notes\n${'Retained prose. '.repeat(Math.ceil(proseSize / 16))}`.slice(0, proseSize) + '\n';
   fixture.github.issues.get(parentIssue).body = prose;
   const decisions = [];
@@ -196,8 +198,16 @@ for (const change of ['prose grew', 'newer Toolkit', 'fence moved']) test(`direc
   assert.equal(github.commentsOf(parentIssue).some(comment => comment.body.includes('<!-- decision-trace-index -->')), false);
 });
 
-for (const change of ['changed bytes', 'duplicate page']) test(`uncertain directory intents hold on ${change}`, () => {
-  const { github, reconciler, parentIssue } = directoryFixture();
+// Recovery holds survive both an unchanged plan and an attention re-plan. Only holds from
+// the first block diff are replaced; an unchecked effect must still stop every body write.
+for (const row of [
+  { change: 'changed bytes', attentionChange: false },
+  { change: 'duplicate page', attentionChange: false },
+  { change: 'changed bytes', attentionChange: true },
+  { change: 'duplicate page', attentionChange: true },
+]) test(`uncertain directory intents hold on ${row.change}, attention ${row.attentionChange ? 'changed' : 'unchanged'}`, () => {
+  const outcomes = [{ issue: 72, label: 'Optional task', class: 'OPTIONAL', parent: null, order: 0 }];
+  const { github, store, reconciler, parentIssue } = directoryFixture({ outcomes });
   let lost = false;
   github.intercept(call => {
     if (!lost && call.method === 'POST' && call.body?.body?.includes('<!-- decision-trace-directory -->')) {
@@ -208,12 +218,23 @@ for (const change of ['changed bytes', 'duplicate page']) test(`uncertain direct
   });
   assert.ok(reconciler().run({ apply: true }).holds.length);
   const directory = [...github.comments.values()].find(comment => comment.body.includes('<!-- decision-trace-directory -->'));
-  if (change === 'changed bytes') directory.body += '\nChanged after posting.';
+  if (row.change === 'changed bytes') directory.body += '\nChanged after posting.';
   else comment(github, parentIssue, directory.body);
+  if (row.attentionChange) github.intercept(call => {
+    if (call.method === 'GET' && call.path.endsWith('/issues/72')) return { status: 404, json: {} };
+  });
+  const before = github.issues.get(parentIssue).body;
   const writes = github.mutations();
+  const dry = reconciler().run();
+  assert.equal(dry.holds.filter(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === `#${parentIssue}` && hold.scope === 'body').length, 1);
+  assert.equal(dry.effects.some(effect => effect.kind === 'update_attention'), row.attentionChange);
   const report = reconciler().run({ apply: true });
-  assert.ok(report.holds.some(hold => hold.code === 'EFFECT_UNKNOWN'));
+  assert.equal(report.holds.filter(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === `#${parentIssue}`).length, 1);
+  assert.ok(report.results.some(result => result.kind === 'replace_block' && result.target.issue === parentIssue && result.outcome === 'SKIPPED'));
+  assert.equal(report.writes.github, 0);
   assert.equal(github.mutations(), writes, 'an unverified intent is not replayed');
+  assert.equal(github.issues.get(parentIssue).body, before);
+  assert.ok(store.read('parent', parentIssue).doc.pending_effects.some(effect => effect.kind === 'post_index_comment' && effect.state === 'UNKNOWN'));
 });
 
 test('a fence takeover during directory publication stops the pass before the body write', () => {
@@ -1710,6 +1731,41 @@ test('a page written by a newer Toolkit is held, not rewritten, so two versions 
 // A deleted comment that a generated page links must not stop the page redrawing.
 const deleteComment = (github, id) => { github.comments.get(id).issue = -1; };
 const traceAudit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+
+for (const row of [
+  { code: 'INDEX_DEPTH', pages: 12, reason: /would exceed two index hops \(index 2\)/ },
+  { code: 'INDEX_LIMIT', pages: traceAudit.MAX_INDEX_COMMENTS, reason: /would exceed 1024 index pages/ },
+]) test(`prospective directory paging includes recovery for ${row.code}`, () => {
+  const { reconciler, parentIssue } = setup({ outcomes: [], issues: () => {} });
+  const pass = reconciler();
+  const person = (id, body) => ({ id, body, user: { login: 'owner', type: 'User' } });
+  const comments = [person(1, 'Topic\n---\nINT-TK421-001 Decision'),
+    ...Array.from({ length: row.pages }, (unused, n) => person(n + 2,
+      `Topic\n---\n${traceAudit.INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=test part=1/1 -->\n[decision](#issuecomment-1)${row.code === 'INDEX_DEPTH' && n === 0 ? '\n[list 1](#issuecomment-3)' : ''}`))];
+  pass.threshold = pass.projectBody(parentIssue, '', 'state', [], '3.9.1').body.length + 600;
+  assert.throws(() => pass.projectBody(parentIssue, '', 'state', comments, '3.9.1'), error => {
+    assert.equal(error.code, 'TRACE_INDEX_INVALID');
+    assert.match(error.message, row.reason);
+    assert.ok(error.message.endsWith(traceAudit.indexRecoveryText([row.code])), 'projection and audit share the recovery step');
+    return true;
+  });
+});
+
+test('a hand-nested directory returns as a body root and keeps its decisions reachable', () => {
+  const { github, reconciler, parentIssue, repository } = setup({ outcomes: [], issues: () => {} });
+  const decision = comment(github, parentIssue, 'Topic\n---\nINT-TK421-001 Decision');
+  const inner = comment(github, parentIssue, `${traceAudit.INDEX_COMMENT_MARKER}\n${traceAudit.DIRECTORY_COMMENT_MARKER}\n[decision](#issuecomment-${decision.id})`);
+  const outer = comment(github, parentIssue, `${traceAudit.INDEX_COMMENT_MARKER}\n${traceAudit.DIRECTORY_COMMENT_MARKER}\n[list 1](#issuecomment-${inner.id})`);
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  assert.ok(github.issues.get(parentIssue).body.includes(`#issuecomment-${inner.id})`));
+  const audit = () => traceAudit.auditDecisionTraces({ body: github.issues.get(parentIssue).body, comments: github.commentsOf(parentIssue), repository, issue: parentIssue });
+  assert.deepEqual(audit().unlinked_decisions, []);
+  assert.ok(audit().index_errors.some(error => error.code === 'INDEX_UNRELATED'));
+  github.comments.get(outer.id).body = `${traceAudit.INDEX_COMMENT_MARKER}\n${traceAudit.DIRECTORY_COMMENT_MARKER}`;
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  assert.equal(audit().ok, true, 'removing the invalid link clears the finding without losing decisions');
+});
 
 test('a decision deleted after directory paging leaves the page redrawing, with a plain finding', () => {
   const { github, reconciler, parentIssue, decisions } = directoryFixture();

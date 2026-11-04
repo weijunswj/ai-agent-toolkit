@@ -22,7 +22,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, auditDecisionTraces, traceEntries, indexErrorText, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
+const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, auditDecisionTraces, traceEntries, indexErrorText, indexRecoveryText, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
 const { OTHER_COMMENTS } = require('./decision-tags.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 
@@ -3304,13 +3304,14 @@ class Reconciler {
       if (lines.length) {
         const pages = indexCommentBodies(number, lines, '9'.repeat(16), null, null, true);
         projected = build({ directories: [...(trace.directories || []), ...pages.map(() => ({ id: '9'.repeat(19) }))], indexes: [], entries: [], marks: [] });
-        if (projected.body.length < this.threshold && trace.indexes.some(index => index.nested)) throw new ProgrammeError('TRACE_INDEX_INVALID', 'Paging this comment directory would exceed two index hops.');
+        const nested = trace.indexes.find(index => index.nested);
+        if (projected.body.length < this.threshold && nested) throw new ProgrammeError('TRACE_INDEX_INVALID', `Paging this comment directory would exceed two index hops (index ${nested.id}). ${indexRecoveryText(['INDEX_DEPTH'])}`);
         overflow.push({ directory: true, tag: null, lines });
       }
     }
     const pageCount = trace.strict_count
       + overflow.reduce((count, part) => count + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0);
-    if (projected.body.length < this.threshold && pageCount > MAX_INDEX_COMMENTS) throw new ProgrammeError('TRACE_INDEX_INVALID', `The comment trace would exceed ${MAX_INDEX_COMMENTS} index pages.`);
+    if (projected.body.length < this.threshold && pageCount > MAX_INDEX_COMMENTS) throw new ProgrammeError('TRACE_INDEX_INVALID', `The comment trace would exceed ${MAX_INDEX_COMMENTS} index pages. ${indexRecoveryText(['INDEX_LIMIT'])}`);
     return { ...projected, overflow };
   }
 
@@ -3446,7 +3447,7 @@ class Reconciler {
   // (a pass for one issue records none), and the inventory source when the pass carries an inventory.
   // When they change, the parent's CURRENT block is planned again with the new list, so the page
   // shows them after this pass.
-  planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds, resolutions = []) {
+  planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds, resolutions = [], blockHolds = new Set()) {
     const folds = [];
     // Hold by issue, even when another pass adds the finding after this snapshot was read.
     const incompletePrHolds = [...observed.discovery].filter(([, discovery]) => discovery.complete === false)
@@ -3465,8 +3466,8 @@ class Reconciler {
     const keep = (list, test) => { const kept = list.filter(item => !test(item)); list.splice(0, list.length, ...kept); };
     keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
     keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
-    // diffBlocks runs again for the parent below, so drop every body hold it raised the first time.
-    keep(holds, hold => hold.target === `#${number}` && hold.scope === 'body');
+    // Replace only the first block diff's parent holds. Recovery holds are not re-raised here.
+    keep(holds, hold => blockHolds.has(hold) && hold.target === `#${number}` && hold.scope === 'body');
     this.diffBlocks({ ...parent, attention: next }, projected, observed, only, effects, findings, holds, [number], resolutions);
   }
 
@@ -3508,14 +3509,16 @@ class Reconciler {
       copy.revision = existing ? existing.revision + (contentDigest(existing) === contentDigest(doc) ? 0 : 1) : 1;
       return [number, copy];
     }));
+    const blockHoldStart = holds.length;
     this.diffBlocks(parent, projected, observed, only, effects, findings, holds, null, resolutions);
+    const blockHolds = new Set(holds.slice(blockHoldStart));
     this.auditTraces(parent, observed, only, findings, effects);
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
       detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
     if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share priority order ${tie[0].order}, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the priority in one update-parent patch` });
-    this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions);
+    this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions, blockHolds);
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
   }

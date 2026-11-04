@@ -62,7 +62,8 @@ function indexGraph({ body = '', comments, repository = '', issue = null, all = 
     });
   };
   const children = new Set();
-  const localLinks = new Map(indexes.map(index => [String(index.id), links(index.body).filter(link => link.local && byId.has(link.id))]));
+  const localLinks = new Map(indexes.map(index => [String(index.id), links(index.body).filter(link => link.local && byId.has(link.id)
+    && !(String(index.body).includes(DIRECTORY_COMMENT_MARKER) && String(byId.get(link.id).body).includes(DIRECTORY_COMMENT_MARKER)))]));
   for (const index of indexes.filter(index => strictIds.has(String(index.id)))) {
     for (const link of localLinks.get(String(index.id))) if (indexIds.has(link.id)) children.add(link.id);
   }
@@ -190,14 +191,17 @@ function entryFor(comment, facts, index) {
 const PROJECTION_TOLERATED = new Set(['INDEX_MISSING', 'INDEX_UNRELATED']);
 
 // Plain recovery text for an index fault, shared by the audit finding and any hold.
+function indexRecoveryText(codes) {
+  const steps = [];
+  if (codes.some(code => PROJECTION_TOLERATED.has(code))) steps.push('A linked comment was deleted or points to another issue, repository or directory; the page still redraws and lists the comments it no longer reaches in the body; to clear this, remove that link from the named index comment.');
+  if (codes.some(code => code === 'INDEX_CYCLE' || code === 'INDEX_DEPTH')) steps.push('An index comment links in a loop or too deep; edit or delete the named index comment to remove the loop or extra hop, then run again.');
+  if (codes.includes('INDEX_LIMIT')) steps.push(`Too many generated index pages: the limit is ${MAX_INDEX_COMMENTS} per issue; compact or delete obsolete index comments to stay within it, then run again. If only the planned new pages would exceed it, shorten retained body prose to avoid adding pages.`);
+  return steps.join(' ');
+}
+
 function indexErrorText(errors) {
   const list = errors.map(entry => `${entry.code} ${entry.id}${entry.target ? ` -> ${entry.target}` : ''}`).join(', ');
-  const dead = errors.some(entry => PROJECTION_TOLERATED.has(entry.code));
-  const structural = errors.some(entry => !PROJECTION_TOLERATED.has(entry.code));
-  const steps = [];
-  if (dead) steps.push('a linked comment was deleted or points elsewhere; the page still redraws and lists the comments it no longer reaches in the body; to clear this, remove that link from the named index comment');
-  if (structural) steps.push('an index comment links in a loop or too deep; edit or delete the named index comment, and the next pass lists its comments in the body');
-  return `Invalid comment index: ${list}. ${steps.join('. ')}`;
+  return `Invalid comment index: ${list}. ${indexRecoveryText(errors.map(entry => entry.code))}`;
 }
 
 function traceEntries(comments, recordPrefix = null, repository = '', issue = null) {
@@ -385,4 +389,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ indexErrorText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });
+module.exports = Object.freeze({ indexErrorText, indexRecoveryText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });

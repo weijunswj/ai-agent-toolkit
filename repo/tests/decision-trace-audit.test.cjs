@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
-const { auditDecisionTraces, traceEntries, commentSummary, ledgerTopics, repairedBody, parseArgs, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+const { auditDecisionTraces, traceEntries, indexErrorText, commentSummary, ledgerTopics, repairedBody, parseArgs, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
 
 const person = (id, body) => ({ id, user: { login: 'owner', type: 'User' }, body });
 const generated = (id, body) => person(id, `${INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=test part=1/1 -->\n${body}`);
@@ -25,7 +25,7 @@ for (const row of [
   { name: 'unrelated upper-case scheme link', root: 2, indexes: [generated(2, '[x](HTTPS://github.com/other.test/project/issues/7#issuecomment-1)')], code: 'INDEX_UNRELATED' },
   { name: 'repository case variant', root: 2, indexes: [generated(2, '[x](https://github.com/Example.test/Project/issues/7#issuecomment-1)')] },
   { name: 'directory links decision comment', root: 2, indexes: [person(2, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n- **Topic:** [1](#issuecomment-1)`)] },
-  { name: 'directory links another directory', root: 3, indexes: [person(2, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}`), person(3, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n[list 1](#issuecomment-2)`)], code: 'INDEX_UNRELATED' },
+  { name: 'directory links another directory', root: 3, indexes: [person(2, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n[decision](#issuecomment-1)`), person(3, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n[list 1](#issuecomment-2)`)], code: 'INDEX_UNRELATED', directories: ['2', '3'] },
   { name: 'too many hops', root: 4, indexes: [generated(2, '[x](#issuecomment-1)'), generated(3, '[list 1](#issuecomment-2)'), generated(4, '[list 1](#issuecomment-3)')], code: 'INDEX_DEPTH' },
 ]) test(`index traversal: ${row.name}`, () => {
   const comments = [person(1, 'Topic\n---\nINT-TK421-001 decision'), ...row.indexes];
@@ -42,7 +42,12 @@ for (const row of [
   if (row.indexes.length && ['INDEX_CYCLE', 'INDEX_DEPTH'].includes(row.code)) assert.throws(() => traceEntries(comments, PREFIX, options.repository, options.issue), { code: 'TRACE_INDEX_INVALID', message: /edit or delete the named index comment/ });
   else if (row.code) {
     const trace = traceEntries(comments, PREFIX, options.repository, options.issue);
-    assert.ok(trace.entries.some(entry => entry.id === '1'), JSON.stringify(trace));
+    if (row.directories) {
+      assert.deepEqual(trace.directories.map(entry => entry.id), row.directories, 'the inner directory returns as a body root');
+      const projected = auditDecisionTraces({ ...options, body: trace.directories.map(entry => `[topic directory 1](#issuecomment-${entry.id})`).join('\n') });
+      assert.deepEqual(projected.unlinked_decisions, [], 'the decision under the inner directory stays reachable');
+      assert.ok(projected.index_errors.some(error => error.code === row.code), 'the audit still reports the hand-nested link');
+    } else assert.ok(trace.entries.some(entry => entry.id === '1'), JSON.stringify(trace));
     assert.match(require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs').indexErrorText(result.index_errors), /remove that link from the named index comment/);
   }
 });
@@ -52,9 +57,25 @@ test('index traversal has a page-count bound and cannot use foreign body links f
   const result = auditDecisionTraces({ body: indexes.map(comment => `[list 1](#issuecomment-${comment.id})`).join('\n'), comments: [person(1, 'Topic\n---\nDecision'), ...indexes] });
   assert.equal(result.ok, false);
   assert.ok(result.index_errors.some(error => error.code === 'INDEX_LIMIT'));
+  assert.match(indexErrorText(result.index_errors), /Too many generated index pages/);
+  assert.doesNotMatch(indexErrorText(result.index_errors), /loop or too deep/);
+  assert.throws(() => traceEntries([person(1, 'Topic\n---\nDecision'), ...indexes]), { code: 'TRACE_INDEX_INVALID', message: /compact or delete obsolete index comments/ });
   const foreign = auditDecisionTraces({ body: '[x](https://github.com/other.test/project/issues/7#issuecomment-1)', comments: [person(1, 'Topic\n---\nDecision')], repository: 'example.test/project', issue: 7 });
   assert.equal(foreign.ok, false);
   assert.deepEqual(foreign.unlinked_decisions.map(entry => entry.id), ['1']);
+});
+
+for (const row of [
+  { code: 'INDEX_MISSING', reason: /A linked comment/, recovery: /remove that link/ },
+  { code: 'INDEX_UNRELATED', reason: /A linked comment/, recovery: /remove that link/ },
+  { code: 'INDEX_CYCLE', reason: /An index comment links in a loop/, recovery: /edit or delete the named index comment/ },
+  { code: 'INDEX_DEPTH', reason: /An index comment links.*too deep/, recovery: /edit or delete the named index comment/ },
+  { code: 'INDEX_LIMIT', reason: /Too many generated index pages/, recovery: /compact or delete obsolete index comments/ },
+]) test(`index recovery text: ${row.code}`, () => {
+  const text = indexErrorText([{ code: row.code, id: '12', target: '13' }]);
+  assert.match(text, row.reason);
+  assert.match(text, row.recovery);
+  assert.doesNotMatch(text, /\. [a-z]/, 'sentences start with capitals');
 });
 
 test('a shared index reached along a longer path still enforces the depth bound', () => {
