@@ -45,7 +45,7 @@ test('each block stays inside its own budget', () => {
   assert.ok(crlfBytes(GOVERNED) <= 4250, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
   // CONTROLLER.md loads only for controllers, not every session; the rules audit cut it below 18000.
-  // provisional headroom so rule wording is not cut, owner approval pending; PR 749 G2
+  // owner-approved headroom so Takeover rule wording is not cut
   assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 18500, 'CONTROLLER.md');
   // The gate rules load on demand for gate sessions only, but stay compact. The cap rose from
   // 10,500 to hold the review-round rules (self-check, finding severities, narrow rechecks), then to
