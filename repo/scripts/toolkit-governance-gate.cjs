@@ -1625,7 +1625,7 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
       try { (deps.startRefresh || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startRefresh)(state.root, deps); started = true; } catch { /* the hourly sweep covers it */ }
     }
     if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.`);
-    // This computer's hourly sweep, when it skipped, failed or has not run for over 2 hours. A test
+    // This computer's hourly sweep, when it held, skipped, failed or has not run for over 2 hours. A test
     // registry without its own home reads nothing.
     if (deps.home || registryOptions.testOnly !== true) {
       const now = deps.now ? new Date(deps.now()) : new Date();
