@@ -85,7 +85,7 @@ function merged(ctx, value, { ageMs = 0 } = {}) {
     text,
     problem: null,
   };
-  const file = bindingCache.cacheFileFor(ctx.registryOptions.registryPath, identity.repository_id);
+  const file = bindingCache.cacheFileFor(governance.userStateDirectory(ctx.registryOptions), identity.repository_id);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(entry));
 }

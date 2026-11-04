@@ -2,6 +2,8 @@
 
 Use validation in two phases: fast targeted local checks before pushing, then the full read-only CI gate for PR and `main` readiness.
 
+Last CI check-up: 4 November 2026, offline. No coverage gaps were found. Test timings need a CI refresh on both systems; live job times were not read.
+
 Targeted validation is an iteration strategy, not a quality downgrade. Local `npm run validate:all` is not required before every push when CI already runs the full gate.
 
 Release maintenance uses `repo/tests/toolkit-version.test.cjs` and `repo/tests/toolkit-rebump-prs.test.cjs`, `repo/tests/toolkit-rebump-prs-conflicts.test.cjs` and `repo/tests/toolkit-rebump-prs-push.test.cjs`: patch, minor and major intent, repeated main moves, fragment folding, frozen notes, conflict refusals, merge parentage, ordinary pushes and concurrent changes. Re-bump tests use disposable local repositories and a bare remote. They do not qualify computer authentication or the coordinator trigger; real agent UAT covers that route. Every re-bumped head needs fresh CI and full delta G2 review.

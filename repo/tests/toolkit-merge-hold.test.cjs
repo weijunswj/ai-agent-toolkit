@@ -39,6 +39,7 @@ function repository(root, name, { slug = `owner/${name}`, branch = 'main', remot
   fs.mkdirSync(remotes, { recursive: true });
   fs.writeFileSync(path.join(remotes, 'main'), `${SHA}\n`);
   if (remoteHead) fs.writeFileSync(path.join(remotes, 'HEAD'), 'ref: refs/remotes/origin/main\n');
+  require('./toolkit-governed-fixture-support.cjs').recordAbsent(repo, { home: path.join(root, 'home') });
   return repo;
 }
 
@@ -120,6 +121,7 @@ function checkEvidenceAuthority(t, name, spec, allowed) {
   if (['name', 'off'].includes(spec.binding)) binding.store.repository = 'owner/TRANSPORT-unrelated';
   const text = spec.binding === 'malformed' ? '{broken' : JSON.stringify(binding);
   const registryPath = ctx.options.registryOptions.registryPath;
+  const stateDirectory = governance.userStateDirectory(ctx.options.registryOptions);
   if (!['absent', 'local'].includes(spec.binding)) {
     recordMerged(spec.binding === 'self' ? ctx.repo : ctx.other, { registryPath, text,
       ...(spec.binding === 'stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
@@ -133,17 +135,17 @@ function checkEvidenceAuthority(t, name, spec, allowed) {
       store: { ...binding.store, repository: 'owner/other-store' } }),
     ...(spec.targetBinding === 'stale-enabled' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
   if (spec.targetBinding === 'unlisted-enabled') {
-    const targetFile = path.basename(cache.cacheFileFor(registryPath, governance.readIdentity(ctx.repo).repository_id));
+    const targetFile = path.basename(cache.cacheFileFor(stateDirectory, governance.readIdentity(ctx.repo).repository_id));
     const readDirectory = fs.readdirSync;
     t.mock.method(fs, 'readdirSync', (folder, ...args) => {
       const names = readDirectory(folder, ...args);
-      return folder === cache.cacheDirFor(registryPath) ? names.filter(name => name !== targetFile) : names;
+      return folder === cache.cacheDirFor(stateDirectory) ? names.filter(name => name !== targetFile) : names;
     });
   }
-  if (spec.binding === 'off') gate.writeGovernanceDecision(ctx.repo, 'disable', ctx.options);
+  if (spec.binding === 'off') recordMerged(ctx.repo, { registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'owner/a', governance: 'disabled' }) });
   if (spec.binding === 'removed') {
-    const entry = cache.readBindingCache(governance.readIdentity(ctx.other), registryPath);
-    cache.writeCache(registryPath, { ...entry, status: 'absent', text: null, bytes_sha256: null });
+    const entry = cache.readBindingCache(governance.readIdentity(ctx.other), stateDirectory);
+    cache.writeCache(stateDirectory, { ...entry, status: 'absent', text: null, bytes_sha256: null });
   }
   if (spec.taskOff) for (const host of ['codex', 'claude-code']) {
     const { TaskAutoMergePreferences } = require('../scripts/toolkit-task-auto-merge-preferences.cjs');
@@ -606,7 +608,7 @@ for (const mode of ['enabled', 'disabled', 'undecided', 'plain']) test(`adapter 
   const home = path.join(ctx.root, 'home');
   let cwd = mode === 'plain' ? ctx.root : ctx.repo;
   if (mode === 'enabled') cwd = require('./toolkit-governed-fixture-support.cjs').makeGoverned(path.join(ctx.root, 'enabled'), 'approval-matrix', { home });
-  if (mode === 'disabled') gate.writeGovernanceDecision(cwd, 'disable', ctx.options);
+  if (mode === 'disabled') require('./support/governance-observations.cjs').seedMerged(cwd, 'disable', ctx.options);
   const env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CODE_REMOTE: '' };
   for (const name of [...gate.LAUNCHER_MARKERS, gate.HOST_SESSION_VARIABLE]) env[name] = '';
   const cases = [
@@ -1190,7 +1192,7 @@ test('the Claude Code hook records the typed approval and enforces it; cloud ses
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
   assert.ok(new hold.MergeApprovals(ctx.options).find('owner/a', 618), 'the held merge did not consume approval');
   // Once the repository is decided, no repetition is needed.
-  gate.writeGovernanceDecision(ctx.repo, 'disable', ctx.options);
+  require('./support/governance-observations.cjs').seedMerged(ctx.repo, 'disable', ctx.options);
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput?.permissionDecision, undefined);
   assert.deepEqual(claudeHook.respond('PreToolUse', merge, { environment: { CLAUDE_CODE_REMOTE: 'true' }, ...ctx.options }), {});
 });

@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.48.0
+
+### Changed
+
+- Governance on or off now comes only from the programme file merged on origin's default branch, on every computer. Historical local answers are inert.
+- Yes and no prepare a pending decision pull request. Prompt hooks capture answers without publishing; the assigned agent publishes, reads back and asks for the owner's merge. Yes carries the binding, governed rules and installed checks together in one setup pull request. Later asks again next chat.
+- Verified read-only accounts continue with global rules and a plain note, without governance effects or standing task auto-merge. Pending proposal checks on prompts use one PR-state read, throttled per repository and limited to three seconds including any default-branch refresh after closure.
+- Ordinary work continues when GitHub cannot be checked, without governance effects or standing task auto-merge. Evidence-store exemption requires an exact programme-binding relationship.
+
 ## 3.47.1
 
 ### Fixed

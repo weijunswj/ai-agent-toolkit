@@ -2,7 +2,7 @@
 
 A compact, pointer-only map of this repository. Rules live in [CONTROLLER.md](CONTROLLER.md), the root `AGENTS.md` and the sources named below; this file only says where things are. Update it in the change that moves what it describes; `repo/tests/repo-map.test.cjs` checks that every path listed here exists.
 
-Last reviewed against `main` `389c1c0608938da3ee3387adbe9235e2ef45784b`.
+Last reviewed against `main` `37c36b2`.
 
 ## Parts
 
@@ -76,7 +76,7 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 | Package version | `repo/contracts/toolkit-local-bridge/version.json`, read at runtime through `repo/scripts/toolkit-version.cjs` |
 | Programme binding and state document schemas | `.github/toolkit-programme.json`, `repo/contracts/programme-state/` |
 | Host needs for programme custody | `repo/docs/HOST-CONTRACT.md`, `repo/contracts/programme-state/host-contract-v1.json` |
-| Per-repository governance decisions | `repo/scripts/toolkit-capability-registry.cjs` (user-side store and identity), `repo/contracts/repository-capability-registry/` |
+| Repository governance decisions | Origin default-branch `.github/toolkit-programme.json`; `repo/scripts/toolkit-governance-binding.cjs` (observations), `repo/scripts/toolkit-governance-proposal.cjs` (pending requests and publication), `repo/scripts/toolkit-repository-identity.cjs` (identity), `repo/scripts/toolkit-user-state.cjs` (operational state directory) |
 | Skill tiers per governance state | `repo/contracts/agent-rules/governance-skill-tiers.json` |
 | Stored native host results (helper route) | `repo/contracts/host-qualification/claude-code.json` |
 | Release notes | `repo/docs/CHANGELOG.md` |

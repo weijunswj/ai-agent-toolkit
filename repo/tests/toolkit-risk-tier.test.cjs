@@ -38,7 +38,7 @@ test('the owner\'s RISKY categories are RISKY in this repository', () => {
     'repo/scripts/toolkit-attribution-guard.cjs', 'repo/contracts/claude-projects/web-controller-projects/SKILL.md',
     '.github/workflows/validate.yml', '.github/toolkit-risk-tiers.json', 'repo/scripts/toolkit-risk-tier.cjs',
     // Authority, custody and home-folder writers: the governance decision store, helper profiles, task sessions and routes.
-    'repo/scripts/toolkit-capability-registry.cjs', 'repo/contracts/repository-capability-registry/repository-capability-policy.json',
+    'repo/scripts/toolkit-repository-identity.cjs', 'repo/scripts/toolkit-user-state.cjs',
     'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-task-session.cjs', 'repo/scripts/toolkit-stack-selection.cjs',
     'repo/scripts/toolkit-gate-contract-compiler.cjs', 'repo/scripts/codex-config-load-check.cjs',
     'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/install-daily-security-check-systemd.sh',
@@ -151,7 +151,8 @@ function riskyReach(tracked) {
 }
 
 test('everything RISKY code loads, starts, copies out or runs with a write token is RISKY, so a family cannot be split', () => {
-  const tracked = spawnSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  const tracked = spawnSync('git', ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8' }).stdout.split('\n').filter(rel => rel && fs.existsSync(path.join(ROOT, rel)));
+  // Working-tree retirement must not read deleted index entries; new runtime files must count before staging.
   const reached = riskyReach(tracked);
   const missing = [...reached].filter(([rel]) => tierOf(rel) !== 'RISKY').map(([rel, from]) => `${rel} (reached from ${from})`);
   assert.deepEqual(missing, []);
@@ -202,8 +203,8 @@ test('an exception can only take a script out of a script folder, never a workfl
   assert.equal(tierOf('repo/scripts/Bump-Version.cjs'), 'RISKY', 'a new script differing only in case from an exception stays RISKY');
 });
 
-test('every RISKY pattern in this repository matches a tracked file, so the list cannot go stale unnoticed', () => {
-  const tracked = spawnSync('git', ['-C', ROOT, 'ls-files'], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+test('every RISKY pattern in this repository matches a source file, so the list cannot go stale unnoticed', () => {
+  const tracked = spawnSync('git', ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8' }).stdout.split('\n').filter(rel => rel && fs.existsSync(path.join(ROOT, rel)));
   const stale = TOOLKIT.risky.filter(glob => !tracked.some(rel => globToRegExp(glob.replace(/^!/, '')).test(rel)));
   assert.deepEqual(stale, []);
 });

@@ -100,6 +100,10 @@ After a grant, the same session or any session in scope does the step through it
 
 The owner answered a card with a standing OK: on one computer, agents may replace the digest script and its test file in `~/digest`, only after the tests pass and a backup of the live script is kept, and tell the owner afterwards. Not covered: any other file, folder or action, or running the script. Review in 90 days.
 
+## Repository governance decisions
+
+Only the programme file merged on origin's default branch decides governance, including off, on every computer. Yes or no authorises preparing one decision pull request, not merging it. Show the published proposal, its external effects and checks, and ask the owner to merge it immediately. A proposal, run receipt or historical local answer grants no governance effects or standing task auto-merge. Later lasts only for that chat run. When GitHub cannot be read, continue ordinary work with a plain "couldn't check governance" note and hold those effects.
+
 ## Never Do By Default
 
 - Do not modify credentials, secrets, tokens, private keys, `.env` values, or private values.

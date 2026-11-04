@@ -48,7 +48,6 @@ const governance = require('./toolkit-governance-state.cjs');
 const { normaliseHost } = require('./toolkit-task-auto-merge-preferences.cjs');
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
 
-const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
 const HELD_BASENAME = 'held-prompts.v1.json';
 const HELD_SCHEMA = 'toolkit.held-prompts.v1';
 const NOT_NOW_BASENAME = 'governance-not-now.v1.json';
@@ -208,8 +207,6 @@ const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 // cards stay held, so a card never stands in for the owner's typed answer.
 const ALWAYS_TOOLS = /^(?:ToolSearch|mcp__hearthbot__(?:post_message|react|update_progress_checklist|no_reply_needed))$/;
 const PICKER_TOOL = 'AskUserQuestion';
-// States that are never governed: an evidence store (S1) and a scratch clone (R1s).
-const NEVER_GOVERNED = Object.freeze(['S1', 'R1s']);
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
 const { SHELL_TOOLS, ShellCall, shellPath } = require('./toolkit-shell-call.cjs');
 // Tools that schedule a prompt for the session itself.
@@ -235,9 +232,13 @@ function terminalCommand(subcommand) {
 // ---- gate -------------------------------------------------------------------------------------
 
 class GovernanceGate {
-  #stateReader; #notNow; #epochs;
+  #stateReader; #notNow; #epochs; #proposals; #transport; #refreshBinding;
 
-  constructor({ registryOptions = {}, stateReader = null, now = () => new Date() } = {}) {
+  constructor({ registryOptions = {}, stateReader = null, now = () => new Date(), environment = process.env, proposalTransport = null, refreshBinding = null } = {}) {
+    const { GovernanceProposals, GitHubProposalTransport } = require('./toolkit-governance-proposal.cjs');
+    this.#transport = proposalTransport || (registryOptions.testOnly || environment.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
+    this.#proposals = new GovernanceProposals({ registryOptions, now, transport: this.#transport });
+    this.#refreshBinding = refreshBinding || ((cwd, budget) => governance.refreshMergedBinding(cwd, registryOptions, budget));
     this.#stateReader = stateReader || (cwd => governance.governanceState(cwd, registryOptions));
     this.#notNow = new NotNow({ registryOptions, now });
     this.#epochs = new SessionEpochs({ registryOptions, now });
@@ -245,60 +246,42 @@ class GovernanceGate {
 
   // { hold, reason, state } where reason is one of 'no-git' (a plain folder, DISABLED
   // automatically), 'decided', 'undecided' (the github.com question), 'not-now' (the user said later in this run of the session)
-  // or 'state-unreadable'. Identity and the state module decide; nothing is written into the
+  // or 'unavailable'. Identity and the state module decide; nothing is written into the
   // repository or folder. "Not now" lasts for the run of the session that said it (its session mark).
-  evaluate(cwd, { sessionId = null } = {}) {
-    const state = this.#stateReader(cwd);
-    const verdict = (hold, reason) => Object.freeze({ hold, reason, state });
-    if (state.state === 'UNDECIDED' && state.rule === 'ERROR') return verdict(true, 'state-unreadable');
+  evaluate(cwd, { sessionId = null, refreshPending = false } = {}) {
+    let state = this.#stateReader(cwd);
+    // Only a new prompt rechecks a known published proposal, never every tool call.
+    if (refreshPending && this.#transport && state.state === 'UNDECIDED') {
+      const deadline = Date.now() + require('./toolkit-governance-proposal.cjs').PROMPT_BUDGET_MS;
+      try {
+        const checked = this.#proposals.refreshPrompt(cwd, deadline);
+        if (!checked.ok) return Object.freeze({ hold: false, reason: 'unavailable', state });
+        if (checked.closed) {
+          const refreshed = this.#refreshBinding(cwd, { deadline });
+          if (Date.now() >= deadline || refreshed?.refreshed === false) return Object.freeze({ hold: false, reason: 'unavailable', state });
+          state = this.#stateReader(cwd);
+          this.#proposals.settle(cwd, state);
+        }
+      } catch { return Object.freeze({ hold: false, reason: 'unavailable', state }); }
+    }
+    const verdict = (hold, reason, pending = null) => Object.freeze({ hold, reason, state, pending });
+    if (state.state === 'UNAVAILABLE') return verdict(false, 'unavailable');
+    if (state.state === 'UNDECIDED') {
+      let pending;
+      try { pending = this.#proposals.pending(cwd, { sessionId, epoch: this.#epochs.get(sessionId) }); } catch { pending = null; }
+      if (pending) return verdict(false, pending.kind === 'unavailable' ? 'unavailable' : 'pending', pending);
+    }
     if (state.state === 'UNDECIDED') return this.#notNow.has(state.repository_id, sessionId, this.#epochs.get(sessionId)) ? verdict(false, 'not-now') : verdict(true, 'undecided');
     return verdict(false, state.rule === 'R1' ? 'no-git' : 'decided');
   }
 }
 
-// ---- decision ---------------------------------------------------------------------------------
-
-// Records the user's decision through the registry's owner-action path, then reads it back through
-// the gate. Throws GovernanceGateError when the result
-// is not the decided state.
-function writeGovernanceDecision(cwd, command, { registryOptions = {}, registry = require('./toolkit-capability-registry.cjs'), now } = {}) {
-  if (!['enable', 'disable', 'decline'].includes(command)) throw new GovernanceGateError('UNKNOWN_COMMAND');
-  // An evidence store or a scratch clone is never governed, so "enable" is never recorded for one.
-  if (command === 'enable' && NEVER_GOVERNED.includes(new GovernanceGate({ registryOptions, now }).evaluate(cwd).state.rule)) throw new GovernanceGateError('NOT_GOVERNABLE');
-  const status = registry.getRepositoryStatus({ cwd, ...registryOptions });
-  if (status.actionable) throw new GovernanceGateError('REGISTRY_UNAVAILABLE');
-  const current = status.capabilities[CAPABILITY].state;
-  // The registry keeps its own operation names: a first "no" is 'decline', turning off an enabled one is 'disable'.
-  const operation = command === 'enable' ? 'enable' : (current === 'enabled' ? 'disable' : 'decline');
-  registry.writeCapabilityDecision({
-    cwd,
-    ...registryOptions,
-    capabilityId: CAPABILITY,
-    operation,
-    ownerAction: {
-      confirmed: true,
-      category: 'explicit-owner',
-      channel: 'capability-route',
-      operation,
-      choice_semantic_id: registry.capabilityDecisionSemanticId(CAPABILITY, operation),
-      contract_digest: registry.CONTRACT_DIGEST,
-      scope_digest: registry.capabilityScopeDigest(status.repository_id, CAPABILITY, operation, 'capability-route'),
-    },
-    expectedRevision: status.registry_revision,
-    expectedHash: status.snapshot_hash,
-  });
-  const verdict = new GovernanceGate({ registryOptions, now }).evaluate(cwd);
-  const expected = command === 'enable' ? 'ENABLED' : 'DISABLED';
-  if (verdict.state.state !== expected || verdict.state.repository_id !== status.repository_id) throw new GovernanceGateError('READBACK_MISMATCH');
-  return verdict;
-}
-
 // ---- session epochs ---------------------------------------------------------------------------
 
 // Random marks written by the session-start hook (both hosts run it in headless runs too) and kept
-// next to the registry, one small file each: one per host session and one per repository. Starting,
-// resuming or forking a session gives it a new mark and gives the repository it starts in a new
-// mark; /clear and compaction keep both. A held message carries both marks of the run that sent it,
+// in private operational state, one small file each: one per host session and one per repository. Starting,
+// resuming or forking a session gives it a new session mark. The repository mark is created once,
+// so another chat cannot invalidate this run; /clear and compaction keep both marks. A held message carries both marks of the run that sent it,
 // and an answer counts only when both still match, so a later process (an agent's `claude -p yes
 // --resume <id>`, or `claude -pc yes`, whatever session id it reports) cannot answer for the user.
 // A session with no mark (it started before the hook could record one) cannot answer in chat at
@@ -308,7 +291,7 @@ class SessionEpochs {
   #folder; #now; #registryOptions; #environment; #host;
 
   constructor({ registryOptions = {}, now = () => new Date(), environment = process.env, host = null } = {}) {
-    this.#folder = path.join(path.dirname(governance.registryPathFor(registryOptions)), SESSIONS_FOLDER);
+    this.#folder = path.join(governance.userStateDirectory(registryOptions), SESSIONS_FOLDER);
     this.#now = now;
     this.#registryOptions = registryOptions;
     this.#environment = environment;
@@ -433,7 +416,7 @@ class SessionEpochs {
       if (this.#restricted(sessionId) || !this.#drop('s', sessionId)) stuck.session = sessionId;
     }
     if (!kept && SessionEpochs.#valid(repositoryId)) {
-      try { this.#write('r', repositoryId); } catch {
+      try { if (!this.repository(repositoryId)) this.#write('r', repositoryId); } catch {
         if (!this.#drop('r', repositoryId)) {
           stuck.repository = repositoryId;
           if (epoch !== null && (this.#restricted(sessionId) || !this.#drop('s', sessionId))) stuck.session = sessionId;
@@ -472,7 +455,7 @@ class SessionEpochs {
 // the repository it starts in, after refreshing this computer's read of the binding merged on that
 // repository's default branch (bounded; offline keeps the last read). Never throws. `refreshBinding`
 // is for tests; a test registry or test run never reaches the network (refreshMergedBinding).
-function startSession(input, { registryOptions = {}, now, environment = process.env, host = null, refreshBinding = null, programmeDeps = {} } = {}) {
+function startSession(input, { registryOptions = {}, now, environment = process.env, host = null, refreshBinding = null, proposalTransport = null, programmeDeps = {} } = {}) {
   try {
     let repositoryId = null;
     if (input && typeof input.cwd === 'string' && input.cwd && input.source !== 'clear' && input.source !== 'compact') {
@@ -480,9 +463,18 @@ function startSession(input, { registryOptions = {}, now, environment = process.
       try { (refreshBinding || governance.refreshMergedBinding)(input.cwd, registryOptions); } catch { /* offline keeps the last read */ }
       let current = null;
       try { current = governance.governanceState(input.cwd, registryOptions); repositoryId = current.repository_id || null; } catch { repositoryId = null; }
+      if (current?.merged?.fresh && ['M1', 'M2'].includes(current.rule)) {
+        try { new (require('./toolkit-governance-proposal.cjs').GovernanceProposals)({ registryOptions, now }).settle(input.cwd, current); } catch { /* repository decision still wins */ }
+      }
+      if (current?.state === 'UNDECIDED' && (proposalTransport || (registryOptions.testOnly !== true && environment.TOOLKIT_GOVERNANCE_OFFLINE !== '1'))) {
+        try {
+          const { GovernanceProposals, GitHubProposalTransport } = require('./toolkit-governance-proposal.cjs');
+          new GovernanceProposals({ registryOptions, now, transport: proposalTransport || new GitHubProposalTransport() }).refresh(input.cwd);
+        } catch { /* unavailable proposal discovery is reported by the gate */ }
+      }
       // Governance confirmed off (the merged binding disables it, or the user's no): turns queued
       // offline for this repository on this computer are never written, so they are deleted now.
-      if (current && current.state === 'DISABLED' && ['M2', 'R2'].includes(current.rule) && current.root) {
+      if (current && current.state === 'DISABLED' && current.rule === 'M2' && current.root) {
         try { require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').discardQueuesFor(current.root, programmeDeps); } catch { /* the next turn end discards it */ }
       }
     }
@@ -492,12 +484,12 @@ function startSession(input, { registryOptions = {}, now, environment = process.
 
 // ---- held prompts -----------------------------------------------------------------------------
 
-// Prompts held in undecided repositories, kept next to the registry, private to this computer.
+// Prompts held in undecided repositories, kept in private operational state.
 class HeldPrompts {
   #file; #now;
 
   constructor({ registryOptions = {}, now = () => new Date() } = {}) {
-    this.#file = path.join(path.dirname(governance.registryPathFor(registryOptions)), HELD_BASENAME);
+    this.#file = path.join(governance.userStateDirectory(registryOptions), HELD_BASENAME);
     this.#now = now;
   }
 
@@ -629,7 +621,7 @@ class HeldPrompts {
   }
 }
 
-// "Not now" answers, kept next to the registry: per repository, the sessions that gave one (the
+// "Not now" answers, kept in private operational state: per repository, the sessions that gave one (the
 // newest few, so another session's "not now" never re-holds this one) and each one's session and
 // repository marks. Nothing is decided; a new session, or the same one resumed, asks again. A
 // missing, unreadable or damaged file counts as no "not now" (the repository stays held and the
@@ -638,7 +630,7 @@ class NotNow {
   #file; #now;
 
   constructor({ registryOptions = {}, now = () => new Date() } = {}) {
-    this.#file = path.join(path.dirname(governance.registryPathFor(registryOptions)), NOT_NOW_BASENAME);
+    this.#file = path.join(governance.userStateDirectory(registryOptions), NOT_NOW_BASENAME);
     this.#now = now;
   }
 
@@ -732,7 +724,7 @@ class NotNow {
 // one-use ticket bound to the session, the run, the message and the one folder asked about. The
 // agent records the answer it read with toolkit-governance-answer.cjs and the ticket; the ticket is
 // spent on first use, only the newest one per session counts, it lapses after half an hour, and one
-// thread message never gets a second ticket. Kept next to the registry, the ticket itself hashed.
+// thread message never gets a second ticket. Kept in private operational state, the ticket itself hashed.
 //
 // A confirmation is the same store's other kind of entry: when the agent records `confirm-<answer>`
 // with a ticket (because it is unsure), the session gets a pending
@@ -755,7 +747,7 @@ class ReplyTickets {
   #file; #now; #gate;
 
   constructor({ registryOptions = {}, now = () => new Date(), gate = null } = {}) {
-    this.#file = path.join(path.dirname(governance.registryPathFor(registryOptions)), TICKETS_BASENAME);
+    this.#file = path.join(governance.userStateDirectory(registryOptions), TICKETS_BASENAME);
     this.#now = now;
     this.#gate = gate;
   }
@@ -925,7 +917,7 @@ function ticketContext(repositories, ticket) {
 }
 
 // The confirmation question for one answer: what Toolkit would record, for which repositories.
-const ANSWER_EFFECTS = Object.freeze({ enable: 'turn on GitHub governance', disable: 'keep GitHub governance off (never ask again)', 'not-now': 'leave GitHub governance undecided until next session' });
+const ANSWER_EFFECTS = Object.freeze({ enable: 'prepare a pull request to turn GitHub governance on', disable: 'prepare a pull request to turn GitHub governance off', 'not-now': 'leave GitHub governance undecided until next session' });
 function confirmQuestion(repositories, command) {
   return `Toolkit will ${ANSWER_EFFECTS[command]} for ${repositoryNames(repositories)}. Is that right?`;
 }
@@ -967,7 +959,7 @@ const ASK = "Enable Toolkit's automated GitHub tracking governance for this repo
 // The held-message notice: two lines here, and PromptHold.decide adds the line for agents.
 const QUESTION = [
   'Toolkit: message held. Turn on GitHub governance (issues, records, evidence store) for this repository?',
-  'Reply yes, no (never ask again) or later (ask next session). Held messages follow your answer.',
+  'Reply yes or no (prepare a decision pull request), or later (ask next chat). Held messages follow your answer.',
 ];
 
 function questionText(verdict, held) {
@@ -982,8 +974,8 @@ function questionText(verdict, held) {
 const PICKER_QUESTION = 'Turn on GitHub governance (issues, records, evidence store) for this repository?';
 const PICKER_HEADER = 'Governance';
 const PICKER_OPTIONS = Object.freeze([
-  Object.freeze({ label: 'Yes', description: 'Toolkit keeps issues, records and an evidence store here; setup questions follow.' }),
-  Object.freeze({ label: 'No', description: 'No GitHub records here, the coding rules still apply, and Toolkit never asks again.' }),
+  Object.freeze({ label: 'Yes', description: 'Prepare a repository on decision through a pull request; missing setup choices follow.' }),
+  Object.freeze({ label: 'No', description: 'Prepare a repository off decision through a pull request; the coding rules still apply.' }),
   Object.freeze({ label: 'Later', description: 'Nothing is recorded, and Toolkit asks again next session.' }),
 ]);
 const PICKER_COMMANDS = Object.freeze({ Yes: 'enable', No: 'disable', Later: 'not-now' });
@@ -1032,24 +1024,13 @@ const NEVER_OWNER = 'Never act as the user: do not answer the governance questio
 // The same rule in the short form the held-message notices end with.
 const NEVER_OWNER_SHORT = 'only the user answers; never answer, script or click it for them.';
 
-function unreadableText(state, registryOptions) {
-  const hint = governance.repairHint(state, registryOptions);
-  return `Toolkit: message held. The governance state of this repository could not be read (${state.error_code}). ${hint || `Run ${terminalCommand('check')} in a terminal to see why.`}`;
-}
-
-// What the agent does in an ENABLED repository whose setup is not finished (the governed block or the
-// binding is missing): right after the user's yes, and at every session start until both land.
-const SETUP_ASK = `GitHub governance setup is not finished here. Before other work, run ${terminalCommand('discover')} (it only reads, and asks nothing) and put its adoption proposal to the user in one message: the parent issue and private evidence store it recommends with their evidence (or the alternatives, or the create defaults when it found none), and what Toolkit would reuse, add, repair, keep and defer. A candidate is used only after the user confirms it; never pick one for them. The free security settings need no question: they are on by default and \`toolkit governance security\` turns them on once governance is enabled; Toolkit never turns on a GitHub feature that needs billing. One yes covers the whole list: then use \`repository-agent-rules\` to add the governed block and the version 2 \`.github/toolkit-programme.json\` in one pull request for the user to merge; the binding applies only once that pull request merges.`
-  + ' If the user says not now, carry on under the global rules and ask again next session. Never act as the user: do not answer any of these questions yourself.';
-
 function replayContext(state, prompts, { notNow = false, elsewhere = false } = {}) {
-  const label = state.state === 'ENABLED' && state.materials_complete === false ? 'ENABLED (materials incomplete)' : state.state;
+  const label = state.state;
   const lines = [notNow
     ? 'The user answered "later" to the Toolkit GitHub governance question. Nothing is decided: for the rest of this session follow the global rules (coding gates included) without GitHub governance, and Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.'
     : elsewhere
-      ? `Toolkit governance is now ${label} for this repository; it was decided outside this session.`
-      : `Toolkit governance is now ${label} for this repository; the user just answered the governance question.`];
-  if (!notNow && state.state === 'ENABLED' && state.materials_complete === false) lines.push(`${SETUP_ASK} Handle the held messages below after that question.`);
+      ? state.state === 'UNDECIDED' ? 'Toolkit: a governance proposal is pending. The default branch has no merged decision yet.' : `Toolkit governance is now ${label} for this repository, as read from the default branch.`
+      : state.state === 'UNDECIDED' ? 'Toolkit: the user answered the governance question. Its proposal is pending; governance stays as merged on the default branch.' : `Toolkit governance is now ${label} for this repository.`];
   if (prompts.length > 0) {
     // Runs of one session share its id, so when several sent messages, or one was a resume or fork, an
     // agent's process may be among them.
@@ -1099,7 +1080,7 @@ class PickerNotes {
   #folder; #now;
 
   constructor({ registryOptions = {}, now = () => new Date() } = {}) {
-    this.#folder = path.join(path.dirname(governance.registryPathFor(registryOptions)), SESSIONS_FOLDER);
+    this.#folder = path.join(governance.userStateDirectory(registryOptions), SESSIONS_FOLDER);
     this.#now = now;
   }
 
@@ -1158,9 +1139,9 @@ class PromptHold {
   // picker: the host can show Toolkit's tap-to-answer card (Claude Code). Then a held message in a
   // github.com repository lets the turn run with an instruction to show the card, and only the card
   // runs (ToolGate); the message stays held and comes back after the answer, as with a typed one.
-  constructor({ registryOptions = {}, environment = process.env, now = () => new Date(), stateReader = null, picker = false } = {}) {
+  constructor({ registryOptions = {}, environment = process.env, now = () => new Date(), stateReader = null, picker = false, proposalTransport = null, refreshBinding = null } = {}) {
     this.#registryOptions = registryOptions;
-    this.#gate = new GovernanceGate({ registryOptions, stateReader, now });
+    this.#gate = new GovernanceGate({ registryOptions, stateReader, now, environment, proposalTransport, refreshBinding });
     this.#held = new HeldPrompts({ registryOptions, now });
     this.#notNow = new NotNow({ registryOptions, now });
     this.#epochs = new SessionEpochs({ registryOptions, now });
@@ -1208,7 +1189,7 @@ class PromptHold {
   }
 
   #decide({ cwd, prompt, sessionId = null }) {
-    const verdict = this.#gate.evaluate(cwd, { sessionId });
+    const verdict = this.#gate.evaluate(cwd, { sessionId, refreshPending: true });
     const text = String(prompt || '');
     // Answers are read from the user's reply; what is held and handed back is the message as sent.
     const message = ownerMessage(text);
@@ -1221,8 +1202,10 @@ class PromptHold {
       const claim = this.#claim(message, verdict.state.repository_id, sessionId, marks, this.#notNow.answeredAt(verdict.state.repository_id, sessionId));
       return claim || this.#afterNotNow(cwd, text, answer, verdict, sessionId);
     }
-    if (!verdict.hold) return verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId);
-    if (verdict.reason === 'state-unreadable') return { action: 'block', reason: unreadableText(verdict.state, this.#registryOptions) };
+    if (!verdict.hold) {
+      const replay = verdict.reason === 'no-git' ? { action: 'pass' } : this.#replayIfAny(verdict.state, sessionId);
+      return verdict.pending ? { ...replay, context: [verdict.pending.text, replay.context].filter(Boolean).join('\n') } : verdict.reason === 'unavailable' ? { ...replay, context: "Toolkit: couldn't check governance. Continue with the global rules; no governance effects or standing task auto-merge until it can be checked." } : replay;
+    }
     // A session another session or a launcher started never answers and never adds to what is held.
     if (this.#launched(sessionId)) return { action: 'block', reason: answer || SHORT_ANSWER.test(reply) ? LAUNCHED_TEXT : LAUNCHED_HOLD_TEXT };
     const marks = this.#marks(verdict, sessionId);
@@ -1436,12 +1419,14 @@ class PromptHold {
     }
     let decided;
     try {
-      decided = writeGovernanceDecision(cwd, command, { registryOptions: this.#registryOptions, now: this.#now });
+      const proposals = new (require('./toolkit-governance-proposal.cjs').GovernanceProposals)({ registryOptions: this.#registryOptions, now: this.#now });
+      proposals.request(cwd, command === 'enable' ? 'yes' : 'no', { sessionId, epoch: marks.session });
+      decided = proposals.pending(cwd, { sessionId, epoch: marks.session });
     } catch (error) {
       return { action: 'block', reason: `Toolkit: your answer could not be recorded (${codeOf(error)}), so nothing changed and this repository is still held. Reply again, or run ${terminalCommand(command)} in your own terminal.` };
     }
     const prompts = this.#held.take(verdict.state.repository_id, sessionId);
-    return { action: 'pass', context: replayContext(decided.state, prompts) };
+    return { action: 'pass', context: [decided.text, replayContext(verdict.state, prompts)].join('\n') };
   }
 }
 
@@ -1551,7 +1536,7 @@ class ToolGate {
       }
     }
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => USER_STATE_PATH.test(resolveTarget(input, target)))) {
-      return { deny: `Toolkit: its user-state files (governance decisions and held messages) are changed only by Toolkit itself. ${NEVER_OWNER}` };
+      return { deny: `Toolkit: its user-state files (cached observations, pending proposals and held messages) are changed only by Toolkit itself. ${NEVER_OWNER}` };
     }
     if (tool === PICKER_TOOL) return this.#picker(input, sessionId);
     // A prompt the agent schedules for itself could arrive as bare text and read as the user's reply,
@@ -1564,7 +1549,6 @@ class ToolGate {
     // message in front of Claude, and only the card runs on it.
     const verdict = this.#gate.evaluate(input && input.cwd, { sessionId });
     if (verdict.hold) {
-      if (verdict.reason === 'state-unreadable') return { deny: [`Toolkit: the governance state of this repository could not be read (${verdict.state.error_code}), so nothing runs here until it can.`, governance.repairHint(verdict.state, this.#registryOptions), NEVER_OWNER].filter(Boolean).join(' ') };
       return { deny: `Toolkit: this repository has no governance decision yet, so nothing runs here. Ask the user in plain words: "${ASK}" Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}` };
     }
     // From a folder that is not held, a command or edit may still reach into one that is.
@@ -1610,13 +1594,14 @@ class ToolGate {
 function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {} } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
   const state = verdict.state;
+  if (verdict.pending) return verdict.pending.text;
+  if (verdict.reason === 'unavailable') return "Toolkit: couldn't check governance. Continue with the global rules; no governance effects or standing task auto-merge until it can be checked.";
   if (verdict.reason === 'not-now') return 'Toolkit governance: not decided yet; the user said "later" for this session. Follow the global rules (coding gates included) without GitHub governance; Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message.';
   if (verdict.hold) {
-    if (verdict.reason === 'state-unreadable') return [`Toolkit governance: the state of this repository could not be read (${state.error_code}). Every user message is held until it can; do not try to work around it.`, governance.repairHint(state, registryOptions), NEVER_OWNER].filter(Boolean).join(' ');
     return `Toolkit governance: this repository has no GitHub governance decision yet. Every user message is held until the user answers Toolkit's question. If you need to raise it, ask "${ASK}"; Toolkit records their own reply, so never ask them to run a command, and do not try to work around it. ${NEVER_OWNER}`;
   }
   const decided = decidedLine(state);
-  const programme = state.state === 'ENABLED' && state.materials_complete !== false ? programmeLines(state, registryOptions, programmeDeps) : [];
+  const programme = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : [];
   return [decided, ...programme].join(' ');
 }
 
@@ -1658,14 +1643,17 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
 }
 
 function decidedLine(state) {
+  if (state.notes?.includes('could-not-check-governance')) return `Toolkit: couldn't check governance. The last repository decision was ${state.state.toLowerCase()}. Ordinary work continues without governance effects or standing task auto-merge until it can be checked.`;
+  if (state.rule === 'M2' && state.notes?.includes('merged-binding-stale')) return 'Toolkit: the last repository decision was disabled, read over 24 hours ago. Ordinary work continues without governance effects or standing task auto-merge until it can be checked.';
   if (state.rule === 'S1') return "Toolkit governance: DISABLED here: this repository is an evidence store (agent-managed, not governed). Follow the global rules; the evidence-store rules in the governed repository's AGENTS.md apply.";
   if (state.rule === 'R1s') return "Toolkit governance: DISABLED here: this repository is a scratch clone in another repository's ignored .tmp folder (not governed). Follow the global rules, coding gates included.";
   if (state.rule === 'R1') return 'Toolkit governance: DISABLED automatically (this folder is not a git repository, so there is no GitHub governance). Follow the global rules, coding gates included.';
   if (state.rule === 'R8') return `Toolkit governance: DISABLED automatically (it ${whereText(state)}, so GitHub governance cannot run here). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.`;
   if (state.state === 'ERROR') return 'Toolkit governance: ERROR for this repository (the programme binding merged on the default branch cannot be used). Follow the global rules, coding gates included; ordinary work continues, but programme records, gate admission and finality hold until a pull request fixes the binding. Never treat this as ENABLED or as DISABLED.';
   if (state.state === 'DISABLED') return 'Toolkit governance: DISABLED for this repository (no GitHub governance). Follow the global rules, coding gates included; any TOOLKIT-GOVERNED-RULES block in AGENTS.md does not apply.';
-  if (state.materials_complete === false) return `Toolkit governance: ENABLED, setup not finished (\`.github/toolkit-programme.json\` is not merged on the default branch yet). Follow the global rules, coding gates included; GitHub governance starts once the setup pull request with the binding merges. ${SETUP_ASK}`;
-  const enabled = 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the TOOLKIT-GOVERNED-RULES block in AGENTS.md (GitHub governance: records and evidence).';
+  const enabled = state.materials?.governed_block
+    ? 'Toolkit governance: ENABLED for this repository. Follow the global rules, coding gates included, and the TOOLKIT-GOVERNED-RULES block in AGENTS.md (GitHub governance: records and evidence).'
+    : 'Toolkit governance: ENABLED by the default branch, but AGENTS.md has no governed rules block. Follow the global rules and use repository-agent-rules to prepare the missing block through a pull request.';
   return state.governed_effects_hold ? `${enabled} The binding merged on the default branch was last read over 24 hours ago, so programme records, gate admission and finality hold until it is read again online.` : enabled;
 }
 
@@ -1709,7 +1697,6 @@ module.exports = Object.freeze({
   insideRepository,
   sessionLine,
   terminalCommand,
-  writeGovernanceDecision,
   PICKER_INPUT,
   PICKER_QUESTION,
   pickerInput,

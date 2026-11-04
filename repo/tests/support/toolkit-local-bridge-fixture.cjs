@@ -111,14 +111,15 @@ function writeDisabledHookHub(hub) {
 const CORE_CACHE_FIXTURE_PATHS = Object.freeze([
   'repo/contracts/toolkit-local-bridge/version.json',
   'repo/scripts/toolkit-gate-contract-compiler.cjs',
-  'repo/scripts/toolkit-capability-registry.cjs',
+  'repo/scripts/toolkit-repository-identity.cjs',
+  'repo/scripts/toolkit-user-state.cjs',
+  'repo/scripts/toolkit-governance-proposal.cjs',
   'repo/contracts/agent-rules/global-rules.md',
   'repo/contracts/agent-rules/n8n-safety-router-adapter.md',
   'repo/CONTROLLER.md',
   'repo/ARCHITECTURE.md',
 ]);
 const CORE_CACHE_FIXTURE_DIRS = Object.freeze([
-  'repo/contracts/repository-capability-registry',
   'repo/contracts/controller-kernel',
 ]);
 

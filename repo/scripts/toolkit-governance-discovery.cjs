@@ -150,6 +150,9 @@ class GovernanceDiscovery {
     if (state.rule === 'M2') return { ...base, status: 'disabled', reason: 'the merged binding sets governance to disabled; only an owner-merged pull request changes it' };
     if (state.rule === 'S1') return { ...base, status: 'not-applicable', reason: 'an evidence store that a programme binding names (agent-managed, not governed)' };
     if (state.rule === 'R1s') return { ...base, status: 'not-applicable', reason: "a scratch clone in another repository's ignored .tmp folder (not governed)" };
+    if (state.state === 'UNAVAILABLE') return { ...base, status: 'unavailable', reason: "couldn't check governance; ordinary work continues without governance effects or standing task auto-merge" };
+    const pending = state.state === 'UNDECIDED' ? new (require('./toolkit-governance-proposal.cjs').GovernanceProposals)({ registryOptions: this.#registryOptions }).pending(cwd) : null;
+    if (pending) return { ...base, status: pending.kind === 'unavailable' ? 'unavailable' : 'pending', reason: pending.text };
     if (state.rule === 'M0') return { ...base, status: 'error', reason: 'the merged binding is invalid; fix it through a pull request first', problems: state.merged.problems };
     const identity = governance.readIdentity(state.root);
     const slug = governance.remoteSlug(identity.remote);
@@ -274,7 +277,7 @@ function adoptionList({ local, parents, stores, requiredChecks, rulesets, draft,
   if (requiredChecks && requiredChecks.length) list.reuse.push(`required checks from the default branch protection: ${requiredChecks.join(', ')}`);
   else if (requiredChecks) list.defer.push('required checks: none are required on the default branch yet');
   if (rulesets.ok && Array.isArray(rulesets.value) && rulesets.value.length) list.keep.push(`rulesets: ${rulesets.value.map(entry => entry.name).filter(Boolean).join(', ')}`);
-  else if (rulesets.ok) list.add.push('the no-force-push ruleset (offered by `toolkit governance migrate` after its own yes)');
+  else if (rulesets.ok) list.add.push('the no-force-push ruleset, after governance is merged and its own explicit approval');
   if (local.scheduled.length) list.keep.push(`scheduled workflows: ${local.scheduled.join(', ')}`);
   if (local.deploy_docs.length) list.keep.push(`deployment notes: ${local.deploy_docs.join(', ')}`);
   if (local.monitoring.length) list.keep.push(`monitoring workflows: ${local.monitoring.join(', ')}`);

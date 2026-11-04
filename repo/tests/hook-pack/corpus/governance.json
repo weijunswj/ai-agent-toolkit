@@ -3,6 +3,28 @@
   "family": "governance",
   "rows": [
     {
+      "id": "GOV.slow-proposal-allows-prompt",
+      "source": "delta review: proposal discovery exceeded the prompt hook timeout",
+      "kind": "fault",
+      "hosts": ["claude"],
+      "event": "UserPromptSubmit",
+      "fixture": { "repo": { "governance": "undecided", "branch": "feature" }, "slow_proposal": true },
+      "payload": { "prompt": "merge 1" },
+      "expect": { "decision": "allow" },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.read-only-account-continues",
+      "source": "governance review: third-party clones must not hold every new chat",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "fixture": {"repo": {"governance": "undecided", "branch": "feature", "can_write": false}},
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "git status"}},
+      "expect": {"decision": "allow"},
+      "postcondition": "no-local-decision-write",
+      "status": "pass"
+    },
+    {
       "id": "GOV.session-shell-resume-answer",
       "source": "resume review: revoking merge origin must still rotate governance question marks",
       "kind": "state",
@@ -709,6 +731,232 @@
       },
       "status": "pass",
       "note": "Seeded from the ReplyTickets writer at 30c7d42. The ticket targets the fixture git folder with no origin, now automatically DISABLED. Its spent receipt stays in the store. CronCreate is a Claude tool; the Codex hook matcher does not claim this tool. Shared ticket and confirmation decisions are covered by the upgrade unit matrix."
+    },
+    {
+      "id": "GOV.local-no-is-not-a-repository-decision",
+      "source": "repository-only governance closure",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "undecided",
+          "branch": "feature",
+          "legacy_answer": "no"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.local-yes-is-not-a-repository-decision",
+      "source": "repository-only governance closure",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "undecided",
+          "branch": "feature",
+          "legacy_answer": "yes"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.damaged-old-registry-cannot-block-main",
+      "source": "repository-only governance closure",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "legacy_answer": "damaged"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.no-answer-remains-pending",
+      "source": "repository-only governance closure",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "undecided",
+          "branch": "feature"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "postcondition": "no-local-decision-write",
+      "steps": [
+        {
+          "event": "SessionStart",
+          "payload": {
+            "source": "startup"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "Prepare this work."
+          },
+          "expect": {
+            "decision": "deny"
+          },
+          "expect_by_host": {
+            "claude": {
+              "decision": "allow"
+            }
+          },
+          "note": "Claude displays its governance card while Codex holds the prompt as text."
+        },
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "no"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "GOV.yes-answer-remains-pending",
+      "source": "repository-only governance closure",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "undecided",
+          "branch": "feature"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "postcondition": "no-local-decision-write",
+      "steps": [
+        {
+          "event": "SessionStart",
+          "payload": {
+            "source": "startup"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "Prepare this work."
+          },
+          "expect": {
+            "decision": "deny"
+          },
+          "expect_by_host": {
+            "claude": {
+              "decision": "allow"
+            }
+          },
+          "note": "Claude displays its governance card while Codex holds the prompt as text."
+        },
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "yes"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "GOV.unavailable-allows-ordinary-work",
+      "source": "repository-only governance closure",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "undecided",
+          "branch": "feature",
+          "binding_status": "unavailable"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
     }
   ]
 }

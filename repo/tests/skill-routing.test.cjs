@@ -557,7 +557,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.doesNotMatch(howToUse, /\.gemini\/antigravity\/skills\/<skill-name>\/SKILL\.md/);
   assert.doesNotMatch(howToUse, /<workspace-root>\/\.agent\/skills\/<skill-name>\/SKILL\.md/);
   assert.match(howToUse, /Antigravity 2 reads `AGENTS\.md` itself, so Toolkit installs no `GEMINI\.md` shim/);
-  assert.match(howToUse, /After the user says yes to Toolkit's GitHub governance for a repository, it carries the governed block in its `AGENTS\.md`/);
+  assert.match(howToUse, /After the owner merges the enabled governance decision on origin's default branch, the repository carries the governed block in its `AGENTS\.md`/);
   assert.match(howToUse, /\[repo-local\/AGENTS\.managed\.template\.md\]\(\.\.\/\.\.\/skills\/repository-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
 
   // The README is the short front page; it links out for the detail above.

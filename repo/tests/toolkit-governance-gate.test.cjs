@@ -57,6 +57,11 @@ function gitRepo(ctx, name, { remote = REMOTE, block = false, binding = false } 
       store: { kind: 'github', repository: 'example-owner/example-store', branch: 'main', path: 'state/' }, required_checks: ['validate'],
     }, null, 2));
   }
+  if (remote && governance.readIdentity(repo).valid && governance.isGitHubHost(governance.readIdentity(repo).remote.host)) {
+    const support = require('./toolkit-governed-fixture-support.cjs');
+    support.recordAbsent(repo, { registryPath: ctx.registryPath });
+    support.recordAbsent(repo, { home: path.join(ctx.root, 'home') });
+  }
   return repo;
 }
 
@@ -190,7 +195,7 @@ for (const kind of ['ticket', 'pending', 'bound']) {
       const ctx = scratch(t);
       const target = gitRepo(ctx, 'target', { remote: identity === 'other' ? 'https://gitlab.com/example-owner/repo.git' : ['enabled', 'disabled'].includes(identity) ? REMOTE : null });
       if (identity === 'several') for (const url of [REMOTE, 'https://github.com/example-owner/second.git']) git(target, ['config', '--add', 'remote.origin.url', url]);
-      if (['enabled', 'disabled'].includes(identity)) gate.writeGovernanceDecision(target, identity === 'enabled' ? 'enable' : 'disable', { registryOptions: ctx.options });
+      if (['enabled', 'disabled'].includes(identity)) require('./support/governance-observations.cjs').seedMerged(target, identity === 'enabled' ? 'enable' : 'disable', { registryOptions: ctx.options });
       const now = () => new Date();
       const options = { registryOptions: ctx.options, environment: {}, now };
       gate.startSession({ session_id: 'owner', source: 'startup' }, options);
@@ -320,13 +325,14 @@ test('adding a GitHub origin brings the normal question on both hosts and requir
     const say = prompt => prompts.decide({ cwd: f.cwd, prompt, sessionId: 'owner' });
     assert.deepEqual(say('no'), { action: 'pass' });
     git(f.target, ['remote', 'add', 'origin', REMOTE]);
+    require('./toolkit-governed-fixture-support.cjs').recordAbsent(f.target, { registryPath: f.ctx.registryPath });
     assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
     const first = say('no');
     assert.equal(first.action, host === 'claude' ? 'pass' : 'block');
-    assert.equal(first.reason || noticeOf(first.context), `${QUESTION_LINE}\nReply yes, no (never ask again) or later (ask next session). Held messages follow your answer.\n${AGENT_LINE}`);
+    assert.equal(first.reason || noticeOf(first.context), `${QUESTION_LINE}\nReply yes or no (prepare a decision pull request), or later (ask next chat). Held messages follow your answer.\n${AGENT_LINE}`);
     assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', 'a pre-question no cannot answer');
     assert.equal(say('no').action, 'pass');
-    assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
   }
 });
 
@@ -344,7 +350,7 @@ test('adding a GitHub origin brings the normal question on both hosts and requir
         if (answer === 'confirm') {
           const confirmation = f.prompts().answerTicket(ticket, 'confirm-no');
           assert.equal(confirmation.ok, true, confirmation.text);
-          assert.match(confirmation.text, /keep GitHub governance off/);
+          assert.match(confirmation.text, /prepare a pull request to turn GitHub governance off/);
           f.tick(1);
           const bound = boundOf(f.say(projects.wake('yes', { now: f.now })).context);
           assert.ok(bound);
@@ -352,7 +358,7 @@ test('adding a GitHub origin brings the normal question on both hosts and requir
           assert.equal(f.prompts().answerTicket(bound.ticket, 'no').ok, true);
         } else assert.equal(f.prompts().answerTicket(ticket, 'no').ok, true);
       }
-      assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED', answer);
+      assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', answer);
     }
   });
 
@@ -420,7 +426,7 @@ for (const picker of [false, true]) {
       assert.equal(initial.action, picker ? 'pass' : 'block', failure);
       const notice = initial.reason || noticeOf(initial.context);
       assert.match(notice, failure === 'damaged' ? /reply could not be checked or kept \(REPLY_TICKETS_MALFORMED\)/ : /delivery-receipt store is full/);
-      const question = `${QUESTION_LINE}\nReply yes, no (never ask again) or later (ask next session). Held messages follow your answer.`;
+      const question = `${QUESTION_LINE}\nReply yes or no (prepare a decision pull request), or later (ask next chat). Held messages follow your answer.`;
       assert.ok(notice.endsWith(`${question}\n${AGENT_LINE}`), notice);
       if (picker) {
         assert.match(initial.notice, /pick an answer/);
@@ -433,7 +439,7 @@ for (const picker of [false, true]) {
       assert.equal(f.say(projects.wake('yes', { now: f.now })).action, 'block', 'wrapped answers still need working receipts');
       assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
       assert.equal(f.say('yes').action, 'pass', 'a bare answer works after the question was shown');
-      assert.equal(stateOf(f.ctx, f.target).state, 'ENABLED');
+      assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
       assert.equal(fs.readFileSync(file, 'utf8'), stored, 'spent receipts are preserved');
     }
   });
@@ -445,7 +451,7 @@ test('bare exact answers work with damaged receipts in a held GitHub repository'
     const file = path.join(path.dirname(f.ctx.registryPath), gate.TICKETS_BASENAME);
     fs.writeFileSync(file, '{broken');
     assert.equal(f.say(answer).action, 'pass');
-    assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
     assert.equal(fs.readFileSync(file, 'utf8'), '{broken', 'no receipt reset');
   }
 });
@@ -471,7 +477,7 @@ test('Projects full answers after later still reject deliveries from before the 
   assert.equal(stale.action, 'block');
   assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
   assert.equal(f.say(projects.wake('toolkit governance enable', { now: f.now })).action, 'pass');
-  assert.equal(stateOf(f.ctx, f.target).state, 'ENABLED');
+  assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
 });
 
 test('closure hostile reader: wrapped authority refuses hostile free-text quoting and shell shapes outside its frame', () => {
@@ -500,7 +506,7 @@ test('closure ticket state conversion, capacity, missing marks and failed persis
   fs.writeFileSync(file, '{broken');
   g.ask();
   assert.equal(g.say('no').action, 'pass', 'bare answers do not read delivery receipts');
-  assert.equal(stateOf(g.ctx, g.target).state, 'DISABLED');
+  assert.equal(stateOf(g.ctx, g.target).state, 'UNDECIDED');
   assert.equal(fs.readFileSync(file, 'utf8'), '{broken', 'damaged receipts are preserved');
   fs.writeFileSync(file, intact);
   const { renameSync, readFileSync } = fs;
@@ -521,17 +527,17 @@ test('closure ticket state conversion, capacity, missing marks and failed persis
 });
 
 test('closure stale question bindings: resume, repository mark, changed origin and decision elsewhere', t => {
-  for (const change of ['resume', 'mark', 'origin', 'elsewhere']) {
+  for (const change of ['resume', 'origin', 'elsewhere']) {
     const f = answerFixture(t); f.ask();
     const ticket = replyTicket(f.say('ur rec'));
     if (change === 'resume') f.start('owner', 'resume');
     if (change === 'mark') f.start('other', 'startup', f.target);
     if (change === 'origin') git(f.target, ['remote', 'set-url', 'origin', 'https://github.com/example-owner/changed.git']);
-    if (change === 'elsewhere') gate.writeGovernanceDecision(f.target, 'disable', f.options);
+    if (change === 'elsewhere') require('./support/governance-observations.cjs').seedMerged(f.target, 'disable', f.options);
     assert.equal(f.prompts().answerTicket(ticket, 'no').ok, false, `${change}`);
     const before = stateOf(f.ctx, f.target).state;
     const reply = f.say(projects.wake('no', { now: f.now }));
-    assert.equal(reply.action, change === 'elsewhere' ? 'pass' : 'block');
+    assert.equal(reply.action, ['elsewhere', 'origin'].includes(change) ? 'pass' : 'block');
     assert.equal(stateOf(f.ctx, f.target).state, before, `${change}: stale question cannot decide`);
   }
 });
@@ -547,7 +553,7 @@ test('closure exact deliveries: before the question and across targets they gran
     f.ask();
     const answer = projects.wake('no', { now: f.now });
     assert.equal(f.say(answer).action, 'pass');
-    assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
     const other = gitRepo(f.ctx, 'second', { remote: 'https://github.com/example-owner/second.git' });
     f.prompts().decide({ cwd: other, sessionId: 'owner', prompt: 'prepare work' });
     // Preserve the spent id but give it a fresh delivery time to isolate the replay check.
@@ -573,7 +579,7 @@ test('closure confirmation delivery must follow the confirmation question itself
     const fresh = boundOf(f.say(projects.wake('yes', { now: f.now })).context);
     assert.equal(fresh.word, 'no');
     assert.equal(f.prompts().answerTicket(fresh.ticket, 'no').ok, true);
-    assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
   }
 });
 
@@ -604,7 +610,7 @@ test('receipt conversion preserves held messages, live tickets and confirmations
       assert.equal(bound.word, 'no');
       assert.equal(f.prompts().answerTicket(bound.ticket, 'no').ok, true);
     } else assert.equal(f.prompts().answerTicket(ticket, 'no').ok, true);
-    assert.equal(stateOf(f.ctx, f.target).state, 'DISABLED');
+    assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
   }
 });
 
@@ -615,7 +621,7 @@ test('H-01, H-02: every prompt in an undecided repository is held; the first sho
   assert.equal(first.action, 'block');
   assert.ok(first.reason.startsWith(QUESTION_LINE));
   // Three short lines: the plain question, what each answer does, and the line for agents; never a command to run.
-  assert.deepEqual(first.reason.split('\n'), [QUESTION_LINE, 'Reply yes, no (never ask again) or later (ask next session). Held messages follow your answer.', AGENT_LINE]);
+  assert.deepEqual(first.reason.split('\n'), [QUESTION_LINE, 'Reply yes or no (prepare a decision pull request), or later (ask next chat). Held messages follow your answer.', AGENT_LINE]);
   assert.doesNotMatch(first.reason, /toolkit-governance\.cjs|node /);
   const second = hold(ctx).decide({ cwd: repo, prompt: 'and the logout one' });
   assert.equal(second.action, 'block');
@@ -647,48 +653,40 @@ test('bypass attempts: ignoring, skipping, near-misses and a "yes" before the qu
   assert.match(gate.ANSWER.exec('Toolkit Governance Enable.')[1], /enable/i);
 });
 
-test('H-04: the answer is recorded in the user-state files only, nothing is written into the repository, and held prompts come back in order', (t) => {
-  const ctx = scratch(t);
-  const repo = gitRepo(ctx, 'repo');
-  hold(ctx).decide({ cwd: repo, prompt: 'first request', sessionId: 's1' });
-  hold(ctx).decide({ cwd: repo, prompt: 'second request', sessionId: 's1' });
-  const answered = hold(ctx).decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's1' });
+test('accepted yes stays pending, replays only this session and writes no repository or laptop decision', t => {
+  const ctx = scratch(t), repo = gitRepo(ctx, 'repo');
+  const prompts = hold(ctx);
+  prompts.decide({ cwd: repo, prompt: 'first request', sessionId: 's1' });
+  prompts.decide({ cwd: repo, prompt: 'second request', sessionId: 's1' });
+  const answered = prompts.decide({ cwd: repo, prompt: 'yes', sessionId: 's1' });
   assert.equal(answered.action, 'pass');
-  assert.match(answered.context, /now ENABLED \(materials incomplete\)/);
-  // A yes leads straight into the setup questions, asked before the held messages are handled.
-  // Discovery comes before any question: the agent runs the read-only discover command and puts its one proposal.
-  assert.match(answered.context, /GitHub governance setup is not finished here\. Before other work, run node "[^"]+toolkit-governance\.cjs" discover \(it only reads, and asks nothing\) and put its adoption proposal to the user in one message/);
-  assert.match(answered.context, /A candidate is used only after the user confirms it[^\n]*Toolkit never turns on a GitHub feature that needs billing[^\n]*One yes covers the whole list[^\n]*the binding applies only once that pull request merges[^\n]*If the user says not now, carry on under the global rules and ask again next session\. Never act as the user/);
-  assert.doesNotMatch(answered.context, /\(4\)|paid|Secret Protection|Code Security|paid_security/, 'setup asks nothing about paid features');
-  assert.ok(answered.context.indexOf('Before other work') < answered.context.indexOf('1. first request'));
-  assert.ok(answered.context.indexOf('1. first request') < answered.context.indexOf('2. second request'));
-  // Until the block and binding land, every new session is reminded, and nothing is held.
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 'later-session' }), /^Toolkit governance: ENABLED, setup not finished [^\n]*Before other work, run node "[^"]+" discover/);
-  assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: 'later-session', tool_input: { command: 'ls' } }), null);
-  assert.equal(stateOf(ctx, repo).recorded_decision, 'enabled');
-  writesNothingIn(repo);
-  assert.equal(fs.existsSync(path.join(repo, '.gitignore')), false, 'the root .gitignore is never created');
-  assert.equal(git(repo, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).join('|'), '', 'git status stays clean');
-  assert.equal(fs.existsSync(ctx.heldPath), false, 'the held file is deleted when empty');
-  assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: 'next request' }), { action: 'pass' });
+  assert.match(answered.context, /yes is pending/);
+  assert.match(answered.context, /missing parent, separate evidence store or required checks/);
+  assert.match(answered.context, /toolkit governance discover/);
+  assert.match(answered.context, /repository-agent-rules/);
+  assert.match(answered.context, /1\. first request\n2\. second request/);
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /yes is pending/);
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
+  assert.equal(registryBytes(ctx), null); writesNothingIn(repo);
+  assert.equal(git(repo, ['status', '--porcelain']), '');
+  assert.equal(prompts.decide({ cwd: repo, prompt: 'next', sessionId: 's1' }).action, 'pass');
+  assert.equal(prompts.decide({ cwd: repo, prompt: 'next', sessionId: 'new' }).action, 'block');
 });
 
-test('H-05: disable is recorded, never asked again in new sessions, and the session line says the block does not apply', (t) => {
-  const ctx = scratch(t);
-  const repo = gitRepo(ctx, 'repo', { block: true });
-  assert.match(hold(ctx).decide({ cwd: repo, prompt: 'hello', sessionId: 's1' }).reason, /Turn on GitHub governance/);
-  const answered = hold(ctx).decide({ cwd: repo, prompt: 'TOOLKIT GOVERNANCE DISABLE', sessionId: 's1' });
-  assert.equal(answered.action, 'pass');
-  assert.match(answered.context, /now DISABLED/);
-  for (let index = 0; index < 3; index += 1) assert.deepEqual(hold(ctx).decide({ cwd: repo, prompt: `task ${index}` }), { action: 'pass' });
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /DISABLED .*does not apply/);
-  writesNothingIn(repo);
+test('a no remains pending in its run; a new chat asks until a decision proposal is published', t => {
+  const ctx = scratch(t), repo = gitRepo(ctx, 'repo'), prompt = hold(ctx);
+  prompt.decide({ cwd: repo, prompt: 'hello', sessionId: 'owner' });
+  const answered = prompt.decide({ cwd: repo, prompt: 'no', sessionId: 'owner' });
+  assert.equal(answered.action, 'pass'); assert.match(answered.context, /no is pending/);
+  assert.equal(prompt.decide({ cwd: repo, prompt: 'next', sessionId: 'owner' }).action, 'pass');
+  assert.equal(prompt.decide({ cwd: repo, prompt: 'next', sessionId: 'new-chat' }).action, 'block');
+  assert.equal(registryBytes(ctx), null);
 });
 
 test('a copy left by an earlier version is read by nothing and left exactly as it was', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
-  gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(repo, 'disable', { registryOptions: ctx.options });
   fs.mkdirSync(path.join(repo, OLD_FOLDER));
   const leftover = JSON.stringify({ schema: 'toolkit.repository-governance.v1', repository_id: stateOf(ctx, repo).repository_id, state: 'DECLINED', basis: 'your decision', history: [] });
   fs.writeFileSync(oldCopy(repo), leftover);
@@ -707,9 +705,9 @@ test('short replies after the question: yes enables, no disables, and the held p
     assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'fix the login bug', sessionId: 's1' }).action, 'block');
     const answered = hold(ctx).decide({ cwd: repo, prompt: reply, sessionId: 's1' });
     assert.equal(answered.action, 'pass', reply);
-    assert.match(answered.context, new RegExp(`now ${expected}`), reply);
+    assert.match(answered.context, /is pending/, reply);
     assert.match(answered.context, /1\. fix the login bug/);
-    assert.equal(stateOf(ctx, repo).state, expected, reply);
+    assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', reply);
   }
 });
 
@@ -723,9 +721,9 @@ test('a reply sent from a Claude Projects thread answers like a typed one; relay
     assert.equal(hold(ctx).decide({ cwd: repo, prompt: original, sessionId: 's1' }).action, 'block');
     const answered = hold(ctx).decide({ cwd: repo, prompt: wake(reply), sessionId: 's1' });
     assert.equal(answered.action, 'pass', reply);
-    assert.match(answered.context, new RegExp(`now ${expected}`), reply);
+    assert.match(answered.context, /is pending/, reply);
     assert.ok(answered.context.includes(original), `${reply}: the held message comes back exactly as sent`);
-    assert.equal(stateOf(ctx, repo).state, expected, reply);
+    assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', reply);
   }
   // "later" from the thread lets this run carry on, as a typed "later" does.
   const later = gitRepo(ctx, 'wake-later', { remote: 'https://github.com/example-owner/wake-later.git' });
@@ -886,7 +884,7 @@ test('a real thread reply with the host\'s system note answers in the repository
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
     const answered = hold(ctx).decide({ cwd: repo, prompt: REAL_THREAD_WAKE(reply), sessionId: 's1' });
     assert.equal(answered.action, 'pass', reply);
-    assert.equal(stateOf(ctx, repo).state, expected, reply);
+    assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', reply);
   }
 });
 
@@ -899,6 +897,7 @@ test('from a parent folder: a command or edit in a held repository is refused, a
     fs.mkdirSync(repo);
     git(repo, ['init', '-q']);
     git(repo, ['remote', 'add', 'origin', `https://github.com/example-owner/${name}.git`]);
+    if (governance.readIdentity(repo).valid && governance.isGitHubHost(governance.readIdentity(repo).remote.host)) require('./toolkit-governed-fixture-support.cjs').recordAbsent(repo, { registryPath: ctx.registryPath });
     return repo;
   };
   const reach = (sessionId, command, tool_name = 'PowerShell') => new gate.ToolGate({ registryOptions: ctx.options }).decide({ tool_name, cwd: parent, session_id: sessionId, tool_input: { command } });
@@ -919,7 +918,7 @@ test('from a parent folder: a command or edit in a held repository is refused, a
   assert.equal(stateOf(ctx, siteA).state, 'UNDECIDED');
   assert.equal(stateOf(ctx, siteB).state, 'UNDECIDED');
   // Once a repository is decided in its own chat, the command runs from the parent folder.
-  gate.writeGovernanceDecision(siteA, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(siteA, 'enable', { registryOptions: ctx.options });
   assert.equal(reach('parent', `git -C "${siteA}" status`), null);
   writesNothingIn(siteA); writesNothingIn(siteB);
 });
@@ -935,6 +934,7 @@ test('reply tickets: "no for both" from the user is read by the agent and record
     fs.mkdirSync(repo);
     git(repo, ['init', '-q']);
     git(repo, ['remote', 'add', 'origin', `https://github.com/example-owner/${name}.git`]);
+    if (governance.readIdentity(repo).valid && governance.isGitHubHost(governance.readIdentity(repo).remote.host)) require('./toolkit-governed-fixture-support.cjs').recordAbsent(repo, { registryPath: ctx.registryPath });
     return repo;
   };
   const toolGate = (environment = {}) => new gate.ToolGate({ registryOptions: ctx.options, environment });
@@ -969,10 +969,10 @@ test('reply tickets: "no for both" from the user is read by the agent and record
   const recorded = prompts().answerTicket(ticket, 'no');
   assert.equal(recorded.ok, true, recorded.text);
   assert.match(recorded.text, /Tell the user in plain words what Toolkit recorded/);
-  assert.equal(stateOf(ctx, first).state, 'DISABLED');
+  assert.equal(stateOf(ctx, first).state, 'UNDECIDED');
   // Spent: the same ticket records nothing again.
   assert.equal(prompts().answerTicket(ticket, 'yes').ok, false);
-  assert.equal(stateOf(ctx, first).state, 'DISABLED');
+  assert.equal(stateOf(ctx, first).state, 'UNDECIDED');
 
   // A coordinator's relay of the user's words, a reminder, another person or an agent: no ticket.
   const third = site('wp-three');
@@ -1011,7 +1011,7 @@ test('reply tickets: "no for both" from the user is read by the agent and record
   const enabled = prompts().answerTicket(insideTicket, 'yes');
   assert.equal(enabled.ok, true, enabled.text);
   assert.match(enabled.text, /1\. set up the theme/);
-  assert.equal(stateOf(ctx, held).state, 'ENABLED');
+  assert.equal(stateOf(ctx, held).state, 'UNDECIDED');
   // Before the question was shown, no ticket: the first message only asks.
   const unasked = gitRepo(ctx, 'unasked', { remote: 'https://github.com/example-owner/unasked.git' });
   assert.equal(prompts().decide({ cwd: unasked, prompt: 'no for both', sessionId: 'inside' }).action, 'block');
@@ -1029,6 +1029,7 @@ test('reply tickets: only the exact answer command runs; newest only, half-hour 
     fs.mkdirSync(repo);
     git(repo, ['init', '-q']);
     if (remote) git(repo, ['remote', 'add', 'origin', remote]);
+    if (governance.readIdentity(repo).valid && governance.isGitHubHost(governance.readIdentity(repo).remote.host)) require('./toolkit-governed-fixture-support.cjs').recordAbsent(repo, { registryPath: ctx.registryPath });
     return repo;
   };
   const toolGate = (options = {}) => new gate.ToolGate({ registryOptions: ctx.options, environment: {}, ...options });
@@ -1080,7 +1081,7 @@ test('reply tickets: only the exact answer command runs; newest only, half-hour 
     assert.match(toolGate().decide({ tool_name, cwd: parent, session_id: 'm', tool_input: { prompt: 'yes' } })?.deny || '', /no prompt is scheduled for the rest of this run, unless the user answers it/, tool_name);
     assert.equal(toolGate().decide({ tool_name, cwd: parent, session_id: 'free', tool_input: { prompt: 'yes' } }), null, tool_name);
   }
-  gate.writeGovernanceDecision(moved, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(moved, 'enable', { registryOptions: ctx.options });
   const none = prompts().answerTicket(late, 'no');
   assert.equal(none.ok, false);
   assert.match(none.text, /Nothing was recorded/);
@@ -1112,6 +1113,7 @@ test('confirmations: the reply records only the answer that was confirmed, and s
     fs.mkdirSync(repo);
     git(repo, ['init', '-q']);
     git(repo, ['remote', 'add', 'origin', `https://github.com/example-owner/${name}.git`]);
+    if (governance.readIdentity(repo).valid && governance.isGitHubHost(governance.readIdentity(repo).remote.host)) require('./toolkit-governed-fixture-support.cjs').recordAbsent(repo, { registryPath: ctx.registryPath });
     return repo;
   };
   const toolGate = () => new gate.ToolGate({ registryOptions: ctx.options, environment: {} });
@@ -1129,21 +1131,21 @@ test('confirmations: the reply records only the answer that was confirmed, and s
   const first = ticketOf(say('h', 'hmm leave it maybe', held).context);
   const asked = prompts().answerTicket(first, 'confirm-no');
   assert.equal(asked.ok, true, asked.text);
-  assert.match(asked.text, /Toolkit recorded nothing yet\. Ask the user this, word for word[^\n]*"Toolkit will keep GitHub governance off \(never ask again\) for held\. Is that right\?"/);
+  assert.match(asked.text, /Toolkit recorded nothing yet\. Ask the user this, word for word[^\n]*"Toolkit will prepare a pull request to turn GitHub governance off for held\. Is that right\?"/);
   assert.equal(prompts().answerTicket(first, 'no').ok, false, 'the first ticket is spent');
   const reply = say('h', 'yes', held);
   assert.equal(reply.action, 'pass');
   assert.equal(stateOf(ctx, held).state, 'UNDECIDED', 'a bare yes after a confirm question is not read as yes');
   const bound = boundOf(reply.context);
   assert.deepEqual(bound && bound.word, 'no');
-  assert.match(reply.context, /their reply to the question "Toolkit will keep GitHub governance off \(never ask again\) for held\. Is that right\?"/);
+  assert.match(reply.context, /their reply to the question "Toolkit will prepare a pull request to turn GitHub governance off for held\. Is that right\?"/);
   assert.equal(prompts().answerTicket(bound.ticket, 'yes').ok, false);
   assert.equal(prompts().answerTicket(bound.ticket, 'confirm-yes').ok, false);
   assert.equal(stateOf(ctx, held).state, 'UNDECIDED');
   assert.equal(toolGate().decide({ tool_name: 'Bash', cwd: held, session_id: 'h', tool_input: { command: `node "${gate.ANSWER_SCRIPT}" no ${bound.ticket}` } }), null);
   const recorded = prompts().answerTicket(bound.ticket, 'no');
   assert.equal(recorded.ok, true, recorded.text);
-  assert.equal(stateOf(ctx, held).state, 'DISABLED');
+  assert.equal(stateOf(ctx, held).state, 'UNDECIDED');
   assert.match(recorded.text, /1\. set up the site/);
 
   // Inside a held repository a confirmation lasts for the run: a "yes" 31 or 240 minutes later, or
@@ -1166,7 +1168,7 @@ test('confirmations: the reply records only the answer that was confirmed, and s
     const refused = say('late', 'yes', late);
     assert.equal(refused.action, 'block');
     // The re-ask is the same confirmation question, word for word, so the next reply matches what was shown.
-    assert.match(refused.reason, /could not be matched to the confirmation question[^\n]*The question is still: "Toolkit will keep GitHub governance off \(never ask again\) for late\. Is that right\?"/);
+    assert.match(refused.reason, /could not be matched to the confirmation question[^\n]*The question is still: "Toolkit will prepare a pull request to turn GitHub governance off for late\. Is that right\?"/);
   } finally { gate.ReplyTickets.prototype.issue = issue; }
   assert.equal(stateOf(ctx, late).state, 'UNDECIDED');
   const afterReask = boundOf(say('late', 'yes', late).context);
@@ -1184,7 +1186,7 @@ test('confirmations: the reply records only the answer that was confirmed, and s
   assert.equal(stateOf(ctx, late).state, 'UNDECIDED');
   assert.equal(fs.readFileSync(ticketsFile, 'utf8'), '{broken', 'no automatic receipt reset');
   assert.equal(say('late', 'toolkit governance disable', late).action, 'pass');
-  assert.equal(stateOf(ctx, late).state, 'DISABLED');
+  assert.equal(stateOf(ctx, late).state, 'UNDECIDED');
   assert.equal(fs.readFileSync(ticketsFile, 'utf8'), '{broken');
   fs.writeFileSync(ticketsFile, intact);
   const relay = '<project_claude_message session="s" thread_id="cmsg_A">\n<relay from="coordinator" session="s" current-time="2026-10-28T02:00:00Z">\n  <cited id="cmsg_B" author="user" name="Owner" at="2026-10-28T02:00:00Z" where="timeline">yes</cited>\n</relay>\n</project_claude_message>';
@@ -1215,7 +1217,7 @@ test('confirmations: the reply records only the answer that was confirmed, and s
   assert.equal(say('r', 'hello again', runs).action, 'block');
   const newRun = say('r', 'yes', runs);
   assert.equal(boundOf(newRun.context), null);
-  assert.equal(stateOf(ctx, runs).state, 'ENABLED');
+  assert.equal(stateOf(ctx, runs).state, 'UNDECIDED');
 
   // Inside a held repository, the user's reply to a confirmation delivered a second time is held and
   // records nothing, in any form, while the agent reads the first delivery with its ticket.
@@ -1260,7 +1262,7 @@ test('confirmations: the reply records only the answer that was confirmed, and s
   assert.match(resumedHold.reason, /^Toolkit: this session was resumed[^\n]*\nToolkit: message held\. Turn on GitHub governance/);
   assert.equal(prompts().answerTicket(ticketOf(say('left', 'hmm', leftover).context), 'confirm-no').ok, true);
   assert.ok(cron()?.deny);
-  gate.writeGovernanceDecision(leftover, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(leftover, 'enable', { registryOptions: ctx.options });
   assert.equal(cron(), null, 'decided elsewhere: the confirmation is over');
 
   // A "later" run counts as open: no prompt is scheduled in it.
@@ -1292,7 +1294,7 @@ test('later: nothing is recorded, this session carries on under the global rules
   assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /no GitHub governance decision yet/);
   // A later yes in the new session still decides.
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'yes', sessionId: 's2' }).action, 'pass');
-  assert.equal(stateOf(ctx, repo).state, 'ENABLED');
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
 });
 
 test('after "not now": the full answer still decides, and a short reply is an ordinary message', (t) => {
@@ -1306,8 +1308,8 @@ test('after "not now": the full answer still decides, and a short reply is an or
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
     const decided = hold(ctx).decide({ cwd: repo, prompt: answer, sessionId: 's1' });
     assert.equal(decided.action, 'pass', answer);
-    assert.match(decided.context, new RegExp(`now ${expected}`));
-    assert.equal(stateOf(ctx, repo).state, expected, answer);
+    assert.match(decided.context, /is pending/);
+    assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', answer);
   }
   // A launcher-started session still cannot answer, even after "not now".
   const repo = gitRepo(ctx, 'after-not-now-launcher', { remote: 'https://github.com/example-owner/after-not-now-launcher.git' });
@@ -1418,7 +1420,7 @@ test('nested sessions: a short reply counts only in the session that was shown t
     assert.equal(send({ cwd: own, session_id: `own-${host}`, prompt: 'fix the bug' }).held, true);
     const answered = send({ cwd: own, session_id: `own-${host}`, prompt: 'yes' });
     assert.equal(answered.held, false, host);
-    assert.match(answered.context, /now ENABLED[\s\S]*1\. fix the bug/);
+    assert.match(answered.context, /yes is pending[\s\S]*1\. fix the bug/);
   }
 });
 
@@ -1584,7 +1586,7 @@ test('session marks: a later process that resumes the session cannot answer, on 
     // The user's own run still answers once it was shown the question.
     const own = gitRepo(ctx, `own-${host}`, { remote: `https://github.com/example-owner/own-${host}.git` });
     assert.equal(send({ cwd: own, session_id: `own-${host}`, prompt: 'fix the bug' }, 'startup').held, true);
-    assert.match(send({ cwd: own, session_id: `own-${host}`, prompt: 'yes' }).context, /now ENABLED[\s\S]*1\. fix the bug/, host);
+    assert.match(send({ cwd: own, session_id: `own-${host}`, prompt: 'yes' }).context, /yes is pending[\s\S]*1\. fix the bug/, host);
   }
 });
 
@@ -1612,7 +1614,7 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
     start(`k-${source}`, source);
     const answered = raw().decide({ cwd: kept, prompt: 'yes', sessionId: `k-${source}` });
     assert.equal(answered.action, 'pass', source);
-    assert.match(answered.context, /now ENABLED[\s\S]*1\. hello/, source);
+    assert.match(answered.context, /yes is pending[\s\S]*1\. hello/, source);
   }
   // A /clear that comes with no mark yet starts one.
   const cleared = gitRepo(ctx, 'cleared', { remote: 'https://github.com/example-owner/cleared.git' });
@@ -1629,7 +1631,7 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
   assert.ok(again.reason.includes(QUESTION_LINE), 'the whole question is shown again');
   const answered = raw().decide({ cwd: own, prompt: 'yes', sessionId: 'o1' });
   assert.equal(answered.action, 'pass');
-  assert.match(answered.context, /now ENABLED[\s\S]*1\. fix the bug/);
+  assert.match(answered.context, /yes is pending[\s\S]*1\. fix the bug/);
   // After "later", the same run carries on; a resumed run is asked again and its full answer does not count.
   const later = gitRepo(ctx, 'later', { remote: 'https://github.com/example-owner/later.git' });
   start('l1', 'startup');
@@ -1647,37 +1649,12 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
   assert.ok(fs.readdirSync(folder).length <= 256);
 });
 
-test('repository marks: any session started in the repository since the question means the answer is asked again, whatever session id the run reports', (t) => {
-  const ctx = scratch(t);
-  const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
-  const start = (sessionId, source, cwd) => gate.startSession({ session_id: sessionId, source, cwd }, { registryOptions: ctx.options });
-  // `claude -p hello`, then `claude -pc yes`, whose session-start hook reports a new id while its prompt carries the old one.
-  const repo = gitRepo(ctx, 'continued');
-  start('first', 'startup', repo);
-  assert.equal(raw().decide({ cwd: repo, prompt: 'hello', sessionId: 'first' }).action, 'block');
-  start('new-id', 'resume', repo);
-  const continued = raw().decide({ cwd: repo, prompt: 'yes', sessionId: 'first' });
-  assert.equal(continued.action, 'block');
-  assert.match(continued.reason, /another session started in this repository, so Toolkit asks again/);
-  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
-  // A session started in another folder leaves this repository's question alone.
-  start('elsewhere', 'startup', path.join(ctx.root));
-  assert.equal(raw().decide({ cwd: repo, prompt: 'no', sessionId: 'first' }).action, 'pass');
-  assert.equal(stateOf(ctx, repo).state, 'DISABLED');
-  // After "later", a session started in the repository ends it for the full answer: Toolkit asks again.
-  const later = gitRepo(ctx, 'later-moved', { remote: 'https://github.com/example-owner/later-moved.git' });
-  start('l1', 'startup', later);
-  raw().decide({ cwd: later, prompt: 'hello', sessionId: 'l1' });
-  assert.equal(raw().decide({ cwd: later, prompt: 'later', sessionId: 'l1' }).action, 'pass');
-  assert.deepEqual(raw().decide({ cwd: later, prompt: 'carry on', sessionId: 'l1' }), { action: 'pass' }, '"later" still holds for ordinary messages');
-  start('agent-run', 'startup', later);
-  const moved = raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'l1' });
-  assert.equal(moved.action, 'block');
-  assert.match(moved.reason, /another session started in this repository since you said "later", so Toolkit asks again/);
-  assert.equal(stateOf(ctx, later).state, 'UNDECIDED');
-  // The user's next reply in that run answers.
-  assert.equal(raw().decide({ cwd: later, prompt: 'yes', sessionId: 'l1' }).action, 'pass');
-  assert.equal(stateOf(ctx, later).state, 'ENABLED');
+test('an unrelated chat cannot invalidate this run\'s accepted answer', t => {
+  const f = answerFixture(t); f.ask();
+  f.start('other');
+  assert.equal(f.say('no').action, 'pass');
+  assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
+  assert.match(gate.sessionLine(f.cwd, { ...f.options, sessionId: 'owner' }), /no is pending/);
 });
 
 test('a mark that cannot be replaced fails safe: the resumed or continued run cannot answer for the user', (t) => {
@@ -1708,7 +1685,7 @@ test('a mark that cannot be replaced fails safe: the resumed or continued run ca
   assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
   // The user's next reply answers.
   assert.equal(raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'first' }).action, 'pass');
-  assert.equal(stateOf(ctx, continued).state, 'ENABLED');
+  assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
 });
 
 test('a failed mark write retains restrictions through later startup replay', t => {
@@ -1755,7 +1732,7 @@ test('repository mark failure cannot delete a newly revoked session mark', t => 
   t.mock.method(fs, 'renameSync', (from, to) => { if (fault && to === file) throw busy(); return renameSync(from, to); });
   t.mock.method(fs, 'rmSync', (target, options) => { if (fault && target === file) throw busy(); return rmSync(target, options); });
   const resumed = new gate.SessionEpochs({ ...options, environment: { TOOLKIT_HOST_SESSION: 'user' } });
-  assert.equal(resumed.start('user', 'resume', 'repository'), null);
+  assert.match(resumed.start('user', 'resume', 'repository'), /^[a-f0-9]{32}$/);
   assert.equal(epochs.resumedFromSessionShell('user'), true, 'repository cleanup preserves the newly written revocation');
   fault = false;
   epochs.start('user', 'startup', 'repository');
@@ -1800,13 +1777,13 @@ test('a mark that can be neither replaced nor removed fails safe: held messages 
   start('B', 'startup', continued);
   assert.equal(raw().decide({ cwd: continued, prompt: 'hello', sessionId: 'B' }).action, 'block');
   locked.add(markFile('r', stateOf(ctx, continued).repository_id));
-  assert.equal(start('new-id', 'resume', continued), null);
+  assert.match(start('new-id', 'resume', continued), /^[a-f0-9]{32}$/);
   const continuedReply = raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'B' });
-  assert.equal(continuedReply.action, 'block');
-  assert.match(continuedReply.reason, /another session started in this repository, so Toolkit asks again/);
+  assert.equal(continuedReply.action, 'pass');
+  assert.match(continuedReply.context, /yes is pending/);
   assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
   assert.equal(raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'B' }).action, 'pass');
-  assert.equal(stateOf(ctx, continued).state, 'ENABLED');
+  assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
   // After "later", a start with the repository mark locked ends "later" for the full answer.
   const later = gitRepo(ctx, 'later', { remote: 'https://github.com/example-owner/later.git' });
   start('L', 'startup', later);
@@ -1815,8 +1792,8 @@ test('a mark that can be neither replaced nor removed fails safe: held messages 
   locked.add(markFile('r', stateOf(ctx, later).repository_id));
   start('agent-run', 'startup', later);
   const moved = raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'L' });
-  assert.equal(moved.action, 'block');
-  assert.match(moved.reason, /since you said "later", so Toolkit asks again/);
+  assert.equal(moved.action, 'pass');
+  assert.match(moved.context, /yes is pending/);
   assert.equal(stateOf(ctx, later).state, 'UNDECIDED');
 });
 
@@ -1884,7 +1861,7 @@ test('every governance refusal and hold an agent can see tells it never to act a
   const fresh = gitRepo(ctx, 'fresh', { remote: 'https://github.com/example-owner/fresh.git' });
   const gitlabFresh = gitRepo(ctx, 'gitlab-fresh', { remote: 'https://gitlab.com/example-owner/fresh.git' });
   texts['question'] = hold(ctx).decide({ cwd: fresh, prompt: 'hello', sessionId: 'agent' }).reason;
-  texts['question, count'] = hold(ctx).decide({ cwd: fresh, prompt: 'again', sessionId: 'agent' }).reason;
+  texts['question, count'] = hold(ctx).decide({ cwd: fresh, prompt: 'again', sessionId: 'other-agent' }).reason;
   texts['no mark'] = new gate.PromptHold({ registryOptions: ctx.options, environment: {} }).decide({ cwd: fresh, prompt: 'yes', sessionId: 'unmarked' }).reason;
   gate.startSession({ session_id: 'agent', source: 'resume', cwd: fresh }, { registryOptions: ctx.options });
   texts['resumed'] = hold(ctx).decide({ cwd: fresh, prompt: 'yes', sessionId: 'agent' }).reason;
@@ -1964,9 +1941,9 @@ const MUST_PASS_POWERSHELL = Object.freeze([
 test('must-pass rows: free text naming Claude or Codex runs in ENABLED, DISABLED and plain folders on both hosts', (t) => {
   const ctx = scratch(t);
   const enabled = gitRepo(ctx, 'enabled');
-  gate.writeGovernanceDecision(enabled, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(enabled, 'enable', { registryOptions: ctx.options });
   const disabled = gitRepo(ctx, 'disabled', { remote: 'https://github.com/example-owner/disabled.git' });
-  gate.writeGovernanceDecision(disabled, 'disable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(disabled, 'disable', { registryOptions: ctx.options });
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   const calls = [
@@ -2016,7 +1993,7 @@ test('a damaged "not now" file keeps the repository held with the real question,
     assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, session_id: 's1', tool_input: { command: 'ls' } }).deny, /no governance decision yet/);
     assert.match(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /no GitHub governance decision yet/);
     assert.equal(hold(ctx).decide({ cwd: repo, prompt: reply, sessionId: 's1' }).action, 'pass', reply);
-    assert.equal(stateOf(ctx, repo).state, expected);
+    assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
     if (reply === 'not now') {
       assert.ok(JSON.parse(fs.readFileSync(notNowPath, 'utf8')).repositories[stateOf(ctx, repo).repository_id].sessions.s1, 'the damaged file is replaced');
     }
@@ -2052,7 +2029,7 @@ test('H-08: a decision made at the terminal lets the next prompt through and han
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   hold(ctx).decide({ cwd: repo, prompt: 'held while away' });
-  gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(repo, 'disable', { registryOptions: ctx.options });
   const next = hold(ctx).decide({ cwd: repo, prompt: 'anything' });
   assert.equal(next.action, 'pass');
   assert.match(next.context, /1\. held while away/);
@@ -2070,7 +2047,7 @@ test('a copy in the repository is never the authority: forged and edited copies 
   assert.ok(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }).deny);
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
   // Decided as DISABLED: the ENABLED file changes nothing and is never rewritten.
-  gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(repo, 'disable', { registryOptions: ctx.options });
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go' }).action, 'pass');
   assert.equal(stateOf(ctx, repo).state, 'DISABLED');
   assert.equal(fs.readFileSync(oldCopy(repo), 'utf8'), forged);
@@ -2114,7 +2091,7 @@ for (const decision of ['disable', 'enable']) {
       if (row.after) row.after(repo);
       t.after(() => { try { fs.chmodSync(path.join(repo, '.gitignore'), 0o644); } catch { /* absent or not a file */ } });
       const before = snapshot(path.join(repo, '.gitignore'));
-      gate.writeGovernanceDecision(repo, decision, { registryOptions: ctx.options });
+      require('./support/governance-observations.cjs').seedMerged(repo, decision, { registryOptions: ctx.options });
       for (let round = 0; round < 3; round += 1) {
         assert.equal(hold(ctx).decide({ cwd: repo, prompt: `request ${round}` }).action, 'pass');
         assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
@@ -2148,7 +2125,7 @@ for (const decision of ['disable', 'enable']) {
           throw error;
         }
       }
-      const decided = gate.writeGovernanceDecision(repo, decision, { registryOptions: ctx.options });
+      const decided = require('./support/governance-observations.cjs').seedMerged(repo, decision, { registryOptions: ctx.options });
       assert.deepEqual([decided.hold, decided.reason], [false, 'decided']);
       for (let round = 0; round < 2; round += 1) {
         assert.equal(hold(ctx).decide({ cwd: repo, prompt: `request ${round}` }).action, 'pass');
@@ -2188,7 +2165,7 @@ test('R7: a working-tree binding is neither merged nor the user\'s answer; it is
   const answered = hold(ctx).decide({ cwd: carried, prompt: 'yes', sessionId: 's1' });
   assert.equal(answered.action, 'pass');
   const after = stateOf(ctx, carried);
-  assert.deepEqual([after.state, after.rule, after.governed_rules_bind], ['ENABLED', 'R5', false], 'records bind only once the binding merges');
+  assert.deepEqual([after.state, after.rule, after.governed_rules_bind], ['UNDECIDED', 'R7', false], 'records bind only once the binding merges');
   recordMerged(carried, { registryPath: ctx.options.registryPath });
   const merged = stateOf(ctx, carried);
   assert.deepEqual([merged.state, merged.rule, merged.governed_rules_bind], ['ENABLED', 'M1', true]);
@@ -2226,14 +2203,14 @@ test('tools: an undecided repository runs no tool but ToolSearch and the card, r
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   for (const tool_name of ['Read', 'Grep']) assert.equal(tools(ctx).decide({ tool_name, cwd: plain, tool_input: {} }), null, `${tool_name} outside a repository`);
-  gate.writeGovernanceDecision(repo, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(repo, 'enable', { registryOptions: ctx.options });
   assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
 });
 
 test('H-07: an agent cannot answer for the user, in any folder, while ordinary commands mentioning the words still run', (t) => {
   const ctx = scratch(t);
   const decided = gitRepo(ctx, 'decided');
-  gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(decided, 'enable', { registryOptions: ctx.options });
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   const refused = [
@@ -2270,7 +2247,7 @@ test('held messages: every answer hands back only the answering session\'s own m
     ['later', github, repo => hold(ctx).decide({ cwd: repo, prompt: 'later', sessionId: 'A' }), 'UNDECIDED', false],
     ['full answer', github, repo => hold(ctx).decide({ cwd: repo, prompt: 'toolkit governance disable', sessionId: 'A' }), 'DISABLED', true],
     ['decided at the terminal', github, repo => {
-      gate.writeGovernanceDecision(repo, 'enable', { registryOptions: ctx.options });
+      require('./support/governance-observations.cjs').seedMerged(repo, 'enable', { registryOptions: ctx.options });
       return hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 'A' });
     }, 'ENABLED', true],
   ];
@@ -2284,18 +2261,19 @@ test('held messages: every answer hands back only the answering session\'s own m
     assert.match(answered.context, /1\. mine-A/, label);
     assert.doesNotMatch(answered.context, /INJECTED-B|PINEAPPLE|no-session/, label);
     assert.match(answered.context, /sent in this session while the repository was held/, label);
-    assert.equal(stateOf(ctx, repo).state, expected, label);
+    assert.equal(stateOf(ctx, repo).state, label === 'decided at the terminal' ? 'ENABLED' : 'UNDECIDED', label);
     const id = stateOf(ctx, repo).repository_id;
     const left = new gate.HeldPrompts({ registryOptions: ctx.options });
     assert.equal(left.count(id, 'A'), 0, label);
     assert.equal(left.count(id, 'B'), 1, `${label}: another session's message stays for that session`);
-    if (!bGetsItsOwn) continue;
-    const b = hold(ctx).decide({ cwd: repo, prompt: 'next', sessionId: 'B' });
+    const merged = label === 'decided at the terminal';
+    const b = hold(ctx).decide({ cwd: repo, prompt: merged ? 'next' : 'no', sessionId: 'B' });
     assert.match(b.context, /1\. INJECTED-B/, label);
     assert.doesNotMatch(b.context, /mine-A|no-session/, label);
     // A host that sends no session id gets back only what was held without one.
-    assert.match(hold(ctx).decide({ cwd: repo, prompt: 'next' }).context, /1\. no-session/, label);
-    assert.equal(left.count(id), 0, label);
+    const unnoted = hold(ctx).decide({ cwd: repo, prompt: 'next' });
+    if (merged) { assert.match(unnoted.context, /1\. no-session/, label); assert.equal(left.count(id), 0, label); }
+    else { assert.equal(unnoted.action, 'block', label); assert.ok(left.count(id) > 0, 'unnoted messages remain held until a repository decision merges'); }
   }
 });
 
@@ -2351,7 +2329,7 @@ test('tools: a command that starts a host session in, or works in, a held reposi
   const held = gitRepo(ctx, 'held');
   const local = gitRepo(ctx, 'local', { remote: null });
   const decided = gitRepo(ctx, 'decided', { remote: 'https://github.com/example-owner/decided.git' });
-  gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(decided, 'enable', { registryOptions: ctx.options });
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   const QUESTION = /only the user answers the governance question.*Enable Toolkit's automated GitHub tracking governance/;
@@ -2408,7 +2386,7 @@ test('B1: the full answer counts only in the session that was asked, on GitHub r
     // The session that was asked answers with it.
     const answered = hold(ctx).decide({ cwd: repo, prompt: answer, sessionId: 'user' });
     assert.equal(answered.action, 'pass', `${where} ${answer}`);
-    assert.equal(stateOf(ctx, repo).state, expected, `${where} ${answer}`);
+    assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', `${where} ${answer}`);
     assert.doesNotMatch(answered.context, /^\d+\. toolkit governance/im, 'a nested session\'s held answer never comes back to the user');
   }
   // End to end on both hosts: a nested session's full answer, as the hosts deliver it, decides nothing.
@@ -2430,7 +2408,7 @@ test('H2: edits cannot reach held repositories', (t) => {
   const ctx = scratch(t);
   const held = gitRepo(ctx, 'held');
   const decided = gitRepo(ctx, 'decided', { remote: 'https://github.com/example-owner/decided.git' });
-  gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(decided, 'enable', { registryOptions: ctx.options });
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   const EDIT = /this edit is in a repository that is waiting for the user's governance answer/;
@@ -2460,7 +2438,7 @@ const REPORT_WRITE = `cat > .tmp/uat-codex-mini3-results.md <<'EOF'\n${UAT_REPOR
 test('a report that names Claude or Codex next to short answer lines is data', (t) => {
   const ctx = scratch(t);
   const decided = gitRepo(ctx, 'decided');
-  gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(decided, 'enable', { registryOptions: ctx.options });
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   const commands = [
@@ -2491,7 +2469,7 @@ test('the Claude Code and Codex hooks let an agent write a report and run the mu
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   const home = path.join(ctx.root, 'home');
-  gate.writeGovernanceDecision(repo, 'enable', { registryOptions: { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true } });
+  require('./support/governance-observations.cjs').seedMerged(repo, 'enable', { registryOptions: { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true } });
   const env = { ...process.env, HOME: home, USERPROFILE: home };
   delete env.CLAUDE_CODE_REMOTE;
   delete env.CLAUDE_ENV_FILE;
@@ -2522,17 +2500,13 @@ test('the Claude Code and Codex hooks let an agent write a report and run the mu
   assert.match(answered.stdout, /only the user answers the governance question/);
 });
 
-test('H3: a damaged decisions file names itself and the terminal repair wherever it holds', (t) => {
-  const ctx = scratch(t);
-  const repo = gitRepo(ctx, 'repo');
-  gate.writeGovernanceDecision(repo, 'enable', { registryOptions: ctx.options });
-  fs.appendFileSync(ctx.registryPath, 'junk');
-  const named = new RegExp(`decisions file \\(${ctx.registryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\) could not be read\\. To start it afresh, run .*toolkit-governance\\.cjs" repair`);
-  assert.match(hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' }).reason, named);
-  assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }).deny, named);
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), named);
-  // An agent cannot run the repair.
-  assert.ok(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'node repo/scripts/toolkit-governance.cjs repair' } })?.deny);
+test('damaged legacy decisions cannot hold a valid merged repository', t => {
+  const ctx = scratch(t), repo = gitRepo(ctx, 'repo');
+  require('./support/governance-observations.cjs').seedMerged(repo, 'enable', { registryOptions: ctx.options });
+  fs.writeFileSync(ctx.registryPath, '{damaged');
+  assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'go', sessionId: 's1' }).action, 'pass');
+  assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
+  assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), '{damaged');
 });
 
 test('H-12, H-13: a launcher-started session cannot answer, and stays held', (t) => {
@@ -2553,9 +2527,9 @@ test('H-09: unreadable state, an unreadable held-prompt store and a broken gate 
   fs.writeFileSync(ctx.registryPath, '{ not json');
   const corrupt = hold(ctx).decide({ cwd: repo, prompt: 'toolkit governance enable' });
   assert.equal(corrupt.action, 'block');
-  assert.match(corrupt.reason, /could not be read/);
-  assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }).deny, /could not be read/);
-  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /could not be read/);
+  assert.match(corrupt.reason, /Turn on GitHub governance/);
+  assert.match(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }).deny, /no governance decision yet/);
+  assert.match(gate.sessionLine(repo, { registryOptions: ctx.options }), /no GitHub governance decision yet/);
   fs.rmSync(ctx.registryPath);
   // A damaged held-prompt store is moved aside (kept on this computer) and the question still works.
   fs.writeFileSync(ctx.heldPath, 'garbage');
@@ -2566,7 +2540,7 @@ test('H-09: unreadable state, an unreadable held-prompt store and a broken gate 
   assert.equal(aside.length, 1);
   assert.equal(fs.readFileSync(path.join(path.dirname(ctx.heldPath), aside[0]), 'utf8'), 'garbage');
   assert.equal(hold(ctx).decide({ cwd: repo, prompt: 'no', sessionId: 's1' }).action, 'pass');
-  assert.equal(stateOf(ctx, repo).state, 'DISABLED');
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
   // A store that cannot be read at all still holds (fail closed).
   const unreadableRepo = gitRepo(ctx, 'unreadable', { remote: 'https://github.com/example-owner/unreadable.git' });
   fs.rmSync(ctx.heldPath, { force: true });
@@ -2639,9 +2613,9 @@ test('hosts: the Claude hook script holds and answers end to end with the real u
   // `decline` is the older word for `disable` and still answers.
   const answered = run('UserPromptSubmit', { cwd: repo, prompt: 'toolkit governance decline', session_id: 's1' });
   assert.match(answered.hookSpecificOutput.additionalContext, /1\. go/);
-  assert.deepEqual(run('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 's1' }), {});
-  assert.match(run('SessionStart', { cwd: repo }).hookSpecificOutput.additionalContext, /DISABLED/);
-  assert.ok(fs.existsSync(path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json')));
+  assert.match(run('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 's1' }).hookSpecificOutput.additionalContext, /no is pending/);
+  assert.match(run('SessionStart', { cwd: repo }).hookSpecificOutput.additionalContext, /no GitHub governance decision yet/);
+  assert.equal(fs.existsSync(path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json')), false);
   // An unknown event name is a broken install and holds.
   const broken = childProcess.execFileSync(process.execPath, [path.join(scripts, 'toolkit-governance-hook.cjs'), '--event', 'Nope'],
     { input: JSON.stringify({ cwd: repo }), env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
@@ -2686,9 +2660,10 @@ test('hosts: the Codex helper hook holds prompts with exit 2 and refuses tools i
   // The user's short reply to the question, asked again, is the answer on Codex too.
   const answered = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'yes' });
   assert.equal(answered.status, 0, answered.stderr);
-  assert.match(JSON.parse(answered.stdout).hookSpecificOutput.additionalContext, /now ENABLED/);
-  const after = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'go' });
-  assert.deepEqual([after.status, after.stdout], [0, '']);
+  assert.match(JSON.parse(answered.stdout).hookSpecificOutput.additionalContext, /yes is pending/);
+  const after = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'go' });
+  assert.equal(after.status, 0);
+  assert.match(JSON.parse(after.stdout).hookSpecificOutput.additionalContext, /yes is pending/);
 });
 
 test('hook wiring: both Claude copies hold prompts and tools with onFailure block; Codex shares the helper launcher', () => {
@@ -2761,7 +2736,7 @@ test('card: a held turn in Claude Code runs only to show the card and the same s
   const first = c.send(repo, 'fix the login bug', 's1');
   assert.equal(first.action, 'pass');
   assert.match(first.notice, /pick an answer to the governance question/);
-  assert.deepEqual(noticeOf(first.context).split('\n'), [QUESTION_LINE, 'Reply yes, no (never ask again) or later (ask next session). Held messages follow your answer.', AGENT_LINE]);
+  assert.deepEqual(noticeOf(first.context).split('\n'), [QUESTION_LINE, 'Reply yes or no (prepare a decision pull request), or later (ask next chat). Held messages follow your answer.', AGENT_LINE]);
   assert.ok(first.context.includes(JSON.stringify(gate.PICKER_INPUT)), 'the exact card input');
   assert.match(first.context, /Do not act on it, answer it or use any other tool/);
   assert.match(first.context, /adding no answers field/);
@@ -2820,19 +2795,19 @@ test('card: only the exact card, with no answer filled in by the caller, runs in
   assert.equal(c.ask(gitlab, 's1', 'tu-gitlab'), null);
   fs.mkdirSync(path.dirname(ctx.registryPath), { recursive: true });
   fs.writeFileSync(ctx.registryPath, '{ not json');
-  assert.match(c.ask(repo, 's1', 'tu-unreadable')?.deny || '', /runs only as Toolkit's own card/);
+  assert.equal(c.ask(repo, 's1', 'tu-unreadable'), null);
   fs.rmSync(ctx.registryPath, { force: true });
-  for (const id of ['tu-gitlab', 'tu-unreadable']) assert.match(c.tap(repo, 's1', id, 'Yes').context, /no answer was recorded/, id);
+  for (const id of ['tu-gitlab']) assert.match(c.tap(repo, 's1', id, 'Yes').context, /no answer was recorded/, id);
   // Outside a held repository the tool is not Toolkit's business.
   const decided = gitRepo(ctx, 'decided', { remote: 'https://github.com/example-owner/decided.git' });
-  gate.writeGovernanceDecision(decided, 'enable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(decided, 'enable', { registryOptions: ctx.options });
   assert.equal(c.ask(decided, 's1', 'tu-z', variants['other question text']), null);
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
 });
 
 test('card: Yes, No and Later each record the right state and hand back the held messages in order', (t) => {
   const ctx = scratch(t);
-  for (const [label, state, pattern] of [['Yes', 'ENABLED', /now ENABLED \(materials incomplete\)[\s\S]*Before other work/], ['No', 'DISABLED', /now DISABLED/], ['Later', 'UNDECIDED', /answered "later"/]]) {
+  for (const [label, state, pattern] of [['Yes', 'UNDECIDED', /yes is pending[\s\S]*missing parent/], ['No', 'UNDECIDED', /no is pending/], ['Later', 'UNDECIDED', /answered "later"/]]) {
     const repo = gitRepo(ctx, `tap-${label}`, { remote: `https://github.com/example-owner/tap-${label}.git` });
     const c = card(ctx);
     const session = `tap-${label}`;
@@ -2843,9 +2818,9 @@ test('card: Yes, No and Later each record the right state and hand back the held
     const picked = c.tap(repo, session, `tu-${label}`, label);
     assert.match(picked.context, pattern, label);
     assert.match(picked.context, /1\. first request\n2\. second request/, label);
-    assert.equal(stateOf(ctx, repo).state, state, label);
+    assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', label);
     if (label === 'Later') assert.equal(c.send(repo, 'next', session).action, 'pass', 'later lasts for the run');
-    else assert.deepEqual(c.send(repo, 'next', session), { action: 'pass' });
+    else assert.equal(c.send(repo, 'next', session).action, 'pass');
     writesNothingIn(repo);
   }
 });
@@ -2890,7 +2865,7 @@ test('card: an answer counts only from the card the gate noted, once, in the run
   // The resumed run is asked again, and its typed answer (or its own card) then counts.
   c.send(repo, 'again', 's1');
   assert.equal(c.typed(repo, 'no', 's1').action, 'pass');
-  assert.equal(stateOf(ctx, repo).state, 'DISABLED');
+  assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
 });
 
 test('card: a typed answer still works after the card was shown, and the Claude hook records a tap end to end', (t) => {
@@ -2901,7 +2876,7 @@ test('card: a typed answer still works after the card was shown, and the Claude 
   c.send(typedRepo, 'go', 's1');
   const typed = c.send(typedRepo, 'toolkit governance enable', 's1');
   assert.equal(typed.action, 'pass');
-  assert.match(typed.context, /now ENABLED[\s\S]*1\. go/);
+  assert.match(typed.context, /yes is pending[\s\S]*1\. go/);
   const repo = gitRepo(ctx, 'hook', { remote: 'https://github.com/example-owner/hook.git' });
   const home = path.join(ctx.root, 'home');
   const env = { ...process.env, HOME: home, USERPROFILE: home };
@@ -2917,8 +2892,8 @@ test('card: a typed answer still works after the card was shown, and the Claude 
   assert.deepEqual(run('PreToolUse', { cwd: repo, session_id: 'h1', tool_name: 'AskUserQuestion', tool_use_id: 'tu-2', tool_input: gate.PICKER_INPUT }), {}, 'no decision: Claude Code shows the card to the user');
   const tapped = run('PostToolUse', { cwd: repo, session_id: 'h1', tool_name: 'AskUserQuestion', tool_use_id: 'tu-2', tool_input: { ...gate.PICKER_INPUT, answers: { [gate.PICKER_QUESTION]: 'No' } },
     tool_response: { questions: gate.PICKER_INPUT.questions, answers: { [gate.PICKER_QUESTION]: 'No' } } });
-  assert.match(tapped.hookSpecificOutput.additionalContext, /now DISABLED[\s\S]*1\. fix it/);
-  assert.equal(governance.governanceState(repo, { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true }).state, 'DISABLED');
+  assert.match(tapped.hookSpecificOutput.additionalContext, /no is pending[\s\S]*1\. fix it/);
+  assert.equal(governance.governanceState(repo, { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true }).state, 'UNDECIDED');
   assert.deepEqual(run('PostToolUse', { cwd: repo, session_id: 'h1', tool_name: 'Bash', tool_response: {} }), {});
 });
 
@@ -2955,7 +2930,7 @@ test('a hook that fails holds only state-changing tools inside a repository; rea
 test('H-16: decided and no-repository folders add only local reads', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
-  gate.writeGovernanceDecision(repo, 'disable', { registryOptions: ctx.options });
+  require('./support/governance-observations.cjs').seedMerged(repo, 'disable', { registryOptions: ctx.options });
   const spawnNames = ['spawn', 'spawnSync', 'execFile', 'execFileSync', 'exec', 'execSync', 'fork'];
   const saved = Object.fromEntries(spawnNames.map(name => [name, childProcess[name]]));
   let spawned = 0;
