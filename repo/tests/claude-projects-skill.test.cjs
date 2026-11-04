@@ -25,7 +25,27 @@ const projectsEntry = () => ({
   skill: read(SKILL_REL).split('## When this applies\n')[1].split('\n## Order of precedence')[0],
   routing: read(SKILL_REL).split('## Guidebook copy\n')[1].split('\n## Project layout')[0],
   guide: read(`${REFERENCE_DIR}/guidebook.md`),
+  setup: read(`${REFERENCE_DIR}/setup.md`),
+  guided: read(SKILL_REL).split('## Guided setup and takeover\n')[1].split('\n## Managed project-instructions sync')[0],
 });
+
+const relayStart = 'A thread or coordinator worker reading CONTROLLER.md for a Projects coordinator';
+const relayHold = "Report, stop and wait for the coordinator; never run setup yourself. Setup is incomplete until guided setup steps 0-10 are all verified done (unknown is incomplete): only its brief for a setup step permits continuing or controller writes, takeover records included.";
+const relayIdentity = 'The coordinator qualifies from its own host role line and tools; the relay selects a procedure, never establishes identity.';
+const bootstrapCommand = '`node repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects/`';
+const relayExpected = {
+  controller: `${relayStart}, even for a brief only to read or report on it, relays its Projects setup line and guidebook link before takeover writes. Relay missing-folder bootstrap: the coordinator starts a thread on fresh Toolkit \`main\` to run ${bootstrapCommand}, requires \`SKILL COPY REFRESHED\`, reads the library's \`SKILL.md\`, runs guided setup steps 0-10. ${relayHold} ${relayIdentity}`,
+  skill: `${relayStart}, even just to read/report, relays its Projects setup line, [guidebook link](reference/guidebook.md) and that guide's **Missing folder** bootstrap step before takeover writes. ${relayHold} ${relayIdentity}`,
+  guide: `${relayStart}, even if the brief only asks to read or report on it, relays its Projects setup line and [guidebook link](guidebook.md) before takeover writes. Relay the **Missing folder** bootstrap step below too. ${relayHold} ${relayIdentity} No special phrase or preference line is required. Threads also have \`read_project_chat\`; it does not distinguish a coordinator. A setup step's own brief permits only its specified action, such as the step 6 mode b takeover record; it never transfers controller identity or allows general controller work.`,
+};
+function relayBlock(text, surface) {
+  const start = text.indexOf(relayStart);
+  assert.ok(start >= 0, `${surface}: missing relay`);
+  // Check the whole bounded block, including added paragraphs, so an appended exception cannot
+  // pass merely by retaining the mandatory substrings. The skill entry ends with this relay.
+  return text.slice(start).split(surface === 'controller' ? '\n\nAppointment/relaunch/recovery:'
+    : surface === 'guide' ? '\n\n## Refreshing the guidebook copy' : '\u0000')[0].trim();
+}
 const projectsEntryContracts = [
   ['controller identity', 'controller', ['Only a Projects session whose host role line names it "the coordinator in a project"',
     'native project tools `start_thread`', 'Read under `/mnt/project-files/`']],
@@ -64,22 +84,28 @@ const projectsEntryContracts = [
     'never substitute generic takeover for guided setup']],
   ['outside appointment', 'guide', ['Outside an appointment, a missing or failed copy keeps working from the last usable copy or the managed block and reports it']],
   ...['controller', 'skill', 'guide'].map(surface => [`${surface} setup relay`, surface, [
-    "A thread reading CONTROLLER.md on a Projects coordinator's behalf",
-    'for any appointment, takeover or controller-setup brief however worded',
-    surface === 'controller' ? 'first reports the Projects setup line above and its guidebook link to the coordinator, before any takeover write'
-      : `first reports its Projects setup line and [guidebook link](${surface === 'skill' ? 'reference/' : ''}guidebook.md) to the coordinator, before any takeover write`,
-    'It never runs setup; while setup is incomplete, it makes no takeover records or other controller writes',
+    relayStart, 'before takeover writes', relayHold,
     'The coordinator qualifies from its own host role line and tools',
     'the relay selects a procedure, never establishes identity',
   ]]),
-  ['relay wording', 'guide', ['This includes a request merely to read CONTROLLER.md or do the takeover',
-    'no special phrase or preference line is required', 'Threads also have `read_project_chat`; it does not distinguish a coordinator',
-    'The coordinator follows the linked procedure before controller actions']],
+  ['controller bare read', 'controller', ['even for a brief only to read or report on it']],
+  ['controller bootstrap relay', 'controller', ['Relay missing-folder bootstrap: the coordinator starts a thread on fresh Toolkit `main`',
+    bootstrapCommand, 'requires `SKILL COPY REFRESHED`', "reads the library's `SKILL.md`, runs guided setup steps 0-10"]],
+  ['relay wording', 'guide', ['even if the brief only asks to read or report on it',
+    'No special phrase or preference line is required', 'Threads also have `read_project_chat`; it does not distinguish a coordinator',
+    "A setup step's own brief permits only its specified action, such as the step 6 mode b takeover record",
+    'it never transfers controller identity or allows general controller work']],
+  ['setup action exception', 'setup', ["no records, gates or GitHub writes except a setup step's own brief",
+    "Step 6's mode b takeover record is such a brief; it does not allow general controller work"]],
+  ['guided action exception', 'guided', ["No controller actions (records, gates or GitHub writes) until its last step except a setup step's own brief"]],
 ];
 function assertProjectsEntry(surfaces, ids = projectsEntryContracts.map(([id]) => id)) {
   for (const [id, surface, clauses] of projectsEntryContracts) {
     if (!ids.includes(id)) continue;
     for (const clause of clauses) assert.ok(surfaces[surface].includes(clause), `${id}: ${clause}`);
+  }
+  for (const surface of ['controller', 'skill', 'guide']) {
+    if (ids.includes(`${surface} setup relay`)) assert.equal(relayBlock(surfaces[surface], surface), relayExpected[surface], `${surface}: complete relay contract`);
   }
 }
 
@@ -99,10 +125,12 @@ const projectsEntryMatrix = [
   ['absent, conflicting or ambiguous host evidence: skip, retain role', ['controller identity', 'controller exclusions', 'skill exclusions', 'guide exclusions']],
   ['qualified coordinator, refresh fails twice: hold, no generic fallback', ['failure hold']],
   ['outside appointment, missing or failed copy: continue from last usable copy or block and report', ['outside appointment']],
-  ...['read CONTROLLER.md', 'do the takeover', 'appointment', 'controller-setup', 'arbitrary wording'].map(brief => [
-    `thread reading for coordinator, ${brief}: relay before writes, no setup or controller writes until setup completes`,
-    ['controller setup relay', 'skill setup relay', 'guide setup relay', 'relay wording'],
-  ]),
+  ['bare read/report brief: CONTROLLER.md itself requires the relay and supplies bootstrap without a library copy',
+    ['controller bare read', 'controller setup relay', 'controller bootstrap relay']],
+  ['thread or coordinator worker reading for any coordinator brief: relay, stop and wait; setup remains coordinator-only',
+    ['skill setup relay', 'guide setup relay', 'relay wording']],
+  ['mode b setup step 6: coordinator may brief its takeover record while later setup steps remain incomplete',
+    ['controller setup relay', 'skill setup relay', 'guide setup relay', 'setup action exception', 'guided action exception']],
   ['relayed text reaches a fresh coordinator: qualify only from own host role and tools',
     ['controller identity', 'skill identity', 'guide identity', 'copied identity',
       'controller setup relay', 'skill setup relay', 'guide setup relay']],
@@ -144,14 +172,19 @@ test('Projects entry rejects removal of every required qualification, exclusion 
 test('Projects setup relay rejects narrowed triggers, premature writes and relayed identity', () => {
   const surfaces = projectsEntry();
   const mutations = [
-    ["on a Projects coordinator's behalf", 'only when explicitly asked to relay setup'],
-    ['for any appointment, takeover or controller-setup brief however worded', 'only for a takeover brief naming Projects setup'],
+    ['A thread or coordinator worker', 'A thread'],
+    ['for a Projects coordinator', 'only when explicitly asked to relay setup'],
     ['Projects setup line', 'generic takeover instructions'],
     ['guidebook link', 'repository homepage'],
-    ['to the coordinator, before any takeover write', 'to the owner, after the takeover record'],
-    ['It never runs setup', 'The thread runs setup'],
-    ['while setup is incomplete, it makes no takeover records or other controller writes',
-      'while setup is incomplete, it may write the takeover record'],
+    ['before takeover writes', 'after takeover writes'],
+    ['Report, stop and wait for the coordinator', 'Report and continue the rest of the brief'],
+    ['never run setup yourself', 'run setup yourself'],
+    ['guided setup steps 0-10 are all verified done', 'guided setup step 0 is verified done'],
+    ['unknown is incomplete', 'unknown is complete'],
+    ['only its brief for a setup step permits continuing or controller writes, takeover records included',
+      'any brief permits continuing or controller writes, takeover records included'],
+    ['only its brief for a setup step permits continuing or controller writes, takeover records included',
+      'no brief permits continuing or controller writes, takeover records included'],
     ['from its own host role line and tools', 'from the relayed text and paths'],
     ['never establishes identity', 'establishes identity'],
   ];
@@ -162,13 +195,66 @@ test('Projects setup relay rejects narrowed triggers, premature writes and relay
         { code: 'ERR_ASSERTION' }, `${surface}: ${before}`);
     }
   }
+  for (const surface of ['controller', 'skill', 'guide']) {
+    const text = surfaces[surface];
+    const block = relayBlock(text, surface);
+    const mutated = text.replace(block, `${block}\n\nExcept a bare read: it may skip relay and proceed.`);
+    assert.notEqual(mutated, text, `${surface}: mutation must add an exception`);
+    assert.throws(() => assertProjectsEntry({ ...surfaces, [surface]: mutated }), { code: 'ERR_ASSERTION' }, surface);
+  }
   // Keep the delegation rule ahead of the generic instruction a reader might otherwise execute.
-  assert.ok(surfaces.controller.indexOf('before any takeover write') < surfaces.controller.indexOf('Appointment/relaunch/recovery:'));
+  assert.ok(surfaces.controller.indexOf('before takeover writes') < surfaces.controller.indexOf('Appointment/relaunch/recovery:'));
   const skill = read(SKILL_REL);
   assert.ok(skill.includes('Follow for the whole session'));
   assert.ok(read('repo/CONTROLLER.md').includes('Routines/executors ask the owner only when the owner must act'));
   assert.doesNotMatch(surfaces.controller + surfaces.skill, /`start_thread`\/`read_project_chat`/);
   assert.doesNotMatch(surfaces.guide, /tools include `mcp__hearthbot__start_thread` and `mcp__hearthbot__read_project_chat`/);
+});
+
+test('Projects correction: a missing copy relay includes the complete bootstrap procedure before waiting', () => {
+  const surfaces = projectsEntry();
+  // The coordinator cannot open a repository link itself. The Controller read alone must deliver
+  // the command, success check, library skill read and setup sequence, in that order.
+  const block = relayBlock(surfaces.controller, 'controller');
+  const sequence = ['starts a thread', 'fresh Toolkit `main`', bootstrapCommand,
+    'requires `SKILL COPY REFRESHED`', "reads the library's `SKILL.md`", 'runs guided setup steps 0-10',
+    'Report, stop and wait for the coordinator'];
+  const positions = sequence.map(clause => block.indexOf(clause));
+  assert.ok(positions.every((position, index) => position >= 0 && (!index || position > positions[index - 1])));
+  for (const clause of sequence) {
+    assert.throws(() => assertProjectsEntry({ ...surfaces, controller: surfaces.controller.replace(clause, '') }),
+      { code: 'ERR_ASSERTION' }, `controller: ${clause}`);
+  }
+  assert.ok(surfaces.skill.includes("and that guide's **Missing folder** bootstrap step"));
+  assert.ok(surfaces.guide.includes('Relay the **Missing folder** bootstrap step below too'));
+  // The guide's existing Missing folder step is canonical; keep its complete sequence checked
+  // without duplicating that procedure in its relay paragraph.
+  assertProjectsEntry(surfaces, ['copy sequence']);
+});
+
+test('Projects correction: setup step 6 is an explicit exception on every route, without transferring identity', () => {
+  const surfaces = projectsEntry();
+  assertProjectsEntry(surfaces);
+  const step6 = surfaces.setup.split('6. **Takeover** (mode b only).')[1].split('\n7. **Orientation**')[0];
+  assert.ok(step6.includes('Post the one-line takeover record (`CONTROLLER.md` Takeover)'));
+  assert.ok(surfaces.setup.includes('Verify 1-5 before reading the outgoing controller'));
+  assert.ok(step6.includes('Never run two controllers that both write'));
+  for (const surface of ['setup', 'guided']) {
+    const changed = surfaces[surface].replace("except a setup step's own brief", 'without exceptions');
+    assert.notEqual(changed, surfaces[surface]);
+    assert.throws(() => assertProjectsEntry({ ...surfaces, [surface]: changed }), { code: 'ERR_ASSERTION' }, surface);
+  }
+});
+
+test('Projects correction restores every rule qualifier lost in the earlier trims', () => {
+  const controller = read('repo/CONTROLLER.md');
+  const skill = read(SKILL_REL);
+  for (const clause of ['owns agreed Core through integration', 'need their own authority',
+    'publish concise authorised progress and screened private evidence directly',
+    "The directive's host matrix and acceptance cases are not claimed implemented or qualified here",
+    'use business-language labels, technical IDs in machine fields']) assert.ok(controller.includes(clause), clause);
+  for (const clause of ["The user's current request", 'Executors never re-plan the programme',
+    'Add new rows in the same change']) assert.ok(skill.includes(clause), clause);
 });
 
 test('Projects uses the host-assigned role even when the runtime calls itself Claude Code', () => {
