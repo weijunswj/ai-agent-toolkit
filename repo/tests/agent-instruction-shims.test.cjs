@@ -177,7 +177,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /A lower option may win when much better for one operation/,
     /only origin's default-branch programme file decides GitHub governance on\/off on every computer/,
     /No Git, non-GitHub, programme-bound stores and ignored \.tmp clones: off automatically/,
-    /Confirmed undecided GitHub repos hold for yes\/no\/later/,
+    /Undecided GitHub holds for yes\/no\/later, except verified read-only: continue/,
     /Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks/,
   ]) assert.match(text, rule);
   assert.doesNotMatch(text, /G0 MUST|CURRENT admission|weijunswj\/TRANSPORT|Decision traces|takeover record/, 'GitHub-tracking rules stay out of the global layer');

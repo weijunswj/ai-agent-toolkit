@@ -50,7 +50,7 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         const source = fs.readFileSync(full, 'utf8');
         const loads = [...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim());
         // The registry already loads through governance state; its direct import normalises the target identity.
-        assert.deepEqual(loads.sort(), ["'../../skills/github-program-reconciler/scripts/programme-state.cjs'", "'../../skills/github-program-reconciler/scripts/resolve-executable.cjs'", "'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-capability-registry.cjs'", "'./toolkit-governance-binding.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
+        assert.deepEqual(loads.sort(), ["'../../skills/github-program-reconciler/scripts/programme-state.cjs'", "'../../skills/github-program-reconciler/scripts/resolve-executable.cjs'", "'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-governance-binding.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-repository-identity.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
         assert.doesNotMatch(source, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
         assert.deepEqual([...source.matchAll(/\.request\('([A-Z]+)',\s*([^)]*)\)/g)].map(match => [match[1], match[2]]), [['GET', 'apiPath']]);
         // The merge-scope check it loads starts only git, with read-only subcommands, and loads only
