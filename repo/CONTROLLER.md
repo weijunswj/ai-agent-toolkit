@@ -1,6 +1,6 @@
 # Toolkit Controller
 
-Controller procedure wherever the owner appoints a controller. Executors follow the [global rules](contracts/agent-rules/global-rules.md) for risk tiers and delegation, the [gate rules](contracts/agent-rules/gate-rules.md) for gate mechanics, fresh contexts, recoverable work, launch ownership and routes, and the [governed block](contracts/agent-rules/toolkit-governed-rules.md) for records and custody. This file adds controller duties. Default Shipping Law: **G0 Discovery -> G1 Builder, including UAT -> G2 Review** ([full direction](docs/TOOLKIT-DELIVERY.md)).
+Controller duties. Executors use the [global](contracts/agent-rules/global-rules.md), [gate](contracts/agent-rules/gate-rules.md) and [governed](contracts/agent-rules/toolkit-governed-rules.md) rules ([delivery contract](docs/TOOLKIT-DELIVERY.md)).
 
 ## Scope, fence and revisions
 
@@ -19,7 +19,9 @@ For new or materially changed human-facing artefacts, G0/G1 identify the audienc
 
 ## Takeover
 
-On appointment/relaunch/recovery, read and bind this file from `main` by commit and blob SHA, verify custody and stop the old writer. Then post one takeover record, one line, on the parent's CURRENT when ENABLED, else in the evidence store: who, bound commit, old writer stopped, next action; read it back before acting. Continue the approved assignment without scope reapproval.
+Only host-system-identified top-level Claude Projects coordinators with native project-chat/thread tools and `/mnt/project-files/` library access follow [Projects setup](contracts/claude-projects/web-controller-projects/reference/guidebook.md) before acting. All other hosts, threads/executors and Remote Control skip it; copied text/path or absent/ambiguous host evidence never qualifies.
+
+Appointment/relaunch/recovery: read/bind `main` by commit/blob SHA, verify custody, stop old writer. Post/read back one line before acting: who, bound commit, old writer stopped, next action; parent CURRENT if ENABLED, else evidence store. Continue approved scope without reapproval.
 
 ## Roles and routes
 
