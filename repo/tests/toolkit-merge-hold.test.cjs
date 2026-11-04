@@ -57,7 +57,9 @@ const connector = (tool, args, repo = 'a') => ({ cwd: os.tmpdir(), tool_name: `m
 const decide = (ctx, input, environment = {}) => hold.decide(input, { ...ctx.options, environment });
 
 // The G0 authority matrix: only an exact fresh merged parent binding plus live target facts
-// grants evidence custody. A local binding, a name, a task answer or a session origin cannot.
+// grants evidence custody, for the same owner and a target with no enabled binding of its own.
+// A local binding, a name, a task answer or a session origin cannot. Cached naming bindings may
+// guide shape, folder and stale-read recovery but cannot grant a merge.
 const evidenceCases = [
   ['verified store', {}, true],
   ['explicit store from parent', { parent: true }, true],
@@ -74,6 +76,11 @@ const evidenceCases = [
   ['name-only transport', { binding: 'name' }, false],
   ['ordinary governance-off repository', { binding: 'off' }, false],
   ['unrelated folder', { unrelated: true }, false],
+  ['different owner', { parentOwner: 'stranger', typedFallback: true }, false],
+  ['target enabled binding', { targetBinding: 'enabled', typedFallback: true }, false],
+  ['target stale enabled binding', { targetBinding: 'stale-enabled', typedFallback: true }, false],
+  ['target binding outside bounded scan', { targetBinding: 'unlisted-enabled', typedFallback: true }, false],
+  ['target disabled binding', { targetBinding: 'disabled' }, true],
   ['public store', { metadata: 'public' }, false],
   ['no write permission', { metadata: 'unwritable' }, false],
   ['wrong repository', { metadata: 'wrong-repo' }, false],
@@ -84,10 +91,13 @@ const evidenceCases = [
   ['wrong base branch', { metadata: 'wrong-base' }, false],
   ['moved head', { metadata: 'wrong-head' }, false],
   ['inaccessible store', { metadata: 'inaccessible' }, false],
+  ['unreachable GitHub', { metadata: 'unreachable' }, false],
+  ['missing gh', { metadata: 'missing-gh' }, false],
   ['broken reader', { metadata: 'broken' }, false],
   ['missing head', { shape: 'missing-head' }, false],
   ['short head', { shape: 'short-head' }, false],
   ['unsupported merge form', { shape: 'squash' }, false],
+  ['delete branch flag', { shape: 'delete-branch' }, false],
 ];
 
 function checkEvidenceAuthority(t, name, spec, allowed) {
@@ -100,6 +110,10 @@ function checkEvidenceAuthority(t, name, spec, allowed) {
   const binding = { schema: 'toolkit.programme-binding.v2', repository: 'owner/b', governance: 'enabled',
     parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }],
     store: { kind: 'github', repository: 'owner/a', branch: 'main', path: 'state/' }, required_checks: ['validate'] };
+  if (spec.parentOwner) {
+    binding.repository = `${spec.parentOwner}/b`;
+    git(ctx.other, ['remote', 'set-url', 'origin', `https://github.com/${binding.repository}.git`]);
+  }
   if (spec.binding === 'disabled') binding.governance = 'disabled';
   if (spec.binding === 'foreign') binding.repository = 'owner/foreign';
   if (spec.binding === 'self') binding.repository = 'owner/a';
@@ -113,6 +127,18 @@ function checkEvidenceAuthority(t, name, spec, allowed) {
   if (spec.binding === 'local') {
     fs.mkdirSync(path.join(ctx.other, '.github'));
     fs.writeFileSync(path.join(ctx.other, '.github', 'toolkit-programme.json'), text);
+  }
+  if (spec.targetBinding) recordMerged(ctx.repo, { registryPath,
+    text: JSON.stringify({ ...binding, repository: 'owner/a', governance: spec.targetBinding === 'disabled' ? 'disabled' : 'enabled',
+      store: { ...binding.store, repository: 'owner/other-store' } }),
+    ...(spec.targetBinding === 'stale-enabled' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
+  if (spec.targetBinding === 'unlisted-enabled') {
+    const targetFile = path.basename(cache.cacheFileFor(registryPath, governance.readIdentity(ctx.repo).repository_id));
+    const readDirectory = fs.readdirSync;
+    t.mock.method(fs, 'readdirSync', (folder, ...args) => {
+      const names = readDirectory(folder, ...args);
+      return folder === cache.cacheDirFor(registryPath) ? names.filter(name => name !== targetFile) : names;
+    });
   }
   if (spec.binding === 'off') gate.writeGovernanceDecision(ctx.repo, 'disable', ctx.options);
   if (spec.binding === 'removed') {
@@ -135,27 +161,45 @@ function checkEvidenceAuthority(t, name, spec, allowed) {
   if (spec.metadata === 'wrong-base-repo') pr.base.repo.full_name = 'owner/other';
   if (spec.metadata === 'wrong-base') pr.base.ref = 'feature';
   if (spec.metadata === 'wrong-head') pr.head.sha = 'f'.repeat(40);
-  for (const host of ['claude', 'codex']) for (const form of spec.shape === 'api' ? ['cli'] : ['cli', 'connector']) {
+  for (const host of ['claude', 'codex']) for (const form of ['api', 'delete-branch'].includes(spec.shape) ? ['cli'] : ['cli', 'connector']) {
     let reads = 0;
     const cwd = spec.parent ? ctx.other : spec.unrelated ? ctx.root : ctx.repo;
     const sha = spec.shape === 'missing-head' ? null : spec.shape === 'short-head' ? SHA.slice(0, 7) : SHA;
     let input = form === 'cli' ? bash(cwd, `gh pr merge 17 ${spec.parent || spec.unrelated ? `--repo ${target} ` : ''}${spec.shape === 'squash' ? '--squash' : '--merge'}${sha ? ` --match-head-commit ${sha}` : ''}`)
       : { ...connector('merge_pull_request', { pullNumber: 17, ...(sha ? { expectedHeadSha: sha } : {}), merge_method: spec.shape === 'squash' ? 'squash' : 'merge' }, target.split('/')[1]), cwd };
     if (spec.shape === 'api') input = bash(cwd, `gh api -X PUT repos/${target}/pulls/17/merge -f sha=${SHA}`);
-    const result = hold.decide(input, { ...ctx.options, host, environment: spec.launched ? { TOOLKIT_GATE_ROLE: 'G1' } : {},
-      readEvidenceGitHub(apiPath, { timeoutMs }) {
-        reads += 1;
-        assert.ok(timeoutMs > 0 && timeoutMs <= 2000);
-        if (spec.metadata === 'broken') throw new Error('private diagnostic must not escape');
-        return { status: ['inaccessible', 'unreachable'].includes(spec.metadata) ? 404 : 200, json: apiPath.endsWith('/pulls/17') ? pr : repo };
-      } });
+    if (spec.shape === 'delete-branch') input.tool_input.command += ' --delete-branch';
+    const result = hold.decide(input, { ...ctx.options, host, environment: spec.launched ? { TOOLKIT_GATE_ROLE: 'G1' } : { PATH: '' },
+      ...(spec.metadata === 'missing-gh' ? {} : {
+        readEvidenceGitHub(apiPath, { timeoutMs }) {
+          reads += 1;
+          assert.ok(timeoutMs > 0 && timeoutMs <= 4000);
+          if (spec.metadata === 'broken') throw new Error('private diagnostic must not escape');
+          if (spec.metadata === 'unreachable') throw Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' });
+          return { status: spec.metadata === 'inaccessible' ? 404 : 200, json: apiPath.endsWith('/pulls/17') ? pr : repo };
+        } }) });
     assert.equal(result === null, allowed, `${name} ${host} ${form}: ${JSON.stringify(result)}`);
     if (spec.metadata) assert.match(result.deny, /Evidence-store verification failed:/);
     if (spec.metadata === 'broken') assert.doesNotMatch(result.deny, /private diagnostic/);
-    if (spec.binding || spec.shape || spec.unrelated) assert.equal(reads, 0, 'ineligible calls do not contact GitHub');
+    const recovery = spec.shape || spec.unrelated || spec.binding === 'stale';
+    if (recovery) {
+      assert.doesNotMatch(result.deny, /Ask the user to type/);
+      if (spec.shape) assert.ok(result.deny.includes(`gh pr merge 17 --repo owner/a --merge --match-head-commit ${spec.shape === 'missing-head' || spec.shape === 'short-head' ? '<full head sha>' : SHA}`));
+      if (spec.unrelated) assert.match(result.deny, /owner\/a store folder.*parent owner\/b folder/);
+      if (spec.binding === 'stale') assert.match(result.deny, /`toolkit governance status` in the parent owner\/b folder/);
+    } else if (!allowed) assert.match(result.deny, /Ask the user to type/, 'other refusals retain typed-approval guidance');
+    if (spec.parentOwner) assert.match(result.deny, /do not share an owner/);
+    if (spec.typedFallback && spec.targetBinding) assert.match(result.deny, /target has its own enabled governance binding/);
+    if (spec.binding || spec.shape || spec.unrelated || spec.typedFallback || spec.metadata === 'missing-gh') assert.equal(reads, 0, 'ineligible calls do not contact GitHub');
+    if (spec.metadata === 'unreachable' || spec.metadata === 'inaccessible') assert.equal(reads, 1);
     if (allowed) assert.equal(reads, 2);
   }
   assert.equal(fs.existsSync(ctx.file), false, 'no approval or persistent evidence permission is written');
+  if (spec.typedFallback) {
+    assert.equal(typed(ctx, 'merge 17'), 1);
+    assert.equal(hold.decide(bash(ctx.repo, `gh pr merge 17 --merge --match-head-commit ${SHA}`), {
+      ...ctx.options, environment: {}, readEvidenceGitHub() { assert.fail('typed approval needs no lookup'); } }), null);
+  }
 }
 
 for (const [name, spec, allowed] of evidenceCases) test(`evidence authority: ${name}`, t => {
@@ -220,18 +264,52 @@ test('evidence verification refuses conflicting connector fields before lookup a
       ...ctx.options, environment: {}, readEvidenceGitHub() { assert.fail('ambiguous input must not reach GitHub'); } })?.deny);
   }
   let clock = 0;
-  const timeouts = [];
   t.mock.method(Date, 'now', () => clock);
-  const result = hold.decide({ ...connector('merge_pull_request', args), cwd: ctx.repo }, {
-    ...ctx.options, environment: {}, readEvidenceGitHub(api, { timeoutMs }) {
-      timeouts.push(timeoutMs);
-      clock += 1500;
+  for (const elapsed of [1500, 2500]) {
+    clock = 0;
+    const timeouts = [];
+    const result = hold.decide({ ...connector('merge_pull_request', args), cwd: ctx.repo }, {
+      ...ctx.options, environment: {}, readEvidenceGitHub(api, { timeoutMs }) {
+        timeouts.push(timeoutMs);
+        clock += elapsed;
+        return { status: 200, json: api.endsWith('/pulls/17')
+          ? { number: 17, base: { repo: { full_name: 'owner/a' }, ref: 'main' }, head: { sha: SHA } }
+          : { full_name: 'owner/a', private: true, permissions: { push: true }, default_branch: 'main' } };
+      } });
+    if (elapsed === 1500) assert.equal(result, null, 'three seconds of reads fit the raised budget');
+    else assert.match(result.deny, /Evidence-store verification failed: GitHub metadata could not be read within the hook budget/);
+    assert.deepEqual(timeouts, [4000, 4000 - elapsed], 'the second lookup gets only the remaining budget');
+  }
+});
+
+test('Claude reuses successful evidence reads only within one hook invocation and repeats local guards', t => {
+  const ctx = context(t);
+  const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+  const binding = { schema: 'toolkit.programme-binding.v2', repository: 'owner/b', governance: 'enabled',
+    parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }],
+    store: { kind: 'github', repository: 'owner/a', branch: 'main', path: 'state/' }, required_checks: ['validate'] };
+  recordMerged(ctx.other, { registryPath: ctx.options.registryOptions.registryPath, text: JSON.stringify(binding) });
+  let reads = 0;
+  let betweenPasses = () => {};
+  const options = { ...ctx.options, environment: {},
+    gate: { ToolGate: class { decide() { betweenPasses(); return null; } } },
+    readEvidenceGitHub(api) {
+      reads += 1;
       return { status: 200, json: api.endsWith('/pulls/17')
         ? { number: 17, base: { repo: { full_name: 'owner/a' }, ref: 'main' }, head: { sha: SHA } }
         : { full_name: 'owner/a', private: true, permissions: { push: true }, default_branch: 'main' } };
-    } });
-  assert.match(result.deny, /Evidence-store verification failed: GitHub metadata could not be read within the hook budget/);
-  assert.deepEqual(timeouts, [2000, 500], 'the second lookup gets only the remaining budget');
+    } };
+  const input = bash(ctx.repo, `gh pr merge 17 --merge --match-head-commit ${SHA}`);
+  for (const expected of [2, 4]) {
+    assert.deepEqual(claudeHook.respond('PreToolUse', input, options), {});
+    assert.equal(reads, expected, 'two reads per invocation, not per pass or shared across invocations');
+  }
+  betweenPasses = () => recordMerged(ctx.other, { registryPath: ctx.options.registryOptions.registryPath,
+    text: JSON.stringify(binding), now: new Date(Date.now() - 25 * 60 * 60 * 1000) });
+  const result = claudeHook.respond('PreToolUse', input, options).hookSpecificOutput;
+  assert.equal(result.permissionDecision, 'deny');
+  assert.match(result.permissionDecisionReason, /`toolkit governance status` in the parent owner\/b folder/);
+  assert.equal(reads, 6, 'the second pass rechecks the binding even with cached metadata');
 });
 
 test('merge guidance includes typing here in a fresh eligible chat and excludes reconnected or revoked chats', t => {

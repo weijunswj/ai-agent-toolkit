@@ -122,7 +122,9 @@ test('never-governed store classification alone grants no merge; fresh exact bin
     } };
   recordMerged(parent, { registryPath: ctx.registryPath, text, now: new Date(Date.now() - 25 * 60 * 60 * 1000) });
   assert.equal(state(ctx, store).rule, 'S1');
-  assert.match(hold.decide(input, options).deny, /no unused approval/);
+  const refusal = hold.decide(input, options).deny;
+  assert.match(refusal, /parent binding is not fresh.*`toolkit governance status` in the parent example-owner\/app folder/);
+  assert.doesNotMatch(refusal, /Ask the user to type/);
   assert.equal(reads, 0);
   recordMerged(parent, { registryPath: ctx.registryPath, text });
   assert.equal(state(ctx, store).rule, 'S1');
