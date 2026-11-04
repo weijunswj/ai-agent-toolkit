@@ -370,3 +370,51 @@ test('dispatcher exception reports called with unknown downstream outcome', asyn
   assert.equal(result.dispatch, 'CALLED');
   assert.equal(result.downstream_result, 'UNKNOWN');
 });
+
+test('mixed synthetic Codex helper closure preserves every guard and never retries unknown dispatch', async (t) => {
+  const entries = ['codex_spawn_agent', 'codex_agent_alias'].flatMap(entry_id => ['G0', 'G1'].map(caller_role => ({ entry_id, caller_role })));
+  const extra = [
+    { id: 'wrong-model', expected: 'ROUTE_MISMATCH', state: s => { s.routing.effective_route.model = 'opus-5.5'; } },
+    { id: 'wrong-selected-profile', expected: 'PROFILE_NOT_SELECTED', call: c => { c.profile_id = 'owner-gpt'; } },
+    { id: 'host-derived-profile', expected: 'PROFILE_BINDING_MISMATCH', state: s => { s.session.profile_id = 'owner-gpt'; } },
+    { id: 'wrong-invocation-revision', expected: 'REGISTRY_REVISION_MISMATCH', call: c => { c.registry_revision = 'newest-bundle'; } },
+    { id: 'wrong-observed-revision', expected: 'REGISTRY_REVISION_MISMATCH', state: s => { s.routing.registry_revision = 'newest-bundle'; } },
+    { id: 'missing-session-metadata', expected: 'MALFORMED_HOST_STATE', state: s => { delete s.session; } },
+    { id: 'missing-route-metadata', expected: 'MALFORMED_HOST_STATE', state: s => { delete s.routing.effective_route; } },
+    { id: 'hook-not-loaded', expected: 'HOOK_UNAVAILABLE', state: s => { s.registration.loaded = false; } },
+    { id: 'hook-disabled', expected: 'HOOK_UNAVAILABLE', state: s => { s.registration.enabled = false; } },
+    ...['fork', 'restore', 'alternate'].map(session_transition => ({ id: session_transition, expected: 'RESTORE_OR_ALTERNATE_SESSION', call: c => { c.session_transition = session_transition; } })),
+    ...['G0_HELPER', 'G1_HELPER', 'G2'].map(caller_role => ({ id: `${caller_role}-cannot-delegate`, expected: 'CALLER_CANNOT_DELEGATE', call: c => { c.caller_role = caller_role; } })),
+    { id: 'unknown-downstream', expected: 'DOWNSTREAM_OUTCOME_UNKNOWN' },
+  ];
+  for (const entry of entries) for (const item of [...matrix, ...extra]) {
+    await t.test(`${entry.entry_id}/${entry.caller_role}/${item.id}`, async () => {
+      const f = makeFixture(entry, { selected_profile_id: 'owner-mixed', timeout_ms: item.id === '08-guard-timeout-fails-closed' ? 5 : 20 });
+      assert.deepEqual(f.leafRoute, { provider: 'openai', model: 'gpt-6-luna', reasoning: 'max' });
+      const call = alterCase(f, item.id);
+      if (item.call) item.call(call);
+      if (item.state) { const state = clone(f.state); item.state(state); f.state = state; }
+      let attempts = 0;
+      if (item.id === 'unknown-downstream') f.dispatch = () => { attempts += 1; throw new Error('synthetic unknown outcome'); };
+      const result = await f.guard.invoke(call);
+      assert.equal(result.host_qualification, 'PREPARATION_ONLY');
+      if (item.expected === 'ALLOW') {
+        assert.equal(result.decision, 'ALLOW'); assert.equal(result.code, 'ROUTE_VERIFIED');
+        assert.equal(f.dispatchCalls, 1); assert.equal(result.profile_id, 'owner-mixed');
+        assert.deepEqual(result.effective_route, f.leafRoute);
+        assert.equal(result.registry_revision, f.resolved.registry_digest);
+        assert.deepEqual(result.downstream_result.request.registry_reference, f.resolved.registry_reference);
+      } else if (item.expected === 'NOOP_NO_HELPER_REQUEST') {
+        assert.equal(result.code, 'NO_HELPER_REQUEST'); assert.equal(result.decision, 'NOOP_NO_HELPER_REQUEST');
+        assert.equal(f.observeCalls, 0); assert.equal(f.dispatchCalls, 0);
+      } else if (item.expected === 'DOWNSTREAM_OUTCOME_UNKNOWN') {
+        assert.equal(result.code, item.expected); assert.equal(result.decision, 'DISPATCH_FAILED');
+        assert.equal(result.dispatch, 'CALLED'); assert.equal(result.downstream_result, 'UNKNOWN');
+        assert.equal(attempts, 1, 'uncertain outcome is returned, never automatically retried');
+      } else {
+        assert.equal(result.decision, 'DENY'); assert.equal(result.code, item.expected);
+        assert.equal(result.dispatch, 'NOT_CALLED'); assert.equal(f.dispatchCalls, 0);
+      }
+    });
+  }
+});

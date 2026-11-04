@@ -72,6 +72,48 @@ test('refuses a stack whose helper route is not an OpenAI route', () => {
   assert.throws(() => CodexHelperAgentRenderer.fromRepository(''), { code: 'HELPER_AGENTS_STACK_SELECTION_REQUIRED' });
 });
 
+test('mixed Codex G0/G1 definitions pin Luna Max and the captured profile and digest', () => {
+  const { capturedStack } = require('./support/captured-stack-fixture.cjs');
+  const captured = capturedStack('owner-mixed');
+  for (const [role, registryRole] of [['G0', 'DISCOVERY_HELPER'], ['G1', 'BUILDER_HELPER']]) {
+    const { file, text } = new CodexHelperAgentRenderer(captured).render(role);
+    assert.equal(file, FILE[role]);
+    assert.deepEqual(captured.selection.routes[registryRole], { provider: 'openai', model: 'gpt-6-luna', reasoning: 'max' });
+    assert.match(text, /^model = "gpt-6-luna"$/m);
+    assert.match(text, /^model_reasoning_effort = "max"$/m);
+    assert.ok(text.includes('Stack `owner-mixed`'));
+    assert.ok(text.includes(captured.selection.registry_digest));
+    assert.deepEqual(topLevelKeys(text), DOCUMENTED_KEYS);
+    assert.deepEqual(matchesRenderedDefinition(role, text), { matches: false, stack: 'owner-mixed' },
+      'a different captured source path cannot byte-match the repository projection');
+    const repositoryText = CodexHelperAgentRenderer.fromRepository('owner-mixed').render(role).text;
+    assert.deepEqual(matchesRenderedDefinition(role, repositoryText), { matches: true, stack: 'owner-mixed' });
+  }
+});
+
+test('digest changes stale both mixed helpers even when their routes stay unchanged', t => {
+  const f = fixture(t);
+  assert.equal(f.defs().refresh({ stack: 'owner-mixed' }).status, 'installed');
+  const before = Object.fromEntries(['G0', 'G1'].map(role => [role, read(path.join(f.agents, FILE[role]))]));
+  // Adoption changes another profile only; the mixed route is identical but source bytes differ.
+  f.editRegistry(value => { value.profiles['owner-claude'].routes.BUILDER.reasoning = 'xhigh'; });
+  assert.equal(f.defs().check().status, 'stale');
+  assert.deepEqual(f.defs().check().files.map(f => f.state), ['update', 'update']);
+  const result = f.defs().refresh();
+  assert.equal(result.status, 'updated');
+  for (const role of ['G0', 'G1']) {
+    assert.equal(read(path.join(result.backup_dir, FILE[role])), before[role]);
+    const after = read(path.join(f.agents, FILE[role]));
+    assert.notEqual(after, before[role]);
+    assert.equal(after, CodexHelperAgentRenderer.fromRepository('owner-mixed', f.repoRoot).render(role).text);
+    assert.match(after, /^model = "gpt-6-luna"$/m);
+    assert.match(after, /^model_reasoning_effort = "max"$/m);
+  }
+  assert.deepEqual(f.defs().check().files.map(f => f.stack), ['owner-mixed', 'owner-mixed']);
+  assert.equal(f.defs().check().status, 'current');
+  assert.equal(result.load_check.status, 'unverified', 'fixture readback is not native host loading');
+});
+
 test('installs into CODEX_HOME/agents, reads back, reports the load check as not verified without Codex, then stays current', t => {
   const f = fixture(t);
   assert.equal(codexUserAgentsDirectory(f.environment), f.agents);

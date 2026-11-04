@@ -503,7 +503,8 @@
         "profile_id": {
           "enum": [
             "owner-gpt",
-            "owner-claude"
+            "owner-claude",
+            "owner-mixed"
           ]
         },
         "builder_qualification": {
