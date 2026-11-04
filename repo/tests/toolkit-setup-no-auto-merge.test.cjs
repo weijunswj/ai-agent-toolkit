@@ -44,13 +44,15 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
       if (!/\.(?:cjs|js|mjs|ps1|sh|cmd|json|md)$/.test(entry.name)) continue;
       // The attribution guard names gh pr merge only to check its message for AI attribution.
       if (entry.name === 'toolkit-attribution-guard.cjs') continue;
-      // The merge hold names merge commands only to refuse them, and must never run one itself: it
-      // loads only these modules and starts no process and makes no network call.
+      // The merge hold must never run a merge. Its only GitHub operation is bounded GET metadata
+      // through the existing transport, to verify the exact bound evidence store and pinned PR.
       if (path.relative(root, full).split(path.sep).join('/') === 'repo/scripts/toolkit-merge-hold.cjs') {
         const source = fs.readFileSync(full, 'utf8');
         const loads = [...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim());
-        assert.deepEqual(loads.sort(), ["'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
+        // The registry already loads through governance state; its direct import normalises the target identity.
+        assert.deepEqual(loads.sort(), ["'../../skills/github-program-reconciler/scripts/programme-state.cjs'", "'../../skills/github-program-reconciler/scripts/resolve-executable.cjs'", "'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-capability-registry.cjs'", "'./toolkit-governance-binding.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
         assert.doesNotMatch(source, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
+        assert.deepEqual([...source.matchAll(/\.request\('([A-Z]+)',\s*([^)]*)\)/g)].map(match => [match[1], match[2]]), [['GET', 'apiPath']]);
         // The merge-scope check it loads starts only git, with read-only subcommands, and loads only
         // Node's process module.
         const scope = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-auto-merge-eligible.cjs'), 'utf8');
@@ -63,6 +65,9 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         const reader = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-shell-call.cjs'), 'utf8');
         assert.deepEqual([...reader.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:os'", "'node:path'"]);
         assert.doesNotMatch(reader, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
+        // The standalone shell diagnostic must not gain file, subprocess or network imports.
+        const diagnostic = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-session-shell-check.cjs'), 'utf8');
+        assert.doesNotMatch(diagnostic, /\brequire\b|\bimport\b/);
         continue;
       }
       const text = fs.readFileSync(full, 'utf8');

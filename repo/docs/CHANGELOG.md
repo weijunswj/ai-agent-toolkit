@@ -1,5 +1,47 @@
 # Toolkit Changelog
 
+## 3.47.1
+
+### Fixed
+
+- Let pinned evidence-store pull request merges use the existing custody permission when a fresh merged parent binding names the exact separate store and live checks confirm privacy, write access, default-branch base and matching head. Other repositories keep their existing merge approval handling.
+- Add isolated hook-pack coverage for verified evidence merges and failed verification, without contacting GitHub or reading real user state.
+
+## 3.47.0
+
+### Added
+
+- Added the Claude Projects stack with a Sonnet gatekeeper, Codex discovery and building, Luna helpers and one fresh Opus review.
+- Defined a gatekeeper's relay-only duties and the cross-host CLI launch exception with pinned model, effort and native launch-record proof. Launcher and hook enforcement remain separate work.
+
+### Changed
+
+- Replaced the bundled mixed profile with `claude-projects-stack`; pinned legacy two-profile and mixed-profile captures remain readable pending deliberate adoption.
+
+## 3.46.1
+
+### Fixed
+
+- Threads reading the Controller for a Claude Projects coordinator's appointment, takeover or setup, or only to read or report on it, now relay its Projects setup instruction and guidebook link before takeover writes. Setup remains coordinator-only, with identity checked from its own host role and tools; relayed text never grants identity or authority.
+- Restored the Projects skill's whole-session scope and clarified who routines ask when owner action is needed.
+- The Projects setup relay now covers a brief that only asks to read or report on the Controller, and coordinator workers as well as threads. It also carries the missing-folder steps a coordinator needs to start setup, and the relaying session stops and waits after reporting.
+- A setup step's own brief can now carry out that step, including the takeover record in a takeover from an existing controller, so the relay's write ban no longer stalls setup there.
+- Ordinary build and review briefs that read the Controller continue on their brief without the setup relay.
+
+### Changed
+
+- Raised the Controller size budget from 18,000 to 18,500 bytes so rule wording is not cut.
+
+## 3.46.0
+
+### Added
+
+- A small Claude Code shell session check prints only whether the Toolkit session entry exists and whether it equals the shell's own non-empty session ID. It grants no authority; installed delivery still needs checks in both real shells. Missing delivery needs fixing and does not switch task auto-merge off; select Off in this app's setup until fixed. Codex does not deliver the variable, so its absent result is expected.
+
+### Fixed
+
+- Merge guidance offers typing in a fresh eligible chat, while reconnected and revoked chat reasons offer only the other approval routes.
+
 ## 3.45.1
 
 ### Fixed

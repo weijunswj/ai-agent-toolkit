@@ -58,6 +58,13 @@
 // native session context. The hook stops that shell call after reporting; it writes nothing and
 // consumes no approval. Outside a hook, the command has no native session context.
 //
+// Evidence-store merges instead use the existing standing custody permission, independently of
+// task auto-merge and session origin. A fresh validated merged parent binding must name the exact
+// separate store. Bounded authenticated metadata reads must show a private writable repository,
+// its default branch as the bound branch and PR base, and the command's full head SHA. Only the
+// plain merge-commit CLI and connector shapes above qualify, from the store's own folder or an
+// explicitly named target from its parent. A name prefix or governance-off state grants nothing.
+//
 // What one approval allows: one merge, of that pull request in that repository, within a day, by any
 // session on this computer. A typed SHA pins the head commit; without one the merge must still name
 // the head it expects, so a push after that read makes GitHub refuse it. Connector auto-merge cannot
@@ -113,6 +120,10 @@ const path = require('node:path');
 const governance = require('./toolkit-governance-state.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
 const mergeScope = require('./toolkit-auto-merge-eligible.cjs');
+const bindingCache = require('./toolkit-governance-binding.cjs');
+const { validateRemoteIdentity, repositoryIdForCanonicalRemote } = require('./toolkit-capability-registry.cjs');
+const { GitHubTransport } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+const { resolveExecutable } = require('../../skills/github-program-reconciler/scripts/resolve-executable.cjs');
 
 const APPROVALS_BASENAME = 'merge-approvals.v1.json';
 const APPROVALS_SCHEMA = 'toolkit.merge-approvals.v1';
@@ -190,7 +201,7 @@ const VALUE_FLAGS = new Set(['--repo', '-R', '--match-head-commit', '--subject',
 const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--exec-path']);
 
 const MERGE_ROUTES = 'in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub';
-const ASK_TEXT = `Ask the user to type, as plain text and not in quotes, a line with the word merge and the pull request number, such as merge owner/name#N, after reading the merge summary. Approval works ${MERGE_ROUTES}. A fully named target works from any folder; merge N needs that repository's folder. Typing in a reconnected or revoked chat records no approval. Never type it yourself, start a session or script to type it, or touch Toolkit's user-state files.`;
+const ASK_TEXT = `Ask the user to type, as plain text and not in quotes, a line with the word merge and the pull request number, such as merge owner/name#N, after reading the merge summary. Approval works here in a fresh eligible chat, ${MERGE_ROUTES}. A fully named target works from any folder; merge N needs that repository's folder. Typing in a reconnected or revoked chat records no approval. Never type it yourself, start a session or script to type it, or touch Toolkit's user-state files.`;
 
 class MergeHoldError extends Error {
   constructor(code) { super(code); this.name = 'MergeHoldError'; this.code = code; }
@@ -652,7 +663,7 @@ function standingProblem(merge, standing) {
 
 // The refusal for one requested merge, or the approval it uses. `standing` is the owner's standing
 // answer evaluation for this folder's repository, including a safe reason when unavailable.
-function judge(merge, approvals, standing = null) {
+function judge(merge, approvals, standing = null, evidence = null) {
   const unreadable = merge.connector ? connectorRefusal(merge) : null;
   if (unreadable) return { refusal: unreadable };
   if (merge.pr === null) return { refusal: deny('this command merges a pull request Toolkit cannot identify, so it is refused. Name the pull request by number.') };
@@ -660,7 +671,11 @@ function judge(merge, approvals, standing = null) {
   const name = `${merge.repository}#${merge.pr}`;
   const approval = approvals.find(merge.repository, merge.pr);
   if (!approval) {
-    if (!standing?.eligible) return { refusal: { deny: `Toolkit has no unused approval recorded for ${name} from the last day, so this merge is refused. Standing task auto-merge is unavailable: ${standingReason(standing?.reason)}. ${ASK_TEXT}` } };
+    const verified = evidence?.check(merge);
+    if (verified?.eligible) return { evidence: true };
+    if (verified?.recovery) return { refusal: refuse(`Evidence-store verification failed: ${verified.reason}. ${verified.recovery}`) };
+    const evidenceReason = verified?.reason ? ` Evidence-store verification failed: ${verified.reason}.` : '';
+    if (!standing?.eligible) return { refusal: { deny: `Toolkit has no unused approval recorded for ${name} from the last day, so this merge is refused. Standing task auto-merge is unavailable: ${standingReason(standing?.reason)}.${evidenceReason} ${ASK_TEXT}` } };
     const problem = standingProblem(merge, standing);
     if (problem) return { refusal: deny(`task auto-merge is on for ${standing.repository}, but this merge of ${name} ${problem}, so it needs the user's typed approval. A merge without one must be exactly \`gh pr merge ${merge.pr} --merge --match-head-commit <full head sha>\` from this repository's folder, or the connector's merge tool with merge_method "merge" and its head SHA field, once the gate rules' task auto-merge conditions hold.`) };
     const scope = standing.scope(merge.sha);
@@ -930,6 +945,87 @@ function standingReason(reason) {
   }[reason] || 'the standing answer is unavailable';
 }
 
+// Standing evidence custody comes from a fresh merged parent binding, never a store's name or
+// governance-off state. This call owns its read budget and metadata; nothing is persisted. Claude
+// checks twice (before and after governance), so each pass gets at most four seconds of GitHub I/O,
+// shared by every merge in a compound call, within its ten-second hook timeout. Successful reads
+// are reused only between those two passes in the same hook invocation; local guards run again.
+class EvidenceStoreMerges {
+  constructor(cwd, { registryOptions = {}, now, environment = process.env, readEvidenceGitHub, evidenceResponses = new Map() } = {}) {
+    this.cwd = cwd;
+    this.registryOptions = registryOptions;
+    this.now = now || (() => new Date());
+    this.environment = environment;
+    this.read = readEvidenceGitHub;
+    this.deadline = Date.now() + 4000;
+    this.responses = evidenceResponses;
+  }
+
+  request(apiPath) {
+    if (this.responses.has(apiPath)) return this.responses.get(apiPath);
+    const timeoutMs = this.deadline - Date.now();
+    if (timeoutMs <= 0) throw new Error('lookup budget exhausted');
+    const response = this.read ? this.read(apiPath, { timeoutMs })
+      : new GitHubTransport({ ghPath: resolveExecutable('gh', { environment: this.environment, cwd: this.cwd || process.cwd() }), timeoutMs }).request('GET', apiPath);
+    if (Date.now() > this.deadline || response?.status !== 200 || !response.json) throw new Error('lookup unavailable');
+    this.responses.set(apiPath, response.json);
+    return response.json;
+  }
+
+  check(merge) {
+    // Parsing, connector field agreement and generic shell refusals have already run. Reuse the
+    // supported standing-merge shape, but not the task preference or the session's origin.
+    const target = merge.repository.toLowerCase();
+    const here = repositoryOf(this.cwd)?.toLowerCase();
+    let bindings;
+    let ownBinding;
+    try {
+      const registryPath = governance.registryPathFor(this.registryOptions);
+      bindings = bindingCache.readAllBindingCaches(registryPath).map(({ entry, identity }) =>
+        governance.judgeMerged(entry, identity, this.now()));
+      // Read the exact target separately: the bounded scan may not include its own binding.
+      const remote = validateRemoteIdentity(`https://github.com/${target}.git`);
+      const identity = { remote, repository_id: repositoryIdForCanonicalRemote(remote.canonical) };
+      ownBinding = governance.judgeMerged(bindingCache.readBindingCache(identity, registryPath), identity, this.now());
+    } catch { return null; }
+    // A naming binding at any freshness supplies recovery text only, never merge authority.
+    const naming = bindings.filter(judged => judged.status === 'enabled'
+      && judged.binding.store?.kind === 'github' && judged.binding.store.repository.toLowerCase() === target
+      && judged.binding.repository.toLowerCase() !== target);
+    if (naming.length === 0) return null;
+    const failed = (reason, recovery = null) => ({ eligible: false, reason, recovery });
+    if (ownBinding.status === 'enabled') {
+      return failed('the target has its own enabled governance binding');
+    }
+    const sameOwner = naming.filter(judged => judged.binding.repository.split('/')[0].toLowerCase() === target.split('/')[0]);
+    if (sameOwner.length === 0) return failed('the parent repository and store do not share an owner');
+    const inFolder = sameOwner.filter(judged => here === target || (merge.explicit && here === judged.binding.repository.toLowerCase()));
+    const bound = inFolder.find(judged => judged.fresh) || inFolder[0] || sameOwner[0];
+    const problem = standingProblem(merge, { repository: merge.repository });
+    if (problem) {
+      const sha = /^[0-9a-f]{40}$/i.test(merge.sha || '') ? merge.sha : '<full head sha>';
+      return failed(problem, `Retry with exactly \`gh pr merge ${merge.pr} --repo ${merge.repository} --merge --match-head-commit ${sha}\`, using the pull request's current full head SHA.`);
+    }
+    if (inFolder.length === 0) return failed('this is neither the store folder nor its explicitly targeted parent',
+      `Run from the ${merge.repository} store folder, or name --repo ${merge.repository} from the parent ${bound.binding.repository} folder.`);
+    if (!bound.fresh) return failed('the parent binding is not fresh',
+      `Run \`toolkit governance status\` in the parent ${bound.binding.repository} folder, then retry.`);
+    try {
+      const repo = this.request(`repos/${merge.repository}`);
+      if (typeof repo.full_name !== 'string' || repo.full_name.toLowerCase() !== target) return failed('the repository identity does not match');
+      if (repo.private !== true) return failed('the store is not verified private');
+      if (repo.permissions?.push !== true) return failed('write access is not verified');
+      if (typeof repo.default_branch !== 'string' || repo.default_branch.length === 0) return failed('the default branch is unknown');
+      if (repo.default_branch !== bound.binding.store.branch) return failed('the bound store branch is not the default branch');
+      const pr = this.request(`repos/${merge.repository}/pulls/${merge.pr}`);
+      if (pr.number !== merge.pr || typeof pr.base?.repo?.full_name !== 'string' || pr.base.repo.full_name.toLowerCase() !== target) return failed('the pull request target does not match');
+      if (pr.base.ref !== repo.default_branch) return failed('the pull request base is not the default branch');
+      if (typeof pr.head?.sha !== 'string' || pr.head.sha.toLowerCase() !== merge.sha.toLowerCase()) return failed('the pull request head has changed');
+      return { eligible: true };
+    } catch { return failed('GitHub metadata could not be read within the hook budget; check access and retry'); }
+  }
+}
+
 function check(input, cwd, options = {}) {
   const { eligible, reason, checks } = standingAnswer(input, cwd, options);
   return { eligible, reason, explanation: eligible ? 'the standing session and repository checks pass; merge scope and gate conditions still apply' : standingReason(reason), ...checks };
@@ -951,7 +1047,7 @@ function isCheckCommand(text, cwd) {
 
 // The PreToolUse decision: { deny } or null.
 // `host` is the hook's own host ('claude' or 'codex'), set by the entry point, never read from the payload.
-function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true } = {}) {
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, evidenceResponses } = {}) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   let cwd = input && typeof input.cwd === 'string' ? input.cwd : null;
@@ -992,9 +1088,10 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   if (merges.length === 0) return null;
   const approvals = new MergeApprovals({ registryOptions, now });
   const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now, host });
+  const evidence = new EvidenceStoreMerges(cwd, { registryOptions, now, environment: environment || {}, readEvidenceGitHub, evidenceResponses });
   const used = [];
   for (const merge of merges) {
-    const { refusal, approval } = judge(merge, approvals, standing);
+    const { refusal, approval } = judge(merge, approvals, standing, evidence);
     if (refusal) return refusal;
     if (approval) used.push(approval);
   }
