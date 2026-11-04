@@ -4,7 +4,8 @@
 
 ### Fixed
 
-- Fresh Claude Projects coordinators automatically bootstrap their guidebook and guided setup on appointment, only when the host identifies the top-level coordinator and provides native project tools and library access. Other hosts and executor threads keep their assigned roles, and failed bootstrap holds takeover.
+- Git folders without a github.com origin now report governance DISABLED automatically. Missing origins, multiple origin URLs and other hosts no longer hold prompts or ordinary tools for an acknowledgement.
+- Removed the non-GitHub acknowledgement store, reply-ticket branches and recovery instructions. Existing acknowledgement files remain inert and untouched; adding a GitHub origin starts the normal governance question.
 
 ## 3.44.0
 
