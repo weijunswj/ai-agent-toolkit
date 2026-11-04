@@ -6,7 +6,7 @@ Use this when a task may affect live systems, credentials, secrets, customer/pri
 
 Before a risky action, verify that explicit approval is bound to the exact action and remains valid; request fresh approval when the scope does not cover the action or is revoked, expired, or unresolved.
 
-The evidence-store line in the managed `AGENTS.md` is the standing approval for that store: writes, deletions and merges there need no further approval.
+The evidence-store line in the managed `AGENTS.md` is the standing approval for the selected, verified private store: writes, deletions and merges into its default branch need no further approval. That exception needs no new ledger entry or per-merge answer; other repositories retain their existing approval rules.
 
 Bind each approval to the exact owner, action, target, resources, effects, recipient, conditions, expiry, revocation state, and recorded outcome. An unchanged, unexpired, unrevoked approval remains valid for the same still-pending action when only the turn, worker, chat, or transport changes. Assignment, custody, capability, and native permission remain separate; an approval, receipt, or prose cannot supply missing native permission. A changed or new action, revoked or expired approval, or recorded outcome that leaves further work unapproved requires fresh approval or host confirmation before that additional effect. Words like `continue`, `next`, `apply`, or `do it` stay within the approved scope.
 
@@ -22,7 +22,7 @@ A hard stop is never offered, never honoured from the ledger, and only explained
 - Force-pushes and history rewrites.
 - Deleting the only copy of evidence.
 - Pushing task or product source to the default branch.
-- Merging without the owner's OK on a summary of its external effects. The governed evidence-store rule already grants custody permission for the selected, verified private store, including merges into its default branch. That exception needs no new ledger entry or per-merge answer; other repositories retain their existing approval rules.
+- Merging without the owner's OK on a summary of its external effects (each merge stays its own OK).
 - Production, live-system, deployment, firewall or security-setting changes.
 - Turning off tests, validation, guardrails, attribution rules or any safety check.
 - Editing the agent's own permission settings, or adding allow rules, `autoMode` entries or Codex allow rules to any saved settings or rules file (user, project, local or managed settings, a Codex rules file, or a reusable `--settings` file, meaning one kept for more than one launch rather than written for one session and deleted when it ends). Per-launch options for a session the agent starts, such as `--allowedTools`, are not covered here, and they never clear a hard stop.

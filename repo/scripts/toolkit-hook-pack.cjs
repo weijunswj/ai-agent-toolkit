@@ -360,6 +360,10 @@ class Fixture {
 
   #git(cwd, args) { return git(cwd, args, { env: this.env }); }
 
+  // hookEnvironment drops the caller's test clock injection. Fixture timestamps must use the
+  // same system clock as the hook processes, even during CI's clock-ahead run.
+  #now(ageMs = 0) { return new Date(Math.round(performance.timeOrigin + performance.now()) - ageMs); }
+
   #files(folder, files) {
     for (const [name, text] of Object.entries(files)) {
       const file = path.join(folder, ...name.split('/'));
@@ -415,7 +419,7 @@ class Fixture {
       schema: 'toolkit.programme-binding.v1', repository: 'toolkit-test-fixture/hook-pack-binding-owner', parent_issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX',
       store: { kind: 'github', repository: store, branch: 'main', path: 'state/' }, required_checks: ['validate'],
     }, null, 2)}\n`;
-    support.recordMerged(owner, { home: this.home, text });
+    support.recordMerged(owner, { home: this.home, text, now: this.#now() });
     return owner;
   }
 
@@ -439,7 +443,7 @@ class Fixture {
     const cache = require('./toolkit-governance-binding.cjs');
     const identity = require('./toolkit-governance-state.cjs').readIdentity(parent);
     fs.writeFileSync(file, text);
-    support.recordMerged(parent, { home: this.home, text, ...(spec.binding === 'stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
+    support.recordMerged(parent, { home: this.home, text, now: this.#now(spec.binding === 'stale' ? 25 * 60 * 60 * 1000 : 0) });
     if (['local', 'absent'].includes(spec.binding)) fs.rmSync(cache.cacheFileFor(registryPath, identity.repository_id));
     if (spec.binding === 'absent') fs.rmSync(file);
     if (spec.binding === 'removed') {
@@ -501,7 +505,7 @@ cp.spawnSync = function(file, args, options) {
       owner.apply(answer === 'off' ? 'off' : 'after-gates', owner.inspect());
     }
     // A stale read is one over a day old, as when this computer has not reached GitHub since.
-    support.recordMerged(this.work, { home: this.home, text, ...(answer === 'after-gates-stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
+    support.recordMerged(this.work, { home: this.home, text, now: this.#now(answer === 'after-gates-stale' ? 25 * 60 * 60 * 1000 : 0) });
   }
 
   // The session-start mark of a session the user opened (not resumed, not launched by another).
@@ -515,7 +519,7 @@ cp.spawnSync = function(file, args, options) {
     if (typeof value === 'string') {
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)
         .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential())
-        .replaceAll('{head}', this.head || '').replaceAll('{now}', new Date().toISOString());
+        .replaceAll('{head}', this.head || '').replaceAll('{now}', this.#now().toISOString());
     }
     if (Array.isArray(value)) return value.map(item => this.expand(item));
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.expand(item)]));
