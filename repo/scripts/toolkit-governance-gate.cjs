@@ -814,21 +814,18 @@ class ReplyTickets {
   }
 
   // Old releases could ask about a folder now automatically DISABLED. Recheck every target before
-  // using a ticket or confirmation; unreadable targets stay held, and spent receipts stay intact.
-  #refresh(data, sessionId, entry) {
+  // using a ticket or confirmation; unreadable targets stay held. Lookups never save their snapshot:
+  // stale entries stay on disk, ignored, until they lapse or a normal mutation replaces them.
+  #refresh(sessionId, entry) {
     if (!this.#gate || !entry || !Array.isArray(entry.repositories)) return entry;
     const repositories = entry.repositories.filter(item => this.#gate.evaluate(item.root, { sessionId }).hold);
-    if (repositories.length === entry.repositories.length) return entry;
-    if (repositories.length) data.sessions[sessionId] = { ...entry, repositories };
-    else delete data.sessions[sessionId];
-    this.#save(data);
-    return data.sessions[sessionId] || null;
+    return repositories.length ? { ...entry, repositories } : null;
   }
 
   // The pending confirmation of this run, { command, repositories }, or null.
   pending(sessionId, epoch) {
     const data = this.#read();
-    const entry = this.#refresh(data, sessionId, typeof sessionId === 'string' && Object.hasOwn(data.sessions, sessionId) ? data.sessions[sessionId] : null);
+    const entry = this.#refresh(sessionId, typeof sessionId === 'string' && Object.hasOwn(data.sessions, sessionId) ? data.sessions[sessionId] : null);
     if (!entry || !Object.hasOwn(COMMAND_WORDS, String(entry.pending)) || entry.epoch !== epoch || !EPOCH.test(String(epoch))
       || !this.#current(entry) || !Array.isArray(entry.repositories)) return null;
     return { command: entry.pending, repositories: entry.repositories, at: entry.at };
@@ -842,7 +839,7 @@ class ReplyTickets {
     if (!found || (sessionId !== undefined && found[0] !== sessionId)) return null;
     const [owner, entry] = found;
     if (!(Date.parse(entry.at) >= this.#now().getTime() - MAX_TICKET_AGE_MS) || !EPOCH.test(String(entry.epoch)) || !Array.isArray(entry.repositories)) return null;
-    const current = this.#refresh(data, owner, entry);
+    const current = this.#refresh(owner, entry);
     return current ? { session_id: owner, ...current } : null;
   }
 
@@ -851,7 +848,7 @@ class ReplyTickets {
   // Whether this run of the session holds a ticket that has not lapsed, or a pending confirmation.
   live(sessionId, epoch) {
     const data = this.#read();
-    const entry = this.#refresh(data, sessionId, typeof sessionId === 'string' && Object.hasOwn(data.sessions, sessionId) ? data.sessions[sessionId] : null);
+    const entry = this.#refresh(sessionId, typeof sessionId === 'string' && Object.hasOwn(data.sessions, sessionId) ? data.sessions[sessionId] : null);
     return this.#current(entry) && EPOCH.test(String(epoch)) && entry.epoch === epoch;
   }
 

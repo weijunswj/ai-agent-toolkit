@@ -107,6 +107,44 @@ function answerFixture(t, { remote = REMOTE } = {}) {
 // Upgrade closure: the previous release's writer produced this store, including its spent receipt.
 // Only paths, session marks and timestamps are rebound to each isolated test run.
 const baseReplyStore = require('./fixtures/governance-reply-tickets-base.json');
+// Lookup closure: peek, pending and both live entry kinds must preserve a concurrent mutation.
+for (const mutation of ['receipt recorded', 'ticket spent']) {
+  test(`reply lookups preserve a ${mutation} during target evaluation`, t => {
+    for (const lookup of ['peek', 'pending', 'live-ticket', 'live-pending']) {
+      const ctx = scratch(t);
+      const options = { registryOptions: ctx.options };
+      gate.startSession({ session_id: 'owner', source: 'startup' }, options);
+      const epoch = new gate.SessionEpochs(options).get('owner');
+      const file = path.join(path.dirname(ctx.registryPath), gate.TICKETS_BASENAME);
+      const repositories = ['held', 'off'].map(name => ({ root: path.join(ctx.root, name), id: `local:${name}`, mark: null }));
+      const data = structuredClone(baseReplyStore.store);
+      data.sessions = Object.fromEntries([['owner', 'ticket'], ['waiting', 'pending']].map(([session, kind]) =>
+        [session, { ...data.sessions[kind], epoch, at: new Date().toISOString(), repositories }]));
+      data.deliveries.forEach(receipt => { receipt.at = new Date().toISOString(); });
+      fs.writeFileSync(file, JSON.stringify(data));
+      const writer = new gate.ReplyTickets(options);
+      const delivery = gate.ownerMessage(projects.wake('no', { id: 'concurrent-receipt' }));
+      let written = null;
+      const reader = new gate.ReplyTickets({ ...options, gate: { evaluate(root) {
+        if (written === null) {
+          if (mutation === 'receipt recorded') assert.equal(writer.acceptDelivery(delivery, null), true);
+          else assert.ok(writer.take(baseReplyStore.ticket));
+          written = fs.readFileSync(file, 'utf8');
+        }
+        return { hold: root === repositories[0].root };
+      } } });
+      if (lookup === 'peek' || lookup === 'pending') {
+        const entry = lookup === 'peek' ? reader.peek(baseReplyStore.ticket, 'owner') : reader.pending('waiting', epoch);
+        assert.deepEqual(entry.repositories, [repositories[0]], lookup);
+      } else assert.equal(reader.live(lookup === 'live-ticket' ? 'owner' : 'waiting', epoch), true, lookup);
+      assert.notEqual(written, null, 'the concurrent mutation ran during target evaluation');
+      if (mutation === 'receipt recorded') assert.equal(writer.acceptDelivery(delivery, null), false, 'spent delivery stays spent');
+      else assert.equal(writer.peek(baseReplyStore.ticket, 'owner'), null, 'spent ticket stays absent');
+      assert.equal(fs.readFileSync(file, 'utf8'), written, `${lookup} leaves the concurrent writer's store unchanged`);
+    }
+  });
+}
+
 for (const kind of ['ticket', 'pending', 'bound']) {
   test(`upgrade reply state: ${kind} stops holding decided targets and cannot ask another confirmation`, t => {
     for (const identity of ['missing', 'several', 'other', 'enabled', 'disabled']) {
@@ -129,7 +167,7 @@ for (const kind of ['ticket', 'pending', 'bound']) {
       for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
         seed();
         assert.equal(tools.decide({ tool_name, cwd: ctx.root, session_id: 'owner', tool_input: { prompt: 'Check later.' } }), null, `${identity}/${tool_name}`);
-        assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(file, 'utf8')).sessions, 'owner'), false);
+        assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).sessions, data.sessions, 'ignored entries stay on disk');
         receipts();
       }
       seed();
@@ -141,6 +179,7 @@ for (const kind of ['ticket', 'pending', 'bound']) {
           assert.equal(result.ok, false, `${identity}/${word}`);
           assert.match(result.text, /Nothing was recorded/);
           assert.doesNotMatch(result.text, /Ask the user|Is that right/);
+          assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).sessions, data.sessions, 'an ignored ticket cannot be spent or confirmed');
           receipts();
         }
       }
@@ -176,8 +215,27 @@ test('upgrade reply state: undecided and unreadable targets keep scheduling held
     const tools = new gate.ToolGate({ ...options, stateReader });
     assert.match(tools.decide({ tool_name: 'CronCreate', cwd: ctx.root, session_id: 'owner', tool_input: { prompt: 'yes' } })?.deny || '', /no prompt is scheduled/);
     const kept = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.deepEqual(kept.sessions.owner.repositories.map(item => item.root), [held]);
+    assert.deepEqual(kept.sessions, data.sessions, 'lookups keep the original stored targets');
     assert.deepEqual(kept.deliveries, data.deliveries);
+    const tickets = new gate.ReplyTickets({ ...options, gate: new gate.GovernanceGate({ ...options, stateReader }) });
+    assert.equal(tickets.live('owner', epoch), true);
+    let ticket = kind === 'bound' ? baseReplyStore.bound_ticket : baseReplyStore.ticket;
+    if (kind === 'pending') {
+      const pending = tickets.pending('owner', epoch);
+      assert.deepEqual(pending.repositories.map(item => item.root), [held]);
+      ticket = tickets.issue('owner', epoch, pending.repositories, pending.command);
+    }
+    assert.deepEqual(tickets.peek(ticket, 'owner').repositories.map(item => item.root), [held]);
+    const taken = tickets.take(ticket);
+    assert.deepEqual(taken.repositories.map(item => item.root), [held], 'spending returns only held targets');
+    assert.equal(tickets.peek(ticket, 'owner'), null);
+    tickets.confirm('owner', epoch, 'disable', taken.repositories);
+    assert.deepEqual(tickets.pending('owner', epoch).repositories.map(item => item.root), [held]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).sessions.owner.repositories, taken.repositories);
+    tickets.drop('owner');
+    assert.equal(tickets.live('owner', epoch), false);
+    assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(file, 'utf8')).sessions, 'owner'), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).deliveries, data.deliveries);
   }
 });
 
