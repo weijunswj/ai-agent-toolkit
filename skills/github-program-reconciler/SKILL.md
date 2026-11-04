@@ -50,6 +50,8 @@ Everything runs through `gh` (resolved to a full `.exe` path, never from the wor
 
 ## Binding
 
+Pending governance proposals and run receipts never permit programme writes. Only a fresh validated default-branch enabled binding does. An off decision is the minimal disabled programme file merged through a pull request; local answers and project memory never decide.
+
 The governed repository holds `.github/toolkit-programme.json` (no secrets). It is the repository's own governance setting: only the copy merged on the default branch counts, on every computer, and a working tree, another branch or a fork's copy never does.
 
 ```json
