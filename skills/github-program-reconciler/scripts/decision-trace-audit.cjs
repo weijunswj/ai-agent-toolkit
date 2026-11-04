@@ -57,7 +57,8 @@ function indexGraph({ body = '', comments, repository = '', issue = null, all = 
       // per character; this bounded scan also refuses oversized or malformed link targets.
       while (start > 0 && match.index - start < 2048 && !/[\s()<>\[\]]/.test(source[start - 1])) start -= 1;
       const target = source.slice(start, match.index + match[0].length);
-      return { id: match[1], local: target === match[0] || !base || target === commentLink(base, match[1]) };
+      // GitHub owner and repository names are case-insensitive, as the binding comparison is.
+      return { id: match[1], local: target === match[0] || !base || target.toLowerCase() === commentLink(base, match[1]).toLowerCase() };
     });
   };
   const children = new Set();
@@ -106,7 +107,7 @@ function indexGraph({ body = '', comments, repository = '', issue = null, all = 
     // A missing body link labelled as an index cannot masquerade as a missing ordinary note.
     for (const match of String(body || '').matchAll(/\[(?:list|topic directory) \d+\]\(([^)]*#issuecomment-(\d+))\)/g)) {
       if (!indexIds.has(match[2])) errors.push({ code: byId.has(match[2]) ? 'INDEX_UNRELATED' : 'INDEX_MISSING', id: match[2] });
-      else if (base && match[1] !== commentLink(base, match[2]) && match[1] !== `#issuecomment-${match[2]}`) errors.push({ code: 'INDEX_UNRELATED', id: match[2] });
+      else if (base && match[1].toLowerCase() !== commentLink(base, match[2]).toLowerCase() && match[1] !== `#issuecomment-${match[2]}`) errors.push({ code: 'INDEX_UNRELATED', id: match[2] });
     }
   }
   return { indexes, roots, reachable, linkedIndexes, errors, localLinks, strictIds };
@@ -183,11 +184,28 @@ function entryFor(comment, facts, index) {
 // index entries in comment order, every comment none of them lists, each with its tag (null for
 // "Other comments"). `marks` names superseded records that an index comment lists without
 // "superseded by", with the tag of the record's comment.
+// A dead or foreign link in a generated index covers nothing, so the comments it no longer reaches
+// return to the body trace and the page keeps redrawing; the audit still reports the link. Only a
+// structural fault (a cycle, too many hops or too many pages) stops the redraw.
+const PROJECTION_TOLERATED = new Set(['INDEX_MISSING', 'INDEX_UNRELATED']);
+
+// Plain recovery text for an index fault, shared by the audit finding and any hold.
+function indexErrorText(errors) {
+  const list = errors.map(entry => `${entry.code} ${entry.id}${entry.target ? ` -> ${entry.target}` : ''}`).join(', ');
+  const dead = errors.some(entry => PROJECTION_TOLERATED.has(entry.code));
+  const structural = errors.some(entry => !PROJECTION_TOLERATED.has(entry.code));
+  const steps = [];
+  if (dead) steps.push('a linked comment was deleted or points elsewhere; the page still redraws and lists the comments it no longer reaches in the body; to clear this, remove that link from the named index comment');
+  if (structural) steps.push('an index comment links in a loop or too deep; edit or delete the named index comment, and the next pass lists its comments in the body');
+  return `Invalid comment index: ${list}. ${steps.join('. ')}`;
+}
+
 function traceEntries(comments, recordPrefix = null, repository = '', issue = null) {
   const people = comments.filter(comment => !isBot(comment));
   const graph = indexGraph({ comments, repository, issue, all: true });
-  if (graph.errors.length) {
-    const error = new Error(`Invalid comment index: ${graph.errors.map(entry => `${entry.code} ${entry.id}`).join(', ')}`);
+  const blocking = graph.errors.filter(entry => !PROJECTION_TOLERATED.has(entry.code));
+  if (blocking.length) {
+    const error = new Error(indexErrorText(blocking));
     error.code = 'TRACE_INDEX_INVALID';
     throw error;
   }
@@ -367,4 +385,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });
+module.exports = Object.freeze({ indexErrorText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });

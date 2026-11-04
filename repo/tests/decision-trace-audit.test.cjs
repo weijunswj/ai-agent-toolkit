@@ -23,6 +23,7 @@ for (const row of [
   { name: 'unrelated repository link', root: 2, indexes: [generated(2, '[x](https://github.com/other.test/project/issues/7#issuecomment-1)')], code: 'INDEX_UNRELATED' },
   { name: 'unrelated protocol-relative link', root: 2, indexes: [generated(2, '[x](//github.com/other.test/project/issues/7#issuecomment-1)')], code: 'INDEX_UNRELATED' },
   { name: 'unrelated upper-case scheme link', root: 2, indexes: [generated(2, '[x](HTTPS://github.com/other.test/project/issues/7#issuecomment-1)')], code: 'INDEX_UNRELATED' },
+  { name: 'repository case variant', root: 2, indexes: [generated(2, '[x](https://github.com/Example.test/Project/issues/7#issuecomment-1)')] },
   { name: 'directory links decision comment', root: 2, indexes: [person(2, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n- **Topic:** [1](#issuecomment-1)`)] },
   { name: 'directory links another directory', root: 3, indexes: [person(2, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}`), person(3, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n[list 1](#issuecomment-2)`)], code: 'INDEX_UNRELATED' },
   { name: 'too many hops', root: 4, indexes: [generated(2, '[x](#issuecomment-1)'), generated(3, '[list 1](#issuecomment-2)'), generated(4, '[list 1](#issuecomment-3)')], code: 'INDEX_DEPTH' },
@@ -36,7 +37,14 @@ for (const row of [
     assert.deepEqual(result.index_errors, []);
     assert.deepEqual(result.unlinked_decisions, []);
   }
-  if (row.indexes.length && row.code) assert.throws(() => traceEntries(comments, PREFIX, options.repository, options.issue), { code: 'TRACE_INDEX_INVALID' });
+  // Projection stops only on structural faults. A dead or foreign link covers nothing, so the
+  // decision returns to the body trace and the page keeps redrawing.
+  if (row.indexes.length && ['INDEX_CYCLE', 'INDEX_DEPTH'].includes(row.code)) assert.throws(() => traceEntries(comments, PREFIX, options.repository, options.issue), { code: 'TRACE_INDEX_INVALID', message: /edit or delete the named index comment/ });
+  else if (row.code) {
+    const trace = traceEntries(comments, PREFIX, options.repository, options.issue);
+    assert.ok(trace.entries.some(entry => entry.id === '1'), JSON.stringify(trace));
+    assert.match(require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs').indexErrorText(result.index_errors), /remove that link from the named index comment/);
+  }
 });
 
 test('index traversal has a page-count bound and cannot use foreign body links for reachability', () => {

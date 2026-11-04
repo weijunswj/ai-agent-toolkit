@@ -1706,3 +1706,76 @@ test('a page written by a newer Toolkit is held, not rewritten, so two versions 
   reconciler().run({ apply: true });
   assert.notEqual(github.issues.get(421).body, before, 'the same version still writes it');
 });
+
+// A deleted comment that a generated page links must not stop the page redrawing.
+const deleteComment = (github, id) => { github.comments.get(id).issue = -1; };
+const traceAudit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+
+test('a decision deleted after directory paging leaves the page redrawing, with a plain finding', () => {
+  const { github, reconciler, parentIssue, decisions } = directoryFixture();
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  deleteComment(github, decisions[4].id);
+  const dry = reconciler().run();
+  assert.deepEqual(dry.holds, []);
+  const finding = dry.findings.find(entry => entry.code === 'TRACE_UNLINKED');
+  assert.ok(finding, JSON.stringify(dry.findings));
+  assert.match(finding.detail, /INDEX_MISSING .* -> /);
+  assert.match(finding.detail, /remove that link from the named index comment/);
+  const later = comment(github, parentIssue, 'Fresh topic\n---\nINT-TK421-99999 Later decision');
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  assert.ok(github.issues.get(parentIssue).body.includes(`#issuecomment-${later.id})`), 'a new decision still reaches the page');
+});
+
+test('a topic page deleted under a directory returns its comments to the body', () => {
+  const { github, reconciler, parentIssue } = setup();
+  reconciler().run({ apply: true });
+  const fix = Array.from({ length: 24 }, (unused, n) => n + 1).map(n => comment(github, 423, `data-leak-fix-122\n---\nINT-TK421-05${n} fix step ${'z'.repeat(60)}`));
+  comment(github, 423, 'TABLE-CREATION\n---\nINT-TK421-060 columns agreed');
+  reconciler().run({ apply: true });
+  const pass = reconciler();
+  pass.threshold = github.issues.get(423).body.length - 200;
+  assert.deepEqual(pass.run({ apply: true }).holds, []);
+  const index = github.commentsOf(423).at(-1);
+  assert.ok(index.body.includes(traceAudit.INDEX_COMMENT_MARKER));
+  // Deleting the topic page (or a decision it links) holds nothing; its comments are listed in the body again.
+  deleteComment(github, fix[3].id);
+  const again = reconciler();
+  assert.deepEqual(again.run().holds, []);
+  deleteComment(github, index.id);
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  const trace = state.findStateBlock(github.issues.get(423).body, state.TRACE_BLOCK_NAME).block.body;
+  assert.match(trace, new RegExp(`#issuecomment-${fix[0].id}\\)`));
+});
+
+test('a cyclic generated index holds the body once, with recovery text', () => {
+  const { github, reconciler, parentIssue } = setup();
+  reconciler().run({ apply: true });
+  const first = comment(github, parentIssue, `${traceAudit.INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=test part=1/1 -->\n`);
+  const second = comment(github, parentIssue, `${traceAudit.INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=test part=1/1 -->\n[list 1](#issuecomment-${first.id})`);
+  github.comments.get(first.id).body += `[list 1](#issuecomment-${second.id})`;
+  const dry = reconciler().run();
+  const held = dry.holds.filter(hold => hold.target === `#${parentIssue}` && hold.code === 'TRACE_INDEX_INVALID');
+  assert.equal(held.length, 1, JSON.stringify(dry.holds));
+  assert.match(held[0].detail, /INDEX_CYCLE/);
+  assert.match(held[0].detail, /edit or delete the named index comment/);
+});
+
+test('a stale body with no planned index pages reads the issue and its comments no more than before paging', () => {
+  const { github, reconciler } = setup();
+  reconciler().run({ apply: true });
+  comment(github, 421, 'Scope\n---\nINT-TK421-001 Decision');
+  const before = github.calls.length;
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  const calls = github.calls.slice(before);
+  assert.equal(calls.filter(call => call.method === 'GET' && /\/issues\/421$/.test(call.path)).length, 4);
+  assert.equal(calls.filter(call => call.method === 'GET' && /\/issues\/421\/comments/.test(call.path)).length, 2);
+});
+
+test('a programming error while projecting a page is thrown, not held without a code', () => {
+  const { reconciler } = setup();
+  const pass = reconciler();
+  pass.projectBody = () => { throw new TypeError('boom'); };
+  assert.throws(() => pass.run(), /boom/);
+});

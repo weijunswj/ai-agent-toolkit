@@ -22,7 +22,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, auditDecisionTraces, traceEntries, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
+const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, auditDecisionTraces, traceEntries, indexErrorText, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
 const { OTHER_COMMENTS } = require('./decision-tags.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 
@@ -3245,7 +3245,7 @@ class Reconciler {
       const issue = observed.issues.get(number);
       if (!issue || traced.has(number)) continue;
       const result = auditDecisionTraces({ body: issue.body, comments: observed.comments.get(number) || [], recordPrefix: this.binding.record_prefix, threshold: this.threshold, repository: this.binding.repository, issue: number });
-      if (result.index_errors.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: `Invalid comment index: ${result.index_errors.map(entry => `${entry.code} ${entry.id}`).join(', ')}` });
+      if (result.index_errors.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: indexErrorText(result.index_errors) });
       if (result.unlinked_decisions.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: `${result.unlinked_decisions.length} decision comment(s) are not linked from the body or an index comment it links; write the lines from decision-trace-audit --repair` });
       for (const entry of result.superseded_unmarked) findings.push({ code: 'TRACE_SUPERSEDED_UNMARKED', issue: number, detail: `${entry.record} is superseded by ${entry.superseded_by} but not marked "superseded by"` });
     }
@@ -3360,7 +3360,7 @@ class Reconciler {
       const topic = this.topicFor(parent, number, observed.issues);
       let traceBody;
       try { traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), this.binding.repository, topic); }
-      catch (error) { holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
+      catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // Dry runs include the time change on the document that holds each effect's intent.
       const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
@@ -3375,7 +3375,7 @@ class Reconciler {
       let projected;
       const topicBudget = Math.max(0, MAX_TOPIC_COMMENTS_PER_PASS - effects.filter(effect => effect.kind === 'post_index_comment' && !effect.target.directory).reduce((count, effect) => count + effect.target.parts.length, 0));
       try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, topicBudget); }
-      catch (error) { holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
+      catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
       if (projected.body.length >= this.threshold) {
         holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body' });
         continue;
@@ -3465,7 +3465,8 @@ class Reconciler {
     const keep = (list, test) => { const kept = list.filter(item => !test(item)); list.splice(0, list.length, ...kept); };
     keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
     keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
-    keep(holds, hold => hold.target === `#${number}` && ['BLOCK_NEWER_TOOLKIT', 'BODY_TOO_LARGE'].includes(hold.code));
+    // diffBlocks runs again for the parent below, so drop every body hold it raised the first time.
+    keep(holds, hold => hold.target === `#${number}` && hold.scope === 'body');
     this.diffBlocks({ ...parent, attention: next }, projected, observed, only, effects, findings, holds, [number], resolutions);
   }
 
@@ -3770,7 +3771,10 @@ class Reconciler {
         const topic = this.topicFor(parentDoc, number, plan.observed.issues);
         // Recheck minimum size and version before posting any pages as well as before the body
         // write. A newly oversized hand-written section must not produce orphan index comments.
-        const topicBudget = plan.effects.filter(entry => entry.kind === 'post_index_comment' && !entry.target.directory && entry.target.issue === number).reduce((count, entry) => count + entry.target.parts.length, 0);
+        const plannedPosts = plan.effects.filter(entry => entry.kind === 'post_index_comment' && !entry.target.directory && entry.target.issue === number);
+        const topicBudget = plannedPosts.reduce((count, entry) => count + entry.target.parts.length, 0);
+        // The latest unchanged read, reused by the body write when nothing was posted after it.
+        let fresh = null;
         const preview = (budget = topicBudget) => {
           const page = this.reader.issue(number);
           if (!page) throw new ProgrammeError('ISSUE_MISSING', 'The issue could not be read.');
@@ -3779,10 +3783,14 @@ class Reconciler {
           comments.set(number, this.reader.comments(number));
           const next = this.projectBody(number, page.body, body, comments.get(number), version, navBody, currentBody, topic, budget);
           if (next.body.length >= this.threshold) throw new ProgrammeError('BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
+          fresh = { page, comments: comments.get(number) };
           return next;
         };
-        try { preview(); }
-        catch (error) { if (STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+        // Planned topic pages are checked against a fresh read before any is posted.
+        if (plannedPosts.length) {
+          try { preview(); }
+          catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+        }
         // An overflowing tag's list first moves into its own new index comment, checked by reading it back.
         const publishIndex = post => {
           withIntent(post, owner, number, () => {
@@ -3801,8 +3809,9 @@ class Reconciler {
             return indexReadback(this.reader.comments(number), intent, post.target.parts) === true ? { outcome: 'DONE' } : { outcome: 'UNKNOWN', detail: 'the index pages did not read back exactly as written' };
           });
         };
-        for (const post of plan.effects.filter(entry => entry.kind === 'post_index_comment' && !entry.target.directory && entry.target.issue === number)) {
+        for (const post of plannedPosts) {
           if (isHeld(`#${number}`, 'body')) break;
+          fresh = null;
           publishIndex(post);
         }
         // Page remaining full topic lines directly, reusing any older verified topic indexes.
@@ -3813,22 +3822,25 @@ class Reconciler {
             for (const part of next.overflow) {
               const post = indexEffect(number, part, String(comments.get(number).at(-1)?.id || ''));
               post.text = describeEffect(post);
+              fresh = null;
               publishIndex(post);
               if (isHeld(`#${number}`, 'body')) break;
             }
-          } catch (error) { if (STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); }
+          } catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); }
         }
         if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
         // The new body is built from a fresh read, so earlier edits by people are kept. Refuse before
         // writing an intent when the block is broken or the body would grow past the threshold.
-        const before = this.reader.issue(number);
+        // Nothing was posted since the last preview, so its read is still the one to build on; the
+        // write itself re-reads and refuses on any change.
+        const before = fresh ? fresh.page : this.reader.issue(number);
         if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
         const newest = newestBlockVersion(before.body);
         if (newest && versionNewer(newest, version)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`); continue; }
         let next;
-        comments.set(number, this.reader.comments(number));
+        comments.set(number, fresh ? fresh.comments : this.reader.comments(number));
         try { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0); }
-        catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+        catch (error) { if (!error.code) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
         effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
         if (next.overflow.length || next.body.length >= this.threshold) {
           record(effect, 'HELD', `the body would be ${next.body.length} characters`);

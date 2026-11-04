@@ -61,7 +61,7 @@ test('programme-state.cjs keeps exactly main\'s top-level requires (lines 21-27)
     [22, "const fs = require('node:fs');"],
     [23, "const path = require('node:path');"],
     [24, "const { spawnSync } = require('node:child_process');"],
-    [25, "const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, auditDecisionTraces, traceEntries, commentLink, issueUrl } = require('./decision-trace-audit.cjs');"],
+    [25, "const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, auditDecisionTraces, traceEntries, indexErrorText, commentLink, issueUrl } = require('./decision-trace-audit.cjs');"],
     [26, "const { OTHER_COMMENTS } = require('./decision-tags.cjs');"],
     [27, "const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');"],
   ]);
