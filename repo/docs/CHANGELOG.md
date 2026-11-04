@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.48.0
+
+### Added
+
+- Owner-led renewal advice for Codex and Claude Code controllers and non-gate test sessions, with verified handoff retrieval and recovery holds.
+- Toolkit daily check-in session advice from redacted digests, keeping missing fields and historical activity explicit without automatic session or task changes.
+
 ## 3.47.1
 
 ### Fixed
