@@ -143,7 +143,7 @@ function writeLastRun(id, record, home) {
 
 // The skip reasons the job runner writes. Anything else is shown as a bare "skipped", so no command
 // output reaches a session line.
-const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|governance status could not be read|governance is [A-Z]+|this checkout has no CI shards to time)$/;
+const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|governance status could not be read|governance is [A-Z]+|no shards yet|this checkout has no CI shards to time)$/;
 const STALE_MS = 2 * 60 * 60 * 1000;
 
 // HH:MMZ on now's UTC date, else with the date (always with it when now is null).

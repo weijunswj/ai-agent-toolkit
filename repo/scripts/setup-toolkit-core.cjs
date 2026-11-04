@@ -4156,8 +4156,8 @@ async function execute(args){return new ToolkitSetupExecution(args).execute();}
 
 // The Windows scheduled tasks Toolkit keeps for the managed checkout's repository
 // (toolkit-windows-tasks.cjs): each with its folder, name, schedule, purpose and state. Setup only
-// reports them: agents do not create scheduled tasks, so when one needs creating or updating the
-// report ends with the one PowerShell line the owner pastes. A failure here never stops setup.
+// reports them, ending with the command a local session runs under the Toolkit task standing
+// approval, or after obtaining approval when it does not apply. A failure here never stops setup.
 // Tests pass a fake scheduler, checkout reads, home and log.
 function printWindowsTasks(args, { platform = process.platform, scheduler = null, checkoutDeps = {}, home = os.homedir(), log = console.log } = {}) {
   if (platform !== 'win32') return null;

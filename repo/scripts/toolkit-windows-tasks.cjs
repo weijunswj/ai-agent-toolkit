@@ -7,11 +7,11 @@
 //   plan    [--repo-root <checkout>] [--folder <F>] [--json]
 //           read-only: the tasks Toolkit would keep for the checkout, what each needs (create,
 //           update, current or refused) and, when anything needs a change, the PowerShell line
-//           for you to paste. Setup prints this.
+//           to run under the Toolkit task standing approval, or with approval. Setup prints this.
 //   apply   [--repo-root <checkout>] [--folder <F>] [--no-first-run] [--json]
 //           creates or updates those tasks and records them in ~/.ai-agent-toolkit/user-state/tasks.json,
-//           then starts a new or changed programme sweep once and waits for its result. You run it:
-//           agents do not create scheduled tasks.
+//           then starts a new or changed programme sweep once and waits for its result. Agents may
+//           run the exact default-folder command under the global Toolkit task standing approval.
 //   remove  [--folder <F>] [--json]
 //           removes only Toolkit's own tasks (all three checks below) and their registry entries,
 //           then the folder when it is empty.
@@ -33,7 +33,6 @@
 // Exit 0 done (or nothing to do), 1 a task could not be changed or refused, 2 bad arguments.
 
 const crypto = require('node:crypto');
-const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -47,25 +46,24 @@ const FIRST_RUN_WAIT_MS = 10 * 60 * 1000;
 const POLL_MS = 5000;
 
 // The jobs Toolkit registers. `applies` says whether a checkout gets the job, and why not.
+function governedTaskProblem({ governanceState, binding }) {
+  if (governanceState !== 'ENABLED') return `GitHub governance is ${governanceState || 'not readable'} here, so Toolkit tasks are not registered`;
+  if (!binding) return 'the binding merged on the default branch could not be read on this computer; run toolkit governance status online first';
+  return null;
+}
+
 const JOBS = Object.freeze({
   'programme-sweep': {
     task: 'PROGRAMME SWEEP',
     schedule: Object.freeze({ kind: 'hourly', at: '08:00', hours: 16 }),
     purpose: 'Brings the programme pages up to date, keeps the attention line and removes the cloud route footer from your own GitHub posts. No AI.',
-    applies({ governanceState, binding }) {
-      if (governanceState !== 'ENABLED') return `GitHub governance is ${governanceState || 'not readable'} here, so there is no programme to sweep`;
-      if (!binding) return 'the binding merged on the default branch could not be read on this computer; run toolkit governance status online first';
-      return null;
-    },
+    applies: governedTaskProblem,
   },
   'shard-timings': {
     task: 'SHARD TIMINGS',
     schedule: Object.freeze({ kind: 'weekly', day: 'Monday', at: '09:15' }),
-    purpose: 'Refreshes the measured test times and opens a pull request when the CI shards drift. No AI.',
-    applies({ checkout }) {
-      const needed = ['repo/contracts/ci/test-shards.json', 'repo/scripts/refresh-shard-timings.cjs'];
-      return needed.every(file => fs.existsSync(path.join(checkout, ...file.split('/')))) ? null : 'only the Toolkit repository has CI shards to time';
-    },
+    purpose: 'Refreshes test times and opens a pull request when CI shards drift; no shards yet means no changes, and timing starts automatically when shards appear. No AI.',
+    applies: governedTaskProblem,
   },
 });
 
@@ -113,7 +111,8 @@ function readCheckout(checkout, deps = {}) {
   if (!identity.valid) return { root: identity.root || null, repository: null, governanceState: null, binding: null };
   let state = null;
   try { state = governance.governanceState(identity.root).state; } catch { state = null; }
-  const binding = governance.mergedBinding(identity.root);
+  let binding = null;
+  try { binding = governance.mergedBinding(identity.root); } catch { /* unreadable grants nothing */ }
   return { root: identity.root, repository: (binding && binding.repository) || repositoryOf(identity), governanceState: state, binding };
 }
 
@@ -468,7 +467,7 @@ function describePlan(plan, { command = null, applied = false } = {}) {
   }
   for (const item of plan.skipped) lines.push(`- ${item.name}: not registered, because ${item.reason}.`);
   if (!applied && command && plan.items.some(item => item.action === 'create' || item.action === 'update')) {
-    lines.push('', 'Agents do not create scheduled tasks, so paste this line into PowerShell yourself (it registers the tasks above, then runs the programme sweep once and shows its result):', '', `    ${command}`);
+    lines.push('', 'Run this command under the Toolkit task standing approval, or obtain approval when it does not apply. It registers the tasks above, then runs the programme sweep once and shows its result:', '', `    ${command}`);
   }
   return lines;
 }

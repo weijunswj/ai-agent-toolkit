@@ -19,9 +19,10 @@
 //                         binding's evidence store, for posts changed since the last sweep that
 //                         ended well (48 hours on the first run). It edits only the signed-in
 //                         account's own posts. It runs even when step 1 held: the two are separate.
-//   shard-timings    for the Toolkit checkout only (it carries the shard manifest and the refresh
-//                    script): refresh-shard-timings.cjs --open-pr, which opens a pull request only
-//                    when the measured times drifted.
+//   shard-timings    checks the repository's shard manifest on every run: "no shards yet" changes
+//                    nothing. Once shards appear, checks fresh enabled governance and runs Toolkit's
+//                    refresh-shard-timings.cjs --repo-root <checkout> --open-pr; a pull request opens
+//                    only when the measured times drifted. No repository-local script is needed.
 //
 // Each run writes ~/.ai-agent-toolkit/user-state/tasks/<id>/last-run.json (mode 600): started,
 // finished, exit, status (ok, held, skipped, failed) and a few summary lines with anything shaped like
@@ -31,18 +32,19 @@
 // session-start line and `toolkit tasks` read these fields, because Task Scheduler shows every skip
 // as success. Exit 0 ok, held or skipped; 1 failed; 2 bad arguments.
 
-const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const tasks = require('./toolkit-tasks.cjs');
+const shards = require('./ci-test-shards.cjs');
 
 const RECONCILER = path.resolve(__dirname, '..', '..', 'skills', 'github-program-reconciler', 'scripts');
 const SCRIPT = Object.freeze({
   governance: path.join(__dirname, 'toolkit-governance.cjs'),
   programme: path.join(RECONCILER, 'programme.cjs'),
   footerSweep: path.join(__dirname, 'toolkit-github-footer-sweep.cjs'),
+  shardTimings: path.join(__dirname, 'refresh-shard-timings.cjs'),
 });
 const JOBS = Object.freeze(['programme-sweep', 'shard-timings']);
 const FIRST_SWEEP_WINDOW_MS = 48 * 60 * 60 * 1000;
@@ -196,12 +198,18 @@ function programmeSweep(job, previous) {
 }
 
 function shardTimings(job) {
-  const manifest = path.join(job.options.repoRoot, 'repo', 'contracts', 'ci', 'test-shards.json');
-  const script = path.join(job.options.repoRoot, 'repo', 'scripts', 'refresh-shard-timings.cjs');
-  if (!fs.existsSync(manifest) || !fs.existsSync(script)) return { status: 'skipped', reason: 'this checkout has no CI shards to time' };
+  let manifest;
+  try { manifest = shards.loadManifest(job.options.repoRoot); }
+  catch (error) {
+    if (error.code === 'ENOENT') return { status: 'skipped', reason: 'no shards yet' };
+    throw error;
+  }
+  shards.assertManifest(manifest, shards.discoverTestFiles(job.options.repoRoot));
+  const notGoverned = job.notGoverned();
+  if (notGoverned) return { status: 'skipped', reason: notGoverned };
   const signedOut = job.ghSignedOut();
   if (signedOut) return { status: 'skipped', reason: signedOut };
-  const run = job.node(script, ['--open-pr'], TIMEOUT.shards);
+  const run = job.node(SCRIPT.shardTimings, ['--repo-root', job.options.repoRoot, '--open-pr'], TIMEOUT.shards);
   const lines = String(run.stdout || '').split(/\r?\n/).filter(Boolean).slice(-3);
   for (const line of lines) job.note(line);
   if (run.status === 0) return { status: 'ok' };
