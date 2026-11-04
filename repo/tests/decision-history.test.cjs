@@ -183,6 +183,7 @@ test('the CLI only reads through gh, resolved to a full path with its window hid
     require(name) {
       if (name === './resolve-executable.cjs') return { resolveExecutable(executable) { assert.equal(executable, 'gh'); return resolved; } };
       if (name === './decision-tags.cjs') return require(path.join(SCRIPTS, 'decision-tags.cjs'));
+      if (name === './decision-trace-audit.cjs') return require(path.join(SCRIPTS, 'decision-trace-audit.cjs'));
       if (name === 'node:child_process') return { spawnSync(executable, args, options) {
         calls.push({ executable, args, options });
         if (args[1] === 'graphql') return { status: 0, stdout: JSON.stringify({ data: { repository: { issue: { lastEditedAt: '2026-10-20T00:00:00Z', userContentEdits: { totalCount: 3 } } } } }) };

@@ -36,6 +36,14 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   const parent = state.newParent({ repository: 'acme/app', parentIssue: 421, outcomes: [outcome], releasePlan: { record: 'INT-TK421-058', comment_id: 5 } });
   assert.equal(validateParent(parent), true, JSON.stringify(validateParent.errors));
   assert.deepEqual(state.validateParent(parent), []);
+  for (const directory of [false, true]) {
+    const pending_effects = [{ intent_id: 'index-intent', kind: 'post_index_comment', state: 'UNKNOWN',
+      target: { issue: 421, tag: null, after: '10', ...(directory ? { directory: true } : {}), parts: [SHA_A + 'a'.repeat(24)] } }];
+    assert.equal(validateParent({ ...parent, pending_effects }), true, JSON.stringify(validateParent.errors));
+    assert.deepEqual(state.validateParent({ ...parent, pending_effects }), []);
+    assert.equal(validateChild({ ...good, pending_effects }), true, JSON.stringify(validateChild.errors));
+    assert.deepEqual(state.validateChild({ ...good, pending_effects }), []);
+  }
   const backfilled = child({ lifecycle: 'DONE', pr: { number: 800, state: 'MERGED', head: SHA_A,
     checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: SHA_A } } });
   assert.equal(validateChild(backfilled), true, JSON.stringify(validateChild.errors));

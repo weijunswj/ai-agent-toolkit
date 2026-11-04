@@ -6,10 +6,87 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
-const { auditDecisionTraces, commentSummary, ledgerTopics, repairedBody, parseArgs, INDEX_COMMENT_MARKER, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+const { auditDecisionTraces, traceEntries, commentSummary, ledgerTopics, repairedBody, parseArgs, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END } = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
 
 const person = (id, body) => ({ id, user: { login: 'owner', type: 'User' }, body });
+const generated = (id, body) => person(id, `${INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=test part=1/1 -->\n${body}`);
 const PREFIX = 'INT-TK421-';
+
+for (const row of [
+  { name: 'old one-hop index', root: 2, indexes: [person(2, `${INDEX_COMMENT_MARKER}\n[x](#issuecomment-1)`)] },
+  { name: 'directory and topic index', root: 3, indexes: [person(2, `${INDEX_COMMENT_MARKER}\n[x](#issuecomment-1)`), person(3, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n- **Topic:** [list 1](#issuecomment-2)`)] },
+  { name: 'missing directory page', root: 3, indexes: [], code: 'INDEX_MISSING' },
+  { name: 'missing topic page', root: 3, indexes: [person(3, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n[list 1](#issuecomment-2)`)], code: 'INDEX_MISSING' },
+  { name: 'missing decision', root: 2, indexes: [generated(2, '[x](#issuecomment-999)')], code: 'INDEX_MISSING' },
+  { name: 'cycle', root: 2, indexes: [generated(2, '[list 1](#issuecomment-3)'), generated(3, '[list 1](#issuecomment-2)')], code: 'INDEX_CYCLE' },
+  { name: 'unrelated issue link', root: 2, indexes: [generated(2, '[x](https://github.com/example.test/project/issues/99#issuecomment-1)')], code: 'INDEX_UNRELATED' },
+  { name: 'unrelated repository link', root: 2, indexes: [generated(2, '[x](https://github.com/other.test/project/issues/7#issuecomment-1)')], code: 'INDEX_UNRELATED' },
+  { name: 'unrelated protocol-relative link', root: 2, indexes: [generated(2, '[x](//github.com/other.test/project/issues/7#issuecomment-1)')], code: 'INDEX_UNRELATED' },
+  { name: 'unrelated upper-case scheme link', root: 2, indexes: [generated(2, '[x](HTTPS://github.com/other.test/project/issues/7#issuecomment-1)')], code: 'INDEX_UNRELATED' },
+  { name: 'directory links decision comment', root: 2, indexes: [person(2, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n- **Topic:** [1](#issuecomment-1)`)] },
+  { name: 'directory links another directory', root: 3, indexes: [person(2, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}`), person(3, `${INDEX_COMMENT_MARKER}\n${DIRECTORY_COMMENT_MARKER}\n[list 1](#issuecomment-2)`)], code: 'INDEX_UNRELATED' },
+  { name: 'too many hops', root: 4, indexes: [generated(2, '[x](#issuecomment-1)'), generated(3, '[list 1](#issuecomment-2)'), generated(4, '[list 1](#issuecomment-3)')], code: 'INDEX_DEPTH' },
+]) test(`index traversal: ${row.name}`, () => {
+  const comments = [person(1, 'Topic\n---\nINT-TK421-001 decision'), ...row.indexes];
+  const options = { body: `[topic directory 1](#issuecomment-${row.root})`, comments, recordPrefix: PREFIX, repository: 'example.test/project', issue: 7 };
+  const result = auditDecisionTraces(options);
+  assert.equal(result.ok, !row.code);
+  if (row.code) assert.ok(result.index_errors.some(error => error.code === row.code), JSON.stringify(result));
+  else {
+    assert.deepEqual(result.index_errors, []);
+    assert.deepEqual(result.unlinked_decisions, []);
+  }
+  if (row.indexes.length && row.code) assert.throws(() => traceEntries(comments, PREFIX, options.repository, options.issue), { code: 'TRACE_INDEX_INVALID' });
+});
+
+test('index traversal has a page-count bound and cannot use foreign body links for reachability', () => {
+  const indexes = Array.from({ length: MAX_INDEX_COMMENTS + 1 }, (_, n) => generated(n + 2, '[x](#issuecomment-1)'));
+  const result = auditDecisionTraces({ body: indexes.map(comment => `[list 1](#issuecomment-${comment.id})`).join('\n'), comments: [person(1, 'Topic\n---\nDecision'), ...indexes] });
+  assert.equal(result.ok, false);
+  assert.ok(result.index_errors.some(error => error.code === 'INDEX_LIMIT'));
+  const foreign = auditDecisionTraces({ body: '[x](https://github.com/other.test/project/issues/7#issuecomment-1)', comments: [person(1, 'Topic\n---\nDecision')], repository: 'example.test/project', issue: 7 });
+  assert.equal(foreign.ok, false);
+  assert.deepEqual(foreign.unlinked_decisions.map(entry => entry.id), ['1']);
+});
+
+test('a shared index reached along a longer path still enforces the depth bound', () => {
+  const comments = [person(1, 'Topic\n---\nDecision'),
+    generated(2, '[x](#issuecomment-1)'),
+    generated(3, '[list 1](#issuecomment-2)'),
+    generated(4, '[list 1](#issuecomment-3)')];
+  const result = auditDecisionTraces({ body: '[list 1](#issuecomment-3) [list 2](#issuecomment-4)', comments });
+  assert.equal(result.ok, false);
+  assert.ok(result.index_errors.some(error => error.code === 'INDEX_DEPTH'));
+});
+
+for (const reference of ['[other issue](https://github.com/example.test/project/issues/99#issuecomment-999)', '[missing](#issuecomment-999)', '[self](#issuecomment-2)']) {
+  test(`hand-made index keeps base handling of ${reference}`, () => {
+    const comments = [person(1, 'Topic\n---\nINT-TK421-001 Decision'), person(2, `${INDEX_COMMENT_MARKER}\n## Decision index for the task (moved from the issue body)\n[local](#issuecomment-1)\n${reference}`)];
+    const result = auditDecisionTraces({ body: '[list 1](#issuecomment-2)', comments, repository: 'example.test/project', issue: 7, recordPrefix: PREFIX });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.index_errors, []);
+    assert.doesNotThrow(() => traceEntries(comments, PREFIX, 'example.test/project', 7));
+  });
+}
+
+test('legacy index-to-index references are not traversed, preserving base unlinked-decision findings', () => {
+  const comments = [person(1, 'Topic\n---\nINT-TK421-001 Decision'), person(2, `${INDEX_COMMENT_MARKER}\n[index](#issuecomment-3)`), person(3, `${INDEX_COMMENT_MARKER}\n[decision](#issuecomment-1)\n[index](#issuecomment-2)`)];
+  const result = auditDecisionTraces({ body: '[list 1](#issuecomment-2)', comments, recordPrefix: PREFIX });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.unlinked_decisions.map(entry => entry.id), ['1']);
+  assert.deepEqual(result.index_errors, []);
+  assert.equal(traceEntries(comments).indexes.length, 2, 'both legacy indexes stay root links, as on the base');
+});
+
+test('a foreign reference in a hand-made index cannot cover a local decision', () => {
+  const comments = [person(1, 'Topic\n---\nDecision'), person(2, `${INDEX_COMMENT_MARKER}\n[foreign](https://github.com/example.test/project/issues/99#issuecomment-1)`)];
+  const options = { body: '[list 1](#issuecomment-2)', comments, repository: 'example.test/project', issue: 7 };
+  const result = auditDecisionTraces(options);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.index_errors, []);
+  assert.deepEqual(result.unlinked_decisions.map(entry => entry.id), ['1']);
+  assert.deepEqual(traceEntries(comments, null, options.repository, options.issue).entries.map(entry => entry.id), ['1']);
+});
 
 test('the CLI resolves gh to a full path and hides its window for both read-only requests', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs'), 'utf8');
