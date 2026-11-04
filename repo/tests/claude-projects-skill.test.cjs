@@ -613,23 +613,24 @@ const ctaRecoveryCases = [
   ['failed or uncertain posting', 'skill', ['Read back a successful post before treating the ask as relayed', 'If posting or notification status is uncertain, inspect chat and the host response before retrying', 'Never claim the owner was notified merely because text was edited or a tool call was attempted']],
   ['missing notification metadata', 'nudge', ['"notification unverified"', 'do not infer notification from an edit timestamp']],
   ['two resumable lanes together', 'skill', ['Put every confirmed resumable lane needing owner input in one combined **Waiting on you** list', 'Link each thread by its title', 'Complete the sweep before posting where possible; never send one recovery announcement per lane']],
-  ['timer owner and nudge repeat recovery', 'skill', ['Keep one entry for the interruption in the existing promise list', 'Reuse it across timer wakes, owner messages and periodic reports', 'Repeated observations do not create another recovery announcement']],
-  ['another lane later becomes resumable', 'skill', ['If another lane becomes resumable later, it is a new owner step under **Call-to-action pings**', 'carry forward the complete outstanding recovery list in that notifying post']],
-  ['one lane resumes', 'skill', ['Mark a lane resumed only after current status or activity confirms it, it finishes, or an explicit owner decision disposes of it']],
-  ['same lanes interrupted again', 'skill', ['A new observed interruption starts a new entry']],
-  ['finished superseded resolved cloud or working lane', 'skill', ['Skip finished, superseded, resolved, cloud and already-working lanes']],
-  ['device or prerequisite unavailable', 'skill', ['Separate sessions still waiting for a device or another prerequisite from resumable sessions needing owner input']],
-  ['missing session or failed incomplete inventory', 'skill', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success', 'reads one thread per call by `thread_id`', 'an active session that is not running, connected or served is the usual parked case']],
+  ['timer owner and nudge repeat recovery', 'device', ['Keep one entry for the interruption in the existing promise list', 'Reuse it across timer wakes, owner messages and periodic reports', 'Repeated observations do not create another recovery announcement']],
+  ['another lane later becomes resumable', 'device', ['If another lane becomes resumable later, it is a new owner step under **Call-to-action pings**', 'carry forward the complete outstanding recovery list in that notifying post']],
+  ['one lane resumes', 'device', ['Mark a lane resumed only after current status or activity confirms it, it finishes, or an explicit owner decision disposes of it']],
+  ['same lanes interrupted again', 'device', ['A new observed interruption starts a new entry']],
+  ['finished superseded resolved cloud or working lane', 'device', ['Skip finished, superseded, resolved, cloud and already-working lanes']],
+  ['device or prerequisite unavailable', 'device', ['Separate sessions still waiting for a device or another prerequisite from resumable sessions needing owner input']],
+  ['missing session or failed incomplete inventory', 'device', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success', 'reads one thread per call by `thread_id`', 'an active session that is not running, connected or served is the usual parked case']],
   ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 4 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
   ['quiet run finds a missed ask', 'nudge', ['2a. Owner asks (runs every time, including the no-change path)', 'UNRELAYED ASK: <n> | ']],
   ['reaction without required native action', 'nudge', ['An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']],
   ['resume while approval is held', 'skill', ['type anything, such as `.`', 'Typing text resumes conversation; it grants no approval for held work']],
   ['owner stopped the nudge', 'skill', ['preserving its schedule, bound home thread, recorded raises and any `stopped by owner` entry', 'On the first successful wake after a recorded interruption', 'never wait for the owner to request the reminder']],
-  ['no new ask or confirmed resumable lane', 'skill', ['a new ask the owner can act on', 'every confirmed resumable lane needing owner input', 'A gap or a parked status alone does not prove that a device or usage limit recovered']]
+  ['no new ask or confirmed resumable lane', 'skill', ['a new ask the owner can act on', 'every confirmed resumable lane needing owner input']],
+  ['parked status is not proof of recovery', 'device', ['A gap or a parked status alone does not prove that a device or usage limit recovered']]
 ];
 for (const [name, surface, required] of ctaRecoveryCases) {
   test(`CTA and recovery source contract: ${name}`, () => {
-    const text = read(surface === 'skill' ? SKILL_REL : surface === 'nudge'
+    const text = read(surface === 'skill' ? SKILL_REL : surface === 'device' ? `${REFERENCE_DIR}/device-work.md` : surface === 'nudge'
       ? 'repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md'
       : `${REFERENCE_DIR}/periodic-runs.md`);
     for (const phrase of required) assert.ok(text.includes(phrase), phrase);
@@ -645,10 +646,12 @@ test('recovery reports stay observational and both periodic findings route to th
     '**Remote Control recovery findings:** follow **Remote Control wake** in SKILL.md in this turn',
     'Combine the report with the other affected lanes and the existing recovery entry',
     'not a separate reminder per lane or proof that every device and usage limit recovered']) assert.ok(periodic.includes(phrase), phrase);
-  for (const phrase of ['never claim an exact reset time or a working lane without evidence',
+  const device = read(`${REFERENCE_DIR}/device-work.md`);
+  assert.ok(skill.includes('Check, list and deduplicate under **Recovery sweep** in `reference/device-work.md`'));
+  for (const phrase of ['## Recovery sweep', 'never claim an exact reset time or a working lane without evidence',
     'After context loss or uncertain posting, reconcile chat and thread status before posting again',
-    'Keep outstanding wake steps in ordinary hourly reminders',
-    'A materially changed action or target is a new ask; rewording or rediscovering the same step is not',
+    'Keep outstanding wake steps in ordinary hourly reminders']) assert.ok(device.includes(phrase), phrase);
+  for (const phrase of ['A materially changed action or target is a new ask; rewording or rediscovering the same step is not',
     'A reply or reaction does not complete an outstanding native step']) assert.ok(skill.includes(phrase), phrase);
   assert.ok(nudge.includes('This task never wakes lanes, posts a separate recovery announcement or edits the coordinator'));
 });
