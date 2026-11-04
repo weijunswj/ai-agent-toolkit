@@ -63,4 +63,5 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
 ## Repository governance
 - Read the programme file from origin's default branch. It decides on or off on every device; project memory only mirrors that read. Historical local answers and unmerged files decide nothing.
 - A confirmed undecided github.com repository holds for the owner's yes, no or later. Yes and no prepare one decision pull request through the shared proposal service; a matching open proposal is pending in every chat, not another yes/no question. Show its effects and checks, then ask the owner to merge it immediately. Missing adoption settings are owner choices, never invented.
+- Governance decision pull requests always require the owner's typed `merge N`, even when task auto-merge is On. Proposals grant no authority.
 - Later records no repository decision and asks next chat. If GitHub cannot be checked, ordinary work continues with a plain "couldn't check governance" note. No governance effects or standing task auto-merge until it can be checked. Direct eligible owner deliveries, replay receipts and local typed merge/native permission rules still apply.
