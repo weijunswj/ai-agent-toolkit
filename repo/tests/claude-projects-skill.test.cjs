@@ -600,7 +600,7 @@ test('task-run relay, catch-up and prefix actions all honour stopped by owner be
 // Instruction contracts for the combined acceptance matrix. Native notification delivery and
 // recovery behaviour still require Projects agent UAT; these checks only pin the source rules.
 const ctaRecoveryCases = [
-  ['every actionable ask type', 'skill', ["In the same turn that you receive or discover a new ask the owner can act on", "host's notification option on", 'a merge, trying the finished feature, a decision, typing text such as `.`', 'connecting an account or connector, and an approval or host prompt']],
+  ['every actionable ask type', 'skill', ["In the same turn that you receive or discover a new ask the owner can act on", "post tool's notify option on; an edit never notifies", 'a merge, trying the finished feature, a decision, typing text such as `.`', 'connecting an account or connector, and an approval or host prompt']],
   ['new ask before the previous owner reply', 'skill', ['**New asks get a fresh post.** This is an exception to the running-post edit rule.', 'Except for new owner asks under **Call-to-action pings**', 'a fresh notifying post required by **Call-to-action pings**']],
   ['asks discovered together', 'skill', ['Combine asks discovered together', 'Carry every still-open owner item into the fresh post', 'link its originating thread by its exact title and say what to tap or type']],
   ['another ask after posting', 'skill', ['a further new ask discovered after that post needs its own notifying post']],
@@ -619,7 +619,7 @@ const ctaRecoveryCases = [
   ['same lanes interrupted again', 'skill', ['A new observed interruption starts a new entry']],
   ['finished superseded resolved cloud or working lane', 'skill', ['Skip finished, superseded, resolved, cloud and already-working lanes']],
   ['device or prerequisite unavailable', 'skill', ['Separate sessions still waiting for a device or another prerequisite from resumable sessions needing owner input']],
-  ['missing session or failed incomplete inventory', 'skill', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success']],
+  ['missing session or failed incomplete inventory', 'skill', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success', 'reads one thread per call by `thread_id`', 'an active session that is not running, connected or served is the usual parked case']],
   ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 4 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
   ['quiet run finds a missed ask', 'nudge', ['2a. Owner asks (runs every time, including the no-change path)', 'UNRELAYED ASK: <n> | ']],
   ['reaction without required native action', 'nudge', ['An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']],
