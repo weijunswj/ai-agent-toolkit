@@ -73,7 +73,7 @@ Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder 
 4. Choose **ANY ONE** supported install location per platform.
 5. Do not paste secrets, tokens, `.env` values, or credentials into repo files.
 
-Repo-local agent instruction installs need a selected or open target repo, or an explicit target path. Generic rules reach every session through the global rules that `setup toolkit` installs in each harness's user-level file. After the user says yes to Toolkit's GitHub governance for a repository, it carries the governed block in its `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](../../AGENTS.md). Claude Code uses a one-line `CLAUDE.md` (`@AGENTS.md`) and Antigravity a small bootstrap under `.agents/rules/`; both point back to the target repo's `AGENTS.md`, so never install one by itself.
+Repo-local agent instruction installs need a selected or open target repo, or an explicit target path. Generic rules reach every session through the global rules that `setup toolkit` installs in each harness's user-level file. After the owner merges the enabled governance decision on origin's default branch, the repository carries the governed block in its `AGENTS.md`, created or merged from [repo-local/AGENTS.managed.template.md](../../skills/repository-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](../../AGENTS.md). Claude Code uses a one-line `CLAUDE.md` (`@AGENTS.md`) and Antigravity a small bootstrap under `.agents/rules/`; both point back to the target repo's `AGENTS.md`, so never install one by itself.
 
 ### Manual Skill Folder Locations
 
@@ -343,3 +343,5 @@ Use [skills/frontend-art-direction/tools/design-system-generator/](../../skills/
 - Do not run live n8n import/export helpers in CI.
 - Do not auto-merge or auto-apply upstream updates. Treat upstream changes as review prompts, then use a separate human-approved PR for any source update.
 - Edit the direct canonical AI-facing skill or contract surface; run retained synchronizer checks only for managed root blocks and shims.
+
+Governance is a repository choice on every computer. Yes and no prepare a decision pull request; ask the owner to merge it immediately after showing its effects and checks. Until then it is pending. Later asks again next chat. If GitHub cannot be checked, ordinary work continues with a plain note, without governance effects or standing task auto-merge. Historical local answers are inert.

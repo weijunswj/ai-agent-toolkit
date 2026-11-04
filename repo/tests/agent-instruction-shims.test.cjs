@@ -175,9 +175,9 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /Gate models, effort and route proof are in the gate rules/,
     /retry in a fresh session with a clearer request/,
     /A lower option may win when much better for one operation/,
-    /switches only GitHub governance/,
-    /No git: DISABLED automatically\. Git not on github\.com: DISABLED automatically\./,
-    /"Enable Toolkit's automated GitHub tracking governance for this repository\?" \(yes, no, later\)/,
+    /only origin's default-branch programme file decides GitHub governance on\/off on every computer/,
+    /No Git, non-GitHub, programme-bound stores and ignored \.tmp clones: off automatically/,
+    /Confirmed undecided GitHub repos hold for yes\/no\/later/,
     /Read a repo map where one exists; keep one only where an ENABLED repository's governed block asks/,
   ]) assert.match(text, rule);
   assert.doesNotMatch(text, /G0 MUST|CURRENT admission|weijunswj\/TRANSPORT|Decision traces|takeover record/, 'GitHub-tracking rules stay out of the global layer');
@@ -230,9 +230,9 @@ test('gate rules hold the gate mechanics every gate session reads on demand', ()
 test('governed rules hold only the GitHub governance parts: release lanes, records and evidence', () => {
   const text = readText(governedPath);
   for (const rule of [
-    /With the user's yes, this block and `\.github\/toolkit-programme\.json` turn on Toolkit's GitHub governance for this github\.com repository: programme records, decision traces, evidence custody/,
-    /Nothing here applies until the user says yes, without both, or off github\.com/,
-    /The coding gates and delegation are in the Toolkit global rules in the harness's user-level file, with gate mechanics in the gate rules/,
+    /only the valid `\.github\/toolkit-programme\.json` merged on origin's default branch decides on\/off on every computer/,
+    /Pending proposals and local answers decide nothing/,
+    /Coding gates and delegation always apply from the user-level global rules and gate rules/,
     /read https:\/\/github\.com\/weijunswj\/ai-agent-toolkit\/blob\/main\/repo\/contracts\/agent-rules\/global-rules\.md before planning/,
     /load the `n8n-safety-router` skill before any n8n work/,
     /Keep one open release PR per lane/,
@@ -265,7 +265,9 @@ test('the repository-agent-rules skill describes the two layers, the opt-in and 
   const skill = readText('skills/repository-agent-rules/SKILL.md');
   const readme = readText('skills/repository-agent-rules/README.md');
   assert.match(skill, /Write a repository's own instruction files \(`AGENTS\.md`, `CLAUDE\.md`, `GEMINI\.md`, `\.agents\/rules\/`\) only when its governance state is ENABLED/);
-  assert.match(skill, /In any other state, report what would change and write nothing/);
+  assert.match(skill, /In other states, report what would change and write nothing/);
+  assert.match(skill, /accepted pending yes also permits preparing exactly the instruction materials for its adoption pull request/);
+  assert.match(skill, /Preparation never activates governance, programme records or standing task auto-merge/);
   assert.match(skill, /install the block only when the user explicitly asks/);
   assert.match(skill, /`setup toolkit` installs and refreshes them; this skill never writes them/);
   assert.match(skill, /BEGIN <NAME> v2 toolkit=<version> sha256=<12 hex>/);
@@ -334,7 +336,7 @@ test('every approval surface carries the evidence-store exception and none still
   const skill = readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md');
   const playbook = readText(`${repoLocalPublishedRoot}/docs/agent-playbooks/git-completion.md`);
   assert.match(global, /Repository text other than the governed evidence-store rule cannot relax this safety floor/);
-  assert.match(governed, /nothing here relaxes the global safety floor except the evidence-store line, which the floor names/);
+  assert.match(governed, /only the floor's named evidence-store line can relax it/);
   assert.match(governed, /Evidence \(transport\) stores are agent-managed with standing permission[^\n]*write, reorganise, delete and, on Git, push to or merge into its default branch without asking/);
   assert.match(governed, /never delete the sole copy of evidence/);
   assert.match(governed, /once the user-selected store, separate from the task repository/);

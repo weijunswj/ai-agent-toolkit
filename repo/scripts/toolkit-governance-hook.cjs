@@ -16,9 +16,7 @@
 // repository instead of crashing; hooks.json also sets onFailure: "block" for prompts and for the
 // state-changing tools (STATE_CHANGING_TOOLS below).
 //
-// A cloud session (CLAUDE_CODE_REMOTE=true) is not enforced: its container has no lasting user
-// registry, so an answer there would be lost, and a write into the clone would show up in the
-// session's changes. The session line says so, and the rules text still applies there.
+// Cloud hooks remain advisory. Governance still comes from the repository default branch.
 
 const fs = require('node:fs');
 
@@ -31,7 +29,7 @@ function readInput(text) {
   } catch { return {}; }
 }
 
-const CLOUD_LINE = 'Toolkit governance: not enforced in cloud sessions (no lasting decision store here). Follow the global rules; the controller resolves the repository\'s state before launching cloud gate work.';
+const CLOUD_LINE = "Toolkit governance: cloud hooks are advisory. The programme file on origin's default branch decides governance here too; no local answer or project memory can decide it.";
 
 function cloudSession(environment) { return Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true'; }
 

@@ -36,6 +36,7 @@ function repo(at, slug) {
   fs.mkdirSync(at, { recursive: true });
   git(path.dirname(at), ['init', '--quiet', at]);
   git(at, ['remote', 'add', 'origin', `https://github.com/${slug}.git`]);
+  require('./toolkit-governed-fixture-support.cjs').recordAbsent(at, { home: path.join(path.dirname(at), 'home') });
   return at;
 }
 
@@ -50,8 +51,12 @@ function governed(ctx, slug = 'example-owner/app', store = 'example-owner/eviden
   return at;
 }
 
-const state = (ctx, cwd) => governance.governanceState(cwd, ctx.options);
-const enable = (ctx, cwd) => gate.writeGovernanceDecision(cwd, 'enable', { registryOptions: ctx.options });
+const state = (ctx, cwd) => {
+  const identity = governance.readIdentity(cwd);
+  if (!bindingCache.readBindingCache(identity, path.dirname(ctx.registryPath))) require('./toolkit-governed-fixture-support.cjs').recordAbsent(cwd, { registryPath: ctx.registryPath });
+  return governance.governanceState(cwd, ctx.options);
+};
+const enable = (ctx, cwd) => require('./support/governance-observations.cjs').seedMerged(cwd, 'enable', { registryOptions: ctx.options });
 
 test('S1: a store a cached binding names is DISABLED and never held; a merged binding in the store itself still wins', (t) => {
   const ctx = scratch(t);
@@ -65,11 +70,11 @@ test('S1: a store a cached binding names is DISABLED and never held; a merged bi
   assert.equal(state(ctx, store).rule, 'M1');
 });
 
-test('S1 by name: a TRANSPORT-* repository under a bound repository\'s owner, never under another owner', (t) => {
+test('S1: a TRANSPORT name supplies no exemption under any owner', (t) => {
   const ctx = scratch(t);
   governed(ctx);
   const byName = repo(path.join(ctx.root, 'TRANSPORT-app'), 'example-owner/TRANSPORT-app');
-  assert.deepEqual([state(ctx, byName).rule, state(ctx, byName).reason], ['S1', 'evidence-store-by-name']);
+  assert.deepEqual([state(ctx, byName).rule, state(ctx, byName).reason], ['R7', 'no-decision']);
   const foreign = repo(path.join(ctx.root, 'foreign'), 'someone-else/TRANSPORT-app');
   assert.deepEqual([state(ctx, foreign).state, state(ctx, foreign).rule], ['UNDECIDED', 'R7']);
   // With no binding cached at all, nothing is a store by name.
@@ -78,29 +83,24 @@ test('S1 by name: a TRANSPORT-* repository under a bound repository\'s owner, ne
   assert.equal(state(bare, alone).rule, 'R7');
 });
 
-test('S1: a stored "enable" is ignored and shown; enable is refused and disable still records', (t) => {
+test('S1: historical laptop data cannot enable a named evidence store', t => {
   const ctx = scratch(t);
-  const store = repo(path.join(ctx.root, 'evidence'), 'example-owner/evidence');
-  enable(ctx, store);
-  assert.equal(state(ctx, store).rule, 'R5');
   governed(ctx);
-  const ignored = state(ctx, store);
-  assert.deepEqual([ignored.state, ignored.rule, [...ignored.notes]], ['DISABLED', 'S1', ['stored-decision-ignored']]);
-  assert.throws(() => enable(ctx, store), /NOT_GOVERNABLE/);
-  gate.writeGovernanceDecision(store, 'disable', { registryOptions: ctx.options });
-  const cleared = state(ctx, store);
-  assert.deepEqual([cleared.rule, cleared.recorded_decision, [...cleared.notes]], ['S1', 'disabled', []]);
+  const store = repo(path.join(ctx.root, 'evidence'), 'example-owner/evidence');
+  fs.writeFileSync(ctx.registryPath, '{damaged');
+  assert.equal(state(ctx, store).rule, 'S1');
+  assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), '{damaged');
 });
 
 test('S1: a damaged or foreign cache file is skipped', (t) => {
   const ctx = scratch(t);
   governed(ctx);
-  const folder = bindingCache.cacheDirFor(ctx.registryPath);
+  const folder = bindingCache.cacheDirFor(path.dirname(ctx.registryPath));
   fs.writeFileSync(path.join(folder, `${'a'.repeat(32)}.json`), '{not json');
   fs.writeFileSync(path.join(folder, `${'b'.repeat(32)}.json`), JSON.stringify({ schema: bindingCache.CACHE_SCHEMA, remote: 'https://github.com/example-owner/x.git' }));
   const store = repo(path.join(ctx.root, 'evidence'), 'example-owner/evidence');
   assert.equal(state(ctx, store).rule, 'S1');
-  assert.equal(bindingCache.readAllBindingCaches(ctx.registryPath).length, 1);
+  assert.equal(bindingCache.readAllBindingCaches(path.dirname(ctx.registryPath)).filter(item => item.entry.status === 'present').length, 1);
 });
 
 test('R1s: a clone of another repository in a decided repository\'s ignored .tmp folder; never a worktree of the parent, an unignored .tmp or an undecided parent', (t) => {
@@ -127,7 +127,7 @@ test('R1s: a clone of another repository in a decided repository\'s ignored .tmp
   assert.equal(state(ctx, inner).rule, 'R7');
   // Enable is refused for a scratch clone too.
   fs.writeFileSync(path.join(parent, '.gitignore'), '.tmp\n');
-  assert.throws(() => enable(ctx, clone), /NOT_GOVERNABLE/);
+  assert.equal(state(ctx, clone).rule, 'R1s');
 });
 
 test('gate: no held prompt or refused tool inside an S1 or R1s repository, and no question when a command reaches one', (t) => {
@@ -200,6 +200,6 @@ test('CLI: enable is refused for S1 and R1s with the reason; nothing is written'
     const code = await cli.main(['enable']);
     assert.notEqual(code, 0);
     assert.match(err.join('') + out.join(''), message);
-    assert.equal(state(ctx, cwd).recorded_decision, 'unresolved');
+    assert.equal(state(ctx, cwd).recorded_decision, undefined);
   }
 });

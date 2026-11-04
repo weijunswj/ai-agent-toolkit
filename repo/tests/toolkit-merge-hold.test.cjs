@@ -39,6 +39,7 @@ function repository(root, name, { slug = `owner/${name}`, branch = 'main', remot
   fs.mkdirSync(remotes, { recursive: true });
   fs.writeFileSync(path.join(remotes, 'main'), `${SHA}\n`);
   if (remoteHead) fs.writeFileSync(path.join(remotes, 'HEAD'), 'ref: refs/remotes/origin/main\n');
+  require('./toolkit-governed-fixture-support.cjs').recordAbsent(repo, { home: path.join(root, 'home') });
   return repo;
 }
 
@@ -343,7 +344,7 @@ for (const mode of ['enabled', 'disabled', 'undecided', 'plain']) test(`adapter 
   const home = path.join(ctx.root, 'home');
   let cwd = mode === 'plain' ? ctx.root : ctx.repo;
   if (mode === 'enabled') cwd = require('./toolkit-governed-fixture-support.cjs').makeGoverned(path.join(ctx.root, 'enabled'), 'approval-matrix', { home });
-  if (mode === 'disabled') gate.writeGovernanceDecision(cwd, 'disable', ctx.options);
+  if (mode === 'disabled') require('./support/governance-observations.cjs').seedMerged(cwd, 'disable', ctx.options);
   const env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CODE_REMOTE: '' };
   for (const name of [...gate.LAUNCHER_MARKERS, gate.HOST_SESSION_VARIABLE]) env[name] = '';
   const cases = [
@@ -927,7 +928,7 @@ test('the Claude Code hook records the typed approval and enforces it; cloud ses
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
   assert.ok(new hold.MergeApprovals(ctx.options).find('owner/a', 618), 'the held merge did not consume approval');
   // Once the repository is decided, no repetition is needed.
-  gate.writeGovernanceDecision(ctx.repo, 'disable', ctx.options);
+  require('./support/governance-observations.cjs').seedMerged(ctx.repo, 'disable', ctx.options);
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput?.permissionDecision, undefined);
   assert.deepEqual(claudeHook.respond('PreToolUse', merge, { environment: { CLAUDE_CODE_REMOTE: 'true' }, ...ctx.options }), {});
 });

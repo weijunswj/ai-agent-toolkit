@@ -1,7 +1,7 @@
 'use strict';
 
-// GovernanceState: the rule table, the git-free identity reader against the registry's own
-// git-based identity, materials, the user's decision, fail-closed reads and the no-subprocess,
+// GovernanceState: the rule table, git-free identity parity, GitHub observations, materials,
+// unavailable reads and the no-subprocess,
 // no-write guarantees. Closure rows S-01 to S-10 and the unit parts of H-09, H-15 and H-16.
 
 const assert = require('node:assert/strict');
@@ -14,7 +14,8 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const scripts = path.join(repoRoot, 'repo', 'scripts');
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
-const registry = require(path.join(scripts, 'toolkit-capability-registry.cjs'));
+const registry = require(path.join(scripts, 'toolkit-repository-identity.cjs'));
+const { recordAbsent, recordMerged } = require('./toolkit-governed-fixture-support.cjs');
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
@@ -39,6 +40,7 @@ function fakeRepo(root, name, { remote = REMOTE, block = false, binding = false,
   fs.writeFileSync(path.join(repo, '.git', 'config'), config);
   if (block) writeBlock(repo);
   if (binding) writeBinding(repo, typeof binding === 'object' ? binding : {});
+  if (remote && governance.readIdentity(repo).valid) recordAbsent(repo, { registryPath: path.join(root, 'state', 'repository-governance.v1.json') });
   return repo;
 }
 
@@ -69,35 +71,33 @@ function opts(ctx) { return { registryPath: ctx.registryPath, testOnly: true }; 
 
 function state(ctx, cwd) { return governance.governanceState(cwd, opts(ctx)); }
 
+test('an off observation reports failed refresh and staleness without enabling effects', t => {
+  const ctx = scratch(t), cwd = fakeRepo(ctx.root, 'off'), identity = governance.readIdentity(cwd);
+  for (const unavailable of [true, false]) {
+    const current = governance.GovernanceState.derive({ identity, materials: governance.readMaterials(cwd, identity),
+      merged: { status: 'disabled', fresh: false, unavailable } });
+    assert.equal(current.state, 'DISABLED');
+    assert.equal(current.programme_records_bind, false);
+    assert.equal(current.hold, false);
+    assert.ok(current.notes.includes(unavailable ? 'could-not-check-governance' : 'merged-binding-stale'));
+    const line = require('../scripts/toolkit-governance-gate.cjs').sessionLine(cwd, { registryOptions: opts(ctx), stateReader: () => current });
+    assert.match(line, /disabled/);
+    assert.match(line, /without governance effects or standing task auto-merge/);
+    assert.match(line, unavailable ? /couldn't check governance/ : /24 hours/);
+  }
+});
+
 // A real git repository, for the decision writer and the identity parity checks.
 function gitRepo(root, name, remote = REMOTE) {
   const repo = path.join(root, name);
   fs.mkdirSync(repo, { recursive: true });
   git(root, ['init', '--quiet', repo]);
   if (remote !== null) git(repo, ['remote', 'add', 'origin', remote]);
+  if (remote && governance.readIdentity(repo).valid) recordAbsent(repo, { registryPath: path.join(root, 'state', 'repository-governance.v1.json') });
   return repo;
 }
 
-function decide(ctx, repo, operation) {
-  const current = registry.getRepositoryStatus({ cwd: repo, ...opts(ctx) });
-  return registry.writeCapabilityDecision({
-    cwd: repo,
-    ...opts(ctx),
-    capabilityId: 'repository.governance',
-    operation,
-    ownerAction: {
-      confirmed: true,
-      category: 'explicit-owner',
-      channel: 'capability-route',
-      operation,
-      choice_semantic_id: registry.capabilityDecisionSemanticId('repository.governance', operation),
-      contract_digest: registry.CONTRACT_DIGEST,
-      scope_digest: registry.capabilityScopeDigest(current.repository_id, 'repository.governance', operation, 'capability-route'),
-    },
-    expectedRevision: current.registry_revision,
-    expectedHash: current.snapshot_hash,
-  });
-}
+function decide(ctx, repo, command) { return require('./support/governance-observations.cjs').seedMerged(repo, command, { registryOptions: opts(ctx) }); }
 
 test('derive: the rule table, first match wins', () => {
   const identity = { root: '/r', repository_id: 'a'.repeat(64), valid: true, remote: { host: 'github.com', path: '/example-owner/example-repo.git' } };
@@ -109,11 +109,11 @@ test('derive: the rule table, first match wins', () => {
     ['disabled', fresh('enabled'), 'ENABLED', 'M1', true],
     ['enabled', fresh('disabled'), 'DISABLED', 'M2', false],
     ['unresolved', fresh('invalid'), 'ERROR', 'M0', false],
-    ['disabled', fresh('none'), 'DISABLED', 'R2', false],
-    ['enabled', fresh('none'), 'ENABLED', 'R5', false],
+    ['disabled', fresh('none'), 'UNDECIDED', 'R7', false],
+    ['enabled', fresh('none'), 'UNDECIDED', 'R7', false],
     ['unresolved', fresh('none'), 'UNDECIDED', 'R7', false],
     ['unresolved', fresh('foreign'), 'UNDECIDED', 'R7', false],
-    ['unresolved', { status: 'unknown', fresh: false }, 'UNDECIDED', 'R7', false],
+    ['unresolved', { status: 'unknown', fresh: false }, 'UNAVAILABLE', 'U1', false],
   ];
   for (const [decision, merged, expectedState, rule, binds] of cases) {
     // Working-tree materials never decide.
@@ -124,7 +124,7 @@ test('derive: the rule table, first match wins', () => {
       assert.equal(result.hold, expectedState === 'UNDECIDED');
       assert.equal(result.governed_rules_bind, binds);
       assert.equal(result.programme_records_bind, binds);
-      assert.equal(result.governed_effects_hold, expectedState === 'ERROR');
+      assert.equal(result.governed_effects_hold, ['ERROR', 'UNDECIDED', 'UNAVAILABLE'].includes(expectedState));
       assert.equal(result.materials_complete, expectedState === 'ENABLED' ? binds : null);
       assert.ok(Object.isFrozen(result));
     }
@@ -216,24 +216,14 @@ test('S-03, S-06, S-07: materials without a decision', (t) => {
   assert.equal(fs.existsSync(ctx.registryPath), false, 'nothing is written without the user\'s answer');
 });
 
-test('S-04, S-05: recorded decisions decide; a repository carrying the block and binding is asked, and a decline wins', (t) => {
-  const ctx = scratch(t);
-  const declined = gitRepo(ctx.root, 'declined', 'https://github.com/example-owner/declined.git');
-  writeBlock(declined);
-  writeBinding(declined, { repository: 'example-owner/declined' });
-  assert.equal(state(ctx, declined).state, 'UNDECIDED');
-  decide(ctx, declined, 'decline');
-  const afterDecline = state(ctx, declined);
-  assert.deepEqual([afterDecline.state, afterDecline.rule, afterDecline.reason, afterDecline.governed_rules_bind], ['DISABLED', 'R2', 'user-declined', false]);
-
-  const incomplete = gitRepo(ctx.root, 'incomplete', 'https://github.com/example-owner/incomplete.git');
-  decide(ctx, incomplete, 'enable');
-  const enabled = state(ctx, incomplete);
-  assert.deepEqual([enabled.state, enabled.rule, enabled.materials_complete, enabled.programme_records_bind], ['ENABLED', 'R5', false, false]);
-  decide(ctx, incomplete, 'disable');
-  assert.deepEqual([state(ctx, incomplete).state, state(ctx, incomplete).reason], ['DISABLED', 'user-disabled']);
-  decide(ctx, incomplete, 'enable');
-  assert.equal(state(ctx, incomplete).state, 'ENABLED');
+test('historical laptop answers are inert, even with confirmed GitHub absence', t => {
+  const ctx = scratch(t), repo = gitRepo(ctx.root, 'history');
+  for (const name of ['yes', 'no']) {
+    fs.copyFileSync(path.join(__dirname, 'fixtures', 'governance-legacy-' + name + '.json'), ctx.registryPath);
+    const before = fs.readFileSync(ctx.registryPath);
+    assert.deepEqual([state(ctx, repo).state, state(ctx, repo).hold], ['UNDECIDED', true]);
+    assert.deepEqual(fs.readFileSync(ctx.registryPath), before);
+  }
 });
 
 test('S-08, S-09: state follows the origin identity, not the path; clones and worktrees share it', (t) => {
@@ -253,7 +243,7 @@ test('S-08, S-09: state follows the origin identity, not the path; clones and wo
   // The same path pointed at another repository gets that repository's state.
   git(first, ['remote', 'set-url', 'origin', 'https://github.com/example-owner/other-repo.git']);
   const moved = state(ctx, first);
-  assert.equal(moved.state, 'UNDECIDED');
+  assert.equal(moved.state, 'UNAVAILABLE');
   assert.notEqual(moved.repository_id, [...ids][0]);
   assert.equal(state(ctx, worktree).repository_id, moved.repository_id, 'a worktree reads the shared config');
 });
@@ -269,7 +259,7 @@ test('identity: the git-free reader agrees with the registry\'s git-based identi
   ];
   remotes.forEach((remote, index) => {
     const repo = gitRepo(ctx.root, `parity-${index}`, remote);
-    const expected = registry.resolveRepositoryIdentity({ cwd: repo }).repository_id;
+    const expected = registry.repositoryIdForCanonicalRemote(git(repo, ['config', '--local', '--get', 'remote.origin.url']));
     assert.equal(governance.readIdentity(repo).repository_id, expected, remote);
   });
   // Quoting, comments, case, continuation lines and other sections as git writes or accepts them.
@@ -312,33 +302,17 @@ test('binding: schema shape and agreement with the origin identity', (t) => {
   assert.deepEqual(governance.bindingProblems(JSON.parse(fs.readFileSync(own, 'utf8')), ownIdentity), []);
 });
 
-test('H-09 (unit): unreadable inputs hold inside a repository and never outside one', (t) => {
-  const ctx = scratch(t);
-  const repo = fakeRepo(ctx.root, 'corrupt', { block: true, binding: true });
-  fs.mkdirSync(path.dirname(ctx.registryPath), { recursive: true });
-  fs.writeFileSync(ctx.registryPath, '{"schema": "not-a-registry"');
-  const corrupt = state(ctx, repo);
-  assert.deepEqual([corrupt.state, corrupt.rule, corrupt.reason, corrupt.hold], ['UNDECIDED', 'ERROR', 'registry-unreadable', true]);
-  assert.match(corrupt.error_code, /^[A-Z_]+$/);
-  // A repository without a GitHub identity never reads the registry: it is automatically off.
-  assert.equal(state(ctx, fakeRepo(ctx.root, 'no-origin', { remote: null })).rule, 'R8');
-
-  fs.rmSync(ctx.registryPath);
-  const worktreeFile = path.join(ctx.root, 'dangling');
-  fs.mkdirSync(worktreeFile);
-  fs.writeFileSync(path.join(worktreeFile, '.git'), 'not a gitdir pointer');
-  const dangling = state(ctx, worktreeFile);
-  assert.deepEqual([dangling.state, dangling.rule, dangling.reason, dangling.hold], ['UNDECIDED', 'ERROR', 'identity-unreadable', true]);
-
-  const thrower = new governance.GovernanceState({
-    identityReader: () => ({ root: '/r', valid: true, repository_id: 'b'.repeat(64) }),
-    materialsReader: () => { throw new Error('boom'); },
-    decisionReader: () => ({ state: 'unresolved', decision_kind: null }),
-  });
-  const materialsError = thrower.evaluate('/r');
-  assert.deepEqual([materialsError.state, materialsError.reason, materialsError.error_code], ['UNDECIDED', 'materials-unreadable', 'UNEXPECTED']);
-
-  assert.throws(() => governance.registryPathFor({ registryPath: ctx.registryPath }), /REGISTRY_PATH_OVERRIDE_FORBIDDEN/);
+test('unreadable identity continues ordinary work; damaged historical records cannot block main', t => {
+  const ctx = scratch(t), repo = fakeRepo(ctx.root, 'corrupt', { block: true, binding: true });
+  fs.writeFileSync(ctx.registryPath, '{damaged');
+  recordMerged(repo, { registryPath: ctx.registryPath });
+  assert.equal(state(ctx, repo).state, 'ENABLED');
+  const dangling = path.join(ctx.root, 'dangling'); fs.mkdirSync(dangling);
+  fs.writeFileSync(path.join(dangling, '.git'), 'not a gitdir pointer');
+  const result = state(ctx, dangling);
+  assert.deepEqual([result.state, result.reason, result.hold], ['UNAVAILABLE', 'identity-unreadable', false]);
+  assert.throws(() => governance.userStateDirectory({ registryPath: ctx.registryPath }), /STATE_PATH_OVERRIDE_FORBIDDEN/);
+  assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), '{damaged');
 });
 
 test('H-15, H-16 (unit): no subprocess, no writes, no raw remote in the result', (t) => {

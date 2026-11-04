@@ -51,6 +51,7 @@ class ClaudeMatrixContext {
     fs.rmSync(path.join(this.undecided, '.github'), { recursive: true });
     fs.writeFileSync(path.join(this.plain, 'AGENTS.md'), '# Project rules\n');
     this.#decline(this.declined);
+    require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs')).recordAbsent(this.undecided, { home: this.home });
     fs.mkdirSync(this.controlRoot);
     this.agentsDir = path.join(this.configDir, 'agents');
     fs.mkdirSync(this.agentsDir, { recursive: true });
@@ -65,17 +66,8 @@ class ClaudeMatrixContext {
 
   // Records the user's decline in this context's private registry, as the governance gate would.
   #decline(repo) {
-    const registry = require(path.join(SCRIPTS, 'toolkit-capability-registry.cjs'));
-    const { execFileSync } = require('node:child_process');
-    execFileSync('git', ['-C', repo, 'init', '--quiet'], { stdio: 'ignore' });
-    const options = { registryPath: path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
-    const status = registry.getRepositoryStatus({ cwd: repo, ...options });
-    const capability = 'repository.governance';
-    registry.writeCapabilityDecision({ cwd: repo, ...options, capabilityId: capability, operation: 'decline',
-      ownerAction: { confirmed: true, category: 'explicit-owner', channel: 'capability-route', operation: 'decline',
-        choice_semantic_id: registry.capabilityDecisionSemanticId(capability, 'decline'), contract_digest: registry.CONTRACT_DIGEST,
-        scope_digest: registry.capabilityScopeDigest(status.repository_id, capability, 'decline', 'capability-route') },
-      expectedRevision: status.registry_revision, expectedHash: status.snapshot_hash });
+    const support = require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs'));
+    support.recordMerged(repo, { home: this.home, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'toolkit-test-fixture/matrix-declined', governance: 'disabled' }) });
   }
 
   // Puts the rendered helpers back and removes anything a row added.

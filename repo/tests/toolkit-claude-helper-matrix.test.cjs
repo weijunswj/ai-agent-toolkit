@@ -47,7 +47,7 @@ test('the matrix context leaves the process home alone and writes nothing there'
   assert.equal(fs.existsSync(home), false, 'nothing was written to the home folder');
 });
 
-test('live sessions in both modes keep the real login and read the scratch registry, where the repository is ENABLED', t => {
+test('live sessions in both modes keep the real login and read the scratch binding observation', t => {
   const { liveEnvironment } = require('./qualification/claude-helper-matrix.live.cjs');
   const context = new ClaudeMatrixContext();
   t.after(() => context.remove());
@@ -66,8 +66,8 @@ test('live sessions in both modes keep the real login and read the scratch regis
     return environment;
   });
   assert.equal(fs.existsSync(userHome), false, 'nothing was written to the user\'s home or user-state');
-  // With the user's own home, as the runner gave installed mode before, the scratch repository is held.
-  for (const environment of environments) assert.equal(hold({ ...environment, HOME: userHome, USERPROFILE: userHome }), true);
+  // A different computer with no observation continues without governance authority.
+  for (const environment of environments) assert.equal(hold({ ...environment, HOME: userHome, USERPROFILE: userHome }), false);
   const configured = liveEnvironment('plugin', context, { environment: { ...runner, CLAUDE_CONFIG_DIR: path.join(userHome, 'work') }, userHome });
   assert.equal(configured.CLAUDE_CONFIG_DIR, path.join(userHome, 'work'));
 });

@@ -42,7 +42,9 @@ const CACHE_FINGERPRINT_PATHS = [
   "repo/scripts/toolkit-push-check.cjs",
   "repo/scripts/toolkit-claude-agent-hook.cjs",
   "repo/scripts/toolkit-gate-contract-compiler.cjs",
-  "repo/scripts/toolkit-capability-registry.cjs",
+  "repo/scripts/toolkit-repository-identity.cjs",
+  "repo/scripts/toolkit-user-state.cjs",
+  "repo/scripts/toolkit-governance-proposal.cjs",
   "repo/CONTROLLER.md",
   "repo/ARCHITECTURE.md",
   '.codex-plugin/plugin.json',
@@ -80,7 +82,6 @@ const CACHE_FINGERPRINT_PATHS = [
   'repo/scripts/toolkit-programme-checkpoint-hook.ps1',
 ];
 const CACHE_FINGERPRINT_DIRS = [
-  "repo/contracts/repository-capability-registry",
   "repo/contracts/controller-kernel",
   '.codex-plugin/assets',
   'skills'

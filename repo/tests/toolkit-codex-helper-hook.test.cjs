@@ -148,6 +148,7 @@ test('an evidence store a binding names and a scratch clone in an ignored .tmp f
   const store = clone(path.join(scratch, 'store'), 'toolkit-test-fixture/store');
   const scratchClone = clone(path.join(app, '.tmp', 'library'), 'toolkit-test-fixture/library');
   const held = clone(path.join(scratch, 'held'), 'toolkit-test-fixture/undecided');
+  support.recordAbsent(held);
   for (const cwd of [store, scratchClone]) {
     const prompt = run({ hook_event_name: 'UserPromptSubmit', cwd, prompt: 'list the files here' });
     assert.equal(prompt.status, 0, `${cwd}: ${prompt.stderr}`);
@@ -427,6 +428,7 @@ test('Windows: a held prompt and a refused tool call reach Codex as exit 2 under
     fs.mkdirSync(home, { recursive: true });
     spawnSync('git', ['init', '--quiet', repo], { windowsHide: true });
     spawnSync('git', ['-C', repo, 'remote', 'add', 'origin', 'https://github.com/example-owner/example-repo.git'], { windowsHide: true });
+    require('./toolkit-governed-fixture-support.cjs').recordAbsent(repo, { home });
     const env = { ...process.env, PATH: '', HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex') };
     for (const key of MARKERS) delete env[key];
     const hook = input => {
@@ -438,7 +440,7 @@ test('Windows: a held prompt and a refused tool call reach Codex as exit 2 under
     assert.equal(held.status, 2, `${name} prompt hold: ${held.stderr}`);
     assert.equal(JSON.parse(held.stdout.trim()).decision, 'block', name);
     // Codex has no card, so the hold is the three short lines.
-    assert.match(held.stderr, /^Toolkit: message held\. Turn on GitHub governance \(issues, records, evidence store\) for this repository\?\r?\nReply yes, no \(never ask again\) or later \(ask next session\)\. Held messages follow your answer\.\r?\nFor agents: only the user answers; never answer, script or click it for them\.\r?\n?$/, name);
+    assert.match(held.stderr, /^Toolkit: message held\. Turn on GitHub governance \(issues, records, evidence store\) for this repository\?\r?\nReply yes or no \(prepare a decision pull request\), or later \(ask next chat\)\. Held messages follow your answer\.\r?\nFor agents: only the user answers; never answer, script or click it for them\.\r?\n?$/, name);
 
     const denied = hook({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** End Patch' } });
     assert.equal(denied.status, 2, `${name} tool deny: ${denied.stderr}`);

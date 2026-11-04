@@ -48,7 +48,7 @@ const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off'
 // The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
 const HOST_SESSIONS = Object.freeze(['matching', 'mismatching', 'empty']);
-const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note', 'steps', 'host_session']);
+const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note', 'steps', 'host_session', 'postcondition']);
 const ID = /^[A-Z][A-Za-z0-9._-]*$/;
 // The plugin content the hooks can reach: both host manifests, the scripts and contracts, and the
 // skill scripts the hook modules load.
@@ -105,6 +105,7 @@ function rowErrors(row) {
     if (typeof row.note !== 'string' || !row.note.trim()) errors.push('a row whose hosts decide differently needs a note saying why');
   }
   if (!STATUSES.includes(row.status)) errors.push(`status must be ${STATUSES.join(' or ')}`);
+  if (row.postcondition !== undefined && row.postcondition !== 'no-local-decision-write') errors.push('unknown postcondition');
   if (row.status === 'known-bad') {
     if (typeof row.lane !== 'string' || !row.lane.trim()) errors.push('a known-bad row names the lane that fixes it');
     if (typeof row.added !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.added)) errors.push('a known-bad row gives the date it was added (YYYY-MM-DD)');
@@ -148,12 +149,14 @@ function fixtureErrors(fixture) {
   if (repo !== undefined) {
     if (!repo || typeof repo !== 'object') errors.push('fixture.repo must be an object');
     else {
-      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
       if (repo.owner !== undefined && (repo.governance !== 'undecided' || !/^[A-Za-z0-9-]+$/.test(repo.owner))) errors.push('fixture.repo.owner needs governance undecided and is a plain owner name');
       if (repo.cached_binding_store !== undefined && (repo.cached_binding_store !== true || repo.governance !== 'undecided')) errors.push('fixture.repo.cached_binding_store needs governance undecided and is true or left out');
       if (repo.nested_worktrees !== undefined && (!Array.isArray(repo.nested_worktrees) || repo.nested_worktrees.some(tree => !tree || !/^[a-z0-9-]+$/.test(tree.branch || '')
         || (tree.commits !== undefined && (!Array.isArray(tree.commits) || tree.commits.some(commit => !commit || typeof commit.files !== 'object')))))) errors.push('fixture.repo.nested_worktrees lists { branch, commits } objects');
       if (repo.task_auto_merge !== undefined && (repo.governance !== 'enabled' || !TASK_AUTO_MERGE.includes(repo.task_auto_merge))) errors.push(`fixture.repo.task_auto_merge needs governance enabled and is one of ${TASK_AUTO_MERGE.join(', ')}`);
+      if (repo.legacy_answer !== undefined && !['yes', 'no', 'damaged'].includes(repo.legacy_answer)) errors.push('legacy_answer must be yes, no or damaged');
+      if (repo.binding_status !== undefined && repo.binding_status !== 'unavailable') errors.push('binding_status must be unavailable');
       if (!GOVERNANCE.includes(repo.governance)) errors.push(`fixture.repo.governance must be one of ${GOVERNANCE.join(', ')}`);
       if (repo.name !== undefined && !/^[A-Za-z0-9._-]+$/.test(repo.name)) errors.push('fixture.repo.name must be a plain repository name');
       if (repo.commits !== undefined && (!Array.isArray(repo.commits) || repo.commits.some(commit => !commit || typeof commit.files !== 'object'))) errors.push('fixture.repo.commits lists { files, message } objects');
@@ -339,6 +342,11 @@ class Fixture {
     // A session a Toolkit launcher started for a gate carries its role.
     if (spec.gate_role) this.env.TOOLKIT_GATE_ROLE = spec.gate_role;
     if (spec.repo) this.#repo(spec.repo);
+    if (spec.repo?.legacy_answer) {
+      const file = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, spec.repo.legacy_answer === 'damaged' ? '{damaged' : fs.readFileSync(path.join(ROOT, 'repo', 'tests', 'fixtures', 'governance-legacy-' + spec.repo.legacy_answer + '.json')));
+    }
     if (spec.owner_session) this.#ownerSession();
     this.#files(this.work, spec.files || {});
     if (spec.transcript) fs.writeFileSync(this.transcript, spec.transcript.map(entry => JSON.stringify(this.expand(entry))).join('\n') + '\n');
@@ -362,7 +370,10 @@ class Fixture {
       if (spec.task_auto_merge) this.#taskAutoMerge(`toolkit-test-fixture/hook-pack-${name}`, spec.task_auto_merge, support);
     } else {
       this.#git(this.work, ['init', '--quiet']);
-      if (spec.governance === 'undecided') this.#git(this.work, ['remote', 'add', 'origin', `https://github.com/${spec.owner || 'toolkit-test-fixture'}/${name}.git`]);
+      if (spec.governance === 'undecided') {
+        this.#git(this.work, ['remote', 'add', 'origin', `https://github.com/${spec.owner || 'toolkit-test-fixture'}/${name}.git`]);
+        if (spec.binding_status !== 'unavailable') require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs')).recordAbsent(this.work, { home: this.home });
+      }
       if (spec.cached_binding_store) this.#bindingNamingStore(`toolkit-test-fixture/${name}`);
     }
     this.#git(this.work, ['checkout', '--quiet', '-B', spec.branch || 'main']);
@@ -542,6 +553,8 @@ async function runOnHost(row, host, fixture, roots) {
   const env = { ...fixture.env, ...(host === 'claude' ? { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: fixture.work } : { PLUGIN_ROOT: pluginRoot }) };
   // Event-local fixture values only: no real session variable is read or carried between steps.
   if (row.host_session !== undefined) env.TOOLKIT_HOST_SESSION = row.host_session === 'matching' ? payload.session_id : row.host_session === 'empty' ? '' : 'different-fixture-session';
+  const decisionFile = path.join(fixture.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
+  const oldDecision = fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, 'utf8') : null;
   const before = fixture.snapshot();
   const decisions = [];
   for (const hook of hooks) {
@@ -551,6 +564,7 @@ async function runOnHost(row, host, fixture, roots) {
     decisions.push(hookDecision(host, hook, result));
   }
   const problems = [];
+  if (row.postcondition === 'no-local-decision-write' && (fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, 'utf8') : null) !== oldDecision) problems.push('a local governance decision was written');
   if (JSON.stringify(fixture.snapshot()) !== JSON.stringify(before)) problems.push('a fixture file changed');
   if (!hooks.length) problems.push(`no ${host} hook matches this call`);
   const deny = decisions.find(entry => entry.decision === 'deny');

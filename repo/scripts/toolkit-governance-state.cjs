@@ -1,63 +1,16 @@
 'use strict';
 
-// The one answer to "which Toolkit governance state applies in this working directory?".
-// Every hook, setup step, conformance check and catalogue call asks this module, and nothing else
-// reads the inputs it combines:
-//
-//   identity   the origin-remote repository identity (toolkit.repository-identity.v1), read
-//              from the repository's own git config file, never from the path;
-//   merged     the programme binding `.github/toolkit-programme.json` as merged on the origin's
-//              default branch, from this computer's cache (toolkit-governance-binding.cjs). It is
-//              the repository's own setting and decides on every computer;
-//   materials  the governed block in the git root's AGENTS.md and the working tree's binding,
-//              shown only (a working-tree binding is "pending: merge it"), never deciding;
-//   registry   the user's own decision for that identity in
-//              ~/.ai-agent-toolkit/user-state/repository-governance.v1.json (U), stored and
-//              written only by toolkit-capability-registry.cjs. It decides only where nothing is
-//              merged, and is never deleted or rewritten here.
-//
-// GitHub governance (programme records, decision traces, evidence custody, the governed block)
-// works only for github.com repositories. States, first matching rule wins:
-//   R1 no git root                                  DISABLED       automatically, never held
-//   R8 not GitHub (no usable origin, or another host) DISABLED   automatically, never held
-//   github.com, by the merged binding:
-//     M0 merged binding malformed or unknown schema ERROR          not held; governed effects hold (A2)
-//     M2 merged v2 binding says disabled            DISABLED       only an owner-merged PR changes it (A3)
-//     M1 merged binding enabled (v2, or v1)         ENABLED        on every computer; a local "no" is only a
-//                                                                  suggestion preference
-//   github.com, nothing merged for this repository (none, a fork's, or not read yet):
-//     S1 an evidence store                          DISABLED       never held or asked: a merged binding in
-//                                                                  this computer's cache names it as its store,
-//                                                                  or it is named TRANSPORT-* under the owner of
-//                                                                  such a binding's repository; U is ignored
-//     R1s a scratch clone                           DISABLED       never held or asked: a clone of another
-//                                                                  repository inside the ignored top-level .tmp/
-//                                                                  folder of a repository that is ENABLED or
-//                                                                  DISABLED; U is ignored
-//     R2 U declined or disabled                    DISABLED       not asked again on this computer
-//     R5 U enabled                                  ENABLED        not held; materials incomplete until the
-//                                                                  setup PR with the binding merges
-//     R7 U not recorded                             UNDECIDED      held until the owner's own reply
-// ENABLED by M1 keeps routine work going on a stale or offline cache; gate admission, finality and
-// governed writes (programme_records_bind) need a read of the merged binding no older than 24
-// hours, else governed_effects_hold (A4). A read error after a git root is found gives UNDECIDED
-// (rule ERROR): the state cannot be shown not to be UNDECIDED, so callers that hold must hold (fail
-// closed). A folder with no git root is never held.
-//
-// Reads local files only: no network, no git or gh subprocess, no writes (refreshMergedBinding,
-// called only by `status` and the session-start hook, is the one exception). Node built-ins
-// plus the existing registry (with its remote-identity check), managed-block, binding-cache and
-// programme-binding modules.
-
+// Effective governance comes only from origin's default-branch programme file.
+// Working files, pending proposals and historical local answers grant no authority.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const registry = require('./toolkit-capability-registry.cjs');
+const repositoryIdentity = require('./toolkit-repository-identity.cjs');
+const { userStateDirectory } = require('./toolkit-user-state.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
 const managedBlock = require('./toolkit-managed-block.cjs');
-const { validateRemoteIdentity } = registry;
+const { validateRemoteIdentity } = repositoryIdentity;
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 
 const SCHEMA = 'toolkit.governance-state.v1';
@@ -67,8 +20,7 @@ const SCHEMA = 'toolkit.governance-state.v1';
 // Enterprise server included, is not github.com. The reconciler uses the same test.
 const TRACKING_HOST = 'github.com';
 const trackingHost = programmeState.isGitHubHost;
-const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED', 'ERROR']);
-const GOVERNANCE_CAPABILITY = 'repository.governance';
+const STATES = Object.freeze(['ENABLED', 'DISABLED', 'UNDECIDED', 'UNAVAILABLE', 'ERROR']);
 const GOVERNED_BLOCK = 'TOOLKIT-GOVERNED-RULES';
 const LEGACY_GOVERNED_BLOCK = 'GLOBAL-AGENTS.MD-TEMPLATE';
 const GOVERNED_BLOCK_LINE = /^<!-- AI-AGENT-TOOLKIT:[^\r\n]*:BEGIN (TOOLKIT-GOVERNED-RULES|GLOBAL-AGENTS\.MD-TEMPLATE) v\d+(?: [^\r\n]*)? -->\r?$/m;
@@ -77,7 +29,6 @@ const BINDING_FILE = Object.freeze(['.github', 'toolkit-programme.json']);
 const BINDING_SCHEMA = 'toolkit.programme-binding.v1';
 // An early name for the binding; reported for the owner, never read or rewritten.
 const LEGACY_BINDING_FILE = Object.freeze(['.github', 'ai-agent-toolkit-programme.json']);
-const REGISTRY_BASENAME = 'repository-governance.v1.json';
 const AGENTS_READ_LIMIT = 1024 * 1024;
 const BINDING_READ_LIMIT = 64 * 1024;
 const GIT_FILE_READ_LIMIT = 4096;
@@ -202,7 +153,7 @@ function gitConfigPath(root) {
 }
 
 // { root, valid, reason, repository_id, remote } where `remote` is the parsed remote identity.
-// Matches toolkit-capability-registry.cjs resolveRepositoryIdentity without running git.
+// Reads the origin from Git's own config, without a subprocess or a local decision store.
 function readIdentity(cwd) {
   const root = findGitRoot(typeof cwd === 'string' && cwd ? cwd : process.cwd());
   if (!root) return { root: null, valid: false, reason: 'no-git-root' };
@@ -214,8 +165,8 @@ function readIdentity(cwd) {
   if (!remote.valid) return { root, valid: false, reason: 'origin-unsupported' };
   return {
     root, valid: true, reason: null, remote,
-    repository_id: registry.repositoryIdForCanonicalRemote(remote.canonical),
-    legacy_repository_ids: registry.legacyRepositoryIdsForCanonicalRemote(remote.canonical),
+    repository_id: repositoryIdentity.repositoryIdForCanonicalRemote(remote.canonical),
+    legacy_repository_ids: repositoryIdentity.legacyRepositoryIdsForCanonicalRemote(remote.canonical),
   };
 }
 
@@ -277,7 +228,7 @@ function mergedBinding(root, options = {}) {
   try {
     const identity = readIdentity(root);
     if (!identity.valid) return null;
-    const judged = judgeMerged(bindingCache.readBindingCache(identity, registryPathFor(options)), identity, new Date());
+    const judged = judgeMerged(bindingCache.readBindingCache(identity, userStateDirectory(options)), identity, new Date());
     return judged.status === 'enabled' ? judged.binding : null;
   } catch { return null; }
 }
@@ -331,7 +282,7 @@ function taskAutoMerge(root, options = {}) {
     const identity = readIdentity(root);
     if (!identity.valid) return { ...off, reason: 'repository-invalid' };
     const now = typeof options.now === 'function' ? options.now() : new Date();
-    const judged = judgeMerged(bindingCache.readBindingCache(identity, registryPathFor(options)), identity, now);
+    const judged = judgeMerged(bindingCache.readBindingCache(identity, userStateDirectory(options)), identity, now);
     if (judged.status !== 'enabled' || judged.binding.schema !== 'toolkit.programme-binding.v2' || judged.fresh !== true) return { ...off, reason: 'fresh-enabled-binding-required' };
     return { ...off, fresh: true, auto_merge: preference.value,
       reason: preference.status === 'missing' ? 'no-answer-saved' : preference.value === 'off' ? 'machine-off' : 'machine-on' };
@@ -379,35 +330,6 @@ function readMaterials(root, identity) {
   return { governed_block: readGovernedBlock(root), binding: readBinding(root, identity), legacy_binding_file: legacyBinding };
 }
 
-// ---- registry ---------------------------------------------------------------------------------
-
-function registryPathFor(options = {}) {
-  const overridden = options.registryPath !== undefined || options.userHome !== undefined;
-  if (overridden && options.testOnly !== true) fail('REGISTRY_PATH_OVERRIDE_FORBIDDEN');
-  if (options.registryPath !== undefined) {
-    if (typeof options.registryPath !== 'string' || !path.isAbsolute(options.registryPath)
-      || path.basename(options.registryPath) !== REGISTRY_BASENAME) fail('REGISTRY_PATH_INVALID');
-    return path.normalize(options.registryPath);
-  }
-  const home = options.userHome !== undefined ? options.userHome : os.homedir();
-  if (typeof home !== 'string' || !path.isAbsolute(home)) fail('USER_HOME_INVALID');
-  return path.join(home, '.ai-agent-toolkit', 'user-state', REGISTRY_BASENAME);
-}
-
-// The user's recorded governance decision for one identity: 'enabled', 'disabled' or
-// 'unresolved' (nothing recorded), with its decision kind. Keys earlier versions stored for the
-// same repository count when the repository's own key has no entry and they agree. A missing
-// file is 'unresolved'; a file that cannot be read or does not validate throws.
-function readDecision(repositoryId, options = {}, legacyIds = []) {
-  const bytes = readSmallFile(registryPathFor(options), registry.MAX_REGISTRY_BYTES, 'REGISTRY_TOO_LARGE');
-  if (!bytes) return { state: 'unresolved', decision_kind: null };
-  let parsed;
-  try { parsed = registry.parseRegistryBytes(bytes); } catch (error) { fail(/^[A-Z][A-Z0-9_]{1,63}$/.test(error && error.code) ? error.code : 'REGISTRY_MALFORMED'); }
-  const entry = registry.readCapabilityMap(parsed, repositoryId, legacyIds)[GOVERNANCE_CAPABILITY];
-  const own = registry.readCapabilityMap(parsed, repositoryId, [])[GOVERNANCE_CAPABILITY];
-  return { state: entry.state, decision_kind: entry.decision_kind, legacy_key: entry.state !== 'unresolved' && own.state === 'unresolved' };
-}
-
 // The key a git repository without a usable origin is known by on this computer: its real path.
 function localRepositoryId(root) {
   let real = root;
@@ -417,46 +339,28 @@ function localRepositoryId(root) {
 
 // ---- evidence stores and scratch clones -------------------------------------------------------
 
-// An evidence store by name: `TRANSPORT-<name>`, as the attribution guard and merge hold read it.
-const STORE_NAME = /^transport-[\w.-]+$/i;
 const SCRATCH_FOLDER = '.tmp';
 const SCRATCH_IGNORE_LINES = Object.freeze(['.tmp', '.tmp/', '/.tmp', '/.tmp/']);
 const GITIGNORE_READ_LIMIT = 1024 * 1024;
-const storeScans = new Map();
-
-// The evidence stores this computer's merged bindings name: { stores, owners }, lowercase sets of
-// "owner/name" store repositories and of the owners of the repositories whose bindings name them.
+// Exact evidence-store relationships in validated cached bindings, as lowercase owner/name values.
 // Only valid, enabled bindings with a github store count, and a damaged cache file is skipped.
-// Read once per process for each state of the cache folder.
 function evidenceStoreRepositories(options = {}, now = new Date()) {
-  const registryPath = registryPathFor(options);
-  let stamp = 'none';
-  try { stamp = String(fs.statSync(bindingCache.cacheDirFor(registryPath)).mtimeMs); } catch { stamp = 'none'; }
-  const known = storeScans.get(registryPath);
-  if (known && known.stamp === stamp) return known.scan;
   const stores = new Set();
-  const owners = new Set();
-  for (const { identity, entry } of bindingCache.readAllBindingCaches(registryPath)) {
+  for (const { identity, entry } of bindingCache.readAllBindingCaches(userStateDirectory(options))) {
     const judged = judgeMerged(entry, identity, now);
     if (judged.status !== 'enabled' || !judged.binding.store || judged.binding.store.kind !== 'github') continue;
     stores.add(judged.binding.store.repository.toLowerCase());
-    owners.add(judged.binding.repository.split('/')[0].toLowerCase());
   }
-  const scan = Object.freeze({ stores, owners });
-  storeScans.set(registryPath, { stamp, scan });
-  return scan;
+  return Object.freeze({ stores });
 }
 
-// 'evidence-store' when a cached binding names this repository as its evidence store,
-// 'evidence-store-by-name' for a `TRANSPORT-*` repository under the owner of a cached binding's
-// repository, else null.
+// A name or shared owner supplies no exemption.
 function evidenceStoreOf(identity, scan) {
   const slug = remoteSlug(identity && identity.remote);
   if (!slug || !scan) return null;
   const lower = slug.toLowerCase();
   if (scan.stores.has(lower)) return 'evidence-store';
-  const [owner, name] = lower.split('/');
-  return STORE_NAME.test(name) && scan.owners.has(owner) ? 'evidence-store-by-name' : null;
+  return null;
 }
 
 // Whether the parent repository's root .gitignore ignores the top-level scratch folder, by an exact
@@ -481,13 +385,13 @@ function scratchParentOf(root) {
 function result(fields) {
   const state = fields.state;
   const complete = state === 'ENABLED' && fields.materials_complete === true;
-  const effectsHold = state === 'ERROR' || (complete && fields.merged_fresh !== true);
+  const effectsHold = state === 'ERROR' || state === 'UNAVAILABLE' || state === 'UNDECIDED' || (complete && fields.merged_fresh !== true);
   return Object.freeze({
     schema: SCHEMA,
     state,
     rule: fields.rule,
     reason: fields.reason,
-    hold: state === 'UNDECIDED',
+    hold: state === 'UNDECIDED' && fields.hold !== false,
     persistable: fields.persistable === true,
     materials_complete: state === 'ENABLED' ? complete : null,
     governed_rules_bind: complete,
@@ -495,8 +399,6 @@ function result(fields) {
     // the merged binding (A4). Routine work follows governed_rules_bind.
     programme_records_bind: complete && !effectsHold,
     governed_effects_hold: effectsHold,
-    recorded_decision: fields.recorded_decision || null,
-    recorded_under_legacy_key: fields.legacy_key === true,
     repository_id: fields.repository_id || null,
     root: fields.root || null,
     materials: fields.materials ? Object.freeze({
@@ -519,7 +421,7 @@ function result(fields) {
 // | 'enabled' | 'disabled', version, problems, foreign_repository, commit, fetched_at, fresh }.
 function judgeMerged(entry, identity, now) {
   if (!entry) return { status: 'unknown', fresh: false };
-  const base = { commit: entry.commit, fetched_at: entry.fetched_at, fresh: bindingCache.isFresh(entry, now) };
+  const base = { commit: entry.commit, fetched_at: entry.fetched_at, fresh: !entry.refresh_error && bindingCache.isFresh(entry, now), unavailable: Boolean(entry.refresh_error) };
   if (entry.status === 'absent') return { ...base, status: 'none' };
   if (typeof entry.text !== 'string') return { ...base, status: 'invalid', problems: [entry.problem || 'unreadable'] };
   let parsed;
@@ -535,15 +437,14 @@ function judgeMerged(entry, identity, now) {
 }
 
 class GovernanceState {
-  #readIdentity; #readMaterials; #readDecision; #readMerged; #readStores; #now;
+  #readIdentity; #readMaterials; #readMerged; #readStores; #now;
 
   // Readers are injectable so the derivation can be tested on its own; the defaults read the
   // real repository, the real user-state files and this computer's cache of the merged binding.
-  constructor({ identityReader = readIdentity, materialsReader = readMaterials, decisionReader = readDecision, mergedReader = null, storeReader = null, registryOptions = {}, now = () => new Date() } = {}) {
+  constructor({ identityReader = readIdentity, materialsReader = readMaterials, mergedReader = null, storeReader = null, registryOptions = {}, now = () => new Date() } = {}) {
     this.#readIdentity = identityReader;
     this.#readMaterials = materialsReader;
-    this.#readDecision = (identity) => decisionReader(identity.repository_id, registryOptions, identity.legacy_repository_ids || []);
-    this.#readMerged = mergedReader || (identity => bindingCache.readBindingCache(identity, registryPathFor(registryOptions)));
+    this.#readMerged = mergedReader || (identity => bindingCache.readBindingCache(identity, userStateDirectory(registryOptions)));
     this.#readStores = storeReader || (() => evidenceStoreRepositories(registryOptions, now()));
     this.#now = now;
   }
@@ -552,8 +453,8 @@ class GovernanceState {
   // default-branch binding (read only for a github.com repository).
   // `store` is evidenceStoreOf's answer and `scratch` whether the repository is a clone of another
   // repository in a decided repository's ignored `.tmp/` folder (both read only for github.com).
-  static derive({ identity, materials, decision, merged = { status: 'unknown', fresh: false }, store = null, scratch = false }) {
-    const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, recorded_decision: decision.state, legacy_key: decision.legacy_key === true, materials };
+  static derive({ identity, materials, merged = { status: 'unknown', fresh: false }, store = null, scratch = false }) {
+    const base = { root: identity.root, repository_id: identity.repository_id, persistable: true, materials };
     const notGitHub = notGitHubOf(identity);
     if (notGitHub) {
       const fields = { ...base, host: notGitHub.host, reason: notGitHub.reason };
@@ -563,29 +464,26 @@ class GovernanceState {
     const withMerged = { ...base, merged: view, merged_fresh: view.fresh };
     // The repository's merged binding decides, on every computer (A1, A3).
     if (merged.status === 'invalid') return result({ ...withMerged, state: 'ERROR', rule: 'M0', reason: 'merged-binding-invalid' });
-    if (merged.status === 'disabled') return result({ ...withMerged, state: 'DISABLED', rule: 'M2', reason: 'repository-disabled' });
+    if (merged.status === 'disabled') return result({ ...withMerged, state: 'DISABLED', rule: 'M2', reason: 'repository-disabled',
+      notes: merged.unavailable ? ['could-not-check-governance'] : !view.fresh ? ['merged-binding-stale'] : [] });
     if (merged.status === 'enabled') {
       const notes = [];
-      if (decision.state === 'disabled') notes.push('local-no-is-preference');
       if (merged.version === 1) notes.push('binding-v2-migration-offered');
-      if (!view.fresh) notes.push('merged-binding-stale');
+      if (merged.unavailable) notes.push('could-not-check-governance');
+      else if (!view.fresh) notes.push('merged-binding-stale');
       return result({ ...withMerged, state: 'ENABLED', rule: 'M1', reason: 'repository-enabled', materials_complete: true, merged_binding_valid: true, notes });
     }
-    // An evidence store, or a scratch clone, is never governed and never asked; a decision recorded
-    // for it decides nothing (a stored "enable" is shown so the owner can clear it).
+    // Exact evidence relationships and scratch clones need no governance question.
     if (store || scratch) {
-      const notes = decision.state === 'enabled' ? ['stored-decision-ignored'] : [];
+      const notes = [];
       return store
         ? result({ ...withMerged, state: 'DISABLED', rule: 'S1', reason: store, notes })
         : result({ ...withMerged, state: 'DISABLED', rule: 'R1s', reason: 'scratch-clone', notes });
     }
-    // No merged binding (none, a fork's, or nothing read yet): this computer's answer decides.
     const notes = [];
     if (merged.status === 'foreign') notes.push('binding-belongs-to-other-repository');
-    if (merged.status === 'unknown') notes.push('merged-binding-unknown');
     if (materials.binding.present === true) notes.push('pending-binding-merge');
-    if (decision.state === 'disabled') return result({ ...withMerged, state: 'DISABLED', rule: 'R2', reason: decision.decision_kind === 'disable' ? 'user-disabled' : 'user-declined', notes });
-    if (decision.state === 'enabled') return result({ ...withMerged, state: 'ENABLED', rule: 'R5', reason: 'binding-not-merged', materials_complete: false, notes: [...notes, 'setup-pr-offered'] });
+    if (merged.status === 'unknown' || !view.fresh) return result({ ...withMerged, state: 'UNAVAILABLE', rule: 'U1', reason: 'governance-unavailable', notes: [...notes, 'could-not-check-governance'] });
     return result({ ...withMerged, state: 'UNDECIDED', rule: 'R7', reason: 'no-decision', notes });
   }
 
@@ -594,9 +492,8 @@ class GovernanceState {
     try {
       identity = this.#readIdentity(cwd);
     } catch (error) {
-      // A git root exists (identity reading only throws after finding one) but its config could
-      // not be read: the state cannot be shown not to be UNDECIDED.
-      return result({ state: 'UNDECIDED', rule: 'ERROR', reason: 'identity-unreadable', error_code: codeOf(error), root: findGitRootQuietly(cwd) });
+      // Unreadable identity supplies no authority and does not stop ordinary work.
+      return result({ state: 'UNAVAILABLE', rule: 'ERROR', reason: 'identity-unreadable', error_code: codeOf(error), root: findGitRootQuietly(cwd) });
     }
     if (!identity.root) {
       return result({ state: 'DISABLED', rule: 'R1', reason: 'no-git', folder: path.resolve(typeof cwd === 'string' && cwd ? cwd : process.cwd()) });
@@ -609,18 +506,9 @@ class GovernanceState {
     // GitHub-only decisions, materials and binding caches cannot affect an unsupported host.
     if (notGitHubOf(identity)) return GovernanceState.derive({ identity, materials: EMPTY_MATERIALS, decision: { state: 'unresolved', decision_kind: null } });
     const partial = { root: identity.root, repository_id: identity.repository_id, persistable: true };
-    let decision;
     let materials;
-    try {
-      decision = this.#readDecision(identity);
-    } catch (error) {
-      return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'registry-unreadable', error_code: codeOf(error) });
-    }
-    try {
-      materials = this.#readMaterials(identity.root, identity);
-    } catch (error) {
-      return result({ ...partial, state: 'UNDECIDED', rule: 'ERROR', reason: 'materials-unreadable', error_code: codeOf(error), recorded_decision: decision.state });
-    }
+    try { materials = this.#readMaterials(identity.root, identity); }
+    catch { materials = EMPTY_MATERIALS; } // Instruction damage never erases a repository decision.
     let store = null;
     let scratch = false;
     let entry = null;
@@ -630,7 +518,7 @@ class GovernanceState {
       try { store = evidenceStoreOf(identity, this.#readStores()); } catch { store = null; }
       if (!store) scratch = this.#scratchClone(identity, depth);
     }
-    return GovernanceState.derive({ identity, materials, decision, merged, store, scratch });
+    return GovernanceState.derive({ identity, materials, merged, store, scratch });
   }
 
   // Whether `identity` is a clone of a different repository inside the ignored top-level `.tmp/`
@@ -688,44 +576,9 @@ function refreshMergedBinding(cwd, options = {}, { runGit, timeout, now, environ
   try {
     const identity = readIdentity(cwd);
     if (!identity.root || !identity.valid || notGitHubOf(identity)) return { refreshed: false, error: 'not-applicable' };
-    const outcome = bindingCache.refreshBindingCache(identity, registryPathFor(options), { runGit, timeout, now, environment });
+    const outcome = bindingCache.refreshBindingCache(identity, userStateDirectory(options), { runGit, timeout, now, environment });
     return { refreshed: outcome.refreshed, error: outcome.error };
   } catch (error) { return { refreshed: false, error: codeOf(error) }; }
-}
-
-// ---- repair -----------------------------------------------------------------------------------
-
-// For a state held because the user's decisions file cannot be read: one sentence naming the file
-// and the terminal repair. Empty otherwise.
-function repairHint(state, options = {}) {
-  if (!state || state.reason !== 'registry-unreadable') return '';
-  let file;
-  try { file = registryPathFor(options); } catch { return ''; }
-  return `Your governance decisions file (${file}) could not be read. To start it afresh, run ${governanceCommand('repair')} in your own terminal: after you type yes it moves the file aside (kept next to it), and Toolkit asks about each repository again.`;
-}
-
-// Whether the decisions file needs the repair: { file, problem } with problem null when it reads
-// (or is missing), else the error code.
-function registryProblem(options = {}) {
-  const file = registryPathFor(options);
-  try {
-    const bytes = readSmallFile(file, registry.MAX_REGISTRY_BYTES, 'REGISTRY_TOO_LARGE');
-    if (bytes) registry.parseRegistryBytes(bytes);
-    return { file, problem: null };
-  } catch (error) {
-    return { file, problem: codeOf(error) };
-  }
-}
-
-// Moves an unreadable decisions file aside, next to the original, and reads back that the file is
-// gone. Only the terminal command calls this, after the user typed yes. Returns the new path.
-function moveRegistryAside(options = {}, now = () => new Date()) {
-  const { file, problem } = registryProblem(options);
-  if (!problem) fail('REGISTRY_READABLE');
-  const aside = `${file}.damaged-${now().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(2).toString('hex')}`;
-  try { fs.renameSync(file, aside); } catch { fail('REGISTRY_NOT_MOVED'); }
-  if (fs.existsSync(file) || !fs.existsSync(aside)) fail('REGISTRY_NOT_MOVED');
-  return aside;
 }
 
 module.exports = Object.freeze({
@@ -735,7 +588,6 @@ module.exports = Object.freeze({
   localRepositoryId,
   evidenceStoreRepositories,
   evidenceStoreOf,
-  GOVERNANCE_CAPABILITY,
   GOVERNED_BLOCK,
   LEGACY_GOVERNED_BLOCK,
   BINDING_FILE: BINDING_FILE.join('/'),
@@ -748,9 +600,6 @@ module.exports = Object.freeze({
   mergedBinding,
   governanceCommand,
   isGitHubHost: trackingHost,
-  repairHint,
-  registryProblem,
-  moveRegistryAside,
   readIdentity,
   readMaterials,
   readGovernedBlock,
@@ -761,8 +610,7 @@ module.exports = Object.freeze({
   taskAutoMerge,
   committedBindingPolicy,
   workingBindingPolicy,
-  readDecision,
-  registryPathFor,
+  userStateDirectory,
   bindingProblems,
   gitConfigValues,
   findGitRoot,

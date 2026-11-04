@@ -201,7 +201,7 @@ class MergeApprovals {
   #file; #now;
 
   constructor({ registryOptions = {}, now = () => new Date() } = {}) {
-    this.#file = path.join(path.dirname(governance.registryPathFor(registryOptions)), APPROVALS_BASENAME);
+    this.#file = path.join(governance.userStateDirectory(registryOptions), APPROVALS_BASENAME);
     this.#now = now;
   }
 

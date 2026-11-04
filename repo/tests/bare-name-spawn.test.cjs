@@ -66,13 +66,16 @@ test('PATH resolution skips relative PATH entries and returns the .exe', { skip:
 });
 
 test('the fixed sites no longer start git or codex by a bare name', () => {
-  for (const file of ['setup-claude-toolkit-plugin.cjs', 'repo-ignore-hygiene.cjs', 'toolkit-capability-registry.cjs', 'toolkit-local-bridge.cjs']) {
+  for (const file of ['setup-claude-toolkit-plugin.cjs', 'repo-ignore-hygiene.cjs', 'toolkit-local-bridge.cjs']) {
     const text = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', file), 'utf8');
     assert.doesNotMatch(text, /spawnSync\('git'/, file);
     assert.match(text, /resolvePathExecutable\('git'\)/, file);
     assert.doesNotMatch(text, /runCommand\('git'/, file);
   }
   const core = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit-core.cjs'), 'utf8');
+  const proposal = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'), 'utf8');
+  assert.doesNotMatch(proposal, /spawnSync\('gh'/);
+  assert.match(proposal, /resolvePathExecutable\('gh'\)/);
   assert.match(core, /spawnSync\(command === 'git' \? processLaunch\.resolvePathExecutable\('git'\) : command,/);
   const codex = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), 'utf8');
   assert.doesNotMatch(codex, /candidates\.push\('codex'\)/);

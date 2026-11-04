@@ -562,7 +562,8 @@ test('Projects lists every owner-hands step when it reports what waits on the ow
 test('the device programme sweep needs both GitHub governance ENABLED and a named device', () => {
   // Cloud-only projects have no device to run it on, so neither half alone may set it up or suggest it.
   const at = rel => read(`repo/contracts/claude-projects/web-controller-projects/${rel}`);
-  assert.match(at('reference/setup.md'), /reports plain `ENABLED` \(not `ENABLED \(materials incomplete\)`; a failed read counts as not ENABLED\) and step 3 named a device: also set up the \*\*Programme sweep on a device\*\*/);
+  assert.match(at('reference/setup.md'), /confirms a fresh merged enabled binding and step 3 named a device: also set up the \*\*Programme sweep on a device\*\*/);
+  assert.match(at('reference/setup.md'), /A pending yes, open proposal, stale read or failed read grants no governance effects/);
   assert.match(at('reference/setup.md'), /With governance in any other state, or no device, do not create it or suggest it/);
   assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(guided setup step 3\); in any other case, never create or suggest it\./);
   assert.match(at('SKILL.md'), /only when ENABLED and a device is named\)/);
