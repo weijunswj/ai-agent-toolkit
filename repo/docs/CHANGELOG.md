@@ -1,10 +1,17 @@
 # Toolkit Changelog
 
+## 3.44.0
+
+### Added
+
+- Select `owner-mixed` for GPT discovery and building, Luna Max helpers and one Opus review. Adoption of a new captured registry revision is deliberate; existing selections retain their original capture.
+- Mixed selection does not supply automated cross-host gate launches. Use Codex for GPT discovery and building and a fresh human-opened Claude session for Opus review of the same candidate, scope and evidence, without helpers.
+
 ## 3.43.3
 
 ### Fixed
 
-- Document the qualified Windows Codex review launch with read-only source, one pre-created writable temp root and network refusal. Require an already elevated backend and set temp variables inside review commands. Keep required suite and hook-pack evidence separate from permission qualification; add explicit-root nested runner and grandchild cleanup coverage.
+- Daily check-ins compare the plugin copy with main when their own session started, keeping genuine lag alerts while avoiding false plugin cards for pinned copies. Reports retain an explicit fallback when session time is unavailable and one advisory when newer hook definitions or entry scripts changed.
 
 ## 3.43.2
 

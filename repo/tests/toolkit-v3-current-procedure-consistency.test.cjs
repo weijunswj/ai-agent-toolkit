@@ -99,21 +99,47 @@ test('current procedure is one wording across CONTROLLER, the governed block and
 
 const WORDS = ['zero', 'one', 'two', 'three', 'four'];
 function reviewerCardinalityContract(text, registry) {
-  const counts = ['owner-gpt', 'owner-claude'].map(id => registry.profiles[id].reviewers.length);
-  const expected = `their independent full-scope reviewer sets are defined only by the pinned registry and currently contain ${WORDS[counts[0]]} and ${WORDS[counts[1]]} members, with no additional peer.`;
+  const ids = Object.keys(registry.profiles);
+  assert.ok(text.includes(`The canonical profiles are ${ids.slice(0, -1).join(', ')} and ${ids.at(-1)};`));
+  const counts = ids.map(id => registry.profiles[id].reviewers.length);
+  const cardinalities = counts.every(count => count === counts[0])
+    ? `${WORDS[counts[0]]} member${counts[0] === 1 ? '' : 's'} each`
+    : `${counts.slice(0, -1).map(count => WORDS[count]).join(', ')} and ${WORDS[counts.at(-1)]} members respectively`;
+  const expected = `their independent full-scope reviewer sets are defined only by the pinned registry and currently contain ${cardinalities}, with no additional peer.`;
   assert.ok(text.includes(expected), expected);
   assert.doesNotMatch(text, /reviewer sets contain two, one and three members/);
 }
 
 test('documented reviewer cardinalities are derived from the pinned registry', () => {
   const registry = JSON.parse(read('repo/contracts/controller-kernel/stack-registry-v3.json'));
-  assert.deepEqual(Object.keys(registry.profiles).map(id => registry.profiles[id].reviewers.length), [1, 1]);
+  assert.deepEqual(Object.keys(registry.profiles).map(id => registry.profiles[id].reviewers.length), [1, 1, 1]);
   for (const rel of ['repo/contracts/source-of-truth-contract.md', 'README.md']) reviewerCardinalityContract(read(rel), registry);
-  const stale = read('repo/contracts/source-of-truth-contract.md').replace('currently contain one and one members', 'currently contain two and one members');
+  const stale = read('repo/contracts/source-of-truth-contract.md').replace('currently contain one member each', 'currently contain two and one members');
   assert.throws(() => reviewerCardinalityContract(stale, registry));
   const grown = structuredClone(registry); grown.profiles['owner-gpt'].reviewers.push({ reviewer_id: 'extra' });
   assert.throws(() => reviewerCardinalityContract(read('repo/contracts/source-of-truth-contract.md'), grown),
     'a registry change cannot pass against stale prose');
+});
+
+test('every documented profile row projects the registry routes and complete reviewer roster', () => {
+  const registry = JSON.parse(read('repo/contracts/controller-kernel/stack-registry-v3.json'));
+  const delivery = read('repo/docs/TOOLKIT-DELIVERY.md');
+  const names = { 'gpt-6.1-sol': 'Sol 6.1', 'gpt-6-luna': 'Luna', 'opus-5.5': 'Opus 5.5', 'haiku-5.5': 'Haiku 5.5' };
+  const efforts = { high: 'High', xhigh: 'XHigh', max: 'Max' };
+  const label = route => {
+    assert.ok(names[route.model], `document the display name for ${route.model}`);
+    assert.ok(efforts[route.reasoning], `document the effort for ${route.reasoning}`);
+    return `${names[route.model]} ${efforts[route.reasoning]}`;
+  };
+  const rows = delivery.split('\n').filter(line => /^\| `owner-/.test(line));
+  assert.equal(rows.length, Object.keys(registry.profiles).length);
+  for (const [id, profile] of Object.entries(registry.profiles)) {
+    assert.deepEqual(profile.routes.DISCOVERY, profile.routes.BUILDER);
+    assert.deepEqual(profile.routes.DISCOVERY_HELPER, profile.routes.BUILDER_HELPER);
+    assert.equal(profile.reviewers.length, 1);
+    const expected = `| \`${id}\` | ${label(profile.routes.DISCOVERY)} | ${label(profile.routes.DISCOVERY_HELPER)} | ${label(profile.routes.DESIGN_CHALLENGE)} | One ${label(profile.reviewers[0])} review |`;
+    assert.equal(rows.filter(row => row === expected).length, 1, expected);
+  }
 });
 
 test('neither the directive nor CONTROLLER keeps a retention clock', () => {

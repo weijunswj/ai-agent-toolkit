@@ -398,17 +398,9 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   }
   // The account copy of the skill is no longer kept: no drift, card or account-skill step remains.
   assert.doesNotMatch(text, /SKILL DRIFT|SKILL BEHIND|SKILL CARD|propose_skills|skill-card|skill card|card <|account folder|skills\/synced/);
-  // Plugin lag needs the full history (a failed fetch is named as stuck) and is reported once per main version.
-  for (const required of ['If none has it, run `git -C TK fetch --unshallow` once and look again',
-    'Equal: "**Plugin:** current (<version>)"', 'take the newest commit whose plugin.json has the account version; main moved past it at the next newer commit',
-    'use the oldest commit whose version is above the account\'s', 'age unverified: unshallow failed: <error>" and no prefix, and name it on the first line as stuck', 'Under 24 hours ago: name both versions and that commit under **Plugin:**',
-    'unless state.md has "plugin behind <main version>"', 'its "plugin behind <version>" record', 'No agent can update the plugin',
-    // The Claude app steps, rendered, equal the shared text the session-start reminder and install check use.
-    `put the owner's steps under **Plugin:** for the coordinator's plugin card: ${STEPS_TEXT} Missing account copy`,
-    '"plugin behind <main version>" for the version reported as PLUGIN BEHIND (carried forward while the account copy is still behind)',
-    'Omit empty bullets except Guidebook, Block, Binding, Tasks, Nudge, Plugin and Run.']) {
-    assert.ok(text.includes(required), required);
-  }
+  // The Claude app steps still equal the shared session-start reminder and install text.
+  assert.ok(text.includes(`put the owner's steps under **Plugin:** for the coordinator's plugin card: ${STEPS_TEXT} Missing account copy`));
+  assert.ok(text.includes('Omit empty bullets except Guidebook, Block, Binding, Tasks, Nudge, Plugin and Run.'));
   // The check-in holds no card, so no run of it, bound or fresh, keeps its thread open for one.
   const freshCheckIn = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], session: 'fresh' }));
   for (const rendered of [text, freshCheckIn]) assert.doesNotMatch(rendered, /skip the resolve in DELIVERY|posted a card/);
@@ -782,5 +774,75 @@ test('the check-in reads the nudge due time from its own cron', () => {
   const text = rendered('daily-check-in');
   for (const required of ['the newest time at or before now when the cron fires', 'hours outside its waking window never count', 'use its interval plus 5 minutes instead of 65 minutes', 'a nudge with no run yet, as after a swap, counts as armed while its next run is within one interval of now']) {
     assert.ok(text.includes(required), required);
+  }
+});
+
+// These check the instruction contract, not the Projects model's interpretation; that remains UAT.
+for (const [variant, repo] of [['repo', 'example-owner/example-repo'], ['Toolkit', 'weijunswj/ai-agent-toolkit'], ['no repo', 'none']]) {
+  for (const session of ['bound', 'fresh']) {
+    test('plugin baseline and evidence contract: ' + variant + ', ' + session, () => {
+      const promptParams = validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo, parent_issue: repo === 'none' ? 'none' : '12', session });
+      const text = tasks().render('daily-check-in', promptParams);
+      const plugin = text.slice(text.indexOf('10. PLUGIN BEHIND:'), text.indexOf('11. GitHub'));
+      const rows = [
+        ['own session and nested timestamp', [/get_session` with no session_id and read `ccr\.created_at`, not a top-level created_at/, /never the coordinator's thread, the trigger creation time/]],
+        ['valid timezone and non-future time', [/valid calendar timestamp with an explicit time zone \(Z or a numeric offset\) that is not in the future/]],
+        ['historical first-parent baseline', [/git -C TK rev-list -1 --first-parent --before=<start> HEAD/, /git -C TK show B:\.claude-plugin\/plugin\.json/]],
+        ['missing, malformed or future start falls back explicitly', [/Missing, malformed, future or unavailable session start: use today's HEAD as B/, /session start unavailable; comparing with main today/]],
+        ['numeric version comparison', [/Compare version components numerically \(3\.9\.0 is older than 3\.10\.0\), never as strings/]],
+        ['current today', [/equal to today's main: "\*\*Plugin:\*\* current \(<version>\)"/]],
+        ['matches or exceeds baseline, below today', [/Equal to or newer than the selected baseline, but older than today's main/, /home thread copy pinned at <date>; observed <account>, baseline <baseline> at <commit7>, main today <main>/, /verified pinned report gets no PLUGIN BEHIND prefix, owner steps or plugin card/]],
+        ['ahead of today', [/newer than today's main is reported as ahead/, /no prefix, owner steps or card/]],
+        ['only real baseline lag is aged', [/Only a copy older than the selected baseline enters the lag-age calculation/, /--format='%h %cI' B -- \.claude-plugin\/plugin\.json/, /next newer commit on the first-parent path up to B/, /oldest commit up to B whose version is above the account's/]],
+        ['at and below the threshold, no card', [/At or below 24 hours ago:[^\n]*no prefix, owner steps or card/]],
+        ['strictly above the threshold', [/Strictly more than 24 hours ago:/, /PLUGIN BEHIND: <account> vs <baseline> \|/, /only for this verified more-than-24-hours gap put the owner's steps/]],
+        ['repeat runs dedupe the baseline', [/unless state\.md has "plugin behind <baseline version>"/, /Dedupe once per selected baseline version, even when today's main advances again; retain the genuine gap and its steps on repeat runs/]],
+        ['one bounded history retry', [/historical baseline or lag-age evidence is missing from a shallow clone/, /fetch --unshallow` once in total/, /retry the affected reads/]],
+        ['failed or unavailable evidence holds', [/A failed unshallow, missing historical baseline or still-missing lag-age evidence is stuck\/unverified/, /no PLUGIN BEHIND prefix, owner steps or plugin card/, /Never substitute today's baseline for missing historical evidence, invent a date\/version or clear an earlier lag marker on uncertainty/, /no proven transition and time, use the stuck\/unverified rule/]],
+        ['copy unavailable or invalid', [/Missing\/unreadable copy or invalid version: report unverified and no prefix, owner steps or plugin card/]],
+      ];
+      for (const [label, patterns] of rows) for (const pattern of patterns) assert.match(plugin, pattern, label);
+      const state = text.split('\n').find(line => line.startsWith('- Overwrite '));
+      for (const pattern of [/baseline mode \(session-start or today\)/, /validated session start in UTC \(or unavailable\)/,
+        /baseline commit\/version and observed version \(or unverified\)/, /carry it forward while that gap remains, even on an unverified run/,
+        /including a legacy "plugin behind <main version>"/, /only when this run verifies current, pinned or ahead; uncertainty never clears it/]) assert.match(state, pattern);
+      assert.match(text, /Recompute the baseline in step 10 each run; an old state record is never evidence/);
+      assert.equal(tasks().check('daily-check-in', text).state, 'current');
+      assert.equal(tasks().refresh('daily-check-in', text), text, 'repeat refresh is stable');
+    });
+  }
+}
+
+test('hook note covers changed, deleted, unchanged and unavailable evidence without new actions', () => {
+  const text = rendered('daily-check-in');
+  const note = text.split('\n').find(line => line.startsWith('   Hook note:'));
+  for (const pattern of [/observed plugin is older than today's main and the session-start baseline is verified/,
+    /first-parent range `B\.\.HEAD`/, /\.claude-plugin\/hooks\/hooks\.json/, /`hooks\/hooks\.json`/,
+    /changed\/deleted hook entry scripts named by either the baseline or current manifests/, /resolve their plugin-root paths/,
+    /\*hook\*\.cjs/, /\*hook\*\.ps1/, /exactly one advisory sentence/, /home thread may retain older hooks/,
+    /fresh home thread after account sync can load the updated copy/, /No changes: omit the advisory/,
+    /Missing history or manifests needed for this comparison, or unavailable session start/, /hook check unverified/,
+    /manifest proven absent at a revision is a deletion\/addition, not a failed read/, /Never infer which hooks ran/,
+    /no prefix, plugin card, owner update steps or automatic thread rotation/]) assert.match(note, pattern);
+});
+
+test('today-only plugin prompts become outdated at the same version and refresh preserves owner text in every mode', () => {
+  const earlier = new ProjectsTasks({ root: ROOT, readFile(target, encoding) {
+    const text = fs.readFileSync(target, encoding);
+    return target === path.join(TASKS, 'daily-check-in.md')
+      ? text.replace(/^10\. PLUGIN BEHIND:[\s\S]*?(?=^\[repo\]11\.)/m, '10. PLUGIN BEHIND: compare the account version with main today.\n') : text;
+  } });
+  for (const repo of ['example-owner/example-repo', 'weijunswj/ai-agent-toolkit', 'none']) {
+    for (const session of ['bound', 'fresh']) {
+      const promptParams = validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo, parent_issue: repo === 'none' ? 'none' : '12', session });
+      const old = earlier.render('daily-check-in', promptParams).replace('- none', '- Keep this owner check.');
+      assert.equal(earlier.check('daily-check-in', old).state, 'current');
+      assert.equal(tasks().check('daily-check-in', old).state, 'outdated');
+      const refreshed = tasks().refresh('daily-check-in', old, { session });
+      assert.equal(tasks().check('daily-check-in', refreshed).state, 'current');
+      assert.ok(refreshed.includes('ccr.created_at'));
+      assert.ok(refreshed.includes('Keep this owner check.'));
+      assert.equal(refreshed.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1], old.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1]);
+    }
   }
 });

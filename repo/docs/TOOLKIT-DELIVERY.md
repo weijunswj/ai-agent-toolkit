@@ -82,6 +82,7 @@ The central named stack registry is the sole source of model and effort choices.
 |---|---|---|---|---|
 | `owner-gpt` | Sol 6.1 High | Luna Max | Sol 6.1 XHigh | One Sol 6.1 XHigh review |
 | `owner-claude` | Opus 5.5 High | Haiku 5.5 XHigh | Opus 5.5 XHigh | One Opus 5.5 XHigh review |
+| `owner-mixed` | Sol 6.1 High | Luna Max | Sol 6.1 XHigh | One Opus 5.5 XHigh review |
 
 This table projects the registry. G0.Discuss resolves to the same selected lead binding as G0.Discovery, with no separate registry role or hardcoded provider/model. Helpers are leaves: no recursive delegation, scope approval, gate dispatch or final acceptance. An absent exact route is reported, never substituted.
 
@@ -101,7 +102,9 @@ In a Git store the commit is the manifest, and a successful push plus one fetch 
 
 ## 14. Installation and supported surfaces
 
-Native plugins target Codex (`owner-gpt` routes) and Claude Code (`owner-claude` routes); Antigravity gets a portable skills copy only. Before inference by an automation-launched agent or helper, deterministically enforce the requested-helper permission, the selected profile and pinned revision, the effective provider, model and effort, and native inheritance and overrides; leaves and G2 cannot delegate. These checks never lock a human's manually selected first-layer model or effort (section 10). Use the host's blocking parent PreToolUse path; a child hook or SubagentStart alone is insufficient.
+Native plugins target Codex and Claude Code; Antigravity gets a portable skills copy only. Codex helper definitions support OpenAI routes, including the helpers in `owner-mixed`; Claude Code helper definitions support Anthropic routes and refuse mixed-profile G0/G1 helpers. Selecting `owner-mixed` requires deliberate adoption of its captured registry revision and does not supply automated cross-host gate launches. Its GPT discovery and building use Codex; its Opus review uses a fresh human-opened Claude session with the same mixed selection, candidate, scope and evidence, without helpers. Existing selections keep their captured revision until explicit adoption.
+
+Before inference by an automation-launched agent or helper, deterministically enforce the requested-helper permission, the selected profile and pinned revision, the effective provider, model and effort, and native inheritance and overrides; leaves and G2 cannot delegate. These checks never lock a human's manually selected first-layer model or effort (section 10). Use the host's blocking parent PreToolUse path; a child hook or SubagentStart alone is insufficient.
 
 Per host path, qualify the correct route and each wrong-route, guard-failure, missing-hook, malformed-config, post-check-change, resume, alternate-entry and delegation negative; a request that escapes the guard fails even when something downstream stops it. Installed proof checks effective instructions, hooks, route and caches, and a new session must receive the current instructions.
 

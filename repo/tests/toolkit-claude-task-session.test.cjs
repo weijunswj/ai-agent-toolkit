@@ -3,6 +3,13 @@ const { capturedStack } = require('./support/captured-stack-fixture.cjs');
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
 const task=require('../scripts/toolkit-claude-task-session.cjs');
 const clone=x=>JSON.parse(JSON.stringify(x));
+
+test('mixed Claude qualification task profiles refuse GPT helpers for both lead roles',()=>{
+ for(const role of ['G0','G1'])assert.throws(()=>task.createTaskSessionProfile({
+  ...capturedStack('owner-mixed'),control_root:path.join(os.tmpdir(),'synthetic-mixed-profile'),
+  cwd:path.resolve(__dirname,'../..'),session_id:'synthetic-mixed-parent',role
+ }),{code:'NATIVE_HELPER_ROUTE_UNSUPPORTED'});
+});
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'claude-task-qualified-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const profile=task.createTaskSessionProfile({ ...capturedStack('owner-claude'),control_root:root,cwd:root,session_id:'controlled-parent',role:'G1'});
