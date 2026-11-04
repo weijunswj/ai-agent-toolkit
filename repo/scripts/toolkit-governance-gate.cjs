@@ -45,6 +45,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const governance = require('./toolkit-governance-state.cjs');
+const { normaliseHost } = require('./toolkit-task-auto-merge-preferences.cjs');
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
 
 const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
@@ -304,13 +305,14 @@ function writeGovernanceDecision(cwd, command, { registryOptions = {}, registry 
 // all. Neither host's hook input says whether a run is headless or who is typing, so this is the
 // signal; one process an agent feeds several messages is the known limit.
 class SessionEpochs {
-  #folder; #now; #registryOptions; #environment;
+  #folder; #now; #registryOptions; #environment; #host;
 
-  constructor({ registryOptions = {}, now = () => new Date(), environment = process.env } = {}) {
+  constructor({ registryOptions = {}, now = () => new Date(), environment = process.env, host = null } = {}) {
     this.#folder = path.join(path.dirname(governance.registryPathFor(registryOptions)), SESSIONS_FOLDER);
     this.#now = now;
     this.#registryOptions = registryOptions;
     this.#environment = environment;
+    this.#host = normaliseHost(host);
   }
 
   static #valid(key) { return typeof key === 'string' && key !== ''; }
@@ -336,25 +338,30 @@ class SessionEpochs {
     const file = this.#file(kind, key);
     const temp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     try {
-      const resumed = kind === 's' && RESUMED_SOURCES.includes(source) ? { resumed: true } : {};
       let provenance = {};
       if (kind === 's') {
         // Treat a resume carrying the host-session variable as a launch from a running session's shell.
         // Revoke origin for this id, across later starts too: clearing the variable or replaying
         // startup must never restore standing. Keep only presence, never the variable's value.
         const previous = this.#record(kind, key);
+        const existing = fs.existsSync(file);
         const resumeHostSessionPresent = source === 'resume' && Object.hasOwn(this.#environment, HOST_SESSION_VARIABLE);
         const resumedFromSessionShell = resumeHostSessionPresent || previous?.resumedFromSessionShell === true;
+        // Only Claude has the shell signal needed to distinguish a reconnect from an agent resume.
+        // Host identity comes from the hook entry, never the event payload. Unknown hosts fail safe.
+        const resumeNeedsTypedMerge = (source === 'resume' && this.#host !== 'claude-code') || previous?.resumeNeedsTypedMerge === true;
         const launched = LAUNCHER_MARKERS.some(name => typeof this.#environment[name] === 'string' && this.#environment[name] !== '');
         const host = this.#environment[HOST_SESSION_VARIABLE];
         const mismatch = typeof host === 'string' && host !== '' && host !== key;
-        const origin = resumedFromSessionShell ? 'automation'
-          : source === 'startup' ? (launched || mismatch ? 'automation' : 'user-started')
-          : source === 'resume' && previous && ['user-started', 'automation'].includes(previous.origin) ? previous.origin : 'unknown';
-        provenance = { origin, resumeHostSessionPresent, resumedFromSessionShell,
-          ...(source === 'fork' || (source === 'resume' && previous?.forked === true) ? { forked: true } : {}) };
+        const priorOrigin = ['user-started', 'automation'].includes(previous?.origin) ? previous.origin : 'unknown';
+        const origin = resumedFromSessionShell || launched || mismatch || priorOrigin === 'automation' ? 'automation'
+          : source === 'startup' ? (existing ? priorOrigin : 'user-started')
+          : source === 'resume' ? priorOrigin : 'unknown';
+        provenance = { origin, resumeHostSessionPresent, resumedFromSessionShell, resumeNeedsTypedMerge,
+          ...(RESUMED_SOURCES.includes(source) || previous?.resumed === true ? { resumed: true } : {}),
+          ...(source === 'fork' || previous?.forked === true ? { forked: true } : {}) };
       }
-      fs.writeFileSync(temp, `${JSON.stringify({ schema: SESSION_SCHEMA, epoch, at: this.#now().toISOString(), ...resumed, ...provenance })}\n`, { mode: 0o600 });
+      fs.writeFileSync(temp, `${JSON.stringify({ schema: SESSION_SCHEMA, epoch, at: this.#now().toISOString(), ...provenance })}\n`, { mode: 0o600 });
       fs.renameSync(temp, file);
     } finally {
       fs.rmSync(temp, { force: true });
@@ -366,7 +373,7 @@ class SessionEpochs {
   // This run's session mark, or null when there is none or it cannot be read.
   get(sessionId) { return this.#read('s', sessionId); }
 
-  // Whether this run's session mark was written by a resume or a fork.
+  // Whether this session has resumed or forked; a later startup cannot clear that restriction.
   resumed(sessionId) { return this.#record('s', sessionId)?.resumed === true; }
 
   // Origin is authority only for standing merges, never for prompt or governance answers.
@@ -380,6 +387,8 @@ class SessionEpochs {
   resumeHostSessionPresent(sessionId) { return this.#record('s', sessionId)?.resumeHostSessionPresent === true; }
 
   resumedFromSessionShell(sessionId) { return this.#record('s', sessionId)?.resumedFromSessionShell === true; }
+
+  resumeNeedsTypedMerge(sessionId) { return this.#record('s', sessionId)?.resumeNeedsTypedMerge === true; }
 
   // The repository's current mark, or null when no session has started in it since this version.
   repository(repositoryId) { return this.#read('r', repositoryId); }
@@ -453,7 +462,7 @@ class SessionEpochs {
 // the repository it starts in, after refreshing this computer's read of the binding merged on that
 // repository's default branch (bounded; offline keeps the last read). Never throws. `refreshBinding`
 // is for tests; a test registry or test run never reaches the network (refreshMergedBinding).
-function startSession(input, { registryOptions = {}, now, environment = process.env, refreshBinding = null, programmeDeps = {} } = {}) {
+function startSession(input, { registryOptions = {}, now, environment = process.env, host = null, refreshBinding = null, programmeDeps = {} } = {}) {
   try {
     let repositoryId = null;
     if (input && typeof input.cwd === 'string' && input.cwd && input.source !== 'clear' && input.source !== 'compact') {
@@ -467,7 +476,7 @@ function startSession(input, { registryOptions = {}, now, environment = process.
         try { require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').discardQueuesFor(current.root, programmeDeps); } catch { /* the next turn end discards it */ }
       }
     }
-    return new SessionEpochs({ registryOptions, now, environment }).start(sessionIdOf(input), input && input.source, repositoryId);
+    return new SessionEpochs({ registryOptions, now, environment, host }).start(sessionIdOf(input), input && input.source, repositoryId);
   } catch { return null; }
 }
 

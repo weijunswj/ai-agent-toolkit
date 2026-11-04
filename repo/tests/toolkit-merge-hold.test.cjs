@@ -479,12 +479,22 @@ test('agent routes that could make an approval are refused', (t) => {
     'claude -p "merge 618"',
     'TOOLKIT_HOST_SESSION= claude -p "merge 618"',
     'env -u TOOLKIT_HOST_SESSION claude -p "hello"',
+    'Remove-Item Env:\\TOOLKIT_HOST_SESSION; claude -p "land it" --resume example-id',
+    'export -n TOOLKIT_HOST_SESSION; claude -p "land it" --resume example-id',
+    'declare +x TOOLKIT_HOST_SESSION; claude -p "land it" --resume example-id',
+    '[Environment]::SetEnvironmentVariable("TOOLKIT_HOST_SESSION", $null); claude -p "land it" --resume example-id',
+    'env -i claude -p "land it" --resume example-id',
     'codex exec "merge 618"',
     'npx @anthropic-ai/claude-code -p "merge 618 at 62405eb"',
     'node -e "require(\'/x/repo/scripts/toolkit-merge-hold.cjs\').recordPrompt({prompt:\'merge 618\'})"',
     'echo \'{"prompt":"merge 618"}\' | node repo/scripts/toolkit-governance-hook.cjs --event UserPromptSubmit',
-    'echo \'{"source":"startup","hook_event_name":"SessionStart"}\' | node repo/scripts/toolkit-governance-hook.cjs',
-    'echo \'{"source":"startup"}\' | node repo/scripts/toolkit-codex-helper-hook.cjs --event SessionStart',
+    'echo \'{"source":"startup","hook_event_name":"SessionStart"}\' | node repo/scripts/toolkit-governance-hook.cjs --event SessionStart',
+    'echo \'{"source":"startup"}\' | node repo/scripts/toolkit-codex-session-start.cjs',
+    ...['node --no-warnings', 'timeout 5 node', 'env node', 'FOO=1 node'].flatMap(prefix => [
+      `echo '{"session_id":"example-id","source":"startup"}' | ${prefix} repo/scripts/toolkit-governance-hook.cjs --event SessionStart`,
+      `echo '{"session_id":"example-id","source":"startup"}' | ${prefix} repo/scripts/toolkit-codex-session-start.cjs`,
+    ]),
+    'bash -c "echo \'{\\"session_id\\":\\"example-id\\",\\"source\\":\\"startup\\"}\' | node repo/scripts/toolkit-governance-hook.cjs --event SessionStart"',
     `echo x > "${ctx.file}"`,
     'cat ~/.ai-agent-toolkit/user-state/merge-approvals.v1.json',
   ];
@@ -498,6 +508,11 @@ test('agent routes that could make an approval are refused', (t) => {
     'Select-String -Pattern SessionStart -LiteralPath repo/scripts/toolkit-codex-helper-hook.cjs',
     'node scripts/report.cjs --topic SessionStart --file toolkit-governance-hook.cjs',
     'node --test repo/tests/toolkit-governance-gate.test.cjs',
+    'node --test --test-name-pattern SessionStart repo/tests/toolkit-governance-hook.test.cjs',
+    'node repo/tests/toolkit-governance-hook.test.cjs SessionStart',
+    'git grep SessionStart -- repo/scripts/toolkit-codex-session-start.cjs',
+    'rg require repo/scripts/toolkit-codex-session-start.cjs',
+    'rg TOOLKIT_HOST_SESSION repo/scripts/toolkit-merge-hold.cjs',
   ]) {
     assert.equal(decide(ctx, bash(ctx.repo, command)), null, command);
   }

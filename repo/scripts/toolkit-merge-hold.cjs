@@ -39,8 +39,10 @@
 // The owner's app-local standing answer instead of a typed approval: On, with an enabled
 // governance binding merged on the default branch (read from this computer's cache, under a day
 // old), a merge with no typed approval passes only in a session whose fresh startup recorded
-// user-started origin, including after a same-ID resume with no inherited host-session variable.
-// A resume carrying that variable revokes standing for this id, even after later starts without it.
+// user-started origin. Claude reconnects keep standing on the same ID without an inherited
+// host-session variable. Codex and unknown-host reconnects need a typed merge because they cannot
+// distinguish a user reconnect from an agent resume. A resume carrying the variable revokes standing
+// for this id, even after later starts without it. Repeated starts never raise origin or clear restrictions.
 // Forks and unknown or automation origins have no standing; launcher and host-session checks must
 // still pass. The merge must run in that repository's own folder, for that repository, as a plain
 // merge commit pinned to the full 40
@@ -78,13 +80,17 @@
 //     run through another shell or expression runner (bash -c, pwsh -Command, cmd /c, eval) is
 //     refused whatever branch it names; encoded PowerShell commands are refused unread;
 //   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
-//     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION, names
+//     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION (assignment,
+//     unset, env -u, Remove-Item Env:\, export -n, declare +x, SetEnvironmentVariable, env -i), names
 //     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt
 //     or a SessionStart event.
 //
 // Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
 // pushes wrapped in a program that is not a shell (timeout, Start-Process, xargs and the like), a
-// prompt file fed to a hook script, a resume whose host-session variable was cleared indirectly
+// prompt file fed to a hook script, other hook-feed wrappers or Node flags (including node -e
+// loading toolkit-governance-gate.cjs), racing session-mark writes without a lock, a startup forged
+// for an unmarked or pruned id, and Claude reconnect launches outside the process tree (scheduled
+// tasks or desktop wakes). Also a resume whose host-session variable was cleared indirectly
 // (direct setting or clearing is refused), a fully forged top-level Projects wake with the right labels,
 // plain text containing an approval line, scripts or programs
 // that call git or the GitHub API themselves, curl and other HTTP clients, a sha= field put in a
@@ -103,6 +109,7 @@ const path = require('node:path');
 const governance = require('./toolkit-governance-state.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
 const mergeScope = require('./toolkit-auto-merge-eligible.cjs');
+const { normaliseHost } = require('./toolkit-task-auto-merge-preferences.cjs');
 
 const APPROVALS_BASENAME = 'merge-approvals.v1.json';
 const APPROVALS_SCHEMA = 'toolkit.merge-approvals.v1';
@@ -169,8 +176,9 @@ const GH_ALIAS_MERGE = /\bgh(?:\.exe)?\s+alias\s+(?:set|import)\b[^\n;&|]*merge/
 const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl)\s|\bGH_REPO\s*=/i;
 // Toolkit's user-state files, and any setting or clearing of the session variable that tells a
 // session another one started it (reading or searching for its name is fine).
-const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\bTOOLKIT_HOST_SESSION\s*=|(?:\bunset|-u|--unset(?:=|\s+)|\benv:|\$env:)\s*TOOLKIT_HOST_SESSION\b/i;
-const HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook)/i;
+const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\bTOOLKIT_HOST_SESSION\s*=|(?:\bunset|-u|--unset(?:=|\s+)|\benv:\\?|\$env:|\bexport\s+-n\s+|\bdeclare\s+\+x\s+)\s*TOOLKIT_HOST_SESSION\b|\bSetEnvironmentVariable\s*\(\s*['"]TOOLKIT_HOST_SESSION['"]|\benv\s+(?:-i|--ignore-environment)\b/i;
+const PROMPT_HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook)/i;
+const HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook|codex-session-start)/i;
 const FEED_WORDS = /\brequire\b|\brecordPrompt\b|\bUserPromptSubmit\b|\bimport\b/;
 const HOST_WORD = /^(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?$|claude-code|@openai\/codex/i;
 // gh pr merge flags that take a value, so the value is not read as the pull request.
@@ -334,7 +342,7 @@ function approvalsIn(prompt) {
   return found;
 }
 
-function sessionChecks(sessionId, environment, registryOptions, now) {
+function sessionChecks(sessionId, environment, registryOptions, now, nativeHost = null) {
   const host = environment[gate.HOST_SESSION_VARIABLE];
   const epochs = new gate.SessionEpochs({ registryOptions, now });
   return {
@@ -345,6 +353,7 @@ function sessionChecks(sessionId, environment, registryOptions, now) {
     resumed: epochs.resumed(sessionId),
     resumeHostSessionPresent: epochs.resumeHostSessionPresent(sessionId),
     resumedFromSessionShell: epochs.resumedFromSessionShell(sessionId),
+    resumeNeedsTypedMerge: epochs.resumeNeedsTypedMerge(sessionId) || (epochs.resumed(sessionId) && normaliseHost(nativeHost) !== 'claude-code'),
     userStartedOrigin: epochs.origin(sessionId) === 'user-started',
     forked: epochs.forked(sessionId),
   };
@@ -354,7 +363,7 @@ function sessionChecks(sessionId, environment, registryOptions, now) {
 // origin to accept a resume; neither Projects delivery nor prompt text can establish origin.
 function startedByUser(checks, standing = false) {
   return checks.sessionMarked && !checks.launcherMarker && checks.hostSessionMatches
-    && (standing ? checks.userStartedOrigin && !checks.forked && !checks.resumedFromSessionShell : !checks.resumed);
+    && (standing ? checks.userStartedOrigin && !checks.forked && !checks.resumedFromSessionShell && !checks.resumeNeedsTypedMerge : !checks.resumed);
 }
 
 // Keeps the approvals a typed message carries; returns how many were kept.
@@ -365,7 +374,7 @@ function recordPrompt(input, { environment = process.env, registryOptions = {}, 
   if (found.length === 0) return 0;
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
   // A direct Projects human trigger attests this message only. The standing-answer route still
-  // uses startedByUser unchanged. Even an attested message needs this host's session-start mark.
+  // requires recorded user origin and all standing checks. Even an attested message needs this host's session-start mark.
   if (message.wrapped) {
     if (!new gate.SessionEpochs({ registryOptions, now }).get(sessionId)) return 0;
   } else if (!startedByUser(sessionChecks(sessionId, environment || {}, registryOptions, now))) return 0;
@@ -678,13 +687,10 @@ function judge(merge, approvals, standing = null) {
 // what an approval can allow; '' when there is none.
 function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
-  // SessionStart alone is also an ordinary source-search term. Only its direct hook invocation
-  // counts as a feed; the existing prompt and module-loading tripwires keep their wider reading.
-  const sessionStartFeed = /\bSessionStart\b/.test(text) && shellCommands(text).some(({ words }) => {
-    const index = words[0] === '&' ? 1 : 0;
-    return /^(?:node|node\.exe)$/i.test(path.basename(words[index] || '')) && HOOK_FEED.test(words[index + 1] || '');
-  });
-  if (HOOK_FEED.test(text) && (FEED_WORDS.test(text) || sessionStartFeed)) return refuse('merge authority must come from the user, so commands that load Toolkit\'s hook scripts or feed them a prompt or session-start event are refused.');
+  // Search arguments and test files are not hook invocations. Read the common command wrappers
+  // and Node's harmless warning flag; Codex's start script writes a mark without any event flag.
+  const sessionStartFeed = hookStartFeed(text);
+  if (HOOK_FEED.test(text) && ((PROMPT_HOOK_FEED.test(text) && FEED_WORDS.test(text)) || sessionStartFeed)) return refuse('merge authority must come from the user, so commands that load Toolkit\'s hook scripts or feed them a prompt or session-start event are refused.');
   const parts = segments(text);
   for (const words of parts) {
     let index = 0;
@@ -712,6 +718,24 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
     if (reason) return refuse(reason);
   }
   return '';
+}
+
+function hookStartFeed(text, depth = 0) {
+  if (depth > 3) return false;
+  return shellCommands(text).some(({ words }) => {
+    let index = words[0] === '&' ? 1 : 0;
+    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] || '')) index += 1;
+    if (words[index] === 'env') index += 1;
+    if (words[index] === 'timeout' && /^\d+$/.test(words[index + 1] || '')) index += 2;
+    const command = path.basename(words[index] || '').toLowerCase();
+    if (['bash', 'sh'].includes(command) && /^-[lc]+$/.test(words[index + 1] || '')) return hookStartFeed(words[index + 2] || '', depth + 1);
+    if (!/^(?:node|node\.exe)$/.test(command)) return false;
+    index += 1;
+    while (words[index] === '--no-warnings') index += 1;
+    const script = path.basename(words[index] || '');
+    return /^toolkit-codex-session-start\.cjs$/i.test(script)
+      || (/^toolkit-(?:governance-hook|codex-helper-hook|merge-hold)\.cjs$/i.test(script) && words.slice(index + 1).includes('SessionStart'));
+  });
 }
 
 // Ignore runner names in quoted prose, but keep whole quoted runner paths and executable
@@ -844,9 +868,10 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
     repositoryValid: Boolean(repository && root),
     autoMergeOn: answer?.preference?.status === 'saved' && answer.preference.value === 'after-gates',
     bindingFresh: answer?.fresh === true,
-    ...sessionChecks(sessionId, environment || {}, registryOptions, now),
+    ...sessionChecks(sessionId, environment || {}, registryOptions, now, host),
   };
-  const reason = !checks.repositoryValid ? 'no-repository'
+  const reason = !checks.nativeSessionContext ? 'no-native-session-context'
+    : !checks.repositoryValid ? 'no-repository'
     : !checks.autoMergeOn ? 'auto-merge-off'
     : !checks.bindingFresh ? 'binding-not-fresh'
     : !checks.sessionMarked ? 'no-session-mark'
@@ -854,6 +879,7 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
     : !checks.hostSessionMatches ? 'host-session-mismatch'
     : checks.resumedFromSessionShell ? 'resume-from-session-shell'
     : checks.forked ? 'fork'
+    : checks.resumeNeedsTypedMerge ? 'resume-needs-typed-merge'
     : !startedByUser(checks, true) ? (checks.resumed ? 'resumed-without-user-started-origin' : 'user-started-origin-required') : null;
   if (reason) return { eligible: false, reason, checks };
   const scope = head => {
@@ -866,6 +892,7 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
 
 function standingReason(reason) {
   return {
+    'no-native-session-context': "this terminal has no native session context; run the check in the session with Toolkit's hook",
     'no-repository': 'this folder has no usable GitHub repository',
     'auto-merge-off': "this app's task auto-merge answer is not On or cannot be read",
     'binding-not-fresh': 'the enabled merged governance binding is missing, invalid or not fresh',
@@ -874,6 +901,7 @@ function standingReason(reason) {
     'host-session-mismatch': 'the host session does not match this session',
     'resume-from-session-shell': 'a resume carried the host-session variable from a running session, so standing authority is revoked for this session',
     'fork': 'this session is a fork',
+    'resume-needs-typed-merge': 'Codex and unknown-host reconnects need a typed merge because they have no reliable signal to distinguish a user reconnect from an agent resume',
     'resumed-without-user-started-origin': 'this resumed session has no recorded user-started origin',
     'user-started-origin-required': 'this session has no recorded user-started origin',
   }[reason] || 'the standing answer is unavailable';

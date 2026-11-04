@@ -1422,6 +1422,45 @@ test('nested sessions: a short reply counts only in the session that was shown t
   }
 });
 
+test('session authority closure: repeated starts never raise origin or clear negative marks', t => {
+  const ctx = scratch(t);
+  // Matrix: native host x initial origin/source x later event. Payload host claims grant nothing.
+  for (const host of ['claude-code', 'claude', 'codex', 'unknown', null]) {
+    for (const source of ['startup', 'resume', 'fork', 'other']) {
+      for (const environment of [{}, { TOOLKIT_GATE_ROLE: 'G1' }, { TOOLKIT_HOST_SESSION: 'parent' }]) {
+        const id = `${host}-${source}-${Object.keys(environment)[0] || 'user'}`;
+        const options = { registryOptions: ctx.options, host, environment: {} };
+        const epochs = new gate.SessionEpochs(options);
+        gate.startSession({ session_id: id, source, host: 'claude-code' }, { ...options, environment });
+        const origin = epochs.origin(id);
+        const resumed = epochs.resumed(id);
+        const forked = epochs.forked(id);
+        const restricted = epochs.resumeNeedsTypedMerge(id);
+        for (const next of ['startup', 'startup', 'clear', 'compact', 'resume', 'startup']) {
+          gate.startSession({ session_id: id, source: next, host: 'claude-code' }, options);
+          assert.equal(epochs.origin(id), origin, `${id}: ${next}`);
+          if (resumed || next === 'resume') assert.equal(epochs.resumed(id), true, id);
+          assert.equal(epochs.forked(id), forked, id);
+          if (restricted || (next === 'resume' && !['claude', 'claude-code'].includes(host))) assert.equal(epochs.resumeNeedsTypedMerge(id), true, id);
+        }
+      }
+    }
+  }
+  const options = { registryOptions: ctx.options, host: 'claude-code', environment: {} };
+  const epochs = new gate.SessionEpochs(options);
+  for (const value of [undefined, 'unrecognised', true, 'corrupt']) {
+    const id = `legacy-startup-${value}`;
+    epochs.start(id, 'startup');
+    const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(id).digest('hex').slice(0, 32)}.json`);
+    const mark = JSON.parse(fs.readFileSync(file, 'utf8'));
+    delete mark.origin;
+    if (value !== undefined) mark.origin = value;
+    fs.writeFileSync(file, value === 'corrupt' ? '{' : JSON.stringify(mark));
+    epochs.start(id, 'startup');
+    assert.equal(epochs.origin(id), 'unknown', id);
+  }
+});
+
 test('session origin closure: only a qualifying startup survives same-id resume, never a fork or unknown origin', t => {
   const ctx = scratch(t);
   const rows = [
@@ -1432,7 +1471,7 @@ test('session origin closure: only a qualifying startup survives same-id resume,
     ...['resume', 'fork', 'clear', 'compact', 'other', null].map(source => ({ name: `unknown-${source}`, source, origin: 'unknown', environment: {} })),
   ];
   for (const row of rows) {
-    const options = { registryOptions: ctx.options, environment: row.environment };
+    const options = { host: 'claude-code', registryOptions: ctx.options, environment: row.environment };
     const epochs = new gate.SessionEpochs(options);
     const first = gate.startSession({ session_id: row.name, source: row.source }, options);
     assert.ok(first, row.name);
@@ -1446,7 +1485,7 @@ test('session origin closure: only a qualifying startup survives same-id resume,
     assert.equal(epochs.forked(row.name), row.source === 'fork', row.name);
     assert.notEqual(epochs.start(row.name, 'resume'), next, 'every resume still rotates its epoch');
   }
-  const epochs = new gate.SessionEpochs({ registryOptions: ctx.options, environment: {} });
+  const epochs = new gate.SessionEpochs({ host: 'claude-code', registryOptions: ctx.options, environment: {} });
   epochs.start('user', 'fork');
   assert.equal(epochs.origin('user'), 'unknown', 'even a fork reporting the same id drops origin');
   epochs.start('user', 'resume');
@@ -1475,7 +1514,7 @@ test('session-shell resume closure: presence revokes origin for the id across ev
     { id: 'private-empty', environment: { [gate.HOST_SESSION_VARIABLE]: '' }, revoked: true },
   ];
   for (const row of rows) {
-    const options = { registryOptions: ctx.options, environment: {} };
+    const options = { host: 'claude-code', registryOptions: ctx.options, environment: {} };
     const epochs = new gate.SessionEpochs(options);
     const first = epochs.start(row.id, 'startup');
     const resumed = gate.startSession({ session_id: row.id, source: 'resume' }, { ...options, environment: row.environment });

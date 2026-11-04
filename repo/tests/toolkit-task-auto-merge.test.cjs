@@ -99,9 +99,19 @@ function machine(ctx, value, host = ctx.host) {
   } else owner.apply(value, owner.inspect());
 }
 
-const userSession = (ctx, id = 'user') => { gate.startSession({ session_id: id, source: 'startup', cwd: ctx.repo }, { registryOptions: ctx.registryOptions, environment: {} }); return id; };
+const userSession = (ctx, id = 'user') => { gate.startSession({ session_id: id, source: 'startup', cwd: ctx.repo }, { registryOptions: ctx.registryOptions, environment: {}, host: ctx.host }); return id; };
 const bash = (ctx, command, session) => ({ cwd: ctx.repo, session_id: session, tool_name: 'Bash', tool_input: { command } });
 const decide = (ctx, input, environment = {}) => hold.decide(input, { registryOptions: ctx.registryOptions, environment, host: ctx.host });
+
+test('terminal check names missing native session context before app preferences', t => {
+  const ctx = context(t);
+  merged(ctx, YES);
+  const report = hold.check({}, ctx.repo, { registryOptions: ctx.registryOptions, environment: {} });
+  assert.equal(report.nativeSessionContext, false);
+  assert.equal(report.reason, 'no-native-session-context');
+  assert.match(report.explanation, /no native session context.*session.*hook/i);
+  assert.doesNotMatch(report.explanation, /answer is not On/);
+});
 
 test('binding: a retired task field is an unknown field and never grants permission', () => {
   assert.ok(programmeState.validateBinding(binding()));
@@ -218,6 +228,28 @@ test('hold: without a fresh yes, or in a session the user did not start, the typ
   assert.equal(decide(ctx, bash(ctx, command, session)), null, 'the user\'s own fresh session still passes');
 });
 
+test(`${HOST}: reconnect policy uses the native host and fresh startups still pass`, t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  const session = userSession(ctx);
+  const input = bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.head}`, session);
+  assert.equal(decide(ctx, input), null, 'fresh startup');
+  gate.startSession({ session_id: session, source: 'resume', host: 'claude-code' }, options);
+  const report = hold.check(input, ctx.repo, options);
+  assert.equal(report.eligible, HOST === 'claude-code');
+  assert.equal(report.resumeNeedsTypedMerge, HOST !== 'claude-code');
+  if (HOST === 'claude-code') assert.equal(hold.check(input, ctx.repo, { ...options, host: 'claude' }).eligible, true, 'the hook uses the existing Claude alias');
+  if (HOST === 'codex') {
+    assert.equal(report.reason, 'resume-needs-typed-merge');
+    assert.match(report.explanation, /Codex.*reconnects need a typed merge.*no reliable signal/);
+    assert.match(decide(ctx, input).deny, /Codex.*reconnects need a typed merge/);
+    gate.startSession({ session_id: session, source: 'startup' }, options);
+    assert.equal(hold.check(input, ctx.repo, options).eligible, false, 'startup replay cannot clear the restriction');
+  } else assert.equal(decide(ctx, input), null, 'Claude reconnect');
+  assert.equal(decide(ctx, { ...input, session_id: userSession(ctx, 'fresh') }), null, 'a fresh id still passes');
+});
+
 test(`${HOST}: Projects approval in a resumed or launched session never grants standing task authority`, t => {
   const { wake } = require('./support/projects-approval.cjs');
   const ctx = context(t, HOST);
@@ -234,7 +266,7 @@ test(`${HOST}: Projects approval in a resumed or launched session never grants s
   }
 });
 
-test(`${HOST}: a session-shell resume loses standing durably and reports only presence`, t => {
+if (HOST === 'claude-code') test(`${HOST}: a session-shell resume loses standing durably and reports only presence`, t => {
   const { wake } = require('./support/projects-approval.cjs');
   const ctx = context(t, HOST);
   merged(ctx, YES);
@@ -285,7 +317,7 @@ test(`${HOST}: a session-shell resume loses standing durably and reports only pr
   }
 });
 
-test(`${HOST}: standing resume closure and diagnostic reasons`, t => {
+if (HOST === 'claude-code') test(`${HOST}: standing resume closure and diagnostic reasons`, t => {
   const ctx = context(t, HOST);
   merged(ctx, YES);
   const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
@@ -342,7 +374,7 @@ test(`${HOST}: standing resume closure and diagnostic reasons`, t => {
   assert.equal(hold.check(input, ctx.root, options).reason, 'no-repository');
   const absent = hold.check({}, ctx.repo, options);
   assert.equal(absent.nativeSessionContext, false);
-  assert.equal(absent.reason, 'no-session-mark');
+  assert.equal(absent.reason, 'no-native-session-context');
   machine(ctx, 'off');
   assert.equal(hold.check(input, ctx.repo, options).reason, 'auto-merge-off');
   machine(ctx, 'after-gates');
