@@ -27,6 +27,7 @@ test('evidence merge fixtures accept only isolated binding and metadata cases', 
   const fixture = { repo: { governance: 'undecided', name: 'evidence' }, evidence_merge: { from: 'store' } };
   assert.deepEqual(pack.rowErrors(row({ fixture })), []);
   for (const evidence_merge of [null, [], { from: 'elsewhere' }, { from: 'store', binding: 'unknown' },
+    { from: 'store', binding: 'disabled' }, { from: 'store', metadata: 'unreachable' },
     { from: 'store', metadata: 'unknown' }, { from: 'store', script: 'arbitrary code' }]) {
     assert.match(pack.rowErrors(row({ fixture: { ...fixture, evidence_merge } })).join('\n'), /evidence_merge needs/);
   }

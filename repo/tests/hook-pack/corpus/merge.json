@@ -53,132 +53,12 @@
       "status": "pass"
     },
     {
-      "id": "MERGE.bound-evidence-binding-disabled",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","binding":"disabled"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-binding-foreign",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","binding":"foreign"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-binding-malformed",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","binding":"malformed"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-binding-removed",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","binding":"removed"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-binding-local",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","binding":"local"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-binding-absent",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","binding":"absent"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
       "id": "MERGE.bound-evidence-public",
       "source": "exact merged evidence-store permission and live target verification",
       "kind": "hostile",
       "hosts": ["claude","codex"],
       "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
       "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","metadata":"public"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-unwritable",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","metadata":"unwritable"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-wrong-repo",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","metadata":"wrong-repo"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-no-default",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","metadata":"no-default"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-wrong-base",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","metadata":"wrong-base"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-wrong-base-repo",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","metadata":"wrong-base-repo"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-wrong-number",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","metadata":"wrong-number"}},
       "expect": {"decision":"deny"},
       "status": "pass"
     },
@@ -193,56 +73,6 @@
       "status": "pass"
     },
     {
-      "id": "MERGE.bound-evidence-unreachable",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","metadata":"unreachable"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-broken",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store","metadata":"broken"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-missing-head",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-squash",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --squash --match-head-commit {head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.bound-evidence-api",
-      "source": "exact merged evidence-store permission and live target verification",
-      "kind": "hostile",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"gh api -X PUT repos/toolkit-test-fixture/evidence/pulls/5/merge -f sha={head}"}},
-      "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store"}},
-      "expect": {"decision":"deny"},
-      "status": "pass"
-    },
-    {
       "id": "MERGE.bound-evidence-compound-source",
       "source": "exact merged evidence-store permission and live target verification",
       "kind": "hostile",
@@ -250,7 +80,9 @@
       "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}; gh pr merge 6 --repo toolkit-test-fixture/source --merge --match-head-commit {head}"}},
       "fixture": {"repo":{"governance":"undecided","name":"evidence"},"evidence_merge":{"from":"store"}},
       "expect": {"decision":"deny"},
-      "status": "pass",
+      "status": "pass"
+    },
+    {
       "id": "MERGE.session-shell-check-bash",
       "source": "the session shell diagnostic needs no hook allowance in Bash",
       "kind": "benign",

@@ -90,7 +90,7 @@ const evidenceCases = [
   ['unsupported merge form', { shape: 'squash' }, false],
 ];
 
-for (const [name, spec, allowed] of evidenceCases) test(`evidence authority: ${name}`, t => {
+function checkEvidenceAuthority(t, name, spec, allowed) {
   const ctx = context(t);
   const cache = require('../scripts/toolkit-governance-binding.cjs');
   const governance = require('../scripts/toolkit-governance-state.cjs');
@@ -135,26 +135,56 @@ for (const [name, spec, allowed] of evidenceCases) test(`evidence authority: ${n
   if (spec.metadata === 'wrong-base-repo') pr.base.repo.full_name = 'owner/other';
   if (spec.metadata === 'wrong-base') pr.base.ref = 'feature';
   if (spec.metadata === 'wrong-head') pr.head.sha = 'f'.repeat(40);
-  for (const host of ['claude', 'codex']) for (const form of ['cli', 'connector']) {
+  for (const host of ['claude', 'codex']) for (const form of spec.shape === 'api' ? ['cli'] : ['cli', 'connector']) {
     let reads = 0;
     const cwd = spec.parent ? ctx.other : spec.unrelated ? ctx.root : ctx.repo;
     const sha = spec.shape === 'missing-head' ? null : spec.shape === 'short-head' ? SHA.slice(0, 7) : SHA;
-    const input = form === 'cli' ? bash(cwd, `gh pr merge 17 ${spec.parent || spec.unrelated ? `--repo ${target} ` : ''}${spec.shape === 'squash' ? '--squash' : '--merge'}${sha ? ` --match-head-commit ${sha}` : ''}`)
+    let input = form === 'cli' ? bash(cwd, `gh pr merge 17 ${spec.parent || spec.unrelated ? `--repo ${target} ` : ''}${spec.shape === 'squash' ? '--squash' : '--merge'}${sha ? ` --match-head-commit ${sha}` : ''}`)
       : { ...connector('merge_pull_request', { pullNumber: 17, ...(sha ? { expectedHeadSha: sha } : {}), merge_method: spec.shape === 'squash' ? 'squash' : 'merge' }, target.split('/')[1]), cwd };
+    if (spec.shape === 'api') input = bash(cwd, `gh api -X PUT repos/${target}/pulls/17/merge -f sha=${SHA}`);
     const result = hold.decide(input, { ...ctx.options, host, environment: spec.launched ? { TOOLKIT_GATE_ROLE: 'G1' } : {},
       readEvidenceGitHub(apiPath, { timeoutMs }) {
         reads += 1;
         assert.ok(timeoutMs > 0 && timeoutMs <= 2000);
         if (spec.metadata === 'broken') throw new Error('private diagnostic must not escape');
-        return { status: spec.metadata === 'inaccessible' ? 404 : 200, json: apiPath.endsWith('/pulls/17') ? pr : repo };
+        return { status: ['inaccessible', 'unreachable'].includes(spec.metadata) ? 404 : 200, json: apiPath.endsWith('/pulls/17') ? pr : repo };
       } });
-    assert.equal(result === null, allowed, `${host} ${form}: ${JSON.stringify(result)}`);
+    assert.equal(result === null, allowed, `${name} ${host} ${form}: ${JSON.stringify(result)}`);
     if (spec.metadata) assert.match(result.deny, /Evidence-store verification failed:/);
     if (spec.metadata === 'broken') assert.doesNotMatch(result.deny, /private diagnostic/);
     if (spec.binding || spec.shape || spec.unrelated) assert.equal(reads, 0, 'ineligible calls do not contact GitHub');
     if (allowed) assert.equal(reads, 2);
   }
   assert.equal(fs.existsSync(ctx.file), false, 'no approval or persistent evidence permission is written');
+}
+
+for (const [name, spec, allowed] of evidenceCases) test(`evidence authority: ${name}`, t => {
+  checkEvidenceAuthority(t, name, spec, allowed);
+});
+
+test('evidence hook-pack refusal controls run in process without losing either host', t => {
+  // These rows moved out of the process-heavy pack. The four positive rows and four refusal
+  // controls still exercise the real hook entry points; this table keeps every other refusal.
+  const rows = [
+    ['binding-disabled', { binding: 'disabled' }],
+    ['binding-foreign', { binding: 'foreign' }],
+    ['binding-malformed', { binding: 'malformed' }],
+    ['binding-removed', { binding: 'removed' }],
+    ['binding-local', { binding: 'local' }],
+    ['binding-absent', { binding: 'absent' }],
+    ['unwritable', { metadata: 'unwritable' }],
+    ['wrong-repo', { metadata: 'wrong-repo' }],
+    ['no-default', { metadata: 'no-default' }],
+    ['wrong-base', { metadata: 'wrong-base' }],
+    ['wrong-base-repo', { metadata: 'wrong-base-repo' }],
+    ['wrong-number', { metadata: 'wrong-number' }],
+    ['unreachable', { metadata: 'unreachable' }],
+    ['broken', { metadata: 'broken' }],
+    ['missing-head', { shape: 'missing-head' }],
+    ['squash', { shape: 'squash' }],
+    ['api', { shape: 'api' }],
+  ];
+  for (const [suffix, spec] of rows) checkEvidenceAuthority(t, `MERGE.bound-evidence-${suffix}`, spec, false);
 });
 
 test('evidence merges retain generic shell and ambiguity checks, and judge every compound target', t => {
@@ -202,6 +232,7 @@ test('evidence verification refuses conflicting connector fields before lookup a
     } });
   assert.match(result.deny, /Evidence-store verification failed: GitHub metadata could not be read within the hook budget/);
   assert.deepEqual(timeouts, [2000, 500], 'the second lookup gets only the remaining budget');
+});
 
 test('merge guidance includes typing here in a fresh eligible chat and excludes reconnected or revoked chats', t => {
   const ctx = context(t);

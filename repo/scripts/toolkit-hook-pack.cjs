@@ -137,8 +137,8 @@ function expectErrors(expect, label) {
   return errors;
 }
 
-const EVIDENCE_BINDINGS = ['fresh', 'stale', 'disabled', 'foreign', 'malformed', 'removed', 'local', 'absent'];
-const EVIDENCE_METADATA = ['verified', 'public', 'unwritable', 'wrong-repo', 'no-default', 'wrong-base', 'wrong-base-repo', 'wrong-number', 'wrong-head', 'unreachable', 'broken'];
+const EVIDENCE_BINDINGS = ['fresh', 'stale'];
+const EVIDENCE_METADATA = ['verified', 'public', 'wrong-head'];
 
 function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
@@ -432,38 +432,17 @@ class Fixture {
     const file = path.join(parent, '.github', 'toolkit-programme.json');
     const binding = JSON.parse(fs.readFileSync(file, 'utf8'));
     binding.store.repository = store;
-    if (spec.binding === 'disabled') {
-      binding.schema = 'toolkit.programme-binding.v2'; binding.governance = 'disabled';
-      binding.parents = [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }];
-      delete binding.parent_issue; delete binding.record_prefix; delete binding.writer_prefix;
-    }
-    if (spec.binding === 'foreign') binding.repository = 'toolkit-test-fixture/foreign';
-    const text = spec.binding === 'malformed' ? '{broken' : JSON.stringify(binding);
-    const registryPath = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
-    const cache = require('./toolkit-governance-binding.cjs');
-    const identity = require('./toolkit-governance-state.cjs').readIdentity(parent);
+    const text = JSON.stringify(binding);
     fs.writeFileSync(file, text);
     support.recordMerged(parent, { home: this.home, text, now: this.#now(spec.binding === 'stale' ? 25 * 60 * 60 * 1000 : 0) });
-    if (['local', 'absent'].includes(spec.binding)) fs.rmSync(cache.cacheFileFor(registryPath, identity.repository_id));
-    if (spec.binding === 'absent') fs.rmSync(file);
-    if (spec.binding === 'removed') {
-      const entry = cache.readBindingCache(identity, registryPath);
-      cache.writeCache(registryPath, { ...entry, status: 'absent', text: null, bytes_sha256: null });
-    }
     const repo = { full_name: store, private: true, permissions: { push: true }, default_branch: 'main' };
     const pr = { number: 5, base: { repo: { full_name: store }, ref: 'main' }, head: { sha: this.head } };
     if (spec.metadata === 'public') repo.private = false;
-    if (spec.metadata === 'unwritable') repo.permissions.push = false;
-    if (spec.metadata === 'wrong-repo') repo.full_name = 'toolkit-test-fixture/other';
-    if (spec.metadata === 'no-default') delete repo.default_branch;
-    if (spec.metadata === 'wrong-base') pr.base.ref = 'feature';
-    if (spec.metadata === 'wrong-base-repo') pr.base.repo.full_name = 'toolkit-test-fixture/other';
-    if (spec.metadata === 'wrong-number') pr.number = 6;
     if (spec.metadata === 'wrong-head') pr.head.sha = 'f'.repeat(40);
-    this.#githubFixture({ [`repos/${store}`]: repo, [`repos/${store}/pulls/5`]: pr }, spec.metadata);
+    this.#githubFixture({ [`repos/${store}`]: repo, [`repos/${store}/pulls/5`]: pr });
   }
 
-  #githubFixture(responses, metadata = 'verified') {
+  #githubFixture(responses) {
     const bin = path.join(this.dir, 'fake-github');
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, process.platform === 'win32' ? 'gh.exe' : 'gh'), '');
@@ -473,9 +452,8 @@ const original = cp.spawnSync;
 const responses = ${JSON.stringify(responses)};
 cp.spawnSync = function(file, args, options) {
   if (!/^gh(?:\\.exe)?$/i.test(require('node:path').basename(file))) return original(file, args, options);
-  if (${JSON.stringify(metadata)} === 'broken') throw new Error('fixture reader failed');
   const body = args[0] === 'api' && args[3] === 'GET' && responses[args[4]];
-  const status = body && ${JSON.stringify(metadata)} !== 'unreachable' ? 200 : 404;
+  const status = body ? 200 : 404;
   return {status: status === 200 ? 0 : 1, stdout: 'HTTP/2.0 ' + status + '\\n\\n' + JSON.stringify(body || {}), stderr: ''};
 };
 `);
