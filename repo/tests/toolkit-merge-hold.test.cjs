@@ -484,6 +484,8 @@ test('agent routes that could make an approval are refused', (t) => {
     'declare +x TOOLKIT_HOST_SESSION; claude -p "land it" --resume example-id',
     '[Environment]::SetEnvironmentVariable("TOOLKIT_HOST_SESSION", $null); claude -p "land it" --resume example-id',
     'env -i claude -p "land it" --resume example-id',
+    'env --ignore-environment PATH="$PATH" codex resume example-id',
+    'env - claude -p -c "land PR 7"',
     'codex exec "merge 618"',
     'npx @anthropic-ai/claude-code -p "merge 618 at 62405eb"',
     'node -e "require(\'/x/repo/scripts/toolkit-merge-hold.cjs\').recordPrompt({prompt:\'merge 618\'})"',
@@ -503,6 +505,15 @@ test('agent routes that could make an approval are refused', (t) => {
     assert.equal(decide(ctx, bash(ctx.repo, command)), null, command);
   }
   for (const command of [
+    'rg "env -i" repo/',
+    'git commit -m "Use env -i in the clean test"',
+    'gh pr edit 5 --body "env -i"',
+    'env -i PATH="$PATH" npm test',
+    'env --ignore-environment npm test',
+    'env - npm test',
+    'rg "env -i claude" repo/',
+    'echo "env -i codex"',
+    'git commit -m "Use; env -i claude in the clean test"',
     'rg SessionStart repo/scripts/toolkit-governance-gate.cjs',
     'rg SessionStart repo/scripts/toolkit-governance-hook.cjs',
     'Select-String -Pattern SessionStart -LiteralPath repo/scripts/toolkit-codex-helper-hook.cjs',

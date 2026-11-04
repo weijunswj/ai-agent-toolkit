@@ -81,17 +81,21 @@
 //     refused whatever branch it names; encoded PowerShell commands are refused unread;
 //   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
 //     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION (assignment,
-//     unset, env -u, Remove-Item Env:\, export -n, declare +x, SetEnvironmentVariable, env -i), names
+//     unset, env -u, Remove-Item Env:\, export -n, declare +x, SetEnvironmentVariable, or an empty
+//     environment on a host launch through env -i, --ignore-environment or a bare -), names
 //     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt
 //     or a SessionStart event.
 //
-// Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
+// Not covered: a fresh `codex exec` launch from a running Codex shell still keeps standing as it
+// did before, wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
 // pushes wrapped in a program that is not a shell (timeout, Start-Process, xargs and the like), a
 // prompt file fed to a hook script, other hook-feed wrappers or Node flags (including node -e
-// loading toolkit-governance-gate.cjs), racing session-mark writes without a lock, a startup forged
+// loading toolkit-governance-gate.cjs, direct toolkit-codex-session-start.ps1, env FOO=1 node,
+// timeout 5s node, bash -l -c, pwsh -c, cmd /c and node x.cjs<feed.json), racing session-mark writes without a lock, a startup forged
 // for an unmarked or pruned id, and Claude reconnect launches outside the process tree (scheduled
 // tasks or desktop wakes). Also a resume whose host-session variable was cleared indirectly
-// (direct setting or clearing is refused), a fully forged top-level Projects wake with the right labels,
+// (including unset -v, quoted unset, Remove-Item Env:/ and typeset +x; the listed direct forms
+// are refused), a fully forged top-level Projects wake with the right labels,
 // plain text containing an approval line, scripts or programs
 // that call git or the GitHub API themselves, curl and other HTTP clients, a sha= field put in a
 // comment or an echo on purpose, git and shell aliases,
@@ -174,8 +178,9 @@ const GH_REPO_SYNC = /\bgh(?:\.exe)?\s+repo\s+sync\b/i;
 const GH_ALIAS_MERGE = /\bgh(?:\.exe)?\s+alias\s+(?:set|import)\b[^\n;&|]*merge/i;
 const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl)\s|\bGH_REPO\s*=/i;
 // Toolkit's user-state files, and any setting or clearing of the session variable that tells a
-// session another one started it (reading or searching for its name is fine).
-const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\bTOOLKIT_HOST_SESSION\s*=|(?:\bunset|-u|--unset(?:=|\s+)|\benv:\\?|\$env:|\bexport\s+-n\s+|\bdeclare\s+\+x\s+)\s*TOOLKIT_HOST_SESSION\b|\bSetEnvironmentVariable\s*\(\s*['"]TOOLKIT_HOST_SESSION['"]|\benv\s+(?:-i|--ignore-environment)\b/i;
+// session another one started it. Searching for its bare name is fine; PowerShell variable and
+// environment-provider references are refused too, including reads.
+const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\bTOOLKIT_HOST_SESSION\s*=|(?:\bunset|-u|--unset(?:=|\s+)|\benv:\\?|\$env:|\bexport\s+-n\s+|\bdeclare\s+\+x\s+)\s*TOOLKIT_HOST_SESSION\b|\bSetEnvironmentVariable\s*\(\s*['"]TOOLKIT_HOST_SESSION['"]/i;
 const PROMPT_HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook)/i;
 const HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook|codex-session-start)/i;
 const FEED_WORDS = /\brequire\b|\brecordPrompt\b|\bUserPromptSubmit\b|\bimport\b/;
@@ -184,7 +189,8 @@ const HOST_WORD = /^(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?$|claude-cod
 const VALUE_FLAGS = new Set(['--repo', '-R', '--match-head-commit', '--subject', '-t', '--body', '-b', '--body-file', '-F', '--author-email', '-A']);
 const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--exec-path']);
 
-const ASK_TEXT = 'Ask the user to type, as plain text and not in quotes, a line with the word merge and the pull request number, such as merge owner/name#N, in their own chat after reading the merge summary. A fully named target works from any folder; merge N needs that repository\'s folder. Never type it yourself, start a session or script to type it, or touch Toolkit\'s user-state files.';
+const MERGE_ROUTES = 'in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub';
+const ASK_TEXT = `Ask the user to type, as plain text and not in quotes, a line with the word merge and the pull request number, such as merge owner/name#N, after reading the merge summary. Approval works ${MERGE_ROUTES}. A fully named target works from any folder; merge N needs that repository's folder. Typing in a reconnected or revoked chat records no approval. Never type it yourself, start a session or script to type it, or touch Toolkit's user-state files.`;
 
 class MergeHoldError extends Error {
   constructor(code) { super(code); this.name = 'MergeHoldError'; this.code = code; }
@@ -686,6 +692,7 @@ function judge(merge, approvals, standing = null) {
 // what an approval can allow; '' when there is none.
 function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
+  if (clearedHostEnvironment(text)) return refuse('starting Claude or Codex with an empty environment hides the running session, so this launch is refused.');
   // Search arguments and test files are not hook invocations. Read the common command wrappers
   // and Node's harmless warning flag; Codex's start script writes a mark without any event flag.
   const sessionStartFeed = hookStartFeed(text);
@@ -717,6 +724,23 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
     if (reason) return refuse(reason);
   }
   return '';
+}
+
+// Read command position with shell quoting intact: an env launch inside a message is just text.
+// Reuse the host-launch pattern and common wrappers above, within this command only.
+function clearedHostEnvironment(text) {
+  return shellCommands(text).some(({ words }) => {
+    let index = words[0] === '&' ? 1 : 0;
+    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] || '')) index += 1;
+    if (!/^env$/i.test(path.basename(words[index] || ''))) return false;
+    let cleared = false;
+    index += 1;
+    while (index < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]) || words[index].startsWith('-') || /^(?:npx|bunx|pnpm|dlx|exec|nohup|start)$/i.test(words[index]))) {
+      if (['-i', '--ignore-environment', '-'].includes(words[index])) cleared = true;
+      index += 1;
+    }
+    return cleared && HOST_WORD.test(path.basename(words[index] || ''));
+  });
 }
 
 function hookStartFeed(text, depth = 0) {
@@ -898,9 +922,9 @@ function standingReason(reason) {
     'no-session-mark': 'this session has no readable session-start mark',
     'launcher-marker': 'a Toolkit launcher marker is present',
     'host-session-mismatch': 'the host session does not match this session',
-    'resume-from-session-shell': 'a resume carried the host-session variable from a running session, so standing authority is revoked for this session',
+    'resume-from-session-shell': `a resume carried the host-session variable from a running session, so standing authority is revoked for this session; approve ${MERGE_ROUTES}; typing in this revoked chat records no approval`,
     'fork': 'this session is a fork',
-    'resume-needs-typed-merge': 'Codex and unknown-host reconnects need a typed merge because they have no reliable signal to distinguish a user reconnect from an agent resume',
+    'resume-needs-typed-merge': `Codex and unknown-host reconnects need a typed merge because they have no reliable signal to distinguish a user reconnect from an agent resume; approve ${MERGE_ROUTES}; typing in this reconnected chat records no approval`,
     'resumed-without-user-started-origin': 'this resumed session has no recorded user-started origin',
     'user-started-origin-required': 'this session has no recorded user-started origin',
   }[reason] || 'the standing answer is unavailable';

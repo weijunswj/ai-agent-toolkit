@@ -1711,6 +1711,58 @@ test('a mark that cannot be replaced fails safe: the resumed or continued run ca
   assert.equal(stateOf(ctx, continued).state, 'ENABLED');
 });
 
+test('a failed mark write retains restrictions through later startup replay', t => {
+  const ctx = scratch(t);
+  const options = { registryOptions: ctx.options, environment: {}, host: 'claude-code' };
+  const epochs = new gate.SessionEpochs(options);
+  const { renameSync } = fs;
+  let blocked = null;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (to === blocked) throw Object.assign(new Error('fixture write failure'), { code: 'EPERM' });
+    return renameSync(from, to);
+  });
+  for (const restriction of ['session-shell', 'codex', 'fork', 'unknown', 'automation']) {
+    epochs.start(restriction, 'startup');
+    if (restriction === 'session-shell') new gate.SessionEpochs({ ...options, environment: { TOOLKIT_HOST_SESSION: restriction } }).start(restriction, 'resume');
+    if (restriction === 'codex') new gate.SessionEpochs({ ...options, host: 'codex' }).start(restriction, 'resume');
+    if (restriction === 'fork') epochs.start(restriction, 'fork');
+    if (restriction === 'unknown') epochs.start(restriction, 'other');
+    if (restriction === 'automation') new gate.SessionEpochs({ ...options, environment: { TOOLKIT_GATE_ROLE: 'G1' } }).start(restriction, 'startup');
+    const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(restriction).digest('hex').slice(0, 32)}.json`);
+    const before = fs.readFileSync(file, 'utf8');
+    blocked = file;
+    assert.equal(epochs.start(restriction, 'startup'), null, restriction);
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'failed replacement must not delete the restricted mark');
+    blocked = null;
+    epochs.start(restriction, 'startup');
+    if (restriction === 'session-shell') assert.equal(epochs.resumedFromSessionShell(restriction), true);
+    if (restriction === 'codex') assert.equal(epochs.resumeNeedsTypedMerge(restriction), true);
+    if (restriction === 'fork') assert.equal(epochs.forked(restriction), true);
+    if (restriction === 'unknown') assert.equal(epochs.origin(restriction), 'unknown');
+    if (restriction === 'automation') assert.equal(epochs.origin(restriction), 'automation');
+  }
+});
+
+test('repository mark failure cannot delete a newly revoked session mark', t => {
+  const ctx = scratch(t);
+  const options = { registryOptions: ctx.options, environment: {}, host: 'claude-code' };
+  const epochs = new gate.SessionEpochs(options);
+  epochs.start('user', 'startup', 'repository');
+  const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `r-${crypto.createHash('sha256').update('repository').digest('hex').slice(0, 32)}.json`);
+  const { renameSync, rmSync } = fs;
+  let fault = true;
+  const busy = () => Object.assign(new Error('fixture repository mark failure'), { code: 'EBUSY' });
+  t.mock.method(fs, 'renameSync', (from, to) => { if (fault && to === file) throw busy(); return renameSync(from, to); });
+  t.mock.method(fs, 'rmSync', (target, options) => { if (fault && target === file) throw busy(); return rmSync(target, options); });
+  const resumed = new gate.SessionEpochs({ ...options, environment: { TOOLKIT_HOST_SESSION: 'user' } });
+  assert.equal(resumed.start('user', 'resume', 'repository'), null);
+  assert.equal(epochs.resumedFromSessionShell('user'), true, 'repository cleanup preserves the newly written revocation');
+  fault = false;
+  epochs.start('user', 'startup', 'repository');
+  assert.equal(epochs.resumedFromSessionShell('user'), true);
+  assert.equal(epochs.origin('user'), 'automation');
+});
+
 test('a mark that can be neither replaced nor removed fails safe: held messages and "later" forget their marks', (t) => {
   const ctx = scratch(t);
   const raw = () => new gate.PromptHold({ registryOptions: ctx.options, environment: {} });

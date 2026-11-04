@@ -331,6 +331,12 @@ class SessionEpochs {
 
   #read(kind, key) { return this.#record(kind, key)?.epoch ?? null; }
 
+  #restricted(sessionId) {
+    const mark = this.#record('s', sessionId);
+    return mark && (mark.origin !== 'user-started' || mark.resumed === true || mark.forked === true
+      || mark.resumedFromSessionShell === true || mark.resumeNeedsTypedMerge === true);
+  }
+
   // A session mark notes whether the run was a resume or a fork, which another process may have started.
   #write(kind, key, source = null) {
     const epoch = crypto.randomBytes(16).toString('hex');
@@ -407,8 +413,10 @@ class SessionEpochs {
   // Records a session start and returns the session's mark. source is the hook input's: startup,
   // resume, fork, clear or compact. Anything but clear or compact starts new marks. A mark that
   // cannot be replaced fails safe: the session's mark is written first and, if it cannot be, the old
-  // one is removed, so the run has none and cannot answer; the repository's mark is handled either
-  // way, and one that cannot be replaced is removed, so every answer held before it is asked again.
+  // one is removed, so the run has none and cannot answer. Restricted session marks are kept so a
+  // later startup cannot turn revocation into fresh authority; held answers forget their marks.
+  // The repository's mark is handled either way, and one that cannot be replaced is removed,
+  // so every answer held before it is asked again.
   // A mark that can be neither replaced nor removed (a locked file, a read-only folder) is left
   // behind, so the held messages and "later" answers that carry it forget their marks instead
   // (they are in another file): no run can match them, and the question is asked again.
@@ -421,12 +429,14 @@ class SessionEpochs {
     }
     let epoch = null;
     const stuck = { session: null, repository: null };
-    try { epoch = this.#write('s', sessionId, source); } catch { if (!this.#drop('s', sessionId)) stuck.session = sessionId; }
+    try { epoch = this.#write('s', sessionId, source); } catch {
+      if (this.#restricted(sessionId) || !this.#drop('s', sessionId)) stuck.session = sessionId;
+    }
     if (!kept && SessionEpochs.#valid(repositoryId)) {
       try { this.#write('r', repositoryId); } catch {
         if (!this.#drop('r', repositoryId)) {
           stuck.repository = repositoryId;
-          if (epoch !== null && !this.#drop('s', sessionId)) stuck.session = sessionId;
+          if (epoch !== null && (this.#restricted(sessionId) || !this.#drop('s', sessionId))) stuck.session = sessionId;
           epoch = null;
         }
       }

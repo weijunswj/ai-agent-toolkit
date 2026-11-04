@@ -266,6 +266,63 @@ test(`${HOST}: Projects approval in a resumed or launched session never grants s
   }
 });
 
+test(`${HOST}: typed approval in a resumed or revoked chat records nothing; a fresh chat can approve it`, t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  const session = userSession(ctx);
+  gate.startSession({ session_id: session, source: 'resume' }, {
+    ...options, environment: HOST === 'claude-code' ? { TOOLKIT_HOST_SESSION: session } : {},
+  });
+  const input = bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.head}`, session);
+  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: session, prompt: 'merge 7' }, options), 0);
+  assert.equal(new hold.MergeApprovals(options).find('owner/a', 7), null);
+  assert.equal(hold.check(input, ctx.repo, options).eligible, false);
+  for (const text of [decide(ctx, input).deny, hold.check(input, ctx.repo, options).explanation]) {
+    assert.match(text, /in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub/);
+    assert.match(text, /typing in this (?:reconnected|revoked) chat records no approval/);
+  }
+  const fresh = userSession(ctx, 'fresh-approval');
+  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: fresh, prompt: 'merge 7' }, options), 1);
+  assert.equal(decide(ctx, input), null, 'computer-wide approval allows the original session once');
+  assert.ok(decide(ctx, input)?.deny, 'consuming approval does not restore standing');
+});
+
+test(`${HOST}: clear under a new id has no standing but can record a typed merge`, t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  userSession(ctx, 'before-clear');
+  gate.startSession({ session_id: 'after-clear', source: 'clear' }, options);
+  const input = bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.head}`, 'after-clear');
+  const epochs = new gate.SessionEpochs(options);
+  assert.equal(epochs.origin('after-clear'), 'unknown');
+  assert.equal(epochs.resumed('after-clear'), false);
+  assert.equal(hold.check(input, ctx.repo, options).eligible, false);
+  assert.ok(decide(ctx, input)?.deny);
+  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: 'after-clear', prompt: 'merge 7' }, options), 1);
+  assert.equal(decide(ctx, input), null);
+  assert.ok(decide(ctx, input)?.deny);
+});
+
+if (HOST === 'claude-code') test('Bash and PowerShell tool resumes revoke standing with fixture-inherited variables', t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  // These are fixture environments, not evidence that the installed host exports to either shell.
+  for (const tool_name of ['Bash', 'PowerShell']) {
+    const session = userSession(ctx, `tool-${tool_name}`);
+    const launch = { cwd: ctx.repo, session_id: session, tool_name, tool_input: { command: 'claude -p -c "land PR 7"' } };
+    assert.equal(decide(ctx, launch), null);
+    gate.startSession({ session_id: session, source: 'resume' }, { ...options, environment: { TOOLKIT_HOST_SESSION: session } });
+    const report = hold.check({ session_id: session }, ctx.repo, options);
+    assert.equal(report.resumedFromSessionShell, true, tool_name);
+    assert.equal(report.eligible, false, tool_name);
+    assert.equal(report.reason, 'resume-from-session-shell', tool_name);
+    assert.ok(decide(ctx, { ...launch, tool_input: { command: `gh pr merge 7 --merge --match-head-commit ${ctx.head}` } })?.deny);
+  }
+});
+
 if (HOST === 'claude-code') test(`${HOST}: a session-shell resume loses standing durably and reports only presence`, t => {
   const { wake } = require('./support/projects-approval.cjs');
   const ctx = context(t, HOST);
