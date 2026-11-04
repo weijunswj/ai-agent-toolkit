@@ -421,7 +421,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects',
     'run it again with `--out` in place of `--check`', '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "']) assert.ok(guidebook.includes(required), required);
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
-  assert.match(nudge, /plus steps 7 to 11 \(and 5b when it applies\)/);
+  assert.match(nudge, /plus steps 2a, 4 and 7 to 11 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(weekly\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
@@ -725,6 +725,8 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     // shared checkouts, Remote Control, the instructions sync and the repo map.
     // These endings create only a receipt for the current run, never a task or schedule.
     '- Every send failed: create the .failed file above,',
+    // These resume existing local rc conversations; none creates, resumes or changes a scheduled task.
+    '**Build one complete list.**', '**Recovery is an owner ask.**', '**Deduplicate recovery reminders.**',
     '- A project with no repo attached gets this coordinator contract', 'Before any other work as a newly appointed controller', '**Threads do GitHub reads.**',
     '- Local sessions sharing one checkout must not clash', '**Remote Control wake.**', '4. Check the result: `--check` reads `current`', '5. Post one short note in project chat: block version',
     '- On undo, restore the saved copy and record `declined project-instructions', '**Dedupe in the same change.**', '**Evidence before "done":**',
@@ -916,6 +918,41 @@ test('today-only plugin prompts become outdated at the same version and refresh 
       assert.ok(refreshed.includes('ccr.created_at'));
       assert.ok(refreshed.includes('Keep this owner check.'));
       assert.equal(refreshed.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1], old.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1]);
+    }
+  }
+});
+
+test('rendered hourly nudges always reconcile owner asks and recovery, including quiet runs', () => {
+  for (const repo of ['example-owner/example-repo', 'none']) {
+    for (const session of ['bound', 'fresh']) {
+      const text = tasks().render('hourly-nudge', validateParams('hourly-nudge', {
+        ...PARAMS['hourly-nudge'], repo, session
+      }));
+      for (const phrase of ['plus steps 2a, 4 and 7 to 11 (and 5b when it applies)',
+        'skip the other checks in steps 2 to 6', '2a. Owner asks (runs every time, including the no-change path)',
+        'Page the inventories and read enough source history to identify each ask and any later answer or completed action',
+        'also check older asks absent from later relays',
+        'A newer unrelated post or a thread-title link without the ask does not prove relay',
+        'regardless of whether their thread is working, blocked or recently resolved',
+        "Follow step 2's recent-resolved-thread window; report unavailable history or incomplete coverage plainly",
+        'the source thread linked by its title, the ask and its source time',
+        '"notification unverified"', 'do not infer notification from an edit timestamp',
+        'this task does not post a separate owner notification or mark an ask relayed',
+        'unless the earlier one neared 8 KB or the later fresh post carries a new actionable owner ask under **Call-to-action pings** in SKILL.md',
+        '(verify the actual new ask before accepting that exception)',
+        '4. Remote Control (runs every time, even when step 1 found no change)',
+        'page through list_threads and reconcile the local rc lanes with the remote_control_status inventory',
+        'an active session that is not connected or served is parked',
+        'Skip finished, superseded, resolved, cloud and already-working lanes',
+        'type anything, such as `.`', 'a parked status or a successful task run alone does not prove',
+        'This task never wakes lanes, posts a separate recovery announcement or edits',
+        'End RC candidates for running sessions whose threads are finished or resolved',
+        "Reuse step 4's current Remote Control findings", 'Do not count it as working because a coordinator message was sent to it',
+        '"UNRELAYED ASK: <n> | "', '**Unrelayed:**', '**Waiting on owner:**',
+        'An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']) {
+        assert.ok(text.includes(phrase), `${repo}/${session}: ${phrase}`);
+      }
+      assert.doesNotMatch(text, /type `continue`|skip the other steps from 2 to 6/);
     }
   }
 });

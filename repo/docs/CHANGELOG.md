@@ -4,8 +4,11 @@
 
 ### Added
 
-- Owner-led renewal advice for Codex and Claude Code controllers and non-gate test sessions, with verified handoff retrieval and recovery holds.
-- Toolkit daily check-in session advice from redacted digests, keeping missing fields and historical activity explicit without automatic session or task changes.
+- Show Projects owners one linked list of Remote Control threads needing text to resume after recovery.
+
+### Fixed
+
+- Notify Projects owners in the same turn when a new actionable ask arrives, including after a coordinator restart, with hourly checks for missed asks.
 
 ## 3.44.3
 
