@@ -565,3 +565,58 @@ test('hygiene: an early exit 0 still masks in PowerShell and cmd, including a Wi
   const items = hits(report({ '.github/workflows/ci.yml': workflow, 'docs/ci-cd/CURRENT_CICD_STATUS.md': STATUS('ci.yml') }), 'hygiene.masked');
   assert.deepEqual(items.map((e) => e.message.match(/step "([^"]+)"/)[1]), ['Pwsh step', 'Cmd step', 'Windows default', 'Matrix default', 'Job default pwsh']);
 });
+
+test('hygiene: a separate executable exit 0 masks only in PowerShell and cmd', async (t) => {
+  const rows = [
+    ['pwsh', 'npm test\nexit 0', true],
+    ['powershell', 'npm test\n  exit 0 # force success', true],
+    ['cmd', 'npm test\nexit 0', true],
+    ['pwsh', "npm test\nWrite-Output @'\nexit 0\n'@\nexit 0", true],
+    ['bash', 'npm test\nexit 0', false],
+    ['sh', 'npm test\nexit 0', false],
+    ['pwsh', 'npm test\n# exit 0', false],
+    ['cmd', 'npm test\nREM exit 0\n:: exit 0', false],
+    ['pwsh', 'npm test\nWrite-Output "exit 0"', false],
+    ['cmd', 'npm test\necho exit 0', false],
+    ['pwsh', 'npm test\n<#\nexit 0\n#>', false],
+    ['pwsh', "npm test\nWrite-Output @'\nexit 0\n'@", false],
+    ['pwsh', 'npm test\nWrite-Output @"\nexit 0\n"@', false],
+    ['pwsh', 'npm test\nWrite-Output "a message\nexit 0\n"', false],
+    ['pwsh', 'npm test\nWrite-Output `\nexit 0', false],
+    ['pwsh', 'npm test\r\nWrite-Output `\r\nexit 0', false],
+    ['cmd', 'npm test\necho ^\nexit 0', false],
+  ];
+  for (const [shell, run, masked] of rows) {
+    await t.test(`${shell}: ${JSON.stringify(run)}`, () => {
+      const workflow = WORKFLOW(`|\n${run.split('\n').map((line) => `          ${line}`).join('\n')}`, `        shell: ${shell}\n`);
+      const items = hits(report({ '.github/workflows/ci.yml': workflow }), 'hygiene.masked');
+      assert.deepEqual(items.map((entry) => entry.level), masked ? ['GAP'] : []);
+    });
+  }
+});
+
+test('hygiene: only runner labels and referenced matrix values determine the default shell', async (t) => {
+  const rows = [
+    { name: 'Linux matrix with windows documentation', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os: [ubuntu-latest]\n        docs: [windows]\n', levels: [] },
+    { name: 'Windows matrix', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os:\n          - ubuntu-latest\n          - windows-latest\n', levels: ['GAP'] },
+    { name: 'literal Windows labels', runner: '[self-hosted, Windows, X64]', levels: ['GAP'] },
+    { name: 'literal Windows block labels', runner: '\n      - self-hosted\n      - Windows', levels: ['GAP'] },
+    { name: 'comment after matrix reference', runner: '${{ matrix.os }} # selected image', strategy: '    strategy:\n      matrix:\n        os: [windows-latest]\n', levels: ['GAP'] },
+    { name: 'Windows matrix with Bash override', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os: [windows-latest]\n', shell: 'bash', levels: [] },
+    { name: 'Linux matrix with PowerShell override', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os: [ubuntu-latest]\n', shell: 'pwsh', levels: ['GAP'] },
+    { name: 'unresolved runner', runner: '${{ inputs.runner }}', levels: ['CHECK'] },
+    { name: 'unresolved matrix values', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os: ${{ inputs.images }}\n', levels: ['CHECK'] },
+    { name: 'unresolved include runners', runner: '${{ matrix.os }}', strategy: '    strategy:\n      matrix:\n        os: [ubuntu-latest]\n        include:\n          - os: ${{ inputs.runner }}\n', levels: ['CHECK'] },
+    { name: 'unrelated windows text without a Windows label', runner: 'ubuntu-latest', levels: [] },
+    { name: 'unresolved runner with Bash override', runner: '${{ inputs.runner }}', shell: 'bash', levels: [] },
+    { name: 'unresolved runner with cmd override', runner: '${{ inputs.runner }}', shell: 'cmd', levels: ['GAP'] },
+  ];
+  for (const row of rows) {
+    await t.test(row.name, () => {
+      const workflow = `on: push\npermissions: {}\njobs:\n  test:\n    runs-on: ${row.runner}\n${row.strategy || ''}    steps:\n      - name: windows documentation\n${row.shell ? `        shell: ${row.shell}\n` : ''}        run: npm test; exit 0\n`;
+      const items = hits(report({ '.github/workflows/ci.yml': workflow }), 'hygiene.masked');
+      assert.deepEqual(items.map((entry) => entry.level), row.levels);
+      if (row.levels[0] === 'CHECK') assert.match(items[0].message, /runner.*unresolved/i);
+    });
+  }
+});
