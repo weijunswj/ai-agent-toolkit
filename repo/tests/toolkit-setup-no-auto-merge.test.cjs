@@ -63,6 +63,9 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         const reader = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-shell-call.cjs'), 'utf8');
         assert.deepEqual([...reader.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:os'", "'node:path'"]);
         assert.doesNotMatch(reader, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
+        // The standalone shell diagnostic must not gain file, subprocess or network imports.
+        const diagnostic = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-session-shell-check.cjs'), 'utf8');
+        assert.doesNotMatch(diagnostic, /\brequire\b|\bimport\b/);
         continue;
       }
       const text = fs.readFileSync(full, 'utf8');

@@ -3,6 +3,28 @@
   "family": "merge",
   "rows": [
     {
+      "id": "MERGE.session-shell-check-bash",
+      "source": "the session shell diagnostic needs no hook allowance in Bash",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"node \"repo/scripts/toolkit-session-shell-check.cjs\""}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"},"owner_session":true},
+      "expect": {"decision":"allow"},
+      "status": "pass",
+      "note": "Relative path form; the pack never executes tool payloads. The unit test also checks the exact absolute path. Installed shell delivery still needs real-host smoke."
+    },
+    {
+      "id": "MERGE.session-shell-check-powershell",
+      "source": "the session shell diagnostic needs no hook allowance in PowerShell",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name":"PowerShell","tool_input":{"command":"node \"repo/scripts/toolkit-session-shell-check.cjs\""}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"},"owner_session":true},
+      "expect": {"decision":"allow"},
+      "status": "pass",
+      "note": "Relative path form; the pack never executes tool payloads. The unit test also checks the exact absolute path. Installed shell delivery still needs real-host smoke."
+    },
+    {
       "id": "MERGE.codex-resume-typed-fresh-chat",
       "source": "resumed or revoked chat records no typed approval; a fresh chat on the same computer grants one",
       "kind": "state",

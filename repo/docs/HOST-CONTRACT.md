@@ -14,6 +14,18 @@ Only the appointed controller writes programme state (the parent and child docum
   - Codex: no documented way for a session to read its own ID was found, so Codex executors use the assisted mode until the Codex host support work qualifies one.
 - **Route proof:** the launched session reads its model and effort from session metadata before consequential work and passes them to `bind` (`--model`, `--effort`, `--route-read-back`), which records them in the journal. On Codex the lead verifies the route from the session log.
 
+### Check what a shell received
+
+Run `node "<installed-root>/repo/scripts/toolkit-session-shell-check.cjs"` separately through the actual Bash and PowerShell tools, replacing `<installed-root>` with the installed Toolkit folder using forward slashes. It accepts no arguments, reads only `TOOLKIT_HOST_SESSION` and `CLAUDE_CODE_SESSION_ID`, and prints only two booleans, for example `{"present":true,"equal":true}`. It reads no files, starts no process, makes no network call and grants no permission or merge authority.
+
+`present` says whether the Toolkit entry exists, including an empty entry. `equal` is true only when both entries are non-empty and identical. It compares against the shell's own session ID, which is weaker than comparing against the hook's native session ID: inherited or overwritten entries could agree.
+
+- `present:false,equal:false`: The shell has no Toolkit entry.
+- `present:true,equal:false`: The Toolkit entry is empty, the comparison ID is missing or empty, or the entries differ.
+- `present:true,equal:true`: The two non-empty shell entries agree. This alone does not establish the hook's identity or approval eligibility.
+
+Fixtures and hook-pack results prove no installed delivery. Qualification needs both booleans true in both real shells on the installed build, with build identity retained, and a repeat after a real reconnect. Until those runs, shell delivery remains unproven. A missing comparison ID, mismatch or host refusal leaves qualification incomplete. Missing Toolkit delivery in either shell means task auto-merge stays Off until fixed.
+
 ## 2. Turn-end hook
 
 | | Rule |
