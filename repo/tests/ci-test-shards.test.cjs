@@ -426,6 +426,56 @@ test('a run uses its own temp folder under the user profile, for every child, an
   assert.equal(fs.existsSync(fail.folder), false, 'the run folder is gone after a failing run');
 });
 
+test('an explicit temp root reaches nested runners and grandchild fixtures without leftovers', (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-explicit-temp-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const tempRoot = path.join(work, 'granted-temp');
+  const record = path.join(work, 'record.json');
+  const leaf = path.join(work, 'leaf.test.cjs');
+  const parent = path.join(work, 'parent.test.cjs');
+  const nestedRecord = path.join(work, 'nested.json');
+  fs.writeFileSync(leaf, [
+    "const test = require('node:test'), assert = require('node:assert/strict');",
+    "const fs = require('node:fs'), os = require('node:os'), path = require('node:path');",
+    "const { spawnSync } = require('node:child_process');",
+    "test('uses the granted temp folder', () => {",
+    "  const script = `const fs=require('node:fs'),os=require('node:os'),path=require('node:path'); const dir=fs.mkdtempSync(path.join(os.tmpdir(),'grandchild-')); fs.rmSync(dir,{recursive:true}); process.stdout.write(JSON.stringify({tmpdir:os.tmpdir(),TEMP:process.env.TEMP,TMP:process.env.TMP,TMPDIR:process.env.TMPDIR}));`;",
+    "  const child = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', env: process.env });",
+    "  assert.equal(child.status, 0, child.stderr);",
+    "  fs.writeFileSync(process.env.RUN_TESTS_RECORD, JSON.stringify({ tmpdir: os.tmpdir(), TEMP: process.env.TEMP, TMP: process.env.TMP, TMPDIR: process.env.TMPDIR, child: JSON.parse(child.stdout) }));",
+    '});',
+  ].join('\n'));
+  fs.writeFileSync(parent, [
+    "const test = require('node:test'), assert = require('node:assert/strict');",
+    "const fs = require('node:fs'), os = require('node:os');",
+    `const runner = require(${JSON.stringify(require.resolve('../scripts/run-tests.cjs'))});`,
+    "test('runs a nested fixture', () => {",
+    "  const env = { ...process.env, RUN_TESTS_RECORD: process.env.NESTED_RECORD }; delete env.NODE_TEST_CONTEXT;",
+    `  const run = new runner.TestRun({ root: ${JSON.stringify(ROOT)}, system: ${JSON.stringify(shards.platformSystem())}, tempRoot: os.tmpdir(), env, stdio: 'ignore' });`,
+    `  assert.equal(run.run([${JSON.stringify(leaf)}], { concurrency: 1 }).exitCode, 0);`,
+    "  assert.equal(fs.existsSync(run.folder), false);",
+    "  const nested = JSON.parse(fs.readFileSync(process.env.NESTED_RECORD, 'utf8'));",
+    "  fs.writeFileSync(process.env.RUN_TESTS_RECORD, JSON.stringify({ outer: os.tmpdir(), folder: run.folder, nested }));",
+    '});',
+  ].join('\n'));
+  const env = { ...process.env, RUN_TESTS_RECORD: record, NESTED_RECORD: nestedRecord };
+  delete env.NODE_TEST_CONTEXT;
+  const run = new runner.TestRun({ root: ROOT, system: shards.platformSystem(), tempRoot, env, stdio: 'ignore', out: sink(), err: sink() });
+  assert.equal(runner.parseArgs(['--temp-root', tempRoot, 'repo/tests/ci-test-shards.test.cjs']).tempRoot, tempRoot);
+  const result = run.run([parent], { concurrency: 1 });
+  assert.equal(result.exitCode, 0);
+  const seen = JSON.parse(fs.readFileSync(record, 'utf8'));
+  assert.equal(seen.outer, run.folder);
+  assert.equal(path.dirname(run.folder), fs.realpathSync.native(tempRoot));
+  assert.equal(path.dirname(seen.folder), run.folder, 'the nested runner stays inside the outer run');
+  for (const key of ['tmpdir', 'TEMP', 'TMP', 'TMPDIR']) {
+    assert.equal(seen.nested[key], seen.folder, key);
+    assert.equal(seen.nested.child[key], seen.folder, `grandchild ${key}`);
+  }
+  assert.equal(fs.existsSync(run.folder), false);
+  assert.deepEqual(fs.readdirSync(tempRoot), [], 'no fixtures or run folders remain');
+});
+
 test('the next run removes marked run folders an interrupted run left more than a day ago, and nothing else', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-run-cleanup-'));
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
