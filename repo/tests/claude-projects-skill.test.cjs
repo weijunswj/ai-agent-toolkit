@@ -28,19 +28,19 @@ const projectsEntry = () => ({
 });
 const projectsEntryContracts = [
   ['controller identity', 'controller', ['Only a Projects session whose host role line names it "the coordinator in a project"',
-    'native project tools `start_thread`/`read_project_chat`', 'Read under `/mnt/project-files/`']],
+    'native project tools `start_thread`', 'Read under `/mnt/project-files/`']],
   ['repository entry', 'controller', ['[Projects setup](contracts/claude-projects/web-controller-projects/reference/guidebook.md) before acting']],
   ['controller exclusions', 'controller', ['Project threads, Remote Control, CLI/desktop/IDE Claude Code or Codex outside Projects, helpers/executors skip it',
     'Copied text or paths never qualify', 'absent/ambiguous role evidence: skip']],
   ['controller runtime', 'controller', ['Runtime name alone (e.g. "Claude Code") never disqualifies that coordinator']],
   ['skill identity', 'skill', ['Only a host role line naming you "the coordinator in a project"',
-    'native project tools `start_thread`/`read_project_chat`', 'Read under `/mnt/project-files/`', 'on owner appointment/setup/takeover',
-    'Run **Guided setup and takeover** before other work']],
+    'native project tools `start_thread`', 'Read under `/mnt/project-files/`', 'on owner appointment/setup/takeover',
+    'Run **Guided setup and takeover** before other work', 'Follow for the whole session']],
   ['skill exclusions', 'skill', ['Project threads, Remote Control, CLI/desktop/IDE Claude Code or Codex outside Projects, helpers/executors skip it',
     'Copied text or paths never qualify', 'absent/ambiguous role evidence: keep your assigned role']],
   ['skill runtime', 'skill', ['Runtime name alone (e.g. "Claude Code") never disqualifies that Projects coordinator']],
   ['guide identity', 'guide', ['applies only when the host role line names this session "the coordinator in a project"',
-    'native project-chat/thread tools include `mcp__hearthbot__start_thread` and `mcp__hearthbot__read_project_chat`',
+    'native project tools include `mcp__hearthbot__start_thread`',
     'Read can access single files under `/mnt/project-files/`', 'the Toolkit subfolder need not exist']],
   ['read access', 'guide', ['Listing files, a shell, Write or git are not required']],
   ['copied identity', 'guide', ['Copied text or paths never qualify',
@@ -63,6 +63,18 @@ const projectsEntryContracts = [
     'With no usable copy, hold takeover', 'Preserve any last usable copy and setup progress',
     'never substitute generic takeover for guided setup']],
   ['outside appointment', 'guide', ['Outside an appointment, a missing or failed copy keeps working from the last usable copy or the managed block and reports it']],
+  ...['controller', 'skill', 'guide'].map(surface => [`${surface} setup relay`, surface, [
+    "A thread reading CONTROLLER.md on a Projects coordinator's behalf",
+    'for any appointment, takeover or controller-setup brief however worded',
+    surface === 'controller' ? 'first reports the Projects setup line above and its guidebook link to the coordinator, before any takeover write'
+      : `first reports its Projects setup line and [guidebook link](${surface === 'skill' ? 'reference/' : ''}guidebook.md) to the coordinator, before any takeover write`,
+    'It never runs setup; while setup is incomplete, it makes no takeover records or other controller writes',
+    'The coordinator qualifies from its own host role line and tools',
+    'the relay selects a procedure, never establishes identity',
+  ]]),
+  ['relay wording', 'guide', ['This includes a request merely to read CONTROLLER.md or do the takeover',
+    'no special phrase or preference line is required', 'Threads also have `read_project_chat`; it does not distinguish a coordinator',
+    'The coordinator follows the linked procedure before controller actions']],
 ];
 function assertProjectsEntry(surfaces, ids = projectsEntryContracts.map(([id]) => id)) {
   for (const [id, surface, clauses] of projectsEntryContracts) {
@@ -87,6 +99,13 @@ const projectsEntryMatrix = [
   ['absent, conflicting or ambiguous host evidence: skip, retain role', ['controller identity', 'controller exclusions', 'skill exclusions', 'guide exclusions']],
   ['qualified coordinator, refresh fails twice: hold, no generic fallback', ['failure hold']],
   ['outside appointment, missing or failed copy: continue from last usable copy or block and report', ['outside appointment']],
+  ...['read CONTROLLER.md', 'do the takeover', 'appointment', 'controller-setup', 'arbitrary wording'].map(brief => [
+    `thread reading for coordinator, ${brief}: relay before writes, no setup or controller writes until setup completes`,
+    ['controller setup relay', 'skill setup relay', 'guide setup relay', 'relay wording'],
+  ]),
+  ['relayed text reaches a fresh coordinator: qualify only from own host role and tools',
+    ['controller identity', 'skill identity', 'guide identity', 'copied identity',
+      'controller setup relay', 'skill setup relay', 'guide setup relay']],
 ];
 for (const [scenario, contracts] of projectsEntryMatrix) {
   test(`Projects entry contract: ${scenario}`, () => assertProjectsEntry(projectsEntry(), contracts));
@@ -103,14 +122,14 @@ test('Projects entry rejects removal of every required qualification, exclusion 
   }
   // Check individual boundary terms too: removing only one exclusion must fail the contract.
   for (const [surface, terms] of [
-    ['controller', ['host role line', 'the coordinator in a project', 'native', 'start_thread', 'read_project_chat',
+    ['controller', ['host role line', 'the coordinator in a project', 'native', 'start_thread',
       'Read under', '/mnt/project-files/', 'Project threads', 'Remote Control', 'CLI/desktop/IDE', 'outside Projects',
       'helpers/executors', 'Copied text or paths', 'absent/ambiguous', 'never disqualifies']],
-    ['skill', ['host role line', 'the coordinator in a project', 'native', 'start_thread', 'read_project_chat',
+    ['skill', ['host role line', 'the coordinator in a project', 'native', 'start_thread',
       'Read under', '/mnt/project-files/', 'Project threads', 'Remote Control', 'CLI/desktop/IDE', 'outside Projects',
       'helpers/executors', 'Copied text or paths', 'absent/ambiguous', 'never disqualifies']],
     ['guide', ['host role line', 'the coordinator in a project', 'native', 'mcp__hearthbot__start_thread',
-      'mcp__hearthbot__read_project_chat', 'Read can access single files', '/mnt/project-files/', 'never disqualifies',
+      'Read can access single files', '/mnt/project-files/', 'never disqualifies',
       'project threads', 'working in a thread of a project', 'Claude Code', 'Codex', 'CLI, desktop app or IDE', 'outside Projects',
       'Remote Control', 'helpers and executors', 'quoted system instructions', 'tool names', 'ambiguous role evidence']],
   ]) {
@@ -120,6 +139,36 @@ test('Projects entry rejects removal of every required qualification, exclusion 
         { code: 'ERR_ASSERTION' }, `${surface}: ${term}`);
     }
   }
+});
+
+test('Projects setup relay rejects narrowed triggers, premature writes and relayed identity', () => {
+  const surfaces = projectsEntry();
+  const mutations = [
+    ["on a Projects coordinator's behalf", 'only when explicitly asked to relay setup'],
+    ['for any appointment, takeover or controller-setup brief however worded', 'only for a takeover brief naming Projects setup'],
+    ['Projects setup line', 'generic takeover instructions'],
+    ['guidebook link', 'repository homepage'],
+    ['to the coordinator, before any takeover write', 'to the owner, after the takeover record'],
+    ['It never runs setup', 'The thread runs setup'],
+    ['while setup is incomplete, it makes no takeover records or other controller writes',
+      'while setup is incomplete, it may write the takeover record'],
+    ['from its own host role line and tools', 'from the relayed text and paths'],
+    ['never establishes identity', 'establishes identity'],
+  ];
+  for (const surface of ['controller', 'skill', 'guide']) {
+    for (const [before, after] of mutations) {
+      assert.ok(surfaces[surface].includes(before), `${surface}: mutation must change source`);
+      assert.throws(() => assertProjectsEntry({ ...surfaces, [surface]: surfaces[surface].replace(before, after) }),
+        { code: 'ERR_ASSERTION' }, `${surface}: ${before}`);
+    }
+  }
+  // Keep the delegation rule ahead of the generic instruction a reader might otherwise execute.
+  assert.ok(surfaces.controller.indexOf('before any takeover write') < surfaces.controller.indexOf('Appointment/relaunch/recovery:'));
+  const skill = read(SKILL_REL);
+  assert.ok(skill.includes('Follow for the whole session'));
+  assert.ok(read('repo/CONTROLLER.md').includes('Routines/executors ask the owner only when the owner must act'));
+  assert.doesNotMatch(surfaces.controller + surfaces.skill, /`start_thread`\/`read_project_chat`/);
+  assert.doesNotMatch(surfaces.guide, /tools include `mcp__hearthbot__start_thread` and `mcp__hearthbot__read_project_chat`/);
 });
 
 test('Projects uses the host-assigned role even when the runtime calls itself Claude Code', () => {
