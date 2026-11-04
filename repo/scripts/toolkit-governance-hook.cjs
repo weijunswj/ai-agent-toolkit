@@ -87,7 +87,7 @@ function respond(event, input, options = {}) {
       return picked ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: picked.context } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
-    gate.startSession(input, options);
+    gate.startSession(input, { ...options, host: 'claude-code' });
     const line = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return line ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line } } : {};
   } catch {

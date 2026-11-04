@@ -197,33 +197,40 @@ test('enable and disable: confirmed, written, read back; repeats write nothing; 
   assert.equal(JSON.parse(off.stdout).reason, 'user-disabled');
 });
 
-test('not on github.com: enable refuses, disable records the ok and reads back DISABLED; a plain folder has nothing to decide', async (t) => {
+test('not on github.com: DISABLED automatically, enable refuses and disable is a no-op without a question', async t => {
   const ctx = scratch(t);
-  for (const [name, remote] of [['no-origin', null], ['gitlab', 'https://gitlab.com/example-owner/example-repo.git']]) {
+  for (const [name, remote, reason, text] of [
+    ['no-origin', null, 'origin-missing', 'there is no github.com origin remote'],
+    ['several', null, 'origin-ambiguous', 'there is more than one origin remote'],
+    ['gitlab', 'https://gitlab.com/example-owner/example-repo.git', 'other-host', 'this repository is on gitlab.com'],
+  ]) {
     const repo = gitRepo(ctx, name, remote);
+    if (name === 'several') {
+      git(repo, ['config', '--add', 'remote.origin.url', REMOTE]);
+      git(repo, ['config', '--add', 'remote.origin.url', 'https://github.com/example-owner/second.git']);
+    }
     const status = JSON.parse((await run(ctx, repo, ['status', '--json'])).stdout);
-    assert.deepEqual([status.state, status.rule], ['UNDECIDED', 'R9'], name);
-    assert.match((await run(ctx, repo, ['status'])).stdout, /works only for github\.com repositories, so it will be DISABLED here once you say ok/);
+    assert.deepEqual([status.state, status.rule, status.hold, status.reason], ['DISABLED', 'R8', false, reason], name);
+    const shown = (await run(ctx, repo, ['status'])).stdout;
+    assert.match(shown, /DISABLED automatically/);
+    assert.ok(shown.includes(text));
+    const checked = await run(ctx, repo, ['check', '--offline', '--json']);
+    assert.equal(checked.code, 0, checked.stderr);
+    assert.equal(JSON.parse(checked.stdout).findings[0].id, 'NOT_GITHUB');
     const enable = await run(ctx, repo, ['enable']);
-    assert.equal(enable.code, 2, name);
+    assert.equal(enable.code, 2);
     assert.match(enable.stderr, /cannot be enabled here\. Nothing was written\./);
     assert.equal(enable.asked.length, 0);
-    const headless = await run(ctx, repo, ['disable'], { interactive: false });
-    assert.equal(headless.code, 2);
-    assert.match(headless.stderr, /ask the user in chat instead: "Reply ok to turn GitHub governance off for this repository\."/);
-    const declined = await run(ctx, repo, ['disable'], { answer: 'no' });
-    assert.equal(declined.code, 1);
-    const disabled = await run(ctx, repo, ['disable']);
-    assert.equal(disabled.code, 0, disabled.stderr);
-    assert.match(disabled.asked[0], /Turn off Toolkit's GitHub governance for .*\nIt works only for github\.com repositories/);
-    assert.match(disabled.stdout, /Recorded\. State: DISABLED/);
-    assert.equal(JSON.parse((await run(ctx, repo, ['status', '--json'])).stdout).rule, 'R8');
-    assert.equal(fs.existsSync(path.join(repo, '.ai-agent-toolkit')), false, 'nothing is written into the repository');
-    const again = await run(ctx, repo, ['disable']);
-    assert.equal(again.code, 0);
-    assert.match(again.stdout, /Already disabled/);
+    for (const interactive of [false, true]) {
+      const disabled = await run(ctx, repo, ['disable', '--json'], { interactive });
+      assert.equal(disabled.code, 0, disabled.stderr);
+      assert.deepEqual(JSON.parse(disabled.stdout), { state: 'DISABLED', writes: 0 });
+      assert.deepEqual(disabled.asked, []);
+    }
+    assert.equal(fs.existsSync(path.join(repo, '.ai-agent-toolkit')), false);
   }
-  assert.equal(fs.existsSync(ctx.registryPath), false, 'the registry only holds github.com decisions');
+  assert.equal(fs.existsSync(ctx.registryPath), false);
+  assert.equal(fs.existsSync(path.join(path.dirname(ctx.registryPath), 'governance-not-github.v1.json')), false);
   const plain = path.join(ctx.root, 'plain-folder');
   fs.mkdirSync(plain);
   if (governance.findGitRoot(plain) === null) {

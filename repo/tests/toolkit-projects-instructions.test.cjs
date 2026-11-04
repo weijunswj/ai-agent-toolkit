@@ -231,3 +231,13 @@ test('source body, measured without the two marker lines, stays under 6200 CRLF 
   assert.deepEqual(findBlocks(text), { blocks: [], errors: [] });
   assert.doesNotMatch(text, /[^\x00-\x7f]/);
 });
+
+test('rendered instructions carry the CTA exception and retain ordinary post safeguards', () => {
+  const text = owner().render();
+  for (const phrase of ['- Posts: read the newest page where you post, never memory.',
+    'Coordinator: new asks use **Call-to-action pings**: same turn, notify on, after restarts too; recovery lists count.',
+    'Else edit your newest top-level post if no owner message follows and under about 8 KB',
+    "keep every line and add one Update line; all times in the owner's time zone",
+    'Otherwise post fresh below the owner; never edit that older post.', 'Answer owner bursts in one post.',
+    'a fresh post carries every open ask forward']) assert.ok(text.includes(phrase), phrase);
+});

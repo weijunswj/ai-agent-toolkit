@@ -145,7 +145,7 @@ class GovernanceDiscovery {
     const state = governance.governanceState(cwd, this.#registryOptions);
     const base = { schema: SCHEMA, state: state.state, rule: state.rule };
     if (state.rule === 'R1') return { ...base, status: 'not-applicable', reason: 'not a git repository' };
-    if (['R8', 'R9'].includes(state.rule) || (state.rule === 'R2' && !state.merged)) return { ...base, status: 'not-applicable', reason: 'not on github.com' };
+    if (state.rule === 'R8') return { ...base, status: 'not-applicable', reason: 'not on github.com' };
     if (state.rule === 'M1') return { ...base, status: 'reuse', reason: 'a valid binding is merged on the default branch, so nothing is asked', notes: state.notes };
     if (state.rule === 'M2') return { ...base, status: 'disabled', reason: 'the merged binding sets governance to disabled; only an owner-merged pull request changes it' };
     if (state.rule === 'S1') return { ...base, status: 'not-applicable', reason: 'an evidence store that a programme binding names (agent-managed, not governed)' };

@@ -47,7 +47,8 @@ const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
 const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'codex-only', 'claude-code-only', 'unreadable']);
 // The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
-const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note', 'steps']);
+const HOST_SESSIONS = Object.freeze(['matching', 'mismatching', 'empty']);
+const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note', 'steps', 'host_session']);
 const ID = /^[A-Z][A-Za-z0-9._-]*$/;
 // The plugin content the hooks can reach: both host manifests, the scripts and contracts, and the
 // skill scripts the hook modules load.
@@ -92,6 +93,7 @@ function rowErrors(row) {
   if (!KINDS.includes(row.kind)) errors.push(`kind must be one of ${KINDS.join(', ')}`);
   if (!Array.isArray(row.hosts) || !row.hosts.length || row.hosts.some(host => !HOSTS.includes(host)) || new Set(row.hosts).size !== row.hosts.length) errors.push('hosts must list claude, codex or both');
   if (row.event !== undefined && !EVENTS.includes(row.event)) errors.push(`event must be one of ${EVENTS.join(', ')}`);
+  if (row.host_session !== undefined && !HOST_SESSIONS.includes(row.host_session)) errors.push(`host_session must be one of ${HOST_SESSIONS.join(', ')}, or omitted for an absent variable`);
   if (!row.payload || typeof row.payload !== 'object' || Array.isArray(row.payload)) errors.push('payload must be the tool call object the host sends');
   errors.push(...expectErrors(row.expect, 'expect'));
   if (row.expect_by_host !== undefined) {
@@ -117,9 +119,9 @@ function rowErrors(row) {
     if (!Array.isArray(row.steps) || row.steps.length < 1 || row.steps.length > 24) errors.push('steps must list 1 to 24 preceding hook events');
     else row.steps.forEach((step, index) => {
       if (!step || typeof step !== 'object' || Array.isArray(step)) { errors.push(`step ${index + 1} must be an object`); return; }
-      for (const key of Object.keys(step)) if (!['event', 'payload', 'expect', 'expect_by_host', 'note'].includes(key)) errors.push(`step ${index + 1} has unknown key ${key}`);
+      for (const key of Object.keys(step)) if (!['event', 'payload', 'expect', 'expect_by_host', 'note', 'host_session'].includes(key)) errors.push(`step ${index + 1} has unknown key ${key}`);
       const candidate = { id: row.id, source: row.source, hosts: row.hosts, kind: row.kind, status: 'pass',
-        event: step.event, payload: step.payload, expect: step.expect, expect_by_host: step.expect_by_host, note: step.note };
+        event: step.event, payload: step.payload, expect: step.expect, expect_by_host: step.expect_by_host, note: step.note, host_session: step.host_session };
       errors.push(...rowErrors(candidate).map(error => `step ${index + 1}: ${error}`));
     });
   }
@@ -429,7 +431,7 @@ class Fixture {
   // The session-start mark of a session the user opened (not resumed, not launched by another).
   #ownerSession() {
     const registryPath = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
-    require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-gate.cjs')).startSession({ session_id: 'hook-pack', source: 'startup', cwd: this.work }, { registryOptions: { registryPath, testOnly: true } });
+    require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-gate.cjs')).startSession({ session_id: 'hook-pack', source: 'startup', cwd: this.work }, { registryOptions: { registryPath, testOnly: true }, environment: {} });
   }
 
   // Writes the fixture's paths into a payload or transcript value.
@@ -528,7 +530,7 @@ async function runOnHost(row, host, fixture, roots) {
   // Every event uses the real host matcher and process, sharing only this row's isolated home.
   // A mismatch in an earlier step fails the row, even if the final merge happens to be refused.
   for (const [index, step] of (row.steps || []).entries()) {
-    const observed = await runOnHost({ ...row, steps: undefined, expect_by_host: undefined, ...step }, host, fixture, roots);
+    const observed = await runOnHost({ ...row, steps: undefined, expect_by_host: undefined, host_session: undefined, ...step }, host, fixture, roots);
     if (!meets(step, host, observed)) return { ...observed, problems: [...observed.problems, `sequence step ${index + 1} did not meet its expectation`] };
   }
   const pluginRoot = roots.forFault(row.fault);
@@ -538,6 +540,8 @@ async function runOnHost(row, host, fixture, roots) {
   const hooks = selectHooks(hostHooks(host, roots.base), event, event === 'SessionStart' ? payload.source : payload.tool_name);
   const shell = shellFor(host);
   const env = { ...fixture.env, ...(host === 'claude' ? { CLAUDE_PLUGIN_ROOT: pluginRoot, CLAUDE_PROJECT_DIR: fixture.work } : { PLUGIN_ROOT: pluginRoot }) };
+  // Event-local fixture values only: no real session variable is read or carried between steps.
+  if (row.host_session !== undefined) env.TOOLKIT_HOST_SESSION = row.host_session === 'matching' ? payload.session_id : row.host_session === 'empty' ? '' : 'different-fixture-session';
   const before = fixture.snapshot();
   const decisions = [];
   for (const hook of hooks) {

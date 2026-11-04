@@ -37,6 +37,7 @@ test('a row with a wrong shape is refused with the reason', () => {
     [row({ fixture: { repo: { governance: 'maybe' } } }), /governance must be one of/],
     [row({ expect_by_host: { codex: { decision: 'deny' } } }), /does not run on/],
     [row({ extra: true }), /unknown key extra/],
+    [row({ host_session: 'arbitrary' }), /host_session must be one of/],
     [row({ fixture: { gate_role: 'G3' } }), /gate_role is one of G0, G1, G2/],
     [row({ fixture: { repo: { governance: 'enabled', cached_binding_store: true } } }), /cached_binding_store needs governance undecided/],
     [row({ fixture: { repo: { governance: 'enabled', owner: 'someone' } } }), /owner needs governance undecided/],
@@ -61,6 +62,11 @@ test('bounded sequences validate every preceding event and its expectation', () 
   const step = { event: 'UserPromptSubmit', payload: { prompt: 'merge owner/a#9' }, expect: { decision: 'allow' } };
   assert.deepEqual(pack.rowErrors(row({ steps: [step] })), []);
   assert.deepEqual(pack.rowErrors(row({ steps: [{ event: 'SessionStart', payload: { source: 'resume' }, expect: { decision: 'allow' } }, step] })), []);
+  for (const host_session of ['matching', 'mismatching', 'empty']) {
+    assert.deepEqual(pack.rowErrors(row({ host_session })), []);
+    assert.deepEqual(pack.rowErrors(row({ steps: [{ ...step, host_session }] })), []);
+  }
+  assert.match(pack.rowErrors(row({ steps: [{ ...step, host_session: 'arbitrary' }] })).join('\n'), /step 1: host_session/);
   for (const steps of [[], Array(25).fill(step), [{ ...step, steps: [step] }], [{ ...step, expect: { decision: 'maybe' } }], [null]]) {
     assert.notDeepEqual(pack.rowErrors(row({ steps })), [], JSON.stringify(steps));
   }
@@ -138,6 +144,7 @@ test('an expectation that changes, a removed row or a row lowered to known-bad n
     { fault: { type: 'bad-json' } },
     { event: 'PostToolUse' },
     { kind: 'parity' },
+    { host_session: 'matching' },
   ];
   for (const change of neutered) {
     const found = pack.expectationChanges([bad], [{ ...bad, ...change }]);

@@ -14,6 +14,20 @@ Only the appointed controller writes programme state (the parent and child docum
   - Codex: no documented way for a session to read its own ID was found, so Codex executors use the assisted mode until the Codex host support work qualifies one.
 - **Route proof:** the launched session reads its model and effort from session metadata before consequential work and passes them to `bind` (`--model`, `--effort`, `--route-read-back`), which records them in the journal. On Codex the lead verifies the route from the session log.
 
+### Check what a shell received
+
+This check is for Claude Code only. Codex does not deliver this variable, so `present:false` is expected there and means nothing. Revocation reads the resume hook's environment, while this check reads the tool shell, where `present:true` is the healthy result.
+
+Run `node "<installed-root>/repo/scripts/toolkit-session-shell-check.cjs"` separately through the actual Bash and PowerShell tools, replacing `<installed-root>` with the installed Toolkit folder using forward slashes. It accepts no arguments, reads only `TOOLKIT_HOST_SESSION` and `CLAUDE_CODE_SESSION_ID`, and prints only two booleans, for example `{"present":true,"equal":true}`. It reads no files, starts no process, makes no network call and grants no permission or merge authority.
+
+`present` says whether the Toolkit entry exists, including an empty entry. `equal` is true only when both entries are non-empty and identical. It compares against the shell's own session ID, which is weaker than comparing against the hook's native session ID: inherited or overwritten entries could agree.
+
+- `present:false,equal:false`: The shell has no Toolkit entry.
+- `present:true,equal:false`: The Toolkit entry is empty, the comparison ID is missing or empty, or the entries differ.
+- `present:true,equal:true`: The two non-empty shell entries agree. This alone does not establish the hook's identity or approval eligibility.
+
+Fixtures and hook-pack results prove no installed delivery. Qualification needs both booleans true in both real shells on the installed build, with build identity retained, and a repeat after a real reconnect. Until those runs, shell delivery remains unproven. A missing comparison ID, mismatch or host refusal leaves qualification incomplete. A separate installed repository with undecided governance can cause such a refusal. Missing delivery is a fault to fix. Nothing switches task auto-merge off by itself, so select Off in this app's setup until it is fixed.
+
 ## 2. Turn-end hook
 
 | | Rule |
@@ -101,6 +115,54 @@ A writing gate works only inside its own session's writable folders, so the owne
 - **Never point a chat at another folder.** A chat told to escalate its shells into a folder outside its own sends every write to Codex's automatic reviewer, which trusts only what the owner typed in that chat and rightly refuses an approval forwarded from the controller. Rewording or retrying after that refusal routes around the reviewer.
 - **Scratch:** a Codex gate keeps scratch in its worktree's ignored `.tmp/`, because a user-profile folder is outside the chat's folders.
 - **Known limit:** Codex cannot attach an existing worktree to a new chat (seen October 2026), and starting a successor from a lane branch still checked out in the old worktree is not yet qualified. Until it is, a successor continues in the old chat, or the owner approves its out-of-scope writes with Codex's native approval in the chat that asks.
+
+### Review CLI permissions
+
+The Windows review permission recipe was measured on the Codex CLI release named in the [validation strategy](VALIDATION-STRATEGY.md#review-temp-permissions), model `gpt-6.1-sol`, effort `high`, using the real authenticated Codex home with optional MCP servers disabled for that invocation. One command passed all eleven boundary and fixture checks. A later `xhigh` launch read back the same permissions and completed one targeted run: 68 of 69 tests passed; the default-root test failed before any write. The hook pack returned no result in 30 minutes. None of these measurements qualifies a complete suite.
+
+Before launch, keep a private pre-run copy of the real `config.toml` outside the grant for comparison without publishing its contents. Inspect the effective Windows backend in the real home and any selected configuration layers: `windows.sandbox` must already be `"elevated"`. Stop if it is different or cannot be verified. Never set or change it for the owner. The same-home helper comparison measured Node children and network refusal under elevated; unelevated returned child-process `EPERM` and an HTTP response. Unelevated is a network boundary failure, not a usable alternative.
+
+Prepare the launch outside any enclosing Codex sandbox:
+
+1. Use a real disposable worktree of the governed repository at the candidate commit, outside the granted temp root. A scratch folder with synthetic `.git` metadata is not the candidate: without a github.com origin it reports governance disabled, and with an undecided github.com origin it hits the governance hold and can produce an empty turn. Do not bypass that hold.
+2. Select a fresh per-run folder as the only absolute, long-form temp write grant, separate from and not an ancestor of the worktree. Never grant a shared parent such as `%USERPROFILE%\t`. Pre-create the folder with plain `mkdir` so permissions inherit. Python `tempfile.mkdtemp` makes owner-only outer folders the sandbox cannot use; an absent grant root stops sandbox startup. A temp-folder argument grants no permission. Codex leaves a lasting Modify ACL entry on the grant; after preserving evidence, delete the per-run folder at cleanup.
+3. Keep the Codex process's own startup temp folder outside the grant. Do not assume its `TEMP` reaches sandboxed commands: elevated supplied a separate agent temp folder where `mkdtemp` failed with `EPERM`. Set all three temp variables inside every review command as shown below. Keep reports outside runner-owned run folders, within the grant, and retain evidence before cleanup.
+4. Read the enabled optional MCP server names from the user config and add one invocation-only `enabled=false` override for each. Do not disable a required server; stop if a requirement conflicts. Keep managed requirements, hooks and execpolicy active. Never copy credentials to an isolated home or edit persistent config.
+5. Resolve model and effort from the explicitly pinned stack registry revision for this gate. Use the argument template below, substituting `<pinned model>`, `<pinned effort>`, actual absolute paths and server names, and send the short review prompt on stdin. Do not add `--sandbox` or `--add-dir`. Loaded legacy `sandbox_mode` settings take precedence over the named profile. Stop if a loaded configuration conflicts; do not repair host settings as part of the launch. See the [official permission guide](https://learn.chatgpt.com/docs/permissions).
+
+```text
+codex exec --json --color never -C <real-disposable-worktree> -m <pinned model> -c model_reasoning_effort="<pinned effort>" -c approval_policy="never" -c default_permissions="review-temp-qualification" -c permissions.review-temp-qualification={extends=":read-only",filesystem={"<absolute-pre-created-temp-root>"="write"},network={enabled=false}} -c mcp_servers.<name>.enabled=false -
+```
+
+Repeat the MCP override for every enabled optional server; omit it when there are none. Pass each `-c` value as one argument with the launcher's native quoting, never with literal environment macros in TOML paths. TOML paths in double-quoted strings need doubled backslashes, for example `C:\\review\\run-temp`. The qualified invocation did not use `--ephemeral`; do not claim unmeasured flag combinations. A qualification prompt runs only its probe command and prints the output, with one model session, a stated timeout and no retries.
+
+Inside the PowerShell review command, replace the root placeholder with the actual grant before invoking tests:
+
+```powershell
+$env:TEMP = '<absolute-pre-created-temp-root>'
+$env:TMP = $env:TEMP
+$env:TMPDIR = $env:TEMP
+$env:NODE_PATH = '<main-checkout>\node_modules'
+node repo/scripts/run-tests.cjs --temp-root $env:TEMP repo/tests/review-rounds-policy.test.cjs
+```
+
+`NODE_PATH` supplies the main checkout's installed dependencies to a worktree without `node_modules`; the reviewer cannot install them with source writes and networking refused. The example policy tests passed in the measured targeted run. The default-root regression in `ci-test-shards.test.cjs` fails at `realpathSync.native(os.homedir())` with `EPERM` before any write; CI or the unsandboxed launch lane owns that test. Do not widen the grant to make it pass. The runner supplies its children and nested runners with their own run folder; see [validation guidance](VALIDATION-STRATEGY.md#review-temp-permissions).
+
+The hook pack does not finish on this review route and can leave a process the sandbox cannot stop. The unsandboxed launch lane owns it: at the exact candidate SHA, set the same temp variables, run `node repo/scripts/toolkit-hook-pack.cjs run --budget-seconds <agreed-budget>`, capture the full result table and per-job CI evidence, and stop any straggler processes from outside the sandbox. The reviewer inspects that evidence and never runs the pack on this route; missing pack evidence remains a hold.
+
+Inspect native command events and `turn_context`: root reads, exactly one temp write entry and restricted command networking are the required effective permissions. The record can label the translated `sandbox_policy` as `workspace-write` with only the temp root writable; inspect the actual entries rather than interpreting that label as a source write grant. Do not switch to a broader policy to obtain a preferred label.
+
+| Check on the disposable worktree | Required result |
+| --- | --- |
+| Read source and Git metadata | Allowed |
+| Write temp files; create and remove mkdtemp fixtures and nested Node test runs | Allowed, fixtures cleaned up |
+| Create files in candidate, metadata or sibling outside the grant; overwrite source | Refused, candidate bytes unchanged |
+| HTTPS from the sandboxed command | Explicit permission denial; an HTTP response or timeout cannot pass |
+| Required targeted local tests | Results from this route for the exact candidate SHA; default-root test supplied by CI or the unsandboxed launch lane |
+| Unchanged hook pack | Unsandboxed launch lane supplies exact-SHA full table and per-job CI evidence, with straggler cleanup confirmed from outside the sandbox |
+| Real config unchanged | Launch lane compares real `config.toml` against its private pre-run copy after the run; a difference holds acceptance for investigation |
+
+Repeat affected qualification checks when the host, CLI, backend or launch changes. Helper results do not replace real exec evidence. A zero-usage empty turn is a hold to investigate, not a pass: `--json` can hide the governance hook line. Preserve native output and inspect the hold; never retry a refused command through another route. Missing results, unexpected writes or network access hold acceptance. The recipe makes no persistent host-config writes.
 
 ## 8. Lane write fences
 

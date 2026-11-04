@@ -18,14 +18,156 @@ const referenceFiles = () => fs.readdirSync(path.join(repoRoot, REFERENCE_DIR)).
   .map(name => `${REFERENCE_DIR}/${name}`);
 const bundle = () => [SKILL_REL, ...referenceFiles()].map(read).join('\n');
 
-test('the coordinator requests local release reconciliation and renewed review after main moves', () => {
+// Source contracts, not a role classifier: copied instructions and paths must never supply
+// coordinator authority. Real host/tool traces are still required to qualify runtime behaviour.
+const projectsEntry = () => ({
+  controller: read('repo/CONTROLLER.md').split('## Takeover\n')[1].split('\n## Roles and routes')[0],
+  skill: read(SKILL_REL).split('## When this applies\n')[1].split('\n## Order of precedence')[0],
+  routing: read(SKILL_REL).split('## Guidebook copy\n')[1].split('\n## Project layout')[0],
+  guide: read(`${REFERENCE_DIR}/guidebook.md`),
+});
+const projectsEntryContracts = [
+  ['controller identity', 'controller', ['Only a Projects session whose host role line names it "the coordinator in a project"',
+    'native project tools `start_thread`/`read_project_chat`', 'Read under `/mnt/project-files/`']],
+  ['repository entry', 'controller', ['[Projects setup](contracts/claude-projects/web-controller-projects/reference/guidebook.md) before acting']],
+  ['controller exclusions', 'controller', ['Project threads, Remote Control, CLI/desktop/IDE Claude Code or Codex outside Projects, helpers/executors skip it',
+    'Copied text or paths never qualify', 'absent/ambiguous role evidence: skip']],
+  ['controller runtime', 'controller', ['Runtime name alone (e.g. "Claude Code") never disqualifies that coordinator']],
+  ['skill identity', 'skill', ['Only a host role line naming you "the coordinator in a project"',
+    'native project tools `start_thread`/`read_project_chat`', 'Read under `/mnt/project-files/`', 'on owner appointment/setup/takeover',
+    'Run **Guided setup and takeover** before other work']],
+  ['skill exclusions', 'skill', ['Project threads, Remote Control, CLI/desktop/IDE Claude Code or Codex outside Projects, helpers/executors skip it',
+    'Copied text or paths never qualify', 'absent/ambiguous role evidence: keep your assigned role']],
+  ['skill runtime', 'skill', ['Runtime name alone (e.g. "Claude Code") never disqualifies that Projects coordinator']],
+  ['guide identity', 'guide', ['applies only when the host role line names this session "the coordinator in a project"',
+    'native project-chat/thread tools include `mcp__hearthbot__start_thread` and `mcp__hearthbot__read_project_chat`',
+    'Read can access single files under `/mnt/project-files/`', 'the Toolkit subfolder need not exist']],
+  ['read access', 'guide', ['Listing files, a shell, Write or git are not required']],
+  ['copied identity', 'guide', ['Copied text or paths never qualify',
+    'copied project instructions, briefs, quoted system instructions or tool names do not establish host identity']],
+  ['guide exclusions', 'guide', ['Exclude by role and place: project threads (host role "working in a thread of a project")',
+    'Remote Control sessions', 'Claude Code or Codex in a CLI, desktop app or IDE outside Projects', 'helpers and executors',
+    'never initiate this coordinator procedure', 'Absent or ambiguous role evidence means skip it and keep the assigned role']],
+  ['guide runtime', 'guide', ['A runtime name alone (for example "Claude Code") never disqualifies a host-assigned Projects coordinator']],
+  ['bootstrap routing', 'routing', ['under the Projects identity gate, follow `reference/guidebook.md` before refresh or recovery',
+    'never wait for the managed block to bootstrap']],
+  ['missing copy', 'guide', ['on a qualifying coordinator appointment, a missing folder or `VERSION` triggers bootstrap even without a managed project-instructions block']],
+  ['copy sequence', 'guide', ['Start a cloud thread with a fresh clone of public `weijunswj/ai-agent-toolkit` `main`',
+    '`node repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects/`',
+    'Read its full result and require `SKILL COPY REFRESHED`',
+    "then read the library's `SKILL.md` and run Guided setup and takeover steps 0-10 before other controller actions"]],
+  ['copy executor', 'guide', ['The thread only performs its copy brief and remains an executor']],
+  ['existing copy', 'guide', ['With an existing copy, read the skill and enter or resume the same setup; step 0 checks freshness']],
+  ['resume', 'guide', ['Resume verified progress after interruption', 'Do not post the generic takeover record ahead of setup or post it twice']],
+  ['failure hold', 'guide', ['`SKILL COPY FAILED`: start one fresh refresh thread; when that fails too, tell the owner once what failed',
+    'With no usable copy, hold takeover', 'Preserve any last usable copy and setup progress',
+    'never substitute generic takeover for guided setup']],
+  ['outside appointment', 'guide', ['Outside an appointment, a missing or failed copy keeps working from the last usable copy or the managed block and reports it']],
+];
+function assertProjectsEntry(surfaces, ids = projectsEntryContracts.map(([id]) => id)) {
+  for (const [id, surface, clauses] of projectsEntryContracts) {
+    if (!ids.includes(id)) continue;
+    for (const clause of clauses) assert.ok(surfaces[surface].includes(clause), `${id}: ${clause}`);
+  }
+}
+
+// Each G0 matrix row points to the actual instruction clauses carrying its expected outcome.
+const projectsEntryMatrix = [
+  ['qualified coordinator, missing guidebook: bootstrap, load skill, steps 0-10',
+    ['controller identity', 'repository entry', 'skill identity', 'guide identity', 'bootstrap routing', 'missing copy', 'copy sequence']],
+  ['qualified coordinator, existing guidebook: load, check freshness, resume setup', ['existing copy', 'resume']],
+  ['host-assigned Projects coordinator with a Claude Code runtime name: qualifies',
+    ['controller identity', 'controller runtime', 'skill identity', 'skill runtime', 'guide identity', 'guide runtime', 'read access']],
+  ['Claude Code in a CLI, desktop app or IDE, including one launched from a project thread: skip', ['controller exclusions', 'guide exclusions', 'copied identity']],
+  ['Codex or another controller: skip', ['controller exclusions', 'guide exclusions']],
+  ['Remote Control, cloud/project thread, helper or executor with project text: keep role', ['skill exclusions', 'guide exclusions', 'copied identity']],
+  ['executor briefed to refresh: copy only, no coordinator authority', ['copy executor', 'guide exclusions']],
+  ['path or tools without host coordinator identity: skip', ['controller identity', 'skill identity', 'guide identity', 'copied identity']],
+  ['coordinator wording only in copied text: skip', ['controller exclusions', 'copied identity']],
+  ['absent, conflicting or ambiguous host evidence: skip, retain role', ['controller identity', 'controller exclusions', 'skill exclusions', 'guide exclusions']],
+  ['qualified coordinator, refresh fails twice: hold, no generic fallback', ['failure hold']],
+  ['outside appointment, missing or failed copy: continue from last usable copy or block and report', ['outside appointment']],
+];
+for (const [scenario, contracts] of projectsEntryMatrix) {
+  test(`Projects entry contract: ${scenario}`, () => assertProjectsEntry(projectsEntry(), contracts));
+}
+
+test('Projects entry rejects removal of every required qualification, exclusion and recovery clause', () => {
+  const surfaces = projectsEntry();
+  assertProjectsEntry(surfaces);
+  for (const [id, surface, clauses] of projectsEntryContracts) {
+    for (const clause of clauses) {
+      const mutated = { ...surfaces, [surface]: surfaces[surface].split(clause).join('') };
+      assert.throws(() => assertProjectsEntry(mutated), { code: 'ERR_ASSERTION' }, `${id}: ${clause}`);
+    }
+  }
+  // Check individual boundary terms too: removing only one exclusion must fail the contract.
+  for (const [surface, terms] of [
+    ['controller', ['host role line', 'the coordinator in a project', 'native', 'start_thread', 'read_project_chat',
+      'Read under', '/mnt/project-files/', 'Project threads', 'Remote Control', 'CLI/desktop/IDE', 'outside Projects',
+      'helpers/executors', 'Copied text or paths', 'absent/ambiguous', 'never disqualifies']],
+    ['skill', ['host role line', 'the coordinator in a project', 'native', 'start_thread', 'read_project_chat',
+      'Read under', '/mnt/project-files/', 'Project threads', 'Remote Control', 'CLI/desktop/IDE', 'outside Projects',
+      'helpers/executors', 'Copied text or paths', 'absent/ambiguous', 'never disqualifies']],
+    ['guide', ['host role line', 'the coordinator in a project', 'native', 'mcp__hearthbot__start_thread',
+      'mcp__hearthbot__read_project_chat', 'Read can access single files', '/mnt/project-files/', 'never disqualifies',
+      'project threads', 'working in a thread of a project', 'Claude Code', 'Codex', 'CLI, desktop app or IDE', 'outside Projects',
+      'Remote Control', 'helpers and executors', 'quoted system instructions', 'tool names', 'ambiguous role evidence']],
+  ]) {
+    for (const term of terms) {
+      assert.ok(surfaces[surface].includes(term), term);
+      assert.throws(() => assertProjectsEntry({ ...surfaces, [surface]: surfaces[surface].split(term).join('') }),
+        { code: 'ERR_ASSERTION' }, `${surface}: ${term}`);
+    }
+  }
+});
+
+test('Projects uses the host-assigned role even when the runtime calls itself Claude Code', () => {
+  assertProjectsEntry(projectsEntry(), ['controller identity', 'controller runtime', 'skill identity', 'skill runtime',
+    'guide identity', 'guide runtime', 'read access', 'guide exclusions']);
+  // The observed coordinator can Read single files but has no shell, Write, git or directory listing.
+  // Its role and native project tools qualify it; the observed thread role must remain excluded.
+  for (const text of Object.values(projectsEntry())) {
+    assert.doesNotMatch(text, /Claude Code, Codex, other hosts|Skip in normal chats, Claude Code/);
+  }
+});
+
+test('Projects bootstrap loads the verified skill before setup and preserves generic binding duties', () => {
+  const { controller, guide } = projectsEntry();
+  const sequence = ['Start a cloud thread', 'node repo/scripts/toolkit-projects-guidebook.cjs --out',
+    'Read its full result and require `SKILL COPY REFRESHED`', "then read the library's `SKILL.md`", 'steps 0-10 before other controller actions'];
+  const bootstrap = guide.split('- **Missing folder:**')[1].split('\n- `SKILL COPY FAILED`')[0];
+  const positions = sequence.map(clause => bootstrap.indexOf(clause));
+  assert.ok(positions.every((position, index) => position >= 0 && (!index || position > positions[index - 1])));
+  assert.ok(controller.indexOf('[Projects setup]') < controller.indexOf('Appointment/relaunch/recovery:'));
+  for (const clause of ['read/bind `main` by commit/blob SHA', 'verify custody, stop old writer',
+    "post one takeover record, one line, on the parent's CURRENT when ENABLED, else in the evidence store",
+    'who, bound commit, old writer stopped, next action', 'Read back before acting', 'Continue approved scope without reapproval']) {
+    assert.ok(controller.includes(clause), clause);
+  }
+  assert.doesNotMatch(bootstrap, /work from the managed block until|once the block that carries the guidebook line arrives/);
+  assertProjectsEntry(projectsEntry(), ['failure hold', 'outside appointment']);
+});
+
+test('merging agents reconcile release versions with a computer handoff and renewed review', () => {
   const text = read(SKILL_REL);
   const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`);
-  for (const surface of [text, periodic]) {
-    assert.ok(surface.includes('node repo/scripts/toolkit-rebump-prs.cjs'));
-    assert.ok(surface.includes('--apply'));
+  const root = read('AGENTS.md');
+  const guide = read('repo/docs/changelog.d/README.md');
+  const map = read('repo/ARCHITECTURE.md');
+  for (const surface of [text, periodic, root, guide]) {
+    assert.ok(surface.includes('node repo/scripts/toolkit-rebump-prs.cjs --apply'));
     assert.match(surface, /computer lane/);
   }
+  assert.match(root, /After merging any PR in this repository, the merging agent runs/);
+  assert.match(root, /after agreeing branch custody with the current builders; without a computer, it asks a computer lane to do so/);
+  assert.match(guide, /After each merge in this repository, the merging agent runs the apply command below, or asks a computer lane to run it if it has no computer/);
+  assert.match(guide, /Agree branch custody with the current builders before applying/);
+  assert.match(periodic, /After each merge in the Toolkit repository,.*ask an available computer lane to run `node repo\/scripts\/toolkit-rebump-prs\.cjs --apply`/);
+  assert.match(periodic, /Agree custody with the current builders before applying/);
+  assert.match(periodic, /Default mode only reports/);
+  assert.match(map, /`repo\/scripts\/toolkit-rebump-prs\.cjs` \(merging agent or requested computer lane;/);
+  assert.doesNotMatch(root + guide + map, /After each merge the coordinator|coordinator requests a computer lane/);
   // The skill points at the reference; holds, offline recovery and review live there.
   assert.match(periodic, /fresh G2|full delta G2/);
   assert.match(periodic, /offline/);
@@ -99,11 +241,17 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   // Setup reads the guidebook first, refreshing it when missing or not current.
   assert.match(text, /Read the guidebook's `VERSION` \(\*\*Guidebook copy\*\* in the skill\)\./);
   assert.match(text, /the guidebook's `VERSION` line, and the next work item\./);
-  // Plugin lag: Check for updates first, then removing the plugin alone, then the marketplace re-add, then an app restart.
-  assert.match(text, /`PLUGIN BEHIND`: the Toolkit plugin on the user's claude\.ai account is more than a day behind `main`/);
-  // One plugin card where the owner reads.
-  assert.match(text, /No agent can update it: once per version, post one plugin card in the project chat with the check-in's steps/);
-  assert.match(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`\./);
+  // Genuine lag is measured against the check-in session baseline, with an explicit today fallback.
+  assert.match(text, /`PLUGIN BEHIND`: this check-in's observed Toolkit plugin copy is strictly more than 24 hours behind main as it was when this check-in's own session started/);
+  assert.match(text, /main today only when the report explicitly says "session start unavailable; comparing with main today"/);
+  assert.match(text, /No agent can update it: once per selected baseline version, post one plugin card in the project chat with the check-in's steps/);
+  assert.match(text, /Keep a genuine gap pending until a check-in verifies current, pinned or ahead/);
+  assert.match(text, /A verified `\*\*Plugin:\*\* home thread copy pinned at <date>` means its copy was current or newer at session start; post no plugin card or owner update steps/);
+  assert.match(text, /Retire an obsolete pending card, including a legacy card caused by comparing a pinned copy with main today, without claiming the account was updated/);
+  assert.match(text, /Missing copy, missing history or other unverified evidence never clears a card/);
+  assert.match(text, /A hook-change advisory is one plain note only, with no prefix, card or automatic thread rotation/);
+  assert.match(text, /confirm the account copy using a fresh session's observation against main today; an old session's pinned report cannot confirm the release reached the account/);
+  assert.doesNotMatch(text, /Keep it pending until a check-in shows `\*\*Plugin:\*\* current`/);
   assert.match(text, /Only the plugin \(two clicks\) needs the owner: no agent can update it\./);
   assert.match(text, /Post its first line to the owner every run, "nothing changed" included/);
   assert.ok(text.includes('Relay each hourly nudge run too, one line when nothing needs the owner (**Communication**).'));
@@ -205,15 +353,15 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(body, /Keep any attribution header/);
   assert.match(body, /Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort \(fallback: a fresh session per run\)/);
   assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
-  assert.ok(body.includes('- Posts: before every post, read the newest page where you post (the project chat, or your thread).'));
-  assert.ok(body.includes('Decide from the chat itself, never from a memory line.'));
+  assert.ok(body.includes('- Posts: read the newest page where you post, never memory.'));
+  assert.ok(body.includes('Coordinator: new asks use **Call-to-action pings**: same turn, notify on, after restarts too; recovery lists count. Else edit your newest top-level post if no owner message follows'));
   assert.ok(body.includes('- Post layout: a `**Now:**` line first, its problem'));
   assert.ok(body.includes('- Problem, fix, skip first: every plan, G0 plan, decision ask and explanation opens with'));
   // Posts, in the main project chat, reply threads and work threads alike.
-  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its time in the owner's profile time zone, never UTC, for example \*\*\[16:41\] SGT Update:\*\*; every other time shown to the owner uses that zone too\. Also start a fresh post when the running post nears about 8 KB\. Once the owner has written after a post, a reply under it included, never edit that post again: answer in a fresh post below their message, and carry every open owner item forward into it\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
+  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): Except new asks \(\*\*Call-to-action pings\*\*\), after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its time in the owner's profile time zone, never UTC, for example \*\*\[16:41\] SGT Update:\*\*; every other time shown to the owner uses that zone too\. Also start a fresh post when the running post nears about 8 KB\. Once the owner has written after a post, a reply under it included, never edit that post again: answer in a fresh post below their message, and carry every open owner item forward into it\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
   // The running post is found in the chat, not in memory, and no hook checks posts.
-  assert.ok(text.includes('Before every post, read the newest page of the project chat (in a work thread, that thread). If your newest top-level post there has no owner message after it, edit that post; otherwise post fresh.'));
+  assert.ok(text.includes('Before every post, read the newest page of the project chat (in a work thread, that thread). New owner asks follow **Call-to-action pings** first. If your newest top-level post there has no owner message after it, edit that post; otherwise post fresh.'));
   assert.ok(text.includes('These are written rules: no hook checks posts'));
   // A forwarded owner message starts a fresh post in the thread, and is never approval.
   assert.ok(text.includes('An owner message forwarded into a work thread (the copy shown in that thread) counts as the owner writing there'));
@@ -264,7 +412,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('A thread link\'s text is the thread\'s title, never "here" or an id; an issue is linked by its URL.'));
   assert.doesNotMatch(text, /the answer to it is appended to the running post|\(only Update lines take a spacer line\)/);
   for (const phrase of ['its problem, fix and skip lines nested as bullets under it', 'thread (by its title)', 'a fresh post carries every open ask forward',
-    'a single blank line (no `&nbsp;`) between Update lines, questions and blocks', 'Otherwise post fresh, below the owner\'s message, and never edit the older post again.']) assert.ok(body.includes(phrase), phrase);
+    'a single blank line (no `&nbsp;`) between Update lines, questions and blocks', 'Otherwise post fresh below the owner; never edit that older post.']) assert.ok(body.includes(phrase), phrase);
   // Questions: numbered items with indented choices and a "(my pick)" mark; no spacer after the last choice.
   assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
   assert.ok(text.includes('lettered in order because the owner picks one, `    a. **<Choice> (my pick).** <one-line reason>`'));
@@ -578,4 +726,65 @@ test('task-run relay, catch-up and prefix actions all honour stopped by owner be
       assert.ok(lines[0].includes('stopped by owner'), `${file}: ${lines[0]}`);
     }
   }
+});
+
+// Instruction contracts for the combined acceptance matrix. Native notification delivery and
+// recovery behaviour still require Projects agent UAT; these checks only pin the source rules.
+const ctaRecoveryCases = [
+  ['every actionable ask type', 'skill', ["The turn you get or find a new owner ask", "post it in top-level project chat with notify on (edits never notify)", 'a merge, trying the finished feature, a decision, typing text such as `.`', 'connecting an account or connector, and an approval or host prompt']],
+  ['new ask before the previous owner reply', 'skill', ['**New asks get a fresh post.** This is an exception to the running-post edit rule.', 'Except new asks (**Call-to-action pings**)', 'a fresh notifying post required by **Call-to-action pings**']],
+  ['asks discovered together', 'skill', ['Combine asks discovered together', 'Carry every still-open owner item into the fresh post', 'link its originating thread by its exact title and say what to tap or type']],
+  ['another ask after posting', 'skill', ['a further new ask discovered after that post needs its own notifying post']],
+  ['routine status without a new ask', 'skill', ['Routine updates and repeated observations of the same ask follow the normal edit rule', 'Except new asks (**Call-to-action pings**)', 'New owner asks follow **Call-to-action pings** first.']],
+  ['fresh coordinator finds an unrelayed ask', 'skill', ['never wait for the nudge. Read `reference/owner-asks.md` first, and on any restart or context reset', 'On the first successful turn of a fresh coordinator', 'Ping an actionable ask that never reached project chat under this rule, even if it predates the restart']],
+  ['rediscovered relayed ask', 'periodic', ['Do not repeat an already confirmed ping; keep its unfinished owner step on the pending list']],
+  ['older ask behind an unrelated post', 'nudge', ['also check older asks absent from later relays', 'A newer unrelated post or a thread-title link without the ask does not prove relay']],
+  ['thread link without its ask', 'periodic', ['Reconcile the actual ask, not just the source thread or post times']],
+  ['unfinished build or review', 'skill', ['work still being built, reviewed or otherwise not ready for them stays off the list until it is']],
+  ['failed or uncertain posting', 'skill', ['Read back a successful post before treating the ask as relayed', 'If posting or notification status is uncertain, inspect chat and the host response before retrying', 'Never claim the owner was notified merely because text was edited or a tool call was attempted']],
+  ['missing notification metadata', 'nudge', ['"notification unverified"', 'do not infer notification from an edit timestamp']],
+  ['two resumable lanes together', 'skill', ['Put every confirmed resumable lane needing owner input in one combined **Waiting on you** list', 'Link each thread by its title', 'Complete the sweep before posting where possible; never send one recovery announcement per lane']],
+  ['timer owner and nudge repeat recovery', 'device', ['Keep one entry for the interruption in the existing promise list', 'Reuse it across timer wakes, owner messages and periodic reports', 'Repeated observations do not create another recovery announcement']],
+  ['another lane later becomes resumable', 'device', ['If another lane becomes resumable later, it is a new owner step under **Call-to-action pings**', 'carry forward the complete outstanding recovery list in that notifying post']],
+  ['one lane resumes', 'device', ['Mark a lane resumed only after current status or activity confirms it, it finishes, or an explicit owner decision disposes of it']],
+  ['same lanes interrupted again', 'device', ['A new observed interruption starts a new entry']],
+  ['finished superseded resolved cloud or working lane', 'device', ['Skip finished, superseded, resolved, cloud and already-working lanes']],
+  ['device or prerequisite unavailable', 'device', ['Separate sessions still waiting for a device or another prerequisite from resumable sessions needing owner input']],
+  ['missing session or failed incomplete inventory', 'device', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success', 'reads one thread per call by `thread_id`', 'an active session that is not connected or served is the usual parked case']],
+  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 4 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
+  ['quiet run finds a missed ask', 'nudge', ['2a. Owner asks (runs every time, including the no-change path)', 'UNRELAYED ASK: <n> | ']],
+  ['reaction without required native action', 'nudge', ['An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']],
+  ['resume while approval is held', 'skill', ['type anything, such as `.`', 'Typing text resumes conversation; it grants no approval for held work']],
+  ['owner stopped the nudge', 'periodic', ['preserving its schedule, bound home thread, recorded raises and any `stopped by owner` entry']],
+  ['recovery check without being asked', 'device', ['On the first successful wake after a recorded interruption', 'never wait for the owner to request the reminder']],
+  ['no new ask or confirmed resumable lane', 'skill', ['a new owner ask', 'every confirmed resumable lane needing owner input']],
+  ['parked status is not proof of recovery', 'device', ['A gap or a parked status alone does not prove that a device or usage limit recovered']]
+];
+for (const [name, surface, required] of ctaRecoveryCases) {
+  test(`CTA and recovery source contract: ${name}`, () => {
+    const text = surface === 'skill' ? read(SKILL_REL) + read(`${REFERENCE_DIR}/owner-asks.md`) : read(surface === 'device' ? `${REFERENCE_DIR}/device-work.md` : surface === 'nudge'
+      ? 'repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md'
+      : `${REFERENCE_DIR}/periodic-runs.md`);
+    for (const phrase of required) assert.ok(text.includes(phrase), phrase);
+  });
+}
+
+test('recovery reports stay observational and both periodic findings route to the shared rules', () => {
+  const skill = read(SKILL_REL) + read(`${REFERENCE_DIR}/owner-asks.md`);
+  const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`);
+  const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
+  assert.doesNotMatch(skill + periodic + nudge + read(`${REFERENCE_DIR}/device-work.md`), /type `continue`/);
+  for (const phrase of ['`UNRELAYED ASK`', 'follow **Call-to-action pings** in SKILL.md in this turn',
+    '**Remote Control recovery findings:** follow **Remote Control wake** in SKILL.md in this turn',
+    'Combine the report with the other affected lanes and the existing recovery entry',
+    'not a separate reminder per lane or proof that every device and usage limit recovered']) assert.ok(periodic.includes(phrase), phrase);
+  const device = read(`${REFERENCE_DIR}/device-work.md`);
+  assert.ok(read(SKILL_REL).includes('follow **Recovery sweep** in `reference/device-work.md`'));
+  assert.ok(read(SKILL_REL).includes('Read `reference/owner-asks.md` first, and on any restart or context reset'));
+  for (const phrase of ['## Recovery sweep', 'never claim an exact reset time or a working lane without evidence',
+    'After context loss or uncertain posting, reconcile chat and thread status before posting again',
+    'Keep outstanding wake steps in ordinary hourly reminders']) assert.ok(device.includes(phrase), phrase);
+  for (const phrase of ['A materially changed action or target is a new ask; rewording or rediscovering the same step is not',
+    'A reply or reaction does not complete an outstanding native step']) assert.ok(skill.includes(phrase), phrase);
+  assert.ok(nudge.includes('This task never wakes lanes, posts a separate recovery announcement or edits the coordinator'));
 });

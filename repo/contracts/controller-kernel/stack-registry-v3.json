@@ -75,6 +75,43 @@
           "reasoning": "xhigh"
         }
       ]
+    },
+    "owner-mixed": {
+      "routes": {
+        "DISCOVERY": {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoning": "high"
+        },
+        "DISCOVERY_HELPER": {
+          "provider": "openai",
+          "model": "gpt-6-luna",
+          "reasoning": "max"
+        },
+        "BUILDER": {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoning": "high"
+        },
+        "BUILDER_HELPER": {
+          "provider": "openai",
+          "model": "gpt-6-luna",
+          "reasoning": "max"
+        },
+        "DESIGN_CHALLENGE": {
+          "provider": "openai",
+          "model": "gpt-6.1-sol",
+          "reasoning": "xhigh"
+        }
+      },
+      "reviewers": [
+        {
+          "reviewer_id": "opus",
+          "provider": "anthropic",
+          "model": "opus-5.5",
+          "reasoning": "xhigh"
+        }
+      ]
     }
   }
 }

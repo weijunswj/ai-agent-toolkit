@@ -118,7 +118,8 @@ test('edit shows real values; a save changes, adds and removes keys, and done re
   const { run, paths, store, helpers, asked } = harness(t, { values: { X1_TEST_KEPT_KEY: kept, X1_TEST_CHANGED_KEY: old, X1_TEST_GONE_KEY: gone }, answers: ['yes'] });
   const opened = await run('edit');
   assert.equal(opened.code, 0);
-  assert.match(opened.stdout, /Opened ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-[0-9a-f]{16}\.env with your 3 keys/);
+  assert.match(opened.stdout, /Opening ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-[0-9a-f]{16}\.env with your 3 keys\./);
+  assert.match(opened.stdout, /If no window appears, open that file yourself\./);
   const file = editFile(paths);
   assert.deepEqual(helpers, [file], 'the helper gets the file path only');
   const text = fs.readFileSync(file, 'utf8');
@@ -180,7 +181,7 @@ test('a second edit builds a fresh file from the store and wipes the old one, wh
   store.writeAll(new Map([['X1_TEST_KEPT_KEY', changed]]));
   await run('remove', 'X1_TEST_GONE_KEY');
   const reopened = await run('edit');
-  assert.match(reopened.stdout, /^Opened /m);
+  assert.match(reopened.stdout, /^Opening ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-[0-9a-f]{16}\.env with your 1 key\./m);
   assert.doesNotMatch(reopened.stdout, /Reopened/);
   const second = editFile(paths);
   assert.notEqual(second, first);
@@ -1622,7 +1623,7 @@ test('every end of an edit says to close the tab, in words for the app it opened
     });
     const edit = await h.run('edit');
     assert.deepEqual(opened, [{ program, name }], 'the opener gets the app found');
-    if (name === 'code.exe') assert.match(edit.stdout, /with your 1 key in a new VS Code window\./);
+    if (name === 'code.exe') assert.match(edit.stdout, /Opening ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-[0-9a-f]{16}\.env with your 1 key in a new VS Code window\. If no window appears, open that file yourself\./);
     if (!name) assert.match(edit.stdout, /If Windows asks which app to use, pick your editor for \.env files\./);
     assert.equal(editState(h.paths).app, name, 'only the program file name is kept');
     const done = await h.run('apply');
@@ -1753,8 +1754,8 @@ test('edit closure matrix: every state and event ends as the plan says', async (
     E3: async (h) => { await h.run('edit'); const older = editFile(h.paths); await h.run('edit'); fs.writeFileSync(older, `X1_TEST_KEPT_KEY=${sentinel()}\n`); },
   };
   const rows = [
-    ['E0', 'edit', { files: 1, out: /^Opened /m }],
-    ['E1', 'edit', { files: 1, out: /^Opened /m }],
+    ['E0', 'edit', { files: 1, out: /^Opening ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-[0-9a-f]{16}\.env with your 1 key\./m }],
+    ['E1', 'edit', { files: 1, out: /^Opening ~\/\.ai-agent-toolkit\/env\/edit\/env-edit-[0-9a-f]{16}\.env with your 1 key\./m }],
     ['E2', 'edit', { files: 1, out: /Closed your env edit 30 minutes after its last save/ }],
     ['E3', 'edit', { files: 1, out: /An older Toolkit env tab was saved and ignored/ }],
     ['E1', 'save', { files: 1, applied: true }],

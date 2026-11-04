@@ -39,8 +39,9 @@ Last reviewed against `main` `389c1c0608938da3ee3387adbe9235e2ef45784b`.
 | Helper route guard and adapter | `repo/scripts/toolkit-v3-helper-guard.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter.cjs` (shared core), `repo/scripts/toolkit-v3-native-helper-adapter-claude.cjs`, `repo/scripts/toolkit-v3-native-helper-adapter-codex.cjs` |
 | Claude helper agents | `repo/scripts/toolkit-claude-helper-agents.cjs`, `repo/scripts/toolkit-claude-helper-spec.cjs`, `repo/scripts/toolkit-claude-task-session.cjs` |
 | Version bump | `repo/scripts/bump-version.cjs` (`--next patch\|minor\|major`; folds notes from `repo/docs/changelog.d/`) |
-| Reconcile open release branches after main moves | `repo/scripts/toolkit-rebump-prs.cjs` (coordinator requests a computer lane; report by default, `--apply` prepares and fast-forwards eligible branches) |
+| Reconcile open release branches after main moves | `repo/scripts/toolkit-rebump-prs.cjs` (merging agent or requested computer lane; report by default, `--apply` prepares and fast-forwards eligible branches) |
 | Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
+| Shell session check (two booleans, no authority) | `repo/scripts/toolkit-session-shell-check.cjs`; meaning and installed-shell qualification in the [host contract](docs/HOST-CONTRACT.md#check-what-a-shell-received) |
 | Leftover worktrees and merged branches (read-only list) | `repo/scripts/workspace-residue-report.cjs` |
 | Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |

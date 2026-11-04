@@ -22,7 +22,7 @@ node repo/scripts/bump-version.cjs --next major
 - **Projects skill Version date:** the date is today's date in UTC, so a merge in the early morning east of UTC may carry the previous day's date.
 ## When main moves
 
-After each merge the coordinator asks an available computer lane to run:
+After each merge in this repository, the merging agent runs the apply command below, or asks a computer lane to run it if it has no computer:
 
 ```text
 node repo/scripts/toolkit-rebump-prs.cjs

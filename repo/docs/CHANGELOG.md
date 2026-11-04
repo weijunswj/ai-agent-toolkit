@@ -1,5 +1,78 @@
 # Toolkit Changelog
 
+## 3.46.0
+
+### Added
+
+- A small Claude Code shell session check prints only whether the Toolkit session entry exists and whether it equals the shell's own non-empty session ID. It grants no authority; installed delivery still needs checks in both real shells. Missing delivery needs fixing and does not switch task auto-merge off; select Off in this app's setup until fixed. Codex does not deliver the variable, so its absent result is expected.
+
+### Fixed
+
+- Merge guidance offers typing in a fresh eligible chat, while reconnected and revoked chat reasons offer only the other approval routes.
+
+## 3.45.1
+
+### Fixed
+
+- Keep standing task auto-merge for a user-started Claude session reconnecting with the same session ID when the resume has no inherited host-session variable. Codex and unknown-host reconnects need explicit approval: in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub. Typing in a reconnected or revoked chat records no approval. A resume carrying the variable revokes standing for that session ID, including after later starts without it. Repeated startup events and failed mark replacements cannot clear recorded restrictions. A clear under a new ID has no standing origin but accepts a typed merge because its mark is not resumed.
+- Refuse direct runs of Codex's session-start script and common commands that feed a session-start event to Toolkit's hook scripts. Refuse direct host-session variable clears through PowerShell's environment path and environment API, export and declare flags, assignments and unset commands. Refuse env's empty-environment flags only on commands starting Claude or Codex; ordinary searches, messages and tests remain allowed.
+- Name the failed standing merge check in refusals and provide a read-only merge check through the session's hook context without consuming approval. A terminal check names its missing native session context before app preferences.
+
+## 3.45.0
+
+### Added
+
+- Show Projects owners one linked list of Remote Control threads needing text to resume after recovery.
+
+### Fixed
+
+- Notify Projects owners in the same turn when a new actionable ask arrives, including after a coordinator restart, with hourly checks for missed asks.
+
+## 3.44.3
+
+### Fixed
+
+- Fresh Claude Projects coordinators automatically bootstrap their guidebook and guided setup on appointment, only when the host identifies the top-level coordinator and provides native project tools and library access. Other hosts and executor threads keep their assigned roles, and failed bootstrap holds takeover.
+
+## 3.44.2
+
+### Fixed
+
+- Correct Windows Codex review guidance for pinned model and effort, worktree dependencies, per-run temp grants and measured limits; assign hook-pack evidence and cleanup to the unsandboxed launch lane, and restore the shared-record rule for project memory.
+- Document the qualified Windows Codex review launch with read-only source, one pre-created writable temp root and network refusal. Require an already elevated backend and set temp variables inside review commands. Keep required suite and hook-pack evidence separate from permission qualification; add explicit-root nested runner and grandchild cleanup coverage.
+
+## 3.44.1
+
+### Fixed
+
+- Git folders without a github.com origin now report governance DISABLED automatically. Missing origins, multiple origin URLs and other hosts no longer hold prompts or ordinary tools for an acknowledgement.
+- Removed the non-GitHub acknowledgement store, reply-ticket branches and recovery instructions. Existing acknowledgement files remain inert and untouched; adding a GitHub origin starts the normal governance question.
+
+## 3.44.0
+
+### Added
+
+- Select `owner-mixed` for GPT discovery and building, Luna Max helpers and one Opus review. Adoption of a new captured registry revision is deliberate; existing selections retain their original capture.
+- Mixed selection does not supply automated cross-host gate launches. Use Codex for GPT discovery and building and a fresh human-opened Claude session for Opus review of the same candidate, scope and evidence, without helpers.
+
+## 3.43.3
+
+### Fixed
+
+- Daily check-ins compare the plugin copy with main when their own session started, keeping genuine lag alerts while avoiding false plugin cards for pinned copies. Reports retain an explicit fallback when session time is unavailable and one advisory when newer hook definitions or entry scripts changed.
+
+## 3.43.2
+
+### Fixed
+
+- Make every merging agent responsible for reconciling open Toolkit versions after a merge, using a computer lane when needed.
+
+## 3.43.1
+
+### Fixed
+
+- Env editing now says the editor is opening and tells you to open the file yourself if no window appears.
+
 ## 3.43.0 (hook review leftovers)
 
 ### Changed
