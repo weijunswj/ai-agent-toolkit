@@ -47,7 +47,7 @@ function manualClaudeRoot({ rootModel, rootEffort, environment = {} }) {
   } };
 }
 
-function manualMixedCodexRoot({ rootModel, rootReasoning }) {
+function manualProjectsStackCodexRoot({ rootModel, rootReasoning }) {
   const captured = capturedStack('claude-projects-stack'), dispatches = [], state = hostState('codex_spawn_agent', captured);
   const actualRootRoute = Object.freeze({ model:rootModel, reasoning:rootReasoning });
   const adapter = createNativeHelperAdapter({ source_capture:captured.source_capture, selection:captured.selection,
@@ -257,7 +257,7 @@ test('synthetic Projects stack G2 requests cannot delegate through either host g
 test('synthetic human-opened Projects stack Codex root choices remain advisory while the helper stays exact', async () => {
   const recommended = { provider:'openai', model:'gpt-6.1-sol', reasoning:'high' };
   for (const [rootModel, rootReasoning] of [['gpt-6.1-sol', 'low'], ['gpt-6-luna', 'max']]) {
-    const root = manualMixedCodexRoot({ rootModel, rootReasoning });
+    const root = manualProjectsStackCodexRoot({ rootModel, rootReasoning });
     assert.deepEqual(root.captured.selection.routes.BUILDER, recommended);
     assert.deepEqual(root.actualRootRoute, { model:rootModel, reasoning:rootReasoning }, 'synthetic actual route chosen by the human');
     const result = await root.invoke();

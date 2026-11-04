@@ -31,3 +31,11 @@ test('actual bootstrap consumer references exact Controller and version-bound re
 test('the Architecture file is a pointer-only map, and the bootstrap no longer pins it',()=>{
  const architecture=fs.readFileSync(path.join(root,'repo/ARCHITECTURE.md'),'utf8');assert.match(architecture,/^# Toolkit Repository Map/);assert.doesNotMatch(architecture,/sole source of concrete model|Every selected required reviewer|selected native qualification bindings are/);const registry=JSON.parse(fs.readFileSync(path.join(root,'repo/contracts/controller-kernel/stack-registry-v3.json')));for(const p of Object.values(registry.profiles))for(const r of [...Object.values(p.routes),...p.reviewers])if(r)assert.equal(architecture.includes(r.model),false);const skill=fs.readFileSync(path.join(root,'skills/controller-bootstrap/SKILL.md'),'utf8');assert.doesNotMatch(skill,/ARCHITECTURE.md/);
 });
+
+test('route proof still refuses a headless run and coordinators never take a gate verdict', () => {
+  const body = current(document);
+  assert.match(body, /never self-report or a headless run/);
+  assert.match(body, /Exception: the gatekeeper may start the other harness's gate through that tool's CLI/);
+  assert.match(body, /Coordinators\/non-gate threads relay, never take a gate's verdict\./);
+  assert.doesNotMatch(body, /relay, never judge\./);
+});

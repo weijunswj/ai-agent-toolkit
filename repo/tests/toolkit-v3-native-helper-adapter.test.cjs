@@ -28,7 +28,7 @@ function fixture(entry_id) {
   return { captured,adapter,event,route,dispatches,get state(){return state},set state(s){state=s},set observe(fn){observe=fn} };
 }
 
-function ownerMixedCodexAdapterFixture() {
+function projectsStackCodexAdapterFixture() {
   const entry_id = 'codex_spawn_agent', captured = capturedStack('claude-projects-stack'), dispatches = [];
   const helperRoute = captured.selection.routes.BUILDER_HELPER;
   const state = { state:'ready', host_version:'synthetic manual-route observation (not native qualification)',
@@ -46,7 +46,7 @@ function ownerMixedCodexAdapterFixture() {
   return { captured, adapter, event, dispatches, get state(){return state}, set state(s){Object.assign(state,s)} };
 }
 
-function ownerMixedClaudeNativeFixture(provider) {
+function projectsStackClaudeNativeFixture(provider) {
   const entry_id = 'claude_parent_agent', captured = capturedStack('claude-projects-stack'), helperIdentity = 'ai-agent-toolkit:g1-helper';
   const toolInput = { subagent_type:helperIdentity };
   const binding = { helper_identity:helperIdentity,
@@ -292,7 +292,7 @@ test('synthetic captured profiles resolve exact helper definitions only on match
 });
 
 test('synthetic Projects stack adapter enforces the captured Codex helper route and refuses profile or digest drift', async () => {
-  const accepted = ownerMixedCodexAdapterFixture();
+  const accepted = projectsStackCodexAdapterFixture();
   const allowed = await accepted.adapter.invoke(accepted.event);
   assert.equal(allowed.decision, 'ALLOW', allowed.code);
   assert.deepEqual(accepted.dispatches[0].route, accepted.captured.selection.routes.BUILDER_HELPER);
@@ -305,7 +305,7 @@ test('synthetic Projects stack adapter enforces the captured Codex helper route 
     }],
   ];
   for (const [label, mutate] of driftCases) {
-    const f = ownerMixedCodexAdapterFixture();
+    const f = projectsStackCodexAdapterFixture();
     const state = clone(f.state);
     mutate(state);
     f.state = state;
@@ -315,13 +315,13 @@ test('synthetic Projects stack adapter enforces the captured Codex helper route 
     assert.equal(f.dispatches.length, 0, `${label}: refuse before dispatch`);
   }
 
-  const claude = ownerMixedClaudeNativeFixture('anthropic');
+  const claude = projectsStackClaudeNativeFixture('anthropic');
   const claudeRoute = await claude.invoke();
   assert.equal(claudeRoute.decision, 'DENY', claudeRoute.code);
   assert.equal(claudeRoute.code, 'ROUTE_MISMATCH', 'the native observer reconstructs the effective Anthropic route');
   assert.equal(claude.dispatches.length, 0, 'Claude Code must refuse the captured mixed OpenAI helper route');
 
-  const forgedProvider = ownerMixedClaudeNativeFixture('openai');
+  const forgedProvider = projectsStackClaudeNativeFixture('openai');
   const unverified = await forgedProvider.invoke();
   assert.equal(unverified.decision, 'DENY', unverified.code);
   assert.equal(unverified.code, 'CLAUDE_EFFECTIVE_CONFIG_UNVERIFIED');
