@@ -6,7 +6,7 @@ const clone=x=>JSON.parse(JSON.stringify(x));
 
 test('mixed Claude qualification task profiles refuse GPT helpers for both lead roles',()=>{
  for(const role of ['G0','G1'])assert.throws(()=>task.createTaskSessionProfile({
-  ...capturedStack('owner-mixed'),control_root:path.join(os.tmpdir(),'synthetic-mixed-profile'),
+  ...capturedStack('claude-projects-stack'),control_root:path.join(os.tmpdir(),'synthetic-mixed-profile'),
   cwd:path.resolve(__dirname,'../..'),session_id:'synthetic-mixed-parent',role
  }),{code:'NATIVE_HELPER_ROUTE_UNSUPPORTED'});
 });

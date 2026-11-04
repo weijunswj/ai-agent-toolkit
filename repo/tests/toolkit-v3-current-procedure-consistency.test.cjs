@@ -124,20 +124,21 @@ test('documented reviewer cardinalities are derived from the pinned registry', (
 test('every documented profile row projects the registry routes and complete reviewer roster', () => {
   const registry = JSON.parse(read('repo/contracts/controller-kernel/stack-registry-v3.json'));
   const delivery = read('repo/docs/TOOLKIT-DELIVERY.md');
-  const names = { 'gpt-6.1-sol': 'Sol 6.1', 'gpt-6-luna': 'Luna', 'opus-5.5': 'Opus 5.5', 'haiku-5.5': 'Haiku 5.5' };
-  const efforts = { high: 'High', xhigh: 'XHigh', max: 'Max' };
+  const names = { 'gpt-6.1-sol': 'Sol 6.1', 'gpt-6-luna': 'Luna', 'opus-5.5': 'Opus 5.5', 'haiku-5.5': 'Haiku 5.5', 'sonnet-5.5': 'Sonnet 5.5' };
+  const efforts = { medium: 'Medium', high: 'High', xhigh: 'XHigh', max: 'Max' };
   const label = route => {
     assert.ok(names[route.model], `document the display name for ${route.model}`);
     assert.ok(efforts[route.reasoning], `document the effort for ${route.reasoning}`);
     return `${names[route.model]} ${efforts[route.reasoning]}`;
   };
-  const rows = delivery.split('\n').filter(line => /^\| `owner-/.test(line));
+  const rows = delivery.split('\n').filter(line => /^\| `(owner-|claude-projects-)/.test(line));
   assert.equal(rows.length, Object.keys(registry.profiles).length);
   for (const [id, profile] of Object.entries(registry.profiles)) {
     assert.deepEqual(profile.routes.DISCOVERY, profile.routes.BUILDER);
     assert.deepEqual(profile.routes.DISCOVERY_HELPER, profile.routes.BUILDER_HELPER);
     assert.equal(profile.reviewers.length, 1);
-    const expected = `| \`${id}\` | ${label(profile.routes.DISCOVERY)} | ${label(profile.routes.DISCOVERY_HELPER)} | ${label(profile.routes.DESIGN_CHALLENGE)} | One ${label(profile.reviewers[0])} review |`;
+    const gatekeeper = profile.routes.GATEKEEPER ? label(profile.routes.GATEKEEPER) : 'None';
+    const expected = `| \`${id}\` | ${gatekeeper} | ${label(profile.routes.DISCOVERY)} | ${label(profile.routes.DISCOVERY_HELPER)} | ${label(profile.routes.DESIGN_CHALLENGE)} | One ${label(profile.reviewers[0])} review |`;
     assert.equal(rows.filter(row => row === expected).length, 1, expected);
   }
 });
