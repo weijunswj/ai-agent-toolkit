@@ -254,7 +254,9 @@ class GitHubProposalTransport {
     return permissions.push;
   }
   state(repository, number, { deadline }) {
-    return JSON.parse(this.#run(['api', `repos/${repository}/pulls/${number}`, '--jq', '.state'], undefined, { deadline }));
+    const state = this.#run(['api', `repos/${repository}/pulls/${number}`, '--jq', '.state'], undefined, { deadline }).trim();
+    if (!['open', 'closed'].includes(state)) fail('PROPOSAL_GITHUB_UNAVAILABLE');
+    return state;
   }
   // Walk only the root and .github trees, retaining the regular-file check without enumerating the repository.
   #bindingEntry(repository, treeSha) {

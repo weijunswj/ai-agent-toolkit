@@ -99,9 +99,9 @@ function parseSymref(text) {
 // at `hooksDir`, an empty folder the refresh owns, so no repository hook can move the tracking ref,
 // and the ref must then be the commit the remote itself reported.
 function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, deadline = null, expectedRemote = null, hooksDir = null, environment = process.env } = {}) {
-  const git = args => {
+  const git = (args, commandDeadline = deadline) => {
     try {
-      const remaining = deadline === null ? timeout : Math.min(timeout, deadline - Date.now());
+      const remaining = commandDeadline === null ? timeout : Math.min(timeout, commandDeadline - Date.now());
       if (remaining <= 0) throw new Error('read budget exhausted');
       return runGit(args, { cwd: root, timeout: remaining });
     } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
@@ -128,7 +128,7 @@ function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_
   const tracking = `refs/remotes/origin/${branch}`;
   const started = Date.now();
   const fetched = git(['-c', `core.hooksPath=${hooksDir}`, 'fetch', '--no-tags', '--no-recurse-submodules', 'origin', `+refs/heads/${branch}:${tracking}`]);
-  if (fetched.status === null) removeKilledFetchLock(git, root, tracking, started);
+  if (fetched.status === null) removeKilledFetchLock(args => git(args, null), root, tracking, started);
   if (fetched.status !== 0) return { status: 'unknown', error: 'fetch-failed' };
   const head = git(['rev-parse', '--verify', '--quiet', `${tracking}^{commit}`]);
   const commit = head.status === 0 ? head.stdout.toString('utf8').trim() : '';

@@ -564,7 +564,7 @@ function governanceState(cwd, options = {}) {
 }
 
 // Refreshes this computer's cache of the merged binding for the repository at cwd (`toolkit
-// governance status` and the session-start hook only). Never throws; returns
+// governance status`, session start, or a prompt after a known proposal closes). Never throws; returns
 // { refreshed, error }. Nothing to refresh outside a github.com repository.
 // With TOOLKIT_GOVERNANCE_OFFLINE=1 (set for test runs), or for a test registry, nothing reads the
 // network unless a git runner is passed in: the last read stays, so governed effects hold once it is

@@ -376,21 +376,33 @@ for (const closed of ['merged', 'unmerged']) test(`next prompt after ${closed} c
   assert.equal(f.owner.pending(f.cwd, run), null);
 });
 
-for (const delayMs of [0, 15000]) test(`real prompt runner: ${delayMs ? 'slow GitHub times out with a note' : 'open PR uses one state read'}, throttled across chats`, t => {
+test('real PR-state runner accepts only bare open or closed, with surrounding whitespace trimmed', t => {
+  for (const state of ['open', 'closed', '"open"', '"closed"', 'merged', 'OPEN', '', null, {}, ['open'], true, 1]) {
+    const f = fixture(t), github = fakeGitHub(f, { pr: { state } });
+    const read = () => github.transport.state('example-owner/example-repo', 1, { deadline: Date.now() + 3000 });
+    if (state === 'open' || state === 'closed') assert.equal(read(), state);
+    else assert.throws(read, /PROPOSAL_GITHUB_UNAVAILABLE/, JSON.stringify(state));
+  }
+});
+
+for (const { state, delayMs } of [{ state: 'open', delayMs: 0 }, { state: 'closed', delayMs: 0 }, { state: 'open', delayMs: 15000 }]) test(`real prompt runner: ${delayMs ? 'slow GitHub times out with a note' : `${state} PR uses one state read`}, throttled across chats`, t => {
   const f = fixture(t, { list: () => [proposal()] });
   f.owner.refresh(f.cwd);
-  const github = fakeGitHub(f, { pr: { state: 'open' }, delayMs });
+  const github = fakeGitHub(f, { pr: { state }, delayMs });
   let refreshes = 0;
   const options = { registryOptions: f.registryOptions, environment: {}, proposalTransport: github.transport,
-    refreshBinding() { refreshes++; throw Error('open proposals never refresh the branch'); } };
+    refreshBinding() { refreshes++; seedMerged(f.cwd, 'disable', f.options); } };
   const started = performance.now();
   const result = new gate.PromptHold(options).decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'merge 1' });
   assert.ok(performance.now() - started < 5000, 'prompt remains well inside the host ten-second limit');
   assert.equal(result.action, 'pass');
-  assert.match(result.context, delayMs ? /couldn't check/ : /merge this pull request now/);
-  assert.equal(refreshes, 0);
+  if (state === 'closed') assert.doesNotMatch(JSON.stringify(result), /couldn't check|merge this pull request now/);
+  else assert.match(result.context, delayMs ? /couldn't check/ : /merge this pull request now/);
+  assert.equal(refreshes, state === 'closed' ? 1 : 0);
   const second = new gate.PromptHold(options).decide({ cwd: f.cwd, sessionId: 'other', prompt: 'Continue' });
   assert.equal(second.action, 'pass');
+  if (state === 'closed') assert.doesNotMatch(JSON.stringify(second), /couldn't check|merge this pull request now/);
+  assert.equal(refreshes, state === 'closed' ? 1 : 0, 'closure refreshes the branch exactly once');
   const calls = github.read().calls;
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].args, ['api', 'repos/example-owner/example-repo/pulls/1', '--jq', '.state']);

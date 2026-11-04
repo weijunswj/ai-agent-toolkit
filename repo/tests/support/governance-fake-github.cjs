@@ -54,4 +54,4 @@ else throw Error(`Unexpected offline GitHub call: ${args.join(' ')}`);
 fs.writeFileSync(file, JSON.stringify(state));
 if (state.delayMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, state.delayMs);
 if (missing) { fs.writeSync(2, '(HTTP 404)'); process.exitCode = 1; }
-else fs.writeFileSync(1, args[0] === 'auth' ? result : JSON.stringify(result));
+else fs.writeFileSync(1, `${args[0] === 'auth' || (args.includes('--jq') && typeof result === 'string') ? result : JSON.stringify(result)}\n`);

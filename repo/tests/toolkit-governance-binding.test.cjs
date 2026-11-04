@@ -691,27 +691,34 @@ test('F7: the attribution guard and the bridge keep their protection on ERROR, a
   }
 });
 
-test('F8: a fetch the timeout stopped leaves no lock of its own behind; an older lock is not touched', (t) => {
+for (const expired of [false, true]) test(`F8: a killed fetch cleans only its own lock${expired ? ' after the prompt deadline' : ''}`, (t) => {
   const ctx = scratch(t);
   const root = path.join(ctx.root, 'locked');
   const lockDir = path.join(root, '.git', 'refs', 'remotes', 'origin');
   fs.mkdirSync(lockDir, { recursive: true });
   const lock = path.join(lockDir, 'main.lock');
+  let clock = Date.now();
+  const original = Date.now;
+  Date.now = () => clock;
+  t.after(() => { Date.now = original; });
+  const deadline = expired ? clock + 50 : null;
+  let cleanups = 0;
   const base = {
     'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`),
-    'rev-parse': args => (args[1] === '--git-common-dir' ? ok('.git\n') : ok(`${SHA}\n`)),
+    'rev-parse': args => { assert.equal(args[1], '--git-common-dir'); cleanups++; return ok('.git\n'); },
   };
   // The lock's time is set from Node's clock, as a real fetch's lock matches it, so this also holds
   // when the clock-ahead run moves Node's clock but not file times.
-  const killed = () => { fs.writeFileSync(lock, ''); const now = new Date(); fs.utimesSync(lock, now, now); return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
-  assert.equal(bindingCache.readDefaultBranchBinding(root, { ...GUARDED, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
+  const killed = () => { fs.writeFileSync(lock, ''); const now = new Date(); fs.utimesSync(lock, now, now); clock += 51; return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
+  assert.equal(bindingCache.readDefaultBranchBinding(root, { ...GUARDED, deadline, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
   assert.equal(fs.existsSync(lock), false, 'the lock this fetch left is removed');
   fs.writeFileSync(lock, '');
   const old = new Date(Date.now() - HOUR);
   fs.utimesSync(lock, old, old);
   const timedOut = () => ({ status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
-  bindingCache.readDefaultBranchBinding(root, { ...GUARDED, runGit: fakeGit({ ...base, fetch: timedOut }) });
+  bindingCache.readDefaultBranchBinding(root, { ...GUARDED, deadline: expired ? clock + 50 : null, runGit: fakeGit({ ...base, fetch: () => { clock += 51; return timedOut(); } }) });
   assert.equal(fs.existsSync(lock), true, 'an older lock belongs to someone else');
+  assert.equal(cleanups, 2, 'both killed fetches run cleanup even after the prompt deadline');
 });
 
 test('F8: the session-start hook refreshes once; the bridge only reads the cache', () => {
