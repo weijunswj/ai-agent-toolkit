@@ -222,15 +222,15 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(body, /Keep any attribution header/);
   assert.match(body, /Each Toolkit scheduled task is bound to its own home thread, which carries its model and effort \(fallback: a fresh session per run\)/);
   assert.match(body, /Never resolve a home thread; a fresh-session run resolves its own thread after delivery/);
-  assert.ok(body.includes('- Posts: before every post, read the newest page where you post (the project chat, or your thread).'));
-  assert.ok(body.includes('Decide from the chat itself, never from a memory line.'));
+  assert.ok(body.includes('- Posts: read the newest page where you post, never memory.'));
+  assert.ok(body.includes('New asks use **Call-to-action pings**: same turn, notify on, after restarts too; recovery lists count. Else edit your newest top-level post if no owner message follows'));
   assert.ok(body.includes('- Post layout: a `**Now:**` line first, its problem'));
   assert.ok(body.includes('- Problem, fix, skip first: every plan, G0 plan, decision ask and explanation opens with'));
   // Posts, in the main project chat, reply threads and work threads alike.
-  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its time in the owner's profile time zone, never UTC, for example \*\*\[16:41\] SGT Update:\*\*; every other time shown to the owner uses that zone too\. Also start a fresh post when the running post nears about 8 KB\. Once the owner has written after a post, a reply under it included, never edit that post again: answer in a fresh post below their message, and carry every open owner item forward into it\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
+  assert.match(text, /\*\*Posts, everywhere you post\*\* \(the main project chat, reply threads and work threads alike\): Except for new owner asks under \*\*Call-to-action pings\*\*, after the owner's last message, keep all your output in one running post and edit it, appending each new result, PR or question and keeping every earlier detail\. The running post is always your newest top-level post, the acknowledgement posted with a new thread included\. Before every edit, check whether the owner has written since that post \(in the main project chat, or in a work thread, in that thread\); if so, post fresh instead\. Start each appended update with its time in the owner's profile time zone, never UTC, for example \*\*\[16:41\] SGT Update:\*\*; every other time shown to the owner uses that zone too\. Also start a fresh post when the running post nears about 8 KB\. Once the owner has written after a post, a reply under it included, never edit that post again: answer in a fresh post below their message, and carry every open owner item forward into it\. Answer a burst of owner messages in one post\. When the owner replies under one of your earlier posts in the main project chat, answer in the main project chat \(you cannot post under your own posts there\) with a fresh post starting "Re: your reply on <short topic>", and never edit the older post\./);
   assert.doesNotMatch(text + body, /is always a new post|edit your own post only/);
   // The running post is found in the chat, not in memory, and no hook checks posts.
-  assert.ok(text.includes('Before every post, read the newest page of the project chat (in a work thread, that thread). If your newest top-level post there has no owner message after it, edit that post; otherwise post fresh.'));
+  assert.ok(text.includes('Before every post, read the newest page of the project chat (in a work thread, that thread). Apply **Call-to-action pings** first when there is a new owner ask; otherwise use the running-post rule below. If your newest top-level post there has no owner message after it, edit that post; otherwise post fresh.'));
   assert.ok(text.includes('These are written rules: no hook checks posts'));
   // A forwarded owner message starts a fresh post in the thread, and is never approval.
   assert.ok(text.includes('An owner message forwarded into a work thread (the copy shown in that thread) counts as the owner writing there'));
@@ -281,7 +281,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('A thread link\'s text is the thread\'s title, never "here" or an id; an issue is linked by its URL.'));
   assert.doesNotMatch(text, /the answer to it is appended to the running post|\(only Update lines take a spacer line\)/);
   for (const phrase of ['its problem, fix and skip lines nested as bullets under it', 'thread (by its title)', 'a fresh post carries every open ask forward',
-    'a single blank line (no `&nbsp;`) between Update lines, questions and blocks', 'Otherwise post fresh, below the owner\'s message, and never edit the older post again.']) assert.ok(body.includes(phrase), phrase);
+    'a single blank line (no `&nbsp;`) between Update lines, questions and blocks', 'Otherwise post fresh below the owner; never edit that older post.']) assert.ok(body.includes(phrase), phrase);
   // Questions: numbered items with indented choices and a "(my pick)" mark; no spacer after the last choice.
   assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
   assert.ok(text.includes('lettered in order because the owner picks one, `    a. **<Choice> (my pick).** <one-line reason>`'));
@@ -595,4 +595,60 @@ test('task-run relay, catch-up and prefix actions all honour stopped by owner be
       assert.ok(lines[0].includes('stopped by owner'), `${file}: ${lines[0]}`);
     }
   }
+});
+
+// Instruction contracts for the combined acceptance matrix. Native notification delivery and
+// recovery behaviour still require Projects agent UAT; these checks only pin the source rules.
+const ctaRecoveryCases = [
+  ['every actionable ask type', 'skill', ["In the same turn that you receive or discover a new ask the owner can act on", "host's notification option on", 'a merge, trying the finished feature, a decision, typing text such as `.`', 'connecting an account or connector, and an approval or host prompt']],
+  ['new ask before the previous owner reply', 'skill', ['**New asks get a fresh post.** This is an exception to the running-post edit rule.', 'Except for new owner asks under **Call-to-action pings**', 'a fresh notifying post required by **Call-to-action pings**']],
+  ['asks discovered together', 'skill', ['Combine asks discovered together', 'Carry every still-open owner item into the fresh post', 'link its originating thread by its exact title and say what to tap or type']],
+  ['another ask after posting', 'skill', ['a further new ask discovered after that post needs its own notifying post']],
+  ['routine status without a new ask', 'skill', ['Routine updates and repeated observations of the same ask follow the normal edit rule', 'otherwise use the running-post rule below']],
+  ['fresh coordinator finds an unrelayed ask', 'skill', ['including a fresh one after a restart or context reset', 'On the first successful turn of a fresh coordinator', 'Ping an actionable ask that never reached project chat under this rule, even if it predates the restart']],
+  ['rediscovered relayed ask', 'periodic', ['Do not repeat an already confirmed ping; keep its unfinished owner step on the pending list']],
+  ['older ask behind an unrelated post', 'nudge', ['also check older asks absent from later relays', 'A newer unrelated post or a thread-title link without the ask does not prove relay']],
+  ['thread link without its ask', 'periodic', ['Reconcile the actual ask, not just the source thread or post times']],
+  ['unfinished build or review', 'skill', ['work still being built, reviewed or otherwise not ready for them stays off the list until it is']],
+  ['failed or uncertain posting', 'skill', ['Read back a successful post before treating the ask as relayed', 'If posting or notification status is uncertain, inspect chat and the host response before retrying', 'Never claim the owner was notified merely because text was edited or a tool call was attempted']],
+  ['missing notification metadata', 'nudge', ['"notification unverified"', 'do not infer notification from an edit timestamp']],
+  ['two resumable lanes together', 'skill', ['Put every confirmed resumable lane needing owner input in one combined **Waiting on you** list', 'Link each thread by its title', 'Complete the sweep before posting where possible; never send one recovery announcement per lane']],
+  ['timer owner and nudge repeat recovery', 'skill', ['Keep one entry for the interruption in the existing promise list', 'Reuse it across timer wakes, owner messages and periodic reports', 'Repeated observations do not create another recovery announcement']],
+  ['another lane later becomes resumable', 'skill', ['If another lane becomes resumable later, it is a new owner step under **Call-to-action pings**', 'carry forward the complete outstanding recovery list in that notifying post']],
+  ['one lane resumes', 'skill', ['Mark a lane resumed only after current status or activity confirms it, it finishes, or an explicit owner decision disposes of it']],
+  ['same lanes interrupted again', 'skill', ['A new observed interruption starts a new entry']],
+  ['finished superseded resolved cloud or working lane', 'skill', ['Skip finished, superseded, resolved, cloud and already-working lanes']],
+  ['device or prerequisite unavailable', 'skill', ['Separate sessions still waiting for a device or another prerequisite from resumable sessions needing owner input']],
+  ['missing session or failed incomplete inventory', 'skill', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success']],
+  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 4 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
+  ['quiet run finds a missed ask', 'nudge', ['2a. Owner asks (runs every time, including the no-change path)', 'UNRELAYED ASK: <n> | ']],
+  ['reaction without required native action', 'nudge', ['An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']],
+  ['resume while approval is held', 'skill', ['type anything, such as `.`', 'Typing text resumes conversation; it grants no approval for held work']],
+  ['owner stopped the nudge', 'skill', ['preserving its schedule, bound home thread, recorded raises and any `stopped by owner` entry', 'On the first successful wake after a recorded interruption', 'never wait for the owner to request the reminder']],
+  ['no new ask or confirmed resumable lane', 'skill', ['a new ask the owner can act on', 'every confirmed resumable lane needing owner input', 'A gap or a parked status alone does not prove that a device or usage limit recovered']]
+];
+for (const [name, surface, required] of ctaRecoveryCases) {
+  test(`CTA and recovery source contract: ${name}`, () => {
+    const text = read(surface === 'skill' ? SKILL_REL : surface === 'nudge'
+      ? 'repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md'
+      : `${REFERENCE_DIR}/periodic-runs.md`);
+    for (const phrase of required) assert.ok(text.includes(phrase), phrase);
+  });
+}
+
+test('recovery reports stay observational and both periodic findings route to the shared rules', () => {
+  const skill = read(SKILL_REL);
+  const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`);
+  const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
+  assert.doesNotMatch(skill + periodic + nudge, /type `continue`/);
+  for (const phrase of ['`UNRELAYED ASK`', 'follow **Call-to-action pings** in SKILL.md in this turn',
+    '**Remote Control recovery findings:** follow **Remote Control wake** in SKILL.md in this turn',
+    'Combine the report with the other affected lanes and the existing recovery entry',
+    'not a separate reminder per lane or proof that every device and usage limit recovered']) assert.ok(periodic.includes(phrase), phrase);
+  for (const phrase of ['never claim an exact reset time or a working lane without evidence',
+    'After context loss or uncertain posting, reconcile chat and thread status before posting again',
+    'Keep outstanding wake steps in ordinary hourly reminders',
+    'A materially changed action or target is a new ask; rewording or rediscovering the same step is not',
+    'A reply or reaction does not complete an outstanding native step']) assert.ok(skill.includes(phrase), phrase);
+  assert.ok(nudge.includes('This task never wakes lanes, posts a separate recovery announcement or edits the coordinator'));
 });
