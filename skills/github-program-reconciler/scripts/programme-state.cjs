@@ -132,7 +132,7 @@ function check(errors, condition, message) { if (!condition) errors.push(message
 const SHAPES = {
   child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile'], optional: ['volatile', 'journals_seen', 'completed_at'] },
   parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'private', 'volatile'], optional: ['volatile', 'attention'] },
-  finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at'] },
+  finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics'], optional: ['diagnostics'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
   outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix'] },
@@ -295,6 +295,7 @@ const FINDING_CODES = Object.freeze({
   READY_TO_CLOSE: { source: 'reconcile', next_action: 'Controller: close the issue as completed if every criterion is met' },
   CHILD_STATE_CONFLICT: { source: 'reconcile', next_action: 'Controller: bring the state document and the issue in line' },
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
+  BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
@@ -316,6 +317,57 @@ const FINDING_CODES = Object.freeze({
 // Findings with no issue of their own.
 const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
+const BODY_SECTION_KINDS = ['CURRENT', 'STATE', 'TRACE', 'NAV', 'hand_written'];
+const BODY_SECTION_LIMIT = 5;
+
+// Disjoint UTF-16 spans, including managed markers and all formatting, in the same units as
+// projectBody's length check. Headings only delimit hand-written spans; no heading text is kept.
+function bodySizeDiagnostics(body, threshold) {
+  const managed = BODY_SECTION_KINDS.filter(kind => kind !== 'hand_written')
+    .map(kind => ({ kind, block: findStateBlock(body, kind).block })).filter(part => part.block)
+    .sort((a, b) => a.block.start - b.block.start);
+  const sections = [];
+  let section = 0;
+  const handwritten = (start, end) => {
+    const cuts = [start, ...[...body.slice(start, end).matchAll(/^#{1,6}[ \t]+/gm)].map(match => start + match.index).filter(at => at > start), end];
+    for (let i = 1; i < cuts.length; i += 1) if (cuts[i] > cuts[i - 1]) sections.push({ kind: 'hand_written', section: ++section, size: cuts[i] - cuts[i - 1] });
+  };
+  let offset = 0;
+  for (const { kind, block } of managed) {
+    handwritten(offset, block.start);
+    sections.push({ kind, section: 0, size: block.end - block.start });
+    offset = block.end;
+  }
+  handwritten(offset, body.length);
+  const largest = sections.sort((a, b) => b.size - a.size).slice(0, BODY_SECTION_LIMIT);
+  return { projected_total: body.length, threshold, required_reduction: Math.max(0, body.length - threshold + 1),
+    largest_sections: largest, remainder: body.length - largest.reduce((sum, part) => sum + part.size, 0) };
+}
+
+function validateBodyDiagnostics(errors, value, at) {
+  check(errors, isObject(value), `${at} must be an object`);
+  if (!isObject(value)) return;
+  checkShape(errors, value, { all: ['projected_total', 'threshold', 'required_reduction', 'largest_sections', 'remainder'] }, at);
+  const numeric = number => Number.isSafeInteger(number) && number >= 0;
+  for (const key of ['projected_total', 'threshold', 'required_reduction', 'remainder']) check(errors, numeric(value[key]), `${at}.${key} must be a bounded whole number`);
+  check(errors, value.threshold > 0, `${at}.threshold must be positive`);
+  check(errors, value.required_reduction === Math.max(0, value.projected_total - value.threshold + 1), `${at}.required_reduction must match the strict threshold`);
+  const parts = Array.isArray(value.largest_sections) ? value.largest_sections : [];
+  check(errors, Array.isArray(value.largest_sections) && parts.length > 0 && parts.length <= BODY_SECTION_LIMIT, `${at}.largest_sections must have 1 to ${BODY_SECTION_LIMIT} spans`);
+  const identities = new Set();
+  for (const part of parts) {
+    check(errors, isObject(part), `${at} section must be an object`);
+    if (!isObject(part)) continue;
+    checkShape(errors, part, { all: ['kind', 'section', 'size'] }, at);
+    check(errors, BODY_SECTION_KINDS.includes(part.kind), `${at} section kind must be fixed`);
+    check(errors, numeric(part.section) && (part.kind === 'hand_written' ? part.section > 0 : part.section === 0), `${at} section number must match its kind`);
+    check(errors, numeric(part.size) && part.size > 0, `${at} section size must be positive and bounded`);
+    const id = `${part.kind}:${part.section}`;
+    check(errors, !identities.has(id), `${at} spans must be disjoint`);
+    identities.add(id);
+  }
+  check(errors, parts.reduce((sum, part) => sum + (part?.size || 0), value.remainder) === value.projected_total, `${at} section sizes and remainder must sum exactly`);
+}
 
 function findingId(source, code, issue, head = '') {
   return sha256(`${source}|${code}|${issue ?? ''}|${head || ''}`).slice(0, 12);
@@ -332,6 +384,8 @@ function validateAttention(errors, attention) {
     checkShape(errors, entry, 'finding', at);
     const known = Object.hasOwn(FINDING_CODES, entry.code) ? FINDING_CODES[entry.code] : null;
     check(errors, Boolean(known), `${at}.code is not a known finding code`);
+    if (entry.code === 'BODY_TOO_LARGE') validateBodyDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
+    else check(errors, entry.diagnostics === undefined, `${at}.diagnostics belongs only to BODY_TOO_LARGE`);
     check(errors, Boolean(known) && entry.source === known.source, `${at}.source must be the code's source`);
     check(errors, ISSUELESS_CODES.has(entry.code) ? entry.issue === null : isInt(entry.issue, 1), `${at}.issue must be an issue number${ISSUELESS_CODES.has(entry.code) ? ' or null' : ''}`);
     check(errors, HEAD_BOUND_CODES.has(entry.code) ? optional(entry.head, isSha) : entry.head === null, `${at}.head must be a full 40-character SHA for a head-bound code, otherwise null`);
@@ -358,7 +412,7 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
   const seenIds = new Set();
   let changed = false;
   const open = () => list.filter(entry => OPEN_FINDING_STATES.includes(entry.state)).length;
-  const add = (code, issue, head, since = null) => {
+  const add = (code, issue, head, since = null, diagnostics = null) => {
     const id = findingId(FINDING_CODES[code].source, code, issue, head);
     seenIds.add(id);
     const existing = byId.get(id);
@@ -371,10 +425,14 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
       const fresh = !since || Number.isNaN(Date.parse(since)) || Date.parse(since) > Date.parse(existing.changed_at);
       const reopens = fresh && (existing.state === 'resolved' || (ONE_TIME_CODES.has(code) && ['acknowledged', 'disposed'].includes(existing.state)));
       if (reopens) { existing.state = 'new'; existing.changed_at = now; changed = true; }
+      if (diagnostics && JSON.stringify(canonical(existing.diagnostics)) !== JSON.stringify(canonical(diagnostics))) {
+        existing.diagnostics = clone(diagnostics);
+        changed = true;
+      }
       return;
     }
     if (code !== 'ATTENTION_FULL' && open() >= ATTENTION_LIMIT) { add('ATTENTION_FULL', null, null); return; }
-    const entry = { id, source: FINDING_CODES[code].source, code, issue, head, state: 'new', first_seen: now, changed_at: now };
+    const entry = { id, source: FINDING_CODES[code].source, code, issue, head, state: 'new', first_seen: now, changed_at: now, ...(diagnostics ? { diagnostics: clone(diagnostics) } : {}) };
     list.push(entry);
     byId.set(id, entry);
     changed = true;
@@ -383,9 +441,13 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     if (!Object.hasOwn(FINDING_CODES, finding.code) || FINDING_CODES[finding.code].source !== source) continue;
     const issue = ISSUELESS_CODES.has(finding.code) ? null : finding.issue;
     if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
-    add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null);
+    add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null,
+      finding.code === 'BODY_TOO_LARGE' ? finding.diagnostics : null);
   }
   for (const entry of complete ? list : []) {
+    // Only the reconciler's complete successful redraw/readback settles a size finding. This also
+    // protects an affected page first reported by another writer after the planning snapshot.
+    if (entry.code === 'BODY_TOO_LARGE') continue;
     // ATTENTION_FULL resolves on any complete run back under the bound.
     const own = entry.source === source || entry.code === 'ATTENTION_FULL';
     if (!own || seenIds.has(entry.id) || hold.includes(entry.id) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
@@ -3378,7 +3440,11 @@ class Reconciler {
       try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, topicBudget); }
       catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
       if (projected.body.length >= this.threshold) {
-        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body' });
+        const diagnostics = bodySizeDiagnostics(projected.body, this.threshold);
+        const finding = { code: 'BODY_TOO_LARGE', issue: number, diagnostics, detail: 'The projected page reaches the redraw threshold' };
+        const previous = findings.find(entry => entry.code === finding.code && entry.issue === number);
+        if (previous) Object.assign(previous, finding); else findings.push(finding);
+        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body', diagnostics });
         continue;
       }
       for (const part of projected.overflow) effects.push(indexEffect(number, part, String(comments.at(-1)?.id || '')));
@@ -3452,23 +3518,40 @@ class Reconciler {
     // Hold by issue, even when another pass adds the finding after this snapshot was read.
     const incompletePrHolds = [...observed.discovery].filter(([, discovery]) => discovery.complete === false)
       .map(([issue]) => findingId(FINDING_CODES.COMPLETED_PR_MISSING.source, 'COMPLETED_PR_MISSING', issue));
-    if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null, since = null }) => ({ code, issue, head, ...(since ? { since } : {}) })),
+    const seen = () => findings.filter(finding => ATTENTION.has(finding.code) && (!only || finding.code === 'BODY_TOO_LARGE'));
+    if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
     const stored = parent.attention || [];
-    const next = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
-    if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored))) return;
-    effects.push({ kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next) });
+    let next = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
+    const settlingSize = !only && openFindings(stored).some(entry => entry.code === 'BODY_TOO_LARGE');
+    if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored)) && !settlingSize) return;
+    const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next) };
+    effects.push(effect);
     const number = parent.parent_issue;
     const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN']);
     const keep = (list, test) => { const kept = list.filter(item => !test(item)); list.splice(0, list.length, ...kept); };
-    keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
-    keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
-    // Replace only the first block diff's parent holds. Recovery holds are not re-raised here.
-    keep(holds, hold => blockHolds.has(hold) && hold.target === `#${number}` && hold.scope === 'body');
-    this.diffBlocks({ ...parent, attention: next }, projected, observed, only, effects, findings, holds, [number], resolutions);
+    const redraw = attention => {
+      keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
+      keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
+      // Replace only block diff holds, preserving recovery holds raised earlier.
+      keep(holds, hold => blockHolds.has(hold) && hold.target === `#${number}` && hold.scope === 'body');
+      const start = holds.length;
+      this.diffBlocks({ ...parent, attention }, projected, observed, only, effects, findings, holds, [number], resolutions);
+      for (const hold of holds.slice(start)) blockHolds.add(hold);
+    };
+    redraw(next);
+    const reconcile = folds.find(fold => fold.source === 'reconcile');
+    if (reconcile) {
+      reconcile.seen = seen();
+      const final = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
+      // Adding attention can itself overflow CURRENT. Include that finding once before measuring
+      // again; the numeric diagnostics are not rendered in CURRENT, so no size feedback loop.
+      if (attentionLine(final) !== attentionLine(next)) { next = final; redraw(next); reconcile.seen = seen(); }
+      effect.line = attentionLine(next);
+    }
   }
 
   plan({ issue: only = null, parentOverride = null, inventory = null } = {}) {
@@ -3520,7 +3603,10 @@ class Reconciler {
     if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share priority order ${tie[0].order}, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the priority in one update-parent patch` });
     this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions, blockHolds);
     for (const effect of effects) effect.text = describeEffect(effect);
-    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
+    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions,
+      complete: !only && !parentOverride && (!inventory || inventory.complete) && [...observed.discovery.values()].every(entry => entry.complete !== false)
+        && [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)].every(number => Boolean(observed.issues.get(number)))
+        && !findings.some(entry => entry.code === 'MANAGED_BLOCK_BROKEN') };
   }
 
   // Runs the planned effects in order: state documents, native links, order, PR links, then bodies.
@@ -3533,6 +3619,11 @@ class Reconciler {
     let parentDoc = null;
     let docs = null;
     const writtenChildren = new Set();
+    const verifiedBodies = new Set();
+    const sizeIds = new Set([...(plan.parent.attention || []), ...plan.findings]
+      .filter(entry => entry.code === 'BODY_TOO_LARGE').map(entry => findingId('reconcile', entry.code, entry.issue)));
+    const canResolveSize = (entry, includeParent = false) => entry.code === 'BODY_TOO_LARGE' && sizeIds.has(entry.id)
+      && (verifiedBodies.has(entry.issue) || (includeParent && entry.issue === parentNumber)) && OPEN_FINDING_STATES.includes(entry.state);
     // The parent fence is read again immediately before every state write and every GitHub change,
     // so a takeover stops this pass at its next effect (STALE_WRITER). An intent it leaves IN_FLIGHT
     // is settled by readback in the successor's next pass, never replayed.
@@ -3560,10 +3651,21 @@ class Reconciler {
     for (const entry of holds) markHeld(entry.target, entry.scope || 'all');
     const outcomes = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, outcome]));
     const record = (effect, outcome, detail = null) => { results.push({ kind: effect.kind, target: effect.target, text: effect.text, outcome, ...(detail ? { detail } : {}) }); };
-    const hold = (effect, code, detail) => {
+    const hold = (effect, code, detail, diagnostics = null) => {
       const scope = holdScope(effect.kind);
-      holds.push({ code, target: `#${effect.target.issue}`, detail, scope });
+      holds.push({ code, target: `#${effect.target.issue}`, detail, scope, ...(diagnostics ? { diagnostics } : {}) });
       markHeld(`#${effect.target.issue}`, scope);
+      if (code === 'BODY_TOO_LARGE' && diagnostics) {
+        const finding = { code, issue: effect.target.issue, diagnostics, detail: 'The projected page reaches the redraw threshold' };
+        const previous = plan.findings.find(entry => entry.code === code && entry.issue === finding.issue);
+        if (previous) Object.assign(previous, finding); else plan.findings.push(finding);
+        mutateDoc('parent', parentNumber, { change: doc => {
+          const next = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [finding], now: this.now() });
+          if (next === doc.attention) return null;
+          doc.attention = next;
+          return doc;
+        } });
+      }
     };
 
     // Resolve recovered effects first: DONE and NOT_DONE leave the document; UNKNOWN stays.
@@ -3618,7 +3720,9 @@ class Reconciler {
       try {
         const result = mutateDoc('parent', parentNumber, { change: doc => {
           const stored = doc.attention || [];
-          const next = effect.folds.reduce((list, fold) => foldAttention(list, { ...fold, now: effect.now }), stored);
+          const plannedIds = new Set((plan.parent.attention || []).map(entry => entry.id));
+          const concurrent = stored.filter(entry => !plannedIds.has(entry.id)).map(entry => entry.id);
+          const next = effect.folds.reduce((list, fold) => foldAttention(list, { ...fold, hold: [...(fold.hold || []), ...concurrent], now: effect.now }), stored);
           if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored))) return null;
           doc.attention = next;
           // A dispose reason goes when its finding drops off the list.
@@ -3750,6 +3854,13 @@ class Reconciler {
 
     // 5. Bodies, with the parent last so it shows state writes made earlier in this pass.
     const blockEffects = plan.effects.filter(entry => entry.kind === 'replace_block');
+    // A previously refused page may already match after a partial pass. Recheck it on the complete
+    // pass too, so lack of another planned write never counts as proof of a successful redraw.
+    if (plan.complete) for (const entry of openFindings(parentDoc.attention).filter(entry => entry.code === 'BODY_TOO_LARGE')) {
+      if (!blockEffects.some(effect => effect.target.issue === entry.issue) && plan.observed.issues.has(entry.issue)) {
+        blockEffects.push({ kind: 'replace_block', target: { issue: entry.issue }, state: true });
+      }
+    }
     if (blockEffects.length || writtenChildren.size) {
       guard();
       docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
@@ -3770,7 +3881,11 @@ class Reconciler {
         const owner = docOwner(number);
         if (owner === 'child' && !docs.has(number)) { record(effect, 'SKIPPED', 'no state document yet'); continue; }
         const navBody = this.navFor(parentDoc, number, docs);
-        const currentBody = number === parentNumber ? renderCurrentBlockBody(parentDoc, docs, plan.observed.issues) : null;
+        // Render the settled attention count on the parent last, but persist those resolutions only
+        // after this exact body also reads back. A refused or uncertain parent leaves findings open.
+        const displayParent = number === parentNumber && plan.complete && !holds.length
+          ? { ...parentDoc, attention: (parentDoc.attention || []).map(entry => canResolveSize(entry, true) ? { ...entry, state: 'resolved' } : entry) } : parentDoc;
+        const currentBody = number === parentNumber ? renderCurrentBlockBody(displayParent, docs, plan.observed.issues) : null;
         const topic = this.topicFor(parentDoc, number, plan.observed.issues);
         // Recheck minimum size and version before posting any pages as well as before the body
         // write. A newly oversized hand-written section must not produce orphan index comments.
@@ -3785,14 +3900,18 @@ class Reconciler {
           if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`);
           comments.set(number, this.reader.comments(number));
           const next = this.projectBody(number, page.body, body, comments.get(number), version, navBody, currentBody, topic, budget);
-          if (next.body.length >= this.threshold) throw new ProgrammeError('BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
+          if (next.body.length >= this.threshold) {
+            const error = new ProgrammeError('BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
+            error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
+            throw error;
+          }
           fresh = { page, comments: comments.get(number) };
           return next;
         };
         // Planned topic pages are checked against a fresh read before any is posted.
         if (plannedPosts.length) {
           try { preview(); }
-          catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+          catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message, error.diagnostics); continue; }
         }
         // An overflowing tag's list first moves into its own new index comment, checked by reading it back.
         const publishIndex = post => {
@@ -3821,7 +3940,11 @@ class Reconciler {
         if (!isHeld(`#${number}`, 'body')) {
           try {
             const next = preview(0);
-            if (next.overflow.some(part => !part.directory)) throw new ProgrammeError('BODY_TOO_LARGE', 'The comment trace changed while paging; the next pass re-plans it.');
+            if (next.overflow.some(part => !part.directory)) {
+              const error = new ProgrammeError('BODY_TOO_LARGE', 'The comment trace changed while paging; the next pass re-plans it.');
+              error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
+              throw error;
+            }
             for (const part of next.overflow) {
               const post = indexEffect(number, part, String(comments.get(number).at(-1)?.id || ''));
               post.text = describeEffect(post);
@@ -3829,7 +3952,7 @@ class Reconciler {
               publishIndex(post);
               if (isHeld(`#${number}`, 'body')) break;
             }
-          } catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); }
+          } catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message, error.diagnostics); }
         }
         if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
         // The new body is built from a fresh read, so earlier edits by people are kept. Refuse before
@@ -3847,10 +3970,10 @@ class Reconciler {
         effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
         if (next.overflow.length || next.body.length >= this.threshold) {
           record(effect, 'HELD', `the body would be ${next.body.length} characters`);
-          hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
+          hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`, bodySizeDiagnostics(next.body, this.threshold));
           continue;
         }
-        if (number === parentNumber && next.body === before.body) { record(effect, 'NOOP'); continue; }
+        if (number === parentNumber && next.body === before.body) { verifiedBodies.add(number); record(effect, 'NOOP'); continue; }
         withIntent(effect, owner, number, () => {
           // Issue PATCH has no compare-and-swap: re-read immediately before writing and refuse on change.
           const latest = this.reader.issue(number);
@@ -3860,14 +3983,25 @@ class Reconciler {
           guard();
           const response = this.mutator.writeBody(number, next.body);
           const after = this.reader.issue(number);
-          if (after && after.body === next.body) return { outcome: 'DONE' };
+          if (after && after.body === next.body) { verifiedBodies.add(number); return { outcome: 'DONE' }; }
           if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
           return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
         });
       }
     }
 
-    return { results, holds };
+    if (plan.complete && !holds.length && verifiedBodies.size) {
+      mutateDoc('parent', parentNumber, { change: doc => {
+        let changed = false;
+        doc.attention = (doc.attention || []).map(entry => {
+          if (!canResolveSize(entry)) return entry;
+          changed = true;
+          return { ...entry, state: 'resolved', changed_at: this.now() };
+        });
+        return changed ? doc : null;
+      } });
+    }
+    return { results, holds, attention: attentionLine(parentDoc.attention) };
   }
 
   run({ apply = false, issue = null, parentOverride = null, inventory = null } = {}) {
@@ -3890,9 +4024,10 @@ class Reconciler {
     if (apply && plan.parent && (plan.effects.length || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;
       const githubWrites = this.mutator.mutations;
-      const { results, holds } = this.apply(plan);
+      const { results, holds, attention } = this.apply(plan);
       report.results = results;
       report.holds = holds;
+      report.attention = attention;
       report.writes = { state: this.store.writes - storeWrites, github: this.mutator.mutations - githubWrites };
     }
     report.summary = !plan.parent ? 'No parent state document'
@@ -3900,7 +4035,7 @@ class Reconciler {
         : apply ? `${report.results.filter(entry => entry.outcome === 'DONE').length} of ${report.results.length} effect(s) done, ${report.holds.length} hold(s)`
           : `${report.effects.length} planned effect(s), ${report.holds.length} hold(s)`;
     const planned = plan.effects.find(effect => effect.kind === 'update_attention');
-    report.attention = planned ? planned.line : plan.parent ? attentionLine(plan.parent.attention) : null;
+    report.attention = report.attention ?? (planned ? planned.line : plan.parent ? attentionLine(plan.parent.attention) : null);
     const attention = report.findings.filter(finding => ATTENTION.has(finding.code));
     report.next_action = report.holds.length ? `Controller: resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
       : !apply && report.effects.length ? 'Controller: run reconcile --apply --controller for this plan; other sessions report it'
@@ -3949,7 +4084,7 @@ module.exports = Object.freeze({
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
-  SECRET_SHAPES, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest,
+  SECRET_SHAPES, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
