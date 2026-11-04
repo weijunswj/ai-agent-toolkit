@@ -647,6 +647,36 @@
       },
       "status": "pass",
       "note": "The first prompt and ordinary tool pass without any acknowledgement. Governance cannot operate without one usable github.com origin. The unchanged governance owner-answer and merge guards still protect their own effects."
+    },
+    {
+      "id": "GOV.upgrade-off-ticket",
+      "source": "G2 finding: previous-release non-GitHub reply state must not hold scheduling",
+      "kind": "state",
+      "hosts": [
+        "claude"
+      ],
+      "payload": {
+        "tool_name": "CronCreate",
+        "tool_input": {
+          "prompt": "Check the work later.",
+          "cron": "0 * * * *"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature"
+        },
+        "files": {
+          "../home/.ai-agent-toolkit/user-state/governance-sessions.v1/s-ac3d774eb4a9bf57262072713ce02a6e.json": "{\"schema\":\"toolkit.governance-session.v1\",\"epoch\":\"11111111111111111111111111111111\",\"source\":\"startup\",\"at\":\"{now}\"}\n",
+          "../home/.ai-agent-toolkit/user-state/governance-reply-tickets.v1.json": "{\"schema\":\"toolkit.governance-reply-tickets.v2\",\"sessions\":{\"hook-pack\":{\"hash\":\"f2dc1e86e530a6be1be28d387e0210f2fbc318836909106afdd36ca2053c1c4e\",\"epoch\":\"11111111111111111111111111111111\",\"at\":\"{now}\",\"repositories\":[{\"root\":\".\",\"id\":\"local:fixture\",\"mark\":\"22222222222222222222222222222222\"}]}},\"deliveries\":[{\"id\":\"2ec6adb8cdecf81a0e0b1bef742f63958331313741a9751c533ef42f09056628\",\"at\":\"{now}\"}]}\n"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "note": "Seeded from the ReplyTickets writer at 30c7d42. The ticket targets the fixture git folder with no origin, now automatically DISABLED. Its spent receipt stays in the store. CronCreate is a Claude tool; the Codex hook matcher does not claim this tool. Shared ticket and confirmation decisions are covered by the upgrade unit matrix."
     }
   ]
 }

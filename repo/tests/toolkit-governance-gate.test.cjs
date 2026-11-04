@@ -104,6 +104,83 @@ function answerFixture(t, { remote = REMOTE } = {}) {
   return { ctx, target, cwd, options, start, say, ask, prompts, now, tick: ms => { clock = new Date(clock.getTime() + ms); } };
 }
 
+// Upgrade closure: the previous release's writer produced this store, including its spent receipt.
+// Only paths, session marks and timestamps are rebound to each isolated test run.
+const baseReplyStore = require('./fixtures/governance-reply-tickets-base.json');
+for (const kind of ['ticket', 'pending', 'bound']) {
+  test(`upgrade reply state: ${kind} stops holding decided targets and cannot ask another confirmation`, t => {
+    for (const identity of ['missing', 'several', 'other', 'enabled', 'disabled']) {
+      const ctx = scratch(t);
+      const target = gitRepo(ctx, 'target', { remote: identity === 'other' ? 'https://gitlab.com/example-owner/repo.git' : ['enabled', 'disabled'].includes(identity) ? REMOTE : null });
+      if (identity === 'several') for (const url of [REMOTE, 'https://github.com/example-owner/second.git']) git(target, ['config', '--add', 'remote.origin.url', url]);
+      if (['enabled', 'disabled'].includes(identity)) gate.writeGovernanceDecision(target, identity === 'enabled' ? 'enable' : 'disable', { registryOptions: ctx.options });
+      const now = () => new Date();
+      const options = { registryOptions: ctx.options, environment: {}, now };
+      gate.startSession({ session_id: 'owner', source: 'startup' }, options);
+      const epoch = new gate.SessionEpochs(options).get('owner');
+      const file = path.join(path.dirname(ctx.registryPath), gate.TICKETS_BASENAME);
+      const data = structuredClone(baseReplyStore.store);
+      data.sessions = { owner: { ...data.sessions[kind], epoch, at: now().toISOString(), repositories: [{ root: target, id: stateOf(ctx, target).repository_id, mark: null }] } };
+      data.deliveries.forEach(receipt => { receipt.at = now().toISOString(); });
+      const seed = () => fs.writeFileSync(file, JSON.stringify(data));
+      const receipts = () => assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).deliveries, data.deliveries, 'spent delivery receipts stay intact');
+      const tools = new gate.ToolGate(options);
+      const prompts = new gate.PromptHold(options);
+      for (const tool_name of ['CronCreate', 'ScheduleWakeup', 'RemoteTrigger']) {
+        seed();
+        assert.equal(tools.decide({ tool_name, cwd: ctx.root, session_id: 'owner', tool_input: { prompt: 'Check later.' } }), null, `${identity}/${tool_name}`);
+        assert.equal(Object.hasOwn(JSON.parse(fs.readFileSync(file, 'utf8')).sessions, 'owner'), false);
+        receipts();
+      }
+      seed();
+      if (kind !== 'pending') {
+        const ticket = kind === 'bound' ? baseReplyStore.bound_ticket : baseReplyStore.ticket;
+        for (const word of ['confirm-no', 'no']) {
+          seed();
+          const result = prompts.answerTicket(ticket, word);
+          assert.equal(result.ok, false, `${identity}/${word}`);
+          assert.match(result.text, /Nothing was recorded/);
+          assert.doesNotMatch(result.text, /Ask the user|Is that right/);
+          receipts();
+        }
+      }
+      // A pending old confirmation must not hijack a reply to a different GitHub question either.
+      seed();
+      const held = gitRepo(ctx, 'held', { remote: 'https://github.com/example-owner/held.git' });
+      assert.equal(prompts.decide({ cwd: held, prompt: 'Start here.', sessionId: 'owner' }).action, 'block');
+      const reply = prompts.decide({ cwd: held, prompt: 'Probably your recommendation.', sessionId: 'owner' });
+      const ticket = replyTicket(reply);
+      assert.ok(ticket);
+      assert.doesNotMatch(reply.context, /Is that right/);
+      assert.deepEqual(new gate.ReplyTickets(options).peek(ticket, 'owner').repositories.map(item => item.root), [held]);
+      receipts();
+      writesNothingIn(target);
+    }
+  });
+}
+
+test('upgrade reply state: undecided and unreadable targets keep scheduling held, including mixed targets', t => {
+  const ctx = scratch(t);
+  const held = gitRepo(ctx, 'held');
+  const off = gitRepo(ctx, 'off', { remote: null });
+  const options = { registryOptions: ctx.options };
+  gate.startSession({ session_id: 'owner', source: 'startup' }, options);
+  const epoch = new gate.SessionEpochs(options).get('owner');
+  const file = path.join(path.dirname(ctx.registryPath), gate.TICKETS_BASENAME);
+  for (const kind of ['ticket', 'pending', 'bound']) for (const unreadable of [false, true]) {
+    const data = structuredClone(baseReplyStore.store);
+    data.sessions = { owner: { ...data.sessions[kind], epoch, at: new Date().toISOString(), repositories: [held, off].map(root => ({ root, id: stateOf(ctx, root).repository_id, mark: null })) } };
+    data.deliveries.forEach(receipt => { receipt.at = new Date().toISOString(); });
+    fs.writeFileSync(file, JSON.stringify(data));
+    const stateReader = cwd => cwd === held && unreadable ? { state: 'UNDECIDED', rule: 'ERROR', error_code: 'STATE_UNREADABLE', root: held } : stateOf(ctx, cwd);
+    const tools = new gate.ToolGate({ ...options, stateReader });
+    assert.match(tools.decide({ tool_name: 'CronCreate', cwd: ctx.root, session_id: 'owner', tool_input: { prompt: 'yes' } })?.deny || '', /no prompt is scheduled/);
+    const kept = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.deepEqual(kept.sessions.owner.repositories.map(item => item.root), [held]);
+    assert.deepEqual(kept.deliveries, data.deliveries);
+  }
+});
+
 // Owner decision closure matrix: unsupported identity x host x actor. No governance answer exists.
 test('non-GitHub identities pass the first prompt and ordinary tools on both hosts without state writes', t => {
   const ctx = scratch(t);

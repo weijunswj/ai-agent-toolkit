@@ -703,11 +703,12 @@ const ANSWER_WORDS = Object.freeze({ yes: 'enable', no: 'disable', later: 'not-n
 const COMMAND_WORDS = Object.freeze({ enable: 'yes', disable: 'no', 'not-now': 'later' });
 function ticketHash(ticket) { return crypto.createHash('sha256').update(String(ticket)).digest('hex'); }
 class ReplyTickets {
-  #file; #now;
+  #file; #now; #gate;
 
-  constructor({ registryOptions = {}, now = () => new Date() } = {}) {
+  constructor({ registryOptions = {}, now = () => new Date(), gate = null } = {}) {
     this.#file = path.join(path.dirname(governance.registryPathFor(registryOptions)), TICKETS_BASENAME);
     this.#now = now;
+    this.#gate = gate;
   }
 
   // Unreadable or damaged state holds. Never discard spent delivery ids to recover authority.
@@ -812,10 +813,22 @@ class ReplyTickets {
     this.#save(data);
   }
 
+  // Old releases could ask about a folder now automatically DISABLED. Recheck every target before
+  // using a ticket or confirmation; unreadable targets stay held, and spent receipts stay intact.
+  #refresh(data, sessionId, entry) {
+    if (!this.#gate || !entry || !Array.isArray(entry.repositories)) return entry;
+    const repositories = entry.repositories.filter(item => this.#gate.evaluate(item.root, { sessionId }).hold);
+    if (repositories.length === entry.repositories.length) return entry;
+    if (repositories.length) data.sessions[sessionId] = { ...entry, repositories };
+    else delete data.sessions[sessionId];
+    this.#save(data);
+    return data.sessions[sessionId] || null;
+  }
+
   // The pending confirmation of this run, { command, repositories }, or null.
   pending(sessionId, epoch) {
-    const sessions = this.#read().sessions;
-    const entry = typeof sessionId === 'string' && Object.hasOwn(sessions, sessionId) ? sessions[sessionId] : null;
+    const data = this.#read();
+    const entry = this.#refresh(data, sessionId, typeof sessionId === 'string' && Object.hasOwn(data.sessions, sessionId) ? data.sessions[sessionId] : null);
     if (!entry || !Object.hasOwn(COMMAND_WORDS, String(entry.pending)) || entry.epoch !== epoch || !EPOCH.test(String(epoch))
       || !this.#current(entry) || !Array.isArray(entry.repositories)) return null;
     return { command: entry.pending, repositories: entry.repositories, at: entry.at };
@@ -829,15 +842,16 @@ class ReplyTickets {
     if (!found || (sessionId !== undefined && found[0] !== sessionId)) return null;
     const [owner, entry] = found;
     if (!(Date.parse(entry.at) >= this.#now().getTime() - MAX_TICKET_AGE_MS) || !EPOCH.test(String(entry.epoch)) || !Array.isArray(entry.repositories)) return null;
-    return { session_id: owner, ...entry };
+    const current = this.#refresh(data, owner, entry);
+    return current ? { session_id: owner, ...current } : null;
   }
 
   peek(ticket, sessionId) { return this.#find(this.#read(), ticket, sessionId); }
 
   // Whether this run of the session holds a ticket that has not lapsed, or a pending confirmation.
   live(sessionId, epoch) {
-    const sessions = this.#read().sessions;
-    const entry = typeof sessionId === 'string' && Object.hasOwn(sessions, sessionId) ? sessions[sessionId] : null;
+    const data = this.#read();
+    const entry = this.#refresh(data, sessionId, typeof sessionId === 'string' && Object.hasOwn(data.sessions, sessionId) ? data.sessions[sessionId] : null);
     return this.#current(entry) && EPOCH.test(String(epoch)) && entry.epoch === epoch;
   }
 
@@ -1104,7 +1118,7 @@ class PromptHold {
     this.#notNow = new NotNow({ registryOptions, now });
     this.#epochs = new SessionEpochs({ registryOptions, now });
     this.#notes = new PickerNotes({ registryOptions, now });
-    this.#tickets = new ReplyTickets({ registryOptions, now });
+    this.#tickets = new ReplyTickets({ registryOptions, now, gate: this.#gate });
     this.#environment = environment || {};
     this.#now = now;
     this.#picker = picker === true;
@@ -1276,7 +1290,7 @@ class PromptHold {
     const bare = String(word).replace(/^confirm-/, '');
     const command = Object.hasOwn(ANSWER_WORDS, bare) ? ANSWER_WORDS[bare] : null;
     if (command === null) return { ok: false, text: 'Toolkit: the answer must be yes, no or later (or confirm-yes, confirm-no or confirm-later to ask first). Nothing was recorded.' };
-    const unusable = { ok: false, text: `Toolkit: that reply ticket is used, lapsed or unknown, so nothing was recorded. Ask the user the governance question again in plain words. ${NEVER_OWNER}` };
+    const unusable = { ok: false, text: `Toolkit: that reply ticket is used, lapsed, no longer needed or unknown. Nothing was recorded. ${NEVER_OWNER}` };
     let found = null;
     try { found = this.#tickets.peek(ticket, undefined); } catch { found = null; }
     if (!found) return unusable;
@@ -1457,7 +1471,7 @@ class ToolGate {
     this.#gate = new GovernanceGate({ registryOptions, stateReader, now });
     this.#epochs = new SessionEpochs({ registryOptions, now });
     this.#notes = new PickerNotes({ registryOptions, now });
-    this.#tickets = new ReplyTickets({ registryOptions, now });
+    this.#tickets = new ReplyTickets({ registryOptions, now, gate: this.#gate });
     this.#notNow = new NotNow({ registryOptions, now });
     this.#registryOptions = registryOptions;
   }
@@ -1533,9 +1547,6 @@ class ToolGate {
     if (typeof sessionId !== 'string' || sessionId === '') return false;
     try {
       const epoch = this.#epochs.get(sessionId);
-      // A confirmation whose repositories were all decided elsewhere is over.
-      const pending = this.#tickets.pending(sessionId, epoch);
-      if (pending && pending.repositories.every(item => this.#verdict(item.root, sessionId)?.reason === 'decided')) this.#tickets.drop(sessionId);
       return this.#tickets.live(sessionId, epoch) || this.#notNow.anyFor(sessionId, epoch);
     } catch { return true; }
   }
