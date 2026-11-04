@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// Coordinator-run release maintenance. Report by default; --apply prepares in a
+// After-merge release maintenance. Report by default; --apply prepares in a
 // disposable clone and only fast-forwards existing same-repository PR branches.
 const fs = require('node:fs');
 const path = require('node:path');
