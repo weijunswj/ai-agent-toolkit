@@ -189,15 +189,15 @@ function ownerRenewalContract(text) {
     ['verified custody', /short handoff index in the verified evidence store/],
     ['recoverable contents', /state, open work, pending\/uncertain effects, links, next action/],
     ['retrieval before owner action', /Reuse records; verify retrieval, then tell the owner to start a fresh session from it/],
-    ['failed save or retrieval', /Save\/retrieval failure: preserve source state; report recovery hold/],
+    ['failed save or retrieval', /On failure keep source state; report a recovery hold/],
     ['no automatic effects', /No automatic launch, termination, archive or task replacement/],
-    ['owner takeover', /Owner switch: apply takeover and writer reconciliation/],
+    ['owner takeover', /Owner switch: Takeover applies/],
     ['gate and Projects boundary', /Gates\/Projects keep their rules/]
   ];
   for (const [name, pattern] of rows) assert.match(rule, pattern, name);
   const takeover = text.match(/## Takeover\n([\s\S]*?)(?=\n## )/)?.[1] || '';
-  assert.match(takeover, /verify custody and stop the old writer/);
-  assert.match(takeover, /read it back before acting/);
+  assert.match(takeover, /verify custody, stop old writer/);
+  assert.match(takeover, /Read back before acting/);
 }
 
 test('owner-led renewal closure matrix preserves recovery, takeover and existing session rules', () => {
@@ -209,12 +209,12 @@ test('owner-led renewal closure matrix preserves recovery, takeover and existing
     ['custody', 'in the verified evidence store: state', 'in session memory: state'],
     ['pending effects', 'pending/uncertain effects, links, next action', 'links only'],
     ['retrieval', 'verify retrieval, then tell', 'assume retrieval, then tell'],
-    ['failed save', 'preserve source state; report recovery hold', 'discard source state; continue'],
+    ['failed save', 'keep source state; report a recovery hold', 'discard source state; continue'],
     ['automatic actions', 'No automatic launch, termination, archive or task replacement', 'Automatic launch and task replacement'],
     ['owner action', 'tell the owner to start a fresh session from it', 'start fresh automatically'],
-    ['writer reconciliation', 'apply takeover and writer reconciliation', 'skip takeover and writer reconciliation'],
+    ['writer reconciliation', 'Owner switch: Takeover applies', 'Owner switch: Takeover is skipped'],
     ['gate and Projects rules', 'Gates/Projects keep their rules', 'Gates/Projects use this rule instead'],
-    ['stop previous writer', 'verify custody and stop the old writer', 'verify custody and retain competing writers']
+    ['stop previous writer', 'verify custody, stop old writer', 'verify custody, retain competing writers']
   ];
   for (const [name, before, after] of rows) {
     assert.ok(controller.includes(before), `mutation exists: ${name}`);
