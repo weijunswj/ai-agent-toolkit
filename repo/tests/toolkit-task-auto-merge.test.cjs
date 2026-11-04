@@ -99,9 +99,19 @@ function machine(ctx, value, host = ctx.host) {
   } else owner.apply(value, owner.inspect());
 }
 
-const userSession = (ctx, id = 'user') => { gate.startSession({ session_id: id, source: 'startup', cwd: ctx.repo }, { registryOptions: ctx.registryOptions }); return id; };
+const userSession = (ctx, id = 'user') => { gate.startSession({ session_id: id, source: 'startup', cwd: ctx.repo }, { registryOptions: ctx.registryOptions, environment: {}, host: ctx.host }); return id; };
 const bash = (ctx, command, session) => ({ cwd: ctx.repo, session_id: session, tool_name: 'Bash', tool_input: { command } });
 const decide = (ctx, input, environment = {}) => hold.decide(input, { registryOptions: ctx.registryOptions, environment, host: ctx.host });
+
+test('terminal check names missing native session context before app preferences', t => {
+  const ctx = context(t);
+  merged(ctx, YES);
+  const report = hold.check({}, ctx.repo, { registryOptions: ctx.registryOptions, environment: {} });
+  assert.equal(report.nativeSessionContext, false);
+  assert.equal(report.reason, 'no-native-session-context');
+  assert.match(report.explanation, /no native session context.*session.*hook/i);
+  assert.doesNotMatch(report.explanation, /answer is not On/);
+});
 
 test('binding: a retired task field is an unknown field and never grants permission', () => {
   assert.ok(programmeState.validateBinding(binding()));
@@ -218,6 +228,28 @@ test('hold: without a fresh yes, or in a session the user did not start, the typ
   assert.equal(decide(ctx, bash(ctx, command, session)), null, 'the user\'s own fresh session still passes');
 });
 
+test(`${HOST}: reconnect policy uses the native host and fresh startups still pass`, t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  const session = userSession(ctx);
+  const input = bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.head}`, session);
+  assert.equal(decide(ctx, input), null, 'fresh startup');
+  gate.startSession({ session_id: session, source: 'resume', host: 'claude-code' }, options);
+  const report = hold.check(input, ctx.repo, options);
+  assert.equal(report.eligible, HOST === 'claude-code');
+  assert.equal(report.resumeNeedsTypedMerge, HOST !== 'claude-code');
+  if (HOST === 'claude-code') assert.equal(hold.check(input, ctx.repo, { ...options, host: 'claude' }).eligible, true, 'the hook uses the existing Claude alias');
+  if (HOST === 'codex') {
+    assert.equal(report.reason, 'resume-needs-typed-merge');
+    assert.match(report.explanation, /Codex.*reconnects need a typed merge.*no reliable signal/);
+    assert.match(decide(ctx, input).deny, /Codex.*reconnects need a typed merge/);
+    gate.startSession({ session_id: session, source: 'startup' }, options);
+    assert.equal(hold.check(input, ctx.repo, options).eligible, false, 'startup replay cannot clear the restriction');
+  } else assert.equal(decide(ctx, input), null, 'Claude reconnect');
+  assert.equal(decide(ctx, { ...input, session_id: userSession(ctx, 'fresh') }), null, 'a fresh id still passes');
+});
+
 test(`${HOST}: Projects approval in a resumed or launched session never grants standing task authority`, t => {
   const { wake } = require('./support/projects-approval.cjs');
   const ctx = context(t, HOST);
@@ -232,6 +264,182 @@ test(`${HOST}: Projects approval in a resumed or launched session never grants s
     assert.match(decide(ctx, bash(ctx, command, session), environment).deny, /no unused approval/, 'explicit approval used, standing answer still unavailable');
     assert.match(decide(ctx, bash(ctx, command.replace('merge 7', 'merge 8'), session), environment).deny, /no unused approval/);
   }
+});
+
+test(`${HOST}: typed approval in a resumed or revoked chat records nothing; a fresh chat can approve it`, t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  const session = userSession(ctx);
+  gate.startSession({ session_id: session, source: 'resume' }, {
+    ...options, environment: HOST === 'claude-code' ? { TOOLKIT_HOST_SESSION: session } : {},
+  });
+  const input = bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.head}`, session);
+  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: session, prompt: 'merge 7' }, options), 0);
+  assert.equal(new hold.MergeApprovals(options).find('owner/a', 7), null);
+  assert.equal(hold.check(input, ctx.repo, options).eligible, false);
+  for (const text of [decide(ctx, input).deny, hold.check(input, ctx.repo, options).explanation]) {
+    assert.match(text, /in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub/);
+    assert.match(text, /typing in this (?:reconnected|revoked) chat records no approval/);
+  }
+  const fresh = userSession(ctx, 'fresh-approval');
+  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: fresh, prompt: 'merge 7' }, options), 1);
+  assert.equal(decide(ctx, input), null, 'computer-wide approval allows the original session once');
+  assert.ok(decide(ctx, input)?.deny, 'consuming approval does not restore standing');
+});
+
+test(`${HOST}: clear under a new id has no standing but can record a typed merge`, t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  userSession(ctx, 'before-clear');
+  gate.startSession({ session_id: 'after-clear', source: 'clear' }, options);
+  const input = bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.head}`, 'after-clear');
+  const epochs = new gate.SessionEpochs(options);
+  assert.equal(epochs.origin('after-clear'), 'unknown');
+  assert.equal(epochs.resumed('after-clear'), false);
+  assert.equal(hold.check(input, ctx.repo, options).eligible, false);
+  assert.ok(decide(ctx, input)?.deny);
+  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: 'after-clear', prompt: 'merge 7' }, options), 1);
+  assert.equal(decide(ctx, input), null);
+  assert.ok(decide(ctx, input)?.deny);
+});
+
+if (HOST === 'claude-code') test('Bash and PowerShell tool resumes revoke standing with fixture-inherited variables', t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  // These are fixture environments, not evidence that the installed host exports to either shell.
+  for (const tool_name of ['Bash', 'PowerShell']) {
+    const session = userSession(ctx, `tool-${tool_name}`);
+    const launch = { cwd: ctx.repo, session_id: session, tool_name, tool_input: { command: 'claude -p -c "land PR 7"' } };
+    assert.equal(decide(ctx, launch), null);
+    gate.startSession({ session_id: session, source: 'resume' }, { ...options, environment: { TOOLKIT_HOST_SESSION: session } });
+    const report = hold.check({ session_id: session }, ctx.repo, options);
+    assert.equal(report.resumedFromSessionShell, true, tool_name);
+    assert.equal(report.eligible, false, tool_name);
+    assert.equal(report.reason, 'resume-from-session-shell', tool_name);
+    assert.ok(decide(ctx, { ...launch, tool_input: { command: `gh pr merge 7 --merge --match-head-commit ${ctx.head}` } })?.deny);
+  }
+});
+
+if (HOST === 'claude-code') test(`${HOST}: a session-shell resume loses standing durably and reports only presence`, t => {
+  const { wake } = require('./support/projects-approval.cjs');
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  const rows = [
+    { id: 'private-absent', environment: {}, revoked: false },
+    { id: 'private-matching', environment: { [gate.HOST_SESSION_VARIABLE]: 'private-matching' }, revoked: true },
+    { id: 'private-mismatching', environment: { [gate.HOST_SESSION_VARIABLE]: 'private-parent' }, revoked: true },
+    { id: 'private-empty', environment: { [gate.HOST_SESSION_VARIABLE]: '' }, revoked: true },
+  ];
+  for (const row of rows) {
+    userSession(ctx, row.id);
+    gate.startSession({ session_id: row.id, source: 'resume', cwd: ctx.repo }, { ...options, environment: row.environment });
+    const command = `gh pr merge 7 --merge --match-head-commit ${ctx.head}`;
+    const input = bash(ctx, command, row.id);
+    const checkInput = bash(ctx, 'node repo/scripts/toolkit-merge-hold.cjs check', row.id);
+    const assertStanding = present => {
+      const report = hold.check(input, ctx.repo, options);
+      assert.equal(report.eligible, !row.revoked, row.id);
+      assert.equal(report.resumeHostSessionPresent, present, row.id);
+      assert.equal(report.resumedFromSessionShell, row.revoked, row.id);
+      assert.equal(report.userStartedOrigin, !row.revoked, row.id);
+      assert.equal(report.reason, row.revoked ? 'resume-from-session-shell' : null, row.id);
+      const diagnostic = decide(ctx, checkInput).deny;
+      assert.deepEqual(JSON.parse(diagnostic.slice(diagnostic.indexOf('\n') + 1)), report);
+      assert.doesNotMatch(diagnostic, /private-|TOOLKIT_|user-state|epoch/);
+      if (row.revoked) {
+        assert.match(report.explanation, /resume carried the host-session variable.*revoked/);
+        const refusal = decide(ctx, input).deny;
+        assert.match(refusal, /resume carried the host-session variable.*revoked/);
+        assert.doesNotMatch(refusal, /private-|TOOLKIT_|epoch/);
+      } else assert.equal(decide(ctx, input), null);
+    };
+    assertStanding(row.revoked);
+    if (row.id === 'private-mismatching') {
+      assert.equal(hold.check(input, ctx.repo, { ...options, environment: row.environment }).reason, 'host-session-mismatch');
+      assert.match(decide(ctx, input, row.environment).deny, /host session does not match/);
+    }
+    for (const source of ['resume', 'startup', 'resume']) {
+      gate.startSession({ session_id: row.id, source, cwd: ctx.repo }, options);
+      assertStanding(false);
+    }
+    if (row.revoked) {
+      assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: row.id, prompt: wake('merge owner/a#7', { id: `cmsg_${HOST}_${row.id}` }) }, options), 1);
+      assert.equal(decide(ctx, input), null, 'explicit user approval still works after revocation');
+      assert.match(decide(ctx, input).deny, /resume carried the host-session variable.*revoked/, 'one approval never restores standing');
+    }
+  }
+});
+
+if (HOST === 'claude-code') test(`${HOST}: standing resume closure and diagnostic reasons`, t => {
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  const start = (id, source, environment = {}) => gate.startSession({ session_id: id, source, cwd: ctx.repo }, { ...options, environment });
+  const epochs = new gate.SessionEpochs(options);
+  const session = userSession(ctx);
+  const first = epochs.get(session);
+  start(session, 'resume');
+  assert.notEqual(epochs.get(session), first);
+  assert.equal(epochs.resumed(session), true);
+  const command = `gh pr merge 7 --merge --match-head-commit ${ctx.head}`;
+  assert.equal(decide(ctx, bash(ctx, command, session)), null, 'same-id user resume keeps standing authority');
+  assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: session, prompt: 'merge 8' }, options), 0, 'bare prompt rules still reject resumed runs');
+  start(session, 'resume');
+  assert.equal(decide(ctx, bash(ctx, command, session)), null, 'another reconnect keeps origin');
+  assert.equal(hold.check(bash(ctx, command, session), ctx.repo, options).eligible, true);
+  for (const [attempt, words] of [
+    [command.replace(ctx.head, ctx.head.slice(0, 7)), /40 character/],
+    [`${command} --squash`, /--merge|--squash/],
+    [`${command} --auto`, /--auto/],
+    [`${command} --repo owner/b`, /another repository/],
+    [command.replace(ctx.head, ctx.authority), /changes the merge rules/],
+    [command.replace(ctx.head, UNKNOWN), /cannot read the changes/],
+  ]) assert.match(decide(ctx, bash(ctx, attempt, session)).deny, words, 'resume keeps every merge guard');
+  const rows = [
+    { id: 'unmarked', reason: 'no-session-mark', words: /no readable session-start mark/ },
+    { id: 'unknown', source: 'resume', reason: 'resumed-without-user-started-origin', words: /resumed session.*no recorded user-started origin/ },
+    { id: 'fork', source: 'fork', reason: 'fork', words: /session is a fork/ },
+    { id: 'legacy', source: 'startup', legacy: true, reason: 'resumed-without-user-started-origin', words: /resumed session.*no recorded user-started origin/ },
+    { id: 'automation', source: 'startup', startupEnv: { TOOLKIT_GATE_ROLE: 'G1' }, reason: 'resumed-without-user-started-origin', words: /no recorded user-started origin/ },
+    { id: 'other-origin', source: 'startup', startupEnv: { TOOLKIT_HOST_SESSION: 'parent' }, reason: 'resumed-without-user-started-origin', words: /no recorded user-started origin/ },
+    { id: session, environment: { TOOLKIT_HOST_SESSION: 'another-native-session' }, reason: 'host-session-mismatch', words: /host session does not match/ },
+    ...gate.LAUNCHER_MARKERS.map(name => ({ id: session, environment: { [name]: 'launcher' }, reason: 'launcher-marker', words: /launcher marker is present/ })),
+  ];
+  for (const row of rows) {
+    if (row.source) start(row.id, row.source, row.startupEnv);
+    if (row.legacy) {
+      const file = path.join(path.dirname(ctx.registryOptions.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(row.id).digest('hex').slice(0, 32)}.json`);
+      const mark = JSON.parse(fs.readFileSync(file, 'utf8'));
+      delete mark.origin;
+      fs.writeFileSync(file, JSON.stringify(mark));
+    }
+    if (row.legacy || row.startupEnv) start(row.id, 'resume');
+    const input = bash(ctx, command, row.id);
+    const evaluation = hold.standingAnswer(input, ctx.repo, { ...options, environment: row.environment || {} });
+    assert.equal(evaluation.eligible, false, row.id);
+    assert.equal(evaluation.reason, row.reason, row.id);
+    const refusal = decide(ctx, input, row.environment);
+    assert.match(refusal.deny, /no unused approval/, row.id);
+    assert.match(refusal.deny, row.words, row.id);
+    assert.doesNotMatch(refusal.deny, /another-native-session|automation|legacy|TOOLKIT_|epoch/);
+  }
+  const input = bash(ctx, command, session);
+  assert.equal(hold.check(input, ctx.root, options).reason, 'no-repository');
+  const absent = hold.check({}, ctx.repo, options);
+  assert.equal(absent.nativeSessionContext, false);
+  assert.equal(absent.reason, 'no-native-session-context');
+  machine(ctx, 'off');
+  assert.equal(hold.check(input, ctx.repo, options).reason, 'auto-merge-off');
+  machine(ctx, 'after-gates');
+  merged(ctx, YES, { ageMs: 25 * 60 * 60 * 1000 });
+  const stale = hold.check(input, ctx.repo, options);
+  assert.equal(stale.autoMergeOn, true);
+  assert.equal(stale.bindingFresh, false);
+  assert.equal(stale.reason, 'binding-not-fresh');
 });
 
 test('hold: with yes, a head that changes the merge rules, or one this computer cannot read, waits for a typed merge', (t) => {

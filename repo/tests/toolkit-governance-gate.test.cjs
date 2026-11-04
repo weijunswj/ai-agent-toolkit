@@ -38,7 +38,7 @@ function scratch(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-governance-gate-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const registryPath = path.join(root, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
-  return { root, registryPath, options: { registryPath, testOnly: true }, heldPath: path.join(path.dirname(registryPath), gate.HELD_BASENAME) };
+  return { root, registryPath, options: { registryPath, testOnly: true, home: path.join(root, 'home') }, heldPath: path.join(path.dirname(registryPath), gate.HELD_BASENAME) };
 }
 
 function gitRepo(ctx, name, { remote = REMOTE, block = false, binding = false } = {}) {
@@ -1422,6 +1422,120 @@ test('nested sessions: a short reply counts only in the session that was shown t
   }
 });
 
+test('session authority closure: repeated starts never raise origin or clear negative marks', t => {
+  const ctx = scratch(t);
+  // Matrix: native host x initial origin/source x later event. Payload host claims grant nothing.
+  for (const host of ['claude-code', 'claude', 'codex', 'unknown', null]) {
+    for (const source of ['startup', 'resume', 'fork', 'other']) {
+      for (const environment of [{}, { TOOLKIT_GATE_ROLE: 'G1' }, { TOOLKIT_HOST_SESSION: 'parent' }]) {
+        const id = `${host}-${source}-${Object.keys(environment)[0] || 'user'}`;
+        const options = { registryOptions: ctx.options, host, environment: {} };
+        const epochs = new gate.SessionEpochs(options);
+        gate.startSession({ session_id: id, source, host: 'claude-code' }, { ...options, environment });
+        const origin = epochs.origin(id);
+        const resumed = epochs.resumed(id);
+        const forked = epochs.forked(id);
+        const restricted = epochs.resumeNeedsTypedMerge(id);
+        for (const next of ['startup', 'startup', 'clear', 'compact', 'resume', 'startup']) {
+          gate.startSession({ session_id: id, source: next, host: 'claude-code' }, options);
+          assert.equal(epochs.origin(id), origin, `${id}: ${next}`);
+          if (resumed || next === 'resume') assert.equal(epochs.resumed(id), true, id);
+          assert.equal(epochs.forked(id), forked, id);
+          if (restricted || (next === 'resume' && !['claude', 'claude-code'].includes(host))) assert.equal(epochs.resumeNeedsTypedMerge(id), true, id);
+        }
+      }
+    }
+  }
+  const options = { registryOptions: ctx.options, host: 'claude-code', environment: {} };
+  const epochs = new gate.SessionEpochs(options);
+  for (const value of [undefined, 'unrecognised', true, 'corrupt']) {
+    const id = `legacy-startup-${value}`;
+    epochs.start(id, 'startup');
+    const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(id).digest('hex').slice(0, 32)}.json`);
+    const mark = JSON.parse(fs.readFileSync(file, 'utf8'));
+    delete mark.origin;
+    if (value !== undefined) mark.origin = value;
+    fs.writeFileSync(file, value === 'corrupt' ? '{' : JSON.stringify(mark));
+    epochs.start(id, 'startup');
+    assert.equal(epochs.origin(id), 'unknown', id);
+  }
+});
+
+test('session origin closure: only a qualifying startup survives same-id resume, never a fork or unknown origin', t => {
+  const ctx = scratch(t);
+  const rows = [
+    { name: 'user', source: 'startup', origin: 'user-started', environment: {} },
+    { name: 'matching-host', source: 'startup', origin: 'user-started', environment: { TOOLKIT_HOST_SESSION: 'matching-host' } },
+    { name: 'other-host', source: 'startup', origin: 'automation', environment: { TOOLKIT_HOST_SESSION: 'parent' } },
+    ...gate.LAUNCHER_MARKERS.map(name => ({ name, source: 'startup', origin: 'automation', environment: { [name]: 'launcher' } })),
+    ...['resume', 'fork', 'clear', 'compact', 'other', null].map(source => ({ name: `unknown-${source}`, source, origin: 'unknown', environment: {} })),
+  ];
+  for (const row of rows) {
+    const options = { host: 'claude-code', registryOptions: ctx.options, environment: row.environment };
+    const epochs = new gate.SessionEpochs(options);
+    const first = gate.startSession({ session_id: row.name, source: row.source }, options);
+    assert.ok(first, row.name);
+    assert.equal(epochs.origin(row.name), row.origin, row.name);
+    assert.equal(epochs.resumed(row.name), ['resume', 'fork'].includes(row.source), row.name);
+    for (const source of ['clear', 'compact']) assert.equal(epochs.start(row.name, source), first, row.name);
+    const next = gate.startSession({ session_id: row.name, source: 'resume', prompt: 'user started this session' }, { ...options, environment: {} });
+    assert.notEqual(next, first, row.name);
+    assert.equal(epochs.resumed(row.name), true, row.name);
+    assert.equal(epochs.origin(row.name), row.origin, row.name);
+    assert.equal(epochs.forked(row.name), row.source === 'fork', row.name);
+    assert.notEqual(epochs.start(row.name, 'resume'), next, 'every resume still rotates its epoch');
+  }
+  const epochs = new gate.SessionEpochs({ host: 'claude-code', registryOptions: ctx.options, environment: {} });
+  epochs.start('user', 'fork');
+  assert.equal(epochs.origin('user'), 'unknown', 'even a fork reporting the same id drops origin');
+  epochs.start('user', 'resume');
+  assert.equal(epochs.forked('user'), true, 'a fork cannot gain origin by resuming');
+  for (const value of [undefined, 'unrecognised', true]) {
+    const id = `legacy-${value}`;
+    epochs.start(id, 'startup');
+    const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(id).digest('hex').slice(0, 32)}.json`);
+    const mark = JSON.parse(fs.readFileSync(file, 'utf8'));
+    delete mark.origin;
+    if (value !== undefined) mark.origin = value;
+    fs.writeFileSync(file, JSON.stringify(mark));
+    epochs.start(id, 'resume');
+    assert.equal(epochs.origin(id), 'unknown', 'legacy and unknown fields never become user origin');
+  }
+  epochs.start('another-id', 'resume');
+  assert.equal(epochs.origin('another-id'), 'unknown', 'origin belongs to one native session id only');
+});
+
+test('session-shell resume closure: presence revokes origin for the id across every later start', t => {
+  const ctx = scratch(t);
+  const rows = [
+    { id: 'private-absent', environment: {}, revoked: false },
+    { id: 'private-matching', environment: { [gate.HOST_SESSION_VARIABLE]: 'private-matching' }, revoked: true },
+    { id: 'private-mismatching', environment: { [gate.HOST_SESSION_VARIABLE]: 'private-parent' }, revoked: true },
+    { id: 'private-empty', environment: { [gate.HOST_SESSION_VARIABLE]: '' }, revoked: true },
+  ];
+  for (const row of rows) {
+    const options = { host: 'claude-code', registryOptions: ctx.options, environment: {} };
+    const epochs = new gate.SessionEpochs(options);
+    const first = epochs.start(row.id, 'startup');
+    const resumed = gate.startSession({ session_id: row.id, source: 'resume' }, { ...options, environment: row.environment });
+    assert.notEqual(resumed, first, row.id);
+    assert.equal(epochs.origin(row.id), row.revoked ? 'automation' : 'user-started', row.id);
+    assert.equal(epochs.resumeHostSessionPresent(row.id), row.revoked, row.id);
+    assert.equal(epochs.resumedFromSessionShell(row.id), row.revoked, row.id);
+    const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(row.id).digest('hex').slice(0, 32)}.json`);
+    const mark = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(mark.resumeHostSessionPresent, row.revoked);
+    assert.equal(mark.resumedFromSessionShell, row.revoked);
+    assert.doesNotMatch(JSON.stringify(mark), /private-|TOOLKIT_HOST_SESSION/, 'only boolean presence is persisted');
+    for (const source of row.revoked ? ['resume', 'clear', 'compact', 'other', 'fork', 'startup', 'resume'] : ['resume', 'clear', 'compact', 'startup', 'resume']) {
+      epochs.start(row.id, source);
+      assert.equal(epochs.resumedFromSessionShell(row.id), row.revoked, `${row.id}: ${source}`);
+      assert.equal(epochs.resumeHostSessionPresent(row.id), false, `${row.id}: ${source}`);
+      assert.equal(epochs.origin(row.id), row.revoked ? 'automation' : 'user-started', `${row.id}: ${source}`);
+    }
+  }
+});
+
 test('session marks: a later process that resumes the session cannot answer, on both hosts, however it was started', (t) => {
   const ctx = scratch(t);
   const home = path.join(ctx.root, 'home');
@@ -1595,6 +1709,58 @@ test('a mark that cannot be replaced fails safe: the resumed or continued run ca
   // The user's next reply answers.
   assert.equal(raw().decide({ cwd: continued, prompt: 'yes', sessionId: 'first' }).action, 'pass');
   assert.equal(stateOf(ctx, continued).state, 'ENABLED');
+});
+
+test('a failed mark write retains restrictions through later startup replay', t => {
+  const ctx = scratch(t);
+  const options = { registryOptions: ctx.options, environment: {}, host: 'claude-code' };
+  const epochs = new gate.SessionEpochs(options);
+  const { renameSync } = fs;
+  let blocked = null;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (to === blocked) throw Object.assign(new Error('fixture write failure'), { code: 'EPERM' });
+    return renameSync(from, to);
+  });
+  for (const restriction of ['session-shell', 'codex', 'fork', 'unknown', 'automation']) {
+    epochs.start(restriction, 'startup');
+    if (restriction === 'session-shell') new gate.SessionEpochs({ ...options, environment: { TOOLKIT_HOST_SESSION: restriction } }).start(restriction, 'resume');
+    if (restriction === 'codex') new gate.SessionEpochs({ ...options, host: 'codex' }).start(restriction, 'resume');
+    if (restriction === 'fork') epochs.start(restriction, 'fork');
+    if (restriction === 'unknown') epochs.start(restriction, 'other');
+    if (restriction === 'automation') new gate.SessionEpochs({ ...options, environment: { TOOLKIT_GATE_ROLE: 'G1' } }).start(restriction, 'startup');
+    const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(restriction).digest('hex').slice(0, 32)}.json`);
+    const before = fs.readFileSync(file, 'utf8');
+    blocked = file;
+    assert.equal(epochs.start(restriction, 'startup'), null, restriction);
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'failed replacement must not delete the restricted mark');
+    blocked = null;
+    epochs.start(restriction, 'startup');
+    if (restriction === 'session-shell') assert.equal(epochs.resumedFromSessionShell(restriction), true);
+    if (restriction === 'codex') assert.equal(epochs.resumeNeedsTypedMerge(restriction), true);
+    if (restriction === 'fork') assert.equal(epochs.forked(restriction), true);
+    if (restriction === 'unknown') assert.equal(epochs.origin(restriction), 'unknown');
+    if (restriction === 'automation') assert.equal(epochs.origin(restriction), 'automation');
+  }
+});
+
+test('repository mark failure cannot delete a newly revoked session mark', t => {
+  const ctx = scratch(t);
+  const options = { registryOptions: ctx.options, environment: {}, host: 'claude-code' };
+  const epochs = new gate.SessionEpochs(options);
+  epochs.start('user', 'startup', 'repository');
+  const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `r-${crypto.createHash('sha256').update('repository').digest('hex').slice(0, 32)}.json`);
+  const { renameSync, rmSync } = fs;
+  let fault = true;
+  const busy = () => Object.assign(new Error('fixture repository mark failure'), { code: 'EBUSY' });
+  t.mock.method(fs, 'renameSync', (from, to) => { if (fault && to === file) throw busy(); return renameSync(from, to); });
+  t.mock.method(fs, 'rmSync', (target, options) => { if (fault && target === file) throw busy(); return rmSync(target, options); });
+  const resumed = new gate.SessionEpochs({ ...options, environment: { TOOLKIT_HOST_SESSION: 'user' } });
+  assert.equal(resumed.start('user', 'resume', 'repository'), null);
+  assert.equal(epochs.resumedFromSessionShell('user'), true, 'repository cleanup preserves the newly written revocation');
+  fault = false;
+  epochs.start('user', 'startup', 'repository');
+  assert.equal(epochs.resumedFromSessionShell('user'), true);
+  assert.equal(epochs.origin('user'), 'automation');
 });
 
 test('a mark that can be neither replaced nor removed fails safe: held messages and "later" forget their marks', (t) => {
