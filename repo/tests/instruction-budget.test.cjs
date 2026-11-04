@@ -41,7 +41,9 @@ test('each block stays inside its own budget', () => {
   // from 22,700 to the cap below, leaving headroom only for lanes already in flight. The governed
   // block took the issue rules from the global layer, so its cap rose a little. The combined Codex
   // limit above stays the hard cap.
-  assert.ok(crlfBytes(GLOBAL) <= 18500, `global block ${crlfBytes(GLOBAL)} bytes`);
+  // Owner raised the global cap to preserve existing wording alongside task standing approval;
+  // a later version will deal with instruction size. The combined Codex limit above still applies.
+  assert.ok(crlfBytes(GLOBAL) <= 19400, `global block ${crlfBytes(GLOBAL)} bytes`);
   assert.ok(crlfBytes(GOVERNED) <= 4250, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
   // CONTROLLER.md loads only for controllers, not every session; the rules audit cut it below 18000.

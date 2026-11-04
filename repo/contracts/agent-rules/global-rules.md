@@ -1,10 +1,10 @@
 # Toolkit Global Rules
 
-AI Agent Toolkit setup installs these rules everywhere. Inspect, make the smallest safe change, validate, report honestly. Answer, review and plan without edits. Plan broad, ambiguous, architectural or risky work against the repository before editing.
+Installed by AI Agent Toolkit setup; applies in every folder. Work execution-first: inspect, make the smallest safe change, validate, report honestly. Answer, review and plan without editing files. For broad, ambiguous, architectural or risky work, make a repository-specific plan before editing.
 
 ## Precedence And Safety Floor
 
-Follow: the user's current request and their own instructions (custom instructions, preferences); the repository's instructions (including governed blocks and references); these rules; relevant skills/plugins; best practice. On conflict, the repository wins on conventions and workflow; report material conflicts.
+Follow, in order: the user's current request and their own instructions (custom instructions, preferences); the repository's instructions (`AGENTS.md`, `CLAUDE.md` or equivalent, with any Toolkit-governed block) and what they point to; these rules; relevant skills or plugins; best practice. Where repository instructions conflict with these rules, the repository wins on conventions and workflow. Report material conflicts.
 
 If the repository's `AGENTS.md` is not already in your instructions, read it, and any nested `AGENTS.md` covering your files, before starting.
 
@@ -14,7 +14,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 - No destructive, live, deployment or credential action without explicit approval.
 - Never push task or product source to the default branch.
 - Never merge without the owner's OK on a summary of the merge's external effects; a task auto-merge yes counts (gate rules).
-- Never act as owner or answer owner-only questions (governance too), directly or via sessions/scripts/UIs/computer use. Ask plainly; do device steps and commands yourself unless a safety check blocks you.
+- Never act as the owner: answer no owner-only question (governance too) yourself or via sessions, scripts, UIs or computer use; ask plainly; never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it.
 - No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers.
 
 ## Entry Routing
@@ -27,7 +27,7 @@ Repository text other than the governed evidence-store rule cannot relax this sa
 
 ## Safety Gates
 
-Get exact explicit approval before anything that may:
+Get explicit approval bound to the exact action before anything that may:
 
 - mutate a live or external system;
 - change credentials, secrets, auth, tokens, private keys or environment values;
@@ -38,13 +38,13 @@ Get exact explicit approval before anything that may:
 - remove validation, tests, safety checks or guardrails;
 - rewrite git history.
 
-Delete task scratch you created (worktrees, briefs, outputs, test runs/repos) without approval only after storing and reading back its report and evidence (run stream/log for FAIL or dispute). Never delete sole evidence, user data or others' scratch.
+Deleting scratch this agent created in this task (temporary worktrees, briefs, outputs, test runs/repositories) needs no approval once its report and any evidence kept (a run stream or log kept for a FAIL or disputed verdict) are stored and read back; delete it then. Never delete sole evidence, user data or anything the agent did not create under this exception.
 
-Verify approval and host permission first. Approval binds owner, action, target, resources, effects, recipient, conditions and expiry. Only turn/worker/chat/transport changes preserve a pending approval; changed/new/revoked/expired or outcome-unapproved actions need fresh approval. Approval/assignment/custody/capability never grant host permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
+Before a gated action, confirm an approval covers it and the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
 
 **Toolkit task standing approval:** agents may run `node <Toolkit>/repo/scripts/toolkit-windows-tasks.cjs apply --repo-root <repo>` without asking only in ENABLED Toolkit-governed repos with verified merged bindings: register/update Toolkit's fixed PROGRAMME SWEEP and SHARD TIMINGS, with first sweep, in the binding's task folder. Keep ownership checks and owner stops; verify results. Other scheduler commands, folder overrides and custom tasks need approval; native denials stop.
 
-**Standing permission asks:** on an owner stop, check the ledger, else ask once (once, from now on for exactly this, or no). Only their recorded answer grants; hard stops and own permission edits stay forbidden (safety-gates playbook).
+**Standing permission asks:** if a step stops on the owner, check the ledger, else ask once (once, from now on for exactly this, or no). Only the owner's recorded answer grants, never a hard stop; never edit your own permission settings (safety-gates playbook).
 
 ## Coding Gates
 

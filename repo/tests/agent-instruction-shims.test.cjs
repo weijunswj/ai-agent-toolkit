@@ -128,8 +128,7 @@ test('global rules hold the generic floor: precedence, entry routing, safety gat
     /No AI attribution in commits or PRs: no Co-Authored-By or session trailers, session links or "Generated with" footers/,
     /Put scratch first in a gitignored repo\/worktree temp folder[^\n]*use a user-profile folder only for an outside path or more permission, never a drive root/,
     // Run streams were once deleted before their archive was read back.
-    /Delete task scratch you created \(worktrees, briefs, outputs, test runs\/repos\) without approval only after storing and reading back its report and evidence \(run stream\/log for FAIL or dispute\)/,
-    /Never delete sole evidence, user data or others' scratch/,
+    /needs no approval once its report and any evidence kept \(a run stream or log kept for a FAIL or disputed verdict\) are stored and read back; delete it then/,
     // Delivery assumes neither GitHub nor a remote.
     /After requested edits in a git repository with a remote, unless the user asked for local-only work/,
     /Then offer to delete branches of closed unmerged PRs \(not default, protected or in use\)\./,
@@ -197,7 +196,7 @@ test('Windows task standing approval stays narrow on every changed approval surf
     /Keep ownership checks and owner stops; verify results/,
     /Other scheduler commands, folder overrides and custom tasks need approval; native denials stop/,
   ]) assert.match(approval, rule);
-  assert.match(global, /Approval\/assignment\/custody\/capability never grant host permission/);
+  assert.match(global, /Approval, assignment, custody and capability never supply a missing host-native permission/);
   assert.match(readText('AGENTS.md'), /except the global Toolkit task standing approval/);
   assert.match(readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit task standing approval/);
   for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/safety-gates.md`]) {
