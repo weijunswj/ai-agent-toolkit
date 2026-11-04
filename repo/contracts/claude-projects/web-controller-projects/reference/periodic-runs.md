@@ -33,6 +33,7 @@ The script compares the merge-base version with the head to prove exactly one pa
 
 ## Acting on the nudge report
 - `UNRELAYED ASK`: read the full source and project-chat relay, verify that the owner can act now, then follow **Call-to-action pings** in SKILL.md in this turn. Reconcile the actual ask, not just the source thread or post times. Do not repeat an already confirmed ping; keep its unfinished owner step on the pending list.
+- **Nudge template changes:** refresh the stored nudge prompt through **Recurring tasks**, preserving its schedule, bound home thread, recorded raises and any `stopped by owner` entry.
 - **Remote Control recovery findings:** follow **Remote Control wake** in SKILL.md in this turn. Combine the report with the other affected lanes and the existing recovery entry. The report is a check opportunity, not a separate reminder per lane or proof that every device and usage limit recovered.
 - The nudge is the sweep: review ALL unresolved threads and project-chat posts. Include top-level posts with replies from coordinator or user: the thread list omits them, so also page through project chat with small page limits (large pages overflow). List:
   1. threads that are blocked, failed or stopped, or working but idle for over 45 minutes;
