@@ -27,6 +27,44 @@ function fixture(entry_id) {
   const event={hook_event_name:'PreToolUse',tool_name:entry.entry,session_id:'parent',cwd:'owned',model:'approved-lead',tool_input:{subagent_type:'ai-agent-toolkit:g1-helper'}};
   return { captured,adapter,event,route,dispatches,get state(){return state},set state(s){state=s},set observe(fn){observe=fn} };
 }
+
+function ownerMixedCodexAdapterFixture() {
+  const entry_id = 'codex_spawn_agent', captured = capturedStack('owner-mixed'), dispatches = [];
+  const helperRoute = captured.selection.routes.BUILDER_HELPER;
+  const state = { state:'ready', host_version:'synthetic manual-route observation (not native qualification)',
+    registration:{...HOST_ENTRIES[entry_id],registered:true,loaded:true,enabled:true},
+    session:{caller_role:'G1',profile_id:'owner-mixed',registry_revision:captured.selection.registry_digest,lifecycle:'fresh'},
+    routing:{profile_id:'owner-mixed',registry_revision:captured.selection.registry_digest,helper_role:'BUILDER_HELPER',
+      effective_route:helperRoute,native_defaults:helperRoute,
+      pinned_defaults:{provider:true,model:true,reasoning:true},inherited_route:null} };
+  const adapter = createNativeHelperAdapter({ source_capture:captured.source_capture, selection:captured.selection, entry_id,
+    helper_identity:'ai-agent-toolkit:g1-helper', timeout_ms:50, observe_host_state:() => clone(state),
+    session_id:'parent', cwd:'owned', caller_model:'approved-lead',
+    dispatch_native:request => { dispatches.push(request); return { first_model_request:'intercepted', task_effects:0 }; } });
+  const event={hook_event_name:'PreToolUse',tool_name:'spawn_agent',session_id:'parent',cwd:'owned',model:'approved-lead',
+    tool_input:{subagent_type:'ai-agent-toolkit:g1-helper'}};
+  return { captured, adapter, event, dispatches, get state(){return state}, set state(s){Object.assign(state,s)} };
+}
+
+function ownerMixedClaudeNativeFixture(provider) {
+  const entry_id = 'claude_parent_agent', captured = capturedStack('owner-mixed'), helperIdentity = 'ai-agent-toolkit:g1-helper';
+  const toolInput = { subagent_type:helperIdentity };
+  const binding = { helper_identity:helperIdentity,
+    host_state:{ state:'ready', host_version:'synthetic Claude config observation (not native qualification)',
+      registration:{...HOST_ENTRIES[entry_id],registered:true,loaded:true,enabled:true},
+      session:{caller_role:'G1',profile_id:'owner-mixed',registry_revision:captured.selection.registry_digest,lifecycle:'fresh'},
+      routing:{profile_id:'owner-mixed',registry_revision:captured.selection.registry_digest,helper_role:'BUILDER_HELPER',
+        effective_route:captured.selection.routes.BUILDER_HELPER,native_defaults:captured.selection.routes.BUILDER_HELPER,
+        pinned_defaults:{provider:true,model:true,reasoning:true},inherited_route:null} },
+    native_config:{loaded_agent:helperIdentity,mods_present:false,provider,parent_model:'claude-opus-5-5',
+      agent_model:'claude-haiku-5-5',agent_effort:'xhigh',session_effort:'high',available_models:['claude-haiku-5-5','claude-opus-5-5']} };
+  const dispatches = [];
+  const adapter = createNativeHelperAdapter({ source_capture:captured.source_capture, selection:captured.selection, entry_id,
+    helper_identity:helperIdentity, timeout_ms:50, observe_host_state:() => resolveClaudeNativeState(binding,toolInput,{}),
+    dispatch_native:request => { dispatches.push(request); return { first_model_request:'intercepted', task_effects:0 }; } });
+  return { captured, dispatches, invoke:() => adapter.invoke({ hook_event_name:'PreToolUse', tool_name:'Agent',
+    session_id:'human-opened-claude-root', cwd:'owned', model:'claude-opus-5-5', tool_input:toolInput }) };
+}
 test('native adapter translation preserves original fifteen cases across every entry', async t => {
   for (const entry of Object.keys(HOST_ENTRIES)) {
     for (let id=1;id<=15;id++) await t.test(entry+' case '+id, async () => {
@@ -207,4 +245,85 @@ test('production helper-definition commands require source-pinned selection with
   }
   assert.throws(()=>renderNativeHelperDefinition('codex','G2'),/SELECTION_INVALID/);
   assert.throws(()=>renderNativeHelperDefinition('unqualified-host','G1'),/SELECTION_INVALID/);
+});
+
+test('synthetic captured profiles resolve exact helper definitions only on matching-provider hosts', () => {
+  const profileHostCases = [
+    { profile: 'owner-gpt', host: 'codex', supported: true },
+    { profile: 'owner-gpt', host: 'claude-code', supported: false },
+    { profile: 'owner-claude', host: 'codex', supported: false },
+    { profile: 'owner-claude', host: 'claude-code', supported: true },
+    { profile: 'owner-mixed', host: 'codex', supported: true },
+    { profile: 'owner-mixed', host: 'claude-code', supported: false },
+  ];
+
+  for (const { profile, host, supported } of profileHostCases) for (const callerRole of ['G0', 'G1']) {
+    const label = `${profile}/${host}/${callerRole}`;
+    const captured = capturedStack(profile);
+    const helperRole = callerRole === 'G0' ? 'DISCOVERY_HELPER' : 'BUILDER_HELPER';
+    const selectedRoute = captured.selection.routes[helperRole];
+    const hostProvider = host === 'codex' ? 'openai' : 'anthropic';
+
+    // Each helper row first proves source and profile binding fail closed before rendering.
+    const sourceDrift = clone(captured);
+    sourceDrift.source_capture.reference.content_sha256 = '0'.repeat(64);
+    assert.throws(() => renderNativeHelperDefinition(host, callerRole, sourceDrift), /STACK_REGISTRY_SOURCE_DRIFT/, `${label}: raw-source digest`);
+
+    const profileDrift = clone(captured);
+    profileDrift.selection.profile_id = profile === 'owner-gpt' ? 'owner-claude' : 'owner-gpt';
+    assert.throws(() => renderNativeHelperDefinition(host, callerRole, profileDrift), /STACK_SELECTION_BINDING_DRIFT/, `${label}: selected profile must remain bound to captured source`);
+
+    if (!supported) {
+      assert.notEqual(selectedRoute.provider, hostProvider, `${label}: G0 matrix expects a provider refusal`);
+      assert.throws(() => renderNativeHelperDefinition(host, callerRole, captured), /NATIVE_HELPER_ROUTE_UNSUPPORTED/, label);
+      continue;
+    }
+
+    assert.equal(selectedRoute.provider, hostProvider, `${label}: G0 matrix expects the host provider`);
+    const rendered = renderNativeHelperDefinition(host, callerRole, captured);
+    assert.equal(rendered.caller_role, callerRole, label);
+    assert.equal(rendered.helper_role, helperRole, label);
+    assert.equal(rendered.selected_profile_id, profile, label);
+    assert.equal(rendered.registry_revision, captured.selection.registry_digest, label);
+    assert.deepEqual(rendered.registry_reference, captured.selection.registry_reference, label);
+    assert.deepEqual(rendered.route, selectedRoute, label);
+    assert.equal(rendered.qualification, 'CONFIGURATION_GENERATED_ONLY', `${label}: generated configuration is not host qualification`);
+  }
+});
+
+test('synthetic owner-mixed adapter enforces the captured Codex helper route and refuses profile or digest drift', async () => {
+  const accepted = ownerMixedCodexAdapterFixture();
+  const allowed = await accepted.adapter.invoke(accepted.event);
+  assert.equal(allowed.decision, 'ALLOW', allowed.code);
+  assert.deepEqual(accepted.dispatches[0].route, accepted.captured.selection.routes.BUILDER_HELPER);
+
+  const driftCases = [
+    ['observed profile', state => { state.session.profile_id = 'owner-gpt'; state.routing.profile_id = 'owner-gpt'; }],
+    ['observed capture digest', state => {
+      state.session.registry_revision = '0'.repeat(64);
+      state.routing.registry_revision = '0'.repeat(64);
+    }],
+  ];
+  for (const [label, mutate] of driftCases) {
+    const f = ownerMixedCodexAdapterFixture();
+    const state = clone(f.state);
+    mutate(state);
+    f.state = state;
+    const denied = await f.adapter.invoke(f.event);
+    assert.equal(denied.decision, 'DENY', label);
+    assert.equal(denied.code, label === 'observed profile' ? 'PROFILE_NOT_SELECTED' : 'REGISTRY_REVISION_MISMATCH', label);
+    assert.equal(f.dispatches.length, 0, `${label}: refuse before dispatch`);
+  }
+
+  const claude = ownerMixedClaudeNativeFixture('anthropic');
+  const claudeRoute = await claude.invoke();
+  assert.equal(claudeRoute.decision, 'DENY', claudeRoute.code);
+  assert.equal(claudeRoute.code, 'ROUTE_MISMATCH', 'the native observer reconstructs the effective Anthropic route');
+  assert.equal(claude.dispatches.length, 0, 'Claude Code must refuse the captured mixed OpenAI helper route');
+
+  const forgedProvider = ownerMixedClaudeNativeFixture('openai');
+  const unverified = await forgedProvider.invoke();
+  assert.equal(unverified.decision, 'DENY', unverified.code);
+  assert.equal(unverified.code, 'CLAUDE_EFFECTIVE_CONFIG_UNVERIFIED');
+  assert.equal(forgedProvider.dispatches.length, 0, 'an injected OpenAI provider is not a verified Claude configuration');
 });
