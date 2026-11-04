@@ -1,11 +1,10 @@
 # Toolkit Changelog
 
-## 3.45.0
+## 3.44.3
 
-### Added
+### Fixed
 
-- Owner-led renewal advice for Codex and Claude Code controllers and non-gate test sessions, with verified handoff retrieval and recovery holds.
-- Toolkit daily check-in session advice from redacted digests, keeping missing fields and historical activity explicit without automatic session or task changes.
+- Fresh Claude Projects coordinators automatically bootstrap their guidebook and guided setup on appointment, only when the host identifies the top-level coordinator and provides native project tools and library access. Other hosts and executor threads keep their assigned roles, and failed bootstrap holds takeover.
 
 ## 3.44.2
 
