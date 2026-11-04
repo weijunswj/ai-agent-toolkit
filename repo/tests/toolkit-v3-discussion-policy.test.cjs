@@ -145,7 +145,7 @@ test('Discuss shares Discovery agent and selected route without a peer or new ga
   assert.match(discovery, /no separate gate, standing peer agent or additional model route/);
   assert.match(routing, /G0\.Discuss resolves to the same selected lead binding as G0\.Discovery/);
   assert.match(routing, /no separate registry role or hardcoded provider\/model/);
-  for (const stack of ['owner-gpt', 'owner-claude']) {
+  for (const stack of ['owner-gpt', 'owner-claude', 'owner-mixed']) {
     assert.ok(routing.includes(`\`${stack}\``), `retained explicit stack: ${stack}`);
   }
   assert.equal(routing.includes('`owner-mixed-claude-gpt`'), false, 'the mixed profile is removed');

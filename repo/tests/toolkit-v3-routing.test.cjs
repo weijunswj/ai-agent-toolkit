@@ -24,5 +24,5 @@ test('the current registry gives each helper role its own route and G2 reviewers
     assert.deepEqual(Object.keys(profile.routes).sort(), ['BUILDER', 'BUILDER_HELPER', 'DESIGN_CHALLENGE', 'DISCOVERY', 'DISCOVERY_HELPER'], id);
     for (const member of profile.reviewers) assert.deepEqual(Object.keys(member).sort(), ['model', 'provider', 'reasoning', 'reviewer_id'], id);
   }
-  assert.deepEqual(Object.keys(registry.profiles).sort(), ['owner-claude', 'owner-gpt']);
+  assert.deepEqual(Object.keys(registry.profiles).sort(), ['owner-claude', 'owner-gpt', 'owner-mixed']);
 });

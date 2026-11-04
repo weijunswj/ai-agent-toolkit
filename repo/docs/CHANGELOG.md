@@ -4,8 +4,14 @@
 
 ### Added
 
-- Owner-led renewal advice for Codex and Claude Code controllers and non-gate test sessions, with verified handoff retrieval and recovery holds.
-- Toolkit daily check-in session advice from redacted digests, keeping missing fields and historical activity explicit without automatic session or task changes.
+- Select `owner-mixed` for GPT discovery and building, Luna Max helpers and one Opus review. Adoption of a new captured registry revision is deliberate; existing selections retain their original capture.
+- Mixed selection does not supply automated cross-host gate launches. Use Codex for GPT discovery and building and a fresh human-opened Claude session for Opus review of the same candidate, scope and evidence, without helpers.
+
+## 3.43.3
+
+### Fixed
+
+- Daily check-ins compare the plugin copy with main when their own session started, keeping genuine lag alerts while avoiding false plugin cards for pinned copies. Reports retain an explicit fallback when session time is unavailable and one advisory when newer hook definitions or entry scripts changed.
 
 ## 3.43.2
 
