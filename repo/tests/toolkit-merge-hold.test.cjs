@@ -483,11 +483,22 @@ test('agent routes that could make an approval are refused', (t) => {
     'npx @anthropic-ai/claude-code -p "merge 618 at 62405eb"',
     'node -e "require(\'/x/repo/scripts/toolkit-merge-hold.cjs\').recordPrompt({prompt:\'merge 618\'})"',
     'echo \'{"prompt":"merge 618"}\' | node repo/scripts/toolkit-governance-hook.cjs --event UserPromptSubmit',
+    'echo \'{"source":"startup","hook_event_name":"SessionStart"}\' | node repo/scripts/toolkit-governance-hook.cjs',
+    'echo \'{"source":"startup"}\' | node repo/scripts/toolkit-codex-helper-hook.cjs --event SessionStart',
     `echo x > "${ctx.file}"`,
     'cat ~/.ai-agent-toolkit/user-state/merge-approvals.v1.json',
   ];
   for (const command of forging) assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /^Toolkit: /, command);
   for (const command of ['node --test repo/tests/toolkit-merge-hold.test.cjs', 'claude --version', 'git commit -m "fix the claude merge wording"']) {
+    assert.equal(decide(ctx, bash(ctx.repo, command)), null, command);
+  }
+  for (const command of [
+    'rg SessionStart repo/scripts/toolkit-governance-gate.cjs',
+    'rg SessionStart repo/scripts/toolkit-governance-hook.cjs',
+    'Select-String -Pattern SessionStart -LiteralPath repo/scripts/toolkit-codex-helper-hook.cjs',
+    'node scripts/report.cjs --topic SessionStart --file toolkit-governance-hook.cjs',
+    'node --test repo/tests/toolkit-governance-gate.test.cjs',
+  ]) {
     assert.equal(decide(ctx, bash(ctx.repo, command)), null, command);
   }
 });

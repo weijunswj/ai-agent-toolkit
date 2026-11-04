@@ -1287,6 +1287,37 @@ test('session origin closure: only a qualifying startup survives same-id resume,
   assert.equal(epochs.origin('another-id'), 'unknown', 'origin belongs to one native session id only');
 });
 
+test('session-shell resume closure: presence revokes origin for the id across every later start', t => {
+  const ctx = scratch(t);
+  const rows = [
+    { id: 'private-absent', environment: {}, revoked: false },
+    { id: 'private-matching', environment: { [gate.HOST_SESSION_VARIABLE]: 'private-matching' }, revoked: true },
+    { id: 'private-mismatching', environment: { [gate.HOST_SESSION_VARIABLE]: 'private-parent' }, revoked: true },
+    { id: 'private-empty', environment: { [gate.HOST_SESSION_VARIABLE]: '' }, revoked: true },
+  ];
+  for (const row of rows) {
+    const options = { registryOptions: ctx.options, environment: {} };
+    const epochs = new gate.SessionEpochs(options);
+    const first = epochs.start(row.id, 'startup');
+    const resumed = gate.startSession({ session_id: row.id, source: 'resume' }, { ...options, environment: row.environment });
+    assert.notEqual(resumed, first, row.id);
+    assert.equal(epochs.origin(row.id), row.revoked ? 'automation' : 'user-started', row.id);
+    assert.equal(epochs.resumeHostSessionPresent(row.id), row.revoked, row.id);
+    assert.equal(epochs.resumedFromSessionShell(row.id), row.revoked, row.id);
+    const file = path.join(path.dirname(ctx.registryPath), gate.SESSIONS_FOLDER, `s-${crypto.createHash('sha256').update(row.id).digest('hex').slice(0, 32)}.json`);
+    const mark = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(mark.resumeHostSessionPresent, row.revoked);
+    assert.equal(mark.resumedFromSessionShell, row.revoked);
+    assert.doesNotMatch(JSON.stringify(mark), /private-|TOOLKIT_HOST_SESSION/, 'only boolean presence is persisted');
+    for (const source of row.revoked ? ['resume', 'clear', 'compact', 'other', 'fork', 'startup', 'resume'] : ['resume', 'clear', 'compact', 'startup', 'resume']) {
+      epochs.start(row.id, source);
+      assert.equal(epochs.resumedFromSessionShell(row.id), row.revoked, `${row.id}: ${source}`);
+      assert.equal(epochs.resumeHostSessionPresent(row.id), false, `${row.id}: ${source}`);
+      assert.equal(epochs.origin(row.id), row.revoked ? 'automation' : 'user-started', `${row.id}: ${source}`);
+    }
+  }
+});
+
 test('session marks: a later process that resumes the session cannot answer, on both hosts, however it was started', (t) => {
   const ctx = scratch(t);
   const home = path.join(ctx.root, 'home');

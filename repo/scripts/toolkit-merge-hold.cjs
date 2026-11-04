@@ -39,9 +39,11 @@
 // The owner's app-local standing answer instead of a typed approval: On, with an enabled
 // governance binding merged on the default branch (read from this computer's cache, under a day
 // old), a merge with no typed approval passes only in a session whose fresh startup recorded
-// user-started origin, including after a same-ID resume (never a fork or an unknown or automation
-// origin), with launcher and host-session checks still passing, in that
-// repository's own folder, for that repository, as a plain merge commit pinned to the full 40
+// user-started origin, including after a same-ID resume with no inherited host-session variable.
+// A resume carrying that variable revokes standing for this id, even after later starts without it.
+// Forks and unknown or automation origins have no standing; launcher and host-session checks must
+// still pass. The merge must run in that repository's own folder, for that repository, as a plain
+// merge commit pinned to the full 40
 // character head SHA: `gh pr merge N --merge --match-head-commit <sha>`, or a connector merge tool
 // call with merge_method "merge" and the head SHA field, and only when the merge-scope check
 // (toolkit-auto-merge-eligible.cjs), run here on that head against this folder's copy of the
@@ -77,11 +79,13 @@
 //     refused whatever branch it names; encoded PowerShell commands are refused unread;
 //   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
 //     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION, names
-//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt.
+//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt
+//     or a SessionStart event.
 //
 // Not covered: wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
 // pushes wrapped in a program that is not a shell (timeout, Start-Process, xargs and the like), a
-// prompt file fed to a hook script, a fully forged top-level Projects wake with the right labels,
+// prompt file fed to a hook script, a resume whose host-session variable was cleared indirectly
+// (direct setting or clearing is refused), a fully forged top-level Projects wake with the right labels,
 // plain text containing an approval line, scripts or programs
 // that call git or the GitHub API themselves, curl and other HTTP clients, a sha= field put in a
 // comment or an echo on purpose, git and shell aliases,
@@ -339,6 +343,8 @@ function sessionChecks(sessionId, environment, registryOptions, now) {
     launcherMarker: gate.LAUNCHER_MARKERS.some(name => typeof environment[name] === 'string' && environment[name] !== ''),
     hostSessionMatches: !(typeof host === 'string' && host !== '' && host !== sessionId),
     resumed: epochs.resumed(sessionId),
+    resumeHostSessionPresent: epochs.resumeHostSessionPresent(sessionId),
+    resumedFromSessionShell: epochs.resumedFromSessionShell(sessionId),
     userStartedOrigin: epochs.origin(sessionId) === 'user-started',
     forked: epochs.forked(sessionId),
   };
@@ -348,7 +354,7 @@ function sessionChecks(sessionId, environment, registryOptions, now) {
 // origin to accept a resume; neither Projects delivery nor prompt text can establish origin.
 function startedByUser(checks, standing = false) {
   return checks.sessionMarked && !checks.launcherMarker && checks.hostSessionMatches
-    && (standing ? checks.userStartedOrigin && !checks.forked : !checks.resumed);
+    && (standing ? checks.userStartedOrigin && !checks.forked && !checks.resumedFromSessionShell : !checks.resumed);
 }
 
 // Keeps the approvals a typed message carries; returns how many were kept.
@@ -672,7 +678,13 @@ function judge(merge, approvals, standing = null) {
 // what an approval can allow; '' when there is none.
 function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   if (STATE_WORDS.test(text)) return refuse('Toolkit\'s user-state files (merge approvals and governance decisions) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
-  if (HOOK_FEED.test(text) && FEED_WORDS.test(text)) return refuse('a merge approval must come from the user\'s own typed message, so commands that load Toolkit\'s hook scripts or feed them a prompt are refused.');
+  // SessionStart alone is also an ordinary source-search term. Only its direct hook invocation
+  // counts as a feed; the existing prompt and module-loading tripwires keep their wider reading.
+  const sessionStartFeed = /\bSessionStart\b/.test(text) && shellCommands(text).some(({ words }) => {
+    const index = words[0] === '&' ? 1 : 0;
+    return /^(?:node|node\.exe)$/i.test(path.basename(words[index] || '')) && HOOK_FEED.test(words[index + 1] || '');
+  });
+  if (HOOK_FEED.test(text) && (FEED_WORDS.test(text) || sessionStartFeed)) return refuse('merge authority must come from the user, so commands that load Toolkit\'s hook scripts or feed them a prompt or session-start event are refused.');
   const parts = segments(text);
   for (const words of parts) {
     let index = 0;
@@ -840,6 +852,7 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
     : !checks.sessionMarked ? 'no-session-mark'
     : checks.launcherMarker ? 'launcher-marker'
     : !checks.hostSessionMatches ? 'host-session-mismatch'
+    : checks.resumedFromSessionShell ? 'resume-from-session-shell'
     : checks.forked ? 'fork'
     : !startedByUser(checks, true) ? (checks.resumed ? 'resumed-without-user-started-origin' : 'user-started-origin-required') : null;
   if (reason) return { eligible: false, reason, checks };
@@ -859,6 +872,7 @@ function standingReason(reason) {
     'no-session-mark': 'this session has no readable session-start mark',
     'launcher-marker': 'a Toolkit launcher marker is present',
     'host-session-mismatch': 'the host session does not match this session',
+    'resume-from-session-shell': 'a resume carried the host-session variable from a running session, so standing authority is revoked for this session',
     'fork': 'this session is a fork',
     'resumed-without-user-started-origin': 'this resumed session has no recorded user-started origin',
     'user-started-origin-required': 'this session has no recorded user-started origin',

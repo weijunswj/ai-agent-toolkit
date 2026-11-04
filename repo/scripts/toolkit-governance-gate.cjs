@@ -347,15 +347,20 @@ class SessionEpochs {
       const resumed = kind === 's' && RESUMED_SOURCES.includes(source) ? { resumed: true } : {};
       let provenance = {};
       if (kind === 's') {
-        // Only a fresh native startup establishes origin. Resume reads only this same session's
-        // previous mark; a fork, missing legacy field or unknown source cannot promote it.
-        const previous = source === 'resume' ? this.#record(kind, key) : null;
+        // Treat a resume carrying the host-session variable as a launch from a running session's shell.
+        // Revoke origin for this id, across later starts too: clearing the variable or replaying
+        // startup must never restore standing. Keep only presence, never the variable's value.
+        const previous = this.#record(kind, key);
+        const resumeHostSessionPresent = source === 'resume' && Object.hasOwn(this.#environment, HOST_SESSION_VARIABLE);
+        const resumedFromSessionShell = resumeHostSessionPresent || previous?.resumedFromSessionShell === true;
         const launched = LAUNCHER_MARKERS.some(name => typeof this.#environment[name] === 'string' && this.#environment[name] !== '');
         const host = this.#environment[HOST_SESSION_VARIABLE];
         const mismatch = typeof host === 'string' && host !== '' && host !== key;
-        const origin = source === 'startup' ? (launched || mismatch ? 'automation' : 'user-started')
-          : previous && ['user-started', 'automation'].includes(previous.origin) ? previous.origin : 'unknown';
-        provenance = { origin, ...(source === 'fork' || previous?.forked === true ? { forked: true } : {}) };
+        const origin = resumedFromSessionShell ? 'automation'
+          : source === 'startup' ? (launched || mismatch ? 'automation' : 'user-started')
+          : source === 'resume' && previous && ['user-started', 'automation'].includes(previous.origin) ? previous.origin : 'unknown';
+        provenance = { origin, resumeHostSessionPresent, resumedFromSessionShell,
+          ...(source === 'fork' || (source === 'resume' && previous?.forked === true) ? { forked: true } : {}) };
       }
       fs.writeFileSync(temp, `${JSON.stringify({ schema: SESSION_SCHEMA, epoch, at: this.#now().toISOString(), ...resumed, ...provenance })}\n`, { mode: 0o600 });
       fs.renameSync(temp, file);
@@ -379,6 +384,10 @@ class SessionEpochs {
   }
 
   forked(sessionId) { return this.#record('s', sessionId)?.forked === true; }
+
+  resumeHostSessionPresent(sessionId) { return this.#record('s', sessionId)?.resumeHostSessionPresent === true; }
+
+  resumedFromSessionShell(sessionId) { return this.#record('s', sessionId)?.resumedFromSessionShell === true; }
 
   // The repository's current mark, or null when no session has started in it since this version.
   repository(repositoryId) { return this.#read('r', repositoryId); }

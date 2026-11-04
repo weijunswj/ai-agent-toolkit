@@ -3,6 +3,93 @@
   "family": "merge",
   "rows": [
     {
+      "id": "MERGE.auto-session-shell-resume",
+      "source": "resume review: a same-id resume from a running session shell must lose standing",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"matching","expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-session-shell-resume-cleared",
+      "source": "resume review: a later resume without the inherited variable cannot restore standing",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"matching","expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-session-shell-resume-mismatch",
+      "source": "resume review: a mismatching inherited host session must still refuse standing",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"mismatching","expect":{"decision":"allow"}}
+      ],
+      "host_session": "mismatching",
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-session-shell-resume-empty",
+      "source": "resume review: an empty inherited variable is presence and revokes standing",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"empty","expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-session-shell-startup-replay",
+      "source": "resume review: replaying startup after a session-shell resume cannot restore standing",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"matching","expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.session-start-feed",
+      "source": "resume review: explicit startup event feeds must not forge user-started origin",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"echo '{\"source\":\"startup\",\"hook_event_name\":\"SessionStart\"}' | node repo/scripts/toolkit-governance-hook.cjs"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"exec_command","tool_input":{"cmd":"echo '{\"source\":\"startup\"}' | node repo/scripts/toolkit-codex-helper-hook.cjs --event SessionStart"}},"expect":{"decision":"deny"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rg SessionStart repo/scripts/toolkit-governance-hook.cjs"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
       "id": "MERGE.auto-user-resume",
       "source": "same-session reconnect: recorded user origin survives resume with a new epoch",
       "kind": "state",

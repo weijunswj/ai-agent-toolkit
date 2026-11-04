@@ -234,6 +234,57 @@ test(`${HOST}: Projects approval in a resumed or launched session never grants s
   }
 });
 
+test(`${HOST}: a session-shell resume loses standing durably and reports only presence`, t => {
+  const { wake } = require('./support/projects-approval.cjs');
+  const ctx = context(t, HOST);
+  merged(ctx, YES);
+  const options = { registryOptions: ctx.registryOptions, environment: {}, host: HOST };
+  const rows = [
+    { id: 'private-absent', environment: {}, revoked: false },
+    { id: 'private-matching', environment: { [gate.HOST_SESSION_VARIABLE]: 'private-matching' }, revoked: true },
+    { id: 'private-mismatching', environment: { [gate.HOST_SESSION_VARIABLE]: 'private-parent' }, revoked: true },
+    { id: 'private-empty', environment: { [gate.HOST_SESSION_VARIABLE]: '' }, revoked: true },
+  ];
+  for (const row of rows) {
+    userSession(ctx, row.id);
+    gate.startSession({ session_id: row.id, source: 'resume', cwd: ctx.repo }, { ...options, environment: row.environment });
+    const command = `gh pr merge 7 --merge --match-head-commit ${ctx.head}`;
+    const input = bash(ctx, command, row.id);
+    const checkInput = bash(ctx, 'node repo/scripts/toolkit-merge-hold.cjs check', row.id);
+    const assertStanding = present => {
+      const report = hold.check(input, ctx.repo, options);
+      assert.equal(report.eligible, !row.revoked, row.id);
+      assert.equal(report.resumeHostSessionPresent, present, row.id);
+      assert.equal(report.resumedFromSessionShell, row.revoked, row.id);
+      assert.equal(report.userStartedOrigin, !row.revoked, row.id);
+      assert.equal(report.reason, row.revoked ? 'resume-from-session-shell' : null, row.id);
+      const diagnostic = decide(ctx, checkInput).deny;
+      assert.deepEqual(JSON.parse(diagnostic.slice(diagnostic.indexOf('\n') + 1)), report);
+      assert.doesNotMatch(diagnostic, /private-|TOOLKIT_|user-state|epoch/);
+      if (row.revoked) {
+        assert.match(report.explanation, /resume carried the host-session variable.*revoked/);
+        const refusal = decide(ctx, input).deny;
+        assert.match(refusal, /resume carried the host-session variable.*revoked/);
+        assert.doesNotMatch(refusal, /private-|TOOLKIT_|epoch/);
+      } else assert.equal(decide(ctx, input), null);
+    };
+    assertStanding(row.revoked);
+    if (row.id === 'private-mismatching') {
+      assert.equal(hold.check(input, ctx.repo, { ...options, environment: row.environment }).reason, 'host-session-mismatch');
+      assert.match(decide(ctx, input, row.environment).deny, /host session does not match/);
+    }
+    for (const source of ['resume', 'startup', 'resume']) {
+      gate.startSession({ session_id: row.id, source, cwd: ctx.repo }, options);
+      assertStanding(false);
+    }
+    if (row.revoked) {
+      assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: row.id, prompt: wake('merge owner/a#7', { id: `cmsg_${HOST}_${row.id}` }) }, options), 1);
+      assert.equal(decide(ctx, input), null, 'explicit user approval still works after revocation');
+      assert.match(decide(ctx, input).deny, /resume carried the host-session variable.*revoked/, 'one approval never restores standing');
+    }
+  }
+});
+
 test(`${HOST}: standing resume closure and diagnostic reasons`, t => {
   const ctx = context(t, HOST);
   merged(ctx, YES);
