@@ -104,7 +104,7 @@ A writing gate works only inside its own session's writable folders, so the owne
 
 ### Review CLI permissions
 
-The Windows review permission recipe was qualified on Codex CLI `0.166.0`, model `gpt-6.1-sol`, effort `high`, using the real authenticated Codex home with optional MCP servers disabled for that invocation. One command passed all eleven boundary and fixture checks. This does not qualify `xhigh`, a complete test suite or the hook pack on this route; those execution results remain required for each review.
+The Windows review permission recipe was qualified on the Codex CLI release named in the [validation strategy](VALIDATION-STRATEGY.md), model `gpt-6.1-sol`, effort `high`, using the real authenticated Codex home with optional MCP servers disabled for that invocation. One command passed all eleven boundary and fixture checks. This does not qualify `xhigh`, a complete test suite or the hook pack on this route; those execution results remain required for each review.
 
 Before launch, inspect the effective Windows backend in the real home and any selected configuration layers: `windows.sandbox` must already be `"elevated"`. Stop if it is different or cannot be verified. Never set or change it for the owner. The same-home helper comparison measured Node children and network refusal under elevated; unelevated returned child-process `EPERM` and an HTTP response. Unelevated is a network boundary failure, not a usable alternative.
 
