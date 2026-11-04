@@ -17,20 +17,44 @@
       "const": 3
     },
     "profiles": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "owner-gpt",
-        "owner-claude"
-      ],
-      "properties": {
-        "owner-gpt": {
-          "$ref": "#/$defs/currentProfile"
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "owner-gpt",
+            "owner-claude"
+          ],
+          "properties": {
+            "owner-gpt": {
+              "$ref": "#/$defs/currentProfile"
+            },
+            "owner-claude": {
+              "$ref": "#/$defs/currentProfile"
+            }
+          }
         },
-        "owner-claude": {
-          "$ref": "#/$defs/currentProfile"
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "owner-gpt",
+            "owner-claude",
+            "owner-mixed"
+          ],
+          "properties": {
+            "owner-gpt": {
+              "$ref": "#/$defs/currentProfile"
+            },
+            "owner-claude": {
+              "$ref": "#/$defs/currentProfile"
+            },
+            "owner-mixed": {
+              "$ref": "#/$defs/currentProfile"
+            }
+          }
         }
-      }
+      ]
     }
   },
   "$defs": {
