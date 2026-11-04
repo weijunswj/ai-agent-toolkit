@@ -138,11 +138,23 @@ function expectErrors(expect, label) {
   return errors;
 }
 
+const EVIDENCE_BINDINGS = ['fresh', 'stale'];
+const EVIDENCE_METADATA = ['verified', 'public', 'wrong-head'];
+
 function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.evidence_merge !== undefined) {
+    const spec = fixture.evidence_merge;
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)
+      || Object.keys(spec).some(key => !['from', 'binding', 'metadata'].includes(key))
+      || !['store', 'parent'].includes(spec.from) || !EVIDENCE_BINDINGS.includes(spec.binding || 'fresh')
+      || !EVIDENCE_METADATA.includes(spec.metadata || 'verified') || !fixture.repo
+      || (spec.from === 'parent' ? fixture.repo.governance !== 'enabled'
+        : fixture.repo.governance !== 'undecided' || fixture.repo.name !== 'evidence' || fixture.repo.owner !== undefined)) errors.push('fixture.evidence_merge needs a parent or evidence store repository, a supported binding and metadata result');
+  }
   if (fixture.owner_session !== undefined && fixture.owner_session !== true) errors.push('fixture.owner_session is true or left out');
   if (fixture.gate_role !== undefined && !GATE_ROLES.includes(fixture.gate_role)) errors.push(`fixture.gate_role is one of ${GATE_ROLES.join(', ')}`);
   const repo = fixture.repo;
@@ -348,12 +360,18 @@ class Fixture {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, spec.repo.legacy_answer === 'damaged' ? '{damaged' : fs.readFileSync(path.join(ROOT, 'repo', 'tests', 'fixtures', 'governance-legacy-' + spec.repo.legacy_answer + '.json')));
     }
+    if (spec.evidence_merge) this.#evidenceMerge(spec.evidence_merge);
+    else this.#githubFixture({});
     if (spec.owner_session) this.#ownerSession();
     this.#files(this.work, spec.files || {});
     if (spec.transcript) fs.writeFileSync(this.transcript, spec.transcript.map(entry => JSON.stringify(this.expand(entry))).join('\n') + '\n');
   }
 
   #git(cwd, args) { return git(cwd, args, { env: this.env }); }
+
+  // hookEnvironment drops the caller's test clock injection. Fixture timestamps must use the
+  // same system clock as the hook processes, even during CI's clock-ahead run.
+  #now(ageMs = 0) { return new Date(Math.round(performance.timeOrigin + performance.now()) - ageMs); }
 
   #files(folder, files) {
     for (const [name, text] of Object.entries(files)) {
@@ -417,7 +435,47 @@ class Fixture {
       schema: 'toolkit.programme-binding.v1', repository: 'toolkit-test-fixture/hook-pack-binding-owner', parent_issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX',
       store: { kind: 'github', repository: store, branch: 'main', path: 'state/' }, required_checks: ['validate'],
     }, null, 2)}\n`;
-    support.recordMerged(owner, { home: this.home, text });
+    support.recordMerged(owner, { home: this.home, text, now: this.#now() });
+    return owner;
+  }
+
+  // Test-only transport at the process boundary. The real GitHubTransport still parses a gh HTTP
+  // response, but the isolated preload intercepts its executable. No fixture can contact GitHub.
+  #evidenceMerge(spec) {
+    const support = require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs'));
+    const store = 'toolkit-test-fixture/evidence';
+    const parent = spec.from === 'parent' ? this.work : this.#bindingNamingStore(store);
+    const file = path.join(parent, '.github', 'toolkit-programme.json');
+    const binding = JSON.parse(fs.readFileSync(file, 'utf8'));
+    binding.store.repository = store;
+    const text = JSON.stringify(binding);
+    fs.writeFileSync(file, text);
+    support.recordMerged(parent, { home: this.home, text, now: this.#now(spec.binding === 'stale' ? 25 * 60 * 60 * 1000 : 0) });
+    const repo = { full_name: store, private: true, permissions: { push: true }, default_branch: 'main' };
+    const pr = { number: 5, base: { repo: { full_name: store }, ref: 'main' }, head: { sha: this.head } };
+    if (spec.metadata === 'public') repo.private = false;
+    if (spec.metadata === 'wrong-head') pr.head.sha = 'f'.repeat(40);
+    this.#githubFixture({ [`repos/${store}`]: repo, [`repos/${store}/pulls/5`]: pr });
+  }
+
+  #githubFixture(responses) {
+    const bin = path.join(this.dir, 'fake-github');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, process.platform === 'win32' ? 'gh.exe' : 'gh'), '');
+    const preload = path.join(bin, 'transport.cjs');
+    fs.writeFileSync(preload, `const cp = require('node:child_process');
+const original = cp.spawnSync;
+const responses = ${JSON.stringify(responses)};
+cp.spawnSync = function(file, args, options) {
+  if (!/^gh(?:\\.exe)?$/i.test(require('node:path').basename(file))) return original(file, args, options);
+  const body = args[0] === 'api' && args[3] === 'GET' && responses[args[4]];
+  const status = body ? 200 : 404;
+  return {status: status === 200 ? 0 : 1, stdout: 'HTTP/2.0 ' + status + '\\n\\n' + JSON.stringify(body || {}), stderr: ''};
+};
+`);
+    this.env.PATH = `${bin}${path.delimiter}${this.env.PATH || this.env.Path || ''}`;
+    delete this.env.Path;
+    this.env.NODE_OPTIONS = `--require="${preload.replace(/\\/g, '/')}"`;
   }
 
   // A fresh enabled binding plus separate app-local answers in this fixture's home.
@@ -441,7 +499,7 @@ class Fixture {
       owner.apply(answer === 'off' ? 'off' : 'after-gates', owner.inspect());
     }
     // A stale read is one over a day old, as when this computer has not reached GitHub since.
-    support.recordMerged(this.work, { home: this.home, text, ...(answer === 'after-gates-stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
+    support.recordMerged(this.work, { home: this.home, text, now: this.#now(answer === 'after-gates-stale' ? 25 * 60 * 60 * 1000 : 0) });
   }
 
   // The session-start mark of a session the user opened (not resumed, not launched by another).
@@ -455,7 +513,7 @@ class Fixture {
     if (typeof value === 'string') {
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)
         .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential())
-        .replaceAll('{head}', this.head || '').replaceAll('{now}', new Date().toISOString());
+        .replaceAll('{head}', this.head || '').replaceAll('{now}', this.#now().toISOString());
     }
     if (Array.isArray(value)) return value.map(item => this.expand(item));
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.expand(item)]));
@@ -585,6 +643,7 @@ function knownBadHosts(row) {
 function meets(row, host, observed) {
   const expect = row.expect_by_host?.[host] || row.expect;
   if (observed.problems.length) return false;
+  if (row.fixture?.evidence_merge && observed.failed?.length) return false;
   if (observed.decision !== expect.decision) return false;
   // A refusal only because a hook itself failed (onFailure: block) proves nothing about what the
   // hooks decide, so it meets a row only when the row names it.

@@ -8,6 +8,13 @@
 - Yes and no prepare a pending decision pull request. Prompt hooks capture answers without publishing; the assigned agent publishes, reads back and asks for the owner's merge. Later asks again next chat.
 - Ordinary work continues when GitHub cannot be checked, without governance effects or standing task auto-merge. Evidence-store exemption requires an exact programme-binding relationship.
 
+## 3.47.1
+
+### Fixed
+
+- Let pinned evidence-store pull request merges use the existing custody permission when a fresh merged parent binding names the exact separate store and live checks confirm privacy, write access, default-branch base and matching head. Other repositories keep their existing merge approval handling.
+- Add isolated hook-pack coverage for verified evidence merges and failed verification, without contacting GitHub or reading real user state.
+
 ## 3.47.0
 
 ### Added
