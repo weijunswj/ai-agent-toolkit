@@ -281,6 +281,7 @@ test(`${HOST}: typed approval in a resumed or revoked chat records nothing; a fr
   for (const text of [decide(ctx, input).deny, hold.check(input, ctx.repo, options).explanation]) {
     assert.match(text, /in a new chat on this computer, as a direct Projects message to the lane, or by the Merge button on GitHub/);
     assert.match(text, /typing in this (?:reconnected|revoked) chat records no approval/);
+    assert.doesNotMatch(text.split(' Ask the user to type')[0], /\bhere\b/, 'the known restricted chat is not an approval route');
   }
   const fresh = userSession(ctx, 'fresh-approval');
   assert.equal(hold.recordPrompt({ cwd: ctx.repo, session_id: fresh, prompt: 'merge 7' }, options), 1);

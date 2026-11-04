@@ -8,7 +8,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator r
 - **Show the checklist once:** all eleven steps, done with evidence, skipped with reason or to do.
 - Run independent steps back to back; post only for a needed owner action/choice/confirmation and once at completion. Each post: one status line, one evidence line per newly finished step, one exact tap/type request and recommendation. No per-step headings/recaps; requested closing element once.
 - **Evidence before "done":** checked read-back, full thread result or owner confirmation of an unseen result. Save evidence/progress to memory after each step; resume there after interruption. Skip only verified completed steps, with a one-line reason.
-- **No controller actions until step 10:** no records, gates or GitHub writes; read-only setup threads are allowed.
+- **No controller actions until step 10:** no records, gates or GitHub writes except a setup step's own brief; read-only setup threads are allowed. Step 6's mode b takeover record is such a brief; it does not allow general controller work.
 - Before posting, return to any unfinished earlier step. For owner-dependent steps, explain what/where/why in one or two lines, wait, verify directly or through a read-only thread, then continue. Never guess UI locations; ask what the owner sees when unsure.
 
 0. **Mode.** Ask which applies, unless the user already said:

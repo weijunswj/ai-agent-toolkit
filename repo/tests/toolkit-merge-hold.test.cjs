@@ -57,6 +57,13 @@ const bash = (cwd, command) => ({ cwd, tool_name: 'Bash', tool_input: { command 
 const connector = (tool, args, repo = 'a') => ({ cwd: os.tmpdir(), tool_name: `mcp__github__${tool}`, tool_input: { owner: 'owner', repo, ...args } });
 const decide = (ctx, input, environment = {}) => hold.decide(input, { ...ctx.options, environment });
 
+test('merge guidance includes typing here in a fresh eligible chat and excludes reconnected or revoked chats', t => {
+  const ctx = context(t);
+  const reason = decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })).deny;
+  assert.match(reason, /Approval works here in a fresh eligible chat/);
+  assert.match(reason, /Typing in a reconnected or revoked chat records no approval/);
+});
+
 // The user's own session: marked at session start, not resumed, not started by another session.
 function userSession(ctx, id = 'user', source = 'startup') {
   gate.startSession({ session_id: id, source, cwd: ctx.repo }, { ...ctx.options, environment: {} });
