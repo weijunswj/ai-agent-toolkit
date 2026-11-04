@@ -11,30 +11,48 @@ test('Ajv and the restricted evaluator agree on retained and mixed closed regist
  const schema=compiler.contractSchema('stack-registry-v3.schema.json');
  const validate=new Ajv2020({strict:false,allErrors:true}).compile(schema);
  const current=compiler.contractSchema('stack-registry-v3.json');
- const old=clone(current);delete old.profiles['owner-mixed'];
- const cases=[['retained two profiles',old,true],['all three profiles',current,true]];
+ const old=clone(current);delete old.profiles['claude-projects-stack'];
+ const legacy=clone(current);
+ legacy.profiles['owner-mixed']=legacy.profiles['claude-projects-stack'];
+ delete legacy.profiles['claude-projects-stack'];delete legacy.profiles['owner-mixed'].routes.GATEKEEPER;
+ const cases=[['retained two profiles',old,true],['retained mixed capture',legacy,true],['current three profiles',current,true]];
  for(const [name,mutate] of [
   ['unknown profile',r=>r.profiles.unknown=clone(r.profiles['owner-gpt'])],
   ['missing GPT',r=>delete r.profiles['owner-gpt']],['missing Claude',r=>delete r.profiles['owner-claude']],
-  ['empty profiles',r=>r.profiles={}],['mixed null',r=>r.profiles['owner-mixed']=null],
-  ['mixed missing routes',r=>delete r.profiles['owner-mixed'].routes],
-  ['mixed missing role',r=>delete r.profiles['owner-mixed'].routes.BUILDER],
-  ['mixed unknown role',r=>r.profiles['owner-mixed'].routes.REVIEW=clone(r.profiles['owner-mixed'].routes.BUILDER)],
-  ['mixed foreign field',r=>r.profiles['owner-mixed'].automatic=true],
-  ['effort instead of reasoning',r=>{const x=r.profiles['owner-mixed'].routes.BUILDER;x.effort=x.reasoning;delete x.reasoning;}],
-  ['unsupported provider',r=>r.profiles['owner-mixed'].routes.BUILDER.provider='foreign'],
-  ['blank model',r=>r.profiles['owner-mixed'].routes.BUILDER.model=' '],
-  ['wrong reasoning',r=>r.profiles['owner-mixed'].routes.BUILDER.reasoning='low'],
-  ['empty reviewers',r=>r.profiles['owner-mixed'].reviewers=[]],
-  ['unknown reviewer',r=>r.profiles['owner-mixed'].reviewers[0].reviewer_id='foreign'],
-  ['reviewer extra field',r=>r.profiles['owner-mixed'].reviewers[0].fallback=true]
+  ['empty profiles',r=>r.profiles={}],['mixed null',r=>r.profiles['claude-projects-stack']=null],
+  ['mixed missing routes',r=>delete r.profiles['claude-projects-stack'].routes],
+  ['mixed missing role',r=>delete r.profiles['claude-projects-stack'].routes.BUILDER],
+  ['mixed unknown role',r=>r.profiles['claude-projects-stack'].routes.REVIEW=clone(r.profiles['claude-projects-stack'].routes.BUILDER)],
+  ['mixed foreign field',r=>r.profiles['claude-projects-stack'].automatic=true],
+  ['effort instead of reasoning',r=>{const x=r.profiles['claude-projects-stack'].routes.BUILDER;x.effort=x.reasoning;delete x.reasoning;}],
+  ['unsupported provider',r=>r.profiles['claude-projects-stack'].routes.BUILDER.provider='foreign'],
+  ['blank model',r=>r.profiles['claude-projects-stack'].routes.BUILDER.model=' '],
+  ['wrong reasoning',r=>r.profiles['claude-projects-stack'].routes.BUILDER.reasoning='low'],
+  ['empty reviewers',r=>r.profiles['claude-projects-stack'].reviewers=[]],
+  ['unknown reviewer',r=>r.profiles['claude-projects-stack'].reviewers[0].reviewer_id='foreign'],
+  ['reviewer extra field',r=>r.profiles['claude-projects-stack'].reviewers[0].fallback=true]
  ]){const value=clone(current);mutate(value);cases.push([name,value,false]);}
+ for(const [name,mutate] of [
+  ['missing gatekeeper',r=>delete r.routes.GATEKEEPER],
+  ['wrong gatekeeper provider',r=>r.routes.GATEKEEPER.provider='openai'],
+  ['wrong gatekeeper family',r=>r.routes.GATEKEEPER.model='opus-5.5'],
+  ['unresolved gatekeeper ID',r=>r.routes.GATEKEEPER.model='newest Sonnet'],
+  ['absent gatekeeper ID',r=>r.routes.GATEKEEPER.model=null],
+  ['gatekeeper fallback alias',r=>r.routes.GATEKEEPER.model='sonnet'],
+  ['wrong gatekeeper effort',r=>r.routes.GATEKEEPER.reasoning='high'],
+  ['gatekeeper reviewer',r=>r.reviewers=[{reviewer_id:'gatekeeper',...r.routes.GATEKEEPER}]],
+  ['gatekeeper is not a gate role',r=>r.routes.G0=clone(r.routes.GATEKEEPER)]
+ ]){const value=clone(current);mutate(value.profiles['claude-projects-stack']);cases.push([name,value,false]);}
  // Old captures retain the same closed boundary, not just a permissive legacy branch.
  for(const [name,mutate] of [
   ['old unknown key',r=>r.profiles.unknown=clone(r.profiles['owner-gpt'])],
   ['old missing GPT',r=>delete r.profiles['owner-gpt']],['old missing Claude',r=>delete r.profiles['owner-claude']],
   ['old malformed route',r=>r.profiles['owner-gpt'].routes.BUILDER.effort='high']
  ]){const value=clone(old);mutate(value);cases.push([name,value,false]);}
+ for(const mutate of [r=>r.profiles['owner-mixed'].routes.GATEKEEPER=clone(current.profiles['claude-projects-stack'].routes.GATEKEEPER),
+  r=>delete r.profiles['owner-mixed'].routes.BUILDER]){
+  const value=clone(legacy);mutate(value);cases.push(['legacy closed routes',value,false]);
+ }
  for(const [name,value,expected] of cases){
   assert.equal(validate(value),expected,`${name}: ${JSON.stringify(validate.errors)}`);
   if(expected)assert.equal(compiler.checkCoreSchema(value,schema),true,name);
@@ -59,13 +77,13 @@ test('both decision profile enums accept all canonical selections and reject ret
  // The retained nested IR decision is a structural contract, not an executable gate launcher.
  for(const [name,schema,root] of [['decision',decisionSchema,decisionSchema],['nested IR',ir.properties.controller_decision,ir.properties.controller_decision]]){
   const validate=new Ajv2020({strict:false,allErrors:true}).compile({...schema,$defs:root.$defs});
-  for(const id of ['owner-gpt','owner-claude','owner-mixed']){
+  for(const id of ['owner-gpt','owner-claude','claude-projects-stack']){
    const {decision}=currentControllerFixture(id);
    assert.equal(validate(decision),true,`${name}/${id}: ${JSON.stringify(validate.errors)}`);
    assert.equal(compiler.checkCoreSchema(decision,schema,root),true);
   }
   for(const id of ['owner-mixed-claude-gpt','codex','claude-code','', 'unknown']){
-   const {decision}=currentControllerFixture('owner-mixed');decision.selection.profile_id=id;
+   const {decision}=currentControllerFixture('claude-projects-stack');decision.selection.profile_id=id;
    assert.equal(validate(decision),false,`${name}/${id}`);
    assert.throws(()=>compiler.checkCoreSchema(decision,schema,root));
   }

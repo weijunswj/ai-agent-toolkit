@@ -49,11 +49,11 @@ function rendered(f, role, stack = 'owner-claude') { return ClaudeHelperAgentRen
 
 test('mixed G0/G1 helpers explicitly refuse Claude rendering without changing their OpenAI routes', () => {
   const { capturedStack } = require('./support/captured-stack-fixture.cjs');
-  const captured = capturedStack('owner-mixed');
+  const captured = capturedStack('claude-projects-stack');
   const before = JSON.stringify(captured.selection);
   for (const role of ['G0', 'G1']) {
     assert.throws(() => new ClaudeHelperAgentRenderer(captured).render(role), { code: 'CLAUDE_NATIVE_ROUTE_UNSUPPORTED' });
-    assert.throws(() => ClaudeHelperAgentRenderer.fromRepository('owner-mixed').render(role), { code: 'CLAUDE_NATIVE_ROUTE_UNSUPPORTED' });
+    assert.throws(() => ClaudeHelperAgentRenderer.fromRepository('claude-projects-stack').render(role), { code: 'CLAUDE_NATIVE_ROUTE_UNSUPPORTED' });
   }
   assert.equal(JSON.stringify(captured.selection), before);
 });

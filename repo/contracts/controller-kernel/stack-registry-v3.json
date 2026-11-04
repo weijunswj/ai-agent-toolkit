@@ -76,8 +76,13 @@
         }
       ]
     },
-    "owner-mixed": {
+    "claude-projects-stack": {
       "routes": {
+        "GATEKEEPER": {
+          "provider": "anthropic",
+          "model": "sonnet-5.5",
+          "reasoning": "medium"
+        },
         "DISCOVERY": {
           "provider": "openai",
           "model": "gpt-6.1-sol",

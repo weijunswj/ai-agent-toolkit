@@ -47,8 +47,8 @@ function manualClaudeRoot({ rootModel, rootEffort, environment = {} }) {
   } };
 }
 
-function manualMixedCodexRoot({ rootModel, rootReasoning }) {
-  const captured = capturedStack('owner-mixed'), dispatches = [], state = hostState('codex_spawn_agent', captured);
+function manualProjectsStackCodexRoot({ rootModel, rootReasoning }) {
+  const captured = capturedStack('claude-projects-stack'), dispatches = [], state = hostState('codex_spawn_agent', captured);
   const actualRootRoute = Object.freeze({ model:rootModel, reasoning:rootReasoning });
   const adapter = createNativeHelperAdapter({ source_capture:captured.source_capture, selection:captured.selection,
     entry_id:'codex_spawn_agent', helper_identity:'ai-agent-toolkit:g1-helper', timeout_ms:50,
@@ -171,7 +171,7 @@ test('synthetic captured sources resolve every non-helper role while documented 
       DESIGN_CHALLENGE: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'xhigh' },
       G2: { reviewer_id: 'opus', provider: 'anthropic', model: 'opus-5.5', reasoning: 'xhigh' },
     },
-    'owner-mixed': {
+    'claude-projects-stack': {
       DISCOVERY: { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' },
       BUILDER: { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' },
       DESIGN_CHALLENGE: { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'xhigh' },
@@ -189,7 +189,7 @@ test('synthetic captured sources resolve every non-helper role while documented 
       codex: { DISCOVERY: false, BUILDER: false, DESIGN_CHALLENGE: false, G2: false },
       'claude-code': { DISCOVERY: true, BUILDER: true, DESIGN_CHALLENGE: true, G2: true },
     },
-    'owner-mixed': {
+    'claude-projects-stack': {
       codex: { DISCOVERY: true, BUILDER: true, DESIGN_CHALLENGE: true, G2: false },
       'claude-code': { DISCOVERY: false, BUILDER: false, DESIGN_CHALLENGE: false, G2: true },
     },
@@ -227,11 +227,17 @@ test('synthetic captured sources resolve every non-helper role while documented 
   assert.match(gateRules, /Every automation-launched .* exact pinned route/);
   assert.match(controller, /G2 has no helpers/);
   assert.match(delivery, /does not supply automated cross-host gate launches/);
-  assert.match(delivery, /fresh human-opened Claude session .* without helpers/);
+  assert.match(delivery, /G2 is a fresh Opus xhigh session started by the gatekeeper in Claude Projects .* without helpers/);
+  assert.match(controller, /One gatekeeper per lane is a fresh session in the controller's harness at the registry GATEKEEPER route/);
+  assert.match(controller, /one blocking call \(no polling or progress posts\).*relays the report verbatim/);
+  assert.match(controller, /never judges findings, merges, closes, takes controller authority or a gate's verdict/);
+  assert.match(controller, /Every report includes a Route line naming actual model and effort/);
+  assert.match(controller, /gatekeeper may start the other harness's gate through that tool's CLI with model\/effort pinned; route proof comes from that CLI's own launch record/);
+  assert.match(controller, /This rule supplies no launcher or hook enforcement/);
 });
 
-test('synthetic owner-mixed G2 requests cannot delegate through either host guard', async () => {
-  const captured = capturedStack('owner-mixed'), dispatches = [];
+test('synthetic Projects stack G2 requests cannot delegate through either host guard', async () => {
+  const captured = capturedStack('claude-projects-stack'), dispatches = [];
   const hostCases = [
     { host: 'codex', entryId: 'codex_spawn_agent' },
     { host: 'claude-code', entryId: 'claude_parent_agent' },
@@ -241,17 +247,17 @@ test('synthetic owner-mixed G2 requests cannot delegate through either host guar
     const guard = createHelperRouteGuard({ entry_id: entryId, source_capture: captured.source_capture, selection: captured.selection,
       observe_host_state: () => clone(hostState(entryId, captured, 'G1')),
       controlled_dispatch: request => { dispatches.push(request); return {}; } });
-    const result = await guard.invoke({ caller_role: 'G2', profile_id: 'owner-mixed', registry_revision: captured.selection.registry_digest,
+    const result = await guard.invoke({ caller_role: 'G2', profile_id: 'claude-projects-stack', registry_revision: captured.selection.registry_digest,
       helper_role: 'BUILDER_HELPER', helper_requested: true, route_overrides: {}, session_transition: 'fresh' });
     assert.equal(result.code, 'CALLER_CANNOT_DELEGATE', `${host}: mixed-profile G2 cannot request helpers`);
   }
   assert.equal(dispatches.length, 0, 'both synthetic host observations refuse before controlled dispatch');
 });
 
-test('synthetic human-opened owner-mixed Codex root choices remain advisory while the helper stays exact', async () => {
+test('synthetic human-opened Projects stack Codex root choices remain advisory while the helper stays exact', async () => {
   const recommended = { provider:'openai', model:'gpt-6.1-sol', reasoning:'high' };
   for (const [rootModel, rootReasoning] of [['gpt-6.1-sol', 'low'], ['gpt-6-luna', 'max']]) {
-    const root = manualMixedCodexRoot({ rootModel, rootReasoning });
+    const root = manualProjectsStackCodexRoot({ rootModel, rootReasoning });
     assert.deepEqual(root.captured.selection.routes.BUILDER, recommended);
     assert.deepEqual(root.actualRootRoute, { model:rootModel, reasoning:rootReasoning }, 'synthetic actual route chosen by the human');
     const result = await root.invoke();

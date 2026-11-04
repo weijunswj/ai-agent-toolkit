@@ -1,11 +1,15 @@
 # Toolkit Changelog
 
-## 3.46.2
+## 3.47.0
 
-### Fixed
+### Added
 
-- Let pinned evidence-store pull request merges use the existing custody permission when a fresh merged parent binding names the exact separate store and live checks confirm privacy, write access, default-branch base and matching head. Other repositories keep their existing merge approval handling.
-- Add isolated hook-pack coverage for verified evidence merges and failed verification, without contacting GitHub or reading real user state.
+- Added the Claude Projects stack with a Sonnet gatekeeper, Codex discovery and building, Luna helpers and one fresh Opus review.
+- Defined a gatekeeper's relay-only duties and the cross-host CLI launch exception with pinned model, effort and native launch-record proof. Launcher and hook enforcement remain separate work.
+
+### Changed
+
+- Replaced the bundled mixed profile with `claude-projects-stack`; pinned legacy two-profile and mixed-profile captures remain readable pending deliberate adoption.
 
 ## 3.46.1
 
