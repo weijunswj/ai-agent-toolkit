@@ -3509,8 +3509,8 @@ class Reconciler {
     }).map(entry => entry.id);
   }
 
-  // The attention findings this pass records on the parent: the reconcile source from a full pass
-  // (a pass for one issue records none), and the inventory source when the pass carries an inventory.
+  // Record reconcile findings from a full pass (only size refusals from a single-issue pass),
+  // and inventory findings when the pass carries an inventory.
   // When they change, the parent's CURRENT block is planned again with the new list, so the page
   // shows them after this pass.
   planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds, resolutions = [], blockHolds = new Set()) {
@@ -3531,7 +3531,7 @@ class Reconciler {
     const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next) };
     effects.push(effect);
     const number = parent.parent_issue;
-    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN']);
+    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN', 'BODY_TOO_LARGE']);
     const keep = (list, test) => { const kept = list.filter(item => !test(item)); list.splice(0, list.length, ...kept); };
     const redraw = attention => {
       keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
@@ -3875,7 +3875,7 @@ class Reconciler {
         const body = number === parentNumber ? renderParentBlockBody(parentDoc, docs, plan.observed.issues, comments) : blocks.get(number);
         const candidate = planned || { kind: 'replace_block', target: { issue: number }, state: true };
         let effect = { ...candidate, target: { ...candidate.target, digest: blockDigest(body) } };
-        if (!planned) effect.text = describeEffect(effect);
+        if (!effect.text) effect.text = describeEffect(effect);
         if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
         if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
         const owner = docOwner(number);
@@ -3973,7 +3973,7 @@ class Reconciler {
           hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`, bodySizeDiagnostics(next.body, this.threshold));
           continue;
         }
-        if (number === parentNumber && next.body === before.body) { verifiedBodies.add(number); record(effect, 'NOOP'); continue; }
+        if (next.body === before.body) { verifiedBodies.add(number); record(effect, 'NOOP'); continue; }
         withIntent(effect, owner, number, () => {
           // Issue PATCH has no compare-and-swap: re-read immediately before writing and refuse on change.
           const latest = this.reader.issue(number);

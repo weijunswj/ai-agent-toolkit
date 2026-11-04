@@ -81,6 +81,54 @@ test('planning refusals persist stable per-page findings with exact bounded diag
   const preview = fx.run(['reconcile']).text;
   assert.match(preview, /projected \d+; threshold 60000; reduce by \d+/);
   assert.doesNotMatch(preview, /undefined/);
+  const apply = fx.run(['reconcile', '--apply', '--controller', '--session', writer.session]).text;
+  assert.match(apply, /SKIPPED: Update the state block in #12's body/);
+  assert.doesNotMatch(apply, /undefined/);
+});
+
+test('a current child with a size finding writes nothing while the parent is refused', t => {
+  const fx = fixture(t);
+  for (const number of [12, 13]) fx.github.issues.get(number).body += LARGE;
+  fx.reconciler.run({ apply: true });
+  assert.equal(fx.entry(13).state, 'new');
+  fx.github.issues.get(13).body = '';
+  fx.reconciler.run({ apply: true });
+  assert.equal(fx.entry(13).state, 'new', 'the parent hold prevents resolution');
+  const before = fx.github.calls.length;
+  const report = fx.reconciler.run({ apply: true });
+  assert.ok(report.holds.some(hold => hold.code === 'BODY_TOO_LARGE' && hold.target === '#12'));
+  assert.deepEqual(report.writes, { state: 0, github: 0 });
+  assert.ok(report.results.some(result => result.kind === 'replace_block' && result.target.issue === 13 && result.outcome === 'NOOP'));
+  assert.equal(fx.github.calls.slice(before).some(call => call.method !== 'GET' && call.path !== 'graphql'), false);
+});
+
+test('attention shrink removes a pre-fold size refusal even on an incomplete pass', t => {
+  const fx = fixture(t);
+  fx.reconciler.run({ apply: true });
+  fx.store.mutate('parent', 12, { writer, change: doc => {
+    doc.attention = state.foldAttention([], { source: 'reconcile', complete: false,
+      seen: Array.from({ length: 10 }, (_, i) => ({ code: 'ISSUE_MISSING', issue: 90 + i })),
+      now: new Date(fx.github.clock).toISOString() });
+    return doc;
+  } });
+  const inventory = { complete: false, findings: [{ code: 'INVENTORY_INCOMPLETE', issue: null }], issues: [], reason: 'deadline' };
+  const lengths = [];
+  const project = fx.reconciler.projectBody.bind(fx.reconciler);
+  fx.reconciler.projectBody = (...args) => {
+    const next = project(...args);
+    if (args[0] === 12) lengths.push(next.body.length);
+    return next;
+  };
+  fx.reconciler.plan({ inventory });
+  assert.ok(lengths[0] > lengths.at(-1), 'resolving old findings shrinks CURRENT');
+  fx.reconciler.threshold = lengths[0];
+  const plan = fx.reconciler.plan({ inventory });
+  assert.equal(plan.complete, false);
+  assert.equal(plan.holds.some(hold => hold.code === 'BODY_TOO_LARGE'), false, 'the final redraw fits');
+  assert.equal(plan.findings.some(finding => finding.code === 'BODY_TOO_LARGE'), false, 'discard the earlier measurement');
+  const report = fx.reconciler.run({ apply: true, inventory });
+  assert.equal(report.holds.some(hold => hold.code === 'BODY_TOO_LARGE'), false);
+  assert.equal(fx.entry(), undefined, 'no stale size finding persists');
 });
 
 test('apply-time overflow persists before any refused page write, including a repeat', t => {

@@ -63,7 +63,7 @@
       }
     },
     "attention": {
-      "description": "Findings the controller must answer, kept beyond the run that saw them. A complete run of a source adds and resolves only its own findings; only the parent's holder acknowledges or disposes, with a dispose reason kept in private.attention_notes. Not part of the revision digest.",
+      "description": "Findings the controller must answer, kept beyond the run that saw them. A complete run adds and resolves only its source's findings; size refusals also record on single-issue passes and resolve only after a complete verified redraw. Only the parent's holder acknowledges or disposes, with a dispose reason kept in private.attention_notes. Not part of the revision digest.",
       "type": "array",
       "maxItems": 700,
       "items": {
