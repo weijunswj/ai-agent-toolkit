@@ -192,7 +192,7 @@ function ownerRenewalContract(text) {
     ['failed save or retrieval', /On failure keep source state; report a recovery hold/],
     ['no automatic effects', /No automatic launch, termination, archive or task replacement/],
     ['owner takeover', /Owner switch: Takeover applies/],
-    ['gate and Projects boundary', /Gates\/Projects keep their rules/]
+    ['gate and Projects coordinator boundary', /Gates\/Projects coordinators keep their rules/]
   ];
   for (const [name, pattern] of rows) assert.match(rule, pattern, name);
   const takeover = text.match(/## Takeover\n([\s\S]*?)(?=\n## )/)?.[1] || '';
@@ -215,7 +215,7 @@ test('owner-led renewal closure matrix preserves recovery, takeover and existing
     ['automatic actions', 'No automatic launch, termination, archive or task replacement', 'Automatic launch and task replacement'],
     ['owner action', 'tell the owner to start a fresh session from it', 'start fresh automatically'],
     ['writer reconciliation', 'Owner switch: Takeover applies', 'Owner switch: Takeover is skipped'],
-    ['gate and Projects rules', 'Gates/Projects keep their rules', 'Gates/Projects use this rule instead'],
+    ['gate and Projects rules', 'Gates/Projects coordinators keep their rules', 'Gates/Projects use this rule instead'],
     ['stop previous writer', 'verify custody, stop old writer', 'verify custody, retain competing writers']
   ];
   for (const [name, before, after] of rows) {
