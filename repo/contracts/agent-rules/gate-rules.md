@@ -1,10 +1,10 @@
 # Toolkit Gate Rules
 
-The gate playbook: G0, G1 and G2 sessions, reviewers and their controllers read it first. The global rules hold the risk tiers, the safety floor and everything every session needs; this file holds the gate mechanics. Repository rules still win on conventions, and nothing here relaxes the safety floor.
+Gates, reviewers and their controllers read this first. Global risk tiers and safety floor stand; repository conventions prevail.
 
 ## Gate order
 
-- **G0 Discovery** runs for every new task, repository or environment; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, find out what the stack really is (an app built in Flutter, for example, breaks browser automation) and test assumptions before planning. It can be short on known ground. It returns the G0 plan: findings, chosen approach, risks, what was tried and failed, and small slices (one reviewable PR each) with acceptance tests (action, expected result, test file). For a release plan in a governed repository, G0 also runs the `secure-ci-cd` CI check-up and lists its real gaps in the brief.
+- **G0 Discovery** runs for every new task, repository or environment; only LIGHT edits and fixes inside an already-discovered task skip it. Walk the real happy path, confirm the stack and test assumptions before planning; keep discovery short on known ground. It returns the G0 plan: findings, chosen approach, risks, what was tried and failed, and small slices (one reviewable PR each) with acceptance tests (action, expected result, test file). For a release plan in a governed repository, G0 also runs the `secure-ci-cd` CI check-up and lists its real gaps in the brief.
 - **G1 Builder** starts in a fresh session, with the G0 plan passed in its brief as the handoff. G0 and G1 share the same strong lead route. One builder owns the whole approved outcome across corrections, checkpoints and fresh sessions; in-scope fixes need no new admission. G1 includes UAT. Before review, the builder self-checks its diff against the G2 review section in the same session, fixes what it finds and notes it in the PR; this replaces no review.
 - **Review** follows the tier: full G2 for RISKY, one independent review for NORMAL, the builder's own diff read for LIGHT.
 - Gate names `G0`, `G1` and `G2` are fine where the reader needs them.
@@ -15,7 +15,7 @@ Fresh executor contexts are mandatory between G0 and G1, for initial G2, for a r
 
 ## Recoverable work
 
-There are no handover packets. Keep the work recoverable at all times instead: push work in progress to the branch, keep the PR (or the brief, before a PR exists) current at milestones, and post progress and decisions where every harness can read them: the PR, plus the programme issue comments when GitHub governance is ENABLED, otherwise the evidence store. Never rely on chat or host memory: a Projects controller may mirror state in project memory, never only there. Any new controller or executor starts from these, with no handover step, loading the current state and changed instructions rather than the full history.
+There are no handover packets. Keep work recoverable: push progress to the branch, update the PR (or brief before a PR exists) at milestones, and post progress and decisions in the PR and, when GitHub governance is ENABLED, programme issue comments; otherwise use the evidence store. All harnesses must be able to read them. Never rely on chat or host memory. Projects may mirror records; new controllers and executors load them and changed instructions, with no handover or full history.
 
 A gate works in the primary checkout unless it needs its own worktree, then uses `.tmp/worktrees/<lane>-<gate>-<sha>` at the admitted commit and records HEAD; the controller removes it after merge. A writing gate's session opens in the folder it writes, never told to escalate into another (Codex: the host contract's gate workspace).
 
@@ -37,6 +37,8 @@ A gate works in the primary checkout unless it needs its own worktree, then uses
 ## G2 review
 
 G2 starts after the working result and any owner UAT acceptance, in fresh independent contexts, and has no helpers. The pinned stack fixes the reviewer set (no added peer, duplicate or automatic closing panel), and every reviewer independently reviews the full accepted scope. Acceptance needs the whole roster, qualified routes, the exact candidate and coverage, verified evidence and no unresolved blocking finding, never a majority verdict or a scope/execution split. G2 stays adversarial on every reachable path inside the frozen supported host/environment matrix and agreed invariants. Reviewers rate findings: High breaks an agreed criterion or the safety floor; Medium is a plausible supported-path break, missing needed proof or an unexplained loosening (below); both block. Low is anything else, never blocks and joins one follow-up record per PR. G2 scans every commit, title and body of a PR for personal data, and checks where a computation ran before accepting that data stayed in place. No review has a dollar cap.
+
+Briefs name the temp root, local tests and authorised network commands, owner and exact-SHA evidence. Use the [Windows review recipe](../../docs/HOST-CONTRACT.md#review-cli-permissions): preflight elevated; set temp variables inside review commands. Missing required results block acceptance; reviewers retain full responsibility.
 
 - **No-weakening proof:** for changed detection or guard code, run base tests and fixtures on the head; each case blocked or flagged on base and now allowed needs a stated reason.
 - **Early returns keep the guards:** every early return or fast path in changed code must still run the generic guards first (identity, path, secret, personal-data, approval), or show they are not needed, with a test.

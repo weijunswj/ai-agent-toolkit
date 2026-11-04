@@ -102,6 +102,49 @@ A writing gate works only inside its own session's writable folders, so the owne
 - **Scratch:** a Codex gate keeps scratch in its worktree's ignored `.tmp/`, because a user-profile folder is outside the chat's folders.
 - **Known limit:** Codex cannot attach an existing worktree to a new chat (seen October 2026), and starting a successor from a lane branch still checked out in the old worktree is not yet qualified. Until it is, a successor continues in the old chat, or the owner approves its out-of-scope writes with Codex's native approval in the chat that asks.
 
+### Review CLI permissions
+
+The Windows review permission recipe was qualified on Codex CLI `0.166.0`, model `gpt-6.1-sol`, effort `high`, using the real authenticated Codex home with optional MCP servers disabled for that invocation. One command passed all eleven boundary and fixture checks. This does not qualify `xhigh`, a complete test suite or the hook pack on this route; those execution results remain required for each review.
+
+Before launch, inspect the effective Windows backend in the real home and any selected configuration layers: `windows.sandbox` must already be `"elevated"`. Stop if it is different or cannot be verified. Never set or change it for the owner. The same-home helper comparison measured Node children and network refusal under elevated; unelevated returned child-process `EPERM` and an HTTP response. Unelevated is a network boundary failure, not a usable alternative.
+
+Prepare the launch outside any enclosing Codex sandbox:
+
+1. Use a real disposable worktree of the governed repository at the candidate commit, outside the granted temp root. A scratch folder with synthetic `.git` metadata hits the governance hold and can produce an empty turn. Do not bypass that hold.
+2. Select one absolute, long-form temp root covering the actual test consumers, separate from and not an ancestor of the worktree. Pre-create it with plain `mkdir` so permissions inherit. Python `tempfile.mkdtemp` makes owner-only outer folders the sandbox cannot use; an absent grant root stops sandbox startup. A temp-folder argument grants no permission.
+3. Keep the Codex process's own startup temp folder outside the grant. Do not assume its `TEMP` reaches sandboxed commands: elevated supplied a separate agent temp folder where `mkdtemp` failed with `EPERM`. Set all three temp variables inside every review command as shown below. Keep reports outside runner-owned run folders, within the grant, and retain evidence before cleanup.
+4. Read the enabled optional MCP server names from the user config and add one invocation-only `enabled=false` override for each. Do not disable a required server; stop if a requirement conflicts. Keep managed requirements, hooks and execpolicy active. Never copy credentials to an isolated home or edit persistent config.
+5. Use the argument template below, with actual absolute paths and server names substituted, and send the short review prompt on stdin. Do not add `--sandbox` or `--add-dir`. Loaded legacy `sandbox_mode` settings take precedence over the named profile. Stop if a loaded configuration conflicts; do not repair host settings as part of the launch. See the [official permission guide](https://learn.chatgpt.com/docs/permissions).
+
+```text
+codex exec --json --color never -C <real-disposable-worktree> -m gpt-6.1-sol -c model_reasoning_effort="high" -c approval_policy="never" -c default_permissions="review-temp-qualification" -c permissions.review-temp-qualification={extends=":read-only",filesystem={"<absolute-pre-created-temp-root>"="write"},network={enabled=false}} -c mcp_servers.<name>.enabled=false -
+```
+
+Repeat the MCP override for every enabled optional server; omit it when there are none. Pass each `-c` value as one argument with the launcher's native quoting, never with literal environment macros in TOML paths. The qualified invocation did not use `--ephemeral`; do not claim unmeasured flag combinations. A qualification prompt runs only its probe command and prints the output, with one model session, a stated timeout and no retries.
+
+Inside the PowerShell review command, replace the root placeholder with the actual grant before invoking tests:
+
+```powershell
+$env:TEMP = '<absolute-pre-created-temp-root>'
+$env:TMP = $env:TEMP
+$env:TMPDIR = $env:TEMP
+node repo/scripts/run-tests.cjs --temp-root $env:TEMP repo/tests/ci-test-shards.test.cjs
+```
+
+This is a command pattern, not a claim that this test file passed in the qualified session. Direct hook-pack commands need the same in-command assignments. Once inside that command, the runner supplies its children and nested runners with their own run folder; see [validation guidance](VALIDATION-STRATEGY.md#review-temp-permissions).
+
+Inspect native command events and `turn_context`: root reads, exactly one temp write entry and restricted command networking are the required effective permissions. The record can label the translated `sandbox_policy` as `workspace-write` with only the temp root writable; inspect the actual entries rather than interpreting that label as a source write grant. Do not switch to a broader policy to obtain a preferred label.
+
+| Check on the disposable worktree | Required result |
+| --- | --- |
+| Read source and Git metadata | Allowed |
+| Write temp files; create and remove mkdtemp fixtures and nested Node test runs | Allowed, fixtures cleaned up |
+| Create files in candidate, metadata or sibling outside the grant; overwrite source | Refused, candidate bytes unchanged |
+| HTTPS from the sandboxed command | Explicit permission denial; an HTTP response or timeout cannot pass |
+| Required local tests and unchanged hook pack | Separately recorded results for the exact candidate commit |
+
+Repeat affected qualification checks when the host, CLI, backend or launch changes. Helper results do not replace real exec evidence. A zero-usage empty turn is a hold to investigate, not a pass: `--json` can hide the governance hook line. Preserve native output and inspect the hold; never retry a refused command through another route. Missing results, unexpected writes or network access hold acceptance. No persistent host-config writer is introduced.
+
 ## 8. Lane write fences
 
 The integration controller alone writes the parent, the version files and the integration files the lane map names (`repo/contracts/lanes/lane-map.json` once it lands). A lane controller writes only the child the catalogue delegates to it (`assign` and `interrupt`), with its own decision-ID prefix.
