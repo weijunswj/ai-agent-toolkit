@@ -99,6 +99,8 @@ test('the check names each way a copy is out of date, and never writes', t => {
     ['an unreadable VERSION', () => fs.writeFileSync(versionFile, 'Version: something else\n'), /^VERSION unreadable$/],
     ['an edited skill file', () => fs.appendFileSync(path.join(out, 'SKILL.md'), 'local edit\n'), /^differs SKILL\.md$/],
     ['a missing reference file', () => fs.rmSync(path.join(out, 'reference', 'setup.md')), /^differs reference\/setup\.md$/],
+    ['a today-only check-in', () => fs.writeFileSync(path.join(out, 'tasks', 'daily-check-in.md'), '10. PLUGIN BEHIND: compare with main today.\n'), /^differs tasks\/daily-check-in\.md$/],
+    ['an old plugin-card rule', () => fs.writeFileSync(path.join(out, 'reference', 'periodic-runs.md'), 'Keep it pending until current.\n'), /^differs reference\/periodic-runs\.md$/],
     ['an older block', () => fs.writeFileSync(path.join(out, 'instructions-block.md'), 'old\n'), /^differs instructions-block\.md$/],
   ];
   for (const [label, damage, reason] of cases) {
@@ -107,6 +109,11 @@ test('the check names each way a copy is out of date, and never writes', t => {
     const result = guidebook().check(out);
     assert.equal(result.state, 'stale', label);
     assert.match(result.reason, reason, label);
+    guidebook().refresh(out);
+    assert.equal(guidebook().check(out).state, 'current', label + ': refresh repairs the copy');
+    for (const rel of ['tasks/daily-check-in.md', 'reference/periodic-runs.md']) {
+      assert.equal(fs.readFileSync(path.join(out, rel), 'utf8'), fs.readFileSync(path.join(SKILL_DIR, rel), 'utf8'), rel);
+    }
   }
 });
 
