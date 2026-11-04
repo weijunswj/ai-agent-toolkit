@@ -20,7 +20,7 @@ Reference for the `web-controller-projects` skill, opened when the coordinator a
 ## Hourly nudge home thread
 - Guards for the nudge's home thread:
   - Never resolve the home thread or list it as a resolve candidate; the nudge never resolves it either.
-  - Each run is self-contained (it re-reads memory and files) and replies in one line when nothing changed.
+  - Each run is self-contained (it re-reads memory and files) and replies in one line when nothing changed and it finds no unrelayed ask or parked lane.
   - The daily check-in reports NUDGE NOT ARMED when its last run is over 65 minutes older than the latest time its own cron should have fired (hours outside its waking window never count; a nudge that fires less often uses its interval plus 5 minutes) or its home thread is resolved, and TASKS OUTDATED `weekly-rebuild` once the home thread is a week old. A run of either bound task (the nudge or the check-in) that reports `CONTEXT RESET DUE` asks for a rebuild of that task: new home thread and task, with the prompt rendered as in the swap (**Recurring tasks** step 2, so a recorded raise is carried), test run, then delete the old task. Note each rebuild in memory. None of this applies once its entry says `stopped by owner`.
   - For a template update (never for a nudge marked `stopped by owner`), ask the home thread to update its own task's prompt, then read it back with `get_trigger` and `--check`; if that fails, rebuild.
   - If the bound nudge dies twice in 7 days, switch that project to a fresh-session nudge every 2 hours (rendered with `session` `fresh`, its entry saying fresh) and tell the owner; never for a nudge marked `stopped by owner`.
