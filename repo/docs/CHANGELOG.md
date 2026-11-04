@@ -1,11 +1,11 @@
 # Toolkit Changelog
 
-## 3.45.0
+## 3.44.1
 
-### Added
+### Fixed
 
-- Owner-led renewal advice for Codex and Claude Code controllers and non-gate test sessions, with verified handoff retrieval and recovery holds.
-- Toolkit daily check-in session advice from redacted digests, keeping missing fields and historical activity explicit without automatic session or task changes.
+- Git folders without a github.com origin now report governance DISABLED automatically. Missing origins, multiple origin URLs and other hosts no longer hold prompts or ordinary tools for an acknowledgement.
+- Removed the non-GitHub acknowledgement store, reply-ticket branches and recovery instructions. Existing acknowledgement files remain inert and untouched; adding a GitHub origin starts the normal governance question.
 
 ## 3.44.0
 
