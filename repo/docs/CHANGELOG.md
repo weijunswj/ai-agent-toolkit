@@ -1,12 +1,17 @@
 # Toolkit Changelog
 
+## 3.44.3
+
+### Fixed
+
+- Fresh Claude Projects coordinators automatically bootstrap their guidebook and guided setup on appointment, only when the host identifies the top-level coordinator and provides native project tools and library access. Other hosts and executor threads keep their assigned roles, and failed bootstrap holds takeover.
+
 ## 3.44.2
 
 ### Fixed
 
-- Keep standing task auto-merge for a user-started Claude session reconnecting with the same session ID when the resume has no inherited host-session variable. Codex reconnects need a typed merge because Codex cannot distinguish a user reconnect from an agent resume. Unknown hosts follow the same rule. A resume carrying the variable revokes standing for that session ID, including after later starts without it. Repeated startup events cannot raise origin or clear resume, fork or revocation restrictions.
-- Refuse direct runs of Codex's session-start script and common commands that feed a session-start event to Toolkit's hook scripts. Refuse direct host-session variable clears through PowerShell's environment path and environment API, export and declare flags, and env's empty-environment flag as well as assignments and unset commands.
-- Name the failed standing merge check in refusals and provide a read-only merge check through the session's hook context without consuming approval. A terminal check names its missing native session context before app preferences.
+- Correct Windows Codex review guidance for pinned model and effort, worktree dependencies, per-run temp grants and measured limits; assign hook-pack evidence and cleanup to the unsandboxed launch lane, and restore the shared-record rule for project memory.
+- Document the qualified Windows Codex review launch with read-only source, one pre-created writable temp root and network refusal. Require an already elevated backend and set temp variables inside review commands. Keep required suite and hook-pack evidence separate from permission qualification; add explicit-root nested runner and grandchild cleanup coverage.
 
 ## 3.44.1
 
