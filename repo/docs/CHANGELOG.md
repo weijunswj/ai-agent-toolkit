@@ -1,11 +1,14 @@
 # Toolkit Changelog
 
-## 3.45.2
+## 3.46.0
+
+### Added
+
+- A small Claude Code shell session check prints only whether the Toolkit session entry exists and whether it equals the shell's own non-empty session ID. It grants no authority; installed delivery still needs checks in both real shells. Missing delivery needs fixing and does not switch task auto-merge off; select Off in this app's setup until fixed. Codex does not deliver the variable, so its absent result is expected.
 
 ### Fixed
 
-- Let pinned evidence-store pull request merges use the existing custody permission when a fresh merged parent binding names the exact separate store and live checks confirm privacy, write access, default-branch base and matching head. Other repositories keep their existing merge approval handling.
-- Add isolated hook-pack coverage for verified evidence merges and failed verification, without contacting GitHub or reading real user state.
+- Merge guidance offers typing in a fresh eligible chat, while reconnected and revoked chat reasons offer only the other approval routes.
 
 ## 3.45.1
 

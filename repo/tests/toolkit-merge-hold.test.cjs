@@ -202,6 +202,12 @@ test('evidence verification refuses conflicting connector fields before lookup a
     } });
   assert.match(result.deny, /Evidence-store verification failed: GitHub metadata could not be read within the hook budget/);
   assert.deepEqual(timeouts, [2000, 500], 'the second lookup gets only the remaining budget');
+
+test('merge guidance includes typing here in a fresh eligible chat and excludes reconnected or revoked chats', t => {
+  const ctx = context(t);
+  const reason = decide(ctx, connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA })).deny;
+  assert.match(reason, /Approval works here in a fresh eligible chat/);
+  assert.match(reason, /Typing in a reconnected or revoked chat records no approval/);
 });
 
 // The user's own session: marked at session start, not resumed, not started by another session.
