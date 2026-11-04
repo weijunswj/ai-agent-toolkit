@@ -22,7 +22,7 @@ A hard stop is never offered, never honoured from the ledger, and only explained
 - Force-pushes and history rewrites.
 - Deleting the only copy of evidence.
 - Pushing task or product source to the default branch.
-- Merging without the owner's OK on a summary of its external effects (each merge stays its own OK).
+- Merging without the owner's OK on a summary of its external effects. The governed evidence-store rule already grants custody permission for the selected, verified private store, including merges into its default branch. That exception needs no new ledger entry or per-merge answer; other repositories retain their existing approval rules.
 - Production, live-system, deployment, firewall or security-setting changes.
 - Turning off tests, validation, guardrails, attribution rules or any safety check.
 - Editing the agent's own permission settings, or adding allow rules, `autoMode` entries or Codex allow rules to any saved settings or rules file (user, project, local or managed settings, a Codex rules file, or a reusable `--settings` file, meaning one kept for more than one launch rather than written for one session and deleted when it ends). Per-launch options for a session the agent starts, such as `--allowedTools`, are not covered here, and they never clear a hard stop.

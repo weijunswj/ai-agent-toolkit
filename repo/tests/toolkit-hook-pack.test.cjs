@@ -23,6 +23,28 @@ test('the corpus loads with unique ids, and every known-bad row names its lane a
   for (const kind of ['benign', 'hostile', 'fault', 'update', 'parity']) assert.ok(corpus.rows.some(item => item.kind === kind), kind);
 });
 
+test('evidence merge fixtures accept only isolated binding and metadata cases', () => {
+  const fixture = { repo: { governance: 'undecided', name: 'evidence' }, evidence_merge: { from: 'store' } };
+  assert.deepEqual(pack.rowErrors(row({ fixture })), []);
+  for (const evidence_merge of [null, [], { from: 'elsewhere' }, { from: 'store', binding: 'unknown' },
+    { from: 'store', metadata: 'unknown' }, { from: 'store', script: 'arbitrary code' }]) {
+    assert.match(pack.rowErrors(row({ fixture: { ...fixture, evidence_merge } })).join('\n'), /evidence_merge needs/);
+  }
+  assert.match(pack.rowErrors(row({ fixture: { ...fixture, repo: { governance: 'none' } } })).join('\n'), /evidence_merge needs/);
+  const positives = pack.loadCorpus().rows.filter(entry => ['gh', 'connector', 'explicit-target', 'launched-session'].some(name => entry.id === `MERGE.bound-evidence-${name}`));
+  assert.equal(positives.length, 4);
+  for (const entry of positives) assert.deepEqual(entry.hosts, ['claude', 'codex']);
+  assert.equal(pack.meets(positives[0], 'codex', { decision: 'allow', problems: [], failed: ['hook exited 1'] }), false,
+    'a Codex hook crash must never count as a verified evidence merge');
+});
+
+test('end to end: verified evidence merges pass both host entry points without real GitHub or user state', async () => {
+  const lines = [];
+  const code = await pack.main(['run', '--rows', 'MERGE.bound-evidence-gh,MERGE.bound-evidence-connector,MERGE.bound-evidence-explicit-target,MERGE.bound-evidence-launched-session'], { write: text => lines.push(text) });
+  assert.equal(code, 0, lines.join(''));
+  assert.match(lines.join(''), /merge\s+8\s+8\s+0/);
+});
+
 test('a row with a wrong shape is refused with the reason', () => {
   assert.deepEqual(pack.rowErrors(row()), []);
   const cases = [

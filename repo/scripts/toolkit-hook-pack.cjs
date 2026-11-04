@@ -137,11 +137,23 @@ function expectErrors(expect, label) {
   return errors;
 }
 
+const EVIDENCE_BINDINGS = ['fresh', 'stale', 'disabled', 'foreign', 'malformed', 'removed', 'local', 'absent'];
+const EVIDENCE_METADATA = ['verified', 'public', 'unwritable', 'wrong-repo', 'no-default', 'wrong-base', 'wrong-base-repo', 'wrong-number', 'wrong-head', 'unreachable', 'broken'];
+
 function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.evidence_merge !== undefined) {
+    const spec = fixture.evidence_merge;
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)
+      || Object.keys(spec).some(key => !['from', 'binding', 'metadata'].includes(key))
+      || !['store', 'parent'].includes(spec.from) || !EVIDENCE_BINDINGS.includes(spec.binding || 'fresh')
+      || !EVIDENCE_METADATA.includes(spec.metadata || 'verified') || !fixture.repo
+      || (spec.from === 'parent' ? fixture.repo.governance !== 'enabled'
+        : fixture.repo.governance !== 'undecided' || fixture.repo.name !== 'evidence' || fixture.repo.owner !== undefined)) errors.push('fixture.evidence_merge needs a parent or evidence store repository, a supported binding and metadata result');
+  }
   if (fixture.owner_session !== undefined && fixture.owner_session !== true) errors.push('fixture.owner_session is true or left out');
   if (fixture.gate_role !== undefined && !GATE_ROLES.includes(fixture.gate_role)) errors.push(`fixture.gate_role is one of ${GATE_ROLES.join(', ')}`);
   const repo = fixture.repo;
@@ -339,6 +351,8 @@ class Fixture {
     // A session a Toolkit launcher started for a gate carries its role.
     if (spec.gate_role) this.env.TOOLKIT_GATE_ROLE = spec.gate_role;
     if (spec.repo) this.#repo(spec.repo);
+    if (spec.evidence_merge) this.#evidenceMerge(spec.evidence_merge);
+    else this.#githubFixture({});
     if (spec.owner_session) this.#ownerSession();
     this.#files(this.work, spec.files || {});
     if (spec.transcript) fs.writeFileSync(this.transcript, spec.transcript.map(entry => JSON.stringify(this.expand(entry))).join('\n') + '\n');
@@ -402,6 +416,68 @@ class Fixture {
       store: { kind: 'github', repository: store, branch: 'main', path: 'state/' }, required_checks: ['validate'],
     }, null, 2)}\n`;
     support.recordMerged(owner, { home: this.home, text });
+    return owner;
+  }
+
+  // Test-only transport at the process boundary. The real GitHubTransport still parses a gh HTTP
+  // response, but the isolated preload intercepts its executable. No fixture can contact GitHub.
+  #evidenceMerge(spec) {
+    const support = require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs'));
+    const store = 'toolkit-test-fixture/evidence';
+    const parent = spec.from === 'parent' ? this.work : this.#bindingNamingStore(store);
+    const file = path.join(parent, '.github', 'toolkit-programme.json');
+    const binding = JSON.parse(fs.readFileSync(file, 'utf8'));
+    binding.store.repository = store;
+    if (spec.binding === 'disabled') {
+      binding.schema = 'toolkit.programme-binding.v2'; binding.governance = 'disabled';
+      binding.parents = [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }];
+      delete binding.parent_issue; delete binding.record_prefix; delete binding.writer_prefix;
+    }
+    if (spec.binding === 'foreign') binding.repository = 'toolkit-test-fixture/foreign';
+    const text = spec.binding === 'malformed' ? '{broken' : JSON.stringify(binding);
+    const registryPath = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
+    const cache = require('./toolkit-governance-binding.cjs');
+    const identity = require('./toolkit-governance-state.cjs').readIdentity(parent);
+    fs.writeFileSync(file, text);
+    support.recordMerged(parent, { home: this.home, text, ...(spec.binding === 'stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
+    if (['local', 'absent'].includes(spec.binding)) fs.rmSync(cache.cacheFileFor(registryPath, identity.repository_id));
+    if (spec.binding === 'absent') fs.rmSync(file);
+    if (spec.binding === 'removed') {
+      const entry = cache.readBindingCache(identity, registryPath);
+      cache.writeCache(registryPath, { ...entry, status: 'absent', text: null, bytes_sha256: null });
+    }
+    const repo = { full_name: store, private: true, permissions: { push: true }, default_branch: 'main' };
+    const pr = { number: 5, base: { repo: { full_name: store }, ref: 'main' }, head: { sha: this.head } };
+    if (spec.metadata === 'public') repo.private = false;
+    if (spec.metadata === 'unwritable') repo.permissions.push = false;
+    if (spec.metadata === 'wrong-repo') repo.full_name = 'toolkit-test-fixture/other';
+    if (spec.metadata === 'no-default') delete repo.default_branch;
+    if (spec.metadata === 'wrong-base') pr.base.ref = 'feature';
+    if (spec.metadata === 'wrong-base-repo') pr.base.repo.full_name = 'toolkit-test-fixture/other';
+    if (spec.metadata === 'wrong-number') pr.number = 6;
+    if (spec.metadata === 'wrong-head') pr.head.sha = 'f'.repeat(40);
+    this.#githubFixture({ [`repos/${store}`]: repo, [`repos/${store}/pulls/5`]: pr }, spec.metadata);
+  }
+
+  #githubFixture(responses, metadata = 'verified') {
+    const bin = path.join(this.dir, 'fake-github');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, process.platform === 'win32' ? 'gh.exe' : 'gh'), '');
+    const preload = path.join(bin, 'transport.cjs');
+    fs.writeFileSync(preload, `const cp = require('node:child_process');
+const original = cp.spawnSync;
+const responses = ${JSON.stringify(responses)};
+cp.spawnSync = function(file, args, options) {
+  if (!/^gh(?:\\.exe)?$/i.test(require('node:path').basename(file))) return original(file, args, options);
+  if (${JSON.stringify(metadata)} === 'broken') throw new Error('fixture reader failed');
+  const body = args[0] === 'api' && args[3] === 'GET' && responses[args[4]];
+  const status = body && ${JSON.stringify(metadata)} !== 'unreachable' ? 200 : 404;
+  return {status: status === 200 ? 0 : 1, stdout: 'HTTP/2.0 ' + status + '\\n\\n' + JSON.stringify(body || {}), stderr: ''};
+};
+`);
+    this.env.PATH = `${bin}${path.delimiter}${this.env.PATH || this.env.Path || ''}`;
+    delete this.env.Path;
+    this.env.NODE_OPTIONS = `--require="${preload.replace(/\\/g, '/')}"`;
   }
 
   // A fresh enabled binding plus separate app-local answers in this fixture's home.
@@ -566,6 +642,7 @@ function knownBadHosts(row) {
 function meets(row, host, observed) {
   const expect = row.expect_by_host?.[host] || row.expect;
   if (observed.problems.length) return false;
+  if (row.fixture?.evidence_merge && observed.failed?.length) return false;
   if (observed.decision !== expect.decision) return false;
   // A refusal only because a hook itself failed (onFailure: block) proves nothing about what the
   // hooks decide, so it meets a row only when the row names it.

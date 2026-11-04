@@ -103,6 +103,33 @@ test('S1: a damaged or foreign cache file is skipped', (t) => {
   assert.equal(bindingCache.readAllBindingCaches(ctx.registryPath).length, 1);
 });
 
+test('never-governed store classification alone grants no merge; fresh exact binding and live facts do', t => {
+  const ctx = scratch(t);
+  const parent = governed(ctx);
+  const store = repo(path.join(ctx.root, 'evidence'), 'example-owner/evidence');
+  const text = binding('example-owner/app', 'example-owner/evidence');
+  const hold = require(path.join(scripts, 'toolkit-merge-hold.cjs'));
+  const sha = 'a'.repeat(40);
+  const input = { cwd: store, tool_name: 'mcp__github__merge_pull_request', tool_input: {
+    owner: 'example-owner', repo: 'evidence', pullNumber: 17, expectedHeadSha: sha, merge_method: 'merge' } };
+  let reads = 0;
+  const options = { registryOptions: { ...ctx.options, home: path.join(ctx.root, 'home') }, environment: {},
+    readEvidenceGitHub(apiPath) {
+      reads += 1;
+      return { status: 200, json: apiPath.endsWith('/pulls/17')
+        ? { number: 17, base: { repo: { full_name: 'example-owner/evidence' }, ref: 'main' }, head: { sha } }
+        : { full_name: 'example-owner/evidence', private: true, permissions: { push: true }, default_branch: 'main' } };
+    } };
+  recordMerged(parent, { registryPath: ctx.registryPath, text, now: new Date(Date.now() - 25 * 60 * 60 * 1000) });
+  assert.equal(state(ctx, store).rule, 'S1');
+  assert.match(hold.decide(input, options).deny, /no unused approval/);
+  assert.equal(reads, 0);
+  recordMerged(parent, { registryPath: ctx.registryPath, text });
+  assert.equal(state(ctx, store).rule, 'S1');
+  assert.equal(hold.decide(input, options), null);
+  assert.equal(reads, 2);
+});
+
 test('R1s: a clone of another repository in a decided repository\'s ignored .tmp folder; never a worktree of the parent, an unignored .tmp or an undecided parent', (t) => {
   const ctx = scratch(t);
   const parent = governed(ctx);

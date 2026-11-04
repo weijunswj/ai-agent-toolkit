@@ -56,6 +56,154 @@ const bash = (cwd, command) => ({ cwd, tool_name: 'Bash', tool_input: { command 
 const connector = (tool, args, repo = 'a') => ({ cwd: os.tmpdir(), tool_name: `mcp__github__${tool}`, tool_input: { owner: 'owner', repo, ...args } });
 const decide = (ctx, input, environment = {}) => hold.decide(input, { ...ctx.options, environment });
 
+// The G0 authority matrix: only an exact fresh merged parent binding plus live target facts
+// grants evidence custody. A local binding, a name, a task answer or a session origin cannot.
+const evidenceCases = [
+  ['verified store', {}, true],
+  ['explicit store from parent', { parent: true }, true],
+  ['launched session', { launched: true }, true],
+  ['task auto-merge off', { taskOff: true }, true],
+  ['absent binding', { binding: 'absent' }, false],
+  ['local unmerged binding', { binding: 'local' }, false],
+  ['stale binding', { binding: 'stale' }, false],
+  ['disabled binding', { binding: 'disabled' }, false],
+  ['foreign binding', { binding: 'foreign' }, false],
+  ['malformed binding', { binding: 'malformed' }, false],
+  ['removed binding', { binding: 'removed' }, false],
+  ['self binding', { binding: 'self' }, false],
+  ['name-only transport', { binding: 'name' }, false],
+  ['ordinary governance-off repository', { binding: 'off' }, false],
+  ['unrelated folder', { unrelated: true }, false],
+  ['public store', { metadata: 'public' }, false],
+  ['no write permission', { metadata: 'unwritable' }, false],
+  ['wrong repository', { metadata: 'wrong-repo' }, false],
+  ['unknown default', { metadata: 'no-default' }, false],
+  ['bound branch differs', { metadata: 'bound-branch' }, false],
+  ['wrong PR number', { metadata: 'wrong-number' }, false],
+  ['wrong base repository', { metadata: 'wrong-base-repo' }, false],
+  ['wrong base branch', { metadata: 'wrong-base' }, false],
+  ['moved head', { metadata: 'wrong-head' }, false],
+  ['inaccessible store', { metadata: 'inaccessible' }, false],
+  ['broken reader', { metadata: 'broken' }, false],
+  ['missing head', { shape: 'missing-head' }, false],
+  ['short head', { shape: 'short-head' }, false],
+  ['unsupported merge form', { shape: 'squash' }, false],
+];
+
+for (const [name, spec, allowed] of evidenceCases) test(`evidence authority: ${name}`, t => {
+  const ctx = context(t);
+  const cache = require('../scripts/toolkit-governance-binding.cjs');
+  const governance = require('../scripts/toolkit-governance-state.cjs');
+  const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+  const target = spec.binding === 'name' ? 'owner/TRANSPORT-app' : 'owner/a';
+  if (spec.binding === 'name') git(ctx.repo, ['remote', 'set-url', 'origin', `https://github.com/${target}.git`]);
+  const binding = { schema: 'toolkit.programme-binding.v2', repository: 'owner/b', governance: 'enabled',
+    parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }],
+    store: { kind: 'github', repository: 'owner/a', branch: 'main', path: 'state/' }, required_checks: ['validate'] };
+  if (spec.binding === 'disabled') binding.governance = 'disabled';
+  if (spec.binding === 'foreign') binding.repository = 'owner/foreign';
+  if (spec.binding === 'self') binding.repository = 'owner/a';
+  if (['name', 'off'].includes(spec.binding)) binding.store.repository = 'owner/TRANSPORT-unrelated';
+  const text = spec.binding === 'malformed' ? '{broken' : JSON.stringify(binding);
+  const registryPath = ctx.options.registryOptions.registryPath;
+  if (!['absent', 'local'].includes(spec.binding)) {
+    recordMerged(spec.binding === 'self' ? ctx.repo : ctx.other, { registryPath, text,
+      ...(spec.binding === 'stale' ? { now: new Date(Date.now() - 25 * 60 * 60 * 1000) } : {}) });
+  }
+  if (spec.binding === 'local') {
+    fs.mkdirSync(path.join(ctx.other, '.github'));
+    fs.writeFileSync(path.join(ctx.other, '.github', 'toolkit-programme.json'), text);
+  }
+  if (spec.binding === 'off') gate.writeGovernanceDecision(ctx.repo, 'disable', ctx.options);
+  if (spec.binding === 'removed') {
+    const entry = cache.readBindingCache(governance.readIdentity(ctx.other), registryPath);
+    cache.writeCache(registryPath, { ...entry, status: 'absent', text: null, bytes_sha256: null });
+  }
+  if (spec.taskOff) for (const host of ['codex', 'claude-code']) {
+    const { TaskAutoMergePreferences } = require('../scripts/toolkit-task-auto-merge-preferences.cjs');
+    const prefs = new TaskAutoMergePreferences({ home: ctx.options.registryOptions.home, host });
+    prefs.apply('off', prefs.inspect());
+  }
+  const repo = { full_name: 'owner/a', private: true, permissions: { push: true }, default_branch: 'main' };
+  const pr = { number: 17, base: { repo: { full_name: 'owner/a' }, ref: 'main' }, head: { sha: SHA } };
+  if (spec.metadata === 'public') repo.private = false;
+  if (spec.metadata === 'unwritable') repo.permissions.push = false;
+  if (spec.metadata === 'wrong-repo') repo.full_name = 'owner/other';
+  if (spec.metadata === 'no-default') delete repo.default_branch;
+  if (spec.metadata === 'bound-branch') repo.default_branch = 'trunk';
+  if (spec.metadata === 'wrong-number') pr.number = 18;
+  if (spec.metadata === 'wrong-base-repo') pr.base.repo.full_name = 'owner/other';
+  if (spec.metadata === 'wrong-base') pr.base.ref = 'feature';
+  if (spec.metadata === 'wrong-head') pr.head.sha = 'f'.repeat(40);
+  for (const host of ['claude', 'codex']) for (const form of ['cli', 'connector']) {
+    let reads = 0;
+    const cwd = spec.parent ? ctx.other : spec.unrelated ? ctx.root : ctx.repo;
+    const sha = spec.shape === 'missing-head' ? null : spec.shape === 'short-head' ? SHA.slice(0, 7) : SHA;
+    const input = form === 'cli' ? bash(cwd, `gh pr merge 17 ${spec.parent || spec.unrelated ? `--repo ${target} ` : ''}${spec.shape === 'squash' ? '--squash' : '--merge'}${sha ? ` --match-head-commit ${sha}` : ''}`)
+      : { ...connector('merge_pull_request', { pullNumber: 17, ...(sha ? { expectedHeadSha: sha } : {}), merge_method: spec.shape === 'squash' ? 'squash' : 'merge' }, target.split('/')[1]), cwd };
+    const result = hold.decide(input, { ...ctx.options, host, environment: spec.launched ? { TOOLKIT_GATE_ROLE: 'G1' } : {},
+      readEvidenceGitHub(apiPath, { timeoutMs }) {
+        reads += 1;
+        assert.ok(timeoutMs > 0 && timeoutMs <= 2000);
+        if (spec.metadata === 'broken') throw new Error('private diagnostic must not escape');
+        return { status: spec.metadata === 'inaccessible' ? 404 : 200, json: apiPath.endsWith('/pulls/17') ? pr : repo };
+      } });
+    assert.equal(result === null, allowed, `${host} ${form}: ${JSON.stringify(result)}`);
+    if (spec.metadata) assert.match(result.deny, /Evidence-store verification failed:/);
+    if (spec.metadata === 'broken') assert.doesNotMatch(result.deny, /private diagnostic/);
+    if (spec.binding || spec.shape || spec.unrelated) assert.equal(reads, 0, 'ineligible calls do not contact GitHub');
+    if (allowed) assert.equal(reads, 2);
+  }
+  assert.equal(fs.existsSync(ctx.file), false, 'no approval or persistent evidence permission is written');
+});
+
+test('evidence merges retain generic shell and ambiguity checks, and judge every compound target', t => {
+  const ctx = context(t);
+  const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+  recordMerged(ctx.other, { registryPath: ctx.options.registryOptions.registryPath, text: JSON.stringify({
+    schema: 'toolkit.programme-binding.v1', repository: 'owner/b', parent_issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX',
+    store: { kind: 'github', repository: 'owner/a', branch: 'main', path: 'state/' }, required_checks: ['validate'] }) });
+  const readEvidenceGitHub = api => ({ status: 200, json: api.endsWith('/pulls/17')
+    ? { number: 17, base: { repo: { full_name: 'owner/a' }, ref: 'main' }, head: { sha: SHA } }
+    : { full_name: 'owner/a', private: true, permissions: { push: true }, default_branch: 'main' } });
+  const command = `gh pr merge 17 --merge --match-head-commit ${SHA}`;
+  for (const suffix of [`; gh pr merge 18 --repo owner/b --merge --match-head-commit ${SHA}`, '; git push origin main']) {
+    // Direct store pushes retain their existing exemption; use the parent for the default push.
+    const cwd = suffix.endsWith('origin main') ? ctx.other : ctx.repo;
+    assert.ok(hold.decide(bash(cwd, `${command} --repo owner/a${suffix}`), { ...ctx.options, environment: {}, readEvidenceGitHub })?.deny, suffix);
+  }
+  git(ctx.repo, ['remote', 'add', 'second', 'https://github.com/owner/second.git']);
+  assert.match(hold.decide(bash(ctx.repo, command), { ...ctx.options, environment: {}, readEvidenceGitHub }).deny, /cannot tell which repository/);
+  assert.equal(hold.decide(bash(ctx.repo, `${command} --repo owner/a`), { ...ctx.options, environment: {}, readEvidenceGitHub }), null);
+  assert.equal(typed(ctx, 'merge 17'), 1);
+  assert.equal(hold.decide(bash(ctx.repo, `${command} --repo owner/a`), { ...ctx.options, environment: {}, readEvidenceGitHub() { assert.fail('typed approval needs no lookup'); } }), null);
+});
+
+test('evidence verification refuses conflicting connector fields before lookup and enforces a shared read budget', t => {
+  const ctx = context(t);
+  require('./toolkit-governed-fixture-support.cjs').recordMerged(ctx.other, { registryPath: ctx.options.registryOptions.registryPath,
+    text: JSON.stringify({ schema: 'toolkit.programme-binding.v1', repository: 'owner/b', parent_issue: 1,
+      record_prefix: 'INT-FX', writer_prefix: 'FX', store: { kind: 'github', repository: 'owner/a', branch: 'main', path: 'state/' }, required_checks: ['validate'] }) });
+  const args = { pullNumber: 17, expectedHeadSha: SHA, merge_method: 'merge' };
+  for (const extra of [{ pr_number: 18 }, { repository_full_name: 'owner/other' }, { expected_head_sha: 'f'.repeat(40) }, { expectedHeadSha: undefined, sha: SHA }]) {
+    assert.ok(hold.decide({ ...connector('merge_pull_request', { ...args, ...extra }), cwd: ctx.repo }, {
+      ...ctx.options, environment: {}, readEvidenceGitHub() { assert.fail('ambiguous input must not reach GitHub'); } })?.deny);
+  }
+  let clock = 0;
+  const timeouts = [];
+  t.mock.method(Date, 'now', () => clock);
+  const result = hold.decide({ ...connector('merge_pull_request', args), cwd: ctx.repo }, {
+    ...ctx.options, environment: {}, readEvidenceGitHub(api, { timeoutMs }) {
+      timeouts.push(timeoutMs);
+      clock += 1500;
+      return { status: 200, json: api.endsWith('/pulls/17')
+        ? { number: 17, base: { repo: { full_name: 'owner/a' }, ref: 'main' }, head: { sha: SHA } }
+        : { full_name: 'owner/a', private: true, permissions: { push: true }, default_branch: 'main' } };
+    } });
+  assert.match(result.deny, /Evidence-store verification failed: GitHub metadata could not be read within the hook budget/);
+  assert.deepEqual(timeouts, [2000, 500], 'the second lookup gets only the remaining budget');
+});
+
 // The user's own session: marked at session start, not resumed, not started by another session.
 function userSession(ctx, id = 'user', source = 'startup') {
   gate.startSession({ session_id: id, source, cwd: ctx.repo }, { ...ctx.options, environment: {} });
