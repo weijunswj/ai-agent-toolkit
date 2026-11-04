@@ -119,7 +119,6 @@ test('derive: the rule table, first match wins', () => {
     // Working-tree materials never decide.
     for (const [block, binding] of [[false, false], [true, true]]) {
       const result = governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null }, merged });
-      assert.equal(governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null }, merged, ok: true }).rule, rule, 'an ok never matters on GitHub');
       assert.equal(result.state, expectedState, `${decision}/${merged.status}`);
       assert.equal(result.rule, rule, `${decision}/${merged.status}`);
       assert.equal(result.hold, expectedState === 'UNDECIDED');
@@ -131,21 +130,19 @@ test('derive: the rule table, first match wins', () => {
     }
   }
 
-  // Not on github.com: a recorded disable still wins; otherwise the user's ok decides, whatever is enabled or present.
-  const gitlab = { root: '/r', repository_id: 'c'.repeat(64), valid: true, remote: { host: 'gitlab.com' } };
-  const noOrigin = { root: '/r', repository_id: 'path:' + 'd'.repeat(64), valid: false, reason: 'origin-missing' };
-  for (const id of [gitlab, noOrigin]) {
-    for (const decision of ['enabled', 'unresolved']) {
-      for (const [ok, expectedState, rule] of [[false, 'UNDECIDED', 'R9'], [true, 'DISABLED', 'R8']]) {
-        const result = governance.GovernanceState.derive({ identity: id, materials: materials(true, true), decision: { state: decision, decision_kind: null }, ok, merged: fresh('enabled') });
-        assert.deepEqual([result.state, result.rule, result.governed_rules_bind, result.hold], [expectedState, rule, false, expectedState === 'UNDECIDED'], `${id.reason || 'gitlab'}/${decision}/${ok}`);
-      }
-    }
-    assert.equal(governance.GovernanceState.derive({ identity: id, materials: materials(true, true), decision: { state: 'disabled', decision_kind: 'disable' } }).rule, 'R2');
+  // Unsupported identities always disable, regardless of stored decisions or materials.
+  const identities = [
+    { root: '/r', repository_id: 'c'.repeat(64), valid: true, remote: { host: 'gitlab.com' } },
+    { root: '/r', repository_id: 'path:' + 'd'.repeat(64), valid: false, reason: 'origin-missing' },
+    { root: '/r', repository_id: 'path:' + 'e'.repeat(64), valid: false, reason: 'origin-ambiguous' },
+  ];
+  for (const identity of identities) for (const decision of ['enabled', 'disabled', 'unresolved']) {
+    const result = governance.GovernanceState.derive({ identity, materials: materials(true, true), decision: { state: decision }, merged: fresh('enabled') });
+    assert.deepEqual([result.state, result.rule, result.governed_rules_bind, result.hold, result.persistable], ['DISABLED', 'R8', false, false, false]);
   }
 });
 
-test('S-01, S-02: no git root is DISABLED automatically; a git repository not on github.com waits for the user\'s ok', (t) => {
+test('S-01, S-02: no git root is DISABLED automatically; a git repository not on github.com is DISABLED automatically', (t) => {
   const ctx = scratch(t);
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
@@ -171,29 +168,33 @@ test('S-01, S-02: no git root is DISABLED automatically; a git repository not on
   ]) {
     const repo = fakeRepo(ctx.root, name, { remote, block: true, binding: true });
     const result = state(ctx, repo);
-    assert.deepEqual([result.state, result.rule, result.reason, result.hold, result.host], ['UNDECIDED', 'R9', reason, true, host], name);
+    assert.deepEqual([result.state, result.rule, result.reason, result.hold, result.host], ['DISABLED', 'R8', reason, false, host], name);
     assert.equal(result.governed_rules_bind, false, `${name}: a governed block never binds off github.com`);
     assert.ok(result.repository_id, name);
   }
   // Without an origin the repository is known by its path on this computer; with one, by the remote.
   assert.equal(state(ctx, path.join(ctx.root, 'none')).repository_id, governance.localRepositoryId(path.join(ctx.root, 'none')));
   const twoOrigins = fakeRepo(ctx.root, 'ambiguous', { configText: `[remote "origin"]\n\turl = ${REMOTE}\n\turl = git@github.com:x/y.git\n` });
-  assert.deepEqual([state(ctx, twoOrigins).rule, state(ctx, twoOrigins).reason], ['R9', 'origin-ambiguous']);
+  assert.deepEqual([state(ctx, twoOrigins).rule, state(ctx, twoOrigins).reason], ['R8', 'origin-ambiguous']);
   // GitHub, by name or SSH alias, still gets the question.
   for (const remote of ['git@github.com:a/b.git', 'git@github-work:a/b.git', 'ssh://git@ssh.github.com:443/a/b.git']) {
     assert.equal(state(ctx, fakeRepo(ctx.root, `gh-${remote.length}-${remote.charCodeAt(4)}`, { remote })).rule, 'R7', remote);
   }
   assert.equal(fs.existsSync(ctx.registryPath), false, 'nothing is written');
-  // The user's ok, kept next to the registry, turns the waiting repository DISABLED (R8).
-  const okFile = path.join(path.dirname(ctx.registryPath), governance.NOT_GITHUB_BASENAME);
-  const gitlab = state(ctx, path.join(ctx.root, 'gitlab'));
-  fs.mkdirSync(path.dirname(okFile), { recursive: true });
-  fs.writeFileSync(okFile, JSON.stringify({ schema: governance.NOT_GITHUB_SCHEMA, repositories: { [gitlab.repository_id]: { at: '2026-10-24T00:00:00.000Z' } } }));
-  assert.deepEqual([state(ctx, path.join(ctx.root, 'gitlab')).state, state(ctx, path.join(ctx.root, 'gitlab')).rule], ['DISABLED', 'R8']);
-  assert.equal(state(ctx, path.join(ctx.root, 'none')).rule, 'R9', 'an ok counts only for its own repository');
-  // A damaged ok file counts as no ok: the repository asks again.
-  fs.writeFileSync(okFile, '{ damaged');
-  assert.equal(state(ctx, path.join(ctx.root, 'gitlab')).rule, 'R9');
+  // Retired acknowledgements are inert, even when damaged; no cleanup deletes user records.
+  const retired = path.join(path.dirname(ctx.registryPath), 'governance-not-github.v1.json');
+  fs.mkdirSync(path.dirname(retired), { recursive: true });
+  for (const bytes of ['{"schema":"toolkit.governance-not-github.v1","repositories":{}}', '{ damaged']) {
+    fs.writeFileSync(retired, bytes);
+    assert.equal(state(ctx, path.join(ctx.root, 'gitlab')).rule, 'R8');
+    assert.equal(state(ctx, path.join(ctx.root, 'none')).rule, 'R8');
+    assert.equal(fs.readFileSync(retired, 'utf8'), bytes);
+  }
+  const forbidden = () => { throw new Error('GitHub state must not be read'); };
+  for (const name of ['gitlab', 'none', 'ambiguous']) {
+    const reader = new governance.GovernanceState({ decisionReader: forbidden, materialsReader: forbidden, mergedReader: forbidden, storeReader: forbidden });
+    assert.equal(reader.evaluate(path.join(ctx.root, name)).state, 'DISABLED');
+  }
 });
 
 test('S-03, S-06, S-07: materials without a decision', (t) => {
@@ -319,8 +320,8 @@ test('H-09 (unit): unreadable inputs hold inside a repository and never outside 
   const corrupt = state(ctx, repo);
   assert.deepEqual([corrupt.state, corrupt.rule, corrupt.reason, corrupt.hold], ['UNDECIDED', 'ERROR', 'registry-unreadable', true]);
   assert.match(corrupt.error_code, /^[A-Z_]+$/);
-  // A repository without an identity never reads the registry: it waits for the user's ok (R9).
-  assert.equal(state(ctx, fakeRepo(ctx.root, 'no-origin', { remote: null })).rule, 'R9');
+  // A repository without a GitHub identity never reads the registry: it is automatically off.
+  assert.equal(state(ctx, fakeRepo(ctx.root, 'no-origin', { remote: null })).rule, 'R8');
 
   fs.rmSync(ctx.registryPath);
   const worktreeFile = path.join(ctx.root, 'dangling');
