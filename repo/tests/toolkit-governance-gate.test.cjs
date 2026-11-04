@@ -38,7 +38,7 @@ function scratch(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-governance-gate-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const registryPath = path.join(root, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
-  return { root, registryPath, options: { registryPath, testOnly: true }, heldPath: path.join(path.dirname(registryPath), gate.HELD_BASENAME) };
+  return { root, registryPath, options: { registryPath, testOnly: true, home: path.join(root, 'home') }, heldPath: path.join(path.dirname(registryPath), gate.HELD_BASENAME) };
 }
 
 function gitRepo(ctx, name, { remote = REMOTE, block = false, binding = false } = {}) {

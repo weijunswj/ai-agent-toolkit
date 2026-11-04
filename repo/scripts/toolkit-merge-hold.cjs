@@ -38,9 +38,9 @@
 //
 // The owner's app-local standing answer instead of a typed approval: On, with an enabled
 // governance binding merged on the default branch (read from this computer's cache, under a day
-// old), a merge with no typed approval passes only in a session the user started, in that
-// same session after a resume if its startup recorded user-started origin (never a fork or an
-// unknown or automation origin), with launcher and host-session checks still passing, in that
+// old), a merge with no typed approval passes only in a session whose fresh startup recorded
+// user-started origin, including after a same-ID resume (never a fork or an unknown or automation
+// origin), with launcher and host-session checks still passing, in that
 // repository's own folder, for that repository, as a plain merge commit pinned to the full 40
 // character head SHA: `gh pr merge N --merge --match-head-commit <sha>`, or a connector merge tool
 // call with merge_method "merge" and the head SHA field, and only when the merge-scope check

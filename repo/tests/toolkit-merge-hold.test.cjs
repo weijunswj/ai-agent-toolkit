@@ -46,7 +46,7 @@ function context(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-merge-hold-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const registryPath = path.join(root, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
-  const options = { registryOptions: { registryPath, testOnly: true } };
+  const options = { registryOptions: { registryPath, testOnly: true, home: path.join(root, 'home') } };
   const repo = repository(root, 'a');
   const other = repository(root, 'b');
   return { root, repo, other, options, file: path.join(path.dirname(registryPath), hold.APPROVALS_BASENAME) };
