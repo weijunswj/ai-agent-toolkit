@@ -198,6 +198,8 @@ function ownerRenewalContract(text) {
   const takeover = text.match(/## Takeover\n([\s\S]*?)(?=\n## )/)?.[1] || '';
   assert.match(takeover, /verify custody, stop old writer/);
   assert.match(takeover, /Read back before acting/);
+  // Pending effects of the old session are reconciled before any successor replays them.
+  assert.match(text, /Never replay uncertain effects before independent reconciliation/);
 }
 
 test('owner-led renewal closure matrix preserves recovery, takeover and existing session rules', () => {
@@ -224,6 +226,7 @@ test('owner-led renewal closure matrix preserves recovery, takeover and existing
   assert.match(cost, /controllers and non-gate test sessions are outside automatic worker rotation/);
   assert.match(cost, /CONTROLLER\.md#evidence-progress-and-finish/);
   assert.match(cost, /Claude Projects keeps its task home-thread rules/);
+  assert.match(cost, /\*\*Never rotate the controller's own thread automatically\.\*\* In plain chats the user starts a fresh chat\./);
   const routing = fs.readFileSync(path.join(__dirname, '../contracts/agent-rules/toolkit-skill-routing.md'), 'utf8');
   assert.match(routing.split('\n').find(line => line.startsWith('| `agent-cost-control`')), /controllers and non-gate test sessions use the owner-led renewal rule in CONTROLLER\.md, outside automatic worker rotation/);
 });
