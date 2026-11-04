@@ -145,6 +145,45 @@ for (const mutation of ['receipt recorded', 'ticket spent']) {
   });
 }
 
+// Spend closure: taking one ticket must preserve mutations made while its targets are evaluated.
+for (const mutation of ['receipt recorded', 'ticket spent']) {
+  test(`reply take preserves a ${mutation} during target evaluation`, t => {
+    const ctx = scratch(t);
+    const options = { registryOptions: ctx.options };
+    gate.startSession({ session_id: 'owner', source: 'startup' }, options);
+    const epoch = new gate.SessionEpochs(options).get('owner');
+    const repositories = [gitRepo(ctx, 'held'), gitRepo(ctx, 'off', { remote: null })]
+      .map(root => ({ root, id: stateOf(ctx, root).repository_id, mark: null }));
+    const file = path.join(path.dirname(ctx.registryPath), gate.TICKETS_BASENAME);
+    const data = structuredClone(baseReplyStore.store);
+    data.sessions = Object.fromEntries([['owner', 'ticket'], ['other', 'bound'], ['waiting', 'pending']].map(([session, kind]) =>
+      [session, { ...data.sessions[kind], epoch, at: new Date().toISOString(), repositories }]));
+    data.deliveries.forEach(receipt => { receipt.at = new Date().toISOString(); });
+    fs.writeFileSync(file, JSON.stringify(data));
+    const writer = new gate.ReplyTickets(options);
+    const delivery = gate.ownerMessage(projects.wake('no', { id: 'concurrent-take-receipt' }));
+    const targets = new gate.GovernanceGate(options);
+    let written = null;
+    const tickets = new gate.ReplyTickets({ ...options, gate: { evaluate(root, context) {
+      if (written === null) {
+        if (mutation === 'receipt recorded') assert.equal(writer.acceptDelivery(delivery, null), true);
+        else assert.ok(writer.take(baseReplyStore.bound_ticket));
+        written = fs.readFileSync(file, 'utf8');
+      }
+      return targets.evaluate(root, context);
+    } } });
+    const entry = tickets.take(baseReplyStore.ticket);
+    assert.deepEqual(entry.repositories, [repositories[0]], 'taking returns only held targets');
+    assert.notEqual(written, null, 'the concurrent mutation ran during target evaluation');
+    assert.equal(writer.peek(baseReplyStore.ticket, 'owner'), null, 'the taken ticket stays spent');
+    if (mutation === 'receipt recorded') assert.equal(writer.acceptDelivery(delivery, null), false, 'spent delivery stays spent');
+    else assert.equal(writer.peek(baseReplyStore.bound_ticket, 'other'), null, 'the other spent ticket stays absent');
+    const expected = JSON.parse(written);
+    delete expected.sessions.owner;
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), expected, 'only the taken ticket is removed from the fresh store');
+  });
+}
+
 for (const kind of ['ticket', 'pending', 'bound']) {
   test(`upgrade reply state: ${kind} stops holding decided targets and cannot ask another confirmation`, t => {
     for (const identity of ['missing', 'several', 'other', 'enabled', 'disabled']) {

@@ -854,9 +854,10 @@ class ReplyTickets {
 
   // Spends the ticket and returns its entry, or null; a ticket that cannot be removed is not used.
   take(ticket) {
-    const data = this.#read();
-    const entry = this.#find(data, ticket, undefined);
+    const entry = this.#find(this.#read(), ticket, undefined);
     if (!entry) return null;
+    const data = this.#read();
+    if (data.sessions[entry.session_id]?.hash !== entry.hash) return null;
     delete data.sessions[entry.session_id];
     this.#save(data);
     return this.#find(this.#read(), ticket, undefined) === null ? entry : null;
