@@ -17,7 +17,7 @@ const scripts = path.join(repoRoot, 'repo', 'scripts');
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const bindingCache = require(path.join(scripts, 'toolkit-governance-binding.cjs'));
 const discovery = require(path.join(scripts, 'toolkit-governance-discovery.cjs'));
-const registry = require(path.join(scripts, 'toolkit-capability-registry.cjs'));
+const registry = require(path.join(scripts, 'toolkit-repository-identity.cjs'));
 const conformance = require(path.join(scripts, 'toolkit-governance-conformance.cjs'));
 const catalogue = require(path.join(scripts, 'toolkit-governance-catalogue.cjs'));
 const migration = require(path.join(scripts, 'toolkit-governance-migration.cjs'));
@@ -66,7 +66,7 @@ function cache(ctx, repo, { status = 'present', binding = v2(), text = undefined
   // Each fixture repository has its own origin; a binding naming the example slug is written for it.
   const own = binding && binding.repository === SLUG ? { ...binding, repository: governance.remoteSlug(identity.remote) } : binding;
   const body = status === 'present' ? (text !== undefined ? text : JSON.stringify(own)) : null;
-  return bindingCache.writeCache(ctx.registryPath, {
+  return bindingCache.writeCache(path.dirname(ctx.registryPath), {
     schema: bindingCache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical,
     default_branch: 'main', commit: 'a'.repeat(40), fetched_at: new Date(at.getTime() - ageMs).toISOString(), status,
     bytes_sha256: body === null ? null : crypto.createHash('sha256').update(body, 'utf8').digest('hex'), text: body, problem: null,
@@ -74,17 +74,8 @@ function cache(ctx, repo, { status = 'present', binding = v2(), text = undefined
 }
 
 function decide(ctx, repo, operation) {
-  const current = registry.getRepositoryStatus({ cwd: repo, ...ctx.opts });
-  return registry.writeCapabilityDecision({
-    cwd: repo, ...ctx.opts, capabilityId: 'repository.governance', operation,
-    ownerAction: {
-      confirmed: true, category: 'explicit-owner', channel: 'capability-route', operation,
-      choice_semantic_id: registry.capabilityDecisionSemanticId('repository.governance', operation),
-      contract_digest: registry.CONTRACT_DIGEST,
-      scope_digest: registry.capabilityScopeDigest(current.repository_id, 'repository.governance', operation, 'capability-route'),
-    },
-    expectedRevision: current.registry_revision, expectedHash: current.snapshot_hash,
-  });
+  fs.mkdirSync(path.dirname(ctx.registryPath), { recursive: true });
+  fs.writeFileSync(ctx.registryPath, JSON.stringify({ historical: operation }));
 }
 
 function stateAt(ctx, repo, now = NOW) {
@@ -120,7 +111,7 @@ test('this repository\'s own binding is version 2 and valid for its origin', () 
 
 // ---- matrix A: state -----------------------------------------------------------------------------
 
-test('A: the merged binding decides on every computer; the local file decides only where nothing is merged', (t) => {
+test('A: the merged binding decides on every computer; historical laptop files never decide', (t) => {
   const ctx = scratch(t);
   const row = (name, setup) => { const repo = fakeRepo(ctx, name, setup.repo || {}); setup.before && setup.before(repo); return stateAt(ctx, repo); };
 
@@ -129,7 +120,7 @@ test('A: the merged binding decides on every computer; the local file decides on
 
   const localNo = row('v2-enabled-local-no', { before: (repo) => { decide(ctx, repo, 'decline'); cache(ctx, repo, { binding: v2({ repository: SLUG }) }); } });
   assert.deepEqual([localNo.state, localNo.rule], ['ENABLED', 'M1']);
-  assert.ok(localNo.notes.includes('local-no-is-preference'));
+  assert.equal(localNo.recorded_decision, undefined);
 
   const old = row('v1', { before: repo => cache(ctx, repo, { binding: v1() }) });
   assert.deepEqual([old.state, old.rule, old.merged.version], ['ENABLED', 'M1', 1]);
@@ -142,11 +133,11 @@ test('A: the merged binding decides on every computer; the local file decides on
   assert.deepEqual([none.state, none.rule, none.hold], ['UNDECIDED', 'R7', true], 'never set up: pause and block until the owner\'s own reply');
 
   const ownerNo = row('none-owner-no', { before: (repo) => { decide(ctx, repo, 'decline'); cache(ctx, repo, { status: 'absent' }); } });
-  assert.deepEqual([ownerNo.state, ownerNo.rule, ownerNo.hold], ['DISABLED', 'R2', false]);
+  assert.deepEqual([ownerNo.state, ownerNo.rule, ownerNo.hold], ['UNDECIDED', 'R7', true]);
 
   const ownerYes = row('none-owner-yes', { before: (repo) => { decide(ctx, repo, 'enable'); cache(ctx, repo, { status: 'absent' }); } });
-  assert.deepEqual([ownerYes.state, ownerYes.rule, ownerYes.hold, ownerYes.programme_records_bind], ['ENABLED', 'R5', false, false], 'records bind only once the binding merges');
-  assert.ok(ownerYes.notes.includes('setup-pr-offered'));
+  assert.deepEqual([ownerYes.state, ownerYes.rule, ownerYes.hold, ownerYes.programme_records_bind], ['UNDECIDED', 'R7', true, false], 'records bind only once the binding merges');
+  assert.equal(ownerYes.governed_rules_bind, false);
 
   const pending = row('none-working-tree', { repo: { workingBinding: v2() }, before: repo => cache(ctx, repo, { status: 'absent' }) });
   assert.deepEqual([pending.state, pending.rule], ['UNDECIDED', 'R7'], 'a working tree never turns it on (A1)');
@@ -168,8 +159,8 @@ test('A: the merged binding decides on every computer; the local file decides on
   assert.ok(stale.notes.includes('merged-binding-stale'));
 
   const unread = row('never-read', { before: repo => decide(ctx, repo, 'enable') });
-  assert.deepEqual([unread.state, unread.rule, unread.programme_records_bind], ['ENABLED', 'R5', false], 'nothing cached: as none, governed effects hold');
-  assert.ok(unread.notes.includes('merged-binding-unknown'));
+  assert.deepEqual([unread.state, unread.rule, unread.programme_records_bind], ['UNAVAILABLE', 'U1', false], 'nothing cached: as none, governed effects hold');
+  assert.ok(unread.notes.includes('could-not-check-governance'));
 
   const gitlab = row('gitlab', { repo: { remote: 'https://gitlab.com/example-owner/example-repo.git' } });
   assert.deepEqual([gitlab.state, gitlab.rule, gitlab.merged], ['DISABLED', 'R8', null], 'not github.com: unchanged');
@@ -183,10 +174,9 @@ test('A3: a merged disabled is not flipped by the CLI, discovery or migration', 
   const out = []; const err = [];
   const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: ctx.opts, interactive: true, ask: async () => 'yes', stdout: { write: text => out.push(text) }, stderr: { write: text => err.push(text) }, refresh: () => ({}) });
   assert.equal(await cli.main(['enable']), 2);
-  assert.match(err.join(''), /merged on the default branch decides/);
+  assert.match(out.join(''), /pending|not published/i);
   assert.equal(registryBytes(ctx), null, 'nothing written');
   assert.equal(new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, gh: () => { throw new Error('no GitHub read'); } }).discover(repo).status, 'disabled');
-  assert.equal(migration.proposalFor(governance.governanceState(repo, ctx.opts), SLUG, new Set()).action, 'keep');
 });
 
 test('A4: the cache never upgrades OFF to ON; offline keeps the last read', (t) => {
@@ -194,14 +184,14 @@ test('A4: the cache never upgrades OFF to ON; offline keeps the last read', (t) 
   const repo = fakeRepo(ctx, 'offline');
   const identity = governance.readIdentity(repo);
   const offline = () => ({ status: 128, stdout: Buffer.alloc(0), stderr: Buffer.from('fatal: unable to access') });
-  assert.deepEqual(bindingCache.refreshBindingCache(identity, ctx.registryPath, { runGit: offline }), { refreshed: false, entry: null, error: 'remote-unreachable' });
-  assert.equal(stateAt(ctx, repo).rule, 'R7');
+  assert.deepEqual(bindingCache.refreshBindingCache(identity, path.dirname(ctx.registryPath), { runGit: offline, environment: {} }), { refreshed: false, entry: null, error: 'remote-unreachable' });
+  assert.equal(stateAt(ctx, repo).rule, 'U1');
   // Offline mode (set for test runs) and a test registry read nothing from the network.
   assert.deepEqual(governance.refreshMergedBinding(repo, {}, { environment: { TOOLKIT_GOVERNANCE_OFFLINE: '1' } }), { refreshed: false, error: 'offline' });
   assert.deepEqual(governance.refreshMergedBinding(repo, ctx.opts, { environment: {} }), { refreshed: false, error: 'offline' });
   cache(ctx, repo, { status: 'absent' });
-  assert.equal(bindingCache.refreshBindingCache(identity, ctx.registryPath, { runGit: offline }).entry.status, 'absent', 'offline keeps the last read');
-  assert.equal(stateAt(ctx, repo).rule, 'R7');
+  assert.equal(bindingCache.refreshBindingCache(identity, path.dirname(ctx.registryPath), { runGit: offline, environment: {} }).entry.status, 'absent', 'offline keeps the last read');
+  assert.equal(stateAt(ctx, repo).rule, 'U1');
 });
 
 // ---- the reader and its cache, hostile input ---------------------------------------------------
@@ -226,6 +216,22 @@ const NO_HOOKS = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-no-hooks-'));
 process.on('exit', () => fs.rmSync(NO_HOOKS, { recursive: true, force: true }));
 const GUARDED = Object.freeze({ expectedRemote: REMOTE, hooksDir: NO_HOOKS, environment: {} });
 const SHA = 'b'.repeat(40);
+
+test('prompt refresh shares one remaining deadline across every git read', () => {
+  let clock = Date.now(), calls = 0;
+  const original = Date.now;
+  Date.now = () => clock;
+  try {
+    const result = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, deadline: clock + 50, runGit(args, { timeout }) {
+      calls++;
+      assert.equal(timeout, 50);
+      clock += 51;
+      return ok(REMOTE);
+    } });
+    assert.equal(result.status, 'unknown');
+    assert.equal(calls, 1, 'no git call starts after the shared budget ends');
+  } finally { Date.now = original; }
+});
 
 test('reader: default branch from the symref, then the binding at its tip; hostile answers never become a binding', () => {
   const base = { 'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`), fetch: ok(''), 'rev-parse': ok(`${SHA}\n`) };
@@ -291,18 +297,18 @@ test('cache: an entry for another identity, a tampered or damaged entry reads as
   const repo = fakeRepo(ctx, 'cached');
   const identity = governance.readIdentity(repo);
   const entry = cache(ctx, repo);
-  const file = bindingCache.cacheFileFor(ctx.registryPath, identity.repository_id);
-  assert.ok(bindingCache.readBindingCache(identity, ctx.registryPath));
+  const file = bindingCache.cacheFileFor(path.dirname(ctx.registryPath), identity.repository_id);
+  assert.ok(bindingCache.readBindingCache(identity, path.dirname(ctx.registryPath)));
   const rewrite = change => fs.writeFileSync(file, JSON.stringify({ ...entry, ...change }));
   for (const change of [{ text: JSON.stringify(v2({ governance: 'enabled', required_checks: [] })) }, { remote: 'github.com/example-owner/other-repo' }, { repository_id: 'f'.repeat(64) }, { schema: 'x' }, { commit: 'nope' }, { fetched_at: 'yesterday' }, { status: 'maybe' }, { default_branch: '../x' }]) {
     rewrite(change);
-    assert.equal(bindingCache.readBindingCache(identity, ctx.registryPath), null, JSON.stringify(change));
+    assert.equal(bindingCache.readBindingCache(identity, path.dirname(ctx.registryPath)), null, JSON.stringify(change));
   }
   fs.writeFileSync(file, '{damaged');
-  assert.equal(bindingCache.readBindingCache(identity, ctx.registryPath), null);
+  assert.equal(bindingCache.readBindingCache(identity, path.dirname(ctx.registryPath)), null);
   fs.writeFileSync(file, ' '.repeat(300 * 1024));
-  assert.equal(bindingCache.readBindingCache(identity, ctx.registryPath), null);
-  assert.deepEqual([stateAt(ctx, repo).rule, stateAt(ctx, repo).merged.status], ['R7', 'unknown']);
+  assert.equal(bindingCache.readBindingCache(identity, path.dirname(ctx.registryPath)), null);
+  assert.deepEqual([stateAt(ctx, repo).rule, stateAt(ctx, repo).merged.status], ['U1', 'unknown']);
   assert.match(path.relative(path.dirname(ctx.registryPath), file), /^governance-binding-cache[\\/][0-9a-f]{32}\.json$/, 'kept next to the user-state files the gate guards');
 });
 
@@ -337,7 +343,7 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
     return bindingCache.defaultRunGit(args.map(arg => (arg === 'origin' ? origin : arg)), options);
   };
   git(clone, ['checkout', '--quiet', 'feature']);
-  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }).refreshed, true);
+  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served, environment: {} }).refreshed, true);
   let current = governance.governanceState(clone, ctx.opts);
   assert.deepEqual([current.rule, current.merged.status], ['R7', 'none'], 'a checked-out branch with a binding is not the default branch');
   assert.ok(current.notes.includes('pending-binding-merge'));
@@ -345,7 +351,7 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   git(seed, ['checkout', '--quiet', 'main']);
   git(seed, [...id, 'merge', '--quiet', '--no-ff', '-m', 'merge binding', 'feature']);
   git(seed, ['push', '--quiet', origin, 'main']);
-  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }).refreshed, true);
+  assert.equal(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served, environment: {} }).refreshed, true);
   current = governance.governanceState(clone, ctx.opts);
   assert.deepEqual([current.state, current.rule, current.programme_records_bind], ['ENABLED', 'M1', true]);
   // Editing the working tree does not change what was merged.
@@ -367,7 +373,7 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
   // N2: a replace ref that swaps the fetched tip for the mirror's commit is not followed.
   git(clone, ['fetch', '--quiet', mirror, 'main']);
   git(clone, ['replace', enabledCommit, disabledCommit]);
-  assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }), refreshedOk, 'replace');
+  assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served, environment: {} }), refreshedOk, 'replace');
   assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', 'replace');
   git(clone, ['replace', '-d', enabledCommit]);
   // N3: a reference-transaction hook that moves the tracking ref after the fetch never runs, whether
@@ -382,7 +388,7 @@ test('A1 end to end with real git: only the default branch\'s merged binding cou
     fs.mkdirSync(folder, { recursive: true });
     fs.writeFileSync(path.join(folder, 'reference-transaction'), hook, { mode: 0o755 });
     setup();
-    assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served }), refreshedOk, label);
+    assert.deepEqual(governance.refreshMergedBinding(clone, ctx.opts, { runGit: served, environment: {} }), refreshedOk, label);
     assert.equal(git(clone, ['rev-parse', 'refs/remotes/origin/main']), enabledCommit, `${label}: the hook did not run`);
     assert.equal(governance.governanceState(clone, ctx.opts).rule, 'M1', label);
     undo();
@@ -442,7 +448,7 @@ const storeRepo = (name, { privacy = true, owner = 'example-owner' } = {}) => ({
 
 function discoverWith(ctx, routes, name = 'disc') {
   const repo = fakeRepo(ctx, name, { remote: REMOTE });
-  cache(ctx, repo, { status: 'absent' });
+  cache(ctx, repo, { status: 'absent', at: new Date() });
   const gh = fakeGh(routes);
   return { result: new discovery.GovernanceDiscovery({ registryOptions: ctx.opts, gh }).discover(repo), gh, repo };
 }
@@ -539,25 +545,17 @@ test('B: adoption lists what exists from the working tree and keeps the owner te
 
 // ---- matrix C: old local answers -------------------------------------------------------------------
 
-test('C: old local answers are read and annotated, never rewritten', (t) => {
-  const ctx = scratch(t);
-  const yes = fakeRepo(ctx, 'old-yes');
-  decide(ctx, yes, 'enable');
-  const no = fakeRepo(ctx, 'old-no', { remote: 'https://github.com/example-owner/old-no.git' });
-  decide(ctx, no, 'decline');
-  const noMerged = fakeRepo(ctx, 'old-no-merged', { remote: 'https://github.com/example-owner/old-no-merged.git' });
-  decide(ctx, noMerged, 'decline');
-  const before = registryBytes(ctx);
-  cache(ctx, yes, { status: 'absent' });
-  cache(ctx, no, { status: 'absent' });
-  cache(ctx, noMerged, { binding: v2({ repository: 'example-owner/old-no-merged' }) });
-  assert.deepEqual([stateAt(ctx, yes).state, stateAt(ctx, yes).rule, stateAt(ctx, yes).hold], ['ENABLED', 'R5', false]);
-  assert.deepEqual([stateAt(ctx, no).state, stateAt(ctx, no).rule], ['DISABLED', 'R2']);
-  assert.deepEqual([stateAt(ctx, noMerged).state, stateAt(ctx, noMerged).notes.includes('local-no-is-preference')], ['ENABLED', true]);
-  assert.deepEqual(registryBytes(ctx), before, 'answers, holds and epochs are byte-identical');
+test('old local answers are ignored and never rewritten', t => {
+  const ctx = scratch(t), repo = fakeRepo(ctx, 'old-answers');
+  for (const bytes of ['{damaged', JSON.stringify({ historical: 'no' }), JSON.stringify({ historical: 'yes' })]) {
+    fs.mkdirSync(path.dirname(ctx.registryPath), { recursive: true }); fs.writeFileSync(ctx.registryPath, bytes);
+    cache(ctx, repo, { status: 'absent', at: new Date() });
+    assert.equal(governance.governanceState(repo, ctx.opts).state, 'UNDECIDED');
+    cache(ctx, repo, { at: new Date() });
+    assert.equal(governance.governanceState(repo, ctx.opts).state, 'ENABLED');
+    assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), bytes);
+  }
 });
-
-// ---- matrix D: consumers ---------------------------------------------------------------------------
 
 test('D: consumers read ENABLED, DISABLED, ERROR and stale the same way', (t) => {
   const ctx = scratch(t);
@@ -585,7 +583,6 @@ test('D: consumers read ENABLED, DISABLED, ERROR and stale the same way', (t) =>
     assert.deepEqual(catalogue.tiersFor(state.state, state.materials_complete), expect[kind].tiers, `${kind}: catalogue`);
     const report = conformance.checkConformance(repo, { ...ctx.opts, offline: true });
     assert.equal(report.exit_code === 2, kind === 'error', `${kind}: conformance`);
-    assert.equal(migration.proposalFor(state, null, new Set()).action, kind === 'error' ? 'skip' : 'keep', `${kind}: migration`);
   }
   assert.ok(conformance.checkConformance(repos.stale, { ...ctx.opts, offline: true }).findings.some(entry => entry.id === 'MERGED_BINDING_STALE'));
   // The session line agents read says the same.
@@ -626,7 +623,7 @@ test('F5: a version 2 binding with an unknown key or a non-string writer prefix 
 test('F3: discovery reads nothing from GitHub in a test run or for a test registry', (t) => {
   const ctx = scratch(t);
   const repo = fakeRepo(ctx, 'quiet-discovery', { remote: REMOTE });
-  cache(ctx, repo, { status: 'absent' });
+  cache(ctx, repo, { status: 'absent', at: new Date() });
   // A test registry: every GitHub read is answered offline, so each search reports itself unknown.
   // The real gh cannot be found during the call, so a regression shows as gh-unavailable, not a
   // network read.
@@ -694,27 +691,34 @@ test('F7: the attribution guard and the bridge keep their protection on ERROR, a
   }
 });
 
-test('F8: a fetch the timeout stopped leaves no lock of its own behind; an older lock is not touched', (t) => {
+for (const expired of [false, true]) test(`F8: a killed fetch cleans only its own lock${expired ? ' after the prompt deadline' : ''}`, (t) => {
   const ctx = scratch(t);
   const root = path.join(ctx.root, 'locked');
   const lockDir = path.join(root, '.git', 'refs', 'remotes', 'origin');
   fs.mkdirSync(lockDir, { recursive: true });
   const lock = path.join(lockDir, 'main.lock');
+  let clock = Date.now();
+  const original = Date.now;
+  Date.now = () => clock;
+  t.after(() => { Date.now = original; });
+  const deadline = expired ? clock + 50 : null;
+  let cleanups = 0;
   const base = {
     'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`),
-    'rev-parse': args => (args[1] === '--git-common-dir' ? ok('.git\n') : ok(`${SHA}\n`)),
+    'rev-parse': args => { assert.equal(args[1], '--git-common-dir'); cleanups++; return ok('.git\n'); },
   };
   // The lock's time is set from Node's clock, as a real fetch's lock matches it, so this also holds
   // when the clock-ahead run moves Node's clock but not file times.
-  const killed = () => { fs.writeFileSync(lock, ''); const now = new Date(); fs.utimesSync(lock, now, now); return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
-  assert.equal(bindingCache.readDefaultBranchBinding(root, { ...GUARDED, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
+  const killed = () => { fs.writeFileSync(lock, ''); const now = new Date(); fs.utimesSync(lock, now, now); clock += 51; return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; };
+  assert.equal(bindingCache.readDefaultBranchBinding(root, { ...GUARDED, deadline, runGit: fakeGit({ ...base, fetch: killed }) }).error, 'fetch-failed');
   assert.equal(fs.existsSync(lock), false, 'the lock this fetch left is removed');
   fs.writeFileSync(lock, '');
   const old = new Date(Date.now() - HOUR);
   fs.utimesSync(lock, old, old);
   const timedOut = () => ({ status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
-  bindingCache.readDefaultBranchBinding(root, { ...GUARDED, runGit: fakeGit({ ...base, fetch: timedOut }) });
+  bindingCache.readDefaultBranchBinding(root, { ...GUARDED, deadline: expired ? clock + 50 : null, runGit: fakeGit({ ...base, fetch: () => { clock += 51; return timedOut(); } }) });
   assert.equal(fs.existsSync(lock), true, 'an older lock belongs to someone else');
+  assert.equal(cleanups, 2, 'both killed fetches run cleanup even after the prompt deadline');
 });
 
 test('F8: the session-start hook refreshes once; the bridge only reads the cache', () => {

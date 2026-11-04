@@ -240,7 +240,9 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
   if (!installPath) return ['installed plugin state does not expose the folder Claude Code runs it from'];
   const pairs = [
     ["repo/scripts/toolkit-stack-selection.cjs",false],
-    ["repo/scripts/toolkit-capability-registry.cjs",false],
+    ["repo/scripts/toolkit-repository-identity.cjs",false],
+    ["repo/scripts/toolkit-user-state.cjs",false],
+    ["repo/scripts/toolkit-governance-proposal.cjs",false],
     ["repo/contracts/controller-kernel/controller-decision-v2.schema.json",true],
     ["repo/contracts/controller-kernel/gate-contract-ir-v3.schema.json",true],
     ["repo/contracts/controller-kernel/codex-host-adapter-v2.schema.json",true],
@@ -287,8 +289,6 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ["repo/scripts/toolkit-codex-helper-hook.cjs",false],
     ["repo/scripts/toolkit-codex-session-start.cjs",false],
     ["repo/scripts/toolkit-codex-session-start.ps1",false],
-    ["repo/contracts/repository-capability-registry/repository-capability-contract.schema.json",true],
-    ["repo/contracts/repository-capability-registry/repository-capability-policy.json",true],
     ["repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json",true],
     ["repo/contracts/toolkit-local-bridge/claude-plugin/marketplace.json",true],
     ["repo/contracts/toolkit-local-bridge/claude-plugin/plugin.json",true],

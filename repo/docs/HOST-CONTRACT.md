@@ -2,6 +2,10 @@
 
 What the programme custody model needs from each supported host (Claude Code and Codex), and how the Toolkit meets it today. The machine-readable twin is [`repo/contracts/programme-state/host-contract-v1.json`](../contracts/programme-state/host-contract-v1.json); tests read it against the shipped plugin hooks. This page records needs and current mechanisms. It does not claim native qualification: route controls, subagent lifecycle and launch escalation stay with each host's own support work (one for Codex, one for Claude Code), which follows this shared contract.
 
+## Repository decision authority
+
+Both host entry points use the same repository decision and proposal service. The valid programme file read from origin's default branch decides on or off. Prompt ingestion captures only a run-bound accepted answer; the assigned agent publishes and reads back its decision pull request, then requests the owner's merge. Proposal heads, local answers and project memory supply no governance or merge authority. Unreachable GitHub allows ordinary work with a plain note, without governance effects or standing task auto-merge. See the closure tables in the [Bridge doc](TOOLKIT-LOCAL-BRIDGE.md).
+
 ## Who writes what
 
 Only the appointed controller writes programme state (the parent and child documents). An executor the controller assigned to a gate writes only its own checkpoint journal in the private state store, through `bind` and its turn-end hook. The controller's `reconcile --apply --controller` reads journals into the child document. Gate acceptance, UAT, review and completion are written only by the controller. The [reconciler skill](../../skills/github-program-reconciler/SKILL.md) has the commands.

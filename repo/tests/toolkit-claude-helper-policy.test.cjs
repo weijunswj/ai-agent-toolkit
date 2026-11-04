@@ -12,7 +12,7 @@ const control = require('../scripts/toolkit-agent-control.cjs');
 const { governedRepo } = require('../scripts/toolkit-governed-repo.cjs');
 const { ClaudeHelperAgentRenderer } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { managedAgentsDirectory } = require('../scripts/toolkit-claude-helper-policy.cjs');
-const { governedHome, makeGoverned } = require('./toolkit-governed-fixture-support.cjs');
+const { governedHome, makeGoverned, recordAbsent } = require('./toolkit-governed-fixture-support.cjs');
 
 
 function scratch(t) {
@@ -53,27 +53,22 @@ test('the governed-repo predicate walks to the first .git and follows the govern
   // Only the merged binding decides: removing the working tree's copy changes nothing.
   fs.rmSync(path.join(managed, '.github'), { recursive: true });
   assert.equal(governedRepo(managed, {}).reason, 'governance-enabled');
-  // The user's yes without a merged binding does not govern: the repository's setup is unfinished.
+  // A missing observation cannot supply governance authority.
   const governance = require('../scripts/toolkit-governance-state.cjs');
   const bindingCache = require('../scripts/toolkit-governance-binding.cjs');
-  fs.rmSync(bindingCache.cacheFileFor(governance.registryPathFor({ userHome: governedHome(), testOnly: true }), governance.readIdentity(managed).repository_id));
-  assert.deepEqual([governedRepo(managed, {}).governed, governedRepo(managed, {}).reason], [false, 'governance-incomplete']);
-  // The block and binding without the user's yes do not govern either: the repository is asked.
+  fs.rmSync(bindingCache.cacheFileFor(governance.userStateDirectory({ userHome: governedHome(), testOnly: true }), governance.readIdentity(managed).repository_id));
+  assert.deepEqual([governedRepo(managed, {}).governed, governedRepo(managed, {}).reason], [false, 'governance-unavailable']);
+  // Confirmed absence on the default branch asks the repository owner.
   const unasked = makeGoverned(path.join(dir, 'unasked'), 'predicate-unasked', { enable: false });
+  recordAbsent(unasked);
   assert.deepEqual([governedRepo(unasked, {}).governed, governedRepo(unasked, {}).reason], [false, 'governance-undecided']);
   // Declined: the block is ignored.
   const registryPath = path.join(dir, 'state', 'repository-governance.v1.json');
-  const registry = require('../scripts/toolkit-capability-registry.cjs');
   const declined = makeGoverned(path.join(dir, 'declined'), 'predicate-declined', { enable: false });
   const childProcess = require('node:child_process');
   childProcess.execFileSync('git', ['-C', declined, 'init', '--quiet']);
   const options = { registryPath, testOnly: true };
-  const status = registry.getRepositoryStatus({ cwd: declined, ...options });
-  registry.writeCapabilityDecision({ cwd: declined, ...options, capabilityId: 'repository.governance', operation: 'decline',
-    ownerAction: { confirmed: true, category: 'explicit-owner', channel: 'capability-route', operation: 'decline',
-      choice_semantic_id: registry.capabilityDecisionSemanticId('repository.governance', 'decline'), contract_digest: registry.CONTRACT_DIGEST,
-      scope_digest: registry.capabilityScopeDigest(status.repository_id, 'repository.governance', 'decline', 'capability-route') },
-    expectedRevision: status.registry_revision, expectedHash: status.snapshot_hash });
+  require('./support/governance-observations.cjs').seedMerged(declined, 'disable', { registryOptions: options });
   assert.equal(governedRepo(declined, {}, { registryOptions: options }).reason, 'governance-disabled');
   // A nested repository (here a worktree-style `.git` file) stops the walk before the managed parent.
   const nested = path.join(managed, 'vendor', 'lib');

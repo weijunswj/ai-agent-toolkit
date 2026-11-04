@@ -51,7 +51,7 @@ const TOOLKIT = Object.freeze([
   [/^repo\/CONTROLLER\.md$/, 'the controller rules'],
   [/^repo\/scripts\/setup-[^/]+\.cjs$/, 'setup and its host bank helpers'],
   [/^repo\/scripts\/toolkit-governance(?:-[^/]+)?\.cjs$/, 'governance runtime and state'],
-  [/^repo\/scripts\/toolkit-capability-registry\.cjs$/, 'governance decisions'],
+  [/^repo\/scripts\/toolkit-(?:repository-identity|user-state)\.cjs$/, 'governance identity and operational state'],
   [/^repo\/scripts\/toolkit-task-auto-merge-preferences\.cjs$/, 'the app-local merge answer'],
   [/^(?:repo\/docs\/agent-playbooks|skills\/repository-agent-rules\/repo-local\/docs\/agent-playbooks)\/safety-gates\.md$/, 'approval rules'],
   [/^repo\/contracts\/programme-state\//, 'the programme binding schema'],

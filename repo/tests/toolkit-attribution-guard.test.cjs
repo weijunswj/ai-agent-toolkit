@@ -401,9 +401,9 @@ test('N3: an ENABLED repository is protected even before its governed block land
     return root;
   };
   const enabled = repo('enabled');
-  gate.writeGovernanceDecision(enabled, 'enable', { registryOptions });
+  require('./support/governance-observations.cjs').seedMerged(enabled, 'enable', { registryOptions });
   const disabledWithBlock = repo('disabled-block', { block: true });
-  gate.writeGovernanceDecision(disabledWithBlock, 'disable', { registryOptions });
+  require('./support/governance-observations.cjs').seedMerged(disabledWithBlock, 'disable', { registryOptions });
   const undecided = repo('undecided');
   for (const [root, refused] of [[enabled, true], [disabledWithBlock, true], [undecided, false]]) {
     assert.equal(forceRefusal('git push --force origin main', root, 0, registryOptions), refused ? FORCE_MESSAGE : '', path.basename(root));

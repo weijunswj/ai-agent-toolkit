@@ -387,7 +387,7 @@ test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLE
   const attentionDir = tmp();
   const started = [];
   let now = '2026-10-28T10:00:00.000Z';
-  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, root };
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
   const programmeDeps = { attentionDir, sessionsDir, home: tmp(), mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: folder => started.push(folder), now: () => now };
   // The repository's state as decided, in place of reading it.
   const evaluate = (stateValue, deps = programmeDeps) => gate.sessionLine(root, { stateReader: () => stateValue, programmeDeps: deps });
@@ -406,7 +406,7 @@ test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLE
   const offline = evaluate(enabled, { ...programmeDeps, startRefresh: undefined, environment: { TOOLKIT_GOVERNANCE_OFFLINE: '1' } });
   assert.match(offline, /Attention: not checked on this computer yet\./);
   assert.doesNotMatch(offline, /refresh has started/);
-  for (const off of [{ state: 'DISABLED', rule: 'M2', root }, { state: 'ENABLED', rule: 'R5', materials_complete: false, root }]) {
+  for (const off of [{ state: 'DISABLED', rule: 'M2', root }, { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: false, root }]) {
     assert.doesNotMatch(evaluate(off), /Attention:/, `${off.state} ${off.rule}: no line`);
   }
   // A session here whose last turn-end record failed.
@@ -423,7 +423,7 @@ test('E3: sessionLine adds the Programme sweep line when this computer\'s hourly
   const home = tmp();
   const now = new Date(2026, 10, 1, 12, 0, 0); // local noon, inside the sweep's hours
   const programmeDeps = { attentionDir: tmp(), sessionsDir: tmp(), home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => now.toISOString() };
-  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, root };
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
   const evaluate = (deps = programmeDeps, registryOptions) => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps: deps, registryOptions });
   assert.doesNotMatch(evaluate(), /Programme sweep:/, 'no task recorded here');
   tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
@@ -582,7 +582,7 @@ test('session start deletes this repository\'s offline queues once governance is
     const hash = checkpoint.sessionHash(`exec-${decision}`);
     checkpoint.writeLocalBinding({ session_hash: hash, repository: 'example-owner/example-repo', issue: 7, assignment: 'g1-a1', repo_root: repo, bound_at: 'x' }, { sessionsDir });
     fs.writeFileSync(checkpoint.queueFile(hash, { sessionsDir }), JSON.stringify({ schema: 'toolkit.programme-checkpoint-queue.v1', entries: [{ at: new Date().toISOString(), repository: 'example-owner/example-repo', issue: 7, assignment: 'g1-a1', facts: null, entry: null }] }));
-    if (decision) gate.writeGovernanceDecision(repo, decision, { registryOptions });
+    if (decision) require('./support/governance-observations.cjs').seedMerged(repo, decision, { registryOptions });
     gate.startSession({ session_id: `s-${decision}`, cwd: repo, source: 'startup' }, { registryOptions, refreshBinding: () => ({ refreshed: false }), programmeDeps: { sessionsDir } });
     assert.equal(fs.existsSync(checkpoint.queueFile(hash, { sessionsDir })), decision === null, `${decision || 'undecided'}`);
   }

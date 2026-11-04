@@ -1,7 +1,7 @@
 'use strict';
 
-// `toolkit governance`: decisions are written only after a typed yes at a terminal and
-// read back; `check` is read-only with exit codes 0, 1 and 2; the skill catalogue is computed
+// `toolkit governance`: accepted answers prepare repository proposals and read them back;
+// `check` is read-only with exit codes 0, 1 and 2; the skill catalogue is computed
 // per state and fails on drift. Closure rows H-06 and H-07 (unit parts), K-01, C-01, C-02, S-10
 // (for the new modules).
 
@@ -41,6 +41,7 @@ function gitRepo(ctx, name, remote = REMOTE) {
   fs.mkdirSync(repo, { recursive: true });
   git(ctx.root, ['init', '--quiet', repo]);
   if (remote !== null) git(repo, ['remote', 'add', 'origin', remote]);
+  if (remote && governance.readIdentity(repo).valid) require('./toolkit-governed-fixture-support.cjs').recordAbsent(repo, { registryPath: ctx.registryPath });
   return repo;
 }
 
@@ -125,7 +126,7 @@ function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, 
 // Records the user's yes, as the governance gate does from their reply, and, where the repository has
 // a binding, this computer's read of it as merged on the default branch: only a merged binding decides.
 function enable(ctx, repo) {
-  require(path.join(scripts, 'toolkit-governance-gate.cjs')).writeGovernanceDecision(repo, 'enable', { registryOptions: { registryPath: ctx.registryPath, testOnly: true } });
+  require('./support/governance-observations.cjs').seedMerged(repo, 'enable', { registryOptions: { registryPath: ctx.registryPath, testOnly: true } });
   if (fs.existsSync(path.join(repo, '.github', 'toolkit-programme.json'))) recordMerged(repo, { registryPath: ctx.registryPath });
 }
 
@@ -149,7 +150,7 @@ test('H-07 (unit): without a terminal nothing is recorded', async (t) => {
   for (const command of ['enable', 'disable', 'decline']) {
     const result = await run(ctx, repo, [command], { interactive: false });
     assert.equal(result.code, 2);
-    assert.match(result.stderr, /Nothing was written: .*ask the user in chat instead: "Enable Toolkit's automated GitHub tracking governance for this repository\?.*run this in your own terminal/);
+    assert.match(result.stderr, /No answer was recorded.*agent cannot answer/);
     assert.equal(result.asked.length, 0);
   }
   assert.equal(fs.existsSync(ctx.registryPath), false);
@@ -168,33 +169,31 @@ test('H-06 (unit): anything but yes writes nothing and keeps the repository UNDE
   assert.equal(JSON.parse(status.stdout).state, 'UNDECIDED');
 });
 
-test('enable and disable: confirmed, written, read back; repeats write nothing; decline is an alias', async (t) => {
-  const ctx = scratch(t);
-  const repo = gitRepo(ctx, 'repo');
-  const disabled = await run(ctx, repo, ['disable']);
-  assert.equal(disabled.code, 0, disabled.stderr);
-  assert.match(disabled.asked[0], /Turn off Toolkit's GitHub governance for .*\nThe global rules and coding gates still apply here/);
-  assert.match(disabled.stdout, /Recorded\. State: DISABLED/);
-  const before = fs.readFileSync(ctx.registryPath);
+test('interactive yes/no publishes repository proposals without a laptop decision; decline is an alias', async t => {
+  const ctx = scratch(t), repo = gitRepo(ctx, 'repo');
   for (const command of ['disable', 'decline']) {
-    const again = await run(ctx, repo, [command]);
-    assert.match(again.stdout, /Already disabled/, command);
+    let open = [], writes = 0;
+    const proposal = { repository: 'example-owner/example-repo', number: 1, head: 'a'.repeat(40), url: 'https://github.com/example-owner/example-repo/pull/1', state: 'open', answer: 'no' };
+    const stdout = sink(), stderr = sink();
+    const cli = new ToolkitGovernanceCli({ cwd: repo, registryOptions: { registryPath: ctx.registryPath, testOnly: true },
+      interactive: true, ask: async () => 'yes', stdout, stderr,
+      proposalTransport: { list: () => open, publish() { writes++; open = [proposal]; return proposal; }, read: () => proposal } });
+    assert.equal(await cli.main([command]), 0, stderr.text());
+    assert.match(stdout.text(), /decision pending[\s\S]*merge this pull request now/);
+    assert.equal(governance.governanceState(repo, { registryPath: ctx.registryPath, testOnly: true }).state, 'UNDECIDED');
+    assert.equal(writes, 1); assert.equal(fs.existsSync(ctx.registryPath), false);
+    const status = JSON.parse((await run(ctx, repo, ['status', '--json'])).stdout);
+    assert.equal(status.pending.kind, 'published');
+    assert.match(status.pending.text, /merge this pull request now/);
+    assert.equal(status.state, 'UNDECIDED');
+    assert.equal(status.programme_records_bind, false);
+    assert.match((await run(ctx, repo, ['status'])).stdout, /decision pending[\s\S]*merge this pull request now/);
   }
-  assert.deepEqual(fs.readFileSync(ctx.registryPath), before);
-  const reopen = await run(ctx, repo, ['reopen']);
-  assert.match(reopen.stdout, /^Nothing changed\. /);
-  assert.match(reopen.stdout, /run `node "[^`]*toolkit-governance\.cjs" enable`/);
-  assert.deepEqual(fs.readFileSync(ctx.registryPath), before, 'reopen writes nothing');
-
-  const enabled = await run(ctx, repo, ['enable', '--json']);
-  assert.equal(enabled.code, 0, enabled.stderr);
-  assert.match(enabled.asked[0], /^Enable Toolkit's GitHub governance for /);
-  assert.doesNotMatch(enabled.asked[0], /paid|Secret Protection|Code Security|billed/, 'the enable question asks nothing about paid features');
-  const enabledState = JSON.parse(enabled.stdout);
-  assert.deepEqual([enabledState.state, enabledState.rule, enabledState.materials_complete], ['ENABLED', 'R5', false]);
-  // The older word still works: declining an enabled repository records a disable.
-  const off = await run(ctx, repo, ['decline', '--json']);
-  assert.equal(JSON.parse(off.stdout).reason, 'user-disabled');
+  const incomplete = await run(ctx, repo, ['enable', '--json']);
+  assert.equal(incomplete.code, 2);
+  assert.equal(JSON.parse(incomplete.stdout).pending, true);
+  assert.equal(JSON.parse(incomplete.stdout).error, 'PROPOSAL_ADOPTION_INCOMPLETE');
+  assert.equal(fs.existsSync(ctx.registryPath), false);
 });
 
 test('not on github.com: DISABLED automatically, enable refuses and disable is a no-op without a question', async t => {
@@ -219,7 +218,7 @@ test('not on github.com: DISABLED automatically, enable refuses and disable is a
     assert.equal(JSON.parse(checked.stdout).findings[0].id, 'NOT_GITHUB');
     const enable = await run(ctx, repo, ['enable']);
     assert.equal(enable.code, 2);
-    assert.match(enable.stderr, /cannot be enabled here\. Nothing was written\./);
+    assert.match(enable.stderr, /github.com repositories\. Nothing was written\./);
     assert.equal(enable.asked.length, 0);
     for (const interactive of [false, true]) {
       const disabled = await run(ctx, repo, ['disable', '--json'], { interactive });
@@ -272,12 +271,11 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
     plain: [1, 'drift', 'DECISION_PENDING'],
   });
 
-  const decisions = fs.readFileSync(ctx.registryPath);
-  fs.writeFileSync(ctx.registryPath, 'corrupt');
-  const broken = await run(ctx, conformant, ['check', '--json']);
-  assert.equal(broken.code, 2);
-  assert.equal(JSON.parse(broken.stdout).status, 'error');
-  fs.writeFileSync(ctx.registryPath, decisions);
+  fs.writeFileSync(ctx.registryPath, '{damaged');
+  const legacyDamage = await run(ctx, conformant, ['check', '--json']);
+  assert.equal(legacyDamage.code, 0, 'retired data cannot change a merged decision');
+  assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), '{damaged');
+  fs.rmSync(ctx.registryPath);
   assert.deepEqual(treeDigest(ctx.root), snapshot, 'check wrote nothing');
 
   // Task auto-merge's effective machine setting is covered in
@@ -335,12 +333,12 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   // Enabled without the binding is incomplete; disabled with a block reports it ignored.
   await run(ctx, incomplete, ['enable']);
   const enabledIncomplete = JSON.parse((await run(ctx, incomplete, ['check', '--json'])).stdout);
-  assert.deepEqual(enabledIncomplete.findings.map(entry => entry.id), ['BINDING_MISSING', 'MERGED_BINDING_UNKNOWN'], 'the default branch has not been read on this computer yet');
-  assert.equal(enabledIncomplete.no_force_push_ruleset.status, 'present', 'the ruleset applies to every ENABLED repository');
+  assert.deepEqual(enabledIncomplete.findings.map(entry => entry.id), ['DECISION_PENDING'], 'a yes stays pending until its adoption merges');
+  assert.equal(enabledIncomplete.no_force_push_ruleset, null, 'pending yes grants no governed effects');
   // A merged binding decides, so a local disable is refused; a merged disabled turns it off everywhere.
   const refusedDisable = await run(ctx, stale, ['disable']);
   assert.equal(refusedDisable.code, 2);
-  assert.match(refusedDisable.stderr, /merged on the default branch decides/);
+  assert.match(refusedDisable.stdout, /pending|not published/i);
   recordMerged(stale, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'disabled' }) });
   const ignored = await run(ctx, stale, ['check', '--json']);
   assert.equal(ignored.code, 0);
@@ -465,7 +463,7 @@ test('C-02: governed-only skills are offered only in a complete ENABLED reposito
   assert.ok(listed.skills.some(entry => entry.skill === 'github-program-reconciler'));
 });
 
-test('S-10 (new modules): only the state module reads the decision file, AGENTS.md and the binding', () => {
+test('S-10: governance consumers delegate authority reads and have no retired decision reader', () => {
   for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-protection.cjs', 'toolkit-governance-migration.cjs', 'toolkit-governance-security.cjs']) {
     const text = fs.readFileSync(path.join(scripts, file), 'utf8');
     assert.equal(/repository-governance\.v1\.json|['"]AGENTS\.md['"]|toolkit-programme\.json['"]|parseRegistryBytes/.test(text.replace(/^\s*\/\/.*$/gm, '')), false, file);
@@ -495,41 +493,12 @@ test('the reconciler runs no programme command unless GitHub governance is ENABL
   }
 });
 
-test('H3: repair moves an unreadable decisions file aside only after a typed yes in a terminal, and names it everywhere', async (t) => {
-  const ctx = scratch(t);
-  const repo = gitRepo(ctx, 'repo');
-  const options = { registryPath: ctx.registryPath, testOnly: true };
-  // Nothing to repair while the file reads (or is missing).
-  for (const setup of [() => {}, () => run(ctx, repo, ['enable'])]) {
-    await setup();
-    const fine = await run(ctx, repo, ['repair']);
-    assert.equal(fine.code, 0);
-    assert.match(fine.stdout, /reads fine .*nothing to repair/);
+test('retired repair and automatic migration routes cannot read, write or move old answers', async t => {
+  const ctx = scratch(t), repo = gitRepo(ctx, 'repo');
+  fs.writeFileSync(ctx.registryPath, '{damaged');
+  for (const command of ['repair']) {
+    const result = await run(ctx, repo, [command]);
+    assert.equal(result.code, 2); assert.equal(result.asked.length, 0);
+    assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), '{damaged');
   }
-  fs.appendFileSync(ctx.registryPath, 'junk');
-  const damaged = fs.readFileSync(ctx.registryPath);
-  const named = new RegExp(ctx.registryPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const status = await run(ctx, repo, ['status']);
-  assert.equal(status.code, 2);
-  assert.match(status.stdout, named);
-  assert.match(status.stdout, /toolkit-governance\.cjs" repair/);
-  const check = conformance.checkConformance(repo, { ...options, offline: true });
-  assert.match(check.findings.find(item => item.id === 'STATE_ERROR').message, named);
-  const disable = await run(ctx, repo, ['disable']);
-  assert.match(disable.stderr, named);
-  for (const [label, runOptions, code] of [
-    ['an agent without a terminal', { interactive: false }, 2],
-    ['not confirmed', { answer: 'no' }, 1],
-  ]) {
-    const refused = await run(ctx, repo, ['repair'], runOptions);
-    assert.equal(refused.code, code, label);
-    assert.deepEqual(fs.readFileSync(ctx.registryPath), damaged, `${label}: nothing moved`);
-  }
-  const repaired = await run(ctx, repo, ['repair', '--json']);
-  assert.equal(repaired.code, 0, repaired.stderr);
-  const result = JSON.parse(repaired.stdout);
-  assert.equal(fs.existsSync(ctx.registryPath), false);
-  assert.deepEqual(fs.readFileSync(result.moved_to), damaged, 'the damaged file is kept next to the original');
-  assert.equal(path.dirname(result.moved_to), path.dirname(ctx.registryPath));
-  assert.deepEqual([governance.governanceState(repo, options).state, governance.governanceState(repo, options).rule], ['UNDECIDED', 'R7'], 'the question is asked again');
 });
