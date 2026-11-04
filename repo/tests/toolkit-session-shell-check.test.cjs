@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const hold = require('../scripts/toolkit-merge-hold.cjs');
 const gate = require('../scripts/toolkit-governance-gate.cjs');
-const { makeGoverned } = require('./toolkit-governed-fixture-support.cjs');
+const { makeGoverned, recordAbsent } = require('./toolkit-governed-fixture-support.cjs');
 
 const script = path.resolve(__dirname, '../scripts/toolkit-session-shell-check.cjs');
 const source = fs.readFileSync(script, 'utf8');
@@ -99,6 +99,7 @@ test('the absolute shell check in a separate installed repository respects its g
   gate.startSession({ cwd, session_id: 'fixture-session', source: 'startup' }, { registryOptions, environment });
   for (const enabled of [true, false]) {
     const installed = makeGoverned(path.join(root, enabled ? 'installed-enabled' : 'installed-undecided'), `shell-check-installed-${enabled}`, { home, enable: enabled });
+    if (!enabled) recordAbsent(installed, { home });
     const installedScript = path.join(installed, 'repo/scripts/toolkit-session-shell-check.cjs');
     fs.mkdirSync(path.dirname(installedScript), { recursive: true });
     fs.copyFileSync(script, installedScript);

@@ -7,11 +7,11 @@
 //   refresh   asks the origin remote for its default branch (`git ls-remote --symref origin HEAD`),
 //             fetches that one branch (bounded), reads `.github/toolkit-programme.json` at its tip
 //             and writes the result to this computer's cache. Only `toolkit governance status`
-//             and the session-start hook refresh.
+//             and the session-start hook refresh; prompts refresh after a known proposal closes.
 //   read      returns the cached result for one repository identity, or null. Every other caller,
 //             every hook on every tool call included, reads only the cache: no network per tool use.
 //
-// The cache lives next to the user's governance decisions, in
+// The cache holds only GitHub observations in
 // ~/.ai-agent-toolkit/user-state/governance-binding-cache/, one file per repository identity, so the
 // hook gate's refusal of agent edits to user-state files covers it too. A cache entry names the
 // identity it was read for; an entry for another identity is ignored. A damaged entry reads as no
@@ -25,7 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const { validateRemoteIdentity, repositoryIdForCanonicalRemote } = require('./toolkit-capability-registry.cjs');
+const { validateRemoteIdentity, repositoryIdForCanonicalRemote } = require('./toolkit-repository-identity.cjs');
 
 const CACHE_SCHEMA = 'toolkit.governance-binding-cache.v1';
 const CACHE_DIR = 'governance-binding-cache';
@@ -61,13 +61,13 @@ function validBranch(name) {
   return typeof name === 'string' && BRANCH.test(name) && !name.split('/').some(part => part === '' || part.startsWith('.') || part.endsWith('.lock'));
 }
 
-function cacheDirFor(registryPath) {
-  return path.join(path.dirname(registryPath), CACHE_DIR);
+function cacheDirFor(stateDirectory) {
+  return path.join(stateDirectory, CACHE_DIR);
 }
 
-function cacheFileFor(registryPath, repositoryId) {
+function cacheFileFor(stateDirectory, repositoryId) {
   const name = crypto.createHash('sha256').update(String(repositoryId)).digest('hex').slice(0, 32);
-  return path.join(cacheDirFor(registryPath), `${name}.json`);
+  return path.join(cacheDirFor(stateDirectory), `${name}.json`);
 }
 
 function defaultRunGit(args, { cwd, timeout }) {
@@ -98,9 +98,13 @@ function parseSymref(text) {
 // these is held as 'remote-redirected' and nothing is fetched (A1). The fetch runs with hooks pointed
 // at `hooksDir`, an empty folder the refresh owns, so no repository hook can move the tracking ref,
 // and the ref must then be the commit the remote itself reported.
-function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, expectedRemote = null, hooksDir = null, environment = process.env } = {}) {
-  const git = args => {
-    try { return runGit(args, { cwd: root, timeout }); } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
+function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, deadline = null, expectedRemote = null, hooksDir = null, environment = process.env } = {}) {
+  const git = (args, commandDeadline = deadline) => {
+    try {
+      const remaining = commandDeadline === null ? timeout : Math.min(timeout, commandDeadline - Date.now());
+      if (remaining <= 0) throw new Error('read budget exhausted');
+      return runGit(args, { cwd: root, timeout: remaining });
+    } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
   };
   const set = name => typeof environment[name] === 'string' && environment[name] !== '' && !(name === 'GIT_CONFIG_COUNT' && environment[name] === '0');
   if (HELD_CONFIG_ENVIRONMENT.some(set)) return { status: 'unknown', error: 'remote-redirected' };
@@ -124,7 +128,7 @@ function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_
   const tracking = `refs/remotes/origin/${branch}`;
   const started = Date.now();
   const fetched = git(['-c', `core.hooksPath=${hooksDir}`, 'fetch', '--no-tags', '--no-recurse-submodules', 'origin', `+refs/heads/${branch}:${tracking}`]);
-  if (fetched.status === null) removeKilledFetchLock(git, root, tracking, started);
+  if (fetched.status === null) removeKilledFetchLock(args => git(args, null), root, tracking, started);
   if (fetched.status !== 0) return { status: 'unknown', error: 'fetch-failed' };
   const head = git(['rev-parse', '--verify', '--quiet', `${tracking}^{commit}`]);
   const commit = head.status === 0 ? head.stdout.toString('utf8').trim() : '';
@@ -183,8 +187,8 @@ function refreshReason(error) {
 }
 
 // Atomic write of one cache entry; returns the entry. Throws on a write failure.
-function writeCache(registryPath, entry) {
-  const file = cacheFileFor(registryPath, entry.repository_id);
+function writeCache(stateDirectory, entry) {
+  const file = cacheFileFor(stateDirectory, entry.repository_id);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
   fs.writeFileSync(temp, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
@@ -195,12 +199,16 @@ function writeCache(registryPath, entry) {
 // Refreshes the cache for one identity (from toolkit-governance-state readIdentity). A failed read
 // keeps the existing entry: offline narrows (see freshness), it never erases what was merged.
 // Returns { refreshed, entry, error }.
-function refreshBindingCache(identity, registryPath, { runGit, timeout, now = () => new Date(), environment = process.env } = {}) {
+function refreshBindingCache(identity, stateDirectory, { runGit, timeout, deadline, now = () => new Date(), environment = process.env } = {}) {
   if (!identity || !identity.valid || !identity.root || !identity.repository_id) return { refreshed: false, entry: null, error: 'identity-invalid' };
-  const hooksDir = path.join(cacheDirFor(registryPath), NO_HOOKS_DIR);
+  const hooksDir = path.join(cacheDirFor(stateDirectory), NO_HOOKS_DIR);
   try { fs.mkdirSync(hooksDir, { recursive: true }); } catch { /* emptyFolder holds the read */ }
-  const read = readDefaultBranchBinding(identity.root, { runGit, timeout, expectedRemote: identity.remote.canonical, hooksDir, environment });
-  if (read.status === 'unknown') return { refreshed: false, entry: readBindingCache(identity, registryPath), error: read.error };
+  const read = readDefaultBranchBinding(identity.root, { runGit, timeout, deadline, expectedRemote: identity.remote.canonical, hooksDir, environment });
+  if (read.status === 'unknown') {
+    const previous = readBindingCache(identity, stateDirectory);
+    if (previous) { try { writeCache(stateDirectory, { ...previous, refresh_error: read.error }); } catch { /* no new authority */ } }
+    return { refreshed: false, entry: previous, error: read.error };
+  }
   const entry = {
     schema: CACHE_SCHEMA,
     repository_id: identity.repository_id,
@@ -213,16 +221,16 @@ function refreshBindingCache(identity, registryPath, { runGit, timeout, now = ()
     text: typeof read.text === 'string' ? read.text : null,
     problem: read.problem || null,
   };
-  try { writeCache(registryPath, entry); } catch { return { refreshed: false, entry: readBindingCache(identity, registryPath), error: 'cache-unwritable' }; }
+  try { writeCache(stateDirectory, entry); } catch { return { refreshed: false, entry: readBindingCache(identity, stateDirectory), error: 'cache-unwritable' }; }
   return { refreshed: true, entry, error: null };
 }
 
 // The cached entry for this identity, or null (none, damaged, or written for another identity).
-function readBindingCache(identity, registryPath) {
+function readBindingCache(identity, stateDirectory) {
   if (!identity || !identity.repository_id) return null;
   let parsed;
   try {
-    const file = cacheFileFor(registryPath, identity.repository_id);
+    const file = cacheFileFor(stateDirectory, identity.repository_id);
     const stat = fs.lstatSync(file);
     if (!stat.isFile() || stat.size > CACHE_READ_LIMIT) return null;
     parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -244,14 +252,14 @@ function readBindingCache(identity, registryPath) {
 
 // Every valid entry in this computer's cache, as [{ identity, entry }], at most `limit` files read.
 // Each file is checked as readBindingCache checks it; a damaged or unknown file is skipped.
-function readAllBindingCaches(registryPath, limit = CACHE_SCAN_LIMIT) {
+function readAllBindingCaches(stateDirectory, limit = CACHE_SCAN_LIMIT) {
   let names;
-  try { names = fs.readdirSync(cacheDirFor(registryPath)); } catch { return []; }
+  try { names = fs.readdirSync(cacheDirFor(stateDirectory)); } catch { return []; }
   const found = [];
   for (const name of names.filter(file => CACHE_FILE.test(file)).sort().slice(0, limit)) {
     let remote = null;
     try {
-      const file = path.join(cacheDirFor(registryPath), name);
+      const file = path.join(cacheDirFor(stateDirectory), name);
       const stat = fs.lstatSync(file);
       if (!stat.isFile() || stat.size > CACHE_READ_LIMIT) continue;
       remote = JSON.parse(fs.readFileSync(file, 'utf8')).remote;
@@ -262,7 +270,7 @@ function readAllBindingCaches(registryPath, limit = CACHE_SCAN_LIMIT) {
       if (!parsedRemote.valid) continue;
       identity = { valid: true, remote: parsedRemote, repository_id: repositoryIdForCanonicalRemote(parsedRemote.canonical) };
     } catch { continue; }
-    const entry = readBindingCache(identity, registryPath);
+    const entry = readBindingCache(identity, stateDirectory);
     if (entry) found.push({ identity, entry });
   }
   return found;

@@ -1,57 +1,42 @@
 'use strict';
 
-// `toolkit governance migrate`: the one-time pass over the repositories already on this computer.
-// It finds every repository in the given folders (each folder itself and the folders directly
-// inside it), shows one list with a proposed answer per repository, and writes only after the
-// user types yes in a terminal. Running it again changes nothing that is already decided.
-//
-// Proposals: a repository already decided stays as it is; a decision stored under an earlier
-// key is carried over to the repository's own key; an evidence store named in another
-// repository's programme binding is disabled; a repository carrying the governed block (with or
-// without its binding, which then still arrives through a pull request) is enabled; any other undecided
-// repository is disabled, which the user can change in the same answer. Repositories without an
-// origin remote are skipped.
-//
-// Afterwards, ENABLED GitHub repositories without the no-force-push ruleset are listed and the
-// ruleset is added only after a second typed yes in the same run; one whose merged binding keeps
-// programme state on the public state branch is then offered a ruleset that stops that branch being
-// deleted, after its own typed yes. Then ENABLED GitHub repositories
-// whose default branch does not require the binding's checks, or allows squash or rebase merges,
-// are listed, and Toolkit's own default-branch ruleset (toolkit-governance-protection.cjs) is
-// created or updated only after a third typed yes. Toolkit never edits a ruleset or branch
-// protection it did not create: what its own ruleset cannot fix (an extra or unpinned check in
-// someone else's rule, a workflow that can mask its check) is reported to change by hand, and a
-// refused write is reported once, never retried. Last, each ENABLED GitHub repository gets its free
-// dependency and security settings turned on and its missing Dependabot files written
-// (toolkit-governance-security.cjs) without another question, because they are on by default under
-// governance; nothing that needs billing is turned on. Files land in the working
-// tree for a normal pull request. Nothing is pushed to any
-// repository and no pull request is opened: missing bindings and legacy markers are reported
-// with what to do.
-
+// Retained settings-operation history. The historical filename/schema is consumed by the security
+// command and kept to preserve its recovery record. It is never governance authority. Legacy local
+// decision migration is a separate explicit operation, not a runtime or setup path.
 const fs = require('node:fs');
 const path = require('node:path');
-
-const registry = require('./toolkit-capability-registry.cjs');
+const crypto = require('node:crypto');
 const governance = require('./toolkit-governance-state.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
-
-const CAPABILITY = governance.GOVERNANCE_CAPABILITY;
+const { userStateDirectory } = require('./toolkit-user-state.cjs');
 const RECORD_SCHEMA = 'toolkit.governance-migration.v1';
 const RECORD_BASENAME = 'governance-migration.v1.json';
-const BINDING_TEMPLATE = 'skills/repository-agent-rules/repo-local/toolkit-programme.template.json';
-
-class MigrationError extends Error {
-  constructor(message, exitCode = 2) {
-    super(message);
-    this.name = 'MigrationError';
-    this.exitCode = exitCode;
+class SettingsOperationHistory {
+  #file;
+  constructor(options = {}) { this.#file = path.join(userStateDirectory(options), RECORD_BASENAME); }
+  append(run) {
+    let previous = [];
+    try {
+      const stat = fs.lstatSync(this.#file);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) throw Error('history unavailable');
+      const parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8'));
+      if (!parsed || parsed.schema !== RECORD_SCHEMA || !Array.isArray(parsed.runs)) throw Error('history invalid');
+      previous = parsed.runs;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw Object.assign(new Error('OPERATION_HISTORY_UNREADABLE'), { code: 'OPERATION_HISTORY_UNREADABLE' });
+    }
+    const text = JSON.stringify({ schema: RECORD_SCHEMA, runs: [...previous, run].slice(-20) }, null, 2) + '\n';
+    fs.mkdirSync(path.dirname(this.#file), { recursive: true });
+    const temp = this.#file + '.' + process.pid + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
+    try { fs.writeFileSync(temp, text, { mode: 0o600 }); fs.renameSync(temp, this.#file); }
+    finally { fs.rmSync(temp, { force: true }); }
+    if (fs.readFileSync(this.#file, 'utf8') !== text) throw Error('OPERATION_HISTORY_READBACK_FAILED');
+    return this.#file;
   }
 }
-
-// Every git repository at `root` or directly inside it, sorted, each listed once.
+function appendRunRecord(options, run) { return new SettingsOperationHistory(options).append(run); }
 function discoverRepositories(roots) {
   const found = new Map();
   const add = (dir) => {
@@ -79,41 +64,11 @@ function slugFor(root) {
   } catch { return null; }
 }
 
-// The proposal for one repository: { action, reason } where action is keep, skip, carry-over,
-// enable or disable.
-function proposalFor(state, slug, transportSlugs) {
-  if (state.rule === 'ERROR') return { action: 'skip', reason: `its state could not be read (${state.error_code})` };
-  if (state.rule === 'R1') return { action: 'skip', reason: 'not a git repository, so GitHub governance is DISABLED automatically' };
-  if (state.rule === 'R8') return { action: 'skip', reason: 'not on github.com, so GitHub governance is DISABLED automatically here' };
-  if (state.state === 'ERROR') return { action: 'skip', reason: 'the programme binding merged on its default branch is invalid; fix it through a pull request' };
-  if (state.rule === 'S1') return { action: 'skip', reason: 'evidence store named in a programme binding (agent-managed, not governed)' };
-  if (state.rule === 'R1s') return { action: 'skip', reason: "a scratch clone in another repository's ignored .tmp folder (not governed)" };
-  if (['M1', 'M2'].includes(state.rule)) return { action: 'keep', reason: `${state.state === 'ENABLED' ? 'enabled' : 'disabled'} by the programme binding merged on its default branch` };
-  if (state.recorded_under_legacy_key) return { action: 'carry-over', reason: `already ${state.recorded_decision === 'enabled' ? 'enabled' : 'disabled'} under an earlier key; kept under its own key` };
-  if (state.state !== 'UNDECIDED') return { action: 'keep', reason: `already ${state.state === 'ENABLED' ? 'enabled' : 'disabled'}` };
-  if (slug && transportSlugs.has(slug.toLowerCase())) return { action: 'disable', reason: 'evidence store named in a programme binding (agent-managed, not governed)' };
-  if (state.notes.includes('pending-binding-merge')) return { action: 'enable', reason: 'its working tree carries a programme binding that still has to be merged' };
-  if (state.materials && state.materials.governed_block) return { action: 'enable', reason: 'carries the governed block; its programme binding still has to be added' };
-  return { action: 'disable', reason: 'no Toolkit materials' };
-}
 
-// "yes", optionally followed by changes such as "3=enable 5=disable" (`decline` is the older word
-// for disable). null when not confirmed.
-function parseAnswer(answer, rows) {
-  const words = String(answer || '').trim().toLowerCase().split(/[\s,]+/).filter(Boolean);
-  if (words[0] !== 'yes') return null;
-  const changes = new Map();
-  for (const word of words.slice(1)) {
-    const match = /^(\d+)=(enable|disable|decline)$/.exec(word);
-    if (!match) return null;
-    const row = rows.find(entry => entry.number === Number(match[1]));
-    if (!row || !['enable', 'disable', 'carry-over'].includes(row.action)) return null;
-    changes.set(row.number, match[2] === 'enable' ? 'enable' : 'disable');
-  }
-  return changes;
-}
-
-class GovernanceMigration {
+// The historical migrate command retains its separately approved protection/security work.
+// It never reads, copies, repairs or writes a historical local governance answer. Keep the command
+// name for existing operators until the explicit migration route separates inventory and maintenance.
+class GovernanceMaintenance {
   #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #now;
 
   constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, now = () => new Date() }) {
@@ -134,98 +89,18 @@ class GovernanceMigration {
 
   #say(lines) { this.#stdout.write(`${[].concat(lines).join('\n')}\n`); }
 
-  plan(roots) {
-    const repositories = discoverRepositories(roots).map(root => ({ root, state: governance.governanceState(root, this.#registryOptions), slug: slugFor(root) }));
-    const transportSlugs = new Set(repositories
-      .flatMap(entry => [governance.bindingStoreRepository(entry.root, this.#registryOptions), governance.workingBindingStoreRepository(entry.root)])
-      .filter(Boolean).map(slug => slug.toLowerCase()));
-    return repositories.map((entry, index) => ({ number: index + 1, ...entry, ...proposalFor(entry.state, entry.slug, transportSlugs) }));
-  }
 
   async run(roots) {
-    if (!this.#interactive) throw new MigrationError('Run this yourself in a terminal: the migration records decisions only when you type them. Nothing was written.');
-    const rows = this.plan(roots);
-    if (rows.length === 0) {
-      this.#say('No git repositories were found in the given folders. Nothing was written.');
-      return 0;
-    }
-    this.#say(['Repositories found:', ...rows.map(row => `${row.number}. ${row.root}: ${row.action} (${row.reason})`)]);
-    const pending = rows.filter(row => ['carry-over', 'enable', 'disable'].includes(row.action));
-    const written = [];
-    if (pending.length === 0) {
-      this.#say('Every repository is already decided or skipped. Nothing to migrate.');
-    } else {
-      const changes = parseAnswer(await this.#ask('Type yes to apply the proposed answers, or yes followed by changes such as "3=enable 5=disable": '), rows);
-      if (changes === null) {
-        this.#say('Not confirmed. Nothing was written.');
-        return 1;
-      }
-      for (const row of pending) {
-        const target = changes.get(row.number) || (row.action === 'carry-over' ? (row.state.recorded_decision === 'enabled' ? 'enable' : 'disable') : row.action);
-        written.push(this.#decide(row, target));
-      }
-    }
-    const after = rows.map(row => ({ ...row, state: governance.governanceState(row.root, this.#registryOptions) }));
-    this.#reportMaterials(after);
-    const rulesets = [...await this.#offerRulesets(after), ...await this.#offerStateRulesets(after)];
-    const protections = await this.#offerProtection(after);
-    const securities = await this.#applySecurity(after);
-    if (written.length || rulesets.length || protections.length || securities.length) this.#writeRecord(written, rulesets, protections, securities);
-    const failed = written.some(entry => entry.result !== 'written') || [...rulesets, ...protections, ...securities].some(entry => ['failed', 'unverified'].includes(entry.result));
-    return failed ? 2 : 0;
-  }
-
-  #decide(row, target) {
-    const status = registry.getRepositoryStatus({ cwd: row.root, ...this.#registryOptions });
-    if (status.status === 'actionable') return { repository_id: row.state.repository_id, action: target, result: `not-written (${status.reason_code})` };
-    const current = status.capabilities[CAPABILITY].state;
-    // The registry keeps its own operation names: a first "no" is 'decline', turning off an enabled one is 'disable'.
-    const operation = target === 'enable' ? 'enable' : current === 'unresolved' ? 'decline' : 'disable';
-    try {
-      registry.writeCapabilityDecision({
-        cwd: row.root,
-        ...this.#registryOptions,
-        capabilityId: CAPABILITY,
-        operation,
-        ownerAction: {
-          confirmed: true,
-          category: 'explicit-owner',
-          channel: 'capability-route',
-          operation,
-          choice_semantic_id: registry.capabilityDecisionSemanticId(CAPABILITY, operation),
-          contract_digest: registry.CONTRACT_DIGEST,
-          scope_digest: registry.capabilityScopeDigest(status.repository_id, CAPABILITY, operation, 'capability-route'),
-        },
-        expectedRevision: status.registry_revision,
-        expectedHash: status.snapshot_hash,
-      });
-    } catch (error) {
-      this.#say(`${row.number}. ${row.root}: not written (${error && error.code ? error.code : 'unexpected error'}).`);
-      return { repository_id: status.repository_id, action: target, result: 'failed' };
-    }
-    const readBack = governance.governanceState(row.root, this.#registryOptions);
-    const expected = target === 'enable' ? 'ENABLED' : 'DISABLED';
-    const ok = readBack.state === expected && readBack.recorded_under_legacy_key === false;
-    this.#say(`${row.number}. ${row.root}: ${ok ? `recorded ${expected}` : `written, but reading it back gave ${readBack.state}`}.`);
-    return { repository_id: status.repository_id, action: target, result: ok ? 'written' : 'read-back-mismatch' };
-  }
-
-  #reportMaterials(rows) {
-    const notes = [];
-    for (const row of rows) {
-      const state = row.state;
-      if (state.state === 'ENABLED' && state.materials && !state.materials.binding && state.notes.includes('pending-binding-merge')) {
-        notes.push(`${row.root}: governance is on and the working tree carries the programme binding, but it is not merged on the default branch yet; it applies once its pull request merges.`);
-      } else if (state.state === 'ENABLED' && state.materials && !state.materials.binding) {
-        notes.push(`${row.root}: governance is on but the programme binding is missing. Copy ${BINDING_TEMPLATE} to .github/toolkit-programme.json, fill in the parent issue and the evidence store${row.slug ? ` (repository: ${row.slug})` : ''}, and add it through a pull request.`);
-      }
-      if (state.state === 'ENABLED' && state.materials && !state.materials.governed_block) {
-        notes.push(`${row.root}: governance is on but AGENTS.md has no governed block; install it with the repository-agent-rules skill, through a pull request.`);
-      }
-      if (state.materials && state.materials.governed_block_legacy) notes.push(`${row.root}: AGENTS.md carries the old GLOBAL-AGENTS.MD-TEMPLATE block; refresh it to the governed block through a pull request.`);
-      if (state.materials && state.materials.legacy_binding_file) notes.push(`${row.root}: .github/ai-agent-toolkit-programme.json is an early binding name and is not read; move its values to .github/toolkit-programme.json through a pull request.`);
-    }
-    if (notes.length) this.#say(['To finish by hand:', ...notes.map(note => `- ${note}`)]);
+    if (!this.#interactive) throw Object.assign(new Error('Repository protection maintenance runs only in the owner\'s interactive terminal. No local decisions were read or written.'), { code: 'OWNER_TERMINAL_REQUIRED' });
+    this.#say('Repository protection and security maintenance only. Historical local answers are inert; no decision migration is performed.');
+    const rows = discoverRepositories(roots).map(root => ({ root, state: governance.governanceState(root, this.#registryOptions), slug: slugFor(root) }))
+      .filter(row => row.state.programme_records_bind === true && row.slug);
+    if (!rows.length) { this.#say('No fresh merged enabled repository was found. No governance or settings changes were made.'); return 0; }
+    const rulesets = [...await this.#offerRulesets(rows), ...await this.#offerStateRulesets(rows)];
+    const protections = await this.#offerProtection(rows);
+    const securities = await this.#applySecurity(rows);
+    if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
+    return [...rulesets, ...protections, ...securities].some(entry => ['failed', 'unverified'].includes(entry.result)) ? 2 : 0;
   }
 
   async #offerRulesets(rows) {
@@ -327,10 +202,10 @@ class GovernanceMigration {
       // The same goes for a check whose workflow does not report on every pull request.
       const unproduced = result.checks.P3 && Array.isArray(result.checks.P3.missing) ? result.checks.P3.missing : [];
       const silent = result.checks.P4 && Array.isArray(result.checks.P4.never_reports) ? result.checks.P4.never_reports.filter(check => !unproduced.includes(check)) : [];
-      if (GovernanceMigration.#rulesetFixes(result) && unproduced.length === 0 && silent.length === 0) candidates.push({ row, ...read });
+      if (GovernanceMaintenance.#rulesetFixes(result) && unproduced.length === 0 && silent.length === 0) candidates.push({ row, ...read });
       else {
-        if (GovernanceMigration.#rulesetFixes(result) && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
-        if (GovernanceMigration.#rulesetFixes(result) && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then run migrate again.`);
+        if (GovernanceMaintenance.#rulesetFixes(result) && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
+        if (GovernanceMaintenance.#rulesetFixes(result) && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then run migrate again.`);
         this.#byHand(row, result);
       }
     }
@@ -357,7 +232,7 @@ class GovernanceMigration {
         continue;
       }
       const after = this.#protectionFor(row).result;
-      const fixed = !GovernanceMigration.#rulesetFixes(after) && ['P1', 'P5'].every(id => after.checks[id] && after.checks[id].status !== 'unverified');
+      const fixed = !GovernanceMaintenance.#rulesetFixes(after) && ['P1', 'P5'].every(id => after.checks[id] && after.checks[id].status !== 'unverified');
       this.#say(`- ${row.slug}: ruleset ${existing ? 'updated' : 'added'}${fixed ? ' and read back' : ', but reading it back still shows drift'}.`);
       if (after.status === 'drift') this.#byHand(row, after);
       results.push({ repository_id: row.state.repository_id, result: fixed ? (existing ? 'updated' : 'added') : 'failed' });
@@ -396,23 +271,6 @@ class GovernanceMigration {
   }
 }
 
-// Appends `run` to the private record next to the decision file (the last 20 runs are kept). Used by
-// migrate and by `toolkit governance security`, so every settings change has a record of what GitHub
-// showed before.
-function appendRunRecord(registryOptions, run) {
-  const directory = path.dirname(governance.registryPathFor(registryOptions));
-  const file = path.join(directory, RECORD_BASENAME);
-  let previous = [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (parsed && parsed.schema === RECORD_SCHEMA && Array.isArray(parsed.runs)) previous = parsed.runs;
-  } catch { previous = []; }
-  const record = { schema: RECORD_SCHEMA, runs: [...previous, run].slice(-20) };
-  fs.mkdirSync(directory, { recursive: true });
-  const temporary = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(temporary, file);
-  return file;
-}
 
-module.exports = Object.freeze({ GovernanceMigration, MigrationError, discoverRepositories, proposalFor, parseAnswer, appendRunRecord, RECORD_BASENAME, BINDING_TEMPLATE });
+
+module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, SettingsOperationHistory, RECORD_BASENAME });

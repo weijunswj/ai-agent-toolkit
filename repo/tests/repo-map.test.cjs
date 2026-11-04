@@ -18,7 +18,10 @@ test('every path in the repository map exists', () => {
 });
 
 test('the map records its review commit and holds no rule text', () => {
-  assert.match(MAP, /Last reviewed against `main` `[0-9a-f]{40}`/);
+  const revision = /Last reviewed against `main` `([0-9a-f]{7,40})`/.exec(MAP);
+  assert.ok(revision, 'the map names its reviewed commit');
+  const checked = require('node:child_process').spawnSync('git', ['-C', ROOT, 'rev-parse', '--verify', revision[1] + '^{commit}'], { encoding: 'utf8', windowsHide: true });
+  assert.equal(checked.status, 0, 'the shortened commit is unambiguous and resolves');
   assert.doesNotMatch(MAP, /MUST delegate|Finish authorised work before stopping|fresh executor contexts are mandatory/i);
 });
 
