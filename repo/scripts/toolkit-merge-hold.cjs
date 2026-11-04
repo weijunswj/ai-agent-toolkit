@@ -109,7 +109,6 @@ const path = require('node:path');
 const governance = require('./toolkit-governance-state.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
 const mergeScope = require('./toolkit-auto-merge-eligible.cjs');
-const { normaliseHost } = require('./toolkit-task-auto-merge-preferences.cjs');
 
 const APPROVALS_BASENAME = 'merge-approvals.v1.json';
 const APPROVALS_SCHEMA = 'toolkit.merge-approvals.v1';
@@ -353,7 +352,7 @@ function sessionChecks(sessionId, environment, registryOptions, now, nativeHost 
     resumed: epochs.resumed(sessionId),
     resumeHostSessionPresent: epochs.resumeHostSessionPresent(sessionId),
     resumedFromSessionShell: epochs.resumedFromSessionShell(sessionId),
-    resumeNeedsTypedMerge: epochs.resumeNeedsTypedMerge(sessionId) || (epochs.resumed(sessionId) && normaliseHost(nativeHost) !== 'claude-code'),
+    resumeNeedsTypedMerge: epochs.resumeNeedsTypedMerge(sessionId) || (epochs.resumed(sessionId) && gate.normaliseHost(nativeHost) !== 'claude-code'),
     userStartedOrigin: epochs.origin(sessionId) === 'user-started',
     forked: epochs.forked(sessionId),
   };

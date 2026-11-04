@@ -1671,6 +1671,7 @@ module.exports = Object.freeze({
   ASK,
   HOST_SESSION_VARIABLE,
   LAUNCHER_MARKERS,
+  normaliseHost,
   SessionEpochs,
   NOT_NOW_BASENAME,
   ReplyTickets,
