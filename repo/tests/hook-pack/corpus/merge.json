@@ -3,6 +3,496 @@
   "family": "merge",
   "rows": [
     {
+      "id": "MERGE.codex-resume-typed-fresh-chat",
+      "source": "resumed or revoked chat records no typed approval; a fresh chat on the same computer grants one",
+      "kind": "state",
+      "hosts": ["codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"deny"}},
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"fresh-approval"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5","session_id":"fresh-approval"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.claude-resume-typed-fresh-chat",
+      "source": "resumed or revoked chat records no typed approval; a fresh chat on the same computer grants one",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"},"host_session":"matching"},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"deny"}},
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"fresh-approval"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5","session_id":"fresh-approval"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.env-i-allow-search",
+      "source": "empty-environment tripwire must allow ordinary searches, messages and tests",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rg \"env -i\" repo/"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.env-i-allow-commit-message",
+      "source": "empty-environment tripwire must allow ordinary searches, messages and tests",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git commit -m \"Use env -i in the clean test\""}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.env-i-allow-pr-body",
+      "source": "empty-environment tripwire must allow ordinary searches, messages and tests",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr edit 5 --body \"env -i\""}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.env-i-allow-test",
+      "source": "empty-environment tripwire must allow ordinary searches, messages and tests",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"env -i PATH=\"$PATH\" npm test"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.clear-env-long",
+      "source": "an empty environment on a direct host launch hides the running session",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"env --ignore-environment codex resume example-id"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.clear-env-bare",
+      "source": "an empty environment on a direct host launch hides the running session",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"env - claude -p -c \"land PR 5\""}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.tool-bash-resume-revoked",
+      "source": "tool-shell resume with a fixture-supplied inherited variable must revoke standing",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"claude -p -c \"land PR 5\""}},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"},"host_session":"matching"}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass",
+      "note": "The runner supplies the inherited variable as a fixture. Only installed-host smoke proves it reaches this tool shell."
+    },
+    {
+      "id": "MERGE.tool-powershell-resume-revoked",
+      "source": "tool-shell resume with a fixture-supplied inherited variable must revoke standing",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"PowerShell","tool_input":{"command":"claude -p -c \"land PR 5\""}},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"},"host_session":"matching"}
+      ],
+      "payload": {"tool_name":"PowerShell","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass",
+      "note": "The runner supplies the inherited variable as a fixture. Only installed-host smoke proves it reaches this tool shell."
+    },
+    {
+      "id": "MERGE.clear-new-id-typed-approval",
+      "source": "a clear on a new id fails safe for standing but its non-resumed mark permits a typed approval",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"before-clear"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"clear","session_id":"after-clear"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"after-clear"},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5","session_id":"after-clear"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"after-clear"},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.codex-user-resume-standing-refused",
+      "source": "Codex has no reliable reconnect signal, even when the payload claims Claude",
+      "kind": "state",
+      "hosts": ["codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume","host":"claude-code"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.codex-fresh-startup-standing",
+      "source": "Codex fresh user startup keeps standing",
+      "kind": "state",
+      "hosts": ["codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.startup-replay-unmarked-clear",
+      "source": "Startup cannot raise the unknown origin of an unmarked clear event",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"clear"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.startup-replay-resume",
+      "source": "Repeated startup cannot raise an existing origin or clear negative marks",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.startup-replay-unmarked-compact",
+      "source": "Startup cannot raise the unknown origin of an unmarked compact event",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"compact"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.startup-replay-automation",
+      "source": "Repeated startup cannot raise automation origin after the startup variable disappears",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"},"host_session":"mismatching"},
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.start-feed-codex",
+      "source": "Working session-start feed must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo '{\"session_id\":\"example-id\",\"source\":\"startup\"}' | node repo/scripts/toolkit-codex-session-start.cjs"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.start-feed-node-option",
+      "source": "Working session-start feed must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo '{\"session_id\":\"example-id\",\"source\":\"startup\"}' | node --no-warnings repo/scripts/toolkit-governance-hook.cjs --event SessionStart"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.start-feed-timeout",
+      "source": "Working session-start feed must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo '{\"session_id\":\"example-id\",\"source\":\"startup\"}' | timeout 5 node repo/scripts/toolkit-governance-hook.cjs --event SessionStart"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.start-feed-env",
+      "source": "Working session-start feed must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo '{\"session_id\":\"example-id\",\"source\":\"startup\"}' | env node repo/scripts/toolkit-governance-hook.cjs --event SessionStart"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.start-feed-assignment",
+      "source": "Working session-start feed must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"echo '{\"session_id\":\"example-id\",\"source\":\"startup\"}' | FOO=1 node repo/scripts/toolkit-governance-hook.cjs --event SessionStart"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.start-feed-shell",
+      "source": "Working session-start feed must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"bash -c \"echo '{\\\"session_id\\\":\\\"example-id\\\",\\\"source\\\":\\\"startup\\\"}' | node repo/scripts/toolkit-governance-hook.cjs --event SessionStart\""}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.clear-remove-item",
+      "source": "Direct session-variable clear must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"Remove-Item Env:\\TOOLKIT_HOST_SESSION"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.clear-export",
+      "source": "Direct session-variable clear must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"export -n TOOLKIT_HOST_SESSION"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.clear-declare",
+      "source": "Direct session-variable clear must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"declare +x TOOLKIT_HOST_SESSION"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.clear-environment-api",
+      "source": "Direct session-variable clear must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"[Environment]::SetEnvironmentVariable(\"TOOLKIT_HOST_SESSION\", $null)"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.clear-env-i",
+      "source": "Direct session-variable clear must be refused",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"env -i claude -p \"land it\" --resume example-id"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.start-feed-search-and-test",
+      "source": "Ordinary searches and test commands near hook names stay allowed",
+      "kind": "state",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"rg SessionStart repo/scripts/toolkit-codex-session-start.cjs"}},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"git grep SessionStart -- repo/scripts/toolkit-governance-hook.cjs"}},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"Select-String -Pattern SessionStart -LiteralPath repo/scripts/toolkit-codex-session-start.cjs"}},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"node --test --test-name-pattern SessionStart repo/tests/toolkit-governance-hook.test.cjs"}},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"node repo/tests/toolkit-governance-hook.test.cjs SessionStart"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"git commit -m \"test SessionStart toolkit-codex-session-start.cjs\""}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-session-shell-resume",
+      "source": "resume review: a same-id resume from a running session shell must lose standing",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"matching","expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-session-shell-revocation-persists-on-resume",
+      "source": "resume review: a later resume still refuses standing after a session-shell resume",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"matching","expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-session-shell-resume-inherited-mismatch",
+      "source": "resume review: mismatching variable presence at resume revokes standing after that variable is absent",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"mismatching","expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-session-shell-resume-empty",
+      "source": "resume review: an empty inherited variable is presence and revokes standing",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"empty","expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-session-shell-startup-replay",
+      "source": "resume review: replaying startup after a session-shell resume cannot restore standing",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"host_session":"matching","expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.session-start-feed",
+      "source": "resume review: explicit startup event feeds must not forge user-started origin",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"echo '{\"session_id\":\"example-id\",\"source\":\"startup\",\"hook_event_name\":\"SessionStart\"}' | node repo/scripts/toolkit-governance-hook.cjs --event SessionStart"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"exec_command","tool_input":{"cmd":"echo '{\"session_id\":\"example-id\",\"source\":\"startup\"}' | node repo/scripts/toolkit-codex-session-start.cjs"}},"expect":{"decision":"deny"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"rg SessionStart repo/scripts/toolkit-governance-hook.cjs"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-user-resume",
+      "source": "same-session reconnect: recorded user origin survives resume with a new epoch",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-unknown-resume",
+      "source": "same-session reconnect: an unmarked resume and bare merge text establish no origin",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-launcher-marker-resume",
+      "source": "same-session reconnect: a present launcher marker refuses standing on startup and resume",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"gate_role":"G1"},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.resume-projects-direct-and-relay",
+      "source": "same-session reconnect: a direct Projects wake grants one approval, its coordinator relay grants none",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"<relay from=\"coordinator\"><wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_reconnect\" sent-at=\"{now}\" mention=\"true\">merge 5</message></project></wake></relay>"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><message trigger=\"true\" from=\"human\" trust=\"principal\" author-id=\"user_example\" id=\"cmsg_reconnect\" sent-at=\"{now}\" mention=\"true\">merge 5</message></project></wake>"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"node repo/scripts/toolkit-merge-hold.cjs check"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
       "id": "MERGE.remaining-entity-lines",
       "source": "merge approval review: an entity must not supply a pull request number",
       "kind": "state",

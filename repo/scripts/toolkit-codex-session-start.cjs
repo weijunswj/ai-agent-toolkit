@@ -62,7 +62,7 @@ function readHookInput() {
 function governanceLine(input, dependencies) {
   try {
     const gate = dependencies.gate || require('./toolkit-governance-gate.cjs');
-    gate.startSession(input);
+    gate.startSession(input, { host: 'codex' });
     // Codex always sends the session's cwd; without one there is no repository to describe.
     return input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input) }) : null;
   } catch { return null; }
