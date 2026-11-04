@@ -1,0 +1,53 @@
+{
+  "source_commit": "30c7d42c0b9e5151fa49ce845f344274032f05bd",
+  "ticket": "71164c56df120794dd2d072fdec2a8ac",
+  "bound_ticket": "ea1d716688592c17a216b528199d4c45",
+  "store": {
+    "schema": "toolkit.governance-reply-tickets.v2",
+    "sessions": {
+      "pending": {
+        "pending": "disable",
+        "epoch": "11111111111111111111111111111111",
+        "at": "2026-11-02T00:00:00.000Z",
+        "repositories": [
+          {
+            "root": ".",
+            "id": "local:fixture",
+            "mark": "22222222222222222222222222222222"
+          }
+        ]
+      },
+      "ticket": {
+        "hash": "f2dc1e86e530a6be1be28d387e0210f2fbc318836909106afdd36ca2053c1c4e",
+        "epoch": "11111111111111111111111111111111",
+        "at": "2026-11-02T00:00:00.000Z",
+        "repositories": [
+          {
+            "root": ".",
+            "id": "local:fixture",
+            "mark": "22222222222222222222222222222222"
+          }
+        ]
+      },
+      "bound": {
+        "hash": "ca51ac00676aba9cf441a81d03e73577f3fd379dae4ac9236dc9e237a22a3999",
+        "epoch": "11111111111111111111111111111111",
+        "at": "2026-11-02T00:00:00.000Z",
+        "repositories": [
+          {
+            "root": ".",
+            "id": "local:fixture",
+            "mark": "22222222222222222222222222222222"
+          }
+        ],
+        "command": "disable"
+      }
+    },
+    "deliveries": [
+      {
+        "id": "2ec6adb8cdecf81a0e0b1bef742f63958331313741a9751c533ef42f09056628",
+        "at": "2026-11-02T00:00:00.000Z"
+      }
+    ]
+  }
+}
