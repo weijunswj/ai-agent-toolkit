@@ -192,20 +192,27 @@ test('Windows task standing approval stays narrow on every changed approval surf
   const approval = global.split('**Toolkit task standing approval:**')[1].split('\n\n')[0];
   for (const rule of [
     /agents may run `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>`/,
-    /<Toolkit> is the recorded managed checkout; <repo> the verified main checkout, never a worktree/,
-    /PROGRAMME SWEEP and SHARD TIMINGS need fresh enabled matching merged governance/,
-    /FOOTER SWEEP also accepts fresh matching disabled governance or confirmed binding absence for a verified github\.com origin/,
-    /Register\/update one fixed cleaner only in the repository-default folder; verify registration and its first result/,
-    /Refuse repository, checkout or Toolkit-copy changes, owner stops, disabled or edited tasks and conflicts/,
-    /Removal, repair, folder overrides and custom tasks need explicit approval; native denials stop/,
+    /<Toolkit> is the recorded managed checkout; <repo> the main checkout, never a linked worktree/,
+    /fixed PROGRAMME SWEEP and SHARD TIMINGS in ENABLED repos with verified merged bindings/,
+    /FOOTER SWEEP for verified github\.com origins with fresh matching disabled or absent governance/,
+    /Binding's task folder, else repo default; first sweep, verify results/,
+    /Fresh confirmed governance changes allow owned task swaps in apply, same folder\/checkout, scan time kept/,
+    /Refuse repository\/checkout\/Toolkit-copy changes, owner stops, disabled or edited tasks/,
+    /modified governance tasks need the owner's keep-or-replace answer each time/,
+    /Other scheduler commands, folder overrides and custom tasks need approval; native denials stop/,
   ]) assert.match(approval, rule);
+  assert.match(global, /Local answers and proposals grant no authority\. Task sync: safety-gates playbook\./);
   assert.match(global, /Approval, assignment, custody and capability never supply a missing host-native permission/);
   assert.match(readText('AGENTS.md'), /except the global Toolkit task standing approval/);
   assert.match(readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit task standing approval/);
   for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/safety-gates.md`]) {
     const safety = readText(file);
     for (const rule of [/toolkit-windows-tasks\.cjs apply --repo-root <repo>/, /recorded managed Toolkit checkout/,
-      /main checkout/, /owner stops/, /--repair-owned/, /explicit approval/, /native/]) assert.match(safety, rule, file);
+      /main checkout/, /owner stops/, /--repair-owned/, /explicit approval/, /native/,
+      /fresh confirmed governance change can switch a proven owned cleaner in the same folder and checkout/,
+      /modified proven-owned PROGRAMME SWEEP or SHARD TIMINGS task needs the owner's keep-or-replace answer/,
+      /the deciding chat immediately reads the decision fresh from origin's default branch/,
+      /the next agent session in that repository reads fresh status/]) assert.match(safety, rule, file);
   }
   const reference = readText('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
   const tables = reference.split('\n\n').filter(part => part.startsWith('| '));
@@ -229,7 +236,7 @@ test('Windows task standing approval stays narrow on every changed approval surf
     /Use the binding's `schedule_folder`, else the repository's default folder, with no `--folder` override/,
     /A working-tree binding alone is not verified/,
     /Read governance status and the merged binding on the device before acting; missing or unreadable evidence grants nothing/,
-    /If either fixed job has an owner stop, ordinary apply refuses both before scheduler or registry writes/,
+    /If any participant in a switch has an owner stop, ordinary apply refuses the whole switch before scheduler or registry writes/,
     /never adopt or delete a conflicting task to get past a refusal/i,
     /only the job's own last-run record proves the sweep ended well/i,
     /a failed, held, skipped or missing result stays visible for recovery/i,

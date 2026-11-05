@@ -58,7 +58,7 @@ for (const shape of ['programme', 'footer']) for (const toolkit of matrixKinds) 
     if (state === 'disabled') scheduler.folders.get('WIDGET')[0].state = 'Disabled';
     if (state === 'edited action') scheduler.folders.get('WIDGET')[0].arguments += ' --owner-edit';
     if (state === 'edited trigger') scheduler.folders.get('WIDGET')[shape === 'footer' ? 0 : 1].triggers = [{ kind: 'MSFT_TaskWeeklyTrigger', start: '2099-01-01T09:15:00', days_of_week: 2 }];
-    if (state === 'removed by owner') owner().remove('WIDGET');
+    if (state === 'removed by owner') owner().remove('WIDGET', wanted);
     if (state === 'adopted/unowned') registry.updateRegistry(null, rows => rows.map(row => ({ ...row, adopted: true })));
     if (state === 'corrupt registry') registry.corrupt = true;
     scheduler.calls.length = 0; registry.calls.length = 0;
@@ -75,7 +75,7 @@ for (const shape of ['programme', 'footer']) for (const toolkit of matrixKinds) 
       return requester === 'setup plan' ? instance.plan(wanted) : instance.apply(wanted);
     };
     if (!validLocation || state === 'corrupt registry' && requester !== 'setup plan') assert.throws(invoke);
-    else { result = invoke(); assert.equal(result.items.every(item => item.action !== 'refused'), allowed); }
+    else { result = invoke(); assert.equal(result.items.every(item => !['refused', 'owner-choice-required'].includes(item.action)), allowed); }
     if (!allowed || requester === 'setup plan') {
       assert.deepEqual(registry.readRegistry(), beforeRegistry, 'registry unchanged');
       assert.deepEqual([...scheduler.folders], beforeTasks, 'scheduler unchanged');
@@ -216,7 +216,7 @@ test('G: fresh enabled governance selects programme and shards; fresh off or abs
     assert.equal(scheduler.calls.filter(call => call[0] === 'register').length, row.footer ? 1 : row.allowed ? 2 : 0);
     if (!row.allowed) {
       assert.equal(result.refused, true, 'unavailable governance is an apply refusal, never a success');
-      assert.equal(result.skipped.length, 2);
+      assert.equal(result.skipped.length, 3);
       for (const item of result.skipped) assert.match(item.reason, /fresh matching merged governance could not be verified/);
       assert.doesNotMatch(windowsTasks.describePlan(result, { command: 'node x apply' }).join('\n'), /Run this command/);
       assert.equal(windowsTasks.main(['apply', '--no-first-run', '--repo-root', wanted.root], {
@@ -243,7 +243,7 @@ test('G: binding folder or repository default selects both jobs; unreadable evid
     reader[failing] = () => { throw new Error('unreadable'); };
     const wanted = windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, deps: { identityReader, governance: reader } });
     assert.deepEqual(wanted.wanted, [], failing);
-    assert.equal(wanted.skipped.length, 2);
+    assert.equal(wanted.skipped.length, 3);
   }
 });
 
@@ -297,8 +297,9 @@ test('G: root-folder n8n backups and other repositories\' folders are never chan
   const n8n = unmarked('n8n-local-cli-backup-0123456789ab', { description: 'n8n backup' });
   const other = { ...unmarked('SAQG - PROGRAMME SWEEP'), description: 'SAQG: PROGRAMME SWEEP. x [toolkit-task v1 id=saqg-programme-sweep def=0123456789ab]' };
   const scheduler = fakeScheduler({ '': [n8n], SAQG: [other] });
-  windowsTasks.applyTasks(desired(t), { scheduler, home });
-  windowsTasks.removeTasks({ scheduler, home });
+  const wanted = desired(t);
+  windowsTasks.applyTasks(wanted, { scheduler, home });
+  windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   assert.deepEqual(scheduler.folders.get(''), [n8n]);
   assert.deepEqual(scheduler.folders.get('SAQG'), [other]);
   assert.equal(scheduler.calls.some(call => call[0] !== 'list' && (call[1] === 'SAQG' || call[1] === '' || call[1] === null)), false);
@@ -346,10 +347,11 @@ test('G: a native denial is reported without a second route or task effect', (t)
 test('G: --remove-toolkit-tasks removes only marked and recorded tasks; the folder only when empty', (t) => {
   const home = tempHome(t);
   const scheduler = fakeScheduler();
-  windowsTasks.applyTasks(desired(t), { scheduler, home });
+  const wanted = desired(t);
+  windowsTasks.applyTasks(wanted, { scheduler, home });
   scheduler.folders.get('TOOLKIT').push(unmarked('Session Digest'));
   windowsTasks.adoptTask({ folder: 'TOOLKIT', task: 'Session Digest', id: 'session-digest', purpose: 'Daily redacted session digest. No AI.' }, { scheduler, home });
-  const kept = windowsTasks.removeTasks({ scheduler, home });
+  const kept = windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   assert.deepEqual(kept.items.map(item => item.action), ['removed', 'removed']);
   assert.deepEqual(kept.folders, [{ folder: 'TOOLKIT', result: 'kept' }]);
   assert.deepEqual(scheduler.folders.get('TOOLKIT').map(task => task.name), ['Session Digest']);
@@ -357,16 +359,18 @@ test('G: --remove-toolkit-tasks removes only marked and recorded tasks; the fold
   // With nothing else in it, the folder goes too.
   const home2 = tempHome(t);
   const empty = fakeScheduler();
-  windowsTasks.applyTasks(desired(t), { scheduler: empty, home: home2 });
-  assert.deepEqual(windowsTasks.removeTasks({ scheduler: empty, home: home2 }).folders, [{ folder: 'TOOLKIT', result: 'removed' }]);
+  const wanted2 = desired(t);
+  windowsTasks.applyTasks(wanted2, { scheduler: empty, home: home2 });
+  assert.deepEqual(windowsTasks.removeTasks({ scope: wanted2, scheduler: empty, home: home2 }).folders, [{ folder: 'TOOLKIT', result: 'removed' }]);
   assert.equal(empty.folders.has('TOOLKIT'), false);
   assert.ok(tasks.readRegistry(home2).tasks.every(entry => entry.stopped_by_owner));
   // A recorded task whose marker was edited away is left alone.
   const home3 = tempHome(t);
   const edited = fakeScheduler();
-  windowsTasks.applyTasks(desired(t, { shards: false }), { scheduler: edited, home: home3 });
+  const wanted3 = desired(t, { shards: false });
+  windowsTasks.applyTasks(wanted3, { scheduler: edited, home: home3 });
   edited.folders.get('TOOLKIT')[0].description = 'changed by hand';
-  assert.equal(windowsTasks.removeTasks({ scheduler: edited, home: home3 }).items[0].action, 'refused');
+  assert.equal(windowsTasks.removeTasks({ scope: wanted3, scheduler: edited, home: home3 }).items[0].action, 'refused');
   assert.deepEqual(edited.folders.get('TOOLKIT').map(item => item.name), ['TOOLKIT - PROGRAMME SWEEP']);
 });
 
@@ -505,7 +509,7 @@ test('ownership: Windows name collisions and folder changes cannot bypass enrolm
   assert.ok(scheduler.calls.every(call => call[0] === 'list'));
   const owned = fakeScheduler();
   windowsTasks.applyTasks(wanted, { scheduler: owned, home });
-  windowsTasks.removeTasks({ scheduler: owned, home });
+  windowsTasks.removeTasks({ scope: wanted, scheduler: owned, home });
   const moved = desired(t, { root: wanted.root, folder: 'NEW' });
   const stop = fs.readFileSync(tasks.registryPath(home)); owned.calls.length = 0;
   for (const repairOwned of [false, true]) assert.ok(windowsTasks.applyTasks(moved, { scheduler: owned, home, repairOwned }).items.every(row => row.action === 'refused'));
@@ -529,7 +533,7 @@ test('readers: hostile inputs cannot become paths, arguments or stop metadata', 
 });
 
 for (const edit of ['execute', 'arguments', 'directory', 'extra action', 'marker', 'principal', 'settings', 'trigger count', 'trigger disabled', 'future start', 'end', 'repetition', 'weekday', 'weekly interval']) {
-  test(`definition baseline: refuses ${edit} on either job before any mutation`, t => {
+  test(`definition baseline: requires an owner choice for ${edit} on either job before any mutation`, t => {
     const home = tempHome(t), scheduler = fakeScheduler(), wanted = desired(t);
     windowsTasks.applyTasks(wanted, { scheduler, home });
     const live = scheduler.folders.get('TOOLKIT')[1];
@@ -549,7 +553,7 @@ for (const edit of ['execute', 'arguments', 'directory', 'extra action', 'marker
     if (edit === 'weekly interval') live.triggers[0].weeks_interval = 2;
     const before = fs.readFileSync(tasks.registryPath(home));
     const snapshot = structuredClone([...scheduler.folders]); scheduler.calls.length = 0;
-    assert.ok(windowsTasks.applyTasks(wanted, { scheduler, home }).items.every(row => row.action === 'refused'));
+    assert.ok(windowsTasks.applyTasks(wanted, { scheduler, home }).items.every(row => ['refused', 'owner-choice-required'].includes(row.action)));
     assert.deepEqual([...scheduler.folders], snapshot);
     assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), before);
     assert.ok(scheduler.calls.every(call => call[0] === 'list'));
@@ -559,7 +563,7 @@ for (const edit of ['execute', 'arguments', 'directory', 'extra action', 'marker
 test('stop: remove, restart CLI, refuse, repeat remove and approved repair retain the right state', t => {
   const home = tempHome(t), scheduler = fakeScheduler(), root = checkout(t), wanted = desired(t, { root });
   windowsTasks.applyTasks(wanted, { scheduler, home });
-  windowsTasks.removeTasks({ scheduler, home });
+  windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   const stop = fs.readFileSync(tasks.registryPath(home));
   scheduler.calls.length = 0;
   const output = [];
@@ -572,7 +576,7 @@ test('stop: remove, restart CLI, refuse, repeat remove and approved repair retai
   assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), stop);
   assert.ok(scheduler.calls.every(call => call[0] === 'list'));
   assert.ok(tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => 'TOOLKIT' }).rows.every(row => row.state === 'stopped by owner'));
-  windowsTasks.removeTasks({ scheduler, home });
+  windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), stop, 'repeated remove preserves time and baseline');
   assert.equal(windowsTasks.main(['apply', '--repo-root', root, '--repair-owned', '--no-first-run'], deps), 0);
   assert.ok(tasks.readRegistry(home).tasks.every(row => !row.stopped_by_owner && row.enrolled));
@@ -581,7 +585,7 @@ test('stop: remove, restart CLI, refuse, repeat remove and approved repair retai
 
 test('stop: a fresh Node process reads the retained stop and performs no scheduler mutation', t => {
   const home = tempHome(t), scheduler = fakeScheduler(), root = checkout(t), wanted = desired(t, { root });
-  windowsTasks.applyTasks(wanted, { scheduler, home }); windowsTasks.removeTasks({ scheduler, home });
+  windowsTasks.applyTasks(wanted, { scheduler, home }); windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   const before = fs.readFileSync(tasks.registryPath(home));
   const script = `const w=require(process.argv[1]);
     const identityReader=({checkout,toolkitRoot})=>({checkout,toolkitRoot});
@@ -605,7 +609,7 @@ test('stop: write failure prevents unregister; unregister failure preserves a du
     if (failure === 'write') registry.updateRegistry = () => { throw new Error('disk denied'); };
     if (failure === 'readback') { let reads = 0; registry.readRegistry = value => ++reads === 1 ? tasks.readRegistry(value) : { status: 'unreadable' }; }
     if (failure === 'unregister') scheduler.unregister = () => { throw new Error('native denial'); };
-    const result = windowsTasks.removeTasks({ scheduler, home, registry });
+    const result = windowsTasks.removeTasks({ scope: wanted, scheduler, home, registry });
     assert.ok(result.items.every(row => row.action === 'failed'));
     if (failure !== 'unregister') assert.equal(scheduler.calls.some(call => call[0] === 'unregister'), false);
     assert.equal(scheduler.folders.get('TOOLKIT').length, 2);
@@ -640,7 +644,7 @@ test('ordering: register/read back both jobs before starting the first sweep; no
 test('effects: registration failure holds the other job and never starts; bad readback never clears stop', t => {
   for (const failure of ['register', 'readback']) {
     const home = tempHome(t), scheduler = fakeScheduler(), wanted = desired(t);
-    windowsTasks.applyTasks(wanted, { scheduler, home }); windowsTasks.removeTasks({ scheduler, home });
+    windowsTasks.applyTasks(wanted, { scheduler, home }); windowsTasks.removeTasks({ scope: wanted, scheduler, home });
     const before = fs.readFileSync(tasks.registryPath(home)); scheduler.calls.length = 0;
     const register = scheduler.register;
     scheduler.register = d => { if (failure === 'register') throw new Error('native denied'); register(d); scheduler.folders.get(d.folder)[0].arguments += ' unexpected'; };
@@ -748,7 +752,7 @@ test('G: setup only plans and reports the tasks, and --remove-toolkit-tasks remo
   scheduler.folders.get('TOOLKIT').push(unmarked('Mine'));
   scheduler.calls.length = 0;
   const out = [];
-  const code = await core.main(['--remove-toolkit-tasks'], { platform: 'win32', windowsTasksDeps: { platform: 'win32', scheduler, home, stdout: text => out.push(text) } });
+  const code = await core.main(['--remove-toolkit-tasks'], { platform: 'win32', windowsTasksDeps: { platform: 'win32', scheduler, home, cwd: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, checkoutDeps: { identityReader, governance: governance() }, stdout: text => out.push(text) } });
   assert.equal(code, 0);
   assert.deepEqual(scheduler.folders.get('TOOLKIT').map(task => task.name), ['Mine']);
   assert.equal(scheduler.calls.some(call => call[0] === 'register' || call[0] === 'start'), false);
@@ -1023,7 +1027,8 @@ test('J: the runner takes only a known job, an absolute checkout and a task id',
 function listedHome(t) {
   const home = tempHome(t);
   const scheduler = fakeScheduler();
-  windowsTasks.applyTasks(desired(t), { scheduler, home });
+  const wanted = desired(t);
+  windowsTasks.applyTasks(wanted, { scheduler, home });
   return { home, scheduler };
 }
 
@@ -1408,26 +1413,25 @@ test('M3: exact real offline status JSON including ERROR exit 2 flows unchanged 
   }
 });
 
-for (const shape of ['programme-sweep', 'footer-sweep']) test(`closure registration: ${shape} retains shape/folder on governance on, off and uncertainty`, t => {
+for (const shape of ['programme-sweep', 'footer-sweep']) test(`closure registration: ${shape} switches only with fresh matching governance, retaining folder and stops`, t => {
   const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
   const initial = desired(t, { root, state: shape === 'footer-sweep' ? 'UNDECIDED' : 'ENABLED', repository: 'example/widget', folder: 'WIDGET' });
   assert.ok(windowsTasks.applyTasks(initial, { home, scheduler }).items.every(row => row.done));
   for (const state of ['ENABLED', 'DISABLED', null, 'ENABLED']) {
-    const offer = desired(t, { root, state, repository: 'example/widget', folder: state === 'ENABLED' ? 'BOUND' : null });
-    offer.folderOverride = null; // The binding changed, without an explicit --folder override.
+    const offer = desired(t, { root, state, repository: 'example/widget', folder: 'WIDGET' });
     const before = structuredClone([...scheduler.folders]); scheduler.calls.length = 0;
     const result = windowsTasks.applyTasks(offer, { home, scheduler });
     assert.equal(result.folder, 'WIDGET');
-    assert.equal(result.items.filter(row => ['programme-sweep','footer-sweep'].includes(row.definition.job)).length, 1);
-    assert.equal(result.items.find(row => row.definition.job === shape).definition.job, shape);
-    assert.equal([...scheduler.folders.values()].flat().filter(row => / - (?:PROGRAMME|FOOTER) SWEEP$/.test(row.name)).length, 1);
-    if (!state || state === 'DISABLED' && shape === 'programme-sweep') {
+    if (!state) {
       assert.ok(result.items.every(row => row.action === 'refused')); assert.deepEqual([...scheduler.folders], before);
       assert.ok(scheduler.calls.every(row => row[0] === 'list'));
+    } else {
+      assert.ok(result.items.every(row => row.done), JSON.stringify(result));
+      assert.deepEqual(scheduler.list('WIDGET').map(r => r.name).sort(), state === 'ENABLED' ? ['WIDGET - PROGRAMME SWEEP','WIDGET - SHARD TIMINGS'] : ['WIDGET - FOOTER SWEEP']);
+      assert.ok(tasks.readRegistry(home).tasks.every(e => !e.stopped_by_owner));
     }
-    if (shape === 'footer-sweep' && state === 'ENABLED') assert.match(result.coverage, /Programme refresh coverage is missing/);
   }
-  windowsTasks.removeTasks({ home, scheduler });
+  windowsTasks.removeTasks({ scope: initial, home, scheduler });
   const stopped = fs.readFileSync(tasks.registryPath(home));
   for (const state of ['ENABLED','UNDECIDED']) {
     const result = windowsTasks.applyTasks(desired(t, { root, state, repository: 'example/widget', folder: 'WIDGET' }), { home, scheduler });
@@ -1442,7 +1446,7 @@ test('closure conflicts: both cleaner shapes, unrecorded opposite shape and cros
     windowsTasks.applyTasks(offer, { home, scheduler });
     const other = offer.definitions.find(row => row.job === 'footer-sweep');
     if (mode === 'cross-folder-stop') {
-      windowsTasks.removeTasks({ home, scheduler });
+      windowsTasks.removeTasks({ scope: offer, home, scheduler });
       const changed = desired(t, { root, state: 'UNDECIDED', folder: 'OTHER' });
       const result = windowsTasks.applyTasks(changed, { home, scheduler });
       assert.ok(result.items.every(row => row.action === 'refused')); continue;
@@ -1471,6 +1475,7 @@ test('schedules: P1D and PT24H are equivalent, updates settle, and warnings use 
 
 test('setup: both projects share report reads, deduplicate and print no paths; apply always reads afresh', t => {
   const core = require('../scripts/setup-toolkit-core.cjs'), home = tempHome(t), managed = checkout(t), project = checkout(t), scheduler = fakeScheduler();
+  for (let i = 0; i < 30; i++) scheduler.folders.set('UNRELATED-' + i, [unmarked('Other', { description: `[toolkit-task v1 id=unrelated-${i} def=0123456789ab]` })]);
   const counts = new Map();
   const count = key => counts.set(key, (counts.get(key) || 0) + 1);
   let origin = 'example/widget';
@@ -1483,7 +1488,8 @@ test('setup: both projects share report reads, deduplicate and print no paths; a
   const plans = core.printWindowsTasks({ repoRoot: managed }, { platform: 'win32', scheduler, home, workingFolder: project, checkoutDeps: deps, log: line => lines.push(line) });
   assert.equal(plans.length, 2);
   assert.ok([...counts.values()].every(value => value === 1), JSON.stringify([...counts]));
-  assert.equal(scheduler.calls.filter(row => row[0] === 'list').length, 2);
+  assert.equal(scheduler.calls.filter(row => row[0] === 'list').length, 32);
+  for (let i = 0; i < 30; i++) assert.equal(scheduler.calls.filter(row => row[0] === 'list' && row[1] === 'UNRELATED-' + i).length, 1);
   assert.equal(lines.join(' ').includes(managed) || lines.join(' ').includes(project), false);
   assert.ok(scheduler.calls.every(row => row[0] === 'list'));
   const offer = windowsTasks.desiredTasks({ checkout: project, toolkitRoot: managed, nodePath: NODE, home, deps });
@@ -1537,7 +1543,7 @@ test('M9: snapshots at each in-place boundary never silently disable or claim an
     const replayHome = tempHome(t), replay = fakeScheduler(snapshot.live);
     tasks.writeRegistry(replayHome, snapshot.registry);
     const repeated = windowsTasks.applyTasks(offer, { home: replayHome, scheduler: replay });
-    assert.ok(repeated.items.every(row => row.action === 'refused' || row.action === 'current' && row.done));
+    assert.ok(repeated.items.every(row => ['refused', 'owner-choice-required'].includes(row.action) || row.action === 'current' && row.done));
     assert.ok([...replay.folders.values()].flat().every(task => task.state !== 'Disabled'));
     assert.equal(replay.calls.some(row => row[0] === 'start'), false);
   }
@@ -1618,6 +1624,385 @@ test('approval metadata: --no-first-run is outside the exact standing command', 
   assert.equal(scheduler.calls.some(row => row[0] === 'start'), false);
 });
 
+function switchOffer(t, shape, root) { return desired(t, { root, state: shape === 'programme-sweep' ? 'ENABLED' : 'DISABLED' }); }
+function assertLiveRegistry(home, scheduler) {
+  for (const entry of tasks.readRegistry(home).tasks) {
+    const live = scheduler.list(entry.folder).find(t => t.name === entry.name);
+    assert.ok(live, entry.id); assert.notEqual(live.state, 'Disabled');
+    assert.deepEqual(windowsTasks.enrolledDefinition(live), entry.enrolled); assert.equal(entry.stopped_by_owner, undefined);
+  }
+}
+
+let currentMainRunner;
+function currentMainReceipt(home, root, clock) {
+  if (!currentMainRunner) {
+    const Module = require('node:module'), file = path.join(ROOT, 'repo/scripts/toolkit-scheduled-job.cjs');
+    const bytes = require('node:child_process').execFileSync('git', ['show', 'cbd3d6078:repo/scripts/toolkit-scheduled-job.cjs'], { cwd: ROOT, timeout: 10000 });
+    const loaded = new Module(file); loaded.require = Module.createRequire(file); loaded._compile(bytes.toString(), file); currentMainRunner = loaded.exports;
+  }
+  let tick = Date.parse(clock);
+  const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION });
+  const receipt = currentMainRunner.runJob({ job: 'programme-sweep', taskId: 'toolkit-programme-sweep', repoRoot: root }, { home, ghPath: GH, nodePath: NODE,
+    repositoryReader: testRepository, mergedBinding: BINDING, now: () => new Date(tick += 1000), run: (...args) => { tick += 10000; return fake.run(...args); } });
+  assert.equal(receipt.status, 'ok'); assert.ok(receipt.footer_sweep_since); return receipt;
+}
+
+test('switch procedure: real status/apply OFF ON OFF ON carries actual main history past 48 hours', async t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+  fs.writeFileSync(path.join(root, '.git/config'), '[remote "origin"]\nurl = https://github.com/weijunswj/ai-agent-toolkit.git\n');
+  const real = require('../scripts/toolkit-governance-state.cjs'), cache = require('../scripts/toolkit-governance-binding.cjs');
+  const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
+  const registryPath = path.join(tasks.userStateDir(home), 'repository-governance.v1.json');
+  let tick = Date.parse('2026-11-05T00:00:00Z'), revision = 0, status;
+  t.mock.timers.enable({ apis: ['Date'], now: tick });
+  const now = () => { tick += 1000; t.mock.timers.setTime(tick); return new Date(tick); };
+  const deps = { identityReader, governance: { ...real, governanceState: root => real.governanceState(root, { registryPath, testOnly: true, now: now() }) },
+    readObservation: identity => windowsTasks.readTaskObservation(identity, home, now()) };
+  const output = [], errors = [], boundaries = [];
+  scheduler.onStart = live => {
+    const mode = live.arguments.includes(' footer-sweep ') ? 'footer-sweep' : 'programme-sweep';
+    const fake = fakeRun({ 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify(status) }, 'programme attention': ATTENTION });
+    boundaries.push(tasks.readLastRun(`toolkit-${mode}`, home)?.footer_sweep_since || null);
+    const record = job.runJob({ job: mode, repoRoot: root, taskId: `toolkit-${mode}` }, { home, now, ghPath: GH, nodePath: NODE,
+      readIdentity: real.readIdentity, repositoryReader: testRepository, readObservation: identity => windowsTasks.readTaskObservation(identity, home, now()),
+      run: (...args) => { tick += 10000; return fake.run(...args); } });
+    Object.assign(live, { last_run: record.started, last_result: 0, state: 'Ready' });
+  };
+  for (const state of ['off','on','off','on']) {
+    const identity = real.readIdentity(root), text = state === 'absent' ? null : JSON.stringify(fixtureBinding(undefined, 'TOOLKIT', state === 'on'));
+    cache.writeCache(tasks.userStateDir(home), { schema: cache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical,
+      default_branch: 'main', commit: String(++revision).repeat(40), fetched_at: now().toISOString(), status: text ? 'present' : 'absent', text,
+      bytes_sha256: text ? require('node:crypto').createHash('sha256').update(text).digest('hex') : null, problem: null });
+    let stdout = '';
+    const cli = new ToolkitGovernanceCli({ cwd: root, registryOptions: { registryPath, testOnly: true, home, now: now() }, refresh: () => ({ refreshed: true }),
+      discoveryGh: () => ({ ok: false, reason: 'fixture offline' }), hookReader: () => null, queueReader: () => null,
+      stdout: { write: value => { stdout += value; } }, stderr: { write: value => errors.push(value) } });
+    assert.equal(await cli.main(['status','--json']), 0); status = JSON.parse(stdout);
+    assert.equal(status.state, state === 'on' ? 'ENABLED' : state === 'off' ? 'DISABLED' : 'UNDECIDED');
+    const invoke = verb => windowsTasks.main([verb,'--repo-root',root,'--json'], { platform: 'win32', scheduler, home, now, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE,
+      checkoutDeps: deps, stdout: text => output.push(JSON.parse(text)), stderr: text => errors.push(text), firstRunOptions: { wait() {} } });
+    assert.equal(invoke('plan'), 0, errors.join(' ') + JSON.stringify(output.at(-1))); assert.ok(output.at(-1).next_step);
+    assert.equal(invoke('apply'), 0, errors.join(' ') + JSON.stringify(output.at(-1)));
+    const result = output.at(-1); assert.ok(result.items.every(i => i.done), JSON.stringify(result));
+    assert.equal(result.items.find(i => i.first_run)?.first_run.status, 'ok');
+    assert.deepEqual(tasks.readRegistry(home).tasks.map(e => e.job).sort(), state === 'on' ? ['programme-sweep','shard-timings'] : ['footer-sweep']);
+    assert.equal(scheduler.list('TOOLKIT').length, state === 'on' ? 2 : 1); assertLiveRegistry(home, scheduler);
+    if (revision === 2) { currentMainReceipt(home, root, now().toISOString()); tick += 4 * 24 * 60 * 60 * 1000; }
+  }
+  assert.ok(boundaries[2] && Date.parse(boundaries[2]) < tick - 48 * 60 * 60 * 1000, 'main pending boundary survives OFF');
+  assert.deepEqual(errors, []);
+});
+
+for (const from of ['programme-sweep','footer-sweep']) test(`interruption table: restart before/after every effect and read-back from ${from}`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+  const source = switchOffer(t, from, root), to = from === 'programme-sweep' ? 'footer-sweep' : 'programme-sweep', offer = switchOffer(t, to, root);
+  windowsTasks.applyTasks(source, { home, scheduler }); baseRun(t, home);
+  const snapshots = []; let capturing = false;
+  const capture = boundary => {
+    if (capturing) return;
+    capturing = true;
+    try { snapshots.push({ boundary, live: Object.fromEntries(structuredClone([...scheduler.folders])), entries: tasks.readRegistry(home).tasks,
+      records: Object.fromEntries(offer.definitions.map(d => [d.id, tasks.readLastRun(d.id, home)])) }); }
+    finally { capturing = false; }
+  };
+  // Observe the real atomic rename and its independent read-back inside updateRegistry,
+  // including the otherwise hidden write/read window. Snapshots never count their own reads.
+  const observedFiles = new Set([tasks.registryPath(home), ...offer.definitions.map(d => tasks.lastRunPath(d.id, home))]);
+  const pendingReadback = new Set(), rename = fs.renameSync, readFile = fs.readFileSync;
+  t.mock.method(fs, 'renameSync', function(from, to, ...args) {
+    const observed = observedFiles.has(to);
+    if (observed) capture('before atomic rename');
+    const result = rename.call(this, from, to, ...args);
+    if (observed) { capture('after atomic rename'); pendingReadback.add(to); }
+    return result;
+  });
+  t.mock.method(fs, 'readFileSync', function(file, ...args) {
+    if (capturing || !pendingReadback.delete(file)) return readFile.call(this, file, ...args);
+    capture('before persisted readback');
+    try { return readFile.call(this, file, ...args); } finally { capture('after persisted readback'); }
+  });
+  const wrap = (object, key) => { const original = object[key]; object[key] = (...args) => { capture('before ' + key); const result = original.apply(object, args); capture('after ' + key); return result; }; };
+  const registry = { ...tasks };
+  let tick = Date.parse('2026-11-05T00:00:00Z');
+  const now = () => new Date(tick += 1000);
+  scheduler.onStart = live => {
+    const definition = offer.definitions.find(d => d.name === live.name);
+    const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION });
+    const record = job.runJob({ job: definition.job, taskId: definition.id, repoRoot: root }, { home, now, ghPath: GH, nodePath: NODE,
+      repositoryReader: testRepository, readIdentity: READ_IDENTITY, readObservation: OBSERVATION, run: (...args) => { tick += 10000; return fake.run(...args); } });
+    Object.assign(live, { state: 'Ready', last_run: record.started, last_result: 0 });
+  };
+  for (const name of ['list','register','unregister','start','info']) wrap(scheduler, name);
+  for (const name of ['readRegistry','updateRegistry']) wrap(registry, name);
+  const owner = new windowsTasks.WindowsTaskOwner({ scheduler, registry, home, now, firstRunOptions: { wait() {} },
+    readRecord: id => { capture('before history read'); const result = tasks.readLastRun(id, home); capture('after history read'); return result; },
+    writeRecord: (id, record) => { capture('before atomic history write'); tasks.writeLastRun(id, record, home); capture('after atomic history write'); } });
+  const applied = owner.apply(offer); assert.ok(applied.items.every(i => i.done), JSON.stringify(applied));
+  assert.ok(snapshots.some(s => s.boundary === 'before atomic history write')); assert.ok(snapshots.some(s => s.boundary === 'after unregister'));
+  assert.ok(snapshots.some(s => s.boundary === 'before start')); assert.ok(snapshots.some(s => s.boundary === 'after info'));
+  assert.ok(snapshots.some(s => s.boundary === 'after atomic rename')); assert.ok(snapshots.some(s => s.boundary === 'before persisted readback'));
+  for (const snap of snapshots) {
+    const replayHome = tempHome(t), replay = fakeScheduler(snap.live); tasks.writeRegistry(replayHome, snap.entries);
+    for (const [id, record] of Object.entries(snap.records)) if (record) tasks.writeLastRun(id, record, replayHome);
+    const unrecorded = Object.values(snap.live).flat().some(l => !snap.entries.some(e => e.name === l.name));
+    const result = windowsTasks.applyTasks(offer, { home: replayHome, scheduler: replay, now: () => new Date('2026-11-06T00:00:00Z') });
+    if (unrecorded) {
+      assert.ok(result.items.every(i => i.action === 'refused'), snap.boundary); assert.ok(replay.calls.every(c => c[0] === 'list'));
+      assert.deepEqual([...replay.folders], Object.entries(snap.live)); assert.match(result.next_step, /inspection\/removal/);
+    } else {
+      assert.ok(result.items.every(i => i.done), snap.boundary + JSON.stringify(result));
+      assert.deepEqual(replay.list('TOOLKIT').map(t => t.name).sort(), to === 'programme-sweep' ? ['TOOLKIT - PROGRAMME SWEEP','TOOLKIT - SHARD TIMINGS'] : ['TOOLKIT - FOOTER SWEEP']);
+      assertLiveRegistry(replayHome, replay);
+    }
+    assert.equal(result.items.some(i => i.first_run?.status === 'ok'), false, 'interruption cannot invent a completed first run');
+    assert.ok(tasks.readRegistry(replayHome).tasks.every(e => !e.stopped_by_owner));
+  }
+});
+
+for (const task of ['programme-sweep','shard-timings']) for (const edit of ['action','trigger','settings']) test(`modified-task choice: ${task} ${edit} needs a scoped one-use answer`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), offer = switchOffer(t, 'programme-sweep', root);
+  windowsTasks.applyTasks(offer, { home, scheduler });
+  const live = scheduler.folders.get('TOOLKIT').find(l => l.name === windowsTasks.taskName('TOOLKIT', task));
+  if (edit === 'action') live.arguments += ' --owner-edit';
+  if (edit === 'trigger') live.triggers[0].start = '2026-11-05T10:30:00';
+  if (edit === 'settings') live.settings = { start_when_available: false };
+  const before = structuredClone([...scheduler.folders]);
+  const plan = windowsTasks.planTasks(offer, { home, scheduler }), item = plan.items.find(i => i.action === 'owner-choice-required');
+  assert.equal(item.choice.task, windowsTasks.taskId('TOOLKIT', task)); assert.ok(item.choice.changed.length); assert.ok(plan.next_step.includes('Keep your changes'));
+  const answer = { task: item.choice.task, observed: item.choice.fingerprint, answer_ref: 'owner-message:keep-1', outcome: 'keep' };
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: answer }).refused, true); assert.deepEqual([...scheduler.folders], before);
+  const recorded = tasks.readRegistry(home).tasks.find(e => e.id === answer.task);
+  assert.equal(recorded.task_choices[0].outcome, 'keep'); assert.deepEqual(recorded.task_choices[0].definition, item.observed);
+  assert.notDeepEqual(recorded.enrolled, windowsTasks.enrolledDefinition(live), 'keep never adopts edits');
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { ...answer, outcome: 'replace' } }).refused, true);
+  const replaced = windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { ...answer, answer_ref: 'owner-message:replace-2', outcome: 'replace' } });
+  assert.ok(replaced.items.every(i => i.done), JSON.stringify(replaced)); assertLiveRegistry(home, scheduler);
+  scheduler.folders.get('TOOLKIT').find(l => l.name === live.name).arguments += ' --later-edit';
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { ...answer, answer_ref: 'owner-message:replace-2', outcome: 'replace' } }).refused, true);
+  assert.equal(windowsTasks.applyTasks(switchOffer(t, 'footer-sweep', root), { home, scheduler, taskChoice: { ...answer, answer_ref: 'owner-message:new', outcome: 'replace' } }).refused, true);
+});
+
+test('choice flags cannot supply a missing exact observation or actual answer reference; hostile and corrupt metadata refuse', t => {
+  for (const args of [['--task-choice','replace'], ['--task-choice','keep','--task','toolkit-programme-sweep'], ['--observed','a'.repeat(64)], ['--task-choice','replace','--task','toolkit-programme-sweep','--observed','a'.repeat(64)]]) assert.throws(() => windowsTasks.parseArgs(['apply', ...args]), /choice needs/);
+  for (const row of hostile.cases(['line-breaks','continued-lines','invisible','quoting','free-text'])) assert.throws(() => windowsTasks.parseArgs(['apply','--task-choice','replace','--task',row.text,'--observed','a'.repeat(64),'--answer-ref','owner-message:1']));
+  const home = tempHome(t), scheduler = fakeScheduler(), offer = desired(t); windowsTasks.applyTasks(offer, { home, scheduler });
+  tasks.updateRegistry(home, rows => rows.map(e => ({ ...e, replaces: { cleaner: { id: 'other', job: 'footer-sweep', identity: 'a'.repeat(64) } } })));
+  const before = structuredClone([...scheduler.folders]);
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { outcome: 'replace', task: 'toolkit-programme-sweep', observed: 'a'.repeat(64), answer_ref: 'agent:unsupported-claim' } }).refused, true);
+  assert.deepEqual([...scheduler.folders], before);
+});
+
+for (const from of ['programme-sweep','footer-sweep']) for (const state of ['removed','disabled','stopped','running']) test(`whole switch: ${from} ${state} participant holds every effect`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), source = switchOffer(t, from, root); windowsTasks.applyTasks(source, { home, scheduler });
+  for (const participant of tasks.readRegistry(home).tasks) {
+    const saved = structuredClone([...scheduler.folders]), entries = tasks.readRegistry(home).tasks;
+    if (state === 'removed') scheduler.folders.set('TOOLKIT', scheduler.folders.get('TOOLKIT').filter(l => l.name !== participant.name));
+    if (state === 'disabled' || state === 'running') scheduler.folders.get('TOOLKIT').find(l => l.name === participant.name).state = state === 'disabled' ? 'Disabled' : 'Running';
+    if (state === 'stopped') tasks.updateRegistry(home, rows => rows.map(e => e.id === participant.id ? { ...e, stopped_by_owner: true, stopped_at: '2026-11-05T00:00:00.000Z' } : e));
+    const before = structuredClone([...scheduler.folders]); scheduler.calls.length = 0;
+    const result = windowsTasks.applyTasks(switchOffer(t, from === 'programme-sweep' ? 'footer-sweep' : 'programme-sweep', root), { home, scheduler, repairOwned: true });
+    assert.equal(result.refused, true, JSON.stringify(result)); assert.deepEqual([...scheduler.folders], before); assert.ok(scheduler.calls.every(c => c[0] === 'list'));
+    scheduler.folders.clear(); for (const [f, rows] of saved) scheduler.folders.set(f, rows); tasks.writeRegistry(home, entries);
+  }
+});
+
+test('Low 3/4: strict managed origin, changed-folder recovery and uncertain-plan next step', t => {
+  const request = { checkout: 'C:\\Repositories\\widget', toolkitRoot: TOOLKIT_ROOT, home: MEMORY_HOME };
+  const deps = { readFile: () => JSON.stringify({ repo_path: TOOLKIT_ROOT }), realpath: value => value, mainCheckout: value => value };
+  for (const remote of ['git@my-github-mirror:weijunswj/ai-agent-toolkit.git','ssh://git@github.com/weijunswj/ai-agent-toolkit.git','https://github.com.evil.test/weijunswj/ai-agent-toolkit']) assert.throws(() => windowsTasks.readLocations(request, { ...deps, run: () => ({ status: 0, stdout: remote }) }), /expected Toolkit/);
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), initial = desired(t, { root }); windowsTasks.applyTasks(initial, { home, scheduler });
+  const changed = desired(t, { root, folder: 'NEW' }); changed.folderOverride = null;
+  const result = windowsTasks.applyTasks(changed, { home, scheduler }); assert.equal(result.refused, true); assert.match(result.next_step, /folder changed from TOOLKIT to NEW/);
+  assert.match(windowsTasks.planTasks(desired(t, { root, state: 'ERROR' }), { home, scheduler }).next_step, /refresh governance status/i);
+});
+
+test('Low 5: actual cursor-free main receipt is silent, damaged/future records diagnose, earlier pending boundary wins', t => {
+  const home = tempHome(t), main = baseRun(t, home), at = new Date('2026-11-05T00:00:00Z'), expected = { id: main.id, job: main.job };
+  const cursorFree = { ...main }; delete cursorFree.footer_sweep_since;
+  assert.deepEqual(job.footerCursor(cursorFree, expected, 'weijunswj/ai-agent-toolkit', at), { since: '2026-11-03T00:00:00.000Z' });
+  for (const record of [{}, { ...main, footer_sweep_since: 'bad' }, { ...main, footer_sweep_since: '2099-01-01T00:00:00.000Z' }, { ...main, repository: 'other/repository' }]) assert.ok(job.footerCursor(record, expected, 'weijunswj/ai-agent-toolkit', at).note);
+  const root = checkout(t), scheduler = fakeScheduler(); windowsTasks.applyTasks(switchOffer(t, 'programme-sweep', root), { home, scheduler });
+  tasks.writeLastRun('toolkit-footer-sweep', { ...main, id: 'toolkit-footer-sweep', job: 'footer-sweep', footer_sweep_since: '2026-09-01T00:00:00.000Z' }, home);
+  const result = windowsTasks.applyTasks(switchOffer(t, 'footer-sweep', root), { home, scheduler, now: () => at }); assert.ok(result.items.every(i => i.done));
+  assert.equal(tasks.readLastRun('toolkit-footer-sweep', home).footer_sweep_since, '2026-09-01T00:00:00.000Z');
+  assert.equal(tasks.readLastRun('toolkit-footer-sweep', home).status, undefined); assert.deepEqual(tasks.readLastRun('toolkit-programme-sweep', home), main);
+});
+
+test('Low 6: unrelated folders list once per invocation, affected mutation guards remain fresh', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+  for (let i = 0; i < 30; i++) scheduler.folders.set('OTHER-' + i, [unmarked('Other', { description: '[toolkit-task v1 id=other-' + i + ' def=0123456789ab]' })]);
+  const offer = desired(t, { root }), started = performance.now();
+  for (let repeat = 0; repeat < 2; repeat++) {
+    scheduler.calls.length = 0; assert.ok(windowsTasks.applyTasks(offer, { home, scheduler }).items.every(i => i.done));
+    for (let i = 0; i < 30; i++) assert.equal(scheduler.calls.filter(c => c[0] === 'list' && c[1] === 'OTHER-' + i).length, 1);
+    assert.ok(scheduler.calls.filter(c => c[0] === 'list' && c[1] === 'TOOLKIT').length > 2);
+  }
+  const core = require('../scripts/setup-toolkit-core.cjs'); scheduler.calls.length = 0;
+  core.printWindowsTasks({ repoRoot: TOOLKIT_ROOT }, { platform: 'win32', scheduler, home, workingFolder: root,
+    checkoutDeps: { identityReader, reportCheckout: r => r, governance: governance() }, log() {} });
+  for (let i = 0; i < 30; i++) assert.equal(scheduler.calls.filter(c => c[0] === 'list' && c[1] === 'OTHER-' + i).length, 1, 'setup shares unrelated discovery across reports');
+  t.diagnostic('fake scheduler two-apply time: ' + (performance.now() - started).toFixed(1) + ' ms; real PowerShell timing is unverified');
+});
+
+test('closure stale enabled preserves main registration eligibility, but never authorises a shape switch', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+  const gov = governance(), old = gov.governanceState, observe = gov.readObservation;
+  gov.governanceState = () => ({ ...old(), merged: { status: 'enabled', fresh: false } });
+  gov.readObservation = () => ({ ...observe(), fresh: false });
+  const offer = windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, home, deps: { identityReader, governance: gov } });
+  assert.ok(windowsTasks.applyTasks(offer, { home, scheduler }).items.every(i => i.done)); assertLiveRegistry(home, scheduler);
+  const other = tempHome(t), source = fakeScheduler(); windowsTasks.applyTasks(switchOffer(t, 'footer-sweep', root), { home: other, scheduler: source });
+  const before = structuredClone([...source.folders]);
+  assert.equal(windowsTasks.applyTasks(offer, { home: other, scheduler: source }).refused, true); assert.deepEqual([...source.folders], before);
+});
+
+test('closure matrix: intact P with never-enrolled S creates S or switches OFF without inventing a stop', t => {
+  for (const next of ['programme-sweep','footer-sweep']) {
+    const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), on = switchOffer(t, 'programme-sweep', root);
+    windowsTasks.applyTasks(on, { home, scheduler }); baseRun(t, home);
+    // A historical P-only enrolment has no missing S enrolment, so it is not an owner stop.
+    scheduler.folders.set('TOOLKIT', scheduler.folders.get('TOOLKIT').filter(l => !l.name.endsWith('SHARD TIMINGS')));
+    tasks.updateRegistry(home, rows => rows.filter(e => e.job !== 'shard-timings'));
+    const result = windowsTasks.applyTasks(switchOffer(t, next, root), { home, scheduler });
+    assert.ok(result.items.every(i => i.done), JSON.stringify(result)); assertLiveRegistry(home, scheduler);
+    assert.deepEqual(tasks.readRegistry(home).tasks.map(e => e.job).sort(), next === 'programme-sweep' ? ['programme-sweep','shard-timings'] : ['footer-sweep']);
+    if (next === 'programme-sweep') assert.equal(result.items.find(i => i.definition.job === 'shard-timings').action, 'create');
+  }
+});
+
+test('modified-task answer is bound to governance revision even when binding and native definition are identical', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), gov = governance(); let revision = 'a'.repeat(40);
+  const status = gov.governanceState, observation = gov.readObservation;
+  gov.governanceState = () => { const s = status(); return { ...s, merged: { ...s.merged, commit: revision } }; };
+  gov.readObservation = () => ({ ...observation(), commit: revision });
+  const offer = () => windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, home, deps: { identityReader, governance: gov } });
+  windowsTasks.applyTasks(offer(), { home, scheduler }); scheduler.folders.get('TOOLKIT')[0].arguments += ' --owner-edit';
+  const choice = windowsTasks.planTasks(offer(), { home, scheduler }).items.find(i => i.choice).choice;
+  const before = structuredClone([...scheduler.folders]); revision = 'b'.repeat(40);
+  assert.equal(windowsTasks.applyTasks(offer(), { home, scheduler, taskChoice: { outcome: 'replace', task: choice.task, observed: choice.fingerprint, answer_ref: 'owner-message:previous-revision' } }).refused, true);
+  assert.deepEqual([...scheduler.folders], before);
+});
+
+test('interrupted proven pair follows a new governance decision and preserves newly observed owner edits/stops', t => {
+  for (const from of ['programme-sweep','footer-sweep']) {
+    const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), first = switchOffer(t, from, root);
+    windowsTasks.applyTasks(first, { home, scheduler });
+    let snap;
+    const registry = { ...tasks, updateRegistry(...args) {
+      const result = tasks.updateRegistry(...args), entries = tasks.readRegistry(home).tasks;
+      if (!snap && entries.filter(e => ['programme-sweep','footer-sweep'].includes(e.job)).length === 2) snap = { entries, live: Object.fromEntries(structuredClone([...scheduler.folders])) };
+      return result;
+    } };
+    windowsTasks.applyTasks(switchOffer(t, from === 'programme-sweep' ? 'footer-sweep' : 'programme-sweep', root), { home, scheduler, registry });
+    assert.ok(snap);
+    for (const stop of [false, true]) {
+      const replayHome = tempHome(t), replay = fakeScheduler(snap.live); tasks.writeRegistry(replayHome, snap.entries);
+      if (stop) replay.folders.get('TOOLKIT')[0].state = 'Disabled';
+      const before = structuredClone([...replay.folders]);
+      const result = windowsTasks.applyTasks(first, { home: replayHome, scheduler: replay });
+      if (stop) { assert.equal(result.refused, true); assert.deepEqual([...replay.folders], before); }
+      else { assert.ok(result.items.every(i => i.done), JSON.stringify(result)); assertLiveRegistry(replayHome, replay); assert.deepEqual(tasks.readRegistry(replayHome).tasks.map(e => e.job).sort(), from === 'programme-sweep' ? ['programme-sweep','shard-timings'] : ['footer-sweep']); }
+    }
+  }
+});
+
+test('retirement-only restart never starts the retired source or invents destination first-run verification', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), source = switchOffer(t, 'programme-sweep', root);
+  windowsTasks.applyTasks(source, { home, scheduler }); let pair;
+  const registry = { ...tasks, updateRegistry(...args) {
+    const result = tasks.updateRegistry(...args), entries = tasks.readRegistry(home).tasks;
+    if (!pair && entries.some(e => e.job === 'footer-sweep')) pair = { entries, live: Object.fromEntries(structuredClone([...scheduler.folders])) };
+    return result;
+  } };
+  const off = switchOffer(t, 'footer-sweep', root); windowsTasks.applyTasks(off, { home, scheduler, registry }); assert.ok(pair);
+  const replayHome = tempHome(t), replay = fakeScheduler(pair.live); tasks.writeRegistry(replayHome, pair.entries);
+  const result = windowsTasks.applyTasks(off, { home: replayHome, scheduler: replay, firstRunOptions: { wait() {}, waitMs: 0, pollMs: 1 } });
+  assert.ok(result.items.every(i => i.done)); assertLiveRegistry(replayHome, replay);
+  assert.equal(replay.calls.some(c => c[0] === 'start'), false);
+  assert.equal(result.items.some(i => i.first_run), false);
+});
+
+test('footer lock defers with no effects and is released before a racing destination first run', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(); windowsTasks.applyTasks(switchOffer(t, 'footer-sweep', root), { home, scheduler });
+  const offer = switchOffer(t, 'programme-sweep', root), before = structuredClone([...scheduler.folders]); let count = 0;
+  const held = windowsTasks.applyTasks(offer, { home, scheduler, takeLock: () => ++count === 1 ? { release() {} } : null });
+  assert.equal(held.refused, true); assert.match(held.next_step, /retry apply/); assert.deepEqual([...scheduler.folders], before);
+  let footerHeld = false;
+  scheduler.onStart = task => { assert.equal(footerHeld, false); task.last_run = new Date().toISOString(); task.state = 'Running'; };
+  const result = windowsTasks.applyTasks(offer, { home, scheduler, takeLock: file => { if (file.includes('footer-')) footerHeld = true; return { release() { if (file.includes('footer-')) footerHeld = false; } }; }, firstRunOptions: { wait() {}, waitMs: 0, pollMs: 1 } });
+  assert.equal(result.items.find(i => i.first_run).first_run.status, 'still running'); assertLiveRegistry(home, scheduler);
+});
+
+test('multiple modified governance tasks require distinct answers for each exact task', t => {
+  const home = tempHome(t), scheduler = fakeScheduler(), offer = desired(t); windowsTasks.applyTasks(offer, { home, scheduler });
+  scheduler.folders.get('TOOLKIT').forEach(l => { l.arguments += ' --owner-edit'; });
+  const plan = windowsTasks.planTasks(offer, { home, scheduler });
+  const answers = plan.items.map((i, index) => ({ task: i.definition.id, observed: i.choice.fingerprint, outcome: 'replace', answer_ref: `owner-message:${index}` }));
+  const before = structuredClone([...scheduler.folders]);
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: answers[0] }).refused, true); assert.deepEqual([...scheduler.folders], before);
+  const args = ['apply', ...answers.flatMap(a => ['--task-choice',a.outcome,'--task',a.task,'--observed',a.observed,'--answer-ref',a.answer_ref])];
+  assert.deepEqual(windowsTasks.parseArgs(args).taskChoices, answers);
+  assert.ok(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: answers }).items.every(i => i.done)); assertLiveRegistry(home, scheduler);
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: answers }).refused, true, 'unused/reused answers refuse even when definitions are current');
+});
+
+test('answered modified P/S switch retires both without owner stops and retains the consumed answer references', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(); windowsTasks.applyTasks(switchOffer(t, 'programme-sweep', root), { home, scheduler });
+  scheduler.folders.get('TOOLKIT').forEach(l => { l.arguments += ' --owner-edit'; });
+  const off = switchOffer(t, 'footer-sweep', root), plan = windowsTasks.planTasks(off, { home, scheduler });
+  const answers = plan.items.filter(i => i.choice).map((i, index) => ({ task: i.definition.id, observed: i.choice.fingerprint, outcome: 'replace', answer_ref: `owner-message:switch-${index}` }));
+  assert.equal(answers.length, 2);
+  const result = windowsTasks.applyTasks(off, { home, scheduler, taskChoice: answers });
+  assert.ok(result.items.every(i => i.done), JSON.stringify(result)); assertLiveRegistry(home, scheduler);
+  const entries = tasks.readRegistry(home).tasks; assert.equal(entries.length, 1); assert.equal(entries[0].job, 'footer-sweep');
+  assert.deepEqual(entries[0].task_choices.map(c => c.answer_ref).sort(), answers.map(a => a.answer_ref).sort());
+  assert.equal(windowsTasks.applyTasks(off, { home, scheduler, taskChoice: answers }).refused, true);
+});
+
+test('history interruption keeps the real source receipt and retries a damaged destination with a diagnostic', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), source = switchOffer(t, 'programme-sweep', root);
+  windowsTasks.applyTasks(source, { home, scheduler }); const receipt = baseRun(t, home);
+  const offer = switchOffer(t, 'footer-sweep', root);
+  assert.throws(() => windowsTasks.applyTasks(offer, { home, scheduler, writeRecord(id) { tasks.writeLastRun(id, {}, home); throw new Error('interrupted history write'); } }), /interrupted history/);
+  assert.deepEqual(tasks.readLastRun(receipt.id, home), receipt); assert.equal(scheduler.list('TOOLKIT').length, 2);
+  const result = windowsTasks.applyTasks(offer, { home, scheduler, now: () => new Date('2026-11-05T00:00:00Z') });
+  assert.ok(result.items.every(i => i.done)); assert.ok(result.history_notes.length);
+  assert.equal(tasks.readLastRun('toolkit-footer-sweep', home).footer_sweep_since, receipt.footer_sweep_since);
+});
+
+for (const change of ['origin','binding folder','checkout','Toolkit location','native definition']) test(`switch guard rechecks ${change} between preview and locked effect`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), source = switchOffer(t, 'programme-sweep', root);
+  windowsTasks.applyTasks(source, { home, scheduler });
+  const offer = switchOffer(t, 'footer-sweep', root), before = structuredClone([...scheduler.folders]);
+  const gov = offer.checkoutDeps.governance, originalObservation = gov.readObservation;
+  let locks = 0, result, failure; scheduler.calls.length = 0;
+  try { result = windowsTasks.applyTasks(offer, { home, scheduler, takeLock() {
+    if (++locks === 1) {
+      if (change === 'origin') gov.readIdentity = root => ({ valid: true, root, remote: { host: 'github.com', path: '/other/repository.git' } });
+      if (change === 'binding folder') gov.readObservation = () => ({ ...originalObservation(), binding: fixtureBinding(undefined, 'OTHER', false) });
+      if (change === 'checkout' || change === 'Toolkit location') tasks.updateRegistry(home, rows => rows.map(e => ({ ...e, [change === 'checkout' ? 'checkout' : 'toolkit_root']: 'C:\\Moved\\checkout' })));
+      if (change === 'native definition') scheduler.folders.get('TOOLKIT')[0].arguments += ' --concurrent-owner-edit';
+    }
+    return { release() {} };
+  } }); } catch (error) { failure = error; }
+  if (failure) { assert.equal(change, 'origin'); assert.match(failure.message, /origin identity and merged binding/); }
+  else assert.equal(result.refused, true);
+  assert.ok(scheduler.calls.every(c => c[0] === 'list'));
+  if (change !== 'native definition') assert.deepEqual([...scheduler.folders], before);
+  else assert.equal(scheduler.list('TOOLKIT').filter(l => /FOOTER/.test(l.name)).length, 0);
+});
+
+test('repository removal: shared folder preserves repository B definitions and registry entries byte for byte', t => {
+  const home = tempHome(t), a = checkout(t), b = checkout(t), scheduler = fakeScheduler(), scope = desired(t, { root: a }); windowsTasks.applyTasks(scope, { home, scheduler });
+  const foreign = tasks.readRegistry(home).tasks.map((e, index) => ({ ...e, id: e.id.replace('toolkit-', 'other-'), name: e.name.replace('TOOLKIT -', 'OTHER -'), repository: index ? 'example/other' : scope.repository, checkout: b }));
+  tasks.writeRegistry(home, [...tasks.readRegistry(home).tasks, ...foreign]); for (const e of foreign) scheduler.folders.get('TOOLKIT').push(unmarked(e.name));
+  const before = structuredClone(scheduler.folders.get('TOOLKIT').filter(l => l.name.startsWith('OTHER')));
+  assert.equal(windowsTasks.removeTasks({ scope, home, scheduler }).items.length, 2);
+  assert.deepEqual(tasks.readRegistry(home).tasks.filter(e => e.id.startsWith('other-')), foreign);
+  assert.deepEqual(scheduler.folders.get('TOOLKIT').filter(l => l.name.startsWith('OTHER')), before);
+  assert.throws(() => windowsTasks.removeTasks({ home, scheduler }), /verified repository main checkout/);
+});
+
 // Disposable-folder qualification, gated by separate owner permission. The installed candidate
 // runner executes repeatedly with fake processes and an isolated home; no real GitHub route exists.
 test('real Task Scheduler: disposable repeated cleaner qualification', { skip: process.platform !== 'win32' || process.env.TOOLKIT_REAL_TASK_SCHEDULER_TEST !== '1' ? 'requires owner approval for disposable scheduler mutations' : false }, t => {
@@ -1629,12 +2014,16 @@ test('real Task Scheduler: disposable repeated cleaner qualification', { skip: p
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-qualification-home-')), root = checkout(t, { shards: false });
   const runner = path.join(root, 'qualified-job.cjs');
   const repository = `qualification/cleaner-${process.pid}`;
+  const knownDefinitions = new Map();
+  let qualificationComplete = false;
   const binding = fixtureBinding(repository, folder);
   const events = path.join(home, 'events.jsonl');
   const failureFile = path.join(home, 'fail-footer');
+  const pauseFile = path.join(home, 'pause-runner');
   const clockFile = path.join(home, 'clock'); fs.writeFileSync(clockFile, String(Date.now()));
   fs.writeFileSync(runner, `const fs=require('node:fs');const j=require(${JSON.stringify(path.join(ROOT, 'repo/scripts/toolkit-scheduled-job.cjs'))});
 const options=j.parseArgs(process.argv.slice(2));
+while(fs.existsSync(${JSON.stringify(pauseFile)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);
 const now=()=>{const value=Math.max(Date.now(),Number(fs.readFileSync(${JSON.stringify(clockFile)},'utf8'))+1);fs.writeFileSync(${JSON.stringify(clockFile)},String(value));return new Date(value);};
 const record=j.runJob(options,{home:${JSON.stringify(home)},ghPath:'fake-gh',nodePath:process.execPath,
 repositoryReader:root=>root===${JSON.stringify(root)} && fs.existsSync(root),
@@ -1651,12 +2040,11 @@ if(args[0]===j.SCRIPT.governance)return ${JSON.stringify(GOVERNED)};if(args[1]==
     gov.readIdentity = target => target === root ? read(target) : realGovernance.readIdentity(target);
     const desired = windowsTasks.desiredTasks({ checkout: root, folder, toolkitRoot: ROOT, nodePath: process.execPath, home,
       deps: { identityReader: location, governance: gov } });
-    desired.definitions = desired.definitions.filter(d => d.job !== 'shard-timings');
-    desired.wanted = desired.wanted.filter(d => d.job === mode);
     for (const d of desired.definitions) {
       const digest = d.def;
       d.arguments = `--headless "${process.execPath}" "${runner}" ${d.job} --repo-root "${root}" --task-id ${d.id}`;
       d.def = windowsTasks.definitionDigest(d); d.description = d.description.replace(digest, d.def);
+      knownDefinitions.set(d.id, d);
     }
     return desired;
   };
@@ -1668,25 +2056,34 @@ if(args[0]===j.SCRIPT.governance)return ${JSON.stringify(GOVERNED)};if(args[1]==
     assert.equal(result.status, 0, result.stderr);
   };
   t.after(() => {
-    for (const mode of ['programme-sweep', 'footer-sweep']) {
-      const modeHome = path.join(home, mode);
+    for (const mode of ['programme-sweep', 'footer-sweep', null]) {
+      const modeHome = mode ? path.join(home, mode) : home;
       for (const row of tasks.readRegistry(modeHome).tasks || []) {
         const live = scheduler.list(folder).find(task => task.name === row.name);
         if (live?.state === 'Running' && windowsTasks.parseMarker(live.description)?.id === row.id) native('Stop-ScheduledTask', row.name);
       }
-      const result = windowsTasks.removeTasks({ folder, scheduler, home: modeHome });
+      const result = windowsTasks.removeTasks({ scope: desiredFor('programme-sweep'), folder, scheduler, home: modeHome });
       assert.ok(result.items.every(row => row.action === 'removed' || row.action.startsWith('stopped by owner')));
+    }
+    // A denied/killed registration may be unrecorded. Only this occupied-folder-checked test's
+    // exact known definitions are eligible for separately authorised disposable cleanup.
+    for (const live of scheduler.list(folder)) {
+      const marker = windowsTasks.parseMarker(live.description);
+      assert.ok(marker && knownDefinitions.get(marker.id)?.name === live.name);
+      if (live.state === 'Running') native('Stop-ScheduledTask', live.name);
+      scheduler.unregister(folder, live.name, marker.id, scheduler.list(folder).find(l => l.name === live.name));
     }
     assert.deepEqual(scheduler.list(folder), []);
     for (const [name, rows] of before) assert.deepEqual(snapshot(name), rows, 'unrelated installed definitions unchanged');
-    fs.rmSync(home, { recursive: true, force: true });
+    if (qualificationComplete) fs.rmSync(home, { recursive: true, force: true });
+    else t.diagnostic(`Qualification failed; evidence retained at ${home}. Disposable task cleanup was verified.`);
   });
-  // Separate local registries preserve each shape's stops without ever converting an enrolment.
+  // Separate registries exercise lasting owner stops and same-job repair before the switch sequence.
   for (const mode of ['programme-sweep', 'footer-sweep']) {
     const modeHome = path.join(home, mode); fs.mkdirSync(modeHome);
     const desired = desiredFor(mode);
     const deps = { scheduler, home: modeHome, identityReader: location, firstRunOptions: { home } };
-    const legacy = { ...desired, wanted: desired.wanted.map(d => ({ ...d, schedule: { kind: 'hourly', at: '08:00', hours: 16 }, schedule_text: 'hourly, 08:00 to 23:59' })) };
+    const legacy = { ...desired, wanted: desired.wanted.map(d => d.job === 'shard-timings' ? d : ({ ...d, schedule: { kind: 'hourly', at: '08:00', hours: 16 }, schedule_text: 'hourly, 08:00 to 23:59' })) };
     for (const d of legacy.wanted) { const digest = d.def; d.def = windowsTasks.definitionDigest(d); d.description = d.description.replace(digest, d.def); }
     assert.equal(windowsTasks.applyTasks(legacy, { ...deps, firstRunOptions: null }).items[0].done, true);
     const applied = windowsTasks.applyTasks(desired, deps);
@@ -1707,7 +2104,7 @@ if(args[0]===j.SCRIPT.governance)return ${JSON.stringify(GOVERNED)};if(args[1]==
     const calls = fs.readFileSync(events, 'utf8').trim().split(/\r?\n/).map(JSON.parse).filter(row => row.id === d.id);
     assert.ok(calls.filter(row => row.args[0] === job.SCRIPT.footerSweep).length >= 2);
     assert.equal(windowsTasks.applyTasks(desired, { ...deps, firstRunOptions: null }).items[0].action, 'current');
-    const removed = windowsTasks.removeTasks({ folder, scheduler, home: modeHome });
+    const removed = windowsTasks.removeTasks({ scope: desired, folder, scheduler, home: modeHome });
     assert.equal(removed.items[0].action, 'removed');
     assert.equal(windowsTasks.applyTasks(desired, deps).items[0].action, 'refused');
     const repaired = windowsTasks.applyTasks(desired, { ...deps, repairOwned: true, firstRunOptions: null });
@@ -1716,6 +2113,104 @@ if(args[0]===j.SCRIPT.governance)return ${JSON.stringify(GOVERNED)};if(args[1]==
     native('Disable-ScheduledTask', d.name);
     assert.equal(windowsTasks.applyTasks(desired, deps).items[0].action, 'refused');
     assert.match(tasks.formatList(tasks.listTasks({ home: modeHome, scheduler, platform: 'win32', folderFor: () => folder })), /Disabled/);
-    windowsTasks.removeTasks({ folder, scheduler, home: modeHome });
+    windowsTasks.removeTasks({ scope: desired, folder, scheduler, home: modeHome });
   }
+  // The same real native folder and registry change shape OFF/ON/OFF/ON. The managed runner
+  // writes each real result; fake GitHub processes stay inside the generated qualification runner.
+  for (const mode of ['footer-sweep','programme-sweep','footer-sweep','programme-sweep']) {
+    const offer = desiredFor(mode), old = tasks.readRegistry(home).tasks.find(e => e.job !== mode && ['programme-sweep','footer-sweep'].includes(e.job));
+    const boundary = old && tasks.readLastRun(old.id, home)?.footer_sweep_since;
+    const adapter = { ...scheduler, start(f, name) {
+      if (boundary) assert.ok(Date.parse(tasks.readLastRun(windowsTasks.taskId(folder, mode), home).footer_sweep_since) <= Date.parse(boundary));
+      scheduler.start(f, name);
+    } };
+    const applied = windowsTasks.applyTasks(offer, { scheduler: adapter, home, identityReader: location, firstRunOptions: { home } });
+    assert.ok(applied.items.every(i => i.done), JSON.stringify(applied));
+    assert.equal(applied.items.find(i => i.first_run)?.first_run.status, 'ok'); assertLiveRegistry(home, scheduler);
+    assert.deepEqual(tasks.readRegistry(home).tasks.map(e => e.job).sort(), mode === 'programme-sweep' ? ['programme-sweep','shard-timings'] : ['footer-sweep']);
+  }
+  // Real native definition changes use the same enrolled baseline and one-use answer path.
+  const on = desiredFor('programme-sweep'), d = on.definitions.find(d => d.job === 'programme-sweep');
+  for (const changed of on.definitions.filter(d => d.job !== 'footer-sweep')) {
+    scheduler.register({ ...changed, schedule: { ...changed.schedule, at: '01:00' } }, scheduler.list(folder).find(l => l.name === changed.name));
+    const choice = windowsTasks.planTasks(on, { scheduler, home, identityReader: location }).items.find(i => i.action === 'owner-choice-required'); assert.ok(choice);
+    const answer = { task: changed.id, observed: choice.choice.fingerprint, outcome: 'keep', answer_ref: `qualification:${changed.job}:simulated-owner-keep` };
+    assert.equal(windowsTasks.applyTasks(on, { scheduler, home, identityReader: location, taskChoice: answer }).refused, true);
+    const replaced = windowsTasks.applyTasks(on, { scheduler, home, identityReader: location, taskChoice: { ...answer, outcome: 'replace', answer_ref: `qualification:${changed.job}:simulated-owner-replace` }, firstRunOptions: { home } });
+    assert.ok(replaced.items.every(i => i.done)); assertLiveRegistry(home, scheduler);
+    assert.equal(windowsTasks.applyTasks(on, { scheduler, home, identityReader: location, taskChoice: answer }).refused, true);
+  }
+  fs.writeFileSync(pauseFile, 'qualification latch'); scheduler.start(folder, d.name);
+  const waitReady = name => {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (scheduler.info(folder, name)?.state !== 'Running') return;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+    }
+    assert.fail('disposable task is still running; preserve evidence and clean up its exact folder');
+  };
+  try {
+    let running = false;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (scheduler.info(folder, d.name)?.state === 'Running') { running = true; break; }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+    }
+    assert.equal(running, true);
+    const beforeSwitch = snapshot(folder);
+    assert.equal(windowsTasks.applyTasks(desiredFor('footer-sweep'), { scheduler, home, identityReader: location }).refused, true);
+    assert.deepEqual(snapshot(folder), beforeSwitch);
+  } finally { fs.unlinkSync(pauseFile); }
+  waitReady(d.name);
+  // Faults leave the native result in place, exactly as a stopped process would. There is no
+  // cross-shape rollback. A native/registry gap needs the test's separately authorised exact cleanup.
+  for (const target of ['footer-sweep','programme-sweep']) for (const point of ['history','register','destination-readback','enrolment','unregister','cleanup','shards','start','result-readback']) for (const side of ['before','after']) {
+    const sourceMode = target === 'footer-sweep' ? 'programme-sweep' : 'footer-sweep';
+    const sourceOffer = desiredFor(sourceMode);
+    assert.ok(windowsTasks.applyTasks(sourceOffer, { scheduler, home, identityReader: location }).items.every(i => i.done));
+    for (const row of scheduler.list(folder)) if (row.state === 'Running') waitReady(row.name);
+    const offer = desiredFor(target); let fired = false, registered = false, removed = false;
+    const at = (label, when) => { if (!fired && point === label && side === when) { fired = true; throw new Error(`qualification interruption ${label} ${when}`); } };
+    const around = (label, effect) => { at(label, 'before'); const result = effect(); at(label, 'after'); return result; };
+    const adapter = { ...scheduler,
+      register(def, old) { return around(def.job === 'shard-timings' ? 'shards' : 'register', () => { const result = scheduler.register(def, old); if (def.job === target) registered = true; return result; }); },
+      list(f) { return registered ? around('destination-readback', () => scheduler.list(f)) : scheduler.list(f); },
+      unregister(f, name, id, old) { return around(id.endsWith('shard-timings') ? 'shards' : 'unregister', () => { const result = scheduler.unregister(f, name, id, old); if (!id.endsWith('shard-timings')) removed = true; return result; }); },
+      start: (f, name) => around('start', () => scheduler.start(f, name)),
+      info: (f, name) => around('result-readback', () => scheduler.info(f, name)),
+    };
+    const registry = { ...tasks, updateRegistry: (...args) => around(removed ? 'cleanup' : 'enrolment', () => tasks.updateRegistry(...args)) };
+    let result;
+    try { result = windowsTasks.applyTasks(offer, { scheduler: adapter, registry, home, identityReader: location,
+      writeRecord: (id, record) => around('history', () => tasks.writeLastRun(id, record, home)), firstRunOptions: { home } }); }
+    catch (error) { assert.match(error.message, /qualification interruption/); }
+    assert.equal(fired, true, `${target} ${point} ${side} was exercised`);
+    assert.ok(!result || result.refused || result.items.some(i => i.done === false || i.first_run?.status === 'failed'));
+    const saved = tasks.readRegistry(home);
+    for (const live of scheduler.list(folder)) {
+      if (live.state === 'Running') waitReady(live.name);
+      if (saved.tasks.some(e => e.name === live.name)) continue;
+      const marker = windowsTasks.parseMarker(live.description);
+      assert.ok(marker && offer.definitions.some(def => def.id === marker.id && def.name === live.name));
+      assert.equal(windowsTasks.applyTasks(offer, { scheduler, home, identityReader: location }).refused, true, 'never take over an unrecorded native write');
+      scheduler.unregister(folder, live.name, marker.id, scheduler.list(folder).find(l => l.name === live.name));
+    }
+    const resumed = windowsTasks.applyTasks(offer, { scheduler, home, identityReader: location });
+    assert.ok(resumed.items.every(i => i.done), JSON.stringify(resumed)); assertLiveRegistry(home, scheduler);
+  }
+  // A second repository in the same disposable folder must survive A's removal unchanged.
+  const otherRoot = checkout(t, { shards: false }), otherRepo = 'qualification/other';
+  const other = { ...desiredFor('programme-sweep').definitions.find(d => d.job === 'programme-sweep'),
+    id: 'qualification-other-programme-sweep', name: `${folder} - OTHER PROGRAMME SWEEP`, repository: otherRepo, checkout: otherRoot };
+  other.arguments = other.arguments.replace(root, otherRoot).replace(/--task-id [a-z0-9-]+$/, '--task-id ' + other.id);
+  other.def = windowsTasks.definitionDigest(other); other.description = `Qualification other [toolkit-task v1 id=${other.id} def=${other.def}]`;
+  knownDefinitions.set(other.id, other); scheduler.register(other);
+  const otherLive = scheduler.list(folder).find(l => l.name === other.name), template = tasks.readRegistry(home).tasks.find(e => e.job === 'programme-sweep');
+  const otherEntry = { ...template, id: other.id, name: other.name, repository: otherRepo, checkout: otherRoot, definition: other.def, enrolled: windowsTasks.enrolledDefinition(otherLive) };
+  delete otherEntry.replaces; delete otherEntry.task_choices;
+  tasks.updateRegistry(home, rows => [...rows, otherEntry]);
+  assert.ok(windowsTasks.removeTasks({ scope: desiredFor('programme-sweep'), folder, scheduler, home }).items.every(i => i.action === 'removed'));
+  assert.deepEqual(scheduler.list(folder).find(l => l.name === other.name), otherLive);
+  assert.deepEqual(tasks.readRegistry(home).tasks.find(e => e.id === other.id), otherEntry);
+  const otherScope = windowsTasks.desiredTasks({ checkout: otherRoot, folder, toolkitRoot: ROOT, nodePath: process.execPath, home, deps: { identityReader: request => request, governance: governance({ repository: otherRepo, folder }) } });
+  assert.equal(windowsTasks.removeTasks({ scope: otherScope, folder, scheduler, home }).items[0].action, 'removed');
+  qualificationComplete = true;
 });

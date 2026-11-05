@@ -12,7 +12,7 @@
 // one fails. The baseline only shrinks: `--prune-baseline` drops entries that no longer occur, and
 // nothing here adds entries.
 //
-// Usage: node repo/scripts/check-plain-references.cjs [--root <dir>] [--prune-baseline] [--files <path>...]
+// Usage: node repo/scripts/check-plain-references.cjs [--root <dir>] [--prune-baseline | --migrate-baseline] [--files <path>...]
 
 const path = require('node:path');
 const portable = require('../../skills/secure-ci-cd/scripts/plain-text-check.cjs');
@@ -31,21 +31,29 @@ const scan = (root) => portable.scanFiles(root, listScopedFiles(root), CONFIG);
 const check = (root, options = {}) => portable.check(root, CONFIG, { spawn: noGit, ...options });
 const describeFailure = (finding) => portable.describeFailure(finding, CONFIG);
 const pruneBaseline = (root) => portable.pruneBaseline(root, CONFIG, { spawn: noGit });
+const migrateBaseline = (root) => portable.migrateBaseline(root, CONFIG);
 
 function parseArgs(argv) {
-  const args = { root: process.cwd(), prune: false, files: null };
+  const args = { root: process.cwd(), prune: false, migrate: false, files: null };
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === '--root') args.root = argv[++index];
     else if (argv[index] === '--prune-baseline') args.prune = true;
+    else if (argv[index] === '--migrate-baseline') args.migrate = true;
     else if (argv[index] === '--files') { args.files = argv.slice(index + 1); break; }
     else throw new Error(`Unknown argument: ${argv[index]}`);
   }
+  if ((args.prune && args.migrate) || ((args.prune || args.migrate) && args.files)) throw new Error('Choose one baseline write mode, without --files.');
   args.root = path.resolve(args.root);
   return args;
 }
 
 function run(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
+  if (args.migrate) {
+    const result = migrateBaseline(args.root);
+    console.log(`Plain-references baseline uses fingerprints (${result.entries} entries); allowances unchanged.`);
+    return 0;
+  }
   if (args.prune) {
     const result = pruneBaseline(args.root);
     console.log(`Plain-references baseline pruned: ${result.removed} entr${result.removed === 1 ? 'y' : 'ies'} removed, ${result.kept} kept.`);
@@ -55,7 +63,7 @@ function run(argv = process.argv.slice(2)) {
 }
 
 if (require.main === module) {
-  try { process.exitCode = run(); } catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 1; }
+  try { process.exitCode = run(); } catch (error) { console.error(`Could not check: ${error instanceof portable.CheckError ? error.message : 'invalid command or internal error'}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ BASELINE_REL, CONFIG, RULES, inScope, listScopedFiles, findReferences, scan, check, describeFailure, pruneBaseline });
+module.exports = Object.freeze({ BASELINE_REL, CONFIG, RULES, inScope, listScopedFiles, findReferences, scan, check, describeFailure, pruneBaseline, migrateBaseline });
