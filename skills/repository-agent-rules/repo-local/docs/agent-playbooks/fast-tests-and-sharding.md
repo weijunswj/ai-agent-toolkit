@@ -26,6 +26,8 @@ Use when tests or CI got slow, or when adding a test runner, test shards or CI t
 
 ## Shard From One Manifest
 
+A generated weekly refresh PR is a candidate. G0 checks its source run, trigger and unchanged budgets. A fresh G1 owns verification and records the classifier's tier, currently RISKY for the shard manifest. Agent UAT verifies exact-head CI coverage on Linux and Windows. Owner UAT is NOT_REQUIRED for manifest-only redistribution because both CI systems exercise the entire changed surface. Full G2 precedes merge. Budget or generator changes need their own impact assessment.
+
 - One manifest lists named shards per system and one `rest` shard per system that takes every file no other shard names, so new files always run.
 - The runner refuses an unknown or empty shard and fails when a file does not load. CI and local runs read the same manifest.
 - One final job waits for every shard, runs even when one failed, and passes only when every shard succeeded and the shard summaries cover plain test discovery exactly once per system, with at least one test per file and no failure or cancellation. Make that job the required check.
