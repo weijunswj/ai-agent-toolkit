@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 const check = require('../../skills/secure-ci-cd/scripts/plain-text-check.cjs');
 const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
 
@@ -16,6 +17,7 @@ const INSTALLER = path.join(ROOT, 'skills', 'secure-ci-cd', 'scripts', 'install-
 const HASH = '#';
 const CODE = 'Q' + '7';
 const GITHUB = 'https://' + 'github.com/example-owner/example-repo';
+const digest = (file, rule, text) => createHash('sha256').update(JSON.stringify([file, rule, text])).digest('hex');
 
 function tempRepo(t, files = {}, { git = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-plain-text-'));
@@ -180,7 +182,9 @@ test('stale matched links reach neither output stream while counts, failures and
   assert.equal(pruned.status, 0, pruned.stderr);
   const baseline = JSON.parse(fs.readFileSync(baselinePath));
   assert.deepEqual(baseline.allowed.map(entry => [entry.file, entry.rule, entry.count]), [['docs/a.md', 'github-link', 1]]);
-  assert.equal(baseline.allowed[0].text, link, 'baseline format is retained; only reporting changes');
+  assert.equal(baseline.schema, check.BASELINE_SCHEMA);
+  assert.deepEqual(baseline.allowed[0], { file: 'docs/a.md', rule: 'github-link', fingerprint: digest('docs/a.md', 'github-link', link), count: 1 });
+  assert.equal(JSON.stringify(baseline).includes(marker), false, 'the baseline never stores matched links');
   const fresh = run([SCRIPT, '--repo', root], root);
   assert.equal(fresh.status, 1, 'new findings still fail after pruning');
   assert.doesNotMatch(fresh.stdout, /NOTE:/);
@@ -205,6 +209,136 @@ test('a recorded off reason switches the check off, and says so', (t) => {
   assert.match(result.stdout, /switched off in this repository: this repository publishes issue numbers on purpose/);
 });
 
+// Invariants: only explicit write modes may write; migration keeps exactly the same identity and
+// allowance; pruning only lowers it; read errors deny the check before any finding is reported.
+// Each row crosses a baseline state, command and finding state, including an OS-unreadable directory.
+const closureRows = ['absent', 'v1', 'v2', 'malformed', 'unreadable'].flatMap(baseline =>
+  ['report', 'check', 'init', 'migrate', 'files-scoped', 'prune'].flatMap(mode =>
+    ['none', 'within allowance', 'excess', 'stale'].map(finding => {
+      const invalid = ['malformed', 'unreadable'].includes(baseline);
+      const excess = finding === 'excess' || (baseline === 'absent' && finding !== 'none');
+      const exit = mode === 'init' ? (baseline === 'absent' ? 0 : 2)
+        : mode === 'migrate' ? (['v1', 'v2'].includes(baseline) ? 0 : 2)
+          : invalid ? 2 : mode === 'prune' ? 0 : excess ? 1 : 0;
+      const writes = (mode === 'init' && baseline === 'absent') || (mode === 'migrate' && baseline === 'v1')
+        || (mode === 'prune' && ['v1', 'v2'].includes(baseline));
+      return { baseline, mode, finding, exit, writes };
+    })));
+
+for (const row of closureRows) test(`baseline closure: ${row.baseline} / ${row.mode} / ${row.finding} => ${row.exit}`, t => {
+  const marker = 'RESERVED-CLOSURE-LINK-MARKER';
+  const link = `${GITHUB}/issues/3?reserved=${marker}`;
+  const occurrences = { none: 0, 'within allowance': 2, excess: 3, stale: 1 }[row.finding];
+  const root = tempRepo(t, { 'docs/a.md': `${link}\n`.repeat(occurrences) }, { git: false });
+  const config = settings(root);
+  const file = path.join(root, config.baseline);
+  const allowed = row.finding === 'none' ? [] : [{ file: 'docs/a.md', rule: 'github-link', count: 2,
+    ...(row.baseline === 'v1' ? { text: link } : { fingerprint: digest('docs/a.md', 'github-link', link) }) }];
+  if (row.baseline === 'unreadable') fs.mkdirSync(file);
+  else if (row.baseline !== 'absent') fs.writeFileSync(file, row.baseline === 'malformed' ? `{"allowed":${link}`
+    : JSON.stringify({ schema: row.baseline === 'v1' ? check.LEGACY_BASELINE_SCHEMA : check.BASELINE_SCHEMA, allowed }));
+  const before = fs.existsSync(file) && row.baseline !== 'unreadable' ? fs.readFileSync(file) : null;
+  let stdout = ''; let stderr = ''; let writes = 0; let status;
+  const out = { write: text => { stdout += text; } }; const err = { write: text => { stderr += text; } };
+  const originalWrite = fs.writeFileSync; const originalMkdir = fs.mkdirSync;
+  fs.writeFileSync = (...args) => { writes++; return originalWrite(...args); };
+  fs.mkdirSync = (...args) => { writes++; return originalMkdir(...args); };
+  try {
+    if (row.mode === 'report') {
+      try { status = check.report(check.check(root, config), config, out, err); }
+      catch (error) { stderr += error.message; status = 2; }
+    } else {
+      const flags = { check: [], init: ['--init-baseline'], migrate: ['--migrate-baseline'],
+        'files-scoped': ['--files', 'docs/a.md'], prune: ['--prune-baseline'] }[row.mode];
+      status = check.main(['--repo', root, ...flags], { out, err });
+    }
+  } finally { fs.writeFileSync = originalWrite; fs.mkdirSync = originalMkdir; }
+  assert.equal(status, row.exit, stderr);
+  assert.equal(writes > 0, row.writes, 'only the explicitly selected write mode writes');
+  const notice = `NOTE: baseline ${config.baseline}: stores matched text (v1); run the check with --migrate-baseline\n`;
+  assert.equal(stdout.includes(notice), row.baseline === 'v1' && row.finding !== 'none' && ['report', 'check'].includes(row.mode));
+  for (const stream of [stdout, stderr]) {
+    assert.equal(stream.includes(link), false);
+    assert.equal(stream.includes(marker), false);
+    assert.equal(stream.includes(digest('docs/a.md', 'github-link', link)), false);
+  }
+  if (!row.writes && before) assert.deepEqual(fs.readFileSync(file), before);
+  if (row.writes) {
+    const saved = JSON.parse(fs.readFileSync(file));
+    assert.equal(saved.schema, row.mode === 'prune' && row.baseline === 'v1' ? check.LEGACY_BASELINE_SCHEMA : check.BASELINE_SCHEMA);
+    assert.deepEqual(saved.allowed.map(entry => entry.count), row.finding === 'none' ? [] : [row.mode === 'init' ? occurrences : row.mode === 'prune' ? Math.min(2, occurrences) : 2]);
+    if (saved.schema === check.BASELINE_SCHEMA) assert.equal(JSON.stringify(saved).includes(marker), false);
+  }
+});
+
+test('legacy migration preserves identities and counts, is explicit, and edited or moved links fail', t => {
+  const link = `${GITHUB}/pull/3?reserved=RESERVED-MIGRATION-MARKER`;
+  const root = tempRepo(t, { 'docs/a.md': `${link}\n${link}\n` });
+  const config = settings(root);
+  const file = path.join(root, config.baseline);
+  const legacy = { schema: check.LEGACY_BASELINE_SCHEMA, description: link, allowed: [
+    { file: 'docs/a.md', rule: 'github-link', text: link, count: 2 },
+    { file: 'docs/gone.md', rule: 'github-link', text: link, count: 1 }
+  ] };
+  fs.writeFileSync(file, JSON.stringify(legacy));
+  const before = fs.readFileSync(file);
+  assert.deepEqual(check.check(root, config).failures, []);
+  assert.deepEqual(fs.readFileSync(file), before);
+  const migrated = run([SCRIPT, '--repo', root, '--migrate-baseline'], root);
+  assert.equal(migrated.status, 0, migrated.stderr);
+  const saved = fs.readFileSync(file, 'utf8');
+  assert.equal(saved.includes(link), false, 'also discard legacy description metadata');
+  assert.deepEqual(JSON.parse(saved).allowed, legacy.allowed.map(({ file, rule, text, count }) => ({ file, rule, fingerprint: digest(file, rule, text), count })));
+  assert.deepEqual(check.check(root, config).failures, []);
+  assert.equal(run([SCRIPT, '--repo', root, '--migrate-baseline'], root).status, 0);
+  assert.equal(fs.readFileSync(file, 'utf8'), saved, 'an already migrated baseline is unchanged');
+  fs.writeFileSync(path.join(root, 'docs/a.md'), `${link}-edited\n`);
+  fs.writeFileSync(path.join(root, 'docs/b.md'), `${link}\n`);
+  assert.deepEqual(check.check(root, config).failures.map(f => f.file), ['docs/a.md', 'docs/b.md']);
+  for (const stream of [migrated.stdout, migrated.stderr]) assert.equal(stream.includes('RESERVED-MIGRATION-MARKER'), false);
+});
+
+test('malformed baseline shapes deny every reading or migration route without echo or writes', t => {
+  const marker = 'RESERVED-MALFORMED-LINK-MARKER';
+  const link = `${GITHUB}/pull/3?reserved=${marker}`;
+  const root = tempRepo(t, { 'docs/a.md': link });
+  const config = settings(root);
+  const file = path.join(root, config.baseline);
+  const legacy = { file: 'docs/a.md', rule: 'github-link', text: link, count: 1 };
+  const current = { file: 'docs/a.md', rule: 'github-link', fingerprint: digest('docs/a.md', 'github-link', link), count: 1 };
+  const bad = [null, [], {}, { schema: link, allowed: [] }, { schema: check.BASELINE_SCHEMA, allowed: null }];
+  for (const [schema, entry] of [[check.LEGACY_BASELINE_SCHEMA, legacy], [check.BASELINE_SCHEMA, current]]) {
+    for (const value of [null, link, {}, { ...entry, count: 0 }, { ...entry, count: -1 }, { ...entry, count: 1.5 },
+      { ...entry, count: Number.MAX_SAFE_INTEGER + 1 }, { ...entry, file: null }, { ...entry, file: link },
+      { ...entry, rule: link }, { ...entry, fingerprint: link }, { ...entry, extra: link }]) bad.push({ schema, allowed: [value] });
+    bad.push({ schema, allowed: [entry, entry] });
+  }
+  bad.push({ schema: check.BASELINE_SCHEMA, allowed: [{ ...current, text: link }] });
+  for (const value of bad) {
+    fs.writeFileSync(file, JSON.stringify(value));
+    const before = fs.readFileSync(file);
+    for (const flags of [[], ['--files', 'docs/a.md'], ['--prune-baseline'], ['--migrate-baseline']]) {
+      let stdout = ''; let stderr = '';
+      const status = check.main(['--repo', root, ...flags], { out: { write: s => { stdout += s; } }, err: { write: s => { stderr += s; } } });
+      assert.equal(status, 2);
+      assert.equal(stdout, '');
+      assert.equal(stderr, 'Could not check: Baseline could not be read or is invalid.\n');
+      assert.deepEqual(fs.readFileSync(file), before);
+    }
+  }
+});
+
+test('write modes reject scoped or conflicting requests, including programmatic scoped pruning', t => {
+  const root = tempRepo(t, { 'docs/a.md': `${HASH}3` });
+  const config = settings(root);
+  for (const flag of ['--init-baseline', '--prune-baseline', '--migrate-baseline']) {
+    for (const suffix of [['--files', 'docs/a.md'], ['--explain']]) assert.equal(run([SCRIPT, '--repo', root, flag, ...suffix], root).status, 2);
+  }
+  assert.equal(run([SCRIPT, '--repo', root, '--init-baseline', '--migrate-baseline'], root).status, 2);
+  for (const operation of [check.initBaseline, check.pruneBaseline, check.migrateBaseline]) assert.throws(() => operation(root, config, { files: ['docs/a.md'] }), /cannot be combined/);
+  assert.equal(fs.existsSync(path.join(root, config.baseline)), false);
+});
+
 test('the installer writes settings, baseline, copy and workflow once, and never overwrites the repository\'s own', (t) => {
   const root = tempRepo(t, { 'docs/a.md': `Old note about ${HASH}12.\n` });
   const first = run([INSTALLER, '--repo', root, '--workflow'], root);
@@ -212,6 +346,10 @@ test('the installer writes settings, baseline, copy and workflow once, and never
   for (const rel of ['.github/plain-text.json', '.github/plain-text-baseline.json', '.github/scripts/plain-text-check.cjs', '.github/workflows/plain-text.yml'])
     assert.ok(fs.existsSync(path.join(root, rel)), rel);
   assert.match(first.stdout, /Baseline written: \.github\/plain-text-baseline\.json \(1 existing item/);
+  const baseline = JSON.parse(fs.readFileSync(path.join(root, '.github', 'plain-text-baseline.json')));
+  assert.equal(baseline.schema, check.BASELINE_SCHEMA);
+  assert.equal(Object.hasOwn(baseline.allowed[0], 'text'), false);
+  assert.equal(baseline.allowed[0].fingerprint, digest('docs/a.md', 'number-reference', `${HASH}12`));
   assert.equal(run([path.join(root, '.github', 'scripts', 'plain-text-check.cjs'), '--repo', root], root).status, 0, 'the copy passes with the old note baselined');
   const own = JSON.stringify({ schema: check.CONFIG_SCHEMA, ...banned() });
   fs.writeFileSync(path.join(root, '.github', 'plain-text.json'), own);
@@ -223,6 +361,93 @@ test('the installer writes settings, baseline, copy and workflow once, and never
   assert.match(second.stdout, /CI workflow kept as it is/);
   assert.equal(fs.readFileSync(path.join(root, '.github', 'plain-text.json'), 'utf8'), own);
 });
+
+test('installer refresh keeps a legacy baseline byte-for-byte; the installed copy migrates only explicitly', t => {
+  const link = `${GITHUB}/pull/3?reserved=RESERVED-INSTALLED-LINK-MARKER`;
+  const root = tempRepo(t, { 'docs/a.md': `${link}\n${link}\n` });
+  const config = settings(root);
+  const file = path.join(root, config.baseline);
+  fs.writeFileSync(file, JSON.stringify({ schema: check.LEGACY_BASELINE_SCHEMA, allowed: [{ file: 'docs/a.md', rule: 'github-link', text: link, count: 2 }] }));
+  const before = fs.readFileSync(file);
+  for (const flags of [[], ['--check'], []]) {
+    const result = run([INSTALLER, '--repo', root, ...flags], root);
+    assert.equal(result.status, 0, result.stderr);
+    if (flags.includes('--check')) assert.match(result.stdout, /NOTE: baseline \.github\/plain-text-baseline\.json: stores matched text \(v1\); run the check with --migrate-baseline/);
+    assert.deepEqual(fs.readFileSync(file), before);
+    for (const stream of [result.stdout, result.stderr]) assert.equal(stream.includes(link), false);
+  }
+  const copy = path.join(root, '.github', 'scripts', 'plain-text-check.cjs');
+  const full = run([copy, '--repo', root], root);
+  assert.equal(full.status, 0, full.stderr);
+  assert.match(full.stdout, /NOTE: baseline \.github\/plain-text-baseline\.json: stores matched text \(v1\); run the check with --migrate-baseline/);
+  assert.deepEqual(fs.readFileSync(file), before);
+  for (const stream of [full.stdout, full.stderr]) {
+    assert.equal(stream.includes(link), false);
+    assert.equal(stream.includes('RESERVED-INSTALLED-LINK-MARKER'), false);
+    assert.equal(stream.includes(digest('docs/a.md', 'github-link', link)), false);
+  }
+  assert.equal(run([copy, '--repo', root, '--files', 'docs/a.md'], root).status, 0);
+  assert.deepEqual(fs.readFileSync(file), before);
+  const migrated = run([copy, '--repo', root, '--migrate-baseline'], root);
+  assert.equal(migrated.status, 0, migrated.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)).allowed, [{ file: 'docs/a.md', rule: 'github-link', fingerprint: digest('docs/a.md', 'github-link', link), count: 2 }]);
+  fs.appendFileSync(path.join(root, 'docs/a.md'), `${link}\n`);
+  const excess = run([copy, '--repo', root], root);
+  assert.equal(excess.status, 1);
+  fs.writeFileSync(file, `{"allowed":${link}`);
+  for (const flags of [[], ['--migrate-baseline']]) {
+    const broken = run([copy, '--repo', root, ...flags], root);
+    assert.equal(broken.status, 2);
+    for (const stream of [broken.stdout, broken.stderr]) assert.equal(stream.includes(link), false);
+  }
+  for (const result of [migrated, excess]) for (const stream of [result.stdout, result.stderr]) assert.equal(stream.includes(link), false);
+});
+
+for (const state of ['v1 references', 'v1 empty', 'v1 banned term', 'v2', 'malformed', 'invalid entry', 'unreadable', 'absent']) {
+  for (const copyMissing of [false, true]) test(`installer baseline notice: ${state} / copy ${copyMissing ? 'missing' : 'current'}`, t => {
+    const marker = 'RESERVED-INSTALLER-NOTICE-MARKER';
+    const link = `${GITHUB}/pull/3?reserved=${marker}`;
+    const root = tempRepo(t, {}, { git: false });
+    const config = settings(root, { baseline: '.github/custom-baseline.json' });
+    const file = path.join(root, config.baseline);
+    const entries = check.REFERENCE_RULES.map(rule => ({ file: 'docs/a.md', rule: rule.id, text: link, count: 2 }));
+    if (state === 'unreadable') fs.mkdirSync(file);
+    else if (state !== 'absent') fs.writeFileSync(file, state === 'malformed' ? `{"allowed":${link}` : JSON.stringify({
+      schema: state === 'v2' ? check.BASELINE_SCHEMA : check.LEGACY_BASELINE_SCHEMA,
+      allowed: state === 'v1 empty' ? [] : state === 'v1 banned term' ? [{ ...entries[0], rule: 'banned-term' }]
+        : state === 'v2' ? entries.map(({ text, ...entry }) => ({ ...entry, fingerprint: digest(entry.file, entry.rule, text) }))
+          : state === 'invalid entry' ? [{ ...entries[0], count: 0 }] : entries,
+    }));
+    if (!copyMissing) {
+      fs.mkdirSync(path.dirname(path.join(root, installer.VENDORED_PATH)), { recursive: true });
+      fs.writeFileSync(path.join(root, installer.VENDORED_PATH), installer.vendoredText());
+    }
+    const snapshot = () => fs.readdirSync(root, { recursive: true }).filter(rel => fs.statSync(path.join(root, rel)).isFile())
+      .map(rel => [rel, fs.readFileSync(path.join(root, rel)).toString('base64')]);
+    const before = snapshot();
+    let stdout = ''; let stderr = ''; let writes = 0; let status;
+    const originalWrite = fs.writeFileSync; const originalMkdir = fs.mkdirSync;
+    fs.writeFileSync = (...args) => { writes++; return originalWrite(...args); };
+    fs.mkdirSync = (...args) => { writes++; return originalMkdir(...args); };
+    try {
+      status = installer.main(['--repo', root, '--check'], {
+        out: { write: text => { stdout += text; } }, err: { write: text => { stderr += text; } },
+        spawn: () => ({ status: 0, stdout: root }),
+      });
+    } finally { fs.writeFileSync = originalWrite; fs.mkdirSync = originalMkdir; }
+    assert.equal(status, copyMissing ? 1 : 0, 'baseline advice does not change drift exit codes');
+    assert.equal(stderr, '');
+    assert.equal(writes, 0);
+    assert.deepEqual(snapshot(), before);
+    assert.equal(stdout.includes(`NOTE: baseline ${config.baseline}: stores matched text (v1); run the check with --migrate-baseline\n`), state === 'v1 references');
+    assert.equal(stdout.includes('NOTE: Baseline could not be read or is invalid.\n'), ['malformed', 'invalid entry', 'unreadable'].includes(state));
+    for (const stream of [stdout, stderr]) {
+      assert.equal(stream.includes(link), false);
+      assert.equal(stream.includes(marker), false);
+      for (const entry of entries) assert.equal(stream.includes(digest(entry.file, entry.rule, link)), false);
+    }
+  });
+}
 
 test('--check reports a missing, edited or outdated copy and missing settings, and changes nothing', (t) => {
   const root = tempRepo(t);
