@@ -748,6 +748,30 @@ test('L: the session sweep line names a skip, a failure or a gap of over 2 hours
   assert.equal(tasks.sweepLine(repository, { home: tempHome(t), now: noon }), null);
 });
 
+test('L: held sweep records are visible in fixed words, including overdue and malformed controls', t => {
+  const { home } = listedHome(t);
+  const now = new Date(2026, 10, 1, 12);
+  const at = minutes => new Date(now.getTime() - minutes * 60000).toISOString();
+  const line = () => tasks.sweepLine('weijunswj/ai-agent-toolkit', { home, now });
+  for (const [status, minutes, pattern] of [
+    ['held', 5, /^Programme sweep: held at \d\d:\d\dZ; see toolkit tasks\.$/],
+    ['held', 200, /^Programme sweep: no run since .*\(over 2 hours\); the last one held at \d\d:\d\dZ; see toolkit tasks\.$/],
+    ['failed', 5, /^Programme sweep: last run failed at /],
+    ['skipped', 5, /^Programme sweep: skipped/],
+    ['ok', 5, null],
+  ]) {
+    tasks.writeLastRun('toolkit-programme-sweep', { started: at(minutes + 1), finished: at(minutes), status, summary: ['Private output must not reach the line'], reason: 'Private reason' }, home);
+    if (pattern) assert.match(line(), pattern, status); else assert.equal(line(), null);
+    assert.doesNotMatch(line() || '', /Private/);
+  }
+  for (const text of ['{broken', 'null', '{}', '{"status":"held","finished":"bad"}']) {
+    fs.writeFileSync(tasks.lastRunPath('toolkit-programme-sweep', home), text);
+    assert.match(line(), /^Programme sweep: no run recorded \(over 2 hours\); see toolkit tasks\.$/);
+  }
+  fs.unlinkSync(tasks.lastRunPath('toolkit-programme-sweep', home));
+  assert.match(line(), /^Programme sweep: no run recorded \(over 2 hours\); see toolkit tasks\.$/);
+});
+
 test('L: a recorded task deleted by hand shows missing; an unmarked task in the folder shows found, not recorded', (t) => {
   const { home, scheduler } = listedHome(t);
   scheduler.folders.set('TOOLKIT', scheduler.folders.get('TOOLKIT').filter(task => task.name !== 'TOOLKIT - SHARD TIMINGS'));

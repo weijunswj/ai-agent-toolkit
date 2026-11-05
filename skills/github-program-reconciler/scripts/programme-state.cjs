@@ -22,7 +22,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, auditDecisionTraces, traceEntries, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
+const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, auditDecisionTraces, traceEntries, indexErrorText, indexRecoveryText, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
 const { OTHER_COMMENTS } = require('./decision-tags.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 
@@ -90,6 +90,8 @@ const NAV_BLOCK_NAME = 'NAV';
 const CURRENT_BLOCK_NAME = 'CURRENT';
 // Index comments are cut below this size (GitHub's comment limit is 65,536 characters).
 const INDEX_COMMENT_LIMIT = 60000;
+// Cap notifying topic comments across the pass; larger traces use directory pages directly.
+const MAX_TOPIC_COMMENTS_PER_PASS = 5;
 const TEXT_LIMIT = 200;
 
 const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
@@ -130,7 +132,7 @@ function check(errors, condition, message) { if (!condition) errors.push(message
 const SHAPES = {
   child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile'], optional: ['volatile', 'journals_seen', 'completed_at'] },
   parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'private', 'volatile'], optional: ['volatile', 'attention'] },
-  finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at'] },
+  finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics'], optional: ['diagnostics'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
   outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix'] },
@@ -293,6 +295,7 @@ const FINDING_CODES = Object.freeze({
   READY_TO_CLOSE: { source: 'reconcile', next_action: 'Controller: close the issue as completed if every criterion is met' },
   CHILD_STATE_CONFLICT: { source: 'reconcile', next_action: 'Controller: bring the state document and the issue in line' },
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
+  BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
@@ -314,6 +317,57 @@ const FINDING_CODES = Object.freeze({
 // Findings with no issue of their own.
 const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
+const BODY_SECTION_KINDS = ['CURRENT', 'STATE', 'TRACE', 'NAV', 'hand_written'];
+const BODY_SECTION_LIMIT = 5;
+
+// Disjoint UTF-16 spans, including managed markers and all formatting, in the same units as
+// projectBody's length check. Headings only delimit hand-written spans; no heading text is kept.
+function bodySizeDiagnostics(body, threshold) {
+  const managed = BODY_SECTION_KINDS.filter(kind => kind !== 'hand_written')
+    .map(kind => ({ kind, block: findStateBlock(body, kind).block })).filter(part => part.block)
+    .sort((a, b) => a.block.start - b.block.start);
+  const sections = [];
+  let section = 0;
+  const handwritten = (start, end) => {
+    const cuts = [start, ...[...body.slice(start, end).matchAll(/^#{1,6}[ \t]+/gm)].map(match => start + match.index).filter(at => at > start), end];
+    for (let i = 1; i < cuts.length; i += 1) if (cuts[i] > cuts[i - 1]) sections.push({ kind: 'hand_written', section: ++section, size: cuts[i] - cuts[i - 1] });
+  };
+  let offset = 0;
+  for (const { kind, block } of managed) {
+    handwritten(offset, block.start);
+    sections.push({ kind, section: 0, size: block.end - block.start });
+    offset = block.end;
+  }
+  handwritten(offset, body.length);
+  const largest = sections.sort((a, b) => b.size - a.size).slice(0, BODY_SECTION_LIMIT);
+  return { projected_total: body.length, threshold, required_reduction: Math.max(0, body.length - threshold + 1),
+    largest_sections: largest, remainder: body.length - largest.reduce((sum, part) => sum + part.size, 0) };
+}
+
+function validateBodyDiagnostics(errors, value, at) {
+  check(errors, isObject(value), `${at} must be an object`);
+  if (!isObject(value)) return;
+  checkShape(errors, value, { all: ['projected_total', 'threshold', 'required_reduction', 'largest_sections', 'remainder'] }, at);
+  const numeric = number => Number.isSafeInteger(number) && number >= 0;
+  for (const key of ['projected_total', 'threshold', 'required_reduction', 'remainder']) check(errors, numeric(value[key]), `${at}.${key} must be a bounded whole number`);
+  check(errors, value.threshold > 0, `${at}.threshold must be positive`);
+  check(errors, value.required_reduction === Math.max(0, value.projected_total - value.threshold + 1), `${at}.required_reduction must match the strict threshold`);
+  const parts = Array.isArray(value.largest_sections) ? value.largest_sections : [];
+  check(errors, Array.isArray(value.largest_sections) && parts.length > 0 && parts.length <= BODY_SECTION_LIMIT, `${at}.largest_sections must have 1 to ${BODY_SECTION_LIMIT} spans`);
+  const identities = new Set();
+  for (const part of parts) {
+    check(errors, isObject(part), `${at} section must be an object`);
+    if (!isObject(part)) continue;
+    checkShape(errors, part, { all: ['kind', 'section', 'size'] }, at);
+    check(errors, BODY_SECTION_KINDS.includes(part.kind), `${at} section kind must be fixed`);
+    check(errors, numeric(part.section) && (part.kind === 'hand_written' ? part.section > 0 : part.section === 0), `${at} section number must match its kind`);
+    check(errors, numeric(part.size) && part.size > 0, `${at} section size must be positive and bounded`);
+    const id = `${part.kind}:${part.section}`;
+    check(errors, !identities.has(id), `${at} spans must be disjoint`);
+    identities.add(id);
+  }
+  check(errors, parts.reduce((sum, part) => sum + (part?.size || 0), value.remainder) === value.projected_total, `${at} section sizes and remainder must sum exactly`);
+}
 
 function findingId(source, code, issue, head = '') {
   return sha256(`${source}|${code}|${issue ?? ''}|${head || ''}`).slice(0, 12);
@@ -330,6 +384,8 @@ function validateAttention(errors, attention) {
     checkShape(errors, entry, 'finding', at);
     const known = Object.hasOwn(FINDING_CODES, entry.code) ? FINDING_CODES[entry.code] : null;
     check(errors, Boolean(known), `${at}.code is not a known finding code`);
+    if (entry.code === 'BODY_TOO_LARGE') validateBodyDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
+    else check(errors, entry.diagnostics === undefined, `${at}.diagnostics belongs only to BODY_TOO_LARGE`);
     check(errors, Boolean(known) && entry.source === known.source, `${at}.source must be the code's source`);
     check(errors, ISSUELESS_CODES.has(entry.code) ? entry.issue === null : isInt(entry.issue, 1), `${at}.issue must be an issue number${ISSUELESS_CODES.has(entry.code) ? ' or null' : ''}`);
     check(errors, HEAD_BOUND_CODES.has(entry.code) ? optional(entry.head, isSha) : entry.head === null, `${at}.head must be a full 40-character SHA for a head-bound code, otherwise null`);
@@ -356,7 +412,7 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
   const seenIds = new Set();
   let changed = false;
   const open = () => list.filter(entry => OPEN_FINDING_STATES.includes(entry.state)).length;
-  const add = (code, issue, head, since = null) => {
+  const add = (code, issue, head, since = null, diagnostics = null) => {
     const id = findingId(FINDING_CODES[code].source, code, issue, head);
     seenIds.add(id);
     const existing = byId.get(id);
@@ -369,10 +425,14 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
       const fresh = !since || Number.isNaN(Date.parse(since)) || Date.parse(since) > Date.parse(existing.changed_at);
       const reopens = fresh && (existing.state === 'resolved' || (ONE_TIME_CODES.has(code) && ['acknowledged', 'disposed'].includes(existing.state)));
       if (reopens) { existing.state = 'new'; existing.changed_at = now; changed = true; }
+      if (diagnostics && JSON.stringify(canonical(existing.diagnostics)) !== JSON.stringify(canonical(diagnostics))) {
+        existing.diagnostics = clone(diagnostics);
+        changed = true;
+      }
       return;
     }
     if (code !== 'ATTENTION_FULL' && open() >= ATTENTION_LIMIT) { add('ATTENTION_FULL', null, null); return; }
-    const entry = { id, source: FINDING_CODES[code].source, code, issue, head, state: 'new', first_seen: now, changed_at: now };
+    const entry = { id, source: FINDING_CODES[code].source, code, issue, head, state: 'new', first_seen: now, changed_at: now, ...(diagnostics ? { diagnostics: clone(diagnostics) } : {}) };
     list.push(entry);
     byId.set(id, entry);
     changed = true;
@@ -381,9 +441,13 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     if (!Object.hasOwn(FINDING_CODES, finding.code) || FINDING_CODES[finding.code].source !== source) continue;
     const issue = ISSUELESS_CODES.has(finding.code) ? null : finding.issue;
     if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
-    add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null);
+    add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null,
+      finding.code === 'BODY_TOO_LARGE' ? finding.diagnostics : null);
   }
   for (const entry of complete ? list : []) {
+    // Only the reconciler's complete successful redraw/readback settles a size finding. This also
+    // protects an affected page first reported by another writer after the planning snapshot.
+    if (entry.code === 'BODY_TOO_LARGE') continue;
     // ATTENTION_FULL resolves on any complete run back under the bound.
     const own = entry.source === source || entry.code === 'ATTENTION_FULL';
     if (!own || seenIds.has(entry.id) || hold.includes(entry.id) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
@@ -1362,8 +1426,9 @@ function renderTraceBlockBody(number, trace, repository = '', topic = null) {
     '',
   ];
   const groups = traceGroups(trace, topic);
+  for (const [at, directory] of (trace.directories || []).entries()) lines.push(`- [topic directory ${at + 1}](${commentLink(base, directory.id)})`);
   for (const group of groups) lines.push(`- **${groupLabel(group, topic)}:** ${traceTokens(group, base).join(' · ')}`);
-  if (!groups.length) lines.push('- No comments yet.');
+  if (!groups.length && !trace.directories?.length) lines.push('- No comments yet.');
   return lines.join('\n');
 }
 
@@ -1559,18 +1624,72 @@ function upsertNavBlock(text, rendered) {
 // sit on one line, separated by " · ", as in the body's trace. A topic's index comment carries the
 // topic on its first line, so it stays in that topic's list; `label` is the topic as written (for
 // an untopiced list, the task page's own name, which names the comment without tagging it).
-function indexCommentBodies(number, links, intent, tag = null, label = null) {
+function indexCommentBodies(number, links, intent, tag = null, label = null, directory = false) {
   const name = label || tag;
-  const head = (part, total) => [...(tag ? [name, '---'] : []), INDEX_COMMENT_MARKER, `<!-- programme-trace intent=${intent} part=${part}/${total} -->`,
-    `## Comment trace for #${number}: ${publicText(name || OTHER_COMMENTS)}`, ''];
+  const head = (part, total) => [...(tag ? [name, '---'] : []), INDEX_COMMENT_MARKER, ...(directory ? [DIRECTORY_COMMENT_MARKER] : []), `<!-- programme-trace intent=${intent} part=${part}/${total} -->`,
+    directory ? '## Comment topics' : `## Comment trace for #${number}: ${publicText(name || OTHER_COMMENTS)}`, ''];
   const chunks = [[]];
-  let size = 0;
-  for (const link of links) {
-    if (size + link.length + 3 > INDEX_COMMENT_LIMIT && chunks.at(-1).length) { chunks.push([]); size = 0; }
+  // Reserve the complete header, separators, final newline and generous part-number space.
+  const overhead = head('9'.repeat(19), '9'.repeat(19)).join('\n').length + 2;
+  const separator = directory ? '\n' : ' · ';
+  // A topic with many older index pages may itself need several directory pages. Repeat its
+  // label on each continuation, cutting only between complete comment links.
+  const entries = directory ? links.flatMap(line => {
+    if (overhead + line.length < INDEX_COMMENT_LIMIT) return [line];
+    const match = /^(- \*\*.*?:\*\* )(.*)$/.exec(line);
+    if (!match) throw new ProgrammeError('BODY_TOO_LARGE', 'A comment topic cannot fit in an index page.');
+    const parts = [];
+    let part = match[1];
+    for (const token of match[2].split(' · ')) {
+      const join = part === match[1] ? '' : ' · ';
+      if (overhead + part.length + join.length + token.length >= INDEX_COMMENT_LIMIT) {
+        parts.push(part);
+        part = match[1];
+      }
+      part += `${part === match[1] ? '' : ' · '}${token}`;
+    }
+    parts.push(part);
+    return parts;
+  }) : links;
+  let size = overhead;
+  for (const link of entries) {
+    if (overhead + link.length >= INDEX_COMMENT_LIMIT) throw new ProgrammeError('BODY_TOO_LARGE', 'A comment topic cannot fit in an index page.');
+    if (size + link.length + separator.length >= INDEX_COMMENT_LIMIT && chunks.at(-1).length) { chunks.push([]); size = overhead; }
     chunks.at(-1).push(link);
-    size += link.length + 3;
+    size += link.length + separator.length;
   }
-  return chunks.map((chunk, at) => [...head(at + 1, chunks.length), chunk.join(' · '), ''].join('\n'));
+  return chunks.map((chunk, at) => [...head(at + 1, chunks.length), chunk.join(separator), ''].join('\n'));
+}
+
+// Intents bind the exact page bytes, ignoring only their own derived intent ID. Old intents keep
+// their part metadata support. A partial verified set is NOT_DONE, so the next plan pages only
+// the uncovered links; a mismatched or duplicate page is UNKNOWN and holds instead of reposting.
+function indexPageDigest(body) { return sha256(body.replace(/programme-trace intent=[a-f0-9]* /, 'programme-trace intent= ')); }
+function indexReadback(comments, intent, parts = null) {
+  const found = comments.filter(comment => String(comment.body || '').includes(`programme-trace intent=${intent} `));
+  if (!parts) {
+    if (!found.length) return false;
+    const metadata = found.map(comment => /part=(\d+)\/(\d+)/.exec(comment.body));
+    if (metadata.some(match => !match)) return null;
+    const total = Number(metadata[0][2]);
+    if (total < 1 || total > MAX_INDEX_COMMENTS || metadata.some(match => Number(match[2]) !== total || Number(match[1]) < 1 || Number(match[1]) > total)
+      || new Set(metadata.map(match => Number(match[1]))).size !== found.length) return null;
+    return found.length === total;
+  }
+  if (!Array.isArray(parts) || !parts.length || parts.some(part => !/^[a-f0-9]{64}$/.test(part))) return null;
+  const remaining = [...parts];
+  for (const comment of found) {
+    const at = remaining.indexOf(indexPageDigest(String(comment.body)));
+    if (at === -1) return null;
+    remaining.splice(at, 1);
+  }
+  return remaining.length === 0;
+}
+
+function indexEffect(number, part, after) {
+  const bodies = indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory);
+  const target = { issue: number, tag: part.tag, after, ...(part.directory ? { directory: true } : {}), parts: bodies.map(indexPageDigest) };
+  return { kind: 'post_index_comment', target, label: part.label, lines: part.lines };
 }
 
 // Headings outside fenced code, with their level, text and line offsets.
@@ -2883,7 +3002,7 @@ const EFFECT_TEXT = {
   replace_block: effect => (effect.state === false ? `Update the ${staleParts(effect)} in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
   replace_pr_nav: effect => `Add the parent and task links at the top of PR #${effect.target.pr}`,
   update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,
-  post_index_comment: effect => `Move #${effect.target.issue}'s "${effect.label || effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} link(s)) into a new index comment`,
+  post_index_comment: effect => effect.target.directory ? `Move #${effect.target.issue}'s comment topics into index pages` : `Move #${effect.target.issue}'s "${effect.label || effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} link(s)) into a new index comment`,
 };
 
 // The parts of a body a block effect rewrites when its state block is already current.
@@ -3187,7 +3306,8 @@ class Reconciler {
     for (const number of numbers) {
       const issue = observed.issues.get(number);
       if (!issue || traced.has(number)) continue;
-      const result = auditDecisionTraces({ body: issue.body, comments: observed.comments.get(number) || [], recordPrefix: this.binding.record_prefix, threshold: this.threshold });
+      const result = auditDecisionTraces({ body: issue.body, comments: observed.comments.get(number) || [], recordPrefix: this.binding.record_prefix, threshold: this.threshold, repository: this.binding.repository, issue: number });
+      if (result.index_errors.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: indexErrorText(result.index_errors) });
       if (result.unlinked_decisions.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: `${result.unlinked_decisions.length} decision comment(s) are not linked from the body or an index comment it links; write the lines from decision-trace-audit --repair` });
       for (const entry of result.superseded_unmarked) findings.push({ code: 'TRACE_SUPERSEDED_UNMARKED', issue: number, detail: `${entry.record} is superseded by ${entry.superseded_by} but not marked "superseded by"` });
     }
@@ -3202,8 +3322,8 @@ class Reconciler {
   // The body with the state block and the comment trace written. When it would reach the threshold,
   // the trace's own lines move to a new index comment: `overflow` lists them, and the body is
   // measured with a link to that comment in their place.
-  projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null) {
-    const trace = traceEntries(comments, this.binding.record_prefix);
+  projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS) {
+    const trace = traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
     const build = entries => {
       const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic);
       const withCurrent = currentBody ? upsertCurrentBlock(source, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : source;
@@ -3213,8 +3333,8 @@ class Reconciler {
     };
     const full = build(trace);
     if (full.body.length < this.threshold) return { ...full, overflow: [] };
-    // Tag by tag, largest list first, the whole list moves into its own new index comment until the
-    // body fits; the body keeps a link in that tag's list. Tags are never combined.
+    // Try the largest topic lists first within the notification budget. If that cannot fit, discard
+    // all speculative topic moves and page the original topic lines together, one line per topic.
     const base = issueUrl(this.binding.repository, number);
     const links = group => traceTokens({ ...group, indexes: [] }, base);
     const size = group => links(group).join(' · ').length;
@@ -3222,16 +3342,38 @@ class Reconciler {
     let current = trace;
     let projected = full;
     const overflow = [];
+    let topicComments = 0;
     for (const group of movable) {
+      const part = { tag: group.tag, label: group.tag ? group.label : topic, lines: links(group) };
+      const pages = indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label);
+      if (topicComments + pages.length > topicCommentBudget) break;
+      topicComments += pages.length;
       current = {
-        indexes: [...current.indexes, { id: '9'.repeat(19), tag: group.tag, date: '0000-00-00' }],
+        directories: current.directories,
+        indexes: [...current.indexes, ...pages.map(() => ({ id: '9'.repeat(19), tag: group.tag, tag_label: group.label, date: '0000-00-00' }))],
         entries: current.entries.filter(entry => topicKey(entry, topic) !== group.tag),
         marks: current.marks.filter(mark => topicKey(mark, topic) !== group.tag),
       };
-      overflow.push({ tag: group.tag, label: group.tag ? group.label : topic, lines: links(group) });
+      overflow.push(part);
       projected = build(current);
       if (projected.body.length < this.threshold) break;
     }
+    if (projected.body.length >= this.threshold) {
+      // Topic links can themselves fill the page. Page that directory, preserving every topic
+      // line and leaving only root links. Existing directories are never nested in new ones.
+      overflow.length = 0;
+      const lines = traceGroups(trace, topic).map(group => `- **${groupLabel(group, topic)}:** ${traceTokens(group, base).join(' · ')}`);
+      if (lines.length) {
+        const pages = indexCommentBodies(number, lines, '9'.repeat(16), null, null, true);
+        projected = build({ directories: [...(trace.directories || []), ...pages.map(() => ({ id: '9'.repeat(19) }))], indexes: [], entries: [], marks: [] });
+        const nested = trace.indexes.find(index => index.nested);
+        if (projected.body.length < this.threshold && nested) throw new ProgrammeError('TRACE_INDEX_INVALID', `Paging this comment directory would exceed two index hops (index ${nested.id}). ${indexRecoveryText(['INDEX_DEPTH'])}`);
+        overflow.push({ directory: true, tag: null, lines });
+      }
+    }
+    const pageCount = trace.strict_count
+      + overflow.reduce((count, part) => count + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0);
+    if (projected.body.length < this.threshold && pageCount > MAX_INDEX_COMMENTS) throw new ProgrammeError('TRACE_INDEX_INVALID', `The comment trace would exceed ${MAX_INDEX_COMMENTS} index pages. ${indexRecoveryText(['INDEX_LIMIT'])}`);
     return { ...projected, overflow };
   }
 
@@ -3279,7 +3421,9 @@ class Reconciler {
       const current = block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered;
       const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
       const topic = this.topicFor(parent, number, observed.issues);
-      const traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix), this.binding.repository, topic);
+      let traceBody;
+      try { traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), this.binding.repository, topic); }
+      catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // Dry runs include the time change on the document that holds each effect's intent.
       const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
@@ -3291,12 +3435,19 @@ class Reconciler {
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
       if (!currentCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: summary.block ? 'the CURRENT summary differs from the state documents' : 'no CURRENT summary yet' });
-      const projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic);
+      let projected;
+      const topicBudget = Math.max(0, MAX_TOPIC_COMMENTS_PER_PASS - effects.filter(effect => effect.kind === 'post_index_comment' && !effect.target.directory).reduce((count, effect) => count + effect.target.parts.length, 0));
+      try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, topicBudget); }
+      catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
       if (projected.body.length >= this.threshold) {
-        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body' });
+        const diagnostics = bodySizeDiagnostics(projected.body, this.threshold);
+        const finding = { code: 'BODY_TOO_LARGE', issue: number, diagnostics, detail: 'The projected page reaches the redraw threshold' };
+        const previous = findings.find(entry => entry.code === finding.code && entry.issue === number);
+        if (previous) Object.assign(previous, finding); else findings.push(finding);
+        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body', diagnostics });
         continue;
       }
-      for (const part of projected.overflow) effects.push({ kind: 'post_index_comment', target: { issue: number, tag: part.tag, after: String(comments.at(-1)?.id || '') }, label: part.label, lines: part.lines });
+      for (const part of projected.overflow) effects.push(indexEffect(number, part, String(comments.at(-1)?.id || '')));
       effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
         insert: !block, move: current && move, state: !current || move, stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent }, body, updated_at: issue.updated_at });
     }
@@ -3330,7 +3481,7 @@ class Reconciler {
           done = page ? Boolean(nav && blockDigest(nav.body) === target.digest) : null;
         } else if (effect.kind === 'post_index_comment') {
           const comments = observed.comments.get(target.issue) || this.reader.comments(target.issue);
-          done = comments.some(comment => String(comment.body || '').includes(`programme-trace intent=${effect.intent_id} `));
+          done = indexReadback(comments, effect.intent_id, target.parts);
         }
         if (done === null) holds.push({ code: 'EFFECT_UNKNOWN', target: `#${target.issue}`, detail: `${effect.kind} from an earlier pass could not be checked; held`, scope: holdScope(effect.kind) });
         resolutions.push({ kind, number, intent_id: effect.intent_id, outcome: done === null ? 'UNKNOWN' : done ? 'DONE' : 'NOT_DONE' });
@@ -3358,31 +3509,49 @@ class Reconciler {
     }).map(entry => entry.id);
   }
 
-  // The attention findings this pass records on the parent: the reconcile source from a full pass
-  // (a pass for one issue records none), and the inventory source when the pass carries an inventory.
+  // Record reconcile findings from a full pass (only size refusals from a single-issue pass),
+  // and inventory findings when the pass carries an inventory.
   // When they change, the parent's CURRENT block is planned again with the new list, so the page
   // shows them after this pass.
-  planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds, resolutions = []) {
+  planAttention(parent, projected, observed, only, override, inventory, effects, findings, holds, resolutions = [], blockHolds = new Set()) {
     const folds = [];
     // Hold by issue, even when another pass adds the finding after this snapshot was read.
     const incompletePrHolds = [...observed.discovery].filter(([, discovery]) => discovery.complete === false)
       .map(([issue]) => findingId(FINDING_CODES.COMPLETED_PR_MISSING.source, 'COMPLETED_PR_MISSING', issue));
-    if (!only && !override) folds.push({ source: 'reconcile', complete: true, seen: findings.filter(finding => ATTENTION.has(finding.code)).map(({ code, issue, head = null, since = null }) => ({ code, issue, head, ...(since ? { since } : {}) })),
+    const seen = () => findings.filter(finding => ATTENTION.has(finding.code) && (!only || finding.code === 'BODY_TOO_LARGE'));
+    if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
     const stored = parent.attention || [];
-    const next = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
-    if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored))) return;
-    effects.push({ kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next) });
+    let next = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
+    const settlingSize = !only && openFindings(stored).some(entry => entry.code === 'BODY_TOO_LARGE');
+    if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored)) && !settlingSize) return;
+    const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next) };
+    effects.push(effect);
     const number = parent.parent_issue;
-    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN']);
+    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN', 'BODY_TOO_LARGE']);
     const keep = (list, test) => { const kept = list.filter(item => !test(item)); list.splice(0, list.length, ...kept); };
-    keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
-    keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
-    keep(holds, hold => hold.target === `#${number}` && ['BLOCK_NEWER_TOOLKIT', 'BODY_TOO_LARGE'].includes(hold.code));
-    this.diffBlocks({ ...parent, attention: next }, projected, observed, only, effects, findings, holds, [number], resolutions);
+    const redraw = attention => {
+      keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
+      keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
+      // Replace only block diff holds, preserving recovery holds raised earlier.
+      keep(holds, hold => blockHolds.has(hold) && hold.target === `#${number}` && hold.scope === 'body');
+      const start = holds.length;
+      this.diffBlocks({ ...parent, attention }, projected, observed, only, effects, findings, holds, [number], resolutions);
+      for (const hold of holds.slice(start)) blockHolds.add(hold);
+    };
+    redraw(next);
+    const reconcile = folds.find(fold => fold.source === 'reconcile');
+    if (reconcile) {
+      reconcile.seen = seen();
+      const final = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
+      // Adding attention can itself overflow CURRENT. Include that finding once before measuring
+      // again; the numeric diagnostics are not rendered in CURRENT, so no size feedback loop.
+      if (attentionLine(final) !== attentionLine(next)) { next = final; redraw(next); reconcile.seen = seen(); }
+      effect.line = attentionLine(next);
+    }
   }
 
   plan({ issue: only = null, parentOverride = null, inventory = null } = {}) {
@@ -3423,16 +3592,21 @@ class Reconciler {
       copy.revision = existing ? existing.revision + (contentDigest(existing) === contentDigest(doc) ? 0 : 1) : 1;
       return [number, copy];
     }));
+    const blockHoldStart = holds.length;
     this.diffBlocks(parent, projected, observed, only, effects, findings, holds, null, resolutions);
+    const blockHolds = new Set(holds.slice(blockHoldStart));
     this.auditTraces(parent, observed, only, findings, effects);
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
       detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
     if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share priority order ${tie[0].order}, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the priority in one update-parent patch` });
-    this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions);
+    this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions, blockHolds);
     for (const effect of effects) effect.text = describeEffect(effect);
-    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions };
+    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions,
+      complete: !only && !parentOverride && (!inventory || inventory.complete) && [...observed.discovery.values()].every(entry => entry.complete !== false)
+        && [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)].every(number => Boolean(observed.issues.get(number)))
+        && !findings.some(entry => entry.code === 'MANAGED_BLOCK_BROKEN') };
   }
 
   // Runs the planned effects in order: state documents, native links, order, PR links, then bodies.
@@ -3445,6 +3619,11 @@ class Reconciler {
     let parentDoc = null;
     let docs = null;
     const writtenChildren = new Set();
+    const verifiedBodies = new Set();
+    const sizeIds = new Set([...(plan.parent.attention || []), ...plan.findings]
+      .filter(entry => entry.code === 'BODY_TOO_LARGE').map(entry => findingId('reconcile', entry.code, entry.issue)));
+    const canResolveSize = (entry, includeParent = false) => entry.code === 'BODY_TOO_LARGE' && sizeIds.has(entry.id)
+      && (verifiedBodies.has(entry.issue) || (includeParent && entry.issue === parentNumber)) && OPEN_FINDING_STATES.includes(entry.state);
     // The parent fence is read again immediately before every state write and every GitHub change,
     // so a takeover stops this pass at its next effect (STALE_WRITER). An intent it leaves IN_FLIGHT
     // is settled by readback in the successor's next pass, never replayed.
@@ -3472,10 +3651,21 @@ class Reconciler {
     for (const entry of holds) markHeld(entry.target, entry.scope || 'all');
     const outcomes = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, outcome]));
     const record = (effect, outcome, detail = null) => { results.push({ kind: effect.kind, target: effect.target, text: effect.text, outcome, ...(detail ? { detail } : {}) }); };
-    const hold = (effect, code, detail) => {
+    const hold = (effect, code, detail, diagnostics = null) => {
       const scope = holdScope(effect.kind);
-      holds.push({ code, target: `#${effect.target.issue}`, detail, scope });
+      holds.push({ code, target: `#${effect.target.issue}`, detail, scope, ...(diagnostics ? { diagnostics } : {}) });
       markHeld(`#${effect.target.issue}`, scope);
+      if (code === 'BODY_TOO_LARGE' && diagnostics) {
+        const finding = { code, issue: effect.target.issue, diagnostics, detail: 'The projected page reaches the redraw threshold' };
+        const previous = plan.findings.find(entry => entry.code === code && entry.issue === finding.issue);
+        if (previous) Object.assign(previous, finding); else plan.findings.push(finding);
+        mutateDoc('parent', parentNumber, { change: doc => {
+          const next = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [finding], now: this.now() });
+          if (next === doc.attention) return null;
+          doc.attention = next;
+          return doc;
+        } });
+      }
     };
 
     // Resolve recovered effects first: DONE and NOT_DONE leave the document; UNKNOWN stays.
@@ -3530,7 +3720,9 @@ class Reconciler {
       try {
         const result = mutateDoc('parent', parentNumber, { change: doc => {
           const stored = doc.attention || [];
-          const next = effect.folds.reduce((list, fold) => foldAttention(list, { ...fold, now: effect.now }), stored);
+          const plannedIds = new Set((plan.parent.attention || []).map(entry => entry.id));
+          const concurrent = stored.filter(entry => !plannedIds.has(entry.id)).map(entry => entry.id);
+          const next = effect.folds.reduce((list, fold) => foldAttention(list, { ...fold, hold: [...(fold.hold || []), ...concurrent], now: effect.now }), stored);
           if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored))) return null;
           doc.attention = next;
           // A dispose reason goes when its finding drops off the list.
@@ -3662,6 +3854,13 @@ class Reconciler {
 
     // 5. Bodies, with the parent last so it shows state writes made earlier in this pass.
     const blockEffects = plan.effects.filter(entry => entry.kind === 'replace_block');
+    // A previously refused page may already match after a partial pass. Recheck it on the complete
+    // pass too, so lack of another planned write never counts as proof of a successful redraw.
+    if (plan.complete) for (const entry of openFindings(parentDoc.attention).filter(entry => entry.code === 'BODY_TOO_LARGE')) {
+      if (!blockEffects.some(effect => effect.target.issue === entry.issue) && plan.observed.issues.has(entry.issue)) {
+        blockEffects.push({ kind: 'replace_block', target: { issue: entry.issue }, state: true });
+      }
+    }
     if (blockEffects.length || writtenChildren.size) {
       guard();
       docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
@@ -3676,44 +3875,105 @@ class Reconciler {
         const body = number === parentNumber ? renderParentBlockBody(parentDoc, docs, plan.observed.issues, comments) : blocks.get(number);
         const candidate = planned || { kind: 'replace_block', target: { issue: number }, state: true };
         let effect = { ...candidate, target: { ...candidate.target, digest: blockDigest(body) } };
-        if (!planned) effect.text = describeEffect(effect);
+        if (!effect.text) effect.text = describeEffect(effect);
         if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
         if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
         const owner = docOwner(number);
         if (owner === 'child' && !docs.has(number)) { record(effect, 'SKIPPED', 'no state document yet'); continue; }
+        const navBody = this.navFor(parentDoc, number, docs);
+        // Render the settled attention count on the parent last, but persist those resolutions only
+        // after this exact body also reads back. A refused or uncertain parent leaves findings open.
+        const displayParent = number === parentNumber && plan.complete && !holds.length
+          ? { ...parentDoc, attention: (parentDoc.attention || []).map(entry => canResolveSize(entry, true) ? { ...entry, state: 'resolved' } : entry) } : parentDoc;
+        const currentBody = number === parentNumber ? renderCurrentBlockBody(displayParent, docs, plan.observed.issues) : null;
+        const topic = this.topicFor(parentDoc, number, plan.observed.issues);
+        // Recheck minimum size and version before posting any pages as well as before the body
+        // write. A newly oversized hand-written section must not produce orphan index comments.
+        const plannedPosts = plan.effects.filter(entry => entry.kind === 'post_index_comment' && !entry.target.directory && entry.target.issue === number);
+        const topicBudget = plannedPosts.reduce((count, entry) => count + entry.target.parts.length, 0);
+        // The latest unchanged read, reused by the body write when nothing was posted after it.
+        let fresh = null;
+        const preview = (budget = topicBudget) => {
+          const page = this.reader.issue(number);
+          if (!page) throw new ProgrammeError('ISSUE_MISSING', 'The issue could not be read.');
+          const newest = newestBlockVersion(page.body);
+          if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`);
+          comments.set(number, this.reader.comments(number));
+          const next = this.projectBody(number, page.body, body, comments.get(number), version, navBody, currentBody, topic, budget);
+          if (next.body.length >= this.threshold) {
+            const error = new ProgrammeError('BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
+            error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
+            throw error;
+          }
+          fresh = { page, comments: comments.get(number) };
+          return next;
+        };
+        // Planned topic pages are checked against a fresh read before any is posted.
+        if (plannedPosts.length) {
+          try { preview(); }
+          catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message, error.diagnostics); continue; }
+        }
         // An overflowing tag's list first moves into its own new index comment, checked by reading it back.
-        for (const post of plan.effects.filter(entry => entry.kind === 'post_index_comment' && entry.target.issue === number)) {
-          if (isHeld(`#${number}`, 'body')) break;
+        const publishIndex = post => {
           withIntent(post, owner, number, () => {
             const intent = intentId(post.kind, post.target);
-            const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag, post.label);
-            guard();
-            for (const text of bodies) this.mutator.postComment(number, text);
-            const kept = this.reader.comments(number).filter(comment => String(comment.body || '').includes(`programme-trace intent=${intent} `)).length;
-            if (kept === bodies.length) return { outcome: 'DONE' };
-            return kept ? { outcome: 'UNKNOWN', detail: `${kept} of ${bodies.length} index comment part(s) read back` } : { outcome: 'NOT_DONE', detail: 'the index comment did not read back' };
+            const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag, post.label, post.target.directory);
+            const existing = this.reader.comments(number);
+            if (indexReadback(existing, intent, post.target.parts) === null) return { outcome: 'UNKNOWN', detail: 'the index pages differ from their intent' };
+            for (const text of bodies) {
+              if (existing.some(comment => comment.body === text)) continue;
+              guard();
+              this.mutator.postComment(number, text);
+              // Stop on the first uncertain response, including a lost successful response.
+              // The next pass reads it back before choosing the remaining pages.
+              if (!this.reader.comments(number).some(comment => comment.body === text)) return { outcome: 'UNKNOWN', detail: 'an index page did not read back exactly as written' };
+            }
+            return indexReadback(this.reader.comments(number), intent, post.target.parts) === true ? { outcome: 'DONE' } : { outcome: 'UNKNOWN', detail: 'the index pages did not read back exactly as written' };
           });
+        };
+        for (const post of plannedPosts) {
+          if (isHeld(`#${number}`, 'body')) break;
+          fresh = null;
+          publishIndex(post);
+        }
+        // Page remaining full topic lines directly, reusing any older verified topic indexes.
+        if (!isHeld(`#${number}`, 'body')) {
+          try {
+            const next = preview(0);
+            if (next.overflow.some(part => !part.directory)) {
+              const error = new ProgrammeError('BODY_TOO_LARGE', 'The comment trace changed while paging; the next pass re-plans it.');
+              error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
+              throw error;
+            }
+            for (const part of next.overflow) {
+              const post = indexEffect(number, part, String(comments.get(number).at(-1)?.id || ''));
+              post.text = describeEffect(post);
+              fresh = null;
+              publishIndex(post);
+              if (isHeld(`#${number}`, 'body')) break;
+            }
+          } catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message, error.diagnostics); }
         }
         if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
         // The new body is built from a fresh read, so earlier edits by people are kept. Refuse before
         // writing an intent when the block is broken or the body would grow past the threshold.
-        const before = this.reader.issue(number);
+        // Nothing was posted since the last preview, so its read is still the one to build on; the
+        // write itself re-reads and refuses on any change.
+        const before = fresh ? fresh.page : this.reader.issue(number);
         if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
         const newest = newestBlockVersion(before.body);
         if (newest && versionNewer(newest, version)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`); continue; }
         let next;
-        const navBody = this.navFor(parentDoc, number, docs);
-        const currentBody = number === parentNumber ? renderCurrentBlockBody(parentDoc, docs, plan.observed.issues) : null;
-        comments.set(number, this.reader.comments(number));
-        try { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, this.topicFor(parentDoc, number, plan.observed.issues)); }
-        catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+        comments.set(number, fresh ? fresh.comments : this.reader.comments(number));
+        try { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0); }
+        catch (error) { if (!error.code) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
         effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
         if (next.overflow.length || next.body.length >= this.threshold) {
           record(effect, 'HELD', `the body would be ${next.body.length} characters`);
-          hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
+          hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`, bodySizeDiagnostics(next.body, this.threshold));
           continue;
         }
-        if (number === parentNumber && next.body === before.body) { record(effect, 'NOOP'); continue; }
+        if (next.body === before.body) { verifiedBodies.add(number); record(effect, 'NOOP'); continue; }
         withIntent(effect, owner, number, () => {
           // Issue PATCH has no compare-and-swap: re-read immediately before writing and refuse on change.
           const latest = this.reader.issue(number);
@@ -3723,14 +3983,25 @@ class Reconciler {
           guard();
           const response = this.mutator.writeBody(number, next.body);
           const after = this.reader.issue(number);
-          if (after && after.body === next.body) return { outcome: 'DONE' };
+          if (after && after.body === next.body) { verifiedBodies.add(number); return { outcome: 'DONE' }; }
           if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
           return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
         });
       }
     }
 
-    return { results, holds };
+    if (plan.complete && !holds.length && verifiedBodies.size) {
+      mutateDoc('parent', parentNumber, { change: doc => {
+        let changed = false;
+        doc.attention = (doc.attention || []).map(entry => {
+          if (!canResolveSize(entry)) return entry;
+          changed = true;
+          return { ...entry, state: 'resolved', changed_at: this.now() };
+        });
+        return changed ? doc : null;
+      } });
+    }
+    return { results, holds, attention: attentionLine(parentDoc.attention) };
   }
 
   run({ apply = false, issue = null, parentOverride = null, inventory = null } = {}) {
@@ -3753,9 +4024,10 @@ class Reconciler {
     if (apply && plan.parent && (plan.effects.length || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;
       const githubWrites = this.mutator.mutations;
-      const { results, holds } = this.apply(plan);
+      const { results, holds, attention } = this.apply(plan);
       report.results = results;
       report.holds = holds;
+      report.attention = attention;
       report.writes = { state: this.store.writes - storeWrites, github: this.mutator.mutations - githubWrites };
     }
     report.summary = !plan.parent ? 'No parent state document'
@@ -3763,7 +4035,7 @@ class Reconciler {
         : apply ? `${report.results.filter(entry => entry.outcome === 'DONE').length} of ${report.results.length} effect(s) done, ${report.holds.length} hold(s)`
           : `${report.effects.length} planned effect(s), ${report.holds.length} hold(s)`;
     const planned = plan.effects.find(effect => effect.kind === 'update_attention');
-    report.attention = planned ? planned.line : plan.parent ? attentionLine(plan.parent.attention) : null;
+    report.attention = report.attention ?? (planned ? planned.line : plan.parent ? attentionLine(plan.parent.attention) : null);
     const attention = report.findings.filter(finding => ATTENTION.has(finding.code));
     report.next_action = report.holds.length ? `Controller: resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
       : !apply && report.effects.length ? 'Controller: run reconcile --apply --controller for this plan; other sessions report it'
@@ -3812,7 +4084,7 @@ module.exports = Object.freeze({
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
-  SECRET_SHAPES, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest,
+  SECRET_SHAPES, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,

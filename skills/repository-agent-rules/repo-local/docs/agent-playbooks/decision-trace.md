@@ -31,7 +31,7 @@ Decisions pile up in issue comments, and old ones get replaced without anyone sa
    ```
 
    It reads the parent's and the child's comments separately, takes the latest comment per tag as live, marks earlier ones replaced (explicit, inferred, or confirmed by the owner), and lists untagged comments, untagged records, and untagged comments that name a tag after its latest decision. Long lists end with a count; `--full` lists everything.
-2. Open the live comments and the uncertain ones. Skip replaced ones unless a live comment depends on them. Read the child's body and, when the history reports body revisions that matter, its edit history.
+2. Open the live comments and the uncertain ones. Skip replaced ones unless a live comment depends on them. Read the child's body and, when the history reports body revisions that matter, its edit history. A large body can link to directory pages with full decision links on separate topic lines, or links to older topic indexes. The pass posts at most five separate topic comments across all issues; when that cannot fit the body, it uses directory pages directly. Follow up to two generated index hops. Missing, cyclic or unrelated links in tool-generated pages are an incomplete trace. Both index kinds carry `<!-- decision-trace-index -->`; directories also carry `<!-- decision-trace-directory -->`. Tool-generated pages carry `programme-trace intent=`. Older hand-made indexes without that marker retain one-hop reading: foreign and missing references are ignored and index-to-index references are not followed. Foreign links do not cover local comments. The history command reads original comments separately and skips both index kinds, so pagination does not change which decision is latest.
 3. If the trace is missing or incomplete (the reconciler's audit fails for that issue), read the child's comments directly, report the gap to the controller, and say how many comments were read. Never skip a long history silently.
 4. Show the owner a live-scope summary of at most 15 lines: the live decisions per tag, the inferred replacements, the uncertain comments, and anything that looks outdated.
 5. The summary becomes the spec only after the owner confirms it. The controller then posts a comment tagged `SCOPE-CONFIRMED` on the child. Each correction is its own tagged comment, so it wins as the latest in its tag.
@@ -46,4 +46,4 @@ Then run the decision history once for the whole programme, `--programme` instea
 
 - Treat an inferred replacement or a backfill result as the spec before the owner confirms it.
 - Edit or delete someone else's comment to change the trace. Post a new tagged comment instead. Changing only the topic line of your own comment is fine.
-- Combine two tags into one list, or mix the parent's trace with a child's.
+- Combine two topics onto one topic line, or mix the parent's trace with a child's.

@@ -58,6 +58,276 @@ const codes = report => report.findings.map(finding => `${finding.code} #${findi
 const kinds = report => report.effects.map(effect => `${effect.kind} #${effect.target.issue}`);
 const patchCount = (github, number) => github.calls.filter(call => call.method === 'PATCH' && call.path.endsWith(`/issues/${number}`)).length;
 
+function directoryFixture({ repository = 'example.test/programme', parentIssue = 71, topics = 122, proseSize = 41347, outcomes = [] } = {}) {
+  const fixture = setup({ repository, parentIssue, outcomes, issues: github => {
+    for (const outcome of outcomes) github.addIssue(outcome.issue);
+  } });
+  const prose = `## Owner notes\n${'Retained prose. '.repeat(Math.ceil(proseSize / 16))}`.slice(0, proseSize) + '\n';
+  fixture.github.issues.get(parentIssue).body = prose;
+  const decisions = [];
+  for (let n = 0; n < topics; n += 1) {
+    const topic = `Topic ${String(n).padStart(4, '0')} ${'x'.repeat(69)}`;
+    for (let at = 0; at < 3; at += 1) decisions.push(comment(fixture.github, parentIssue, `${topic}\n---\nINT-TK421-${n * 3 + at + 1} Decision ${at + 1}${at === 2 ? ` SUPERSEDES=INT-TK421-${n * 3 + 1}` : ''}`));
+  }
+  return { ...fixture, prose, decisions };
+}
+
+for (const identity of [
+  { repository: 'example.test/programme', parentIssue: 71 },
+  { repository: 'another.test/decisions', parentIssue: 2048 },
+]) test(`many small topics page their directory in ${identity.repository} parent ${identity.parentIssue}`, () => {
+  const { github, reconciler, parentIssue, prose, decisions } = directoryFixture(identity);
+  const dry = reconciler().run();
+  assert.ok(dry.effects.some(effect => effect.target.directory));
+  const posts = dry.effects.filter(effect => effect.kind === 'post_index_comment');
+  assert.equal(posts.length, 1, 'full topic lines share one directory effect instead of notifying per topic');
+  assert.equal(posts[0].target.parts.length, 1, 'the complete trace fits one notifying comment');
+  assert.equal(github.mutations(), 0, 'preview posts nothing');
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  const body = github.issues.get(parentIssue).body;
+  assert.ok(body.length < 60000, `body size ${body.length}`);
+  assert.ok(body.includes(prose), 'retained prose is byte-identical');
+  const comments = github.commentsOf(parentIssue);
+  const audit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+  const directories = comments.filter(comment => comment.body.includes(audit.DIRECTORY_COMMENT_MARKER));
+  assert.equal(directories.length, 1);
+  assert.equal(directories[0].body.split('\n').filter(line => line.startsWith('- **Topic ')).length, 122, 'topic lines remain separate');
+  for (const entry of comments.filter(comment => comment.body.includes(audit.INDEX_COMMENT_MARKER))) assert.ok(entry.body.length < 60000);
+  assert.equal(audit.auditDecisionTraces({ body, comments, repository: identity.repository, issue: parentIssue, recordPrefix: 'INT-TK421-' }).ok, true, 'every decision and supersession stays reachable');
+  const history = require('../../skills/github-program-reconciler/scripts/decision-history.cjs');
+  const entries = history.entriesFromComments(parentIssue, comments, { repo: identity.repository, prefix: 'INT-TK421-' });
+  assert.equal(entries.entries.length, decisions.length, 'G0 reads decisions and skips both index layers');
+  const trace = history.analyseTrace(entries.entries);
+  assert.equal(trace.live.length, 122);
+  assert.ok(trace.live.every(entry => entry.summary.includes('Decision 3')), 'latest comment per topic still wins');
+  const writes = github.mutations();
+  const settled = reconciler().run({ apply: true });
+  assert.equal(settled.summary, 'No changes');
+  assert.equal(github.mutations(), writes);
+  const latest = comment(github, parentIssue, `${decisions[0].body.split('\n')[0]}\n---\nINT-TK421-99999 Later decision SUPERSEDES=INT-TK421-3`);
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  const updatedBody = github.issues.get(parentIssue).body;
+  assert.ok(updatedBody.includes(`#issuecomment-${latest.id}`));
+  assert.ok(updatedBody.includes(`replaced by [${latest.id}]`), 'new supersession marks for archived records stay visible');
+  assert.equal(audit.auditDecisionTraces({ body: updatedBody, comments: github.commentsOf(parentIssue), repository: identity.repository, issue: parentIssue, recordPrefix: 'INT-TK421-' }).ok, true);
+  assert.equal(reconciler().run().summary, 'No changes');
+});
+
+for (const interruption of ['lost response', 'failed post', 'body write']) test(`directory publication retries after ${interruption} without duplicates`, () => {
+  const { github, store, reconciler, parentIssue } = directoryFixture();
+  let interrupted = false;
+  github.intercept(call => {
+    const directoryPost = call.method === 'POST' && call.body?.body?.includes('<!-- decision-trace-directory -->');
+    const bodyWrite = call.method === 'PATCH' && call.path.endsWith(`/issues/${parentIssue}`);
+    if (interrupted || !(interruption === 'body write' ? bodyWrite : directoryPost)) return;
+    interrupted = true;
+    if (interruption === 'lost response') {
+      github.route(call.method, call.path, call.body);
+      throw new Error('Response lost after publication');
+    }
+    return { status: 502, json: { message: 'Bad gateway' } };
+  });
+  const first = reconciler().run({ apply: true });
+  assert.equal(interrupted, true);
+  assert.ok(first.holds.length);
+  const verified = github.commentsOf(parentIssue).filter(comment => comment.body.includes('<!-- decision-trace-index -->'));
+  const retried = reconciler().run({ apply: true });
+  assert.deepEqual(retried.holds, []);
+  const indexes = github.commentsOf(parentIssue).filter(comment => comment.body.includes('<!-- decision-trace-index -->'));
+  for (const before of verified) assert.equal(indexes.filter(comment => comment.body === before.body).length, 1, 'a verified page is reused once');
+  assert.equal(indexes.length, 1, 'only the directory page is posted');
+  assert.deepEqual(store.read('parent', parentIssue).doc.pending_effects, []);
+  const writes = github.mutations();
+  assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
+  assert.equal(github.mutations(), writes);
+});
+
+test('prose alone over the threshold holds without posting indexes or writing the body', () => {
+  const { github, reconciler, parentIssue, prose } = directoryFixture({ proseSize: 60001 });
+  const report = reconciler().run({ apply: true });
+  assert.ok(report.holds.some(hold => hold.code === 'BODY_TOO_LARGE'));
+  assert.equal(github.issues.get(parentIssue).body, prose);
+  assert.equal(patchCount(github, parentIssue), 0);
+  assert.equal(github.commentsOf(parentIssue).some(comment => comment.body.includes('<!-- decision-trace-index -->')), false);
+});
+
+test('partly published multi-page directories reuse verified pages and finish within comment budgets', () => {
+  const { github, store, reconciler, parentIssue, decisions, prose } = directoryFixture({ topics: 700 });
+  // Existing one-hop topic indexes need only their directory paged. Each keeps one topic.
+  for (let n = 0; n < 700; n += 1) {
+    const topic = decisions[n * 3].body.split('\n')[0];
+    const entries = decisions.slice(n * 3, n * 3 + 3);
+    comment(github, parentIssue, `${topic}\n---\n<!-- decision-trace-index -->\n${entries.map((entry, at) => `[${entry.id}](#issuecomment-${entry.id})${at === 0 ? ` (replaced by [${entries[2].id}](#issuecomment-${entries[2].id}))` : ''}`).join(' ')}`);
+  }
+  let posts = 0;
+  github.intercept(call => {
+    if (call.method === 'POST' && call.body?.body?.includes('<!-- decision-trace-directory -->') && ++posts === 2) return { status: 502, json: {} };
+  });
+  assert.ok(reconciler().run({ apply: true }).holds.length);
+  const first = github.commentsOf(parentIssue).filter(comment => comment.body.includes('<!-- decision-trace-directory -->'));
+  assert.equal(first.length, 1);
+  const retried = reconciler().run({ apply: true });
+  assert.deepEqual(retried.holds, []);
+  const directories = github.commentsOf(parentIssue).filter(comment => comment.body.includes('<!-- decision-trace-directory -->'));
+  assert.ok(directories.length > 1);
+  assert.equal(directories.filter(comment => comment.body === first[0].body).length, 1);
+  assert.equal(directories.flatMap(comment => comment.body.split('\n').filter(line => line.startsWith('- **Topic '))).length, 700);
+  assert.ok(directories.every(comment => comment.body.length < 60000));
+  const body = github.issues.get(parentIssue).body;
+  assert.ok(body.length < 60000);
+  assert.ok(body.includes(prose));
+  const audit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+  assert.equal(audit.auditDecisionTraces({ body, comments: github.commentsOf(parentIssue), repository: github.repository, issue: parentIssue, recordPrefix: 'INT-TK421-' }).ok, true);
+  assert.deepEqual(store.read('parent', parentIssue).doc.pending_effects, []);
+  const writes = github.mutations();
+  assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
+  assert.equal(github.mutations(), writes);
+});
+
+for (const change of ['prose grew', 'newer Toolkit', 'fence moved']) test(`directory preflight preserves guards when ${change}`, () => {
+  const { github, store, reconciler, parentIssue } = directoryFixture();
+  const pass = reconciler();
+  const plan = pass.plan();
+  if (change === 'prose grew') github.issues.get(parentIssue).body += 'x'.repeat(60000);
+  if (change === 'newer Toolkit') github.issues.get(parentIssue).body += state.renderBlock('Newer content', '99.0.0');
+  if (change === 'fence moved') store.mutate('parent', parentIssue, { writer, change: doc => state.claimDocument(doc, { session: 'new-holder', prefix: writer.prefix }, { takeover: true }) });
+  if (change === 'fence moved') assert.throws(() => pass.apply(plan), { code: 'STALE_WRITER' });
+  else assert.ok(pass.apply(plan).holds.some(hold => hold.code === (change === 'prose grew' ? 'BODY_TOO_LARGE' : 'BLOCK_NEWER_TOOLKIT')));
+  assert.equal(patchCount(github, parentIssue), 0);
+  assert.equal(github.commentsOf(parentIssue).some(comment => comment.body.includes('<!-- decision-trace-index -->')), false);
+});
+
+// Recovery holds survive both an unchanged plan and an attention re-plan. Only holds from
+// the first block diff are replaced; an unchecked effect must still stop every body write.
+for (const row of [
+  { change: 'changed bytes', attentionChange: false },
+  { change: 'duplicate page', attentionChange: false },
+  { change: 'changed bytes', attentionChange: true },
+  { change: 'duplicate page', attentionChange: true },
+]) test(`uncertain directory intents hold on ${row.change}, attention ${row.attentionChange ? 'changed' : 'unchanged'}`, () => {
+  const outcomes = [{ issue: 72, label: 'Optional task', class: 'OPTIONAL', parent: null, order: 0 }];
+  const { github, store, reconciler, parentIssue } = directoryFixture({ outcomes });
+  let lost = false;
+  github.intercept(call => {
+    if (!lost && call.method === 'POST' && call.body?.body?.includes('<!-- decision-trace-directory -->')) {
+      lost = true;
+      github.route(call.method, call.path, call.body);
+      throw new Error('Lost response');
+    }
+  });
+  assert.ok(reconciler().run({ apply: true }).holds.length);
+  const directory = [...github.comments.values()].find(comment => comment.body.includes('<!-- decision-trace-directory -->'));
+  if (row.change === 'changed bytes') directory.body += '\nChanged after posting.';
+  else comment(github, parentIssue, directory.body);
+  if (row.attentionChange) github.intercept(call => {
+    if (call.method === 'GET' && call.path.endsWith('/issues/72')) return { status: 404, json: {} };
+  });
+  const before = github.issues.get(parentIssue).body;
+  const writes = github.mutations();
+  const dry = reconciler().run();
+  assert.equal(dry.holds.filter(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === `#${parentIssue}` && hold.scope === 'body').length, 1);
+  assert.equal(dry.effects.some(effect => effect.kind === 'update_attention'), row.attentionChange);
+  const report = reconciler().run({ apply: true });
+  assert.equal(report.holds.filter(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === `#${parentIssue}`).length, 1);
+  assert.ok(report.results.some(result => result.kind === 'replace_block' && result.target.issue === parentIssue && result.outcome === 'SKIPPED'));
+  assert.equal(report.writes.github, 0);
+  assert.equal(github.mutations(), writes, 'an unverified intent is not replayed');
+  assert.equal(github.issues.get(parentIssue).body, before);
+  assert.ok(store.read('parent', parentIssue).doc.pending_effects.some(effect => effect.kind === 'post_index_comment' && effect.state === 'UNKNOWN'));
+});
+
+test('a fence takeover during directory publication stops the pass before the body write', () => {
+  const { github, store, reconciler, parentIssue } = directoryFixture();
+  let takeover = false;
+  github.intercept(call => {
+    if (!takeover && call.method === 'POST' && call.body?.body?.includes('<!-- decision-trace-directory -->')) {
+      takeover = true;
+      store.mutate('parent', parentIssue, { writer, change: doc => state.claimDocument(doc, { session: 'successor', prefix: writer.prefix }, { takeover: true }) });
+    }
+  });
+  assert.throws(() => reconciler().run({ apply: true }), { code: 'STALE_WRITER' });
+  assert.equal(takeover, true);
+  assert.equal(patchCount(github, parentIssue), 0);
+});
+
+test('one topic with many older indexes continues across bounded directory pages', () => {
+  const { github, reconciler, parentIssue, decisions, prose } = directoryFixture({ topics: 1 });
+  const topic = decisions[0].body.split('\n')[0];
+  for (let n = 0; n < 900; n += 1) comment(github, parentIssue,
+    `${topic}\n---\n<!-- decision-trace-index -->\n${decisions.map((entry, at) => `[${entry.id}](#issuecomment-${entry.id})${at === 0 ? ` (replaced by [${decisions[2].id}](#issuecomment-${decisions[2].id}))` : ''}`).join(' ')}`);
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  const comments = github.commentsOf(parentIssue);
+  const directories = comments.filter(comment => comment.body.includes('<!-- decision-trace-directory -->'));
+  assert.equal(directories.length, 2);
+  assert.ok(directories.every(comment => comment.body.length < 60000 && comment.body.includes(`- **${topic}:**`)));
+  const audit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+  const body = github.issues.get(parentIssue).body;
+  assert.ok(body.includes(prose));
+  assert.ok(body.length < 60000);
+  assert.equal(audit.auditDecisionTraces({ body, comments, repository: github.repository, issue: parentIssue, recordPrefix: 'INT-TK421-' }).ok, true);
+  assert.equal(reconciler().run().summary, 'No changes');
+});
+
+test('hand-moved decision indexes keep foreign references as prose and still allow a normal body write', () => {
+  const { github, reconciler } = setup();
+  reconciler().run({ apply: true });
+  const local = comment(github, 423, 'Local scope\n---\nINT-TK421-900 Local decision');
+  const index = comment(github, 423, `<!-- decision-trace-index -->\n## Decision index for #423 (moved from the issue body on 23 Oct 2026)\n- [Local decision](https://github.com/acme/app/issues/423#issuecomment-${local.id})\n- [Related task](https://github.com/acme/app/issues/461#issuecomment-6037517104)\n- [Older reference](#issuecomment-123456789)\n`);
+  // A hand-maintained self-reference is content, not another traversal edge, as on the base.
+  github.comments.get(index.id).body += `- [Index](#issuecomment-${index.id})\n`;
+  const before = patchCount(github, 423);
+  const plan = reconciler().run();
+  assert.equal(plan.holds.some(hold => hold.target === '#423'), false);
+  assert.equal(plan.findings.some(finding => finding.issue === 423 && ['TRACE_UNLINKED', 'TRACE_SUPERSEDED_UNMARKED'].includes(finding.code)), false);
+  assert.ok(plan.effects.some(effect => effect.kind === 'replace_block' && effect.target.issue === 423));
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  assert.equal(patchCount(github, 423), before + 1);
+  assert.equal(reconciler().run().summary, 'No changes');
+});
+
+for (const topics of [1, 3, 5, 6]) test(`notification budget with ${topics} large topics`, () => {
+  const fixture = directoryFixture({ topics: 0, proseSize: 41000 });
+  const { github, reconciler, parentIssue } = fixture;
+  for (let n = 0; n < topics; n += 1) {
+    for (let at = 0; at < 25; at += 1) comment(github, parentIssue, `Topic ${n}\n---\nDecision ${at}`);
+  }
+  const pass = reconciler();
+  const doc = fixture.store.read('parent', parentIssue).doc;
+  // Only a nearly empty trace fits: each large topic must move to make this budget.
+  const minimum = pass.projectBody(parentIssue, fixture.prose, state.renderParentBlockBody(doc, new Map()), [], '3.9.1').body.length;
+  pass.threshold = minimum + 1100;
+  const plan = pass.plan();
+  const posts = plan.effects.filter(effect => effect.kind === 'post_index_comment');
+  if (topics <= 5) {
+    assert.equal(posts.some(post => post.target.directory), false);
+    assert.equal(posts.length, topics);
+  } else {
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].target.directory, true, 'discard every speculative per-topic post');
+  }
+  assert.deepEqual(pass.apply(plan).holds, []);
+});
+
+test('the five-topic notification budget is shared across issues in one pass', () => {
+  const { github, reconciler } = setup();
+  reconciler().run({ apply: true });
+  for (const issue of [423, 467]) {
+    github.issues.get(issue).body += 'p'.repeat(41000);
+    for (let n = 0; n < 5; n += 1) for (let at = 0; at < 40; at += 1) comment(github, issue, `Topic ${n}\n---\nDecision ${at}`);
+  }
+  const pass = reconciler();
+  pass.threshold = 45000;
+  const plan = pass.plan();
+  const topics = plan.effects.filter(effect => effect.kind === 'post_index_comment' && !effect.target.directory);
+  assert.ok(topics.length, 'the first issue keeps the small-case path');
+  assert.ok(topics.reduce((count, effect) => count + effect.target.parts.length, 0) <= 5);
+  assert.ok(plan.effects.some(effect => effect.kind === 'post_index_comment' && effect.target.directory));
+  assert.deepEqual(pass.apply(plan).holds, []);
+  assert.equal(reconciler().run().summary, 'No changes');
+});
+
 // Completed-task discovery fixtures use reserved fake repository identities and no live records.
 function completedFixture(count = 1) {
   const outcomes = Array.from({ length: count }, (_, order) => ({ issue: 100 + order, class: 'COMPLETED', parent: 7, order }));
@@ -840,7 +1110,7 @@ test('a trace that would overflow the body moves whole into one index comment, t
   assert.equal(audit.auditDecisionTraces({ body: github.issues.get(423).body, comments: github.commentsOf(423), recordPrefix: 'INT-TK421-', threshold: limit }).ok, true);
 });
 
-test('each tag keeps its own list and overflows into its own index comment; tags are never combined', () => {
+test('small overflows keep each topic in its own index comment', () => {
   const { github, reconciler } = setup();
   reconciler().run({ apply: true });
   const fix = Array.from({ length: 24 }, (unused, n) => n + 1).map(n => comment(github, 423, `data-leak-fix-122\r\n---\r\nINT-TK421-05${n} fix step ${'z'.repeat(60)}`));
@@ -1456,4 +1726,112 @@ test('a page written by a newer Toolkit is held, not rewritten, so two versions 
   assert.equal(github.issues.get(421).body, before, 'the page is left as the newer copy wrote it');
   reconciler().run({ apply: true });
   assert.notEqual(github.issues.get(421).body, before, 'the same version still writes it');
+});
+
+// A deleted comment that a generated page links must not stop the page redrawing.
+const deleteComment = (github, id) => { github.comments.get(id).issue = -1; };
+const traceAudit = require('../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs');
+
+for (const row of [
+  { code: 'INDEX_DEPTH', pages: 12, reason: /would exceed two index hops \(index 2\)/ },
+  { code: 'INDEX_LIMIT', pages: traceAudit.MAX_INDEX_COMMENTS, reason: /would exceed 1024 index pages/ },
+]) test(`prospective directory paging includes recovery for ${row.code}`, () => {
+  const { reconciler, parentIssue } = setup({ outcomes: [], issues: () => {} });
+  const pass = reconciler();
+  const person = (id, body) => ({ id, body, user: { login: 'owner', type: 'User' } });
+  const comments = [person(1, 'Topic\n---\nINT-TK421-001 Decision'),
+    ...Array.from({ length: row.pages }, (unused, n) => person(n + 2,
+      `Topic\n---\n${traceAudit.INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=test part=1/1 -->\n[decision](#issuecomment-1)${row.code === 'INDEX_DEPTH' && n === 0 ? '\n[list 1](#issuecomment-3)' : ''}`))];
+  pass.threshold = pass.projectBody(parentIssue, '', 'state', [], '3.9.1').body.length + 600;
+  assert.throws(() => pass.projectBody(parentIssue, '', 'state', comments, '3.9.1'), error => {
+    assert.equal(error.code, 'TRACE_INDEX_INVALID');
+    assert.match(error.message, row.reason);
+    assert.ok(error.message.endsWith(traceAudit.indexRecoveryText([row.code])), 'projection and audit share the recovery step');
+    return true;
+  });
+});
+
+test('a hand-nested directory returns as a body root and keeps its decisions reachable', () => {
+  const { github, reconciler, parentIssue, repository } = setup({ outcomes: [], issues: () => {} });
+  const decision = comment(github, parentIssue, 'Topic\n---\nINT-TK421-001 Decision');
+  const inner = comment(github, parentIssue, `${traceAudit.INDEX_COMMENT_MARKER}\n${traceAudit.DIRECTORY_COMMENT_MARKER}\n[decision](#issuecomment-${decision.id})`);
+  const outer = comment(github, parentIssue, `${traceAudit.INDEX_COMMENT_MARKER}\n${traceAudit.DIRECTORY_COMMENT_MARKER}\n[list 1](#issuecomment-${inner.id})`);
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  assert.ok(github.issues.get(parentIssue).body.includes(`#issuecomment-${inner.id})`));
+  const audit = () => traceAudit.auditDecisionTraces({ body: github.issues.get(parentIssue).body, comments: github.commentsOf(parentIssue), repository, issue: parentIssue });
+  assert.deepEqual(audit().unlinked_decisions, []);
+  assert.ok(audit().index_errors.some(error => error.code === 'INDEX_UNRELATED'));
+  github.comments.get(outer.id).body = `${traceAudit.INDEX_COMMENT_MARKER}\n${traceAudit.DIRECTORY_COMMENT_MARKER}`;
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  assert.equal(audit().ok, true, 'removing the invalid link clears the finding without losing decisions');
+});
+
+test('a decision deleted after directory paging leaves the page redrawing, with a plain finding', () => {
+  const { github, reconciler, parentIssue, decisions } = directoryFixture();
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  deleteComment(github, decisions[4].id);
+  const dry = reconciler().run();
+  assert.deepEqual(dry.holds, []);
+  const finding = dry.findings.find(entry => entry.code === 'TRACE_UNLINKED');
+  assert.ok(finding, JSON.stringify(dry.findings));
+  assert.match(finding.detail, /INDEX_MISSING .* -> /);
+  assert.match(finding.detail, /remove that link from the named index comment/);
+  const later = comment(github, parentIssue, 'Fresh topic\n---\nINT-TK421-99999 Later decision');
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  assert.ok(github.issues.get(parentIssue).body.includes(`#issuecomment-${later.id})`), 'a new decision still reaches the page');
+});
+
+test('a topic page deleted under a directory returns its comments to the body', () => {
+  const { github, reconciler, parentIssue } = setup();
+  reconciler().run({ apply: true });
+  const fix = Array.from({ length: 24 }, (unused, n) => n + 1).map(n => comment(github, 423, `data-leak-fix-122\n---\nINT-TK421-05${n} fix step ${'z'.repeat(60)}`));
+  comment(github, 423, 'TABLE-CREATION\n---\nINT-TK421-060 columns agreed');
+  reconciler().run({ apply: true });
+  const pass = reconciler();
+  pass.threshold = github.issues.get(423).body.length - 200;
+  assert.deepEqual(pass.run({ apply: true }).holds, []);
+  const index = github.commentsOf(423).at(-1);
+  assert.ok(index.body.includes(traceAudit.INDEX_COMMENT_MARKER));
+  // Deleting the topic page (or a decision it links) holds nothing; its comments are listed in the body again.
+  deleteComment(github, fix[3].id);
+  const again = reconciler();
+  assert.deepEqual(again.run().holds, []);
+  deleteComment(github, index.id);
+  const report = reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  const trace = state.findStateBlock(github.issues.get(423).body, state.TRACE_BLOCK_NAME).block.body;
+  assert.match(trace, new RegExp(`#issuecomment-${fix[0].id}\\)`));
+});
+
+test('a cyclic generated index holds the body once, with recovery text', () => {
+  const { github, reconciler, parentIssue } = setup();
+  reconciler().run({ apply: true });
+  const first = comment(github, parentIssue, `${traceAudit.INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=test part=1/1 -->\n`);
+  const second = comment(github, parentIssue, `${traceAudit.INDEX_COMMENT_MARKER}\n<!-- programme-trace intent=test part=1/1 -->\n[list 1](#issuecomment-${first.id})`);
+  github.comments.get(first.id).body += `[list 1](#issuecomment-${second.id})`;
+  const dry = reconciler().run();
+  const held = dry.holds.filter(hold => hold.target === `#${parentIssue}` && hold.code === 'TRACE_INDEX_INVALID');
+  assert.equal(held.length, 1, JSON.stringify(dry.holds));
+  assert.match(held[0].detail, /INDEX_CYCLE/);
+  assert.match(held[0].detail, /edit or delete the named index comment/);
+});
+
+test('a stale body with no planned index pages reads the issue and its comments no more than before paging', () => {
+  const { github, reconciler } = setup();
+  reconciler().run({ apply: true });
+  comment(github, 421, 'Scope\n---\nINT-TK421-001 Decision');
+  const before = github.calls.length;
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  const calls = github.calls.slice(before);
+  assert.equal(calls.filter(call => call.method === 'GET' && /\/issues\/421$/.test(call.path)).length, 4);
+  assert.equal(calls.filter(call => call.method === 'GET' && /\/issues\/421\/comments/.test(call.path)).length, 2);
+});
+
+test('a programming error while projecting a page is thrown, not held without a code', () => {
+  const { reconciler } = setup();
+  const pass = reconciler();
+  pass.projectBody = () => { throw new TypeError('boom'); };
+  assert.throws(() => pass.run(), /boom/);
 });

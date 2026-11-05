@@ -163,7 +163,7 @@ function skipText(last, now = null) {
 }
 
 // The session-start line for this computer's programme sweep of a repository, or null when it is
-// fine or there is none: its last run skipped or failed, or there has been no run for over 2 hours
+// fine or there is none: its last run held, skipped or failed, or there has been no run for over 2 hours
 // inside its hours. Fixed wording only.
 function sweepLine(repository, { home = os.homedir(), now = new Date() } = {}) {
   const registry = readRegistry(home);
@@ -177,7 +177,7 @@ function sweepLine(repository, { home = os.homedir(), now = new Date() } = {}) {
   const [hour, minute] = schedule.at.split(':').map(Number);
   const intoWindow = ((now.getHours() * 60 + now.getMinutes()) - (hour * 60 + minute) + 1440) % 1440;
   const stale = intoWindow >= STALE_MS / 60000 && intoWindow < schedule.hours * 60 && (!at || now.getTime() - Date.parse(at) > STALE_MS);
-  const status = skipText(last, now) || (last && last.status === 'failed' && at ? `failed at ${shortTime(at, now)}` : null);
+  const status = skipText(last, now) || (last && ['failed', 'held'].includes(last.status) && at ? `${last.status} at ${shortTime(at, now)}` : null);
   if (stale) return `Programme sweep: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}; see toolkit tasks.`;
   if (status) return `Programme sweep: ${status.startsWith('failed') ? 'last run ' : ''}${status}; see toolkit tasks.`;
   return null;

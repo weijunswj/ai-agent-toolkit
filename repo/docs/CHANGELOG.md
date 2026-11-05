@@ -1,15 +1,34 @@
 # Toolkit Changelog
 
-## 3.49.0
+## 3.48.3
 
-### Changed
+### Added
 
-- Local agents register or update Toolkit's fixed Windows programme sweep and shard timing tasks under narrowly scoped standing approval, with verified enabled governance, ownership checks, owner stops and run-result verification. Setup continues to report tasks without changing them.
-- Every eligible governed repository gets the shard timing task. Runs report `no shards yet` without repository or external changes until the shard manifest appears, then use Toolkit's fixed refresher automatically.
+- A programme page redraw that is refused for being too large now leaves a lasting attention finding that names the total size, the limit, the reduction needed and the largest sections. It stays open until a complete redraw is written and read back.
+- The session-start sweep line now names a recently held scheduled sweep, in addition to skipped, failed and overdue runs.
+
+### Tests
+
+- A new test proves that taking over a programme reads the same bounded set of resources whether the history is short or long.
+
+## 3.48.2
 
 ### Fixed
 
-- Preserve the existing global rules and device-task setup wording alongside the task standing approval. Raise only the global instruction block budget from 18,500 to 19,400 bytes rather than shorten unrelated rules.
+- The CI check-up now reports a failing command hidden by a later `exit 0` line in PowerShell and cmd steps.
+- The CI check-up decides whether a job runs on Windows only from its runner labels or the matrix values it names, so a step called "windows documentation" no longer makes a Linux job look like a Windows job. An unresolved runner produces a CHECK for the agent to judge only when a step ends in `exit 0` and sets no shell.
+
+### Tests
+
+- The external operation preflight tests now cover blank authority fields, empty target lists, secret patterns and key names, and secrets nested under secret-looking keys, and check that no secret value is echoed.
+
+## 3.48.1
+
+### Fixes
+
+- Page large comment traces directly into bounded directory comments with a separate line per topic, preventing notification floods while retaining hand-written prose and decision links. Small moves use at most five topic comments per pass. Interrupted passes verify and reuse pages. The audit rejects missing, cyclic or unrelated links in generated indexes within two hops; hand-made indexes retain their one-hop reading and ignore foreign references.
+- A deleted comment linked from a generated decision index no longer stops the programme page redrawing; the comments it no longer reaches are listed in the body again, and the audit finding says how to clear the dead link. Index links match the repository in any letter case.
+- Keep recovery holds for unchecked writes when attention findings change. Hand-nested directories return as body links so their decisions stay reachable, and index-limit holds explain the correct recovery step.
 
 ## 3.48.0
 
