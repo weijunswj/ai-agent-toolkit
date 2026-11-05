@@ -4210,7 +4210,7 @@ function printWindowsTasks(args, { platform = process.platform, scheduler = null
         read = resolved;
         const desired = windowsTasks.desiredTasks({ checkout: root, checkoutRead: read, toolkitRoot, home, deps });
         const plan = windowsTasks.planTasks(desired, { scheduler: reportScheduler, home, registry });
-        for (const line of windowsTasks.describePlan(plan)) log(line);
+        for (const line of windowsTasks.describePlan(plan, { summaryOnly: true })) log(line);
         plans.push(plan);
         seen.add(read.repository.toLowerCase());
       } catch { refusal('checkout or task ownership could not be verified; run the direct task plan for details'); }
