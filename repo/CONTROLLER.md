@@ -59,6 +59,8 @@ Record standing authority's owner/provenance, repository/destination, purpose, o
 
 ## Evidence, progress and finish
 
+Parent completion requires every native child and descendant to be closed, including optional and uncatalogued children. Catalogue completion alone grants no closure. The fenced refresh owns automatic repair and completion only with explicit `parent_lifecycle` permission in the merged binding; incomplete reads hold writes and an empty tree never completes automatically. Use Refs for parent links in records and pull request bodies; avoid closing words before those links. Child acceptance and user testing requirements still apply.
+
 - Executors publish concise authorised progress and screened private evidence directly: fresh expected-head/conditional writes, minimal edits, unrelated content preserved, independent readback. Keep conflicts/unknown outcomes in PR/evidence store. Transport failure is no implementation defect; republishing unchanged bytes consumes no correction.
 - Finish authorised work before stopping, as the global rules' Shipping section says; a genuine hold stops only its dependent steps.
 - Reuse the user-selected private evidence store; a private `TRANSPORT-*` Git repository is only the recommended default when no store was previously selected. Verify identity, privacy, access and consumer retrieval through its backend; hold unsupported capabilities. Session folders are never custody (governed block).

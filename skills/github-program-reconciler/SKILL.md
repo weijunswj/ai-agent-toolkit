@@ -1,6 +1,6 @@
 ---
 name: github-program-reconciler
-description: Keep a programme's parent issue, child issues, pull request status and decision history in step on github.com, only where .github/toolkit-programme.json exists and the user has turned Toolkit's GitHub governance on. Use at big moments: the programme file is added, a child issue changes, a pull request opens, moves or merges, an issue closes or reopens, the order changes, a release ships or the controller changes. Any session may run the preview (dry run) and report it. Only the appointed controller writes programme state: it holds the parent document and runs every writing command itself, including handing out work, returns, user testing, review and completion. A planning, build or review session it assigns (G0, G1 or G2) writes only its own checkpoint journal; helpers never write. Every programme.cjs command refuses without the programme file or while governance is off; the file does not change governed issue records. Never closes, deletes or merges.
+description: Keep a programme's parent issue, child issues, pull request status and decision history in step on github.com, only where .github/toolkit-programme.json exists and the user has turned Toolkit's GitHub governance on. Use at big moments: the programme file is added, a child issue changes, a pull request opens, moves or merges, an issue closes or reopens, the order changes, a release ships or the controller changes. Any session may run the preview (dry run) and report it. Only the appointed controller writes programme state: it holds the parent document and runs every writing command itself, including handing out work, returns, user testing, review and completion. A planning, build or review session it assigns (G0, G1 or G2) writes only its own checkpoint journal; helpers never write. Every programme.cjs command refuses without the programme file or while governance is off; the file does not change governed issue records. Never deletes or merges. Parent lifecycle changes require explicit merged binding permission.
 ---
 
 # GitHub Program Reconciler
@@ -22,7 +22,7 @@ Any session may run the dry-run `reconcile` (or `show`) at these significant eve
 - A release ships.
 - A controller is appointed or rebinds.
 
-Check for the binding first at each event; without it, do not run `programme.cjs`. Governed issue records are unchanged. The reconciler never closes, deletes or merges.
+Check for the binding first at each event; without it, do not run `programme.cjs`. Governed issue records are unchanged. The reconciler never deletes or merges. Only explicit `parent_lifecycle` permission in the merged binding allows the fenced refresh to reopen an incomplete parent or complete its non-empty native tree once every descendant is closed.
 
 ## Refresh after every write (required)
 
@@ -73,9 +73,17 @@ The governed repository holds `.github/toolkit-programme.json` (no secrets). It 
 
 - The repository is the `origin` remote as GitHub names it; the file must agree and cannot override it (`REPO_IDENTITY_MISMATCH`).
 - `store.kind` names the backend. The only kind is `github`: a separate repository that exists, is private and is writable, checked before every pass (`STATE_STORE_UNVERIFIED`). Another kind (a different store) is added in code with the same compare-and-swap contract; an unknown kind stops at setup. There is no fallback store.
-- `required_checks` adds check names to the ones GitHub marks required. With neither, checks are never `GREEN`. (Toolkit's `main` has no required status checks configured, so its binding names them.)
+- `required_checks` adds check names to the ones GitHub marks required. With neither, checks are never `GREEN`. (Toolkit's `main` requires `validate`; its binding names it too.)
 - `projection` (optional) places the Programme Graph on the parent page: `replace_section` names a hand-kept section the graph replaces while it is still there (removed in the same body write), and `after_section` names the status section the graph follows. Toolkit uses `"after_section": "CURRENT", "replace_section": "Programme index"`.
 - `state` (optional, version 2 only) moves the parent and child documents to the public state branch: exactly `{ "kind": "branch", "branch": "DO-NOT-DELETE-IF-TOOLKIT-GOVERNANCE-IS-ENABLED", "path": "state/" }`, on the bound repository itself. `store` stays required beside it. `migrate-state` prints this block; it takes effect only once a pull request merges it (see "The public state branch").
+
+## Parent lifecycle
+
+The optional version 2 `parent_lifecycle` block explicitly sets both `reopen_incomplete` and `complete_when_children_closed` to booleans. Absence grants no automatic lifecycle writes. Only the bound programme parent is affected. Every paginated native child and descendant counts, including optional and uncatalogued tasks; a closed intermediary cannot hide an open descendant. An empty tree never completes automatically. Child acceptance and user testing requirements remain unchanged.
+
+The existing fenced refresh is the only repair owner. It rechecks the native tree just before mutation, persists intent, verifies state independently, and recovers uncertain outcomes before retrying. Repair notices identify the closure event, actor and time, with closing source unavailable when the event has no commit. A deterministic marker prevents duplicate notices. Completion happens on the next successful refresh or sweep; schedules guarantee neither immediate nor overnight repair.
+
+Use Refs for parent links in records and pull request bodies; avoid closing words before those links. The pre-write guard and read-only CI check inspect title, body and every commit. The hooks also inspect merge-message overrides and explicit issue closes. Unreadable files, editor, stdin and shell-generated content hold the affected write; provide literal text or a readable body file. URLs and the saved parenthesised record-link incident pattern are defensive matches, rather than claims about documented GitHub grammar. Reads remain unaffected.
 
 ## State documents
 
