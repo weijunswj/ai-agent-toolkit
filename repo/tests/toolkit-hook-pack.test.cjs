@@ -15,6 +15,27 @@ const hooksOf = host => JSON.parse(fs.readFileSync(path.join(ROOT, host === 'cla
 const row = (extra = {}) => ({ id: 'X1', source: 'test', kind: 'benign', hosts: ['claude'], payload: { tool_name: 'Bash', tool_input: { command: 'git status' } }, expect: { decision: 'allow' }, status: 'pass', ...extra });
 const output = (status, stdout = '', stderr = '') => ({ status, stdout, stderr });
 
+test('context assertions validate and read only delivered host context, with private diagnostics', () => {
+  const text = 'private fixture context';
+  const expected = row({ event: 'SessionStart', expect: { decision: 'allow', context_contains: [text], context_excludes: ['excluded private text'] } });
+  assert.deepEqual(pack.rowErrors(expected), []);
+  for (const value of ['', [], [text,text], [''], [9], text]) assert.ok(pack.rowErrors(row({ expect: { decision: 'allow', context_contains: value } })).length);
+  const claude = pack.hookContext('claude', 'SessionStart', output(0, JSON.stringify({ hookSpecificOutput: { additionalContext: text } })));
+  assert.equal(claude, text);
+  assert.equal(pack.hookContext('claude','SessionStart',output(0,'',text)), '');
+  assert.equal(pack.hookContext('claude','SessionStart',output(0,JSON.stringify({ reason: text }))), '');
+  assert.equal(pack.hookContext('codex','SessionStart',output(0,text,'wrong')), text);
+  assert.equal(pack.hookContext('codex','PreToolUse',output(0,text)), '');
+  assert.equal(pack.hookContext('codex','SessionStart',output(1,text)), '');
+  const observed = context => ({ context, decision: 'allow', problems: [], failed: [] });
+  assert.equal(pack.meets(expected,'claude',observed(claude)), true);
+  for (const context of ['', 'wrong', `${text}\n${text}`, `${text} excluded private text`]) {
+    assert.equal(pack.meets(expected,'claude',observed(context)), false);
+    assert.doesNotMatch(pack.failureKind(expected,'claude',observed(context)), /private|fixture/);
+  }
+  assert.equal(pack.meets(expected,'claude', { ...observed(claude), decision: 'deny' }), false);
+});
+
 test('the corpus loads with unique ids, and every known-bad row names its lane and date', () => {
   const corpus = pack.loadCorpus();
   assert.deepEqual(corpus.errors, []);
