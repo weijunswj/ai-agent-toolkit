@@ -28,6 +28,8 @@ Every hook carries both kinds of rows:
 - **Must-refuse rows** for each effect it exists to stop.
 - **Must-pass rows** for ordinary daily commands near its pattern: reads of `.claude` and `.codex` folders, reports and metadata files that name Claude or Codex next to yes, no or ok, `grep -rn` and `head -c`, heredocs and here-strings, loops over file names, SSH reads. Run them in an enabled repository, a disabled one and a plain folder, on every shell tool name both hosts report.
 
+CI runs the full pack on Linux and one Windows job per family. Every family keeps the 360-second pack budget; the required `validate` check waits for all of them. Sharding changes execution layout only: corpus rows, hosts and expectations stay intact.
+
 ## Owner Approval
 
 A new hook, or a new rule inside a hook, needs the owner's yes on one line: what it stops, and what it might wrongly stop. Put that line in the pull request body.

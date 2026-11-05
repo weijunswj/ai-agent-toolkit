@@ -134,7 +134,7 @@ function ciFixture() {
       summary('linux', 'linux-2', ['repo/tests/b.test.cjs', 'repo/tests/c.test.cjs']),
       summary('windows', 'windows-1', files),
     ],
-    needs: { 'tests-linux': { result: 'success', outputs: {} }, 'tests-windows': { result: 'success', outputs: {} } },
+    needs: Object.fromEntries(['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'hook-pack-windows', 'personal-data', 'issue-closure'].map(job => [job, { result: 'success', outputs: {} }])),
   };
 }
 
@@ -148,6 +148,10 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
     ['a failed leg', (f) => { f.needs['tests-windows'].result = 'failure'; }, /tests-windows finished as failure/],
     ['a cancelled leg', (f) => { f.needs['tests-linux'].result = 'cancelled'; }, /finished as cancelled/],
     ['a skipped leg', (f) => { f.needs['tests-linux'].result = 'skipped'; }, /finished as skipped/],
+    ['a failed Windows pack family', (f) => { f.needs['hook-pack-windows'].result = 'failure'; }, /hook-pack-windows finished as failure/],
+    ['a skipped Windows pack family', (f) => { f.needs['hook-pack-windows'].result = 'skipped'; }, /hook-pack-windows finished as skipped/],
+    ['a cancelled Windows pack family', (f) => { f.needs['hook-pack-windows'].result = 'cancelled'; }, /hook-pack-windows finished as cancelled/],
+    ['a missing Windows pack result', (f) => { delete f.needs['hook-pack-windows']; }, /required job hook-pack-windows is missing/],
     ['no leg results', (f) => { f.needs = null; }, /results \(needs\) are missing/],
     ['a missing summary', (f) => { f.summaries.splice(1, 1); }, /linux shard linux-2 has no summary/],
     ['a summary reported twice', (f) => { f.summaries.push(clone(f.summaries[0])); }, /reported twice/],
@@ -168,6 +172,19 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
     const { errors } = shards.verifyCiSummaries({ manifest: fixture.manifest, discovered: fixture.files, summaries: fixture.summaries, needs: fixture.needs });
     assert.match(errors.join('\n'), pattern, label);
   }
+});
+
+test('Windows hook pack families cover every corpus host case exactly once', () => {
+  const pack = require('../scripts/toolkit-hook-pack.cjs');
+  const corpus = pack.loadCorpus(ROOT);
+  assert.deepEqual(corpus.errors, []);
+  const job = WORKFLOW.split('\n  hook-pack-windows:\n')[1].split('\n  personal-data:\n')[0];
+  const families = /family: \[([^\]]+)\]/.exec(job)[1].split(', ');
+  assert.equal(new Set(families).size, families.length, 'no duplicate family');
+  assert.deepEqual([...families].sort(), [...new Set(corpus.rows.map(row => row.family))].sort());
+  const cases = rows => rows.flatMap(row => row.hosts.map(host => `${row.id}:${host}`)).sort();
+  const selected = families.flatMap(family => corpus.rows.filter(row => row.family === family));
+  assert.deepEqual(cases(selected), cases(corpus.rows), 'same row and host pairs, with no duplicates or omissions');
 });
 
 // The pinned uses: text of an action as it stands in a workflow. Found at run time, so the tests
@@ -209,24 +226,31 @@ function assertDriftGuard(WORKFLOW) {
     ['the leg timeout removed', WORKFLOW.replace('    timeout-minutes: 30\n', '')],
     ['the aggregate no longer always runs', WORKFLOW.replace('    if: ${{ always() }}\n', '')],
     ['the aggregate skipped on failure', WORKFLOW.replace('if: ${{ always() }}', 'if: ${{ success() }}')],
-    ['the aggregate not waiting for Windows', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data, issue-closure]', 'needs: [tests-linux, tests-clock-ahead, hook-pack, personal-data]')],
-    ['the aggregate not waiting for the personal-data check', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data, issue-closure]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack]')],
-    ['the aggregate not waiting for the clock-ahead run', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data, issue-closure]', 'needs: [tests-linux, tests-windows, hook-pack, personal-data]')],
+    ['the aggregate not waiting for Windows', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows, personal-data, issue-closure]', 'needs: [tests-linux, tests-clock-ahead, hook-pack, personal-data]')],
+    ['the aggregate not waiting for the personal-data check', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows, personal-data, issue-closure]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack]')],
+    ['the aggregate not waiting for the clock-ahead run', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows, personal-data, issue-closure]', 'needs: [tests-linux, tests-windows, hook-pack, personal-data]')],
     ['the clock-ahead job removed', WORKFLOW.replace(/\n  tests-clock-ahead:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
     ['the clock-ahead run narrowed to one file', WORKFLOW.replace('--clock-ahead --clock-offset-days 400', 'repo/tests/skill-routing.test.cjs --clock-offset-days 400')],
     ['the clock-ahead run moved one day only', WORKFLOW.replace('--clock-ahead --clock-offset-days 400', '--clock-ahead --clock-offset-days 1')],
     ['a failed shard no longer uploads its summary', WORKFLOW.replace('        if: ${{ !cancelled() }}\n', '')],
     ['the personal-data check narrowed to one mode', WORKFLOW.replace('personal-data-guard.cjs ci', 'personal-data-guard.cjs pr')],
     ['the closure check removed', WORKFLOW.replace(/\n  issue-closure:\n[\s\S]*?(?=\n  validate:\n)/, '')],
-    ['the aggregate not waiting for closure safety', WORKFLOW.replace('hook-pack, personal-data, issue-closure]', 'hook-pack, personal-data]')],
+    ['the aggregate not waiting for closure safety', WORKFLOW.replace('hook-pack-windows, personal-data, issue-closure]', 'hook-pack-windows, personal-data]')],
     ['the closure check given write permissions', WORKFLOW.replace('      issues: read', '      issues: write')],
     ['the closure check skipped on PRs', WORKFLOW.replace("        if: ${{ github.event_name == 'pull_request' }}", "        if: ${{ github.event_name == 'push' }}")],
     ['the personal-data check on a shallow clone', WORKFLOW.replace(/(\n  personal-data:\n[\s\S]*?)fetch-depth: 0/, '$1fetch-depth: 1')],
     ['the personal-data job removed', WORKFLOW.replace(/\n  personal-data:\n[\s\S]*?(?=\n  validate:\n)/, '')],
     ['the hook pack job removed', WORKFLOW.replace(/\n  hook-pack:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
-    ['the hook pack dropped on Windows', WORKFLOW.replace('os: [ubuntu-latest, windows-latest]', 'os: [ubuntu-latest]')],
+    ['the hook pack dropped on Windows', WORKFLOW.replace('    runs-on: windows-latest\n    timeout-minutes: 15', '    runs-on: ubuntu-latest\n    timeout-minutes: 15')],
+    ['the Windows pack job removed', WORKFLOW.replace(/\n  hook-pack-windows:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
+    ['a Windows family dropped', WORKFLOW.replace('issue-closure, merge, push]', 'merge, push]')],
+    ['a Windows family duplicated', WORKFLOW.replace('merge, push]', 'merge, push, push]')],
+    ['a Windows family filter removed', WORKFLOW.replace(' --family ${{ matrix.family }}', '')],
+    ['the Windows pack budget raised', WORKFLOW.replace(' --family ${{ matrix.family }} --budget-seconds 360', ' --family ${{ matrix.family }} --budget-seconds 400')],
+    ['the Windows pack made optional', WORKFLOW.replace('  hook-pack-windows:\n', '  hook-pack-windows:\n    continue-on-error: true\n')],
+    ['the aggregate not waiting for Windows families', WORKFLOW.replace('hook-pack, hook-pack-windows, personal-data, issue-closure]', 'hook-pack, personal-data, issue-closure]')],
     ['the hook pack budget removed', WORKFLOW.replace(' run --budget-seconds 360', ' run')],
-    ['the aggregate not waiting for the hook pack', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data, issue-closure]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data]')],
+    ['the aggregate not waiting for the hook pack', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows, personal-data, issue-closure]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data]')],
     ['the summary check removed', WORKFLOW.replace(`\n${verify}`, '')],
     ['the summary check not last', WORKFLOW.replace(`\n${verify}`, '').replace('          node repo/scripts/validate-toolkit.cjs\n', `          node repo/scripts/validate-toolkit.cjs\n${verify}\n`)],
     ['the leg results not passed in', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '')],
