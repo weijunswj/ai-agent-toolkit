@@ -234,15 +234,16 @@ function indent(text, spaces) {
 // smaller run takes at least minMs or the larger would pass maxSize, and fails when the time grows
 // by more than maxRatio (linear work grows about fourfold, quadratic about sixteenfold).
 // The larger size stops repeating once a run is within the limit, so a linear reader is timed
-// once there. Returns { ok, ratio, size, times, message }.
-function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 20, maxRatio = 10, runs = 3 } = {}) {
+// once there. clock returns monotonic bigint nanoseconds (real time by default).
+// Returns { ok, ratio, size, times, message }.
+function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 20, maxRatio = 10, runs = 3, clock = () => process.hrtime.bigint() } = {}) {
   const time = (size, count, enough = -1) => {
     const input = build(size);
     let best = Infinity;
     for (let run = 0; run < count && best > enough; run += 1) {
-      const started = process.hrtime.bigint();
+      const started = clock();
       fn(input);
-      best = Math.min(best, Number(process.hrtime.bigint() - started) / 1e6);
+      best = Math.min(best, Number(clock() - started) / 1e6);
     }
     return best;
   };

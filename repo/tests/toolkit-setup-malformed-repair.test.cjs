@@ -78,22 +78,32 @@ test('approved repair completes the bounded root-only repair after the full ques
   assert.ok(backupFiles(root).length > 0);
 });
 
-test('plan and JSON question surfaces remain coherent and read-only for malformed synthetic config', () => {
-  for (const json of [false, true]) {
+test('plan, JSON and explain question surfaces remain coherent and read-only for malformed synthetic config', () => {
+  for (const mode of [['--plan'], ['--plan', '--json'], ['--explain', '2.1']]) {
     const root = tmpRoot();
     const { origin, setupRepo } = createGitBackedSetupRepo(root);
     const filePath = codexConfig(root);
     const original = Buffer.from(malformedConfig());
     writeFile(filePath, original.toString('utf8'));
+    const env = isolatedHomeEnv(root);
+    const nested = path.join(root, '.ai-agent-toolkit');
+    writeFile(path.join(nested, 'user-state', 'task-auto-merge.codex.v1.json'), JSON.stringify({ schema: 'toolkit.task-auto-merge-preferences.v1', host: 'codex', value: 'off' }));
+    writeFile(path.join(nested, 'agent-control', 'profiles', 'codex.json'), '{ legacy profile');
+    const snapshot = () => fs.readdirSync(root, { recursive: true }).sort().map(rel => {
+      const file = path.join(root, rel);
+      return [rel, fs.lstatSync(file).isDirectory() ? null : fs.readFileSync(file).toString('hex')];
+    });
+    const before = snapshot();
     const result = run([
-      '--plan', ...(json ? ['--json'] : []), '--repo-root', setupRepo, '--repo-remote', origin,
-      '--skip-codex-plugin-auto-refresh',
-    ], { env: isolatedHomeEnv(root), timeout: 300000 });
+      ...mode, '--repo-root', setupRepo, '--repo-remote', origin,
+      '--skip-codex-plugin-auto-refresh', '--yes-recommended', '--task-auto-merge', 'after-gates',
+    ], { env, timeout: 300000 });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.doesNotMatch(result.stdout, /codex-helper-agents|Codex helper agents/);
     assert.match(result.stdout, /automatically limits|automatic.*memory|root-only/i);
     assert.doesNotMatch(result.stdout, /SYNTHETIC-DO-NOT-PRINT/);
     assert.deepEqual(fs.readFileSync(filePath), original);
     assert.deepEqual(backupFiles(root), []);
+    assert.deepEqual(snapshot(), before, 'nested state and all new paths remain unchanged');
   }
 });
