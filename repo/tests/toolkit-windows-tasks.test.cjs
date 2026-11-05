@@ -808,6 +808,15 @@ test('J: a refresh that holds is recorded and the footer sweep still runs', (t) 
   assert.ok(log.some(entry => path.basename(entry[1] || '') === 'toolkit-github-footer-sweep.cjs'));
 });
 
+test('J: the existing sweep reports parent lifecycle results without a second repair owner', t => {
+  const report = { results: [{ kind: 'set_parent_state', target: { issue: 421, state: 'open' }, outcome: 'DONE' }, { kind: 'post_parent_repair', target: { issue: 421 }, outcome: 'UNKNOWN' }], holds: [{ code: 'EFFECT_UNKNOWN', target: '#421' }] };
+  const { record, log } = runSweep(t, { 'programme refresh': { status: 1, stdout: JSON.stringify(report) } });
+  assert.ok(record.summary.includes('Parent lifecycle: reopen DONE.'));
+  assert.ok(record.summary.includes('Parent lifecycle: repair notice UNKNOWN.'));
+  assert.equal(record.status, 'held');
+  assert.equal(log.filter(args => args.some(arg => arg === 'refresh')).length, 1);
+});
+
 test('J: gh signed out skips with no GitHub call; a stale binding skips before any write', (t) => {
   const out = runSweep(t, { 'gh auth': { status: 1 } });
   assert.equal(out.record.status, 'skipped');

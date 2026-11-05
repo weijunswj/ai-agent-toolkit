@@ -58,6 +58,89 @@ const codes = report => report.findings.map(finding => `${finding.code} #${findi
 const kinds = report => report.effects.map(effect => `${effect.kind} #${effect.target.issue}`);
 const patchCount = (github, number) => github.calls.filter(call => call.method === 'PATCH' && call.path.endsWith(`/issues/${number}`)).length;
 
+function lifecycleFixture({ state: parentState = 'open', childState = 'open', empty = false, nested = false, policy = true } = {}) {
+  const f = setup({ outcomes: [], issues: github => {
+    if (!empty) github.addIssue(424, { state: childState, parent: 421 });
+    if (nested) github.addIssue(425, { parent: 424 });
+  } });
+  Object.assign(f.binding, { schema: state.SCHEMA.bindingV2, governance: 'enabled', parents: [{ issue: 421, record_prefix: 'INT-TK421-' }] });
+  if (policy) f.binding.parent_lifecycle = { reopen_incomplete: true, complete_when_children_closed: true };
+  Object.assign(f.github.issues.get(421), { state: parentState,
+    events: [{ id: 10, event: 'closed', created_at: '2026-11-05T10:13:19Z', actor: { login: 'fixture-owner' }, commit_id: null }] });
+  return f;
+}
+for (const row of [
+  { name: 'closed parent with open uncatalogued child', state: 'closed', childState: 'open', want: 'open' },
+  { name: 'open parent with all native children closed', state: 'open', childState: 'closed', want: 'closed' },
+  { name: 'open parent with open child', state: 'open', childState: 'open', want: null },
+  { name: 'closed parent with closed children', state: 'closed', childState: 'closed', want: null },
+  { name: 'empty parent', empty: true, want: null },
+  { name: 'missing permission', state: 'closed', policy: false, want: null },
+  { name: 'closed intermediary with open descendant', state: 'closed', childState: 'closed', nested: true, want: 'open' },
+]) test(`parent lifecycle matrix: ${row.name}`, () => {
+  const f = lifecycleFixture(row);
+  const plan = f.reconciler().plan();
+  assert.equal(plan.effects.find(effect => effect.kind === 'set_parent_state')?.target.state || null, row.want);
+  const report = f.reconciler().run({ apply: true });
+  assert.deepEqual(report.holds, []);
+  assert.equal(f.github.issues.get(421).state, row.want || row.state || 'open');
+  if (row.want === 'open') {
+    const flags = f.github.commentsOf(421).filter(comment => comment.body.includes('toolkit-parent-repair'));
+    assert.equal(flags.length, 1);
+    assert.match(flags[0].body, /Closing source unavailable/);
+    f.reconciler().run({ apply: true });
+    assert.equal(f.github.commentsOf(421).filter(comment => comment.body.includes('toolkit-parent-repair')).length, 1);
+  }
+});
+test('incomplete lifecycle reads hold, and child attachment/reopening before mutation refuses completion', () => {
+  for (const change of ['unreadable', 'attach', 'reopen']) {
+    const f = lifecycleFixture({ childState: 'closed' });
+    const plan = f.reconciler().plan();
+    if (change === 'unreadable') {
+      const pass = f.reconciler();
+      pass.reader.nativeChildState = () => { throw new Error('incomplete native tree'); };
+      assert.ok(pass.plan().holds.some(hold => hold.code === 'PARENT_LIFECYCLE_UNKNOWN'));
+      f.github.hooks.push(call => call.path.includes('/sub_issues?') ? { status: 403, json: {} } : null);
+    } else if (change === 'attach') f.github.addIssue(426, { parent: 421 });
+    else f.github.issues.get(424).state = 'open';
+    const result = f.reconciler().apply(plan);
+    assert.ok(result.holds.length);
+    assert.equal(f.github.issues.get(421).state, 'open');
+  }
+});
+test('stale lifecycle writer cannot mutate parent state', () => {
+  const f = lifecycleFixture({ state: 'closed' });
+  const pass = f.reconciler(); const plan = pass.plan();
+  f.store.mutate('parent', 421, { writer, change: doc => state.claimDocument(doc, { session: 'successor', prefix: writer.prefix }, { takeover: true }) });
+  assert.throws(() => pass.apply(plan), /writer|hold|session/i);
+  assert.equal(f.github.issues.get(421).state, 'closed');
+});
+test('successful reopen followed by timeout and interrupted notice recover without duplicate writes', () => {
+  const f = lifecycleFixture({ state: 'closed' });
+  const original = f.github.request.bind(f.github);
+  let failed = false;
+  f.github.request = (method, endpoint, body) => {
+    const response = original(method, endpoint, body);
+    if (method === 'PATCH' && body?.state === 'open' && !failed) { failed = true; throw new Error('timeout after write'); }
+    return response;
+  };
+  assert.ok(f.reconciler().run({ apply: true }).holds.length);
+  assert.equal(f.github.issues.get(421).state, 'open');
+  assert.ok(f.store.read('parent', 421).doc.pending_effects.some(effect => effect.kind === 'post_parent_repair'));
+  let noticeFailed = false;
+  f.github.request = (method, endpoint, body) => {
+    const response = original(method, endpoint, body);
+    if (method === 'POST' && endpoint.endsWith('/comments') && !noticeFailed) { noticeFailed = true; throw new Error('timeout after notice'); }
+    return response;
+  };
+  assert.ok(f.reconciler().run({ apply: true }).holds.length);
+  const recovered = f.reconciler().run({ apply: true });
+  assert.deepEqual(recovered.holds, []);
+  assert.equal(f.github.calls.filter(call => call.method === 'PATCH' && call.body?.state === 'open').length, 1);
+  assert.equal(f.github.commentsOf(421).filter(comment => comment.body.includes('toolkit-parent-repair')).length, 1);
+  assert.deepEqual(f.store.read('parent', 421).doc.pending_effects, []);
+});
+
 function directoryFixture({ repository = 'example.test/programme', parentIssue = 71, topics = 122, proseSize = 41347, outcomes = [] } = {}) {
   const fixture = setup({ repository, parentIssue, outcomes, issues: github => {
     for (const outcome of outcomes) github.addIssue(outcome.issue);

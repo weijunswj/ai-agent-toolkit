@@ -58,7 +58,7 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   assert.deepEqual([normalized.parent_issue, normalized.record_prefix, normalized.writer_prefix], [binding.parents[0].issue, binding.parents[0].record_prefix, binding.parents[0].writer_prefix]);
   // Version 1 is still read, as enabled with one parent.
   // schedule_folder is a version 2 field.
-  const { governance: _governance, parents: _parents, schedule_folder: _folder, ...rest } = binding;
+  const { governance: _governance, parents: _parents, schedule_folder: _folder, parent_lifecycle: _lifecycle, ...rest } = binding;
   const v1 = { ...rest, schema: state.SCHEMA.binding, parent_issue: 421, record_prefix: 'INT-TK421-', writer_prefix: 'INT-TK421-' };
   assert.equal(validateBindingV1(v1), true, JSON.stringify(validateBindingV1.errors));
   assert.equal(state.validateBinding(v1), v1);
@@ -68,6 +68,17 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   for (const doc of [{ ...disabled, governance: 'enabled' }, { ...binding, parents: [] }, { ...binding, parents: [{ issue: 1, record_prefix: 'X', children: [2] }] }]) {
     assert.equal(validateBinding(doc), false, JSON.stringify(doc).slice(0, 80));
     assert.throws(() => state.validateBinding(doc), /is invalid/);
+  }
+  for (const parent_lifecycle of [{}, { reopen_incomplete: true }, { reopen_incomplete: 'yes', complete_when_children_closed: true }, { reopen_incomplete: true, complete_when_children_closed: true, all_repositories: true }]) {
+    assert.equal(validateBinding({ ...binding, parent_lifecycle }), false);
+    assert.throws(() => state.validateBinding({ ...binding, parent_lifecycle }), /invalid/);
+  }
+  const { parent_lifecycle: _policy, ...unboundLifecycle } = binding;
+  assert.equal(state.validateBinding(unboundLifecycle).parent_lifecycle, undefined, 'existing bindings acquire no lifecycle authority');
+  for (const kind of ['set_parent_state', 'post_parent_repair']) {
+    const doc = { ...parent, pending_effects: [{ intent_id: 'lifecycle-intent', kind, target: { issue: 421 }, state: 'UNKNOWN' }] };
+    assert.equal(validateParent(doc), true);
+    assert.deepEqual(state.validateParent(doc), []);
   }
 
   const bad = [
