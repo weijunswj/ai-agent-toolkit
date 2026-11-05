@@ -131,7 +131,7 @@ test('generated candidate body requires gates and names pending evidence without
   assert.doesNotMatch(body, /\b(passed|approved|verified)\b/i);
 });
 
-for (const mode of ['after-fetch', 'before-worktree', 'fetch-failure', 'resolution-failure', 'worktree-failure']) {
+for (const mode of ['after-fetch', 'before-worktree', 'fetch-failure', 'resolution-failure', 'worktree-failure', 'cleanup-failure']) {
   test(`refresh worktree owns its fetched commit: ${mode}`, () => {
     const fixture = fetchFixture();
     try {
@@ -139,20 +139,24 @@ for (const mode of ['after-fetch', 'before-worktree', 'fetch-failure', 'resoluti
       let tree;
       let target;
       let fetchRef;
+      let fetchArgs;
+      const output = [];
       const branch = `toolkit/shard-timings-${fixture.intended.slice(0, 7)}`;
       const invoke = (program, args, options) => {
         if (program === 'gh') throw new Error('stop after inspecting candidate');
         assert.equal(program, 'git');
         if (args[0] === 'fetch') {
+          fetchArgs = args;
           fetchRef = args.at(-1);
           if (mode === 'fetch-failure') return spawnSync(program, ['fetch', 'origin', 'refs/heads/missing'], options);
         }
+        if (mode === 'cleanup-failure' && args[0] === 'update-ref' && args[1] === '-d') return { status: 1, stdout: '', stderr: 'injected cleanup failure' };
         if (mode === 'resolution-failure' && args[0] === 'rev-parse') return { status: 1, stdout: '', stderr: 'injected resolution failure' };
         if (args[0] === 'worktree' && args[1] === 'add') {
           target = args.at(-1);
           tree = args.at(-2);
           if (mode === 'before-worktree') { foreignFetch(fixture); injected = true; }
-          if (mode === 'worktree-failure') return { status: 1, stdout: '', stderr: 'injected worktree failure' };
+          if (mode === 'worktree-failure' || mode === 'cleanup-failure') return { status: 1, stdout: '', stderr: 'injected worktree failure' };
         }
         const result = spawnSync(program, args, options);
         // Stop before reading manifests or publishing; the real candidate is now inspectable.
@@ -161,7 +165,7 @@ for (const mode of ['after-fetch', 'before-worktree', 'fetch-failure', 'resoluti
         return result;
       };
       const { openPr } = loadWithCommands('refresh-shard-timings.cjs', ['openPr'], invoke, fixture.root);
-      assert.throws(() => openPr(fixture.repo, { headSha: fixture.intended, databaseId: 123 }, { write() {} }), mode.endsWith('failure') ? /failed/ : /stop after inspecting candidate/);
+      assert.throws(() => openPr(fixture.repo, { headSha: fixture.intended, databaseId: 123 }, { write(text) { output.push(text); } }), mode === 'cleanup-failure' ? /git worktree failed: injected worktree failure/ : mode.endsWith('failure') ? /failed/ : /stop after inspecting candidate/);
       assert.equal(git(fixture.repo, ['rev-parse', 'HEAD']), fixture.initialCommit, 'caller HEAD stays unchanged');
       if (!mode.endsWith('failure')) {
         assert.equal(git(tree, ['rev-parse', 'HEAD']), fixture.intended);
@@ -173,7 +177,15 @@ for (const mode of ['after-fetch', 'before-worktree', 'fetch-failure', 'resoluti
       }
       assert.match(fetchRef, /^main:refs\/toolkit\/fetch\/\d+-[a-f0-9]+$/);
       assert.equal(git(fixture.repo, ['rev-parse', 'refs/toolkit/fetch/foreign-owner']), injected ? fixture.foreign : fixture.initialCommit);
-      assert.equal(git(fixture.repo, ['for-each-ref', '--format=%(refname)', 'refs/toolkit/fetch/']), 'refs/toolkit/fetch/foreign-owner');
+      const ownedRef = fetchRef.slice('main:'.length);
+      const remaining = ['refs/toolkit/fetch/foreign-owner'];
+      if (mode === 'cleanup-failure') {
+        remaining.push(ownedRef);
+        assert.match(output.join(''), /warning.*owned fetch ref/i);
+        assert.ok(output.join('').includes(ownedRef));
+      }
+      assert.deepEqual(git(fixture.repo, ['for-each-ref', '--format=%(refname)', 'refs/toolkit/fetch/']).split('\n').sort(), remaining.sort());
+      assert.ok(fetchArgs.includes('--no-tags'), 'owned fetch does not follow tags');
       assert.equal(git(fixture.repo, ['status', '--porcelain']), '');
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });

@@ -159,6 +159,16 @@ function command(program, args, options = {}) {
   return result.stdout;
 }
 
+// Cleanup must preserve the primary result even when Git cannot start or delete the ref.
+function gitCommand(root, args) {
+  try {
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
+    return { ok: !result.error && result.status === 0 };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function latestGreenRun(root, run) {
   const fields = 'databaseId,headSha,conclusion,headBranch,workflowName';
   if (run) {
@@ -220,7 +230,7 @@ function openPr(root, run, out) {
   let parent;
   let tree;
   try {
-    command('git', ['fetch', '--quiet', 'origin', `main:${fetchRef}`], { cwd: root });
+    command('git', ['fetch', '--quiet', '--no-tags', 'origin', `main:${fetchRef}`], { cwd: root });
     const fetchedCommit = command('git', ['rev-parse', `${fetchRef}^{commit}`], { cwd: root }).trim();
     parent = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-timings-wt-'));
     tree = path.join(parent, 'tree');
@@ -244,7 +254,8 @@ function openPr(root, run, out) {
     return 0;
   } finally {
     try {
-      command('git', ['update-ref', '-d', fetchRef], { cwd: root });
+      const cleanup = gitCommand(root, ['update-ref', '-d', fetchRef]);
+      if (!cleanup.ok) out.write(`Warning: could not remove owned fetch ref ${fetchRef}; it may remain.\n`);
     } finally {
       if (tree && fs.existsSync(tree)) out.write(`The temporary worktree ${tree} was left for inspection; remove it with git worktree remove.\n`);
       else if (parent) fs.rmSync(parent, { recursive: true, force: true });

@@ -9,7 +9,7 @@ const { createRequire } = require('node:module');
 const childProcess = require('node:child_process');
 const { createRepoAutoUpdateFixture, git, writeFile, commitAll } = require('./toolkit-local-bridge-fixture.cjs');
 
-function fetchFixture() {
+function fetchFixture({ foreignRef = true } = {}) {
   const fixture = createRepoAutoUpdateFixture();
   writeFile(path.join(fixture.upstream, 'intended.txt'), 'intended update\n');
   fixture.intended = commitAll(fixture.upstream, 'intended update');
@@ -17,7 +17,7 @@ function fetchFixture() {
   writeFile(path.join(fixture.upstream, 'foreign.txt'), 'foreign update\n');
   fixture.foreign = commitAll(fixture.upstream, 'foreign descendant');
   git(fixture.upstream, ['push', 'origin', 'HEAD:refs/heads/foreign']);
-  git(fixture.repo, ['update-ref', 'refs/toolkit/fetch/foreign-owner', fixture.initialCommit]);
+  if (foreignRef) git(fixture.repo, ['update-ref', 'refs/toolkit/fetch/foreign-owner', fixture.initialCommit]);
   return fixture;
 }
 

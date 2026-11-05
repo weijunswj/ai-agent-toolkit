@@ -416,7 +416,7 @@ function isCredentialError(message = '') {
 
 function fetchWithCredentialFallback(repoPath, branch, fetchRef) {
   const refspec = `${branch}:${fetchRef}`;
-  const defaultFetch = gitCommand(repoPath, ['fetch', 'origin', refspec], { timeout: 120000 });
+  const defaultFetch = gitCommand(repoPath, ['fetch', '--no-tags', 'origin', refspec], { timeout: 120000 });
   if (defaultFetch.ok) return defaultFetch;
 
   let lastError = commandOutput(defaultFetch);
@@ -425,7 +425,7 @@ function fetchWithCredentialFallback(repoPath, branch, fetchRef) {
   for (const helper of GIT_CREDENTIAL_HELPERS) {
     const fallback = gitCommand(
       repoPath,
-      ['-c', `credential.helper=${helper}`, 'fetch', 'origin', refspec],
+      ['-c', `credential.helper=${helper}`, 'fetch', '--no-tags', 'origin', refspec],
       { timeout: 120000 }
     );
     if (fallback.ok) return fallback;
@@ -607,7 +607,7 @@ function validateAndUpdateRepo(state, args = {}) {
     branchSwitchedFrom = currentBranch;
   }
   const fromCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read current commit');
-  // FETCH_HEAD is shared by unrelated fetches, including those in other worktrees.
+  // FETCH_HEAD is overwritten by any other fetch in this worktree.
   const fetchRef = `refs/toolkit/fetch/${process.pid}-${crypto.randomBytes(12).toString('hex')}`;
   try {
     const fetchResult = fetchWithCredentialFallback(repoPath, branch, fetchRef);
@@ -635,7 +635,7 @@ function validateAndUpdateRepo(state, args = {}) {
     if (fromCommit !== fetchedCommit) {
       const merge = gitCommand(repoPath, ['merge', '--ff-only', fetchedCommit], { timeout: 120000 });
       if (!merge.ok) {
-        throw repoUpdateError('skipped', `git merge --ff-only FETCH_HEAD failed: ${commandOutput(merge)}`, {
+        throw repoUpdateError('skipped', `git merge --ff-only ${fetchedCommit} failed: ${commandOutput(merge)}`, {
           fromCommit,
           toCommit: fetchedCommit,
           branchSwitchedFrom,
@@ -644,7 +644,8 @@ function validateAndUpdateRepo(state, args = {}) {
       }
     }
   } finally {
-    requireGit(repoPath, ['update-ref', '-d', fetchRef], 'remove owned fetch ref');
+    const cleanup = gitCommand(repoPath, ['update-ref', '-d', fetchRef]);
+    if (!cleanup.ok) console.warn(`Toolkit warning: could not remove owned fetch ref ${fetchRef}; it may remain.`);
   }
   const toCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read updated commit');
   const changedFiles = changedFilesBetween(repoPath, fromCommit, toCommit);
