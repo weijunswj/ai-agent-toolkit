@@ -11,7 +11,7 @@
 // nothing. --run <id> reads that finished Validate run instead, for example a pull request's run
 // that measured a new or split test file. It reports the refresh triggers it checks:
 //   - more than 10% of test files have no measured time;
-//   - with the fresh times, the slowest shard of a system is estimated over 1.3x its fastest;
+//   - with the fresh times, the slowest shard is over 1.5x its fastest on Linux, 1.3x on Windows;
 //   - a file is over its per-file budget (budgets in the manifest). Refreshing cannot fix this: the
 //     report says to split or speed up that file.
 // --write updates the manifest in this checkout when the first two triggers fire: durations from
@@ -23,15 +23,16 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { randomBytes } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const shards = require('./ci-test-shards.cjs');
 
 const WORKFLOW_FILE = 'validate.yml';
 const ARTIFACT_PATTERN = 'test-summary-*';
 const UNTIMED_SHARE = 0.1;
-const IMBALANCE_RATIO = 1.3;
+const IMBALANCE_RATIO = Object.freeze({ linux: 1.5, windows: 1.3 });
 const CONCURRENCY = 3; // run-tests.cjs default; node --test runs three files at a time per shard
-const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--run <id>] [--write | --open-pr]';
+const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--run <id>] [--write | --open-pr]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
 
 class UsageError extends Error {}
 
@@ -127,11 +128,11 @@ function planRefresh(manifest, discovered, fresh) {
     const estimates = shardEstimates(manifest, system, discovered, merged);
     const ratio = imbalance(estimates);
     lines.push(`${system}: estimated shard seconds ${estimates.map((item) => `${item.id} ${item.seconds}`).join(', ')}`);
-    if (ratio > IMBALANCE_RATIO) {
+    if (ratio > IMBALANCE_RATIO[system]) {
       refresh = true;
       next.systems[system].shards = rebalance(manifest, system, discovered, merged);
       const after = shardEstimates(next, system, discovered, merged);
-      findings.push(`${system}: slowest shard is ${ratio.toFixed(2)}x the fastest (over ${IMBALANCE_RATIO}x); rebalanced to ${after.map((item) => `${item.id} ${item.seconds}`).join(', ')}`);
+      findings.push(`${system}: slowest shard is ${ratio.toFixed(2)}x the fastest (over ${IMBALANCE_RATIO[system]}x); rebalanced to ${after.map((item) => `${item.id} ${item.seconds}`).join(', ')}`);
     }
     const limit = (budgets.seconds_per_file || {})[system];
     if (limit !== undefined) {
@@ -156,6 +157,16 @@ function command(program, args, options = {}) {
   if (result.error) throw new Error(`${program} could not start: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`${program} ${args[0]} failed: ${(result.stderr || result.stdout || '').trim().split('\n').slice(-3).join(' ')}`);
   return result.stdout;
+}
+
+// Cleanup must preserve the primary result even when Git cannot start or delete the ref.
+function gitCommand(root, args) {
+  try {
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
+    return { ok: !result.error && result.status === 0 };
+  } catch {
+    return { ok: false };
+  }
 }
 
 function latestGreenRun(root, run) {
@@ -198,6 +209,14 @@ function prBody(run, plan) {
     ...plan.findings.map((finding) => `- ${finding}`),
     '',
     'Made by `node repo/scripts/refresh-shard-timings.cjs --open-pr`, which makes no model calls. Only the shard manifest changes; no test is added, removed or skipped.',
+    '',
+    'This is a generated candidate. Required route and evidence:',
+    '- G0: pending checks of the source run, trigger and unchanged budgets.',
+    '- A fresh G1: pending verification and recorded classifier tier, currently RISKY for the shard manifest.',
+    '- Agent UAT: pending exact-head CI coverage on Linux and Windows.',
+    '- Owner UAT: NOT_REQUIRED for manifest-only redistribution because both CI systems exercise the entire changed surface.',
+    '- Full G2: pending before merge.',
+    'Budget or generator changes need their own impact assessment.',
   ].join('\n');
 }
 
@@ -207,11 +226,15 @@ function openPr(root, run, out) {
     out.write(`Branch ${branch} already exists on origin; no new pull request.\n`);
     return 0;
   }
-  command('git', ['fetch', '--quiet', 'origin', 'main'], { cwd: root });
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-timings-wt-'));
-  const tree = path.join(parent, 'tree');
-  command('git', ['worktree', 'add', '--quiet', '-b', branch, tree, 'FETCH_HEAD'], { cwd: root });
+  const fetchRef = `refs/toolkit/fetch/${process.pid}-${randomBytes(12).toString('hex')}`;
+  let parent;
+  let tree;
   try {
+    command('git', ['fetch', '--quiet', '--no-tags', 'origin', `main:${fetchRef}`], { cwd: root });
+    const fetchedCommit = command('git', ['rev-parse', `${fetchRef}^{commit}`], { cwd: root }).trim();
+    parent = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-timings-wt-'));
+    tree = path.join(parent, 'tree');
+    command('git', ['worktree', 'add', '--quiet', '-b', branch, tree, fetchedCommit], { cwd: root });
     const discovered = shards.discoverTestFiles(tree);
     const plan = planRefresh(shards.loadManifest(tree), discovered, timingsFromSummaries(downloadSummaries(root, run.databaseId), discovered));
     for (const finding of plan.findings) out.write(`- ${finding}\n`);
@@ -230,8 +253,13 @@ function openPr(root, run, out) {
     command('git', ['worktree', 'remove', '--force', tree], { cwd: root });
     return 0;
   } finally {
-    if (fs.existsSync(tree)) out.write(`The temporary worktree ${tree} was left for inspection; remove it with git worktree remove.\n`);
-    else fs.rmSync(parent, { recursive: true, force: true });
+    try {
+      const cleanup = gitCommand(root, ['update-ref', '-d', fetchRef]);
+      if (!cleanup.ok) out.write(`Warning: could not remove owned fetch ref ${fetchRef}; it may remain.\n`);
+    } finally {
+      if (tree && fs.existsSync(tree)) out.write(`The temporary worktree ${tree} was left for inspection; remove it with git worktree remove.\n`);
+      else if (parent) fs.rmSync(parent, { recursive: true, force: true });
+    }
   }
 }
 
