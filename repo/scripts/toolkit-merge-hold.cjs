@@ -58,6 +58,8 @@
 // native session context. The hook stops that shell call after reporting; it writes nothing and
 // consumes no approval. Outside a hook, the command has no native session context.
 //
+// Closure safety runs once in the final pass before any approval is consumed; the non-consuming
+// pre-pass skips it. Origin, evidence and closure work share the host invocation deadline.
 // Evidence-store merges instead use the existing standing custody permission, independently of
 // task auto-merge and session origin. A fresh validated merged parent binding must name the exact
 // separate store. Bounded authenticated metadata reads must show a private writable repository,
@@ -132,7 +134,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELLS, SHELL_TOOLS, ShellCall, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { SHELLS, SHELL_TOOLS, ShellCall, MOVES_TARGET, connectorTarget, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -187,7 +189,6 @@ const ALWAYS_REFUSED_API = /\b(?:mergePullRequest|enablePullRequestAutoMerge|enq
 const PR_URL = /github\.com\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)\/pull\/(\d+)/i;
 const GH_REPO_SYNC = /\bgh(?:\.exe)?\s+repo\s+sync\b/i;
 const GH_ALIAS_MERGE = /\bgh(?:\.exe)?\s+alias\s+(?:set|import)\b[^\n;&|]*merge/i;
-const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl)\s|\bGH_REPO\s*=/i;
 // Toolkit's user-state files, and any setting or clearing of the session variable that tells a
 // session another one started it. Searching for its bare name is fine; PowerShell variable and
 // environment-provider references are refused too, including reads.
@@ -569,30 +570,8 @@ function connectorMergeArgs(tool, args) {
   let unclear = null;
   const disagree = part => { unclear = unclear || part; };
 
-  // The repository: "owner/name", or owner and repo; when both are given they must agree.
-  const name = /^[A-Za-z0-9._-]+$/;
-  let repository = null;
-  let readable = true;
-  if (has('repository_full_name')) {
-    const full = given.repository_full_name;
-    if (typeof full === 'string' && new RegExp(`^${SLUG}$`).test(full)) repository = full; else readable = false;
-  }
-  if (has('owner') || has('repo')) {
-    const pair = typeof given.owner === 'string' && typeof given.repo === 'string' && name.test(given.owner) && name.test(given.repo) ? `${given.owner}/${given.repo}` : null;
-    if (!pair) readable = false;
-    else if (repository && repository.toLowerCase() !== pair.toLowerCase()) disagree('repository');
-    else repository = repository || pair;
-  }
-  if (!readable) repository = null;
-
-  // The number: a positive whole number, or a string of digits; every number field given must agree.
-  const numbers = NUMBER_FIELDS.filter(has).map(field => {
-    const value = given[field];
-    const number = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,10}$/.test(value) ? Number(value) : NaN;
-    return Number.isSafeInteger(number) && number > 0 ? number : null;
-  });
-  let pr = numbers.length > 0 && numbers.every(number => number !== null) ? numbers[0] : null;
-  if (pr !== null && numbers.some(number => number !== pr)) { disagree('pull request'); pr = null; }
+  const { repository, pr, unclear: targetUnclear } = connectorTarget(given);
+  if (targetUnclear) disagree(targetUnclear);
 
   // The head commit: 7 to 40 hex; every SHA field given must agree.
   const shas = SHA_FIELDS.filter(has).map(field => (typeof given[field] === 'string' && /^[0-9a-f]{7,40}$/i.test(given[field]) ? given[field].toLowerCase() : null));
@@ -947,27 +926,27 @@ function standingReason(reason) {
 
 // Standing evidence custody comes from a fresh merged parent binding, never a store's name or
 // governance-off state. This call owns its read budget and metadata; nothing is persisted. Claude
-// checks twice (before and after governance), so each pass gets at most four seconds of GitHub I/O,
-// shared by every merge in a compound call, within its ten-second hook timeout. Successful reads
+// checks twice (before and after governance), with at most four seconds of evidence I/O per pass,
+// capped by the shared invocation deadline. Successful reads
 // are reused only between those two passes in the same hook invocation; local guards run again.
 class EvidenceStoreMerges {
-  constructor(cwd, { registryOptions = {}, now, environment = process.env, readEvidenceGitHub, evidenceResponses = new Map() } = {}) {
+  constructor(cwd, { registryOptions = {}, now, environment = process.env, readEvidenceGitHub, evidenceResponses = new Map(), deadline } = {}) {
     this.cwd = cwd;
     this.registryOptions = registryOptions;
     this.now = now || (() => new Date());
     this.environment = environment;
     this.read = readEvidenceGitHub;
-    this.deadline = Date.now() + 4000;
+    this.deadline = Math.min(deadline ?? Infinity, globalThis.performance.now() + 4000);
     this.responses = evidenceResponses;
   }
 
   request(apiPath) {
     if (this.responses.has(apiPath)) return this.responses.get(apiPath);
-    const timeoutMs = this.deadline - Date.now();
+    const timeoutMs = this.deadline - globalThis.performance.now();
     if (timeoutMs <= 0) throw new Error('lookup budget exhausted');
     const response = this.read ? this.read(apiPath, { timeoutMs })
       : new GitHubTransport({ ghPath: resolveExecutable('gh', { environment: this.environment, cwd: this.cwd || process.cwd() }), timeoutMs }).request('GET', apiPath);
-    if (Date.now() > this.deadline || response?.status !== 200 || !response.json) throw new Error('lookup unavailable');
+    if (globalThis.performance.now() > this.deadline || response?.status !== 200 || !response.json) throw new Error('lookup unavailable');
     this.responses.set(apiPath, response.json);
     return response.json;
   }
@@ -1052,7 +1031,8 @@ function readClosureFile(file) {
   return fs.readFileSync(file, 'utf8');
 }
 
-function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, evidenceResponses, closureGuard, transport, timeoutMs = 30000, deadlineMs = 120000, maxRequests = 500 } = {}) {
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, evidenceResponses, closureGuard, transport, deadline, timeoutMs = 30000, deadlineMs = 120000, maxRequests = 500 } = {}) {
+  deadline ??= globalThis.performance.now() + (host === 'claude' ? 7500 : host === 'codex' ? 50000 : deadlineMs);
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   let cwd = input && typeof input.cwd === 'string' ? input.cwd : null;
@@ -1093,12 +1073,13 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   if (merges.length === 0) return null;
   const approvals = new MergeApprovals({ registryOptions, now });
   const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now, host });
-  const evidence = new EvidenceStoreMerges(cwd, { registryOptions, now, environment: environment || {}, readEvidenceGitHub, evidenceResponses });
+  const evidence = new EvidenceStoreMerges(cwd, { registryOptions, now, environment: environment || {}, readEvidenceGitHub, evidenceResponses, deadline });
   const used = [];
   for (const merge of merges) {
     // Preserve specific authority refusals; closure safety still precedes approval consumption.
     const { refusal, approval } = judge(merge, approvals, standing, evidence);
     if (refusal) return refusal;
+    if (!consume) continue;
     const call = ShellCall.from(input);
     let mergeTexts = [];
     try {
@@ -1134,11 +1115,11 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
       }
     } catch { return refuse('the merge-message file could not be read. Provide a readable body file.'); }
     try {
-      const guard = closureGuard || new IssueClosureGuard({ repository: merge.repository, deadlineMs, maxRequests,
+      const guard = closureGuard || new IssueClosureGuard({ repository: merge.repository, deadlineMs, deadline, maxRequests,
         transport: transport || new GitHubTransport({ ghPath: resolveExecutable('gh', { cwd: cwd || process.cwd(), environment }), timeoutMs }) });
       const result = guard.checkPullRequest(merge.pr, { head: merge.sha, mergeTexts });
       if (result.status !== 'allowed') return refuse(result.reason);
-    } catch { return refuse('issue closure safety could not be checked for this merge. Retry when GitHub is readable.'); }
+    } catch { return refuse('gh is unavailable for issue closure safety. Run setup toolkit and gh auth login, then retry.'); }
     if (approval) used.push(approval);
   }
   if (consume) for (const approval of used) approvals.use(approval);

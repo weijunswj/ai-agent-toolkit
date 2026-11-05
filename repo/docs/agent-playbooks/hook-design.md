@@ -35,3 +35,9 @@ A new hook, or a new rule inside a hook, needs the owner's yes on one line: what
 ## Review
 
 At each release, and at least once a year, list the hooks with their false-block fixes and their real catches since the last review. A hook with repeated false-block fixes and no catch moves to a written rule.
+
+## Closure command reader
+
+The closure guard reads executable command positions with separate flag-arity tables for PR create, PR edit, issue close and API calls. Quoted examples and data passed to grep, echo and other commands remain data. Recognised shell runners recurse only into their script argument. Heredoc and here-string data stay separate; executable shell heredocs, bounded loop bodies and PowerShell script blocks are inspected without expansion or execution. Unknown flags on a guarded write, duplicate scalar options and unresolved closure-sensitive text hold local writes.
+
+Only supplied edit text is checked before an edit. Merge and CI checks retain responsibility for existing title, body and commits. PR closing targets pass without child traversal. Same-repository missing targets pass only after the inspected PR was read; cross-repository failures remain unknown. Each hook invocation shares a monotonic deadline across origin, evidence and closure reads; the non-consuming merge pre-pass skips closure reads.

@@ -2,9 +2,12 @@
 
 ## 3.50.0
 
+- Update every computer together: older readers reject the parent lifecycle binding and pending lifecycle intents, holding governed work until updated.
+- Repair executable command reading, flag arity, cloud unknown advisories, shared invocation deadlines, supplied-text edit checks and full unattended completion walks.
+
 ### Safety
 
-- Refuse pull request text, merges and issue closures that would close a parent with open native descendants, including optional and uncatalogued children. Unreadable text or incomplete GitHub state holds the affected write.
+- Refuse pull request text, merges and issue closures that would close a parent with open native descendants, including optional and uncatalogued children. Locally, unreadable text or incomplete GitHub state holds the affected write; cloud unknowns are advisory.
 - Add a read-only closure check feeding the required validation job, and explicit binding permission for fenced parent reopening, completion and recoverable repair notices on refresh.
 - Use Refs for programme-parent links; retain child acceptance and user testing requirements.
 

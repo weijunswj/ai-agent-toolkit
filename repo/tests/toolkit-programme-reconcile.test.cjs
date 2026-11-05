@@ -115,6 +115,40 @@ test('stale lifecycle writer cannot mutate parent state', () => {
   assert.throws(() => pass.apply(plan), /writer|hold|session/i);
   assert.equal(f.github.issues.get(421).state, 'closed');
 });
+test('completion planning and final mutation walk every descendant despite zero summaries', () => {
+  for (const grandchild of ['open', 'closed']) {
+    const f = lifecycleFixture({ childState: 'closed', nested: true });
+    f.github.issues.get(425).state = grandchild;
+    const original = f.github.request.bind(f.github);
+    f.github.request = (...args) => {
+      const response = original(...args);
+      if (args[0] === 'GET' && args[1].includes('/issues/421/sub_issues')) response.json.forEach(child => { child.sub_issues_summary = { total: 0 }; });
+      return response;
+    };
+    const report = f.reconciler().run({ apply: true });
+    assert.equal(f.github.issues.get(421).state, grandchild === 'closed' ? 'closed' : 'open');
+    if (grandchild === 'open') assert.ok(report.holds.some(h => h.code === 'PARENT_LIFECYCLE_UNKNOWN'));
+    else assert.deepEqual(report.holds, []);
+  }
+});
+
+test('a failed full completion walk plans no close', () => {
+  for (const failure of ['timeout', 'pagination']) {
+    const f = lifecycleFixture({ childState: 'closed' });
+    const original = f.github.request.bind(f.github);
+    f.github.request = (...args) => {
+      if (args[0] === 'GET' && args[1].includes('/issues/424/sub_issues')) {
+        if (failure === 'timeout') throw Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' });
+        return { status: 403 };
+      }
+      return original(...args);
+    };
+    const plan = f.reconciler().plan();
+    assert.ok(plan.holds.some(h => h.code === 'PARENT_LIFECYCLE_UNKNOWN'));
+    assert.ok(!plan.effects.some(e => e.kind === 'set_parent_state'));
+    assert.equal(f.github.issues.get(421).state, 'open');
+  }
+});
 test('successful reopen followed by timeout and interrupted notice recover without duplicate writes', () => {
   const f = lifecycleFixture({ state: 'closed' });
   const original = f.github.request.bind(f.github);

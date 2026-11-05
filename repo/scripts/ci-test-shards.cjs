@@ -515,6 +515,8 @@ const WORKFLOW_HEADER = [
   '# body for home-folder paths and AI attribution (values are never printed); validate waits for it',
   '# too, so a hit or a scan error fails the required check. An edit to the title or body runs the',
   '# whole workflow again, so a fixed body clears the required check without a new commit.',
+  '# The issue-closure job checks live PR text and all commits against native descendant state;',
+  '# validate also waits for that read-only closure backstop.',
   'jobs:',
 ].join('\n');
 

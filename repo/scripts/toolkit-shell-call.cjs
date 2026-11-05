@@ -334,4 +334,124 @@ class ShellCall {
   }
 }
 
-module.exports = Object.freeze({ SHELLS, SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, quoteWords, shellCommands, shellOf, shellPath, shellReadings });
+// Additive closure reader. Only executable positions recurse; arguments of echo, grep, git,
+// and other data consumers are never interpreted as scripts. No expansion or execution occurs.
+const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl)\s|\bGH_REPO\s*=/i;
+const NUMBER_FIELDS = Object.freeze(['pr_number', 'pull_number', 'pullNumber', 'pull_request_number', 'number']);
+const GRAPHQL_OPERATION = /(?:^|__)(?:graphql|graphql_query|execute_graphql)$/i;
+function connectorTarget(args, numberFields = NUMBER_FIELDS) {
+  const given = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
+  const has = key => Object.prototype.hasOwnProperty.call(given, key) && given[key] !== undefined;
+  let repository = null; let readable = true; let unclear = null;
+  if (has('repository_full_name')) {
+    if (typeof given.repository_full_name === 'string' && /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(given.repository_full_name)) repository = given.repository_full_name;
+    else readable = false;
+  }
+  if (has('owner') || has('repo')) {
+    const pair = typeof given.owner === 'string' && typeof given.repo === 'string' && /^[a-z0-9_.-]+$/i.test(given.owner) && /^[a-z0-9_.-]+$/i.test(given.repo) ? `${given.owner}/${given.repo}` : null;
+    if (!pair) readable = false;
+    else if (repository && repository.toLowerCase() !== pair.toLowerCase()) unclear = 'repository';
+    else repository ||= pair;
+  }
+  if (!readable) repository = null;
+  const numbers = numberFields.filter(has).map(key => {
+    const value = given[key];
+    const number = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,10}$/.test(value) ? Number(value) : NaN;
+    return Number.isSafeInteger(number) && number > 0 ? number : null;
+  });
+  let pr = numbers.length && numbers.every(n => n !== null) ? numbers[0] : null;
+  if (pr !== null && numbers.some(n => n !== pr)) { unclear ||= 'pull request'; pr = null; }
+  return { repository, pr, unclear };
+}
+
+function executableCommands(text, depth = 0, context = {}) {
+  if (typeof text !== 'string' || text.length > 1024 * 1024 || depth > 4) throw new Error('Executable command read bound exceeded.');
+  const nested = [];
+  // Here-strings and non-shell heredocs are data. A shell-fed heredoc is a script.
+  let source = text.replace(/@(['"])\r?\n[\s\S]*?\r?\n\1@/g, "'__here_string__'");
+  source = source.replace(/([^\r\n]*?)<<-?\s*(['"]?)([a-zA-Z_][a-zA-Z_0-9]*)\2[^\r\n]*\r?\n([\s\S]*?)\r?\n\t*\3(?=\r?\n|$)/g, (all, header, quote, marker, body) => {
+    const first = shellCommands(header)[0]?.words[0];
+    if (first && SHELLS.test(first)) nested.push(...executableCommands(body, depth + 1, { ...context, wrapper: true }));
+    return `${header} __unreadable_stdin__\n`;
+  });
+  // Braces and the PowerShell invocation operator introduce command positions outside strings.
+  let clean = ''; let quote = ''; let boundary = 0; let blocks = 0;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (quote !== "'" && (c === '\\' || c === '`')) { clean += c + (source[++i] || ''); continue; }
+    if (quote) { if (c === quote) quote = ''; clean += c; continue; }
+    if (c === "'" || c === '"') { quote = c; clean += c; continue; }
+    if (c === '#' && (i === 0 || /[\s;&|{}]/.test(source[i - 1]))) {
+      while (i + 1 < source.length && source[i + 1] !== '\n') i++;
+      continue;
+    }
+    if (c === '{') {
+      const prefix = clean.slice(boundary).trim();
+      if (!prefix || /^(?:for(?:each)?|while|if|else|do|try|catch|finally)\b/i.test(prefix)) {
+        clean += ';'; boundary = clean.length; blocks++; continue;
+      }
+      // A block passed to Write-Output/echo or another data consumer is not executed.
+      // Mask its complete balanced contents, including multiline statements. Relevant gh
+      // fields carrying such a block remain unreadable rather than becoming clean text.
+      let depth = 1; let innerQuote = '';
+      while (++i < source.length && depth) {
+        const char = source[i];
+        if (innerQuote !== "'" && (char === '\\' || char === '`')) { i++; continue; }
+        if (innerQuote) { if (char === innerQuote) innerQuote = ''; continue; }
+        if (char === "'" || char === '"') { innerQuote = char; continue; }
+        if (char === '#' && /[\s;&|{}]/.test(source[i - 1])) { while (i + 1 < source.length && source[i + 1] !== '\n') i++; continue; }
+        if (char === '{') depth++;
+        else if (char === '}') depth--;
+      }
+      if (depth === 0) i--;
+      clean += " '__inert_block__' "; continue;
+    }
+    if (c === '}' && blocks) { blocks--; clean += ';'; boundary = clean.length; continue; }
+    if (c === '&' && source[i + 1] !== '&' && source[i - 1] !== '&') { clean += ';'; boundary = clean.length; continue; }
+    clean += c;
+    if (/[;|\n]/.test(c) || c === '&' && source[i - 1] === '&') boundary = clean.length;
+  }
+  let movesTarget = Boolean(context.movesTarget);
+  const result = [];
+  for (const command of shellCommands(clean)) {
+    let words = [...command.words];
+    while (['do', 'then', 'else'].includes(words[0])) words.shift();
+    if (!words.length || ['for', 'foreach', 'while', 'if', 'done', 'fi'].includes(words[0])) continue;
+    let assigned = false;
+    while (/^(?:[A-Za-z_][\w]*=|\$env:GH_REPO\s*=)/i.test(words[0] || '')) { if (/^(?:GH_REPO=|\$env:GH_REPO\s*=)/i.test(words[0])) movesTarget = true; assigned = true; words.shift(); }
+    if (!words.length) { result.push({ ...command, movesTarget, wrapper: Boolean(context.wrapper || assigned) }); continue; }
+    if (/^(?:export|unset)$/i.test(words[0]) && words.slice(1).some(word => /^GH_REPO(?:=|$)/.test(word))) movesTarget = true;
+    if (MOVES_TARGET.test(words[0] + ' ') || /^\$env:GH_REPO$/i.test(words[0])) movesTarget = true;
+    if (/^(?:command|exec|env)$/i.test(words[0])) { words.shift(); while (/^[A-Za-z_]\w*=/.test(words[0] || '')) { if (/^GH_REPO=/.test(words[0])) movesTarget = true; words.shift(); } }
+    if (SHELLS.test(words[0] || '')) {
+      const program = programName(words[0]);
+      const index = words.findIndex((word, i) => i > 0 && (/^-[a-z]*c$/i.test(word) || /^-(?:command|c)$/i.test(word) || /^\/[ck]$/i.test(word)));
+      const script = /^(?:eval|iex|invoke-expression)$/.test(program) ? words.slice(1).join(' ') : index >= 0 ? words[index + 1] : null;
+      if (script) {
+        const inner = executableCommands(script, depth + 1, { wrapper: true, movesTarget });
+        result.push(...inner);
+        if (/^(?:eval|iex|invoke-expression)$/.test(program) && inner.some(command => command.movesTarget)) movesTarget = true;
+      }
+      continue;
+    }
+    result.push({ words, offsets: command.offsets, wrapper: Boolean(context.wrapper || assigned), movesTarget, unreadableInput: words.includes('__unreadable_stdin__'), provenance: words.map(value => ({ value, unresolved: /[$`]/.test(value) })) });
+  }
+  return [...result, ...nested];
+}
+
+function closureWriteCandidate(input) {
+  const tool = input?.tool_name || '';
+  if (!ShellCall.isShellTool(tool)) return /(?:create|update|edit)_pull_request$|close_issue$/.test(tool) || /(?:issue_write|update_issue)$/.test(tool) && String(input?.tool_input?.state).toLowerCase() === 'closed' || GRAPHQL_OPERATION.test(tool);
+  return executableCommands(ShellCall.from(input).text).some(({ words }) => {
+    if (!/(?:^|[\\/])gh(?:\.exe)?$/i.test(words[0])) return false;
+    const args = words.slice(1);
+    if (['-R', '--repo'].includes(args[0])) args.splice(0, 2);
+    else if (/^(?:-R.+|--repo=)/.test(args[0] || '')) args.shift();
+    // A help word used as another option's value must never disguise a write when the
+    // closure module is broken. Only the unambiguous help-only shape is a read here.
+    if (['--help', '-h'].includes(args.at(-1)) && (args[0] === 'api' && args.length === 2 || args.length === 3 && (args[0] === 'pr' || args[0] === 'issue'))) return false;
+    return args[0] === 'api' || args[0] === 'pr' && ['create', 'edit'].includes(args[1]) || args[0] === 'issue' && args[1] === 'close';
+  });
+}
+
+module.exports = Object.freeze({ SHELLS, SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, MOVES_TARGET, GRAPHQL_OPERATION, connectorTarget, executableCommands, closureWriteCandidate, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, quoteWords, shellCommands, shellOf, shellPath, shellReadings });

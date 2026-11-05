@@ -37,6 +37,16 @@ test('closure adapters keep short hook reads and accept an explicit cold-runner 
   assert.equal(adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath }).transport.timeoutMs, 5000);
   assert.equal(adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath, timeoutMs: 30000 }).transport.timeoutMs, 30000);
 });
+
+test('per-request timeouts are bounded integers and never mutate the transport default', () => {
+  const seen = [];
+  const transport = new GitHubTransport({ ghPath: process.execPath, timeoutMs: 30000, run(file, args, options) { seen.push(options.timeout); return {status:0,stdout:'HTTP/2.0 200\n\n{}'}; } });
+  transport.request('GET','repos/example.test/app',undefined,{timeoutMs:125.8});
+  transport.request('GET','repos/example.test/app',undefined,{timeoutMs:50000});
+  transport.request('GET','repos/example.test/app');
+  assert.deepEqual(seen,[125,30000,30000]);
+  assert.equal(transport.timeoutMs,30000);
+});
 test('PR read refusals identify metadata or commits and timeout or HTTP status', () => {
   for (const target of ['metadata', 'commits']) for (const failure of ['timeout', 'http']) {
     const endpoint = `repos/${repo}/pulls/7${target === 'commits' ? '/commits?per_page=100&page=1' : ''}`;
@@ -81,7 +91,7 @@ test('saved incident line and the earlier closed form are both defensive matches
 });
 test('controls, lists, source locations and repository identities', () => {
   for (const text of ['Refs #1', 'Enclosed #1', 'prefixes #1', 'Resolved the discussion. Refs #1', 'Closed before the record #1']) assert.deepEqual(closingReferences(text, repo), [], text);
-  const refs = closingReferences('Notes\nCloses #1, other.test/app#9 and #2; #3', repo);
+  const refs = closingReferences('Notes\nCloses #1, other.test/app#9 and #2, #3', repo);
   assert.deepEqual(refs.map(ref => [ref.repository, ref.number, ref.line]), [[repo, 1, 2], ['other.test/app', 9, 2], [repo, 2, 2], [repo, 3, 2]]);
   assert.equal(setup({ child: 'closed' }).guard.checkTexts(['Closes #1']).status, 'allowed');
   assert.equal(setup().guard.assertClosable(2).status, 'allowed');
@@ -106,7 +116,7 @@ function prFixture(texts = ['Refs #1']) {
   let reads = 0;
   github.request = (method, endpoint, body) => {
     if (endpoint === `repos/${repo}/pulls/7`) { reads += 1; return { status: 200, json: { ...pr } }; }
-    if (endpoint.startsWith(`repos/${repo}/pulls/7/commits?`)) return { status: 200, json: texts.map(message => ({ commit: { message } })) };
+    if (endpoint.startsWith(`repos/${repo}/pulls/7/commits?`)) return { status: 200, json: texts.map((message, i) => ({ sha: (i + 1).toString(16).padStart(40, '0'), commit: { message } })) };
     return original(method, endpoint, body);
   };
   return { github, guard, pr, reads: () => reads };
@@ -115,7 +125,10 @@ test('PR title, body, every commit, overrides, partial edits and metadata drift'
   for (const surface of ['title', 'body', 'commit', 'merge']) {
     const f = prFixture(surface === 'commit' ? ['Refs #1', 'Fixes #1'] : undefined);
     if (['title', 'body'].includes(surface)) f.pr[surface] = 'Closes #1';
-    assert.equal(f.guard.checkPullRequest(7, { head: SHA, mergeTexts: surface === 'merge' ? ['Closed #1'] : [] }).status, 'refused', surface);
+    const result = f.guard.checkPullRequest(7, { head: SHA, mergeTexts: surface === 'merge' ? ['Closed #1'] : [] });
+    assert.equal(result.status, 'refused', surface);
+    const source = surface === 'commit' ? `commit ${'2'.padStart(40, '0')}` : surface === 'merge' ? 'merge override 1' : surface;
+    assert.ok(result.reason.includes(`${source}, line 1, closing-keyword, target ${repo}#1`), result.reason);
   }
   const f = prFixture();
   assert.equal(f.guard.checkPullRequest(7, { head: SHA, body: 'Safe partial edit' }).status, 'allowed');
@@ -123,6 +136,14 @@ test('PR title, body, every commit, overrides, partial edits and metadata drift'
   const original = f.github.request;
   f.github.request = (...args) => { if (args[1].endsWith('/pulls/7') && f.reads() > 0) f.pr.body += ' changed'; return original(...args); };
   assert.equal(f.guard.checkPullRequest(7, { head: SHA }).status, 'unknown');
+  for (const field of ['head', 'title', 'body', 'commits']) {
+    const fresh = prFixture(); const read = fresh.github.request;
+    fresh.github.request = (...args) => {
+      if (args[1].endsWith('/pulls/7') && fresh.reads() > 0) fresh.pr[field] = field === 'head' ? { sha: 'b'.repeat(40) } : field === 'commits' ? 2 : 'Changed text';
+      return read(...args);
+    };
+    assert.equal(fresh.guard.checkPullRequest(7, { head: SHA }).status, 'unknown', `${field} drift`);
+  }
 });
 const shell = command => ({ cwd: process.cwd(), tool_name: 'Bash', tool_input: { command } });
 test('shell and connector closure matrix with positive read controls', () => {
@@ -148,7 +169,7 @@ test('shell and connector closure matrix with positive read controls', () => {
     assert.ok(adapter.issueClosureDecision({ cwd: process.cwd(), tool_name: `mcp__github__${tool}`, tool_input: { owner: 'example.test', repo: 'app', ...args } }, { guard: prFixture().guard })?.deny);
   }
 });
-test('readable body files are inspected and partial edits retain the live title', t => {
+test('readable body files are inspected; edits check supplied text and merge checks retain title coverage', t => {
   fs.mkdirSync(path.join(process.cwd(), '.tmp'), { recursive: true });
   const dir = fs.mkdtempSync(path.join(process.cwd(), '.tmp', 'closure-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -156,8 +177,11 @@ test('readable body files are inspected and partial edits retain the live title'
   assert.ok(adapter.issueClosureDecision(shell(`gh pr create -R ${repo} --title Change --body-file "${file}"`), { guard: setup().guard })?.deny);
   fs.writeFileSync(file, 'Refs #1');
   assert.equal(adapter.issueClosureDecision(shell(`gh pr create -R ${repo} --title Change --body-file "${file}"`), { guard: setup().guard }), null);
+  fs.writeFileSync(file, JSON.stringify({ body: 'Refs #1' }));
+  assert.ok(adapter.issueClosureDecision(shell(`echo regenerate; gh api repos/${repo}/pulls/7 -X PATCH --input "${file}"`), { guard: setup().guard })?.deny);
   const f = prFixture(); f.pr.title = 'Fixes #1';
-  assert.ok(adapter.issueClosureDecision(shell(`gh pr edit 7 -R ${repo} --body 'Safe'`), { guard: f.guard })?.deny);
+  assert.equal(adapter.issueClosureDecision(shell(`gh pr edit 7 -R ${repo} --body 'Safe'`), { guard: f.guard }), null);
+  assert.equal(f.guard.checkPullRequest(7).status, 'refused');
 });
 test('hostile bounded readers never turn unreadable state into permission', () => {
   const hostile = require('./support/hostile-inputs.cjs');
@@ -168,7 +192,7 @@ test('hostile bounded readers never turn unreadable state into permission', () =
 
 test('only closing targets are read and a root summary never replaces its native child list', () => {
   const { github } = setup();
-  const guard = new IssueClosureGuard({ transport: github, repository: repo, parentIssue: 1 });
+  const guard = new IssueClosureGuard({ transport: github, repository: repo });
   assert.equal(guard.checkTexts(['Fixes #2']).status, 'allowed');
   assert.equal(github.calls[0].path, `repos/${repo}/issues/2`);
   assert.ok(github.calls.every(call => !call.path.includes('/issues/1')));
@@ -200,7 +224,7 @@ test('slow sixty-child trees read only closing targets and skip proven leaves', 
       if (endpoint.includes('/pulls/7/commits?')) return { status: 200, json: [] };
       return { status: 404 };
     } };
-    const guard = new IssueClosureGuard({ repository: repo, parentIssue: 1, transport, now: () => elapsed });
+    const guard = new IssueClosureGuard({ repository: repo, transport, now: () => elapsed });
     assert.equal(guard.checkPullRequest(7, { head: SHA }).status, 'allowed', 'a PR referencing a leaf needs no programme tree');
     assert.ok(calls.every(endpoint => !endpoint.includes('/issues/')));
     calls.length = 0;
@@ -234,4 +258,80 @@ test('aggregate text, target and request bounds return unknown', () => {
   const f = prFixture();
   const guard = new IssueClosureGuard({ transport: f.github, repository: repo, maxRequests: 2 });
   assert.equal(guard.checkPullRequest(7, { head: SHA }).status, 'unknown');
+});
+
+test('command data stays inert, flags keep arity, and unrelated API writes pass', () => {
+  assert.ok(adapter.issueClosureDecision({ tool_name: 'PowerShell', tool_input: { command: `gh pr create -R ${repo} --title T --body { Closes #1 }` } }, { guard: setup().guard })?.deny, 'a script-block body is unreadable, not clean replacement text');
+  for (const command of ['grep -rn "gh pr create" docs', 'git log --grep="gh issue close"', 'echo "gh pr edit later"', '# gh issue close 1', 'cat <<\'EOF\'\ngh issue close later\nEOF', 'for x in a b; do echo "gh pr edit $x"; done', "Write-Output @'\ngh pr edit later\n'@", `gh pr create -R ${repo} --draft --title T --body B`, `gh pr create -R ${repo} --label a --label b --reviewer a --reviewer b --title T --body B`, 'gh api -X POST repos/$REPO/issues/1/comments -f body="$(cat note.md)"', 'gh api graphql -f \'query=mutation { resolveReviewThread(input: {threadId: "closeIssue"}) { clientMutationId } }\'']) {
+    assert.equal(adapter.issueClosureDecision(shell(command), { guard: setup().guard }), null, command);
+  }
+  for (const flag of ['--silent', '-i', '--include', '--verbose']) for (const before of [true, false]) {
+    const command = `gh api ${before ? flag : ''} -X PATCH repos/${repo}/issues/1 ${before ? '' : flag} -f state=closed`;
+    assert.ok(adapter.issueClosureDecision(shell(command), { guard: setup().guard })?.deny, command);
+  }
+  for (const command of [`gh pr edit 7 -R ${repo} --remove-milestone --body 'Closes #1'`, `bash -c "gh issue close 1 -R ${repo}"`, `for x in a; do gh issue close 1 -R ${repo}; done`, `& { gh issue close 1 -R ${repo} }`, `bash <<'EOF'\ngh issue close 1 -R ${repo}\nEOF`]) assert.ok(adapter.issueClosureDecision(shell(command), { guard: setup().guard })?.deny, command);
+});
+
+test('same-line boundaries terminate semicolons while comma and and remain lists', () => {
+  for (const text of ['Fixes #12abc', 'Fixes\n#1', 'Closes #1; #2 stays open']) assert.deepEqual(closingReferences(text, repo).map(r => r.number), text.startsWith('Closes') ? [1] : [], text);
+  assert.equal(closingReferences('fixed #333333 border', repo)[0].number, 333333);
+  assert.deepEqual(closingReferences('Closes #1, #2 and #3', repo).map(r => r.number), [1,2,3]);
+  assert.deepEqual(closingReferences('Fixes ' + ' '.repeat(500000) + 'prose', repo), []);
+  const timed = require('./support/hostile-inputs.cjs').timing(text => closingReferences(text, repo), size => 'Fixes ' + ' '.repeat(size) + 'prose', { startSize: 4096, maxSize: 262144, minMs: 5 });
+  assert.ok(timed.ok, timed.message);
+});
+
+test('PR target and same-repository missing references require the narrow resolution path', () => {
+  for (const status of [404, 410, 200]) {
+    const f = prFixture(['Fixes #9']); const original = f.github.request;
+    f.github.request = (method, endpoint, ...rest) => endpoint === `repos/${repo}/issues/9` ? { status, json: { number: 9, state: 'open', pull_request: {} } } : original(method, endpoint, ...rest);
+    assert.equal(f.guard.checkPullRequest(7).status, 'allowed');
+    assert.ok(!f.github.calls.some(c => c.path.includes('/issues/9/sub_issues')));
+    if (status !== 200) assert.equal(f.guard.checkTexts(['Fixes #9']).status, 'unknown');
+    assert.equal(f.guard.checkTexts(['Fixes other.test/app#9']).status, 'unknown');
+  }
+});
+
+test('pin prefixes, source diagnostics and harmless timestamp activity', () => {
+  const f = prFixture();
+  for (const head of [SHA.slice(0,7), SHA.toUpperCase()]) assert.equal(f.guard.checkPullRequest(7, { head }).status, 'allowed');
+  const original = f.github.request;
+  f.github.request = (...args) => { f.pr.updated_at += 'x'; return original(...args); };
+  assert.equal(f.guard.checkPullRequest(7).status, 'allowed');
+  for (const [source, apply] of [['title', () => { f.pr.title = 'Closes #1'; }], ['body', () => { f.pr.title = 'Safe'; f.pr.body = 'Closes #1'; }]]) {
+    apply(); const result = f.guard.checkPullRequest(7);
+    assert.match(result.reason, new RegExp(source + '.*line 1.*closing-keyword.*' + repo.replace('.', '\\.') + '#1'));
+  }
+});
+
+test('large PRs stay unknown rather than silently truncating their commit list', () => {
+  const f=prFixture(); f.pr.commits=251;
+  assert.match(f.guard.checkPullRequest(7).reason,/250-commit/);
+});
+
+test('invalid connector fields and missing PR numbers never read transport', () => {
+  const guard = { checkEdit() { assert.fail('must validate before reading'); } };
+  for (const args of [{ owner: 'example.test', repo: 'app', body: 'Safe' }, { repository_full_name: repo, owner: 'other', repo: 'app', pr_number: 7 }, { repository_full_name: repo, pr_number: 7, pull_number: 8 }]) assert.ok(adapter.issueClosureDecision({ tool_name: 'mcp__github__update_pull_request', tool_input: args }, { guard })?.deny);
+  for (const field of ['pr_number', 'pull_request_number']) assert.equal(adapter.issueClosureDecision({ tool_name: 'mcp__github__update_pull_request', tool_input: { repository_full_name: repo, [field]: 7, body: 'Refs #1' } }, { guard: prFixture().guard }), null);
+});
+
+test('GraphQL mutation fields ignore comments, aliases and string prose but preserve guarded state', () => {
+  const read = {tool_name:'mcp__github__search_graphql_documents',tool_input:{query:'mutation closeIssue'}};
+  assert.equal(adapter.issueClosureDecision(read), null);
+  assert.equal(require('../scripts/toolkit-shell-call.cjs').closureWriteCandidate(read), false);
+  for (const query of ['mutation { alias: resolveReviewThread(input: {threadId:"closeIssue"}) { id } }', 'mutation { updateIssue(input:{id:"opaque", title:"Closes #1"}) { id } }', 'mutation { updateIssue(input:{id:"opaque", state:OPEN}) { id } }', 'mutation { # closeIssue(input: {})\n resolveReviewThread(input:{threadId:"opaque"}) { id } }']) assert.equal(adapter.graphqlRelevant(query), false, query);
+  for (const query of ['mutation { alias: closeIssue(input:{issueId:"opaque"}) { id } }', 'mutation { updateIssue(input:$input) { id } }', 'mutation { a: updateIssue(input:{id:"one",state:OPEN}) { id } b: updateIssue(input:{id:"two",state:CLOSED}) { id } }']) assert.equal(adapter.graphqlRelevant(query), true, query);
+});
+
+test('full walks distrust a zero descendant summary and share a remaining-time request cap', () => {
+  const { github } = setup({ child: 'closed', nested: true }); const original = github.request.bind(github);
+  let time = 0;
+  github.request = (method, endpoint, body, options) => {
+    assert.ok(options.timeoutMs <= 1000 - time); time += 10;
+    const response = original(method, endpoint, body);
+    if (endpoint.includes('/issues/1/sub_issues')) response.json[0].sub_issues_summary = { total: 0 };
+    return response;
+  };
+  const guard = new IssueClosureGuard({ repository: repo, transport: github, now: () => time, deadlineMs: 1000 });
+  assert.equal(guard.tree(repo, 1, guard.budget(), new Set(), { full: true }).descendants.some(c => c.number === 3 && c.state === 'open'), true);
 });

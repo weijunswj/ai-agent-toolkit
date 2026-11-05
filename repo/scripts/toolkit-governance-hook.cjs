@@ -16,7 +16,7 @@
 // repository instead of crashing; hooks.json also sets onFailure: "block" for prompts and for the
 // state-changing tools (STATE_CHANGING_TOOLS below).
 //
-// Cloud hooks remain advisory. Governance still comes from the repository default branch.
+// Proven unsafe issue closures are refused locally and in cloud sessions. Unknown cloud checks are advisory. Governance still comes from the repository default branch.
 
 const fs = require('node:fs');
 
@@ -29,7 +29,7 @@ function readInput(text) {
   } catch { return {}; }
 }
 
-const CLOUD_LINE = "Toolkit governance: cloud hooks are advisory. The programme file on origin's default branch decides governance here too; no local answer or project memory can decide it.";
+const CLOUD_LINE = "Toolkit governance: cloud hooks are advisory for unknown state; proven unsafe issue closures are refused. Required CI checks remain the backstop. The programme file on origin's default branch decides governance here too; no local answer or project memory can decide it.";
 
 function cloudSession(environment) { return Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true'; }
 
@@ -45,8 +45,10 @@ function exportHostSession(input, environment, gate) {
 
 // The hook's stdout for one event. Never throws.
 function respond(event, input, options = {}) {
+  options = { ...options, deadline: options.deadline ?? require('node:perf_hooks').performance.now() + 7500 };
+
   if (cloudSession(options.environment || process.env)) {
-    if (event === 'PreToolUse') return closureDecision(input, options);
+    if (event === 'PreToolUse') return closureDecision(input, { ...options, cloud: true });
     if (event !== 'SessionStart') return {};
     let inside = false;
     try { inside = (options.gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = false; }
@@ -109,14 +111,18 @@ const mergeHold = () => require('./toolkit-merge-hold.cjs');
 function closureDecision(input, options) {
   let closure;
   try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input, options); }
-  catch { if (/gh\b.*\b(?:pr\s+(?:create|edit)|issue\s+close|api)|(?:create|update|edit)_pull_request|close_issue|issue_write|update_issue|closeIssue/.test(JSON.stringify(input))) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+  catch {
+    try { if (require('./toolkit-shell-call.cjs').closureWriteCandidate(input)) closure = { status: 'unknown', deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+    catch { closure = { status: 'unknown', deny: 'Toolkit: executable command reader is unavailable. Run setup toolkit to repair the plugin.' }; }
+  }
+  if (options.cloud && closure?.status !== 'refused') return closure ? { systemMessage: 'Toolkit advisory: ' + closure.deny + ' Required CI must verify closure safety.' } : {};
   return closure ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } } : {};
 }
 
 // The merge hold's decision (toolkit-merge-hold.cjs), failing closed for a call that may merge
 // when the module cannot run.
 function mergeDecision(input, options = {}) {
-  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env, host: 'claude', consume: options.consume !== false, readEvidenceGitHub: options.readEvidenceGitHub, evidenceResponses: options.evidenceResponses, closureGuard: options.closureGuard, transport: options.transport }); } catch {
+  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env, host: 'claude', consume: options.consume !== false, readEvidenceGitHub: options.readEvidenceGitHub, evidenceResponses: options.evidenceResponses, closureGuard: options.closureGuard, transport: options.transport, deadline: options.deadline }); } catch {
     let mayMerge = true;
     try { mayMerge = (options.mergeHold || mergeHold()).mayMerge(input); } catch { mayMerge = STATE_CHANGING_TOOLS.test(String(input && input.tool_name || '')) && /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: MERGE_CHECK_FAILED } : null;

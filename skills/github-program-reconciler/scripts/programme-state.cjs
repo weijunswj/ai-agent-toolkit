@@ -1807,12 +1807,12 @@ class GitHubTransport {
     this.timeoutMs = timeoutMs;
   }
 
-  request(method, apiPath, body) {
+  request(method, apiPath, body, { timeoutMs = this.timeoutMs } = {}) {
     const args = ['api', '-i', '-X', method, apiPath, '-H', 'Accept: application/vnd.github+json'];
     if (body !== undefined) args.push('--input', '-');
     const result = this.run(this.ghPath, args, {
       encoding: 'utf8', input: body === undefined ? undefined : JSON.stringify(body),
-      maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: this.timeoutMs,
+      maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: Math.max(1, Math.floor(Math.min(this.timeoutMs, timeoutMs))),
     });
     if (result.error) throw new ProgrammeError('GH_FAILED', `gh could not run: ${result.error.message}`);
     // gh exits 4 when it is not signed in, before any request: a refusal, never "unreachable".
@@ -2932,8 +2932,8 @@ class GitHubMutator {
     const policy = binding.parent_lifecycle;
     if (binding.governance !== 'enabled' || binding.schema !== SCHEMA.bindingV2 || number !== binding.parent_issue || binding.repository.toLowerCase() !== this.repository.toLowerCase()
       || !(state === 'open' ? policy?.reopen_incomplete : state === 'closed' && policy?.complete_when_children_closed)) throw new ProgrammeError('LIFECYCLE_REFUSED', 'No bound permission for this parent lifecycle write.');
-    const closure = new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.transport, repository: this.repository });
-    const fresh = closure.tree(this.repository, number);
+    const closure = new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.transport, repository: this.repository, deadlineMs: state === 'closed' ? 120000 : 30000 });
+    const fresh = closure.tree(this.repository, number, closure.budget(), new Set(), { full: state === 'closed' });
     if (lifecycleSnapshot(fresh) !== expected) throw new ProgrammeError('LIFECYCLE_MOVED', 'Native parent or child state changed; re-plan before writing.');
     if (state === 'closed' && (!fresh.descendants.length || fresh.descendants.some(child => child.state !== 'closed'))
       || state === 'open' && !fresh.descendants.some(child => child.state === 'open')) throw new ProgrammeError('LIFECYCLE_REFUSED', 'Native child state does not permit this lifecycle write.');
@@ -3087,7 +3087,11 @@ class Reconciler {
         effects.push({ kind: 'post_parent_repair', target: repair });
         findings.push({ code: 'PARENT_CLOSED_INCOMPLETE', issue: number, detail: 'The parent closed while native descendants remain open; lifecycle permission permits repair.' });
       } else if (tree.issue.state === 'open' && tree.descendants.length && !open && policy.complete_when_children_closed) {
-        effects.push({ kind: 'set_parent_state', target: { issue: number, state: 'closed', expected: lifecycleSnapshot(tree) } });
+        const closure = new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.reader.transport, repository: this.binding.repository, deadlineMs: 120000 });
+        const full = closure.tree(this.binding.repository, number, closure.budget(), new Set(), { full: true });
+        observed.lifecycle = full;
+        if (full.issue.state !== 'open' || !full.descendants.length || full.descendants.some(child => child.state !== 'closed')) throw new Error('Full native child walk changed the completion decision.');
+        effects.push({ kind: 'set_parent_state', target: { issue: number, state: 'closed', expected: lifecycleSnapshot(full) } });
       }
       // A flag intent is recorded before reopening, so interrupted repair never loses its notice.
       for (const pending of parent.pending_effects.filter(effect => policy.reopen_incomplete && effect.kind === 'post_parent_repair')) {

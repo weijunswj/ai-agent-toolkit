@@ -160,3 +160,5 @@ Test the actual supported controller/launcher continuation path when section 7 r
 ## 20. History
 
 The dated owner decisions, launch reconciliation, the bounded evidence-integrity evaluation and the earlier retention clocks behind this contract are in git history at commit `1a64367`, with a copy in the Toolkit evidence store. History is evidence, never a competing current instruction.
+
+Parent completion rechecks every native descendant with full planning and final walks before the fenced close. Hooks and CI may trust zero child summaries; stale summaries remain a known gap there. Local closure checks refuse unreadable gh state; cloud unknowns are advisory and required CI remains the backstop. Update every computer together when a binding enables parent lifecycle: older readers reject that binding and pending lifecycle intents, holding governed work until updated.

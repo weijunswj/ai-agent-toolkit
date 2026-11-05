@@ -92,6 +92,16 @@ function merged(ctx, value, { ageMs = 0 } = {}) {
 
 const YES = binding();
 
+test('genuine standing task authority still reaches and cannot bypass closure refusal', t => {
+  const ctx = context(t); merged(ctx, YES); const session = userSession(ctx);
+  const input = bash(ctx, `gh pr merge 5 --merge --match-head-commit ${ctx.head}`, session);
+  let calls = 0;
+  const output = hold.decide(input, { registryOptions:ctx.registryOptions,environment:{},host:ctx.host, closureGuard:{checkPullRequest(){ calls++; return {status:'refused',reason:'Open native descendants'}; }} });
+  assert.match(output.deny, /Open native descendants/);
+  assert.equal(calls, 1);
+  assert.equal(decide(ctx,input), null);
+});
+
 function machine(ctx, value, host = ctx.host) {
   const owner = new TaskAutoMergePreferences({ host, home: ctx.registryOptions.home });
   if (value === null) {

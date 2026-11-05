@@ -2578,7 +2578,7 @@ test('H-15: held prompts stay private, are never echoed in the hold message, and
   assert.equal(Object.values(JSON.parse(fs.readFileSync(ctx.heldPath, 'utf8')).repositories)[0].length, gate.MAX_HELD);
 });
 
-test('cloud sessions are not enforced and write nothing; the session line says so inside a repository', (t) => {
+test('cloud governance remains advisory and writes nothing; the session line explains closure enforcement', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   const environment = { CLAUDE_CODE_REMOTE: 'true' };
@@ -2588,6 +2588,16 @@ test('cloud sessions are not enforced and write nothing; the session line says s
   assert.deepEqual(claudeHook.respond('SessionStart', { cwd: ctx.root }, { environment }), {});
   writesNothingIn(repo);
   assert.equal(fs.existsSync(ctx.heldPath), false);
+});
+
+test('cloud closure unknowns advise, proven open descendants refuse, and local unknowns name gh', () => {
+  const input = { tool_name: 'mcp__github__close_issue', tool_input: { owner: 'example.test', repo: 'app', issue_number: 1 } };
+  for (const status of ['unknown','refused']) {
+    const options = { environment: {CLAUDE_CODE_REMOTE:'true'}, guard: { assertClosable: () => ({status,reason:'gh is not signed in; run gh auth login'}) } };
+    const result = claudeHook.respond('PreToolUse', input, options);
+    if (status === 'unknown') { assert.equal(result.hookSpecificOutput, undefined); assert.match(result.systemMessage, /advisory.*gh.*Required CI/); }
+    else assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+  }
 });
 
 test('hosts: the Claude hook script holds and answers end to end with the real user-state location', (t) => {

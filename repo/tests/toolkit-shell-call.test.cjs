@@ -1,4 +1,20 @@
 'use strict';
+
+const closureReader = require('../scripts/toolkit-shell-call.cjs');
+require('node:test')('executable closure reader separates scripts from data without changing generic words', () => {
+  const assert = require('node:assert/strict');
+  for (const command of ['echo "gh issue close 1"', 'grep -rn "gh pr create" docs', "cat <<'EOF'\ngh issue close later\nEOF", "Write-Output @'\ngh pr edit later\n'@", 'for x in a b; do echo "gh pr edit $x"; done']) assert.equal(closureReader.closureWriteCandidate({ tool_name:'Bash',tool_input:{command} }), false, command);
+  for (const command of ['bash -c "gh issue close 1"', "bash <<'EOF'\ngh issue close 1\nEOF", 'for x in a b; do gh issue close 1; done', '& { gh pr edit 7 --body Safe }']) assert.equal(closureReader.closureWriteCandidate({ tool_name:'Bash',tool_input:{command} }), true, command);
+  assert.equal(closureReader.executableCommands('git push origin feature && gh pr create --title T --body B')[1].movesTarget, false);
+  assert.equal(closureReader.executableCommands('cd another; gh pr edit 7 --body B')[1].movesTarget, true);
+  for (const prefix of ['export GH_REPO=other.test/app', 'unset GH_REPO', "eval 'cd another'", "eval 'GH_REPO=other.test/app'"]) assert.equal(closureReader.executableCommands(prefix + '; gh pr edit 7 --body B').at(-1).movesTarget, true, prefix);
+  assert.equal(closureReader.executableCommands("eval 'echo GH_REPO=example.test/app'; gh pr edit 7 --body B").at(-1).movesTarget, false);
+  assert.equal(closureReader.executableCommands('NOTE=GH_REPO; gh pr create --title T --body B').at(-1).movesTarget, false);
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command:"gh pr create --title 'Closes #1' --body '--help'"}}), true);
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command:'gh pr create --help'}}), false);
+  for (const command of ['echo { gh pr edit later }', 'Write-Output {\n gh pr edit later\n}', 'Write-Output { echo { gh pr edit later } }']) assert.equal(closureReader.closureWriteCandidate({tool_name:'PowerShell',tool_input:{command}}), false, command);
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command:'# an unmatched { in a comment\ngh issue close 1'}}), true);
+});
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const os = require('node:os');

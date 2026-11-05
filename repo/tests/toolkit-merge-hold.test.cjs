@@ -61,7 +61,7 @@ const bash = (cwd, command) => ({ cwd, tool_name: 'Bash', tool_input: { command 
 const connector = (tool, args, repo = 'a') => ({ cwd: os.tmpdir(), tool_name: `mcp__github__${tool}`, tool_input: { owner: 'owner', repo, ...args } });
 const decide = (ctx, input, environment = {}) => hold.decide(input, { ...ctx.options, environment });
 
-test('closure refusal precedes typed approval consumption and standing authority', t => {
+test('closure refusal precedes typed approval consumption', t => {
   const ctx = context(t);
   typed(ctx, 'merge 17');
   const input = bash(ctx.repo, `gh pr merge 17 --merge --match-head-commit ${SHA} --body 'Fixes #1'`);
@@ -74,6 +74,19 @@ test('closure refusal precedes typed approval consumption and standing authority
   assert.match(decide(ctx, input).deny, /no unused approval/);
   typed(ctx, 'merge 17');
   assert.match(holdCore.decide(input, { ...ctx.options, closureGuard: failingGuard, environment: {} }).deny, /Open native descendants/);
+});
+
+test('the non-consuming pre-pass skips closure and the final pass reads once before consuming', t => {
+  const ctx = context(t); typed(ctx, 'merge 17');
+  const input = bash(ctx.repo, `gh pr merge 17 --merge --match-head-commit ${SHA}`);
+  let reads = 0;
+  const closureGuard = { checkPullRequest() { reads++; return { status: 'unknown', reason: 'Invocation deadline expired' }; } };
+  const options = { ...ctx.options, environment: {}, closureGuard };
+  assert.equal(holdCore.decide(input, { ...options, consume: false }), null);
+  assert.equal(reads, 0);
+  assert.match(holdCore.decide(input, options).deny, /deadline/);
+  assert.equal(reads, 1);
+  assert.equal(holdCore.decide(input, ctx.options), null, 'refusal retained the typed approval');
 });
 
 // The G0 authority matrix: only an exact fresh merged parent binding plus live target facts
@@ -270,6 +283,10 @@ test('evidence merges retain generic shell and ambiguity checks, and judge every
   git(ctx.repo, ['remote', 'add', 'second', 'https://github.com/owner/second.git']);
   assert.match(hold.decide(bash(ctx.repo, command), { ...ctx.options, environment: {}, readEvidenceGitHub }).deny, /cannot tell which repository/);
   assert.equal(hold.decide(bash(ctx.repo, `${command} --repo owner/a`), { ...ctx.options, environment: {}, readEvidenceGitHub }), null);
+  let closureReads = 0;
+  assert.match(holdCore.decide(bash(ctx.repo, `${command} --repo owner/a`), { ...ctx.options, environment: {}, readEvidenceGitHub,
+    closureGuard: { checkPullRequest() { closureReads++; return { status: 'refused', reason: 'Open native descendants' }; } } }).deny, /Open native descendants/);
+  assert.equal(closureReads, 1, 'verified evidence authority still reaches closure enforcement');
   assert.equal(typed(ctx, 'merge 17'), 1);
   assert.equal(hold.decide(bash(ctx.repo, `${command} --repo owner/a`), { ...ctx.options, environment: {}, readEvidenceGitHub() { assert.fail('typed approval needs no lookup'); } }), null);
 });
@@ -285,7 +302,7 @@ test('evidence verification refuses conflicting connector fields before lookup a
       ...ctx.options, environment: {}, readEvidenceGitHub() { assert.fail('ambiguous input must not reach GitHub'); } })?.deny);
   }
   let clock = 0;
-  t.mock.method(Date, 'now', () => clock);
+  t.mock.method(require('node:perf_hooks').performance, 'now', () => clock);
   for (const elapsed of [1500, 2500]) {
     clock = 0;
     const timeouts = [];

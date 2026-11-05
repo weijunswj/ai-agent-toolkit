@@ -49,13 +49,14 @@ function promptEvent(input) {
 // namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
 // `notes` collects what a shell check could not check, for the caller to show the user.
 async function decide(input, environment = process.env, { notes } = {}) {
+  const deadline = require('node:perf_hooks').performance.now() + 50000;
   let governanceDenial;
   try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
   }
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
   // Merges: the merge hold, a tripwire that waits for the user's own "merge N" (toolkit-merge-hold.cjs), in every folder.
-  const mergeDenial = mergeDecision(input);
+  const mergeDenial = mergeDecision(input, { deadline });
   if (mergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: mergeDenial.deny } };
   // Shell commands, under any of the shell tool names Codex may report: refuse AI attribution in
   // commits and pull requests, force pushes and pushes that carry a credential.
@@ -65,9 +66,13 @@ async function decide(input, environment = process.env, { notes } = {}) {
     if (attribution?.hookSpecificOutput?.permissionDecision === 'deny' || notes?.length) return attribution;
   }
   let closure;
-  try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input); }
-  catch { if (/gh\b.*\b(?:pr\s+(?:create|edit)|issue\s+close|api)|(?:create|update|edit)_pull_request|close_issue|issue_write|update_issue|closeIssue/.test(JSON.stringify(input))) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+  try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input, { deadline }); }
+  catch {
+    try { if (require('./toolkit-shell-call.cjs').closureWriteCandidate(input)) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+    catch { closure = { deny: 'Toolkit: executable command reader is unavailable. Run setup toolkit to repair the plugin.' }; }
+  }
   if (closure) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } };
+  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return {};
   if (!gateRun(environment)) return {};
   const state = governance(input, environment);
   if (!state.governed) return {};
@@ -85,8 +90,8 @@ async function decide(input, environment = process.env, { notes } = {}) {
 }
 
 // The merge hold's decision, failing closed for a call that may merge when the module cannot run.
-function mergeDecision(input) {
-  try { return require('./toolkit-merge-hold.cjs').decide(input || {}, { host: 'codex' }); } catch {
+function mergeDecision(input, options = {}) {
+  try { return require('./toolkit-merge-hold.cjs').decide(input || {}, { host: 'codex', ...options }); } catch {
     let mayMerge = true;
     try { mayMerge = require('./toolkit-merge-hold.cjs').mayMerge(input || {}); } catch { mayMerge = /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.' } : null;

@@ -42,7 +42,7 @@ const KINDS = Object.freeze(['benign', 'hostile', 'fault', 'update', 'state', 'p
 const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart']);
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
-const GOVERNANCE = Object.freeze(['enabled', 'undecided', 'none']);
+const GOVERNANCE = Object.freeze(['enabled', 'disabled', 'undecided', 'none']);
 // App-local task answers in each fixture home; the stale variant ages only its governance binding.
 const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'codex-only', 'claude-code-only', 'unreadable']);
 // The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
@@ -145,8 +145,11 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure'].includes(key)) errors.push(`fixture has unknown key ${key}`);
-  if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
+  if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
+  if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
+  if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -163,7 +166,8 @@ function fixtureErrors(fixture) {
   if (repo !== undefined) {
     if (!repo || typeof repo !== 'object') errors.push('fixture.repo must be an object');
     else {
-      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status', 'can_write'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status', 'can_write', 'remote_main'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      if (repo.remote_main !== undefined && repo.remote_main !== true) errors.push('remote_main is true or left out');
       if (repo.can_write !== undefined && (repo.can_write !== false || repo.governance !== 'undecided')) errors.push('fixture.repo.can_write needs governance undecided and is false or left out');
       if (repo.owner !== undefined && (repo.governance !== 'undecided' || !/^[A-Za-z0-9-]+$/.test(repo.owner))) errors.push('fixture.repo.owner needs governance undecided and is a plain owner name');
       if (repo.cached_binding_store !== undefined && (repo.cached_binding_store !== true || repo.governance !== 'undecided')) errors.push('fixture.repo.cached_binding_store needs governance undecided and is true or left out');
@@ -354,6 +358,7 @@ class Fixture {
     for (const folder of [this.home, this.work, path.dirname(this.transcript)]) fs.mkdirSync(folder, { recursive: true });
     fs.writeFileSync(path.join(this.home, '.gitconfig'), '[user]\n\tname = Fixture Author\n\temail = fixture@example.test\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n[core]\n\tfsmonitor = false\n');
     this.env = hookEnvironment(this.home);
+    if (spec.closure_cloud) this.env.CLAUDE_CODE_REMOTE = 'true';
     // Plain-folder CLI fixtures still have gh's default repository, without reading host config.
     if (!spec.repo && !spec.evidence_merge) this.env.GH_REPO = 'toolkit-test-fixture/fixture';
     // A session a Toolkit launcher started for a gate carries its role.
@@ -365,7 +370,7 @@ class Fixture {
       fs.writeFileSync(file, spec.repo.legacy_answer === 'damaged' ? '{damaged' : fs.readFileSync(path.join(ROOT, 'repo', 'tests', 'fixtures', 'governance-legacy-' + spec.repo.legacy_answer + '.json')));
     }
     if (spec.evidence_merge) this.#evidenceMerge(spec.evidence_merge);
-    else this.#githubFixture(this.#closureFixture(spec), spec.slow_proposal === true);
+    else this.#githubFixture(this.#closureFixture(spec), spec.slow_proposal === true, spec);
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
       const repository = `toolkit-test-fixture/${spec.repo.name || 'fixture'}`;
@@ -395,9 +400,10 @@ class Fixture {
 
   #repo(spec) {
     const name = spec.name || 'fixture';
-    if (spec.governance === 'enabled') {
+    if (spec.governance === 'enabled' || spec.governance === 'disabled') {
       const support = require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs'));
       support.makeGoverned(this.work, `hook-pack-${name}`, { home: this.home });
+      if (spec.governance === 'disabled') support.recordMerged(this.work, { home: this.home, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: `toolkit-test-fixture/hook-pack-${name}`, governance: 'disabled', parents: [{issue:1,record_prefix:'INT-FX',writer_prefix:'FX'}], store:{kind:'github',repository:'toolkit-test-fixture/store',branch:'main',path:'state/'}, required_checks:['validate'] }) });
       if (spec.task_auto_merge) this.#taskAutoMerge(`toolkit-test-fixture/hook-pack-${name}`, spec.task_auto_merge, support);
     } else {
       this.#git(this.work, ['init', '--quiet']);
@@ -422,6 +428,11 @@ class Fixture {
       if (spec.task_auto_merge && commit === commits[0]) this.#git(this.work, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
     }
     this.head = this.#git(this.work, ['rev-parse', 'HEAD']).trim();
+    if (spec.remote_main) {
+      if (!this.#git(this.work, ['remote']).trim()) this.#git(this.work, ['remote', 'add', 'origin', `https://github.com/toolkit-test-fixture/${name}.git`]);
+      this.#git(this.work, ['update-ref', 'refs/remotes/origin/main', this.head]);
+      this.#git(this.work, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+    }
     for (const branch of spec.worktrees || []) this.#git(this.work, ['worktree', 'add', '--quiet', '-b', branch, path.join(this.trees, branch)]);
     // Lane worktrees nested in the working folder's ignored .tmp/, as a controller's checkout has
     // them, each with its own commits.
@@ -475,7 +486,7 @@ class Fixture {
     const repository = `toolkit-test-fixture/${spec.repo.name || 'fixture'}`;
     const issue = (number, state) => ({ number, state, url: `https://api.github.com/repos/${repository}/issues/${number}` });
     const parent = issue(1, 'open');
-    const child = issue(2, spec.issue_closure === 'open-child' ? 'open' : 'closed');
+    const child = issue(2, ['open-child', 'retained-title'].includes(spec.issue_closure) ? 'open' : 'closed');
     const result = {};
     for (const row of [parent, child, issue(3, 'open')]) {
       result[`repos/${repository}/issues/${row.number}`] = row;
@@ -483,10 +494,13 @@ class Fixture {
     }
     result[`repos/${repository}/pulls/7`] = { number: 7, title: 'Update', body: 'Refs #1', head: { sha: this.head }, commits: 0 };
     result[`repos/${repository}/pulls/7/commits?per_page=100&page=1`] = [];
+    if (spec.issue_closure === 'target-pr') result[`repos/${repository}/issues/9`] = { number: 9, state: 'open', pull_request: {} };
+    if (spec.issue_closure === 'missing-gone') result[`repos/${repository}/issues/999`] = { fixtureStatus: 410 };
+    if (spec.issue_closure === 'retained-title') result[`repos/${repository}/pulls/7`].title = 'Closes #1';
     return result;
   }
 
-  #githubFixture(responses, slowProposal = false) {
+  #githubFixture(responses, slowProposal = false, spec = {}) {
     const bin = path.join(this.dir, 'fake-github');
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, process.platform === 'win32' ? 'gh.exe' : 'gh'), '');
@@ -498,6 +512,13 @@ const original = cp.spawnSync;
 const responses = ${JSON.stringify(responses)};
 cp.spawnSync = function(file, args, options) {
   if (!/^gh(?:\\.exe)?$/i.test(require('node:path').basename(file))) return original(file, args, options);
+  if (${JSON.stringify(spec.closure_transport)} === 'signed-out') return { status: 4, stdout: '', stderr: 'isolated signed-out gh' };
+  if (${JSON.stringify(spec.closure_transport)} === 'missing') return { error: Object.assign(new Error('gh unavailable'), {code:'ENOENT'}) };
+  if (${spec.closure_delay_ms || 0}) {
+    const delay = Math.min(${spec.closure_delay_ms || 0}, options.timeout);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+    if (delay < ${spec.closure_delay_ms || 0}) return { error: Object.assign(new Error('ETIMEDOUT'), {code:'ETIMEDOUT'}) };
+  }
   if (${slowProposal}) return original(process.execPath, [${JSON.stringify(slow)}, ...args], options);
   let body = args[0] === 'api' && args[3] === 'GET' && responses[args[4]];
   // Authority-only rows have a PR without closing references. Explicit closure fixtures
@@ -507,7 +528,7 @@ cp.spawnSync = function(file, args, options) {
     if (pr) body = { number: Number(pr[1]), title: 'Fixture change', body: '', commits: 0, head: { sha: ${JSON.stringify(this.head || 'a'.repeat(40))} } };
     else if (/^repos\\/[^/]+\\/[^/]+\\/pulls\\/\\d+\\/commits\\?/.test(args[4])) body = [];
   }
-  const status = body ? 200 : 404;
+  const status = body?.fixtureStatus || (body ? 200 : 404);
   return {status: status === 200 ? 0 : 1, stdout: 'HTTP/2.0 ' + status + '\\n\\n' + JSON.stringify(body || {}), stderr: ''};
 };
 `);
@@ -552,7 +573,7 @@ cp.spawnSync = function(file, args, options) {
     if (typeof value === 'string') {
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)
         .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential())
-        .replaceAll('{head}', this.head || '').replaceAll('{now}', this.#now().toISOString());
+        .replaceAll('{head7}', (this.head || '').slice(0,7)).replaceAll('{headUpper}', (this.head || '').toUpperCase()).replaceAll('{head}', this.head || '').replaceAll('{now}', this.#now().toISOString());
     }
     if (Array.isArray(value)) return value.map(item => this.expand(item));
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.expand(item)]));
@@ -741,13 +762,14 @@ async function run(options, out = process.stdout) {
       let outcomes;
       running.add(row.id);
       try { outcomes = await runRow(row, hosts, { roots, scratch }); } catch (error) { outcomes = hosts.map(host => ({ host, observed: { decision: 'error', problems: [`the runner failed: ${error.message}`], failed: [] } })); }
+      if (options.verbose) out.write(`row outcome ${row.id}: ${JSON.stringify(outcomes)}\n`);
       running.delete(row.id);
       return outcomes.map(({ host, observed }) => ({ row, host, observed, met: meets(row, host, observed) }));
     });
     if (watchdog) clearTimeout(watchdog);
     const results = perRow.flat();
     const seconds = (Date.now() - started) / 1000;
-    return options.against ? revertReport(results, options.against, seconds, out) : scoreboard(results, seconds, options, out);
+    return options.against ? revertReport(results, options.against, seconds, out, options.verbose) : scoreboard(results, seconds, options, out);
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -783,11 +805,12 @@ function scoreboard(results, seconds, { budgetSeconds, verbose }, out) {
   return bad ? 1 : 0;
 }
 
-function revertReport(results, against, seconds, out) {
+function revertReport(results, against, seconds, out, verbose = false) {
   let bad = 0;
   for (const { row, host, observed, met } of results) {
     if (met) { bad += 1; out.write(`NOT PROVED ${row.id} on ${host}: it already passes at ${against}, so it does not show the fix\n`); }
     else out.write(`proved ${row.id} on ${host}: fails at ${against} (${failureKind(row, host, observed)})\n`);
+    if (verbose) out.write(`  outcome: ${JSON.stringify(observed)}\n`);
   }
   out.write(`${results.length} case(s) against ${against} in ${seconds.toFixed(1)} s.\n`);
   return bad ? 1 : 0;
