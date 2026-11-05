@@ -46,7 +46,7 @@ Module._load = function(request, parent, main) {
   return load.call(this,request,parent,main);
 };
 `);
-  const env = { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_GOVERNANCE_OFFLINE: '1', NODE_OPTIONS: `--require="${preload.replace(/\\/g, '/')}"` };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_GOVERNANCE_OFFLINE: '1', NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require="${preload.replace(/\\/g, '/')}"`].filter(Boolean).join(' ') };
   for (const host of ['claude','codex']) for (const source of ['startup','resume','clear','compact']) {
     const input = JSON.stringify({ cwd: work, session_id: `load-${host}-${source}`, source });
     const windowsLauncher = host === 'codex' && process.platform === 'win32';
