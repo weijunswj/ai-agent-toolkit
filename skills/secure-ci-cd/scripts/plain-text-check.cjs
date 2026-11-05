@@ -360,7 +360,7 @@ function parseArgs(argv) {
 }
 
 function report({ failures, stale }, config, out, err) {
-  for (const entry of stale) out.write(`NOTE: ${entry.file}: ${entry.rule} "${entry.text}" is in the baseline ${entry.count} time(s) but occurs ${entry.found}; run with --prune-baseline.\n`);
+  for (const entry of stale) out.write(`NOTE: ${entry.file}: ${entry.rule} is in the baseline ${entry.count} time(s) but occurs ${entry.found}; run with --prune-baseline.\n`);
   if (failures.length) {
     for (const finding of failures) err.write(`FAIL: ${describeFailure(finding, config)}\n`);
     err.write(`\n${failures.length} item(s) to rewrite in plain English. Repository file links are fine.\n`);
