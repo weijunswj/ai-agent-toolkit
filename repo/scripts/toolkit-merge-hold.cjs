@@ -122,7 +122,7 @@ const gate = require('./toolkit-governance-gate.cjs');
 const mergeScope = require('./toolkit-auto-merge-eligible.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
 const { validateRemoteIdentity, repositoryIdForCanonicalRemote } = require('./toolkit-repository-identity.cjs');
-const { GitHubTransport } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+const { GitHubTransport, IssueClosureGuard } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const { resolveExecutable } = require('../../skills/github-program-reconciler/scripts/resolve-executable.cjs');
 
 const APPROVALS_BASENAME = 'merge-approvals.v1.json';
@@ -1047,7 +1047,12 @@ function isCheckCommand(text, cwd) {
 
 // The PreToolUse decision: { deny } or null.
 // `host` is the hook's own host ('claude' or 'codex'), set by the entry point, never read from the payload.
-function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, evidenceResponses, closureGuard, transport } = {}) {
+function readClosureFile(file) {
+  if (!file || /[$`\r\n]/.test(file) || !fs.statSync(file).isFile() || fs.statSync(file).size > 1024 * 1024) throw new Error('Unreadable merge content.');
+  return fs.readFileSync(file, 'utf8');
+}
+
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, evidenceResponses, closureGuard, transport, deadlineMs = 120000, maxRequests = 500 } = {}) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   let cwd = input && typeof input.cwd === 'string' ? input.cwd : null;
@@ -1091,16 +1096,18 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   const evidence = new EvidenceStoreMerges(cwd, { registryOptions, now, environment: environment || {}, readEvidenceGitHub, evidenceResponses });
   const used = [];
   for (const merge of merges) {
-    // Closure safety precedes every authority route and never consumes approval on refusal.
-    const call = require('./toolkit-shell-call.cjs').ShellCall.from(input);
+    // Preserve specific authority refusals; closure safety still precedes approval consumption.
+    const { refusal, approval } = judge(merge, approvals, standing, evidence);
+    if (refusal) return refusal;
+    const call = ShellCall.from(input);
     let mergeTexts = [];
     try {
       if (call.isShell) {
-        for (const command of require('./toolkit-shell-call.cjs').shellCommands(call.text)) {
+        for (const command of shellCommands(call.text)) {
           for (let i = 0; i < command.words.length; i += 1) {
             const word = command.words[i];
             if (merge.kind === 'api') {
-              const read = raw => require('./toolkit-issue-closure.cjs').readFile(require('./toolkit-shell-call.cjs').shellPath(cwd, raw));
+              const read = raw => readClosureFile(shellPath(cwd, raw));
               if (word === '--input' || word.startsWith('--input=')) {
                 const body = JSON.parse(read(word === '--input' ? command.words[++i] : word.slice(8)));
                 for (const key of ['commit_title', 'commit_message']) if (body[key] !== undefined) mergeTexts.push(body[key]);
@@ -1114,8 +1121,8 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
               continue;
             }
             if (['--subject', '-t', '--body', '-b'].includes(word)) mergeTexts.push(command.words[++i]);
-            else if (word === '--body-file' || word === '-F') mergeTexts.push(require('./toolkit-issue-closure.cjs').readFile(require('./toolkit-shell-call.cjs').shellPath(cwd, command.words[++i])));
-            else if (/^--body-file=/.test(word) || /^-F.+/.test(word)) mergeTexts.push(require('./toolkit-issue-closure.cjs').readFile(require('./toolkit-shell-call.cjs').shellPath(cwd, word.startsWith('--') ? word.slice(12) : word.slice(word[2] === '=' ? 3 : 2))));
+            else if (word === '--body-file' || word === '-F') mergeTexts.push(readClosureFile(shellPath(cwd, command.words[++i])));
+            else if (/^--body-file=/.test(word) || /^-F.+/.test(word)) mergeTexts.push(readClosureFile(shellPath(cwd, word.startsWith('--') ? word.slice(12) : word.slice(word[2] === '=' ? 3 : 2))));
             else if (/^--(?:subject|body)=/.test(word)) mergeTexts.push(word.slice(word.indexOf('=') + 1));
             else if (/^-[tb].+/.test(word)) mergeTexts.push(word.slice(word[2] === '=' ? 3 : 2));
           }
@@ -1126,10 +1133,12 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
         mergeTexts = ['commit_title', 'commit_message', 'commitTitle', 'commitMessage'].filter(key => args[key] !== undefined).map(key => args[key]);
       }
     } catch { return refuse('the merge-message file could not be read. Provide a readable body file.'); }
-    const closure = merge.repository && merge.pr && merge.sha && require('./toolkit-issue-closure.cjs').checkMerge(merge, cwd, { closureGuard, transport, mergeTexts });
-    if (closure) return closure;
-    const { refusal, approval } = judge(merge, approvals, standing, evidence);
-    if (refusal) return refusal;
+    try {
+      const guard = closureGuard || new IssueClosureGuard({ repository: merge.repository, deadlineMs, maxRequests,
+        transport: transport || new GitHubTransport({ ghPath: resolveExecutable('gh', { cwd: cwd || process.cwd(), environment }), timeoutMs: 5000 }) });
+      const result = guard.checkPullRequest(merge.pr, { head: merge.sha, mergeTexts });
+      if (result.status !== 'allowed') return refuse(result.reason);
+    } catch { return refuse('issue closure safety could not be checked for this merge. Retry when GitHub is readable.'); }
     if (approval) used.push(approval);
   }
   if (consume) for (const approval of used) approvals.use(approval);

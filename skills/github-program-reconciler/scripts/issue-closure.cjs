@@ -83,10 +83,15 @@ class IssueClosureGuard {
     for (const child of children) {
       if (!Number.isSafeInteger(child?.number) || !['open', 'closed'].includes(child.state)) throw new Error('Malformed native child state.');
       const target = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\/issues\/(\d+)$/.exec(child.url || '');
-      if (!target || Number(target[2]) !== child.number) throw new Error('Native child identity unavailable.');
+      if (!target || !REPOSITORY.test(target[1]) || Number(target[2]) !== child.number) throw new Error('Native child identity unavailable.');
       const childKey = `${target[1].toLowerCase()}#${child.number}`;
+      if (next.has(childKey)) throw new Error('Native issue tree is cyclic.');
       if (seen.has(childKey)) throw new Error('Duplicate native child across pages.');
       seen.add(childKey);
+      if (child.sub_issues_summary?.total === 0) {
+        descendants.push({ repository: target[1].toLowerCase(), number: child.number, state: child.state });
+        continue;
+      }
       const nested = this.tree(target[1], child.number, budget, next);
       // A changed state between the list and detail cannot support a close.
       if (nested.issue.state !== child.state) throw new Error('Native child changed during the read.');
@@ -94,9 +99,8 @@ class IssueClosureGuard {
     }
     return { issue, children, descendants };
   }
-  assertClosable(number, repository = this.repository, budget = this.budget(), checkParent = true) {
+  assertClosable(number, repository = this.repository, budget = this.budget()) {
     try {
-      if (checkParent && this.parentIssue && (repository.toLowerCase() !== this.repository || number !== this.parentIssue)) this.tree(this.repository, this.parentIssue, budget);
       const tree = this.tree(repository, number, budget);
       const open = tree.descendants.filter(child => child.state === 'open');
       return open.length ? { status: 'refused', reason: `Issue ${repository}#${number} has open native descendants. Keep it open and use Refs for parent links.`, open, tree } : allowed({ tree });
@@ -107,15 +111,14 @@ class IssueClosureGuard {
       if (!Array.isArray(texts) || texts.reduce((length, text) => length + (typeof text === 'string' ? text.length : Infinity), 0) > 1024 * 1024) throw new Error('PR text exceeds the total read bound.');
       const references = texts.flatMap(text => closingReferences(text, this.repository));
       const targets = new Map();
-      // The bound parent is checked first, even when the text closes a different issue.
-      if (this.parentIssue) targets.set(`${this.repository}#${this.parentIssue}`, { repository: this.repository, number: this.parentIssue });
       for (const ref of references) targets.set(`${ref.repository}#${ref.number}`, ref);
+      let incomplete;
       for (const target of targets.values()) {
-        const result = this.assertClosable(target.number, target.repository, budget, false);
-        // Merely referencing a healthy/open programme is allowed; only closure targets must
-        // have no open descendants. Unknown parent state still holds the write.
-        if (result.status === 'unknown' || (result.status === 'refused' && references.some(ref => ref.repository === target.repository && ref.number === target.number))) return result;
+        const result = this.assertClosable(target.number, target.repository, budget);
+        if (result.status === 'refused') return result;
+        if (result.status === 'unknown') incomplete = result;
       }
+      if (incomplete) return incomplete;
       return allowed({ references });
     } catch { return unknown('PR text could not be inspected. Provide explicit title and body text or files.'); }
   }

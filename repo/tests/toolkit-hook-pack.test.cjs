@@ -43,7 +43,7 @@ test('closure fixtures are bounded native-state cases and cover both hosts', () 
   for (const value of ['open-child', 'closed-child', 'nested-open', 'unavailable']) assert.deepEqual(pack.rowErrors(row({ fixture: { repo: { governance: 'none' }, issue_closure: value } })), []);
   assert.ok(pack.rowErrors(row({ fixture: { issue_closure: 'unknown' } })).length);
   const rows = pack.loadCorpus().rows.filter(row => row.id.startsWith('CLOSURE.'));
-  assert.equal(rows.length, 14);
+  assert.equal(rows.length, 15);
   assert.ok(rows.every(row => row.hosts.includes('claude') && row.hosts.includes('codex')));
 });
 

@@ -4,7 +4,6 @@
 // Pre-write adapter: prevents closing a parent with unfinished native descendants.
 // Unreadable content/state refuses only PR writes and issue closures; ordinary reads pass.
 const fs = require('node:fs');
-const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { ShellCall, shellCommands, shellPath } = require('./toolkit-shell-call.cjs');
 const { IssueClosureGuard } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
@@ -26,15 +25,7 @@ function originRepository(cwd) {
 function guardFor(repository, cwd, options = {}) {
   if (!SLUG.test(repository || '')) throw new Error('Repository unavailable.');
   const transport = options.transport || new GitHubTransport({ ghPath: resolveExecutable('gh', { cwd }), timeoutMs: 5000 });
-  // Enforcement does not grant lifecycle authority. A local binding is only a read hint;
-  // lifecycle writes independently use the fresh merged binding in programme-state.
-  let parentIssue = null;
-  const bindingPath = path.join(cwd, '.github', 'toolkit-programme.json');
-  if (fs.existsSync(bindingPath)) {
-    const binding = JSON.parse(readFile(bindingPath));
-    if (binding.repository?.toLowerCase() === repository.toLowerCase()) parentIssue = binding.parents?.[0]?.issue || binding.parent_issue || null;
-  }
-  return new IssueClosureGuard({ transport, repository, parentIssue });
+  return new IssueClosureGuard({ transport, repository, deadlineMs: options.deadlineMs ?? 120000, maxRequests: options.maxRequests ?? 500 });
 }
 function flagValues(words) {
   const flags = new Map(); const positional = [];
@@ -151,14 +142,6 @@ function issueClosureDecision(input, options = {}) {
     return null;
   } catch { return { deny: `Toolkit: the issue closure check could not inspect this write. ${RECOVERY}` }; }
 }
-function checkMerge(merge, cwd, options = {}) {
-  try {
-    if (!merge.repository || !merge.pr || !merge.sha) throw new Error('Merge target is incomplete.');
-    const guard = options.closureGuard || guardFor(merge.repository, cwd || process.cwd(), options);
-    const result = guard.checkPullRequest(merge.pr, { head: merge.sha, mergeTexts: options.mergeTexts || [] });
-    return result.status === 'allowed' ? null : { deny: `Toolkit: ${result.reason} ${RECOVERY}` };
-  } catch { return { deny: `Toolkit: issue closure safety could not be checked for this merge. ${RECOVERY}` }; }
-}
 function main() {
   const event = JSON.parse(readFile(process.env.GITHUB_EVENT_PATH));
   const repository = process.env.GITHUB_REPOSITORY;
@@ -169,4 +152,4 @@ function main() {
   process.stdout.write('Issue closure safety verified on the current PR head.\n');
 }
 if (require.main === module) { try { main(); } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; } }
-module.exports = { issueClosureDecision, checkMerge, guardFor, readFile, shellOperations, connectorOperations };
+module.exports = { issueClosureDecision, guardFor, readFile, shellOperations, connectorOperations };

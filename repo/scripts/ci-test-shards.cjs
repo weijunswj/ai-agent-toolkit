@@ -409,6 +409,7 @@ const ISSUE_CLOSURE_JOB = [
   '      - name: Checkout',
   '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
   '        with:',
+  '          fetch-depth: 0',
   '          persist-credentials: false',
   '',
   '      - name: Set up Node',

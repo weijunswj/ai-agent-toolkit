@@ -72,6 +72,7 @@ test('closure refusal precedes typed approval consumption and standing authority
   assert.match(holdCore.decide(input, { ...ctx.options, closureGuard: failingGuard, environment: {} }).deny, /Open native descendants/);
   assert.equal(decide(ctx, input), null, 'the typed approval was retained');
   assert.match(decide(ctx, input).deny, /no unused approval/);
+  typed(ctx, 'merge 17');
   assert.match(holdCore.decide(input, { ...ctx.options, closureGuard: failingGuard, environment: {} }).deny, /Open native descendants/);
 });
 

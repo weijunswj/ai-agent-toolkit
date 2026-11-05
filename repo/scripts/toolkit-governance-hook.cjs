@@ -45,13 +45,8 @@ function exportHostSession(input, environment, gate) {
 
 // The hook's stdout for one event. Never throws.
 function respond(event, input, options = {}) {
-  if (event === 'PreToolUse') {
-    let closure;
-    try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input, options); }
-    catch { if (/gh\b.*\b(?:pr\s+(?:create|edit)|issue\s+close|api)|(?:create|update|edit)_pull_request|close_issue|issue_write|update_issue|closeIssue/.test(JSON.stringify(input))) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
-    if (closure) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } };
-  }
   if (cloudSession(options.environment || process.env)) {
+    if (event === 'PreToolUse') return closureDecision(input, options);
     if (event !== 'SessionStart') return {};
     let inside = false;
     try { inside = (options.gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = false; }
@@ -83,6 +78,8 @@ function respond(event, input, options = {}) {
     if (event === 'PreToolUse') {
       const decision = new gate.ToolGate(options).decide(input);
       if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
+      const closure = closureDecision(input, options);
+      if (closure.hookSpecificOutput) return closure;
       const merge = mergeDecision(input, options);
       return merge ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } } : {};
     }
@@ -108,6 +105,13 @@ function respond(event, input, options = {}) {
 }
 
 const mergeHold = () => require('./toolkit-merge-hold.cjs');
+
+function closureDecision(input, options) {
+  let closure;
+  try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input, options); }
+  catch { if (/gh\b.*\b(?:pr\s+(?:create|edit)|issue\s+close|api)|(?:create|update|edit)_pull_request|close_issue|issue_write|update_issue|closeIssue/.test(JSON.stringify(input))) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+  return closure ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } } : {};
+}
 
 // The merge hold's decision (toolkit-merge-hold.cjs), failing closed for a call that may merge
 // when the module cannot run.

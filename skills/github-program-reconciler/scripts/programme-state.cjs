@@ -675,7 +675,8 @@ function validateBinding(binding) {
         check(errors, new Set(parents.map(entry => (isObject(entry) ? entry.issue : null))).size === parents.length, 'parents must not repeat an issue');
       }
     } else {
-      check(errors, binding.governance === undefined && binding.parents === undefined && binding.parent_lifecycle === undefined, 'governance, parents and parent_lifecycle belong to v2');
+      check(errors, binding.governance === undefined && binding.parents === undefined, 'governance and parents belong to v2');
+      check(errors, binding.parent_lifecycle === undefined, 'parent_lifecycle belongs to v2');
       check(errors, isInt(binding.parent_issue, 1), 'parent_issue must be an issue number');
       check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
       check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
@@ -4180,6 +4181,7 @@ function bindRepository({ transport, originUrl, binding }) {
 }
 
 module.exports = Object.freeze({
+  get IssueClosureGuard() { return require('./issue-closure.cjs').IssueClosureGuard; },
   SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,

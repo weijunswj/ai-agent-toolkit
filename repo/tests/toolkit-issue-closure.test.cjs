@@ -105,6 +105,7 @@ test('shell and connector closure matrix with positive read controls', () => {
   }
 });
 test('readable body files are inspected and partial edits retain the live title', t => {
+  fs.mkdirSync(path.join(process.cwd(), '.tmp'), { recursive: true });
   const dir = fs.mkdtempSync(path.join(process.cwd(), '.tmp', 'closure-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'body.txt'); fs.writeFileSync(file, 'Closes #1');
@@ -121,11 +122,12 @@ test('hostile bounded readers never turn unreadable state into permission', () =
   for (const text of [null, {}, [], 1]) assert.equal(setup().guard.checkTexts([text]).status, 'unknown');
 });
 
-test('the programme parent is read first and misleading child summaries never hide native children', () => {
+test('only closing targets are read and a root summary never replaces its native child list', () => {
   const { github } = setup();
   const guard = new IssueClosureGuard({ transport: github, repository: repo, parentIssue: 1 });
   assert.equal(guard.checkTexts(['Fixes #2']).status, 'allowed');
-  assert.equal(github.calls[0].path, `repos/${repo}/issues/1`);
+  assert.equal(github.calls[0].path, `repos/${repo}/issues/2`);
+  assert.ok(github.calls.every(call => !call.path.includes('/issues/1')));
   const original = github.request.bind(github);
   github.request = (...args) => {
     const response = original(...args);
@@ -134,7 +136,52 @@ test('the programme parent is read first and misleading child summaries never hi
   };
   assert.equal(guard.assertClosable(1).status, 'refused');
   github.request = (...args) => args[1].includes('/issues/1/sub_issues?') ? { status: 403 } : original(...args);
-  assert.equal(guard.assertClosable(2).status, 'unknown', 'an inaccessible bound parent holds even a leaf close');
+  assert.equal(guard.assertClosable(2).status, 'allowed', 'an inaccessible unrelated parent does not hold a leaf close');
+  assert.equal(guard.checkTexts(['Closes #1']).status, 'unknown', 'an inaccessible closing target still holds');
+});
+
+test('slow sixty-child trees read only closing targets and skip proven leaves', () => {
+  for (const state of ['open', 'closed']) {
+    let elapsed = 0;
+    const calls = [];
+    const children = Array.from({ length: 60 }, (_, i) => ({ number: i + 2, state,
+      url: `https://api.github.com/repos/${repo}/issues/${i + 2}`, sub_issues_summary: { total: 0 } }));
+    const transport = { request(method, endpoint) {
+      calls.push(endpoint); elapsed += 400;
+      const row = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(endpoint);
+      if (row) return { status: 200, json: { number: Number(row[1]), state: 'open', sub_issues_summary: { total: row[1] === '1' ? 60 : 0 } } };
+      if (endpoint.includes('/issues/1/sub_issues?')) return { status: 200, json: children };
+      if (endpoint.includes('/sub_issues?')) return { status: 200, json: [] };
+      if (endpoint.endsWith('/pulls/7')) return { status: 200, json: { number: 7, title: 'Change', body: 'Refs #2', commits: 0, head: { sha: SHA } } };
+      if (endpoint.includes('/pulls/7/commits?')) return { status: 200, json: [] };
+      return { status: 404 };
+    } };
+    const guard = new IssueClosureGuard({ repository: repo, parentIssue: 1, transport, now: () => elapsed });
+    assert.equal(guard.checkPullRequest(7, { head: SHA }).status, 'allowed', 'a PR referencing a leaf needs no programme tree');
+    assert.ok(calls.every(endpoint => !endpoint.includes('/issues/')));
+    calls.length = 0;
+    assert.equal(guard.checkTexts(['Closes #1']).status, state === 'open' ? 'refused' : 'allowed');
+    assert.equal(calls.length, 2, 'one issue detail and one child page suffice for sixty proven leaves');
+  }
+});
+
+test('a specific open-child refusal wins over another target with incomplete state', () => {
+  const { guard } = setup();
+  assert.equal(guard.checkTexts(['Closes #999, #1']).status, 'refused');
+});
+
+test('leaf optimisation preserves identity and cycle checks and adapters expose read bounds', () => {
+  for (const url of [`https://api.github.com/repos/${repo}/issues/1`, 'https://api.github.com/repos/bad owner/app/issues/2']) {
+    const transport = { request(method, endpoint) {
+      return { status: 200, json: endpoint.includes('/sub_issues?')
+        ? [{ number: url.endsWith('/1') ? 1 : 2, state: 'closed', url, sub_issues_summary: { total: 0 } }]
+        : { number: 1, state: 'open' } };
+    } };
+    assert.equal(new IssueClosureGuard({ repository: repo, transport }).assertClosable(1).status, 'unknown');
+    const guard = adapter.guardFor(repo, process.cwd(), { transport, deadlineMs: 120000, maxRequests: 9 });
+    assert.equal(guard.deadlineMs, 120000);
+    assert.equal(guard.maxRequests, 9);
+  }
 });
 
 test('aggregate text, target and request bounds return unknown', () => {

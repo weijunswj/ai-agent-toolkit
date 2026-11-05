@@ -49,10 +49,6 @@ function promptEvent(input) {
 // namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
 // `notes` collects what a shell check could not check, for the caller to show the user.
 async function decide(input, environment = process.env, { notes } = {}) {
-  let closure;
-  try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input); }
-  catch { if (/gh\b.*\b(?:pr\s+(?:create|edit)|issue\s+close|api)|(?:create|update|edit)_pull_request|close_issue|issue_write|update_issue|closeIssue/.test(JSON.stringify(input))) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
-  if (closure) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } };
   let governanceDenial;
   try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
@@ -64,7 +60,14 @@ async function decide(input, environment = process.env, { notes } = {}) {
   // Shell commands, under any of the shell tool names Codex may report: refuse AI attribution in
   // commits and pull requests, force pushes and pushes that carry a credential.
   // Codex's top-level cwd is the chat's folder, which may not be where a call with no workdir runs.
-  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes, sessionFolderOnly: true });
+  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) {
+    const attribution = require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes, sessionFolderOnly: true });
+    if (attribution?.hookSpecificOutput?.permissionDecision === 'deny' || notes?.length) return attribution;
+  }
+  let closure;
+  try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input); }
+  catch { if (/gh\b.*\b(?:pr\s+(?:create|edit)|issue\s+close|api)|(?:create|update|edit)_pull_request|close_issue|issue_write|update_issue|closeIssue/.test(JSON.stringify(input))) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+  if (closure) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } };
   if (!gateRun(environment)) return {};
   const state = governance(input, environment);
   if (!state.governed) return {};

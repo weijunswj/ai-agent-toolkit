@@ -354,6 +354,8 @@ class Fixture {
     for (const folder of [this.home, this.work, path.dirname(this.transcript)]) fs.mkdirSync(folder, { recursive: true });
     fs.writeFileSync(path.join(this.home, '.gitconfig'), '[user]\n\tname = Fixture Author\n\temail = fixture@example.test\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n[core]\n\tfsmonitor = false\n');
     this.env = hookEnvironment(this.home);
+    // Plain-folder CLI fixtures still have gh's default repository, without reading host config.
+    if (!spec.repo && !spec.evidence_merge) this.env.GH_REPO = 'toolkit-test-fixture/fixture';
     // A session a Toolkit launcher started for a gate carries its role.
     if (spec.gate_role) this.env.TOOLKIT_GATE_ROLE = spec.gate_role;
     if (spec.repo) this.#repo(spec.repo);
@@ -502,7 +504,7 @@ cp.spawnSync = function(file, args, options) {
   // override these safe PR facts; all unspecified issue and repository reads still fail.
   if (!body && args[0] === 'api' && args[3] === 'GET') {
     const pr = /^repos\\/[^/]+\\/[^/]+\\/pulls\\/(\\d+)$/.exec(args[4]);
-    if (pr) body = { number: Number(pr[1]), title: 'Fixture change', body: '', commits: 0, head: { sha: ${JSON.stringify(this.head)} } };
+    if (pr) body = { number: Number(pr[1]), title: 'Fixture change', body: '', commits: 0, head: { sha: ${JSON.stringify(this.head || 'a'.repeat(40))} } };
     else if (/^repos\\/[^/]+\\/[^/]+\\/pulls\\/\\d+\\/commits\\?/.test(args[4])) body = [];
   }
   const status = body ? 200 : 404;

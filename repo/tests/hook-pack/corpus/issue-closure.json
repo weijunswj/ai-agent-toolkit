@@ -3,6 +3,12 @@
   "family": "issue-closure",
   "rows": [
     {
+      "id": "CLOSURE.unreadable-unrelated-parent", "source": "unreadable programme state must not block text without closing targets", "kind": "benign", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "enabled" }, "issue_closure": "unavailable", "files": { ".github/toolkit-programme.json": "{\"schema\":\"toolkit.programme-binding.v1\",\"repository\":\"toolkit-test-fixture/fixture\",\"parent_issue\":1,\"record_prefix\":\"INT-FX\",\"writer_prefix\":\"FX\",\"store\":{\"kind\":\"github\",\"repository\":\"toolkit-test-fixture/store\",\"branch\":\"main\",\"path\":\"state/\"},\"required_checks\":[\"validate\"]}" } },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --body 'Refs #1'" } },
+      "expect": { "decision": "allow" }, "status": "pass"
+    },
+    {
       "id": "CLOSURE.missing-guard-write", "source": "broken enforcement must hold only affected writes", "kind": "fault", "hosts": ["claude", "codex"],
       "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child" },
       "fault": { "type": "remove-file", "file": "repo/scripts/toolkit-issue-closure.cjs" },
