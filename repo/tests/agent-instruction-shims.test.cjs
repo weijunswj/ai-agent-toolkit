@@ -191,11 +191,13 @@ test('Windows task standing approval stays narrow on every changed approval surf
   const global = readText(globalPath);
   const approval = global.split('**Toolkit task standing approval:**')[1].split('\n\n')[0];
   for (const rule of [
-    /agents may run `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>` without asking only in ENABLED Toolkit-governed repos with verified merged bindings/,
-    /<Toolkit> is this computer's recorded managed checkout; <repo> is the target repository's main checkout, never a linked worktree/,
-    /Register\/update only Toolkit's fixed PROGRAMME SWEEP and SHARD TIMINGS, with first sweep, in the binding's task folder/,
-    /Refuse repository, checkout or Toolkit-copy changes, owner stops, disabled or hand-edited tasks; verify results/,
-    /Other scheduler commands, folder overrides and custom tasks need approval; native denials stop/,
+    /agents may run `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>`/,
+    /<Toolkit> is the recorded managed checkout; <repo> the verified main checkout, never a worktree/,
+    /PROGRAMME SWEEP and SHARD TIMINGS need fresh enabled matching merged governance/,
+    /FOOTER SWEEP also accepts fresh matching disabled governance or confirmed binding absence for a verified github\.com origin/,
+    /Register\/update one fixed cleaner only in the repository-default folder; verify registration and its first result/,
+    /Refuse repository, checkout or Toolkit-copy changes, owner stops, disabled or edited tasks and conflicts/,
+    /Removal, repair, folder overrides and custom tasks need explicit approval; native denials stop/,
   ]) assert.match(approval, rule);
   assert.match(global, /Approval, assignment, custody and capability never supply a missing host-native permission/);
   assert.match(readText('AGENTS.md'), /except the global Toolkit task standing approval/);
