@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-11-04.4
+Version: 2026-11-05.1
 
 Run Toolkit repos through Claude Projects. Global rules and coding gates apply everywhere; GitHub governance (issues, records, decision traces, evidence custody) only to ENABLED github.com repos. Keep project facts in project memory; durable work state in the branch, PR and programme comments or evidence store, mirrored in memory, never only there.
 
@@ -157,6 +157,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - Cloud threads, when used for code, push only to their own branch.
 
 ## Approvals
+- The global Toolkit task standing approval covers eligible Windows task registration; follow `reference/recurring-tasks.md`, including owner stops and native denials.
 - Ask before hard-to-undo or outward-facing actions: closing PRs or issues other than completed children (`CONTROLLER.md`), deleting branches/folders, merging, production/VM changes, live external writes and emails outside the project. Apply the global agent-created scratch exception; it grants no native permission. Transport stores are the exception: agents manage them fully, merges and deletions included (`CONTROLLER.md` transport-store rule).
 - **Before every merge** outside a transport store, post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup defaults and other repos) with the diff link, and merge only after the user's OK. With this app's task auto-merge On and fresh enabled governance, the summary is a notice and the merge follows the gate rules' task auto-merge section: the lane runs `node repo/scripts/toolkit-auto-merge-eligible.cjs --base <base SHA> --head <head SHA>` on that head; exit 0 merges after the notice, otherwise the user types `merge N`. Toolkit PRs carry their own `bump-version.cjs --next patch|minor|major` bump. After main changes, a computer lane runs `node repo/scripts/toolkit-rebump-prs.cjs --apply` on open PRs (`reference/periodic-runs.md`). Its closing checklist carries "coordinator: refresh the guidebook" (**Guidebook copy**, fast route).
 - Use a decision card with a recommendation for every approval or choice the coordinator acts on itself, opening with its problem, fix and skip lines (**Style**).

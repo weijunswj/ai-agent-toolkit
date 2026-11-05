@@ -4,7 +4,8 @@
 // Refreshes the measured per-file test times in the shard manifest (repo/contracts/ci/test-shards.json)
 // from the test summaries of the latest green Validate run on main. It makes no model calls.
 //
-//   node repo/scripts/refresh-shard-timings.cjs [--run <id>] [--write | --open-pr]
+//   node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--run <id>] [--write | --open-pr]
+// --repo-root selects another repository using the same shard manifest and Validate summary contract.
 //
 // Without a flag it only reports. Each shard job already uploads its run-tests.cjs summary (per-file
 // seconds) as a test-summary-<shard> artifact, so this reads those through read-only `gh` and changes
@@ -32,7 +33,7 @@ const ARTIFACT_PATTERN = 'test-summary-*';
 const UNTIMED_SHARE = 0.1;
 const IMBALANCE_RATIO = Object.freeze({ linux: 1.5, windows: 1.3 });
 const CONCURRENCY = 3; // run-tests.cjs default; node --test runs three files at a time per shard
-const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--run <id>] [--write | --open-pr]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
+const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--run <id>] [--write | --open-pr]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
 
 class UsageError extends Error {}
 
@@ -42,6 +43,11 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === '--write') options.write = true;
     else if (arg === '--open-pr') options.openPr = true;
+    else if (arg === '--repo-root') {
+      const value = argv[index += 1];
+      if (!value || !path.isAbsolute(value)) throw new UsageError('--repo-root needs an absolute checkout path');
+      options.root = value;
+    }
     else if (arg === '--run') {
       const value = argv[index += 1];
       if (!/^[0-9]+$/.test(value || '')) throw new UsageError('--run needs a numeric run id');
@@ -208,7 +214,7 @@ function prBody(run, plan) {
     'Triggers crossed:',
     ...plan.findings.map((finding) => `- ${finding}`),
     '',
-    'Made by `node repo/scripts/refresh-shard-timings.cjs --open-pr`, which makes no model calls. Only the shard manifest changes; no test is added, removed or skipped.',
+    'Made by `node <Toolkit>/repo/scripts/refresh-shard-timings.cjs --repo-root <checkout> --open-pr`, which makes no model calls. Only the shard manifest changes; no test is added, removed or skipped.',
     '',
     'This is a generated candidate. Required route and evidence:',
     '- G0: pending checks of the source run, trigger and unchanged budgets.',
@@ -263,7 +269,7 @@ function openPr(root, run, out) {
   }
 }
 
-function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr } = {}) {
+function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, readRun = latestGreenRun, readSummaries = downloadSummaries, publish = openPr } = {}) {
   let options;
   try {
     options = parseArgs(argv);
@@ -273,15 +279,16 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     return 2;
   }
   if (options.help) { out.write(`${USAGE}\n`); return 0; }
+  root = options.root || root;
   try {
-    const run = latestGreenRun(root, options.run);
+    const run = readRun(root, options.run);
     out.write(`Validate run ${run.databaseId} on ${run.headBranch} (${run.headSha.slice(0, 7)})\n`);
     if (options.openPr) {
       if (run.headBranch !== 'main') throw new Error('--open-pr reads main runs only');
-      return openPr(root, run, out);
+      return publish(root, run, out);
     }
     const discovered = shards.discoverTestFiles(root);
-    const plan = planRefresh(shards.loadManifest(root), discovered, timingsFromSummaries(downloadSummaries(root, run.databaseId), discovered));
+    const plan = planRefresh(shards.loadManifest(root), discovered, timingsFromSummaries(readSummaries(root, run.databaseId), discovered));
     for (const line of plan.lines) out.write(`${line}\n`);
     for (const finding of plan.findings) out.write(`- ${finding}\n`);
     if (!plan.refresh) out.write('No refresh trigger crossed.\n');
@@ -298,4 +305,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ IMBALANCE_RATIO, UNTIMED_SHARE, manifestText, parseArgs, planRefresh, rebalance, timingsFromSummaries });
+module.exports = Object.freeze({ IMBALANCE_RATIO, UNTIMED_SHARE, main, manifestText, parseArgs, planRefresh, rebalance, timingsFromSummaries });

@@ -8,6 +8,8 @@ Before a risky action, verify that explicit approval is bound to the exact actio
 
 The evidence-store line in the managed `AGENTS.md` is the standing approval for that store: writes, deletions and merges there need no further approval.
 
+The global Safety Gates' Toolkit task standing approval covers only the exact `node <Toolkit>/repo/scripts/toolkit-windows-tasks.cjs apply --repo-root <repo>` command in an ENABLED governed repository with a verified merged binding. `<Toolkit>` is the recorded managed Toolkit checkout; `<repo>` is the target repository's main checkout, never a linked worktree. Verify repository, checkout, runner and task ownership, refuse owner stops and disabled or hand-edited tasks, and verify results. Other scheduler commands, folder overrides, custom tasks and `apply --repair-owned` need explicit approval naming the tasks, paths and changes; native denials remain stops. Setup and `plan` register nothing.
+
 Bind each approval to the exact owner, action, target, resources, effects, recipient, conditions, expiry, revocation state, and recorded outcome. An unchanged, unexpired, unrevoked approval remains valid for the same still-pending action when only the turn, worker, chat, or transport changes. Assignment, custody, capability, and native permission remain separate; an approval, receipt, or prose cannot supply missing native permission. A changed or new action, revoked or expired approval, or recorded outcome that leaves further work unapproved requires fresh approval or host confirmation before that additional effect. Words like `continue`, `next`, `apply`, or `do it` stay within the approved scope.
 
 ## Standing Permission Asks

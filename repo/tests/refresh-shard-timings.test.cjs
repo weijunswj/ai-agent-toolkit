@@ -7,6 +7,7 @@ require('./toolkit-test-temp-guard.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { fetchFixture, foreignFetch, loadWithCommands } = require('./support/toolkit-fetch-race-fixture.cjs');
@@ -105,6 +106,73 @@ test('the refreshed manifest keeps the file format', () => {
   assert.equal(refresh.manifestText({ a: [1] }), '{\n  "a": [\n    1\n  ]\n}\n');
 });
 
+test('an explicit repository root must be absolute and complete', () => {
+  const root = path.resolve(os.tmpdir(), 'selected-checkout');
+  assert.equal(refresh.parseArgs(['--repo-root', root]).root, root);
+  for (const argv of [['--repo-root'], ['--repo-root', '--write'], ['--repo-root', 'relative']]) {
+    assert.throws(() => refresh.parseArgs(argv), /absolute checkout path/, JSON.stringify(argv));
+  }
+});
+
+function checkout(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-refresh-root-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'repo', 'tests'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'repo', 'contracts', 'ci'), { recursive: true });
+  for (const file of FILES) fs.writeFileSync(path.join(root, ...file.split('/')), '// fixture\n');
+  fs.writeFileSync(path.join(root, ...shards.MANIFEST_REL.split('/')), refresh.manifestText(manifest({})));
+  return root;
+}
+
+test('report and write discover, measure and update only the selected repository', (t) => {
+  const fallback = checkout(t);
+  const selected = checkout(t);
+  const target = path.join(selected, ...shards.MANIFEST_REL.split('/'));
+  const other = path.join(fallback, ...shards.MANIFEST_REL.split('/'));
+  const before = fs.readFileSync(target);
+  const toolkitManifest = fs.readFileSync(path.join(shards.ROOT, ...shards.MANIFEST_REL.split('/')));
+  const calls = [];
+  const deps = {
+    root: fallback,
+    readRun(root, run) { calls.push(['run', root, run]); return { databaseId: 123, headBranch: 'main', headSha: 'a'.repeat(40) }; },
+    readSummaries(root, run) { calls.push(['summaries', root, run]); return shards.SYSTEMS.map(system => summary(system, even)); },
+    publish() { assert.fail('report/write must not publish'); },
+    out: { write() {} }, err: { write(text) { assert.fail(text); } },
+  };
+  assert.equal(refresh.main(['--repo-root', selected, '--run', '123'], deps), 0);
+  assert.deepEqual(fs.readFileSync(target), before, 'report is read-only');
+  assert.equal(refresh.main(['--repo-root', selected, '--run', '123', '--write'], deps), 0);
+  const updated = JSON.parse(fs.readFileSync(target, 'utf8'));
+  assert.deepEqual(updated.durations_seconds, { linux: even, windows: even });
+  assert.deepEqual(shards.manifestErrors(updated, FILES), []);
+  assert.deepEqual(fs.readFileSync(other), before, 'injected default repository stays untouched');
+  assert.deepEqual(fs.readFileSync(path.join(shards.ROOT, ...shards.MANIFEST_REL.split('/'))), toolkitManifest, 'Toolkit stays untouched');
+  assert.deepEqual(calls, [
+    ['run', selected, '123'], ['summaries', selected, 123],
+    ['run', selected, '123'], ['summaries', selected, 123],
+  ]);
+});
+
+test('--open-pr forwards the selected root and keeps the main-only guard; default root still works', (t) => {
+  const selected = checkout(t);
+  const run = { databaseId: 123, headBranch: 'main', headSha: 'a'.repeat(40) };
+  const published = [];
+  const errors = [];
+  const deps = {
+    out: { write() {} }, err: { write(text) { errors.push(text); } },
+    readRun: () => run,
+    readSummaries() { assert.fail('publish owns summary reads'); },
+    publish(root, actualRun) { published.push([root, actualRun]); return 0; },
+  };
+  assert.equal(refresh.main(['--repo-root', selected, '--open-pr'], deps), 0);
+  assert.equal(refresh.main(['--open-pr'], deps), 0);
+  assert.deepEqual(published, [[selected, run], [shards.ROOT, run]]);
+  run.headBranch = 'feature';
+  assert.equal(refresh.main(['--repo-root', selected, '--open-pr'], deps), 2);
+  assert.match(errors.join(''), /--open-pr reads main runs only/);
+  assert.equal(published.length, 2);
+});
+
 for (const [system, ratio, expected] of [['linux', 1.38, false], ['linux', 1.50, false], ['linux', 1.51, true], ['windows', 1.30, false], ['windows', 1.31, true]]) {
   test(`fully timed ${system} balance ${ratio} triggers=${expected}`, () => {
     const current = manifest(even);
@@ -122,6 +190,7 @@ for (const [system, ratio, expected] of [['linux', 1.38, false], ['linux', 1.50,
 test('generated candidate body requires gates and names pending evidence without claiming completion', () => {
   const { prBody } = loadWithCommands('refresh-shard-timings.cjs', ['prBody'], spawnSync, __dirname);
   const body = prBody({ databaseId: 123, headSha: 'a'.repeat(40) }, { findings: ['linux: trigger crossed'] });
+  assert.ok(body.includes('node <Toolkit>/repo/scripts/refresh-shard-timings.cjs --repo-root <checkout> --open-pr'));
   assert.match(body, /G0.*pending.*source run.*trigger.*unchanged budgets/i);
   assert.match(body, /fresh G1.*pending.*classifier.*RISKY/i);
   assert.match(body, /Agent UAT.*pending.*exact-head CI coverage.*Linux and Windows/i);
