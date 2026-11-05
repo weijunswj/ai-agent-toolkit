@@ -55,8 +55,15 @@ class IssueClosureGuard {
   budget() { return { requests: 0, deadline: this.now() + this.deadlineMs }; }
   get(apiPath, budget) {
     if (++budget.requests > this.maxRequests || this.now() > budget.deadline) throw new Error('Issue closure reads exceeded their bound.');
-    const response = this.transport.request('GET', apiPath);
-    if (this.now() > budget.deadline || response?.status !== 200) throw new Error('GitHub issue closure state could not be read completely.');
+    let response;
+    try { response = this.transport.request('GET', apiPath); }
+    catch (error) {
+      // Report only the operation and a safe failure category, never transport output.
+      const timeout = error?.code === 'ETIMEDOUT' || /ETIMEDOUT|timed?\s*out|timeout/i.test(error?.message || '');
+      throw new Error(`GET ${apiPath} failed: ${timeout ? 'timeout' : 'transport unavailable'}.`);
+    }
+    if (this.now() > budget.deadline) throw new Error(`GET ${apiPath} failed: timeout (closure read deadline).`);
+    if (response?.status !== 200) throw new Error(`GET ${apiPath} failed: ${Number.isInteger(response?.status) ? `HTTP ${response.status}` : 'missing HTTP status'}.`);
     return response.json;
   }
   pages(apiPath, budget) {
@@ -104,7 +111,7 @@ class IssueClosureGuard {
       const tree = this.tree(repository, number, budget);
       const open = tree.descendants.filter(child => child.state === 'open');
       return open.length ? { status: 'refused', reason: `Issue ${repository}#${number} has open native descendants. Keep it open and use Refs for parent links.`, open, tree } : allowed({ tree });
-    } catch { return unknown('Native child state is incomplete or changed. Retry after GitHub can be read completely.'); }
+    } catch (error) { return unknown(`Native child state is incomplete or changed. ${error.message} Retry after GitHub can be read completely.`); }
   }
   checkTexts(texts, budget = this.budget()) {
     try {
@@ -139,7 +146,7 @@ class IssueClosureGuard {
       const after = this.pullRequest(number, budget);
       if (JSON.stringify([before.head.sha, before.title, before.body, before.commits, before.updated_at]) !== JSON.stringify([after.head.sha, after.title, after.body, after.commits, after.updated_at])) return unknown('PR head or text changed during inspection. Read it again and retry.');
       return result;
-    } catch { return unknown('PR metadata or commits could not be read completely. Retry with a current explicit PR and head.'); }
+    } catch (error) { return unknown(`PR metadata or commits could not be read completely. ${error.message} Retry with a current explicit PR and head.`); }
   }
 }
 module.exports = { closingReferences, IssueClosureGuard };

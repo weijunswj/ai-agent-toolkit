@@ -5,9 +5,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { closingReferences, IssueClosureGuard } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
 const adapter = require('../scripts/toolkit-issue-closure.cjs');
+const { GitHubTransport } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
 const SHA = 'a'.repeat(40);
 const repo = 'example.test/app';
+test('closure adapters keep short hook reads and accept an explicit cold-runner timeout', () => {
+  assert.equal(adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath }).transport.timeoutMs, 5000);
+  assert.equal(adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath, timeoutMs: 30000 }).transport.timeoutMs, 30000);
+});
+test('PR read refusals identify metadata or commits and timeout or HTTP status', () => {
+  for (const target of ['metadata', 'commits']) for (const failure of ['timeout', 'http']) {
+    const endpoint = `repos/${repo}/pulls/7${target === 'commits' ? '/commits?per_page=100&page=1' : ''}`;
+    const transport = new GitHubTransport({ ghPath: process.execPath, timeoutMs: 30000, run(file, args, options) {
+      assert.equal(options.timeout, 30000);
+      if (args[4] === endpoint) return failure === 'timeout'
+        ? { error: Object.assign(new Error('spawnSync ETIMEDOUT'), { code: 'ETIMEDOUT' }) }
+        : { status: 1, stdout: 'HTTP/2.0 403\n\n{}', stderr: '' };
+      return { status: 0, stdout: 'HTTP/2.0 200\n\n' + JSON.stringify({ number: 7, title: 'Safe change', body: 'Refs #1', commits: 0, head: { sha: SHA } }) };
+    } });
+    const result = new IssueClosureGuard({ transport, repository: repo }).checkPullRequest(7, { head: SHA });
+    assert.equal(result.status, 'unknown');
+    assert.ok(result.reason.includes(`GET ${endpoint} failed: ${failure === 'timeout' ? 'timeout' : 'HTTP 403'}`), result.reason);
+  }
+});
 function setup({ child = 'open', nested = false } = {}) {
   const github = new FakeGitHub({ repository: repo });
   github.addIssue(1); github.addIssue(2, { state: child, parent: 1 });

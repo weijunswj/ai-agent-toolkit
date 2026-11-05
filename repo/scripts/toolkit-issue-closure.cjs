@@ -24,7 +24,7 @@ function originRepository(cwd) {
 }
 function guardFor(repository, cwd, options = {}) {
   if (!SLUG.test(repository || '')) throw new Error('Repository unavailable.');
-  const transport = options.transport || new GitHubTransport({ ghPath: resolveExecutable('gh', { cwd }), timeoutMs: 5000 });
+  const transport = options.transport || new GitHubTransport({ ghPath: options.ghPath || resolveExecutable('gh', { cwd }), timeoutMs: options.timeoutMs ?? 5000 });
   return new IssueClosureGuard({ transport, repository, deadlineMs: options.deadlineMs ?? 120000, maxRequests: options.maxRequests ?? 500 });
 }
 function flagValues(words) {
@@ -147,7 +147,7 @@ function main() {
   const repository = process.env.GITHUB_REPOSITORY;
   const pr = event.pull_request;
   if (!pr?.number || !pr.head?.sha) throw new Error('A current pull request event is required.');
-  const result = guardFor(repository, process.cwd()).checkPullRequest(pr.number, { head: pr.head.sha });
+  const result = guardFor(repository, process.cwd(), { timeoutMs: 30000 }).checkPullRequest(pr.number, { head: pr.head.sha });
   if (result.status !== 'allowed') throw new Error(result.reason);
   process.stdout.write('Issue closure safety verified on the current PR head.\n');
 }

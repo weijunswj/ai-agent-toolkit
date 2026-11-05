@@ -1052,7 +1052,7 @@ function readClosureFile(file) {
   return fs.readFileSync(file, 'utf8');
 }
 
-function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, evidenceResponses, closureGuard, transport, deadlineMs = 120000, maxRequests = 500 } = {}) {
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, evidenceResponses, closureGuard, transport, timeoutMs = 30000, deadlineMs = 120000, maxRequests = 500 } = {}) {
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
   let cwd = input && typeof input.cwd === 'string' ? input.cwd : null;
@@ -1135,7 +1135,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     } catch { return refuse('the merge-message file could not be read. Provide a readable body file.'); }
     try {
       const guard = closureGuard || new IssueClosureGuard({ repository: merge.repository, deadlineMs, maxRequests,
-        transport: transport || new GitHubTransport({ ghPath: resolveExecutable('gh', { cwd: cwd || process.cwd(), environment }), timeoutMs: 5000 }) });
+        transport: transport || new GitHubTransport({ ghPath: resolveExecutable('gh', { cwd: cwd || process.cwd(), environment }), timeoutMs }) });
       const result = guard.checkPullRequest(merge.pr, { head: merge.sha, mergeTexts });
       if (result.status !== 'allowed') return refuse(result.reason);
     } catch { return refuse('issue closure safety could not be checked for this merge. Retry when GitHub is readable.'); }
