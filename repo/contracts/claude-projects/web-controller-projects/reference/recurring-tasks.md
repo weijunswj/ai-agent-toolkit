@@ -3,6 +3,8 @@
 Reference for the `web-controller-projects` skill, opened when the coordinator sets up, renders, swaps or deletes a scheduled task. The skill's precedence, style and approvals apply; where this file and the skill differ, the skill wins.
 
 ## Recurring tasks
+
+For device footer cleaning, owner-run `apply` adds the independent task and installs full-day schedules. Until its matching record, live marker and action are verified, the programme task cleans first using its installed hours, independently of programme governance. The task list and session line say `Footer task not set up; paste the apply line.` A verified disabled companion is an owner stop, so no substitute runs. Interim and independent cleaning share a repository lock. First handover saves the earliest valid unfinished window before scanning; damaged history holds for recovery and only a genuinely new repository starts with 48 hours. Device setup and task commands resolve linked worktrees to a verified primary checkout and visibly refuse unusable layouts. Plans describe which hourly jobs start immediately and that the footer job edits the signed-in account's own GitHub posts, adding the evidence store only when verified. Shard timings wait for their scheduled time.
 Whenever the user asks for anything recurring (the daily check-in, a sweep, a reminder), set it up this way, and tell the user which kind you used and where they will see it.
 
 **How to set one up (project panel):**

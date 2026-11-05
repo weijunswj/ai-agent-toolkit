@@ -26,6 +26,8 @@ Check for the binding first at each event; without it, do not run `programme.cjs
 
 ## Refresh after every write (required)
 
+Owner-run `apply` adds the independent footer task and installs full-day schedules. Until a matching recorded task passes live marker and action checks, the programme task cleans first using its installed hours, even when programme governance fails. It reports `Footer task not set up; paste the apply line.` in the task list and session line. A verified disabled companion stops substitute cleaning. Both jobs share a repository lock; first handover saves the earliest valid pending scan window before work and never reimports it. Damaged history holds for recovery; only genuinely new repositories start with 48 hours. Setup and the task commands resolve linked worktrees to a verified primary checkout and report refused layouts. Every footer API request targets github.com and verifies repository metadata before edits.
+
 The programme pages stay current without any token: the session that changed GitHub brings them up to date with its own `gh` sign-in, and an hourly sweep catches everything else.
 
 - **After any write in a governed repository** (an issue or comment created, edited, closed or reopened, a sub-issue link, a PR opened, edited, reviewed or merged, or a push that moves a PR head), run `node scripts/programme.cjs refresh` from its checkout before ending the turn. Any session may, executors included: `refresh` is the full `reconcile --apply` pass written under the controller that holds the parent now, and it takes no session, patch or verdict, so it records nothing that is a decision.
