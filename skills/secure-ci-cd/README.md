@@ -21,6 +21,8 @@ node .github/scripts/plain-text-check.cjs --migrate-baseline
 
 Migration keeps every allowance and count unchanged, including stale allowances, and removes legacy metadata that could contain matched text. It does not scan for or approve new findings. An already migrated baseline is left unchanged. A missing, malformed or unreadable baseline cannot be migrated; errors never print its contents. Fingerprints reduce copied text; they do not encrypt it or make predictable matches impossible to guess.
 
+Migration removes matched text from the current baseline file but not from git history, and a real token found there must be revoked, not just migrated.
+
 Use `--prune-baseline` separately to lower counts or remove stale allowances. Pruning never adds allowances or raises counts, and keeps the existing format. Use `--init-baseline` only when no baseline exists. Baseline write commands cannot be combined with each other, `--files` or `--explain`. Normal checks, including `--files`, are read-only.
 
 For Toolkit's own baseline, use `node repo/scripts/check-plain-references.cjs --migrate-baseline` when migration is wanted. That wrapper also supports read-only scoped checks and shrink-only pruning.

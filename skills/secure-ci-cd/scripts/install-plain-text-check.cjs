@@ -136,6 +136,23 @@ class PlainTextInstaller {
   check() {
     const top = this.locate();
     const problems = drift(top);
+    if (readOrNull(path.join(top, CONFIG_PATH)) !== null) {
+      let config;
+      try { config = check.readConfigFile(path.join(top, CONFIG_PATH)); }
+      catch (error) {
+        if (!(error instanceof check.CheckError)) throw error;
+        this.#say('NOTE: Settings could not be read or are invalid.');
+      }
+      if (config) {
+        try {
+          const notice = check.baselineMigrationNotice(check.readBaseline(top, config), config);
+          if (notice) this.#say(`NOTE: ${notice}`);
+        } catch (error) {
+          if (!(error instanceof check.CheckError)) throw error;
+          this.#say('NOTE: Baseline could not be read or is invalid.');
+        }
+      }
+    }
     if (problems.length) {
       for (const problem of problems) this.#say(`Drift: ${problem}`);
       return 1;

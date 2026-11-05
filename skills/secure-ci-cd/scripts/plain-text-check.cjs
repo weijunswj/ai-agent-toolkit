@@ -280,6 +280,12 @@ function readBaseline(root, config) {
   }
 }
 
+function baselineMigrationNotice(baseline, config) {
+  return baseline.schema === LEGACY_BASELINE_SCHEMA && baseline.allowed.some(entry => REFERENCE_RULES.some(rule => rule.id === entry.rule))
+    ? `baseline ${config.baseline}: stores matched text (v1); run the check with --migrate-baseline`
+    : null;
+}
+
 // Findings beyond the baseline count fail (every occurrence of that text in that file is listed, so
 // the line to fix is among them). Baseline entries that occur less often than recorded are stale.
 // With `files`, only those files are read and staleness is not judged.
@@ -298,7 +304,7 @@ function check(root, config, { files = null, spawn } = {}) {
   for (const [key, group] of groups) if (group.length > (allowed.get(key) || 0)) failures.push(...group);
   const stale = files ? [] : baseline.allowed.filter((entry) => (groups.get(keyOf(entry)) || []).length < entry.count)
     .map((entry) => ({ ...entry, found: (groups.get(keyOf(entry)) || []).length }));
-  return { failures, stale, findings, baseline };
+  return { failures, stale, findings, baseline, scoped: Boolean(files) };
 }
 
 // One failure. A reference is described without its matched text, because a matched link can carry
@@ -405,7 +411,9 @@ function parseArgs(argv) {
   return args;
 }
 
-function report({ failures, stale }, config, out, err) {
+function report({ failures, stale, baseline, scoped }, config, out, err) {
+  const notice = scoped ? null : baselineMigrationNotice(baseline, config);
+  if (notice) out.write(`NOTE: ${notice}\n`);
   for (const entry of stale) out.write(`NOTE: ${entry.file}: ${entry.rule} is in the baseline ${entry.count} time(s) but occurs ${entry.found}; run with --prune-baseline.\n`);
   if (failures.length) {
     for (const finding of failures) err.write(`FAIL: ${describeFailure(finding, config)}\n`);
@@ -447,7 +455,7 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 module.exports = Object.freeze({
   CHECK_VERSION, CONFIG_SCHEMA, BASELINE_SCHEMA, LEGACY_BASELINE_SCHEMA, DEFAULT_CONFIG, DEFAULTS, REFERENCE_RULES, CheckError,
   termPattern, resolveConfig, readConfigFile, scopeOf, listFiles, listScopedFiles, findInText, scanFiles,
-  ALLOW_MARKER, check, describeFailure, pruneBaseline, initBaseline, migrateBaseline, explain, report, main
+  ALLOW_MARKER, readBaseline, baselineMigrationNotice, check, describeFailure, pruneBaseline, initBaseline, migrateBaseline, explain, report, main
 });
 
 if (require.main === module) process.exitCode = main();
