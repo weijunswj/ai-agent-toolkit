@@ -147,6 +147,7 @@ test('host and user arguments survive delegation exactly once and recursion dept
   assert.equal(logged.argv.filter((arg) => arg === 'instructions').length, 1);
   assert.equal(logged.argv.filter((arg) => arg === '--keep-update-reports').length, 1);
   assert.equal(logged.depth, '1');
+  assert.equal(logged.workingFolder, path.resolve(__dirname, '..', '..'));
 });
 
 test('receipt may arrive before a delayed fragmented bank and acknowledgement follows exact forwarding', () => {

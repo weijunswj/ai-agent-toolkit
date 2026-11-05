@@ -142,8 +142,9 @@ function writeLastRun(id, record, home) {
 // ---- skipped runs ------------------------------------------------------------------------------
 
 // The skip reasons the job runner writes. Anything else is shown as a bare "skipped", so no command
-// output reaches a session line.
-const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|governance status could not be read|governance is [A-Z]+|this checkout has no CI shards to time)$/;
+// output reaches a session line. The old age reason remains readable in historical programme
+// records; the current runner no longer emits it.
+const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|binding is missing|binding is invalid|binding does not match origin|binding observation expired|binding refresh failed(?:: (?:default branch fetch failed|GitHub unreachable|origin transport refused|default branch unknown|default branch moved|fetch guards unavailable|commit unreadable|binding unreadable|cache unwritable|governance reads offline))?|no usable github\.com origin repository|governance status could not be read|governance is (?:ENABLED|DISABLED|UNDECIDED|UNAVAILABLE|ERROR)|this checkout has no CI shards to time)$/;
 const STALE_MS = 2 * 60 * 60 * 1000;
 
 // HH:MMZ on now's UTC date, else with the date (always with it when now is null).

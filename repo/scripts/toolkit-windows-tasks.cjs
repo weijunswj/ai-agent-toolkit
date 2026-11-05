@@ -10,7 +10,7 @@
 //           for you to paste. Setup prints this.
 //   apply   [--repo-root <checkout>] [--folder <F>] [--no-first-run] [--json]
 //           creates or updates those tasks and records them in ~/.ai-agent-toolkit/user-state/tasks.json,
-//           then starts a new or changed programme sweep once and waits for its result. You run it:
+//           then starts each new or changed hourly sweep once and waits for its result. You run it:
 //           agents do not create scheduled tasks.
 //   remove  [--folder <F>] [--json]
 //           removes only Toolkit's own tasks (all three checks below) and their registry entries,
@@ -50,13 +50,19 @@ const POLL_MS = 5000;
 const JOBS = Object.freeze({
   'programme-sweep': {
     task: 'PROGRAMME SWEEP',
-    schedule: Object.freeze({ kind: 'hourly', at: '08:00', hours: 16 }),
-    purpose: 'Brings the programme pages up to date, keeps the attention line and removes the cloud route footer from your own GitHub posts. No AI.',
+    schedule: Object.freeze({ kind: 'hourly', at: '00:00', hours: 24 }),
+    purpose: 'Brings the programme pages up to date and keeps the attention line. No AI.',
     applies({ governanceState, binding }) {
       if (governanceState !== 'ENABLED') return `GitHub governance is ${governanceState || 'not readable'} here, so there is no programme to sweep`;
       if (!binding) return 'the binding merged on the default branch could not be read on this computer; run toolkit governance status online first';
       return null;
     },
+  },
+  'footer-sweep': {
+    task: 'FOOTER SWEEP',
+    schedule: Object.freeze({ kind: 'hourly', at: '00:00', hours: 24 }),
+    purpose: 'Removes the cloud route footer from your own GitHub posts in this repository and its freshly verified evidence store. No AI.',
+    applies() { return null; },
   },
   'shard-timings': {
     task: 'SHARD TIMINGS',
@@ -102,19 +108,23 @@ function parseMarker(description) {
 }
 
 function repositoryOf(identity) {
-  const parts = String(identity?.remote?.path || '').replace(/^\/+/, '').replace(/\.git$/i, '').split('/');
-  return parts.length === 2 && parts.every(Boolean) ? parts.join('/') : null;
+  if (identity?.valid !== true || identity.remote?.host !== 'github.com') return null;
+  const slug = String(identity.remote.path || '').replace(/^\//, '').replace(/\/$/, '').replace(/\.git$/i, '');
+  return /^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(slug) && !['.', '..'].includes(slug.split('/')[1]) ? slug : null;
 }
 
 // What the checkout's governance says: { root, repository, governanceState, binding }.
 function readCheckout(checkout, deps = {}) {
   const governance = deps.governance || require('./toolkit-governance-state.cjs');
   const identity = governance.readIdentity(checkout);
-  if (!identity.valid) return { root: identity.root || null, repository: null, governanceState: null, binding: null };
+  const repository = repositoryOf(identity);
+  if (!repository) return { root: null, repository: null, governanceState: null, binding: null };
   let state = null;
   try { state = governance.governanceState(identity.root).state; } catch { state = null; }
-  const binding = governance.mergedBinding(identity.root);
-  return { root: identity.root, repository: (binding && binding.repository) || repositoryOf(identity), governanceState: state, binding };
+  let binding = null;
+  try { binding = governance.mergedBinding(identity.root); } catch { /* planning can still offer origin cleaning */ }
+  if (binding && String(binding.repository).toLowerCase() !== repository.toLowerCase()) binding = null;
+  return { root: identity.root, repository, governanceState: state, binding };
 }
 
 function folderForCheckout(checkout, deps = {}) {
@@ -136,16 +146,19 @@ function durationText(iso) {
 const DAYS = Object.freeze(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
 const timeOf = start => (/T(\d{2}:\d{2})/.exec(String(start || '')) || [])[1] || '?';
 
-// One plain line for a task's triggers, such as "hourly, 08:00 to 23:59".
+// One plain line for a task's triggers, such as "hourly, 00:00 to 23:59".
 function describeTriggers(triggers) {
   const list = Array.isArray(triggers) ? triggers : triggers ? [triggers] : [];
   return list.map((trigger) => {
     const at = timeOf(trigger.start);
     const kind = String(trigger.kind || '');
     const every = durationText(trigger.interval);
-    if (/Daily/.test(kind) && trigger.interval === 'PT1H' && /^PT\d+H$/.test(String(trigger.duration))) {
+    // The native XML duration can spell 24 hours P1D: on Windows,
+    // [System.Xml.XmlConvert]::ToString([TimeSpan]::FromHours(24)) returns P1D.
+    const durationHours = trigger.duration === 'P1D' ? 24 : /^PT\d+H$/.test(String(trigger.duration)) ? Number(/\d+/.exec(trigger.duration)[0]) : null;
+    if (/Daily/.test(kind) && trigger.interval === 'PT1H' && durationHours !== null) {
       const [hours, minutes] = at.split(':').map(Number);
-      const end = (hours + Number(/\d+/.exec(trigger.duration)[0])) * 60 + minutes - 1;
+      const end = (hours + durationHours) * 60 + minutes - 1;
       return `hourly, ${at} to ${String(Math.floor(end / 60) % 24).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
     }
     if (/Daily/.test(kind)) return `daily at ${at}${every ? `, every ${every}` : ''}`;
@@ -185,7 +198,7 @@ function definitionDigest(definition) {
 // { folder, repository, wanted: [definitions], skipped: [{ job, reason }] } for a checkout.
 function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__dirname, '..', '..'), nodePath = process.execPath, systemRoot = process.env.SystemRoot || 'C:\\Windows', deps = {} }) {
   const read = readCheckout(checkout, deps);
-  if (!read.root) throw new WindowsTasksError(`${checkout} is not inside a git repository with an origin remote`);
+  if (!read.root) throw new WindowsTasksError(`${checkout} has no usable github.com origin repository; footer cleaning refused`);
   const chosen = folder || (read.binding && read.binding.schedule_folder) || defaultFolder(read.repository);
   if (!chosen || !FOLDER.test(chosen)) throw new WindowsTasksError(`no usable task folder for this repository (got ${JSON.stringify(chosen)}); set schedule_folder in its binding or pass --folder`);
   const wanted = [];
@@ -388,7 +401,7 @@ function applyTasks(desired, { scheduler, home, now = () => new Date(), firstRun
         return [...list.filter(entry => entry.id !== definition.id), registryEntry(definition, existing, now)];
       });
       const result = { ...item, done: true };
-      if (item.action !== 'current' && definition.job === 'programme-sweep' && firstRunOptions) result.first_run = firstRun(definition, { scheduler, home, now, ...firstRunOptions });
+      if (item.action !== 'current' && ['programme-sweep', 'footer-sweep'].includes(definition.job) && firstRunOptions) result.first_run = firstRun(definition, { scheduler, home, now, ...firstRunOptions });
       results.push(result);
     } catch (error) {
       results.push({ ...item, done: false, error: tasks.safeText(error.message) });
@@ -547,7 +560,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
 if (require.main === module) process.exitCode = main();
 
 module.exports = {
-  JOBS, FOLDER, MARKER, STATUS_CONTROL_C_EXIT, WindowsTasksError, defaultFolder, nameProblem, taskName, taskId, parseMarker, readCheckout, folderForCheckout,
+  JOBS, FOLDER, MARKER, STATUS_CONTROL_C_EXIT, WindowsTasksError, defaultFolder, nameProblem, taskName, taskId, parseMarker, repositoryOf, readCheckout, folderForCheckout,
   describeTriggers, describeResult, describeSchedule, desiredTasks, definitionDigest, powerShellScheduler, runPowerShell, SCRIPTS, planTasks, applyTasks, firstRun,
   removeTasks, adoptTask, applyCommand, powerShellPath, describePlan, parseArgs, main,
 };

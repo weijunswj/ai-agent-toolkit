@@ -4159,18 +4159,30 @@ async function execute(args){return new ToolkitSetupExecution(args).execute();}
 // reports them: agents do not create scheduled tasks, so when one needs creating or updating the
 // report ends with the one PowerShell line the owner pastes. A failure here never stops setup.
 // Tests pass a fake scheduler, checkout reads, home and log.
-function printWindowsTasks(args, { platform = process.platform, scheduler = null, checkoutDeps = {}, home = os.homedir(), log = console.log } = {}) {
+function printWindowsTasks(args, { platform = process.platform, scheduler = null, checkoutDeps = {}, home = os.homedir(), workingFolder = process.env[SETUP_START_FOLDER_ENV] || process.cwd(), log = console.log } = {}) {
   if (platform !== 'win32') return null;
   log('');
   log('## Windows scheduled tasks');
   try {
     const windowsTasks = require('./toolkit-windows-tasks.cjs');
     const toolkitRoot = path.resolve(args.repoRoot);
-    const desired = windowsTasks.desiredTasks({ checkout: toolkitRoot, toolkitRoot, deps: checkoutDeps });
-    const plan = windowsTasks.planTasks(desired, { scheduler: scheduler || windowsTasks.powerShellScheduler(), home });
-    const command = windowsTasks.applyCommand(desired, { toolkitRoot, home });
-    for (const line of windowsTasks.describePlan(plan, { command })) log(line);
-    return plan;
+    const plans = [];
+    const seen = new Set();
+    for (const checkout of [toolkitRoot, workingFolder]) {
+      const read = windowsTasks.readCheckout(checkout, checkoutDeps);
+      if (!read.root) continue;
+      // Tasks belong to a repository. Prefer the managed checkout when setup started in a
+      // second Toolkit clone or worktree, rather than printing two competing apply commands.
+      const key = read.repository.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const desired = windowsTasks.desiredTasks({ checkout: read.root, toolkitRoot, deps: checkoutDeps });
+      const plan = windowsTasks.planTasks(desired, { scheduler: scheduler || windowsTasks.powerShellScheduler(), home });
+      const command = windowsTasks.applyCommand(desired, { toolkitRoot, home });
+      for (const line of windowsTasks.describePlan(plan, { command })) log(line);
+      plans.push(plan);
+    }
+    return plans;
   } catch (error) {
     log(`Windows scheduled tasks could not be checked: ${error.message}`);
     return null;
