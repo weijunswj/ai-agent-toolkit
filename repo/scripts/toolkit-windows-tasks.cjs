@@ -19,7 +19,8 @@
 //           records a task you made yourself so `toolkit tasks` lists it as known; Toolkit never
 //           changes or removes an adopted task.
 //   apply --repair-owned needs explicit approval naming the affected fixed tasks, paths and changes.
-//           It repairs owned same-repository enrolments only; never an unowned task or corrupt registry.
+//           It repairs owned same-repository enrolments and obsolete switch records towards fresh
+//           governance; never an unowned task, owner-choice answer or corrupt registry.
 //
 // Tasks live in \<schedule_folder>\ (the merged binding's `schedule_folder`, else the repository
 // name in capitals) and are named "<FOLDER> - <TASK>". A task is Toolkit's only when it is in that
@@ -142,7 +143,12 @@ function readLocations({ checkout, toolkitRoot, home = os.homedir() }, deps = {}
   if (typeof state?.repo_path !== 'string' || !(path.isAbsolute(state.repo_path) || path.win32.isAbsolute(state.repo_path))) throw new WindowsTasksError('the managed Toolkit repo_path is invalid', 1);
   const managed = primary(state.repo_path);
   const toolkit = primary(toolkitRoot);
-  if (!samePath(managed, toolkit) || !samePath(realpath(toolkitRoot), managed)) throw new WindowsTasksError('invoke the recorded managed Toolkit checkout', 1);
+  if (!samePath(managed, toolkit) || !samePath(realpath(toolkitRoot), managed)) {
+    const error = new WindowsTasksError('invoke the recorded managed Toolkit checkout', 1);
+    error.managedCheckout = managed;
+    error.primaryCheckout = primary(checkout);
+    throw error;
+  }
   // Inspect the source repository as well as its location; an arbitrary repository is not Toolkit.
   const result = (deps.run || spawnSync)('git', ['-C', toolkit, 'config', '--get', 'remote.origin.url'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
   if (result.error || result.status !== 0 || !/^(?:https:\/\/github\.com\/|git@github\.com:)weijunswj\/ai-agent-toolkit(?:\.git)?\s*$/i.test(String(result.stdout))) throw new WindowsTasksError('the managed checkout is not the expected Toolkit repository', 1);
@@ -466,17 +472,19 @@ class WindowsTaskOwner {
       : selected?.job || (read?.enabled ? 'programme-sweep' : null);
     const source = cleaners.find(e => e.job !== desiredJob);
     const destination = cleaners.find(e => e.job === desiredJob);
-    const relation = cleaners.find(e => e.replaces && this.validReplacement(e.replaces, ours));
+    const relationships = ours.filter(e => e.replaces !== undefined);
+    const relationshipOK = relationships.length === 1 && cleaners.length === 2
+      && this.validMetadata(relationships[0]) && this.validReplacement(relationships[0].replaces, ours);
     const switching = Boolean(source || cleaners.length > 1 || fresh && desiredJob === 'footer-sweep' && ours.some(e => e.job === 'shard-timings'));
     const live = this.scheduler.list(folder);
     let conflict = null;
-    if (ours.some(e => !this.validMetadata(e))) conflict = 'task replacement or choice metadata is invalid; exact owner inspection is required';
-    if (cleaners.length > 1 && !relation) conflict = 'conflicting cleaner enrolments without a proven replacement relationship; explicit owner recovery is required';
+    if (ours.some(e => !this.validMetadata({ ...e, replaces: undefined }))) conflict = 'task choice metadata is invalid; exact owner inspection is required';
+    if (!this.repairOwned && (relationships.length && !relationshipOK || cleaners.length > 1 && !relationshipOK)) conflict = 'conflicting or exhausted cleaner relationship metadata; explicit owner recovery is required';
     if (cleaners.some(e => e.folder !== folder)) conflict = 'cleaner folders differ; ask the owner to reconcile the recorded folders';
-    if (read?.binding?.schedule_folder && read.binding.schedule_folder !== folder && !desired.folderOverride) conflict = `binding folder changed from ${folder} to ${read.binding.schedule_folder}; ask the owner to reconcile the folders before applying`;
+    if (read?.binding?.schedule_folder && read.binding.schedule_folder !== folder && !desired.folderOverride) conflict = `binding folder changed from ${folder} to ${read.binding.schedule_folder}; with explicit approval to keep the recorded folder, run ${applyCommand(desired, { toolkitRoot: desired.locations.toolkitRoot, home: this.home, folderOverride: folder })}; future applies need that override until the binding folder agrees`;
     for (const [otherFolder, rows] of new Map([...this.discover(entries, folder), [folder, live]])) for (const task of rows) {
       const marker = parseMarker(task.description);
-      if (!definitions.some(d => isCleaner(d.job) && (sameTaskName(task.name, taskName(otherFolder, d.job)) || marker?.id === taskId(otherFolder, d.job)))) continue;
+      if (!definitions.some(d => sameTaskName(task.name, taskName(otherFolder, d.job)) || marker?.id === taskId(otherFolder, d.job))) continue;
       const target = /--repo-root "([^"\r\n]+)"/.exec(String(task.arguments || ''))?.[1];
       let repository = null;
       try { if (target) repository = repositoryOf((desired.checkoutDeps?.governance || require('./toolkit-governance-state.cjs')).readIdentity(target)); } catch { /* unknown target cannot prove ownership */ }
@@ -485,7 +493,7 @@ class WindowsTaskOwner {
       if (!record || record.adopted || !marker || marker.id !== record.id) conflict = (marker && !record
         ? `"${task.name}" carries Toolkit's marker but this computer's task registry does not list it, so Toolkit leaves it alone`
         : `"${task.name}" is already in \\${otherFolder}\\ and is not Toolkit's (no matching ownership), so Toolkit leaves it alone`)
-        + '; foreign or unrecorded cleaner conflict; obtain approval for exact inspection/removal, then retry';
+        + `; foreign or unrecorded task conflict; obtain approval for exact inspection/removal, then retry. Inspect Get-ScheduledTask -TaskPath '\\${otherFolder}\\' -TaskName '${task.name.replace(/'/g, "''")}'; only after approval: Unregister-ScheduledTask -TaskPath '\\${otherFolder}\\' -TaskName '${task.name.replace(/'/g, "''")}' -Confirm:$false`;
       else if (!ours.includes(record) || otherFolder !== folder) conflict = 'another cleaner is enrolled for this repository; explicit owner recovery is required';
     }
     const wanted = definitions.filter(d => d.job === desiredJob || d.job === 'shard-timings' && (fresh ? read.governanceState === 'ENABLED' : read?.enabled && desiredJob === 'programme-sweep'));
@@ -503,7 +511,7 @@ class WindowsTaskOwner {
       if (currentRead && !sameDefinition(currentRead, plannedRead)) return refuse('origin or governance changed after planning; refresh status and run a fresh plan');
       if (read && (!read.repository || read.repository.toLowerCase() !== definition.repository.toLowerCase())) return refuse('repository origin changed; left alone');
       if (!fresh && (switching || desiredJob !== 'programme-sweep' || !read?.enabled)) return refuse('fresh matching merged governance could not be verified; existing shape and folder retained; refresh governance status, then retry plan');
-      if (recorded?.stopped_by_owner && (!this.repairOwned || switching)) return refuse('stopped by owner');
+      if (recorded?.stopped_by_owner && !this.repairOwned) return refuse('stopped by owner');
       if (ours.some(e => e.job === definition.job && e.id !== definition.id)) return refuse('this repository already has this job enrolled in another folder; ask owner to reconcile it');
       if (recorded && (recorded.adopted || recorded.host !== 'windows' || recorded.folder !== definition.folder || recorded.name !== definition.name)) return refuse('adopted or unowned enrolment; Toolkit leaves it alone');
       if (recorded && String(recorded.repository).toLowerCase() !== definition.repository.toLowerCase()) return refuse('repository ownership differs; Toolkit leaves it alone');
@@ -511,21 +519,28 @@ class WindowsTaskOwner {
       if (existing && existing.name !== definition.name) return refuse('task name differs from its fixed name; Toolkit leaves it alone');
       if (existing && (!marker || marker.id !== definition.id || !recorded)) return refuse('task is unowned or unrecorded; obtain approval for exact inspection/removal, then retry');
       if (!recorded) return { definition, action: 'create', observed: null, recorded: null };
-      const retired = !existing && relation && this.replacementIncludes(relation.replaces, recorded);
       let reason = null;
       if (recorded.stopped_by_owner) reason = 'stopped by owner';
-      else if (!existing && !retired) reason = 'stopped by owner: enrolled task removed';
+      else if (!existing) reason = 'unproven absence: enrolled task is missing; no deletion attribution or owner stop inferred';
       else if (!recorded.checkout || !recorded.toolkit_root || !recorded.enrolled) reason = 'legacy enrolment cannot prove checkout or definition; ask owner';
       else if (!samePath(recorded.checkout, definition.checkout)) reason = 'checkout ownership differs; ask owner';
       else if (!samePath(recorded.toolkit_root, definition.toolkit_root)) reason = 'Toolkit runner location differs; ask owner';
       else if (existing?.state === 'Disabled') reason = 'stopped by owner: disabled task';
-      if (reason && (!this.repairOwned || switching)) return refuse(reason);
+      if (reason && !this.repairOwned) return refuse(reason);
+      // Cross-shape recovery needs independent location and baseline proof. Legacy rows can
+      // instead be explicitly removed, then their stopped obsolete records reconciled.
+      if (switching && this.repairOwned && recorded.checkout && !samePath(recorded.checkout, definition.checkout)) return refuse('checkout ownership differs; ask owner');
+      if (switching && this.repairOwned && recorded.toolkit_root && !samePath(recorded.toolkit_root, definition.toolkit_root)) return refuse('Toolkit runner location differs; ask owner');
+      if (switching && this.repairOwned && (!recorded.checkout || !recorded.toolkit_root || !recorded.enrolled)
+        && !(recorded.stopped_by_owner && !existing)) return refuse('legacy enrolment needs approved scoped remove followed by apply --repair-owned');
       if (switching && existing?.state === 'Running') return refuse('a participating task is running; retry apply after it finishes');
       let choice = null;
       const observed = existing ? enrolledDefinition(existing) : null;
+      if (switching && existing?.state === 'Disabled' && recorded.enrolled
+        && !sameDefinition({ ...observed, enabled: recorded.enrolled.enabled }, recorded.enrolled)) return refuse('disabled participant also has an edited definition; approved scoped remove followed by repair is required');
       if (existing && switching && (!samePath(existing.working_directory, recorded.toolkit_root)
         || !samePath(/--repo-root "([^"\r\n]+)"/.exec(existing.arguments || '')?.[1], definition.checkout))) return refuse('live checkout or Toolkit runner location differs; explicit owner recovery is required');
-      if (!reason && existing && !sameDefinition(observed, recorded.enrolled) && !(this.repairOwned && !switching)) {
+      if (existing && recorded.enrolled && !sameDefinition(observed, recorded.enrolled) && existing.state !== 'Disabled' && !(this.repairOwned && !switching)) {
         if (definition.job === 'footer-sweep') reason = 'stopped by owner: hand-edited task definition';
         else if (!fresh) return refuse('modified governance task needs fresh status and the owner keep-or-replace answer');
         else {
@@ -541,8 +556,8 @@ class WindowsTaskOwner {
           if (answer.outcome === 'keep') return { definition, action: 'owner-choice-required', reason: 'owner kept the changes; the whole operation stays held', choice, observed, recorded };
         }
       }
-      if (reason && !this.repairOwned) return refuse(reason);
-      return { definition, action: retiring ? 'retire' : reason || choice || !sameDefinition(observed, recorded.enrolled) || marker?.def !== definition.def || source && definition.job === desiredJob && destination?.replaces?.cleaner?.id !== source.id ? 'update' : 'current', observed, recorded, ...(choice ? { choice } : {}), ...(reason ? { recovery: reason } : {}) };
+      if (reason && (!this.repairOwned || switching && existing && reason === 'stopped by owner: hand-edited task definition')) return refuse(reason);
+      return { definition, action: retiring ? 'retire' : reason || choice || !sameDefinition(observed, recorded.enrolled) || marker?.def !== definition.def ? 'update' : 'current', observed, recorded, ...(choice ? { choice } : {}), ...(reason ? { recovery: reason } : {}) };
     });
     // Historical shard stops also hold an ON switch before the destination is touched.
     if (this.answers.some(a => !items.some(i => i.choice?.outcome && i.choice.task === a.task))) {
@@ -550,26 +565,31 @@ class WindowsTaskOwner {
     }
     const held = items.find(item => ['refused', 'owner-choice-required'].includes(item.action));
     if (held) for (const item of items) if (!['refused', 'owner-choice-required'].includes(item.action)) Object.assign(item, { action: 'refused', reason: `all selected jobs held: ${held.reason}` });
-    const next = held ? held.action === 'owner-choice-required' ? held.choice.question : held.reason
+    const command = applyCommand(desired, { toolkitRoot: desired.locations.toolkitRoot, home: this.home });
+    const recovery = `Explicit approval must name affected tasks, paths, recreation, obsolete-record removal and any owner-stop reactivation. Owner-authorised recovery: ${command} --repair-owned. If edits or legacy proof prevent that, approved reset: ${command.replace(' apply ', ' remove ')}; then ${command} --repair-owned.`;
+    const recoverable = held && /unproven absence|relationship metadata|stopped by owner|legacy enrolment|disabled participant also/.test(held.reason);
+    const next = held ? held.action === 'owner-choice-required' ? held.choice.question : `${held.reason}${recoverable && fresh ? `. ${recovery}` : ''}`
       : !items.length ? 'Refresh governance status, then run the task plan again.'
       : items.some(i => i.action !== 'current') ? 'Run apply from the recorded managed Toolkit checkout against this repository main checkout, then read back tasks and results.' : 'No task changes needed.';
     return { folder, repository: desired.repository, registry: registry.status, items, switching,
       source: source || null, destination: definitions.find(d => d.job === desiredJob),
+      relationshipUpdate: Boolean(!destination ? relationships.length : source
+        ? !relationshipOK || relationships[0].id !== destination.id || !sameDefinition(destination.replaces.cleaner, this.proof(source))
+        : relationships.length),
       approval: items.length && !held ? desired.folderOverride || this.repairOwned ? 'explicit approval required' : 'standing approval with verified ownership' : 'verification held; no standing action',
-      coverage: live.some(t => t.name === taskName(folder, 'programme-sweep') && t.state !== 'Disabled') ? 'PROGRAMME SWEEP is present; check its result for programme coverage.' : 'Programme refresh coverage is missing.',
+      coverage: read?.governanceState !== 'ENABLED' ? 'Programme refresh is not selected by current governance.' : live.some(t => t.name === taskName(folder, 'programme-sweep') && t.state !== 'Disabled') ? 'PROGRAMME SWEEP is present; check its result for programme coverage.' : 'Programme refresh coverage is missing.',
       next_step: next, skipped: items.length ? [] : desired.skipped };
   }
   validMetadata(entry) {
     if (entry.task_choices !== undefined && (!Array.isArray(entry.task_choices) || entry.task_choices.some(c => !c || !['keep', 'replace'].includes(c.outcome) || !safeAnswerRef(c.answer_ref) || !/^[a-f0-9]{64}$/.test(c.observed) || !tasks.ID.test(c.task)))) return false;
-    if (entry.replaces !== undefined && (!isCleaner(entry.job) || !entry.replaces || !this.validProof(entry.replaces.cleaner) || !isCleaner(entry.replaces.cleaner.job) || entry.replaces.cleaner.job === entry.job || entry.replaces.cleaner.id !== taskId(entry.folder, entry.replaces.cleaner.job) || entry.replaces.shard && (!this.validProof(entry.replaces.shard) || entry.replaces.shard.job !== 'shard-timings' || entry.replaces.shard.id !== taskId(entry.folder, 'shard-timings')))) return false;
+    if (entry.replaces !== undefined && (!isCleaner(entry.job) || !entry.replaces || Object.keys(entry.replaces).join() !== 'cleaner' || !this.validProof(entry.replaces.cleaner) || !isCleaner(entry.replaces.cleaner.job) || entry.replaces.cleaner.job === entry.job || entry.replaces.cleaner.id !== taskId(entry.folder, entry.replaces.cleaner.job))) return false;
     return true;
   }
   validProof(proof) { return proof && tasks.ID.test(proof.id) && Object.hasOwn(JOBS, proof.job) && /^[a-f0-9]{64}$/.test(proof.identity); }
   proof(entry) { return { id: entry.id, job: entry.job, identity: digest([entry.id, entry.job, entry.folder, entry.repository, entry.checkout, entry.toolkit_root, entry.enrolled]) }; }
-  replacementIncludes(relation, entry) { return [relation.cleaner, relation.shard].some(p => p && sameDefinition(p, this.proof(entry))); }
   validReplacement(relation, entries) {
-    if (!relation || !this.validProof(relation.cleaner) || relation.shard && !this.validProof(relation.shard)) return false;
-    return [relation.cleaner, relation.shard].filter(Boolean).every(p => !entries.some(e => e.id === p.id) || this.replacementIncludes(relation, entries.find(e => e.id === p.id)));
+    const source = entries.find(e => e.id === relation?.cleaner?.id);
+    return Boolean(source && sameDefinition(relation.cleaner, this.proof(source)));
   }
   apply(desired) {
     this.discovery = null;
@@ -612,7 +632,12 @@ class WindowsTaskOwner {
     const runner = require('./toolkit-scheduled-job.cjs');
     const read = this.readRecord || (id => tasks.readLastRun(id, this.home) || (fs.existsSync(tasks.lastRunPath(id, this.home)) ? {} : null));
     const at = this.now();
-    const histories = [source, destination].map(d => runner.footerCursor(read(d.id), d, destination.repository, at));
+    // An unenrolled destination's record belongs to a completed earlier stint. Only a
+    // currently enrolled overlap can hold an independent pending retry boundary.
+    const enrolled = this.registry.readRegistry(this.home);
+    if (enrolled.status !== 'ok') throw new Error('history ownership could not be read');
+    const participants = [source, ...(enrolled.tasks.some(e => e.id === destination.id) ? [destination] : [])];
+    const histories = participants.map(d => runner.footerCursor(read(d.id), d, destination.repository, at));
     const since = histories.map(h => h.since).sort()[0];
     const record = { schema: 'toolkit.task-last-run.v1', id: destination.id, job: destination.job, repository: destination.repository, footer_sweep_since: since };
     beforeWrite();
@@ -621,12 +646,26 @@ class WindowsTaskOwner {
     return histories.map(h => h.note).filter(Boolean);
   }
   applyLocked(desired, beforeFirstRun = () => {}) {
-    const plan = this.plan(desired);
+    let plan = this.plan(desired);
     if (plan.registry !== 'ok') throw new WindowsTasksError(`the task registry ${tasks.registryPath(this.home)} could not be read, so no task was changed`, 1);
     if (plan.skipped.length) return { ...plan, refused: true };
     if (plan.items.some(item => ['refused', 'owner-choice-required'].includes(item.action))) return { ...plan, refused: true };
     // Consume the exact answer once, before any native effect. A failed attempt asks again.
     for (const answered of plan.items.filter(item => item.choice?.outcome === 'replace')) this.consumeChoice(answered);
+    if (plan.relationshipUpdate) {
+      const expected = this.registry.readRegistry(this.home);
+      if (expected.status !== 'ok') throw new Error('relationship registry could not be read');
+      this.registry.updateRegistry(this.home, list => {
+        if (!sameDefinition(list, expected.tasks)) throw new Error('registry changed before relationship update');
+        return list.map(entry => {
+          if (entry.host !== 'windows' || String(entry.repository).toLowerCase() !== desired.repository.toLowerCase()) return entry;
+          const { replaces, ...rest } = entry;
+          return entry.id === plan.destination.id && plan.source ? { ...rest, replaces: { cleaner: this.proof(plan.source) } } : rest;
+        });
+      });
+      plan = this.plan(desired);
+      if (plan.items.some(i => ['refused', 'owner-choice-required'].includes(i.action)) || plan.relationshipUpdate) throw new Error('relationship readback failed; re-plan before effects');
+    }
     let historyNotes = [];
     if (plan.source) historyNotes = this.copyHistory(plan.source, plan.destination, () => {
       const fresh = this.plan(desired);
@@ -649,17 +688,23 @@ class WindowsTaskOwner {
         previous = this.scheduler.list(definition.folder).find(row => row.name === definition.name) || null;
         if (!sameDefinition(previous ? enrolledDefinition(previous) : null, expected.observed)) throw new Error('task changed after preflight; left alone');
         if (item.action === 'retire') {
-          if (previous) this.scheduler.unregister(definition.folder, definition.name, definition.id, previous);
+          if (previous) {
+            if (this.scheduler.unregister(definition.folder, definition.name, definition.id, previous)?.removed !== true) throw new Error('removal was not acknowledged; absence is unproven');
+          } else if (!this.repairOwned) throw new Error('absence is unproven; owner-authorised recovery required');
           if (this.scheduler.list(definition.folder).some(row => sameTaskName(row.name, definition.name))) throw new Error('retirement readback failed; retry the verified remaining effect');
           this.registry.updateRegistry(this.home, list => {
             if (!sameDefinition(list.find(e => e.id === definition.id), expected.recorded)) throw new Error('registry changed before retirement cleanup');
             const choices = expected.recorded.task_choices || [];
-            return list.filter(e => e.id !== definition.id).map(e => e.id === plan.destination.id && choices.length ? { ...e, task_choices: [...(e.task_choices || []), ...choices] } : e);
+            return list.filter(e => e.id !== definition.id).map(e => {
+              if (e.id !== plan.destination.id) return e;
+              const { replaces, ...rest } = e;
+              return { ...rest, ...(choices.length ? { task_choices: [...(e.task_choices || []), ...choices] } : {}) };
+            });
           });
           const saved = this.registry.readRegistry(this.home);
-          if (saved.status !== 'ok' || saved.tasks.some(e => e.id === definition.id)) throw new Error('retirement registry readback failed');
+          if (saved.status !== 'ok' || saved.tasks.some(e => e.id === definition.id) || saved.tasks.find(e => e.id === plan.destination.id)?.replaces) throw new Error('retirement registry readback failed');
           this.answers = this.answers.filter(a => a.task !== definition.id);
-          results.push({ ...item, done: true });
+          results.push({ ...item, done: true, ...(this.repairOwned ? { recovery: 'owner-authorised recovery; no deletion attribution inferred' } : {}) });
           continue;
         }
         if (previous) backup = this.registry.writeTaskBackup(this.home, definition.id, { task: previous, registry: expected.recorded });
@@ -671,8 +716,7 @@ class WindowsTaskOwner {
           const existing = list.find(entry => entry.id === definition.id);
           const planned = fresh.items.find(row => row.definition.id === definition.id);
           if (!planned || !sameDefinition(existing || null, expected.recorded)) throw new Error('registry changed after preflight; owner choices retained');
-          const replacement = plan.source && isCleaner(definition.job) ? { cleaner: this.proof(plan.source),
-            ...(plan.source.job === 'programme-sweep' && list.find(e => e.job === 'shard-timings' && e.repository === desired.repository) ? { shard: this.proof(list.find(e => e.job === 'shard-timings' && e.repository === desired.repository)) } : {}) } : existing?.replaces;
+          const replacement = plan.source && isCleaner(definition.job) ? { cleaner: this.proof(plan.source) } : null;
           return [...list.filter(entry => entry.id !== definition.id), { ...registryEntry(definition, existing, this.now, live),
             ...(replacement ? { replaces: replacement } : {}), ...(existing?.task_choices ? { task_choices: existing.task_choices } : {}) }];
         });
@@ -712,6 +756,10 @@ class WindowsTaskOwner {
       }); }
       catch (error) { sweep.first_run = { status: 'failed', detail: `registration verified; first-run check or wait interrupted: ${tasks.safeText(error.message)}` }; }
     }
+    // A successful effect is not proof of the whole shape. Read native tasks and registry
+    // independently again, including unwanted shards and any second cleaner.
+    const complete = this.plan(desired);
+    if (!complete.items.length || complete.items.some(i => i.action !== 'current') || complete.relationshipUpdate) return { ...plan, items: results, refused: true, next_step: `Final shape verification held: ${complete.next_step}` };
     return { ...plan, history_notes: historyNotes, items: results };
   }
   remove(folder = null, scope) {
@@ -721,7 +769,10 @@ class WindowsTaskOwner {
     if (current.repository?.toLowerCase() !== scope.repository.toLowerCase()) throw new WindowsTasksError('repository origin changed; no tasks removed', 1);
     const registry = this.registry.readRegistry(this.home);
     if (registry.status !== 'ok') throw new WindowsTasksError(`the task registry ${tasks.registryPath(this.home)} could not be read, so no task was removed`, 1);
-    const ours = registry.tasks.filter(entry => entry.host === 'windows' && !entry.adopted && String(entry.repository).toLowerCase() === scope.repository.toLowerCase() && samePath(entry.checkout, scope.root) && (!folder || entry.folder === folder));
+    // Removal is explicitly approved and repository-scoped. The current primary checkout's
+    // verified GitHub origin and the non-adopted registry repository prove the scope, even
+    // before checkout was recorded or after it moved. Live marker + exact XML still guard deletion.
+    const ours = registry.tasks.filter(entry => entry.host === 'windows' && !entry.adopted && String(entry.repository).toLowerCase() === scope.repository.toLowerCase() && (!folder || entry.folder === folder));
     const results = [];
     for (const entry of ours) {
       const live = this.scheduler.list(entry.folder).find(task => sameTaskName(task.name, entry.name));
@@ -731,7 +782,7 @@ class WindowsTaskOwner {
         this.registry.updateRegistry(this.home, list => list.map(item => item.id === entry.id ? { ...item, stopped_by_owner: true, stopped_at: item.stopped_at || this.now().toISOString() } : item));
         const saved = this.registry.readRegistry(this.home);
         if (saved.status !== 'ok' || !saved.tasks.find(item => item.id === entry.id)?.stopped_by_owner) throw new Error('owner stop readback failed; live task retained');
-        if (live) this.scheduler.unregister(entry.folder, entry.name, entry.id, live);
+        if (live && this.scheduler.unregister(entry.folder, entry.name, entry.id, live)?.removed !== true) throw new Error('removal was not acknowledged');
         if (this.scheduler.list(entry.folder).some(task => task.name === entry.name)) throw new Error('unregister readback failed; live task remains, stop retained');
         results.push({ ...entry, action: live ? 'removed' : 'stopped by owner (already absent)' });
       } catch (error) { results.push({ ...entry, action: 'failed', reason: `stop retained if saved; live task may remain: ${tasks.safeText(error.message)}` }); }
@@ -844,10 +895,14 @@ function describePlan(plan, { command = null, applied = false } = {}) {
   const lines = [`Windows scheduled tasks for ${plan.repository || 'this repository'} in \\${plan.folder}\\:`];
   for (const item of plan.items) {
     const d = item.definition;
-    const state = applied ? (['refused', 'owner-choice-required'].includes(item.action) ? ACTION_TEXT[item.action] : item.done === false ? `failed: ${item.error}` : item.action === 'current' ? 'up to date' : item.action === 'create' ? 'created' : item.action === 'retire' ? 'retired by Toolkit' : 'updated') : ACTION_TEXT[item.action];
+    const state = applied ? (['refused', 'owner-choice-required'].includes(item.action) ? ACTION_TEXT[item.action] : item.done === false ? `failed: ${item.error}` : item.action === 'current' ? 'up to date' : item.action === 'create' ? 'created' : item.action === 'retire' ? item.recovery ? 'reconciled by owner-authorised recovery' : 'retired by Toolkit' : 'updated') : ACTION_TEXT[item.action];
     lines.push(`- ${d.name} (${d.schedule_text}): ${state}. ${d.purpose}`);
     if (item.reason) lines.push(`  ${item.reason}`);
-    if (item.choice) lines.push(`  Task ${item.choice.task}; operation: ${item.choice.operation}; changed: ${item.choice.changed.join(', ')}; observation: ${item.choice.fingerprint}. Flags attest an actual owner answer; they cannot prove who answered.`);
+    if (item.choice) {
+      lines.push(`  Task ${item.choice.task}; operation: ${item.choice.operation}; changed: ${item.choice.changed.join(', ')}; observation: ${item.choice.fingerprint}. Use --task-choice keep|replace --task ${item.choice.task} --observed ${item.choice.fingerprint} --answer-ref <actual-owner-answer-reference>. Flags attest an actual owner answer; they cannot prove who answered.`);
+      if (item.choice.last_choice) lines.push(`  Earlier owner answer: ${item.choice.last_choice.outcome}; reference: ${item.choice.last_choice.answer_ref}. That answer grants no new attempt.`);
+    }
+    if (item.recovery) lines.push(`  Owner-authorised recovery: ${item.recovery}.`);
     if (item.restoration) lines.push(`  Recovery: ${item.restoration}.`);
     if (item.backup) lines.push(`  Previous task and enrolment backup: ${item.backup}`);
     if (item.first_run) lines.push(`  First run: ${item.first_run.status}${item.first_run.detail ? ` (${item.first_run.detail})` : ''}.`);
@@ -943,8 +998,8 @@ function main(argv = process.argv.slice(2), deps = {}) {
       const scope = desiredTasks(desiredOptions);
       const result = removeTasks({ scope, folder: options.folder || null, scheduler, home, registry: deps.registry, now: deps.now });
       print(result, [
-        `Removal scope: ${scope.repository}, verified main checkout only.`,
-        ...(result.items.length ? result.items.map(item => `- ${item.name} in \\${item.folder}\\: ${item.action}${item.reason ? ` (${item.reason})` : ''}`) : ['No Toolkit tasks are recorded on this computer.']),
+        `Removal scope: ${scope.repository}, verified repository origin, including legacy and moved-checkout enrolments.`,
+        ...(result.items.length ? result.items.map(item => `- ${item.name} in \\${item.folder}\\: ${item.action}${item.reason ? ` (${item.reason})` : ''}`) : [`No Toolkit tasks match this repository${options.folder ? ' and folder' : ''}; other repositories are unchanged.`]),
         ...result.folders.map(item => `- folder \\${item.folder}\\: ${item.result === 'removed' ? 'removed (it was empty)' : item.result === 'kept' ? 'kept (other tasks are in it)' : item.result}`),
       ]);
       return result.items.some(item => item.action === 'refused' || item.action === 'failed') ? 1 : 0;
@@ -954,7 +1009,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
     return 0;
   } catch (error) {
     err(`${error instanceof WindowsTasksError ? error.message : `Windows tasks failed: ${tasks.safeText(error.message)}`}\n`);
-    if (options.command === 'remove') err(`Removal is repository-scoped. Use node ${powerShellPath(path.win32.join(deps.toolkitRoot || path.resolve(__dirname, '..', '..'), 'repo', 'scripts', 'toolkit-windows-tasks.cjs'), home)} remove --repo-root ${error.primaryCheckout ? powerShellPath(error.primaryCheckout, home) : '"<verified-primary-checkout>"'}.\n`);
+    if (options.command === 'remove') err(`Removal is repository-scoped. Use node ${powerShellPath(path.win32.join(error.managedCheckout || deps.toolkitRoot || path.resolve(__dirname, '..', '..'), 'repo', 'scripts', 'toolkit-windows-tasks.cjs'), home)} remove --repo-root ${error.primaryCheckout ? powerShellPath(error.primaryCheckout, home) : '"<verified-primary-checkout>"'}.\n`);
     return error instanceof WindowsTasksError ? error.exitCode : 1;
   }
 }
