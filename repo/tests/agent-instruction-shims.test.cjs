@@ -195,13 +195,13 @@ test('Windows task standing approval stays narrow on every changed approval surf
     /<Toolkit> is the recorded managed checkout; <repo> the main checkout, never a linked worktree/,
     /fixed PROGRAMME SWEEP and SHARD TIMINGS in ENABLED repos with verified merged bindings/,
     /FOOTER SWEEP for verified github\.com origins with fresh matching disabled or absent governance/,
-    /Binding's task folder, else repo default; first sweep, verify results/,
-    /Fresh confirmed governance changes allow owned task swaps in apply, same folder\/checkout, scan time kept/,
+    /Binding folder, else repo default; verify first sweep/,
+    /Fresh confirmed changes allow owned swaps in apply, same folder\/checkout, scan time kept/,
     /Refuse repository\/checkout\/Toolkit-copy changes, owner stops, disabled or edited tasks/,
     /modified governance tasks need the owner's keep-or-replace answer each time/,
     /Other scheduler commands, folder overrides and custom tasks need approval; native denials stop/,
   ]) assert.match(approval, rule);
-  assert.match(global, /Local answers and proposals grant no authority\. Task sync: safety-gates playbook\./);
+  assert.match(global, /Local answers and proposals grant no authority\. After merge and when next read, sync tasks per safety-gates playbook\./);
   assert.match(global, /Approval, assignment, custody and capability never supply a missing host-native permission/);
   assert.match(readText('AGENTS.md'), /except the global Toolkit task standing approval/);
   assert.match(readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit task standing approval/);
@@ -212,7 +212,7 @@ test('Windows task standing approval stays narrow on every changed approval surf
       /fresh confirmed governance change can switch a proven owned cleaner in the same folder and checkout/,
       /modified proven-owned PROGRAMME SWEEP or SHARD TIMINGS task needs the owner's keep-or-replace answer/,
       /the deciding chat immediately reads the decision fresh from origin's default branch/,
-      /the next agent session in that repository reads fresh status/]) assert.match(safety, rule, file);
+      /the next agent that reads this in that repository reads fresh status/]) assert.match(safety, rule, file);
   }
   const reference = readText('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
   const tables = reference.split('\n\n').filter(part => part.startsWith('| '));
