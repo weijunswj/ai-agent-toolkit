@@ -513,7 +513,8 @@ cp.spawnSync = function(file, args, options) {
 `);
     this.env.PATH = `${bin}${path.delimiter}${this.env.PATH || this.env.Path || ''}`;
     delete this.env.Path;
-    this.env.NODE_OPTIONS = `--require="${preload.replace(/\\/g, '/')}"`;
+    const quotedPreload = preload.replace(/[\\"]/g, (char) => `\\${char}`);
+    this.env.NODE_OPTIONS = [this.env.NODE_OPTIONS, `--require "${quotedPreload}"`].filter(Boolean).join(' ');
   }
 
   // A fresh enabled binding plus separate app-local answers in this fixture's home.

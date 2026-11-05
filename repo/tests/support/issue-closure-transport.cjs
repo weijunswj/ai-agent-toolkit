@@ -19,6 +19,7 @@ cp.spawnSync = function(file, args, options) {
   return { status: status === 200 ? 0 : 1, stdout: 'HTTP/2.0 ' + status + '\\n\\n' + JSON.stringify(json || {}), stderr: '' };
 };
 `);
-  return { ...environment, Path: undefined, PATH: `${bin}${path.delimiter}${environment.PATH || environment.Path || ''}`, NODE_OPTIONS: `--require="${preload.replace(/\\/g, '/')}"` };
+  const quotedPreload = preload.replace(/[\\"]/g, (char) => `\\${char}`);
+  return { ...environment, Path: undefined, PATH: `${bin}${path.delimiter}${environment.PATH || environment.Path || ''}`, NODE_OPTIONS: [environment.NODE_OPTIONS, `--require "${quotedPreload}"`].filter(Boolean).join(' ') };
 }
 module.exports = { fakeClosureEnvironment };

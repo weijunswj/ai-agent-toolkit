@@ -9,6 +9,30 @@ const { GitHubTransport } = require('../../skills/github-program-reconciler/scri
 const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
 const SHA = 'a'.repeat(40);
 const repo = 'example.test/app';
+test('closure transport preserves existing Node options and quoted preload paths with spaces', t => {
+  const { spawnSync } = require('node:child_process');
+  const { fakeClosureEnvironment } = require('./support/issue-closure-transport.cjs');
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'closure transport '));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const preload = path.join(dir, 'existing preload.cjs');
+  fs.writeFileSync(preload, 'global.closurePreloadLoaded = true;');
+  const quotedPreload = preload.replace(/[\\"]/g, (char) => `\\${char}`);
+  for (const existing of [undefined, '--max-old-space-size=2048', `--require "${quotedPreload}"`]) {
+    const environment = { ...process.env, NODE_OPTIONS: existing };
+    const env = fakeClosureEnvironment(dir, environment, SHA);
+    assert.equal(environment.NODE_OPTIONS, existing, 'the caller environment is unchanged');
+    const transport = path.join(dir, 'closure-github', 'transport.cjs').replace(/[\\"]/g, (char) => `\\${char}`);
+    assert.equal(env.NODE_OPTIONS, [existing, `--require "${transport}"`].filter(Boolean).join(' '));
+    const result = spawnSync(process.execPath, ['-e', `
+      const assert = require('node:assert/strict');
+      assert.equal(global.closurePreloadLoaded === true, ${existing?.startsWith('--require') || false});
+      const result = require('node:child_process').spawnSync('gh', ['api', '--include', '--method', 'GET', 'repos/example.test/app/pulls/7']);
+      assert.equal(result.status, 0);
+      assert.ok(result.stdout.includes(${JSON.stringify(SHA)}));
+    `], { env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  }
+});
 test('closure adapters keep short hook reads and accept an explicit cold-runner timeout', () => {
   assert.equal(adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath }).transport.timeoutMs, 5000);
   assert.equal(adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath, timeoutMs: 30000 }).transport.timeoutMs, 30000);
