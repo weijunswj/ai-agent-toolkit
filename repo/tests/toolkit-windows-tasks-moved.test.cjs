@@ -40,7 +40,7 @@ test(`moved recovery table: ${move}`, async t => {
       }
       assert.equal(fired, true);
     }
-  
+
     snapshots.push({ phase, target, entries: tasks.readRegistry(w.home).tasks, live: structuredClone([...w.scheduler.folders]) });
   }
   const old = w.move(move);
@@ -93,4 +93,3 @@ test(`moved recovery table: ${move}`, async t => {
   }
   assert.equal(cells, 54, 'all phases, governance shapes and participant states proved');
 });
-
