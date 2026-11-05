@@ -583,7 +583,7 @@ function printHelp() {
     '',
     'Options:',
     '  --repo-root <path>           advanced override for managed Toolkit checkout source',
-    '  --remove-toolkit-tasks       on its own: remove only Toolkit\'s own Windows scheduled tasks and their records',
+    '  --remove-toolkit-tasks       on its own: stop and remove Toolkit tasks for the invocation repository main checkout only',
     '  --repo-branch <branch>       default: main',
     '  --repo-remote <url>          default: https://github.com/weijunswj/ai-agent-toolkit',
     '  --host codex|claude-code     default: codex',
@@ -4238,7 +4238,7 @@ async function main(argv = process.argv.slice(2), options = {}) {
   if (argv.includes(REMOVE_TOOLKIT_TASKS_FLAG)) {
     if (argv.length !== 1) throw new Error(`${REMOVE_TOOLKIT_TASKS_FLAG} runs on its own`);
     assertSupportedComputer(options);
-    return require('./toolkit-windows-tasks.cjs').main(['remove'], options.windowsTasksDeps || {});
+    return require('./toolkit-windows-tasks.cjs').main(['remove', '--repo-root', process.env[SETUP_START_FOLDER_ENV] || options.windowsTasksDeps?.cwd || process.cwd()], options.windowsTasksDeps || {});
   }
   const restoreIndex = argv.indexOf(RESTORE_FLAG);
   const restoreInline = argv.find((arg) => arg.startsWith(`${RESTORE_FLAG}=`));

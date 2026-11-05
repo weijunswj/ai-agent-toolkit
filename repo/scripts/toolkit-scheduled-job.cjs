@@ -144,6 +144,8 @@ function footerCursor(record, expected, repository, now) {
   if (!record) return { since: fallback };
   const identityMismatch = record.schema !== 'toolkit.task-last-run.v1' || record.id !== expected.id || record.job !== expected.job
     || (Object.hasOwn(record, 'repository') && (typeof record.repository !== 'string' || record.repository.toLowerCase() !== repository.toLowerCase()));
+  // Main's valid receipts predate the cursor. Missing history is not damaged history.
+  if (!identityMismatch && !Object.hasOwn(record, 'footer_sweep_since')) return { since: fallback };
   if (identityMismatch || !validTime(record.footer_sweep_since, now)) {
     const future = !identityMismatch && Number.isFinite(Date.parse(record.footer_sweep_since)) && Date.parse(record.footer_sweep_since) > now.getTime();
     return { since: fallback, note: future ? `Footer clock anomaly; scanning the last 48 hours. Older posts may need a separately authorised full-history cleanup.` : HISTORY_NOTE };
