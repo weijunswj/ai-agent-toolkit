@@ -4243,6 +4243,10 @@ async function main(argv = process.argv.slice(2), options = {}) {
   const restoreIndex = argv.indexOf(RESTORE_FLAG);
   const restoreInline = argv.find((arg) => arg.startsWith(`${RESTORE_FLAG}=`));
   if (restoreIndex >= 0 || restoreInline) {
+    // Recovery is a dedicated command, never a fast path around setup's read-only modes.
+    const dedicated = (argv.length === 2 && restoreIndex === 0 && !argv[1].startsWith('-'))
+      || (argv.length === 1 && Boolean(restoreInline));
+    if (!dedicated) throw new Error(`${RESTORE_FLAG} runs on its own with one backup metadata path`);
     const metadataPath = restoreInline
       ? restoreInline.slice(`${RESTORE_FLAG}=`.length)
       : String(argv[restoreIndex + 1] || '');
