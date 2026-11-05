@@ -4169,9 +4169,27 @@ function printWindowsTasks(args, { platform = process.platform, scheduler = null
     const plans = [];
     const seen = new Set();
     for (const checkout of [toolkitRoot, workingFolder]) {
+      const managed = path.resolve(checkout) === toolkitRoot;
+      const label = managed ? 'the managed Toolkit checkout' : 'this project';
+      const checkoutPaths = new Map([[toolkitRoot, 'the managed Toolkit checkout'], [workingFolder, path.resolve(workingFolder) === toolkitRoot ? 'the managed Toolkit checkout' : 'this project']]);
+      // Planning errors can include the durable primary path, including JSON-escaped paths.
+      // Keep those details in direct plan/apply output, but use names in setup diagnostics.
+      const refusal = reason => {
+        let text = String(reason);
+        const replacements = [...checkoutPaths].flatMap(([root, name]) =>
+          [root, root.replace(/\\/g, '/'), JSON.stringify(root).slice(1, -1)].map(value => [value, name]));
+        for (const [value, name] of replacements.sort((a, b) => b[0].length - a[0].length)) text = text.split(value).join(name);
+        log(`Windows scheduled tasks refused for ${label}: ${text}`);
+      };
       try {
         const read = windowsTasks.readCheckout(checkout, checkoutDeps);
-        if (!read.root) { log(`Windows scheduled tasks refused for ${checkout}: ${read.refusal || 'no usable github.com origin repository'}.`); continue; }
+        if (!read.root) {
+          // Local mirrors and non-GitHub managed sources have no GitHub tasks to offer.
+          // An unusable original project still needs the explicit refusal (L4).
+          if (!(managed && read.refusalCode === 'no-github-origin')) refusal(`${read.refusal || 'no usable github.com origin repository'}.`);
+          continue;
+        }
+        checkoutPaths.set(read.root, label);
         // Tasks belong to a repository. Prefer the managed checkout when setup started in a
         // second Toolkit clone or worktree, rather than printing two competing apply commands.
         const key = read.repository.toLowerCase();
@@ -4182,7 +4200,7 @@ function printWindowsTasks(args, { platform = process.platform, scheduler = null
         for (const line of windowsTasks.describePlan(plan, { command })) log(line);
         plans.push(plan);
         seen.add(key);
-      } catch (error) { log(`Windows scheduled tasks refused for ${checkout}: ${error.message}`); }
+      } catch (error) { refusal(error.message); }
     }
     return plans;
   } catch (error) {

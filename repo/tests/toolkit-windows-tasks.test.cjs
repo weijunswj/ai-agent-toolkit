@@ -678,7 +678,16 @@ DELTA_CLOSURE.push(
       // A refused managed checkout must not discard the usable original project plan.
       const good = layout(t), lines = [], home = tempHome(t), scheduler = fakeScheduler();
       const plans = core.printWindowsTasks({ repoRoot: linked }, { platform: 'win32', home, scheduler, checkoutDeps, workingFolder: good.primary, log: text => lines.push(text) });
-      assert.equal(plans.length, 1); assert.match(lines.join('\n'), /refused/);
+      assert.equal(plans.length, 1);
+      if (variant === 'unusable') assert.doesNotMatch(lines.join('\n'), /refused/);
+      else assert.match(lines.join('\n'), /refused for the managed Toolkit checkout: .*refused/);
+      const refusals = lines.filter(line => line.includes('Windows scheduled tasks refused'));
+      assert.ok(refusals.every(line => !line.includes(linked) && !line.includes(primary)));
+      // The same layout remains an explicit project refusal, including a non-GitHub origin.
+      const projectLines = [];
+      core.printWindowsTasks({ repoRoot: good.primary }, { platform: 'win32', home, scheduler, checkoutDeps, workingFolder: linked, log: text => projectLines.push(text) });
+      assert.match(projectLines.join('\n'), /refused for this project:/);
+      assert.ok(projectLines.filter(line => line.includes('Windows scheduled tasks refused')).every(line => !line.includes(linked) && !line.includes(primary)));
       assert.ok(scheduler.calls.every(row => row[0] === 'list')); assert.equal(fs.existsSync(tasks.registryPath(home)), false);
     }
   }],
@@ -988,6 +997,64 @@ test('Acceptance: full-day schedule migration updates in place, then apply is un
   for (const task of scheduler.folders.get('TOOLKIT').filter(task => windowsTasks.parseMarker(task.description))) assert.equal(windowsTasks.describeTriggers(task.triggers), 'hourly, 00:00 to 23:59');
   assert.equal(scheduler.folders.get('TOOLKIT').find(task => task.name === 'Owner reminder').description, 'My own task');
 });
+
+for (const host of [null, 'other.test']) test(`Setup quietly omits a managed source with ${host || 'a local file origin'}, but refuses the project`, t => {
+  const core = require('../scripts/setup-toolkit-core.cjs');
+  const managed = checkout(t), project = checkout(t), home = tempHome(t), scheduler = fakeScheduler(), lines = [];
+  for (const root of [managed, project]) {
+    fs.mkdirSync(path.join(root, '.git'));
+    fs.writeFileSync(path.join(root, '.git/config'), `[remote "origin"]\nurl = ${host ? `https://${host}/example/source.git` : 'file:///C:/local/source.git'}\n`);
+  }
+  const checkoutDeps = { governance: { ...governance(), readIdentity: require('../scripts/toolkit-governance-state.cjs').readIdentity } };
+  assert.equal(windowsTasks.readCheckout(managed, checkoutDeps).refusalCode, 'no-github-origin');
+  const plans = core.printWindowsTasks({ repoRoot: managed }, { platform: 'win32', home, scheduler, checkoutDeps, workingFolder: project, log: line => lines.push(line) });
+  assert.deepEqual(plans, []);
+  assert.deepEqual(lines.filter(line => line.includes('refused')), ['Windows scheduled tasks refused for this project: no usable github.com origin repository; footer cleaning refused.']);
+  assert.ok(lines.every(line => !line.includes(managed) && !line.includes(project)));
+  assert.deepEqual(scheduler.calls, []);
+  assert.equal(fs.existsSync(tasks.registryPath(home)), false);
+  const same = [];
+  core.printWindowsTasks({ repoRoot: managed }, { platform: 'win32', home, scheduler, checkoutDeps, workingFolder: managed, log: line => same.push(line) });
+  assert.doesNotMatch(same.join('\n'), /refused/);
+  // Direct commands retain the folder the user supplied and still refuse before scheduler access.
+  for (const command of ['plan', 'apply']) {
+    const errors = [];
+    assert.equal(windowsTasks.main([command, '--repo-root', managed], { platform: 'win32', home, scheduler, checkoutDeps, stderr: text => errors.push(text), stdout: () => {} }), 2);
+    assert.ok(errors.join('').includes(managed));
+    assert.match(errors.join(''), /no usable github.com origin/);
+  }
+  assert.deepEqual(scheduler.calls, []);
+});
+
+for (const target of ['managed', 'project']) for (const route of ['identity', 'desired-origin', 'desired-identity', 'desired-path', 'scheduler']) {
+  test(`Setup labels ${target} refusal without leaking paths through ${route}`, t => {
+    const core = require('../scripts/setup-toolkit-core.cjs');
+    const managed = checkout(t), project = checkout(t), home = tempHome(t), lines = [], reads = new Map();
+    const refused = target === 'managed' ? managed : project;
+    const scheduler = fakeScheduler();
+    if (route === 'scheduler') scheduler.list = () => { throw new Error(`cannot inspect ${refused}, ${JSON.stringify(refused)}, ${refused.replace(/\\/g, '/')}`); };
+    const checkoutDeps = { governance: { ...governance(), readIdentity: root => {
+      const count = (reads.get(root) || 0) + 1;
+      reads.set(root, count);
+      if (root === refused) {
+        if (route === 'identity' || (route === 'desired-identity' && count === 2)) throw new Error(`identity failed for ${root}`);
+        if (route === 'desired-origin' && count === 2) return { valid: false, root };
+        if (route === 'desired-path') return { valid: true, root: path.join(root, '"invalid"'), remote: { host: 'github.com', path: '/example/invalid.git' } };
+      }
+      return { valid: true, root, remote: { host: 'github.com', path: root === managed ? '/example/toolkit.git' : '/example/project.git' } };
+    } } };
+    const plans = core.printWindowsTasks({ repoRoot: managed }, { platform: 'win32', home, scheduler, checkoutDeps, workingFolder: project, log: line => lines.push(line) });
+    const refusals = lines.filter(line => line.includes('Windows scheduled tasks refused'));
+    assert.ok(refusals.some(line => line.startsWith(`Windows scheduled tasks refused for ${target === 'managed' ? 'the managed Toolkit checkout' : 'this project'}:`)));
+    for (const root of [managed, project]) for (const spelling of [root, JSON.stringify(root).slice(1, -1), root.replace(/\\/g, '/')]) {
+      assert.ok(refusals.every(line => !line.includes(spelling)), `${route} leaked a checkout path`);
+    }
+    assert.match(refusals.join('\n'), route === 'desired-origin' ? /no usable github.com origin/ : route === 'scheduler' ? /cannot inspect/ : route === 'desired-path' ? /cannot be used in a task/ : /checkout identity could not be read/);
+    assert.equal(plans.length, route === 'scheduler' ? 0 : 1);
+    assert.ok(scheduler.calls.every(row => row[0] === 'list'));
+    assert.equal(fs.existsSync(tasks.registryPath(home)), false);
+  });
+}
 
 test('Acceptance: setup plans managed and original project checkouts once, including projectless starts', t => {
   const core = require('../scripts/setup-toolkit-core.cjs');

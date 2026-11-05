@@ -117,7 +117,10 @@ function repositoryOf(identity) {
 // Submodules have a gitdir pointer but no commondir, and remain their own checkout.
 function durableIdentity(checkout, governance) {
   const identity = governance.readIdentity(checkout);
-  if (!repositoryOf(identity)) return { ...identity, refusal: 'no usable github.com origin repository; footer cleaning refused' };
+  if (!repositoryOf(identity)) {
+    const nonGitHubOrigin = identity.reason === 'origin-unsupported' || (identity.valid === true && !require('./toolkit-governance-state.cjs').isGitHubHost(identity.remote?.host));
+    return { ...identity, refusalCode: nonGitHubOrigin ? 'no-github-origin' : null, refusal: 'no usable github.com origin repository; footer cleaning refused' };
+  }
   const dotGit = path.join(identity.root, '.git');
   // Injected identity readers in pure tests need no filesystem. Real readers always have .git.
   if (governance.readIdentity !== require('./toolkit-governance-state.cjs').readIdentity) return identity;
@@ -145,7 +148,7 @@ function readCheckout(checkout, deps = {}) {
   try { identity = durableIdentity(checkout, governance); }
   catch { return { root: null, repository: null, refusal: 'checkout identity could not be read; scheduled tasks refused' }; }
   const repository = repositoryOf(identity);
-  if (!repository) return { root: null, repository: null, governanceState: null, binding: null, refusal: identity.refusal };
+  if (!repository) return { root: null, repository: null, governanceState: null, binding: null, refusal: identity.refusal, refusalCode: identity.refusalCode };
   let state = null;
   try { state = governance.governanceState(identity.root).state; } catch { state = null; }
   let binding = null;
