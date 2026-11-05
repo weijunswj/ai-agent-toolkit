@@ -6,3 +6,9 @@
 - `repo/source-watch/provenance/**/SOURCE-LOCK.json` holds only active third-party pins (upstream repo, ref, commit, update policy, attribution, allowlist, blob pins). Scheduled source-watch only opens or refreshes a review PR: it never copies upstream files, edits locks, runs upstream code, merges, pushes to main or runs live n8n, and a notification is not approval.
 - `.codex-plugin/` and `.claude-plugin/` hold each host's native plugin metadata and never update the other host. There is no repo-wide MCP surface; n8n work uses the official n8n Skills and API, with setup guidance in `skills/n8n-environment-setup/`. Skill and runtime context stays local and traceable; external links may support provenance but are never required to run.
 - Coordinated decisions use controller-decision v2, the captured registry v3 revision and raw digest, nested IR v3, Codex adapter v2 and CURRENT v2, and no other versions. The canonical profiles are owner-gpt, owner-claude and claude-projects-stack; their independent full-scope reviewer sets are defined only by the pinned registry and currently contain one member each, with no additional peer. Source progress does not establish native or installed qualification.
+
+### Version bumps
+
+For version bumps, plugin-packaged content means files read or copied by an installed plugin, installed skill, setup or Bridge, including their dependencies. Files used only from a development or CI checkout do not require a bump merely because the package physically contains them. Check the actual consumers rather than deciding by path alone.
+
+For example, the shard manifest `repo/contracts/ci/test-shards.json` is read from the target development or CI checkout. The scheduled refresh uses that checkout's refresh script, which prepares its candidate from fetched main. A manifest-only timing or shard redistribution change does not require a Toolkit bump; changes to the Bridge or installed skill guidance do.

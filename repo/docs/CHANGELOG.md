@@ -1,15 +1,15 @@
 # Toolkit Changelog
 
-## 3.49.0
-
-### Changed
-
-- Local agents register or update Toolkit's fixed Windows programme sweep and shard timing tasks under narrowly scoped standing approval, with verified enabled governance, ownership checks, owner stops and run-result verification. Setup continues to report tasks without changing them.
-- Every eligible governed repository gets the shard timing task. Runs report `no shards yet` without repository or external changes until the shard manifest appears, then use Toolkit's fixed refresher automatically.
+## 3.48.4
 
 ### Fixed
 
-- Preserve the existing global rules and device-task setup wording alongside the task standing approval. Raise only the global instruction block budget from 18,500 to 19,400 bytes rather than shorten unrelated rules.
+- Keep Bridge updates and shard refresh worktrees on their own fetched commit when another fetch runs at the same time, and remove only the invocation's temporary ref.
+- Use a wider Linux shard-balance trigger while keeping the Windows trigger, and state the review and verification still needed for generated refresh candidates.
+
+### Documentation
+
+- Define version bumps by the files installed consumers read or copy, with the shard manifest as a development and CI example.
 
 ## 3.48.3
 

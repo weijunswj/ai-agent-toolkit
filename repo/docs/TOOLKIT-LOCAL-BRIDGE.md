@@ -382,8 +382,8 @@ When a native SessionStart hook runs and repo auto-update is enabled, the bridge
 3. Reads the current branch and validates `origin` matches `repo_remote`.
 4. Refuses to continue when the working tree is dirty, leaving the current branch and local changes untouched.
 5. If the clean configured checkout (setup configures only the managed clean checkout) is on a different branch, switches it to `repo_branch` with `git switch <repo_branch>` and records that auto-switch in the update report.
-6. Fetches `origin <repo_branch>`.
-7. Updates only with `git merge --ff-only FETCH_HEAD`.
+6. Fetches `origin <repo_branch>` into an invocation-owned ref and resolves its commit once.
+7. Checks that resolved commit is a fast-forward, updates only with `git merge --ff-only <sha>`, and removes only the invocation-owned ref. A failed ref cleanup produces a warning and preserves the update result or original error.
 8. Runs hook-light validation:
 
 ```powershell
