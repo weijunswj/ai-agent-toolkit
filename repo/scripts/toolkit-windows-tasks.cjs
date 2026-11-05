@@ -391,7 +391,7 @@ function liveDefinition(live, entry) {
 class WindowsTaskReconciliation {
   constructor(desired, { scheduler, home, now = () => new Date(), wait = sleep, takeLock, readRecord, writeRecord, writeRegistry } = {}) {
     this.desired = desired; this.scheduler = scheduler; this.home = home; this.now = now;
-    this.takeLock = takeLock || require('../../skills/github-program-reconciler/scripts/programme.cjs').takeLock;
+    this.takeLock = takeLock || require('../../skills/github-program-reconciler/scripts/programme-lock.cjs').takeLock;
     this.readRecord = readRecord || (id => tasks.readLastRun(id, home) || (fs.existsSync(tasks.lastRunPath(id, home)) ? {} : null));
     this.writeRecord = writeRecord || ((id, record) => tasks.writeLastRun(id, record, home));
     this.writeRegistry = writeRegistry || (rows => tasks.writeRegistry(home, rows));

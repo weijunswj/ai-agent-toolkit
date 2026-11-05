@@ -172,7 +172,7 @@ class Job {
     this.#now = deps.now || (() => new Date());
     this.#record = deps.readRecord || (id => tasks.readLastRun(id, this.#home) || (fs.existsSync(tasks.lastRunPath(id, this.#home)) ? {} : null));
     this.#write = deps.writeRecord || ((id, record) => tasks.writeLastRun(id, record, this.#home));
-    this.#lock = deps.takeLock || require('../../skills/github-program-reconciler/scripts/programme.cjs').takeLock;
+    this.#lock = deps.takeLock || require('../../skills/github-program-reconciler/scripts/programme-lock.cjs').takeLock;
   }
 
   get options() { return this.#options; }
