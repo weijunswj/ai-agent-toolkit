@@ -194,8 +194,7 @@ function installedHours(text) {
 // The session-start line for this computer's programme sweep of a repository, or null when it is
 // fine or there is none: its last run held, skipped or failed, or there has been no run for over 2 hours
 // inside its hours. Fixed wording only.
-function sweepLine(repository, { home = os.homedir(), now = new Date() } = {}) {
-  const registry = readRegistry(home);
+function sweepLine(repository, { home = os.homedir(), now = new Date(), registry = readRegistry(home) } = {}) {
   if (registry.status !== 'ok' || typeof repository !== 'string') return null;
   const entry = registry.tasks.find(item => item.host === 'windows' && ['programme-sweep', 'footer-sweep'].includes(item.job) && !item.adopted
     && String(item.repository || '').toLowerCase() === repository.toLowerCase());
@@ -211,6 +210,49 @@ function sweepLine(repository, { home = os.homedir(), now = new Date() } = {}) {
   if (stale) return `${label}: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}; see toolkit tasks.`;
   if (status) return `${label}: ${status.startsWith('failed') ? 'last run ' : ''}${status}; see toolkit tasks.`;
   return null;
+}
+
+// Prevent obsolete recorded task shapes going unnoticed after a governance change. Advisory only:
+// uncertain reads fail quiet; no history, directory enumeration, scheduler, process or network work.
+function taskGovernanceLine(state, { home = os.homedir(), platform = process.platform, environment = process.env, registry } = {}) {
+  if (platform !== 'win32' || environment.TOOLKIT_GOVERNANCE_OFFLINE === '1') return null;
+  const merged = state?.merged;
+  const certain = merged?.fresh === true && !merged.unavailable && !state.notes?.includes('could-not-check-governance')
+    && (state.state === 'ENABLED' && merged.status === 'enabled'
+      || state.state === 'DISABLED' && ['disabled', 'none'].includes(merged.status)
+      || state.state === 'UNDECIDED' && merged.status === 'none');
+  const wanted = require('./toolkit-task-shape.cjs').confirmedTaskShape({ certain, governanceState: state?.state });
+  if (!wanted || typeof state.repository !== 'string' || !REPOSITORY.test(state.repository)) return null;
+  registry ??= readRegistry(home);
+  if (registry.status !== 'ok' || !Array.isArray(registry.tasks)) return null;
+  const jobs = ['programme-sweep', 'shard-timings', 'footer-sweep'];
+  const rows = registry.tasks.filter(row => row.host === 'windows' && !row.adopted
+    && String(row.repository || '').toLowerCase() === state.repository.toLowerCase());
+  if (!rows.length || rows.some(row => !jobs.includes(row.job) || row.stopped_by_owner)) return null;
+  // Choices can travel with a surviving row after retirement. Use the latest answer per task,
+  // rather than an earlier keep which a later replace has superseded.
+  const latest = new Map();
+  for (const row of rows) {
+    if (row.task_choices !== undefined && !Array.isArray(row.task_choices)) return null;
+    const rowChoices = new Map();
+    for (const choice of row.task_choices || []) {
+      if (!choice || !ID.test(choice.task || '') || !['keep', 'replace'].includes(choice.outcome) || !Number.isFinite(Date.parse(choice.at))) return null;
+      rowChoices.set(choice.task, choice);
+    }
+    for (const choice of rowChoices.values()) {
+      const previous = latest.get(choice.task);
+      if (previous && Date.parse(previous.at) === Date.parse(choice.at) && previous.outcome !== choice.outcome) return null;
+      if (!previous || Date.parse(choice.at) >= Date.parse(previous.at)) latest.set(choice.task, choice);
+    }
+    // A relationship is proof about a recorded cleaner, never another enrolment.
+    if (row.replaces !== undefined && (!row.replaces || Object.keys(row.replaces).join() !== 'cleaner'
+      || !['programme-sweep', 'footer-sweep'].includes(row.job)
+      || !['programme-sweep', 'footer-sweep'].includes(row.replaces.cleaner?.job)
+      || row.replaces.cleaner.job === row.job)) return null;
+  }
+  if ([...latest.values()].some(choice => choice.outcome === 'keep')) return null;
+  if (rows.length === wanted.length && wanted.every(job => rows.filter(row => row.job === job).length === 1)) return null;
+  return 'Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers.';
 }
 
 // ---- record and forget -----------------------------------------------------------------------
@@ -440,5 +482,5 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = {
   SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, writeTaskBackup, readLastRun, writeLastRun,
-  entryProblem, looksSecret, safeText, skipText, sweepLine, installedHours, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
+  entryProblem, looksSecret, safeText, skipText, sweepLine, taskGovernanceLine, installedHours, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
 };

@@ -339,6 +339,7 @@ test('H-15, H-16 (unit): no subprocess, no writes, no raw remote in the result',
   }
   const perRunMs = Number(process.hrtime.bigint() - started) / 1e6 / 20;
   assert.deepEqual([result.state, result.rule], ['UNDECIDED', 'R7']);
+  assert.equal(result.repository, 'example-owner/example-repo', 'the local advisory reuses canonical identity');
   assert.ok(perRunMs < 250, `one evaluation took ${perRunMs} ms`);
   const text = JSON.stringify(result);
   assert.doesNotMatch(text, /example-owner/, 'the raw remote is not in the result');

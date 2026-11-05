@@ -1,0 +1,119 @@
+{
+  "schema": "toolkit-hook-pack/v1",
+  "family": "task-governance",
+  "rows": [
+    {
+      "id": "TasksGovernanceOffProgrammeShard",
+      "source": "Owner session-start task advisory",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        },
+        "windows_tasks": [
+          "programme-sweep",
+          "shard-timings"
+        ]
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers."
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksGovernanceOnFooter",
+      "source": "Owner session-start task advisory",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "windows_tasks": [
+          "footer-sweep"
+        ]
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers."
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksGovernanceOnMissingShard",
+      "source": "Owner session-start task advisory",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "windows_tasks": [
+          "programme-sweep"
+        ]
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers."
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksGovernanceAbsentProgramme",
+      "source": "Owner session-start task advisory",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "windows_tasks": [
+          "programme-sweep"
+        ]
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers."
+        ]
+      },
+      "status": "pass"
+    }
+  ]
+}
