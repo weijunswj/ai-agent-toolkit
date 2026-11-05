@@ -323,7 +323,8 @@ function windowsRows(registry, folders, scheduler, home) {
       if (owned) {
         const last = readLastRun(recorded.id, home);
         const edited = recorded.enrolled && JSON.stringify(windowsTasks.enrolledDefinition(task)) !== JSON.stringify(recorded.enrolled);
-        row.state = recorded.stopped_by_owner || task.state === 'Disabled' || edited ? 'stopped by owner' : 'Toolkit';
+        row.state = recorded.stopped_by_owner || task.state === 'Disabled' ? 'stopped by owner'
+          : edited ? ['programme-sweep', 'shard-timings'].includes(recorded.job) ? 'modified; owner choice required' : 'stopped by owner' : 'Toolkit';
         // The job writes its record as it starts and again as it ends, so a record that ended (or,
         // still running, started) before Task Scheduler's last run time, less 2 seconds, belongs to
         // an older run: the newer one stopped before writing anything, and is not shown as the

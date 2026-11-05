@@ -11,18 +11,16 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..', '..');
+const { tempHome, checkout, addShards, fixtureBinding, fakeScheduler, assertDefinition, fakeRun, assertLiveRegistry, switchWorld, assertShape, printedRecovery, NODE, identityReader, testRepository, TOOLKIT_ROOT, GH, ATTENTION } = require('./support/windows-task-switch-world.cjs');
 const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
 const job = require('../scripts/toolkit-scheduled-job.cjs');
 const tasks = require('../scripts/toolkit-tasks.cjs');
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const shards = require('../scripts/ci-test-shards.cjs');
 
-const NODE = 'C:\\Program Files\\nodejs\\node.exe';
-const identityReader = ({ checkout, toolkitRoot }) => ({ checkout, toolkitRoot });
-const testRepository = root => { if (!fs.existsSync(path.join(root, '.git'))) throw new Error('registered root is not a repository checkout'); return true; };
 const MEMORY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-memory-'));
 test.after(() => fs.rmSync(MEMORY_HOME, { recursive: true, force: true }));
-const TOOLKIT_ROOT = 'C:\\Toolkit\\ai-agent-toolkit';
+
 const hostile = require('./support/hostile-inputs.cjs');
 
 function memoryRegistry(initial = []) {
@@ -88,37 +86,6 @@ for (const shape of ['programme', 'footer']) for (const toolkit of matrixKinds) 
   });
 }
 
-function tempHome(t) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-tasks-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  return home;
-}
-
-// A checkout folder; `shards` adds the Toolkit shard contract, not a local refresher script.
-function checkout(t, { shards = true } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-checkout-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, '.git'));
-  if (shards) {
-    addShards(root);
-  }
-  return root;
-}
-
-function addShards(root) {
-  fs.mkdirSync(path.join(root, 'repo', 'contracts', 'ci'), { recursive: true });
-  fs.mkdirSync(path.join(root, 'repo', 'tests'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'repo', 'tests', 'example.test.cjs'), '// fixture\n');
-  fs.writeFileSync(path.join(root, ...shards.MANIFEST_REL.split('/')), JSON.stringify({
-    schema: shards.MANIFEST_SCHEMA,
-    systems: Object.fromEntries(shards.SYSTEMS.map(system => [system, { shards: [{ id: `${system}-1`, rest: true }] }])),
-  }));
-}
-
-function fixtureBinding(repository = 'weijunswj/ai-agent-toolkit', folder = 'TOOLKIT', enabled = true) {
-  return { schema: 'toolkit.programme-binding.v2', repository, governance: enabled ? 'enabled' : 'disabled', ...(folder ? { schedule_folder: folder } : {}),
-    ...(enabled ? { parents: [{ issue: 1, record_prefix: 'TASK' }], store: { kind: 'github', repository: 'weijunswj/TRANSPORT-ai-agent-toolkit', branch: 'main', path: 'state/' }, required_checks: [] } : {}) };
-}
 function governance({ state = 'ENABLED', folder = 'TOOLKIT', repository = 'weijunswj/ai-agent-toolkit', binding = true } = {}) {
   const status = state === 'ENABLED' ? binding ? 'enabled' : 'unknown' : state === 'DISABLED' ? binding ? 'disabled' : 'none' : state === 'UNDECIDED' ? 'none' : 'unknown';
   const source = binding && ['enabled', 'disabled'].includes(status) ? fixtureBinding(repository, folder, status === 'enabled') : null;
@@ -128,54 +95,6 @@ function governance({ state = 'ENABLED', folder = 'TOOLKIT', repository = 'weiju
     mergedBinding: () => source,
     readObservation: () => ({ status, fresh: status !== 'unknown', binding: source }),
   };
-}
-
-// An in-memory Task Scheduler with the same methods as powerShellScheduler(). register and
-// unregister keep the PowerShell side's own marker check.
-function fakeScheduler(initial = {}) {
-  const folders = new Map(Object.entries(initial).map(([folder, list]) => [folder, list.map(task => ({ ...task }))]));
-  const calls = [];
-  const key = folder => folder || '';
-  const of = folder => folders.get(key(folder)) || [];
-  return {
-    calls, folders,
-    onStart: null,
-    list(folder) { calls.push(['list', folder]); return structuredClone(of(folder)); },
-    markedFolders() { return [...folders.entries()].filter(([name, list]) => name && list.some(task => String(task.description).includes('[toolkit-task v1 '))).map(([name]) => name); },
-    register(d, previous = null) {
-      calls.push(['register', d.folder, d.name]);
-      const list = folders.get(d.folder) || [];
-      const existing = list.find(task => task.name === d.name);
-      if (existing && !String(existing.description).includes(`[toolkit-task v1 id=${d.id} `)) throw new Error('not Toolkit\'s');
-      if (existing && (!previous || !assertDefinition(existing, previous)) || !existing && previous) throw new Error('changed before registration');
-      const task = { name: d.name, description: d.description, state: 'Ready', execute: d.execute, arguments: d.arguments, working_directory: d.working_directory,
-        actions: [{ execute: d.execute, arguments: d.arguments, working_directory: d.working_directory }],
-        triggers: d.schedule.kind === 'hourly' ? [{ kind: 'MSFT_TaskDailyTrigger', start: `2026-10-29T${d.schedule.at}:00+08:00`, interval: 'PT1H', duration: `PT${d.schedule.hours}H` }]
-          : [{ kind: 'MSFT_TaskWeeklyTrigger', start: `2026-10-26T${d.schedule.at}:00+08:00`, days_of_week: 2 }], last_run: null, last_result: 0x41303 };
-      folders.set(d.folder, [...list.filter(item => item.name !== d.name), task]);
-    },
-    unregister(folder, name, id, previous) {
-      calls.push(['unregister', folder, name]);
-      const task = of(folder).find(item => item.name === name);
-      if (task && !String(task.description).includes(`[toolkit-task v1 id=${id} `)) throw new Error('marker');
-      if (task && (!previous || !assertDefinition(task, previous))) throw new Error('changed before removal');
-      folders.set(folder, of(folder).filter(item => item.name !== name));
-      return { removed: Boolean(task) };
-    },
-    removeFolderIfEmpty(folder) {
-      calls.push(['remove-folder', folder]);
-      if (!folders.has(folder)) return { folder: 'absent' };
-      if (of(folder).length) return { folder: 'kept' };
-      folders.delete(folder);
-      return { folder: 'removed' };
-    },
-    start(folder, name) { calls.push(['start', folder, name]); if (this.onStart) this.onStart(of(folder).find(item => item.name === name)); },
-    info(folder, name) { const task = of(folder).find(item => item.name === name); return { state: task.state, last_run: task.last_run, last_result: task.last_result }; },
-  };
-}
-
-function assertDefinition(a, b) {
-  return JSON.stringify(windowsTasks.enrolledDefinition(a)) === JSON.stringify(windowsTasks.enrolledDefinition(b));
 }
 
 function desired(t, options = {}) {
@@ -782,26 +701,13 @@ test('G: adopt records a task the owner made and refuses one carrying Toolkit\'s
 
 // ---- J. job runs ------------------------------------------------------------------------------
 
-const GH = 'C:\\gh\\gh.exe';
 const REPO_ROOT = path.join(os.tmpdir(), 'tk-job-checkout');
-
-// A fake process runner: answers by script and records every start.
-function fakeRun(answers = {}) {
-  const log = [];
-  const run = (file, args) => {
-    log.push([file, ...args]);
-    const name = file === GH ? `gh ${args[0]}` : args[0] === '-e' ? 'reach github' : path.basename(args[0]) === 'programme.cjs' ? `programme ${args[1]}` : path.basename(args[0]);
-    const answer = answers[name] || { status: 0, stdout: '' };
-    return { stdout: '', stderr: '', ...(typeof answer === 'function' ? answer(args) : answer) };
-  };
-  return { run, log };
-}
 
 const GOVERNED = { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { status: 'enabled', fresh: true } }) };
 const BINDING = () => fixtureBinding();
 const READ_IDENTITY = root => ({ valid: true, root, remote: { host: 'github.com', path: '/weijunswj/ai-agent-toolkit.git' } });
 const OBSERVATION = () => ({ status: 'enabled', fresh: true, binding: BINDING() });
-const ATTENTION = { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', text: 'Attention: clear (stored on #421, written 3 min ago)' }) };
+
 const options = { job: 'programme-sweep', repoRoot: REPO_ROOT, taskId: 'toolkit-programme-sweep' };
 
 function runSweep(t, answers, home = tempHome(t), clock = '2026-10-29T09:00:00.000Z') {
@@ -1632,13 +1538,6 @@ test('approval metadata: --no-first-run is outside the exact standing command', 
 });
 
 function switchOffer(t, shape, root) { return desired(t, { root, state: shape === 'programme-sweep' ? 'ENABLED' : 'DISABLED' }); }
-function assertLiveRegistry(home, scheduler, registry = tasks) {
-  for (const entry of registry.readRegistry(home).tasks) {
-    const live = scheduler.list(entry.folder).find(t => t.name === entry.name);
-    assert.ok(live, entry.id); assert.notEqual(live.state, 'Disabled');
-    assert.deepEqual(windowsTasks.enrolledDefinition(live), entry.enrolled); assert.equal(entry.stopped_by_owner, undefined);
-  }
-}
 
 let currentMainRunner;
 function currentMainReceipt(home, root, clock, taskId = 'toolkit-programme-sweep') {
@@ -1652,60 +1551,6 @@ function currentMainReceipt(home, root, clock, taskId = 'toolkit-programme-sweep
   const receipt = currentMainRunner.runJob({ job: 'programme-sweep', taskId, repoRoot: root }, { home, ghPath: GH, nodePath: NODE,
     repositoryReader: testRepository, mergedBinding: BINDING, now: () => new Date(tick += 1000), run: (...args) => { tick += 10000; return fake.run(...args); } });
   assert.equal(receipt.status, 'ok'); assert.ok(receipt.footer_sweep_since); return receipt;
-}
-
-// All switch-family sequences share the actual status service, merged observation and CLI.
-// Only GitHub processes, native scheduler and the clock are substituted.
-function switchWorld(t) {
-  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
-  fs.writeFileSync(path.join(root, '.git/config'), '[remote "origin"]\nurl = https://github.com/weijunswj/ai-agent-toolkit.git\n');
-  const real = require('../scripts/toolkit-governance-state.cjs'), cache = require('../scripts/toolkit-governance-binding.cjs');
-  const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
-  const registryPath = path.join(tasks.userStateDir(home), 'repository-governance.v1.json');
-  let tick = Date.now(), revision = 0, status;
-  t.mock.timers.enable({ apis: ['Date'], now: tick });
-  const now = () => { tick += 1000; t.mock.timers.setTime(tick); return new Date(tick); };
-  const deps = { identityReader, governance: { ...real, governanceState: root => real.governanceState(root, { registryPath, testOnly: true, now: now() }) },
-    readObservation: identity => windowsTasks.readTaskObservation(identity, home, now()) };
-  scheduler.onStart = live => {
-    const mode = live.arguments.includes(' footer-sweep ') ? 'footer-sweep' : 'programme-sweep';
-    const fake = fakeRun({ 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify(status) }, 'programme attention': ATTENTION });
-    const record = job.runJob({ job: mode, repoRoot: root, taskId: /--task-id ([a-z0-9-]+)/.exec(live.arguments)[1] }, { home, now, ghPath: GH, nodePath: NODE,
-      readIdentity: real.readIdentity, repositoryReader: testRepository, readObservation: identity => windowsTasks.readTaskObservation(identity, home, now()),
-      run: (...args) => { tick += 10000; return fake.run(...args); } });
-    Object.assign(live, { last_run: record.started, last_result: 0, state: 'Ready' });
-  };
-  const fixture = { home, root, scheduler, now, registry: null,
-    advance(days) { tick += days * 86400000; t.mock.timers.setTime(tick); },
-    offer() { return windowsTasks.desiredTasks({ checkout: root, home, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, deps }); },
-    async gov(state, { folder = 'AI-AGENT-TOOLKIT' } = {}) {
-      const identity = real.readIdentity(root), text = ['absent','uncertain'].includes(state) ? null : JSON.stringify(fixtureBinding(undefined, folder, state === 'on'));
-      const fetched = now(); if (state === 'uncertain') fetched.setHours(fetched.getHours() - 30);
-      cache.writeCache(tasks.userStateDir(home), { schema: cache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical,
-        default_branch: 'main', commit: (++revision).toString(16).padStart(40, '0'), fetched_at: fetched.toISOString(), status: text ? 'present' : 'absent', text,
-        bytes_sha256: text ? require('node:crypto').createHash('sha256').update(text).digest('hex') : null, problem: null });
-      let stdout = '';
-      const cli = new ToolkitGovernanceCli({ cwd: root, registryOptions: { registryPath, testOnly: true, home, now: now() }, refresh: () => ({ refreshed: true }),
-        discoveryGh: () => ({ ok: false, reason: 'fixture offline' }), hookReader: () => null, queueReader: () => null,
-        stdout: { write: value => { stdout += value; } }, stderr: { write() {} } });
-      await cli.main(['status','--json']); status = JSON.parse(stdout);
-      assert.equal(status.state, state === 'on' ? 'ENABLED' : state === 'off' ? 'DISABLED' : state === 'absent' ? 'UNDECIDED' : 'UNAVAILABLE');
-    },
-    cli(verb, ...args) {
-      let text = '', err = '';
-      const code = windowsTasks.main([verb,'--repo-root',root,'--json',...args], { platform: 'win32', scheduler, home, now, registry: fixture.registry || undefined, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE,
-        checkoutDeps: deps, stdout: value => { text += value; }, stderr: value => { err += value; }, firstRunOptions: { wait() {}, pollMs: 1, waitMs: 2 } });
-      return { code, json: text ? JSON.parse(text) : null, err };
-    },
-  };
-  return fixture;
-}
-function assertShape(w, state) {
-  const expected = state === 'on' ? ['programme-sweep','shard-timings'] : ['footer-sweep'];
-  assert.deepEqual((w.registry || tasks).readRegistry(w.home).tasks.map(e => e.job).sort(), expected);
-  assert.deepEqual(w.scheduler.list('AI-AGENT-TOOLKIT').map(l => l.name).sort(), expected.map(j => windowsTasks.taskName('AI-AGENT-TOOLKIT', j)).sort());
-  assertLiveRegistry(w.home, w.scheduler, w.registry || tasks);
-  assert.ok((w.registry || tasks).readRegistry(w.home).tasks.every(e => !e.replaces), 'completed switches retain no relationship');
 }
 
 test('task advisory clears immediately after real owner ON/OFF/absent switches and removal with leftover records', async t => {
@@ -1752,41 +1597,6 @@ test(`switch sequence: real status/apply ${sequence.join('/')} advancing ${days}
     }
   }
 });
-
-// Execute the commands that the held plan actually prints, through the real CLI. Native
-// cleanup is interpreted only by the fake scheduler, after its exact inspection command.
-function printedRecovery(w, reset = false) {
-  let plan = w.cli('plan').json;
-  assert.ok(plan);
-  const text = plan.next_step;
-  if (/Unregister-ScheduledTask/.test(text)) {
-    assert.equal(w.cli('apply', '--repair-owned').code, 1, 'repair never adopts an unrecorded native write');
-    const cleanup = [...text.matchAll(/Unregister-ScheduledTask -TaskPath '(.*?)' -TaskName '([^']*)' -Confirm:\$false/g)];
-    assert.ok(cleanup.length, text);
-    for (const [, nativePath, name] of cleanup) {
-      const folder = nativePath.slice(1, -1), live = w.scheduler.list(folder).find(l => l.name === name);
-      assert.ok(text.includes(`Get-ScheduledTask -TaskPath '${nativePath}' -TaskName '${name}'`));
-      assert.ok(live); const marker = windowsTasks.parseMarker(live.description); assert.ok(marker);
-      assert.equal(w.scheduler.unregister(folder, name, marker.id, live).removed, true);
-    }
-    const retried = w.cli('apply');
-    if (retried.code === 0) return retried;
-    plan = w.cli('plan').json;
-  }
-  const commands = [...plan.next_step.matchAll(/node "([^"\n]+)" (apply|remove) --repo-root "([^"\n]+)"(?: --folder ([A-Z0-9-]+))?( --repair-owned)?/g)];
-  assert.ok(commands.length, plan.next_step);
-  const run = match => {
-    assert.equal(match[1], TOOLKIT_ROOT + '\\repo\\scripts\\toolkit-windows-tasks.cjs'); assert.equal(match[3], w.root);
-    return w.cli(match[2], ...(match[4] ? ['--folder', match[4]] : []), ...(match[5] ? ['--repair-owned'] : []));
-  };
-  if (reset) {
-    const remove = commands.find(m => m[2] === 'remove'); assert.ok(remove, plan.next_step);
-    assert.equal(run(remove).code, 0);
-    const stopped = (w.registry || tasks).readRegistry(w.home).tasks; assert.ok(stopped.every(e => e.stopped_by_owner));
-  }
-  const repair = commands.find(m => m[2] === 'apply' && m[5]); assert.ok(repair, plan.next_step);
-  const result = run(repair); assert.equal(result.code, 0, result.err + JSON.stringify(result.json)); return result;
-}
 
 const switchFaultPoints = ['history', 'history-read', 'register', 'destination-readback', 'enrolment', 'unregister', 'source-readback', 'cleanup', 'shards', 'start', 'result-readback', 'final-readback', 'registry-read', 'registry-write', 'rename', 'persisted-readback'];
 // Reuses probe-stuck, probe-stuck2 and probe-qual-loop's continuous registry/history sequence.
@@ -1961,7 +1771,12 @@ for (const task of ['programme-sweep','shard-timings']) for (const edit of ['act
   const answer = { task: item.choice.task, observed: item.choice.fingerprint, answer_ref: 'owner-message:keep-1', outcome: 'keep' };
   assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: answer }).refused, true); assert.deepEqual([...scheduler.folders], before);
   const recorded = tasks.readRegistry(home).tasks.find(e => e.id === answer.task);
-  assert.equal(recorded.task_choices[0].outcome, 'keep'); assert.deepEqual(recorded.task_choices[0].definition, item.observed);
+  // The fingerprint already binds the exact observation. Repeating XML in every answer
+  // grows the bounded registry without adding replay or ownership protection.
+  assert.equal(recorded.task_choices[0].outcome, 'keep'); assert.equal(recorded.task_choices[0].observed, item.choice.fingerprint);
+  assert.equal(Object.hasOwn(recorded.task_choices[0], 'definition'), false);
+  assert.equal(recorded.task_choices[0].answer_ref, answer.answer_ref);
+  assert.ok(Number.isFinite(Date.parse(recorded.task_choices[0].at)));
   assert.notDeepEqual(recorded.enrolled, windowsTasks.enrolledDefinition(live), 'keep never adopts edits');
   assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { ...answer, outcome: 'replace' } }).refused, true);
   const replaced = windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { ...answer, answer_ref: 'owner-message:replace-2', outcome: 'replace' } });
@@ -2221,8 +2036,9 @@ test(`repository removal: ${kind} through ${caller}, off-governance reset and fo
   tasks.updateRegistry(w.home, list => list.filter(e => e.id !== foreign.id));
   w.scheduler.folders.get(foreign.folder).splice(0, 1);
   await w.gov('off'); assert.equal(w.cli('apply').code, 1);
-  if (kind !== 'moved checkout') { printedRecovery(w); assertShape(w, 'off'); }
-  else assert.equal(w.cli('apply','--repair-owned').code, 1, 'a moved checkout needs separately approved location recovery, never standing switching');
+  // Approved removal proved absence; explicit repair can now reconcile old paths.
+  // Ordinary apply above still holds, including the moved-checkout case.
+  printedRecovery(w); assertShape(w, 'off');
 });
 
 test('removal: empty repository scope says nothing about other repositories; managed-copy hint executes', t => {
@@ -2648,4 +2464,116 @@ if(args[0]===j.SCRIPT.governance)return ${JSON.stringify(GOVERNED)};if(args[1]==
   const otherScope = windowsTasks.desiredTasks({ checkout: otherRoot, folder, toolkitRoot: ROOT, nodePath: process.execPath, home, deps: { identityReader: request => request, governance: governance({ repository: otherRepo, folder }) } });
   assert.equal(windowsTasks.removeTasks({ scope: otherScope, folder, scheduler, home }).items[0].action, 'removed');
   qualificationComplete = true;
+});
+
+test('setup held plans omit recovery paths and commands, while direct plan retains them', async t => {
+  const w = switchWorld(t); await w.gov('on'); assert.equal(w.cli('apply').code, 0);
+  await w.gov('off');
+  tasks.updateRegistry(w.home, rows => rows.map(e => ({ ...e, stopped_by_owner: true, stopped_at: w.now().toISOString() })));
+  const lines = [], core = require('../scripts/setup-toolkit-core.cjs');
+  core.printWindowsTasks({ repoRoot: w.root }, { platform: 'win32', scheduler: w.scheduler, home: w.home, workingFolder: w.root,
+    checkoutDeps: { ...w.offer().checkoutDeps, reportCheckout: root => root }, log: line => lines.push(line) });
+  const text = lines.join('\n');
+  for (const location of [w.root, w.toolkitRoot, w.home]) assert.equal(text.includes(location), false);
+  assert.doesNotMatch(text, /--repo-root|--repair-owned|node |USERPROFILE/);
+  assert.match(text, /direct task plan/);
+  assert.match(windowsTasks.describePlan(w.cli('plan').json).join('\n'), /node .* --repair-owned/);
+});
+
+for (const mode of ['success','register failure','first-run failure']) test(`apply next step describes ${mode} without asking to run apply`, t => {
+  const home = tempHome(t), scheduler = fakeScheduler(), offer = desired(t);
+  if (mode === 'register failure') scheduler.register = () => { throw new Error('fixture denied'); };
+  const result = windowsTasks.applyTasks(offer, { home, scheduler, firstRunOptions: mode === 'first-run failure' ? { wait() {}, waitMs: 1, pollMs: 1 } : null });
+  assert.doesNotMatch(result.next_step, /^Run apply/);
+  if (mode === 'register failure') assert.ok(result.items.some(i => i.done === false));
+  if (mode === 'first-run failure') assert.equal(result.items[0].first_run.status, 'failed');
+});
+
+for (const jobName of ['programme-sweep','shard-timings']) test(`task list: edited ${jobName} needs a choice, with no owner stop`, t => {
+  const home = tempHome(t), scheduler = fakeScheduler(), offer = desired(t);
+  windowsTasks.applyTasks(offer, { home, scheduler });
+  const live = scheduler.folders.get('TOOLKIT').find(l => l.name === windowsTasks.taskName('TOOLKIT',jobName));
+  live.arguments += ' --owner-edit';
+  const before = fs.readFileSync(tasks.registryPath(home));
+  const listed = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => 'TOOLKIT' });
+  assert.equal(listed.rows.find(r => r.name === live.name).state, 'modified; owner choice required');
+  assert.equal(windowsTasks.planTasks(offer, { home, scheduler }).items.find(i => i.definition.job === jobName).action, 'owner-choice-required');
+  assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), before);
+  assert.ok(tasks.readRegistry(home).tasks.every(e => !e.stopped_by_owner));
+});
+
+test('removal hints: plugin and linked Toolkit copies name the managed runner and target primary, then execute', t => {
+  const base = tempHome(t), home = path.join(base,'home'), managed = path.join(base,'managed'), project = path.join(base,'project');
+  const git = (root,...args) => require('node:child_process').execFileSync('git',['-C',root,...args],{encoding:'utf8',windowsHide:true,timeout:10000});
+  for (const [root,origin] of [[managed,'https://github.com/weijunswj/ai-agent-toolkit.git'],[project,'https://github.com/example/widget.git']]) {
+    fs.mkdirSync(root); git(root,'init','--quiet'); git(root,'remote','add','origin',origin);
+    git(root,'-c','user.name=Fixture','-c','user.email=fixture@example.test','commit','--quiet','--allow-empty','-m','fixture');
+  }
+  const plugin = path.join(base,'plugin'), linked = path.join(base,'linked'); fs.mkdirSync(plugin);
+  git(managed,'worktree','add','--quiet','-b','fixture',linked);
+  const state = path.join(home,'.ai-agent-toolkit','current','state.json');
+  fs.mkdirSync(path.dirname(state),{recursive:true}); fs.writeFileSync(state,JSON.stringify({repo_path:managed}));
+  const real = require('../scripts/toolkit-governance-state.cjs'), scheduler = fakeScheduler();
+  const deps = { platform:'win32',home,scheduler,nodePath:NODE,
+    checkoutDeps:{governance:{...governance({repository:'example/widget'}),readIdentity:real.readIdentity}} };
+  for (const copy of [plugin,linked]) {
+    let text='';
+    assert.equal(windowsTasks.main(['remove','--repo-root',project],{...deps,toolkitRoot:copy,stdout:v=>{text+=v;},stderr:v=>{text+=v;}}),1);
+    const command = /Use node "([^"\n]+)" remove --repo-root "([^"\n]+)"/.exec(text); assert.ok(command,text);
+    const script=command[1].replace('$env:USERPROFILE',home), target=command[2].replace('$env:USERPROFILE',home);
+    assert.equal(script,path.win32.join(managed,'repo','scripts','toolkit-windows-tasks.cjs')); assert.equal(target,project);
+    assert.equal(windowsTasks.main(['remove','--repo-root',target],{...deps,toolkitRoot:managed,stdout(){},stderr(){}}),0);
+  }
+});
+
+test('choice history: repeated real large edits store fingerprints and retain bounded-reader recovery', t => {
+  const home=tempHome(t),scheduler=fakeScheduler(),offer=desired(t);
+  windowsTasks.applyTasks(offer,{home,scheduler});
+  const live=scheduler.folders.get('TOOLKIT')[0];
+  for (let index=0;index<90;index++) {
+    live.definition_xml='<Task>'+String(index)+'x'.repeat(4096)+'</Task>';
+    const item=windowsTasks.planTasks(offer,{home,scheduler}).items.find(i=>i.choice);
+    assert.ok(item);
+    const answer={task:item.choice.task,observed:item.choice.fingerprint,outcome:'keep',answer_ref:`owner-message:large-${index}`};
+    assert.equal(windowsTasks.applyTasks(offer,{home,scheduler,taskChoice:answer}).refused,true);
+  }
+  const read=tasks.readRegistry(home); assert.equal(read.status,'ok');
+  const history=read.tasks[0].task_choices; assert.equal(history.length,90);
+  assert.ok(history.every(c=>!Object.hasOwn(c,'definition')&&/^[a-f0-9]{64}$/.test(c.observed)&&c.answer_ref&&c.outcome==='keep'&&c.at));
+  assert.ok(fs.statSync(tasks.registryPath(home)).size<512*1024);
+  assert.equal(windowsTasks.removeTasks({scope:offer,home,scheduler}).items.every(i=>i.action==='removed'),true);
+});
+
+for (const target of ['on','off']) for (const failure of ['native denial','XML race','recreated source'])
+test(`moved recovery interruption: ${target} / ${failure}`, async t => {
+  const w=switchWorld(t); await w.gov(target==='on'?'off':'on'); assert.equal(w.cli('apply').code,0);
+  const folder='AI-AGENT-TOOLKIT', original=structuredClone(w.scheduler.folders.get(folder)[0]);
+  w.move('checkout'); await w.gov(target);
+  if (failure!=='recreated source') {
+    const unregister=w.scheduler.unregister; let fired=false;
+    w.scheduler.unregister=(...args)=>{
+      if (!fired) {
+        fired=true;
+        if (failure==='native denial') throw new Error('fixture native denial');
+        w.scheduler.folders.get(folder).find(l=>l.name===args[1]).definition_xml='<concurrent-owner-edit/>';
+      }
+      return unregister(...args);
+    };
+    assert.equal(w.cli('remove').code,1); assert.equal(fired,true);
+    const entries=tasks.readRegistry(w.home).tasks;
+    assert.ok(entries.some(e=>e.stopped_by_owner));
+    assert.ok(w.scheduler.list(folder).some(l=>l.name===original.name));
+    const before={live:JSON.stringify([...w.scheduler.folders]),registry:fs.readFileSync(tasks.registryPath(w.home))};
+    assert.equal(w.cli('apply','--repair-owned').code,1);
+    assert.equal(JSON.stringify([...w.scheduler.folders]),before.live); assert.deepEqual(fs.readFileSync(tasks.registryPath(w.home)),before.registry);
+    w.scheduler.unregister=unregister;
+  } else {
+    assert.equal(w.cli('remove').code,0);
+    const register=w.scheduler.register; let fired=false;
+    w.scheduler.register=(...args)=>{if(!fired){fired=true;w.scheduler.folders.set(folder,[original]);}return register(...args);};
+    assert.equal(w.cli('apply','--repair-owned').code,1); assert.equal(fired,true);
+    assert.ok(w.scheduler.list(folder).some(l=>l.name===original.name));
+    w.scheduler.register=register;
+  }
+  printedRecovery(w,true); assertShape(w,target);
 });

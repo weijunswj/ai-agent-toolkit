@@ -114,6 +114,35 @@
         ]
       },
       "status": "pass"
+    },
+    {
+      "id": "TasksGovernanceOnMatchingSilent",
+      "source": "Review: forbid advisory for a matching recorded shape",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "windows_tasks": [
+          "programme-sweep",
+          "shard-timings"
+        ]
+      },
+      "expect": {
+        "decision": "allow",
+        "context_excludes": [
+          "Toolkit tasks: recorded Windows tasks do not match confirmed governance."
+        ]
+      },
+      "status": "pass"
     }
   ]
 }
