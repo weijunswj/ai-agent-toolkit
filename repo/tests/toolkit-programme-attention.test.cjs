@@ -431,6 +431,12 @@ test('E3: sessionLine adds the Programme sweep line when this computer\'s hourly
   const at = new Date(now.getTime() - 50 * 60000).toISOString();
   tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 0, status: 'skipped', reason: 'offline', skipped_streak: 3, skipped_since: new Date(now.getTime() - 170 * 60000).toISOString(), summary: ['skipped: offline'] }, home);
   assert.match(evaluate(), /Toolkit governance: ENABLED[^]* Programme sweep: skipped \(offline\), 3 runs in a row since [^;]+; see toolkit tasks\./);
+  for (const condition of ['needed', 'Private diagnostic']) {
+    const last = tasks.readLastRun('app-programme-sweep', home);
+    tasks.writeLastRun('app-programme-sweep', { ...last, footer_setup: condition }, home);
+    assert.equal(evaluate().includes(tasks.FOOTER_SETUP_NOTE), condition === 'needed');
+    assert.doesNotMatch(evaluate(), /Private diagnostic/);
+  }
   assert.doesNotMatch(evaluate({ ...programmeDeps, home: undefined }, { testOnly: true }), /Programme sweep:/, 'a test registry without its own home reads nothing');
   tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 0, status: 'ok', summary: [] }, home);
   assert.doesNotMatch(evaluate(), /Programme sweep:/, 'gone after a good run');

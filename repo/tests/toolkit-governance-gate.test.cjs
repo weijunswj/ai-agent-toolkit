@@ -89,6 +89,40 @@ const registryBytes = ctx => (fs.existsSync(ctx.registryPath) ? fs.readFileSync(
 
 // G0 closure matrix: held-repository verdict x actor/delivery. These use test registries only.
 const projects = require('./support/projects-approval.cjs');
+
+test('Delta closure: setup advisory survives fresh, unavailable, pending, later and held session verdicts', t => {
+  const tasks = require('../scripts/toolkit-tasks.cjs');
+  for (const scenario of ['fresh', 'unavailable', 'pending', 'held', 'later']) {
+    const f = answerFixture(t);
+    if (scenario === 'pending' || scenario === 'later') { f.ask(); f.say(scenario === 'pending' ? 'no' : 'later'); }
+    const home = path.join(f.ctx.root, 'home');
+    const opts = { ...f.options, sessionId: 'owner', programmeDeps: { home } };
+    if (scenario === 'fresh' || scenario === 'unavailable') opts.stateReader = () => ({ ...stateOf(f.ctx, f.cwd),
+      state: scenario === 'fresh' ? 'ENABLED' : 'UNAVAILABLE', rule: scenario === 'fresh' ? 'M1' : 'E1', programme_records_bind: false });
+    tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59',
+      purpose: 'Refresh programme', repository: 'example-owner/example-repo', created: '2026-10-01T00:00:00Z', created_by: 'toolkit-windows-tasks apply', model: null, effort: null, job: 'programme-sweep' }]);
+    const before = new gate.GovernanceGate(opts).evaluate(f.cwd, { sessionId: 'owner' });
+    const original = gate.sessionLine(f.cwd, opts);
+    for (const condition of ['needed', 'Private text', null]) {
+      tasks.writeLastRun('app-programme-sweep', { footer_setup: condition, summary: ['Private text'], reason: 'Private text' }, home);
+      const line = gate.sessionLine(f.cwd, opts);
+      assert.equal(line, condition === 'needed' ? `${original} ${tasks.FOOTER_SETUP_NOTE}` : original, scenario);
+      assert.doesNotMatch(line, /Private text/);
+      assert.deepEqual(new gate.GovernanceGate(opts).evaluate(f.cwd, { sessionId: 'owner' }), before);
+    }
+    for (const registry of ['missing', 'unreadable']) {
+      if (registry === 'missing') fs.unlinkSync(tasks.registryPath(home));
+      else fs.writeFileSync(tasks.registryPath(home), '{broken');
+      for (const repository of ['example-owner/example-repo', 'foreign/repo', null, ['example-owner/example-repo']]) {
+        tasks.writeLastRun('app-programme-sweep', { schema: 'toolkit.task-last-run.v1', id: 'app-programme-sweep', job: 'programme-sweep',
+          repository, footer_setup: 'needed', summary: ['Private text'] }, home);
+        const line = gate.sessionLine(f.cwd, opts);
+        assert.equal(line.includes(tasks.FOOTER_SETUP_NOTE), repository === 'example-owner/example-repo', `${scenario} ${registry}`);
+        assert.doesNotMatch(line, /Private text/);
+      }
+    }
+  }
+});
 const hostile = require('./support/hostile-inputs.cjs');
 const replyTicket = result => (/ ANSWER ([0-9a-f]{32})\n/.exec(result.context || '') || [])[1];
 function answerFixture(t, { remote = REMOTE } = {}) {

@@ -134,7 +134,8 @@ function expectErrors(expect, label) {
   const errors = [];
   if (!['allow', 'deny'].includes(expect.decision)) errors.push(`${label}.decision must be allow or deny`);
   if (expect.reason !== undefined && (typeof expect.reason !== 'string' || !/^[a-z0-9.-]+(?::failure)?$/.test(expect.reason))) errors.push(`${label}.reason is a hook name (the script file name without .cjs), with :failure when the host blocked because the hook itself failed`);
-  for (const key of Object.keys(expect)) if (!['decision', 'reason'].includes(key)) errors.push(`${label} has unknown key ${key}`);
+  if (expect.context_contains !== undefined && (typeof expect.context_contains !== 'string' || !expect.context_contains.trim())) errors.push(`${label}.context_contains must be nonempty text`);
+  for (const key of Object.keys(expect)) if (!['decision', 'reason', 'context_contains'].includes(key)) errors.push(`${label} has unknown key ${key}`);
   return errors;
 }
 
@@ -273,7 +274,12 @@ function hookDecision(host, hook, result) {
   if (result.status === 0 && result.stdout.trim()) { try { output = JSON.parse(result.stdout); } catch { output = null; } }
   const denied = output && (output.hookSpecificOutput?.permissionDecision === 'deny' || output.decision === 'block' || output.continue === false);
   if (result.status === 2 || denied) return { decision: 'deny', reason: name, text: (output?.hookSpecificOutput?.permissionDecisionReason || output?.reason || result.stderr || '').trim() };
-  if (result.status === 0) return { decision: 'allow' };
+  if (result.status === 0) {
+    // Codex SessionStart emits plain context; Claude Code emits additionalContext JSON.
+    const context = output?.hookSpecificOutput?.additionalContext
+      || (host === 'codex' && name === 'toolkit-codex-session-start' ? result.stdout.trim() : '');
+    return { decision: 'allow', ...(context ? { context } : {}) };
+  }
   // Any other exit, or a stop at the timeout: Claude Code blocks only where the hook says
   // onFailure: block; Codex blocks only on exit 2.
   if (host === 'claude' && hook.onFailure === 'block') return { decision: 'deny', reason: `${name}:failure` };
@@ -643,7 +649,8 @@ async function runOnHost(row, host, fixture, roots) {
   if (JSON.stringify(fixture.snapshot()) !== JSON.stringify(before)) problems.push('a fixture file changed');
   if (!hooks.length) problems.push(`no ${host} hook matches this call`);
   const deny = decisions.find(entry => entry.decision === 'deny');
-  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems };
+  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text,
+    context: decisions.map(entry => entry.context || '').join('\n'), failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems };
 }
 
 // The hosts a row is known to fail on (none for a passing row).
@@ -657,6 +664,7 @@ function meets(row, host, observed) {
   if (observed.problems.length) return false;
   if (row.fixture?.evidence_merge && observed.failed?.length) return false;
   if (observed.decision !== expect.decision) return false;
+  if (expect.context_contains && !observed.context?.includes(expect.context_contains)) return false;
   // A refusal only because a hook itself failed (onFailure: block) proves nothing about what the
   // hooks decide, so it meets a row only when the row names it.
   if (expect.reason === undefined) return !observed.reason?.endsWith(':failure');
@@ -666,6 +674,7 @@ function meets(row, host, observed) {
 function failureKind(row, host, observed) {
   const expect = row.expect_by_host?.[host] || row.expect;
   if (observed.problems.length) return observed.problems.join('; ');
+  if (expect.context_contains && !observed.context?.includes(expect.context_contains)) return 'required session advisory was absent';
   if (expect.decision === 'allow' && observed.decision === 'deny') return `false block (refused by ${observed.reason})`;
   if (expect.decision === 'deny' && observed.decision === 'allow') return `leak (allowed${observed.failed.length ? `; ${observed.failed.join(', ')} failed and the host ran the call` : ''})`;
   if (expect.reason === undefined) return `refused only because ${observed.reason.replace(/:failure$/, '')} itself failed; a row that expects that names the reason`;
