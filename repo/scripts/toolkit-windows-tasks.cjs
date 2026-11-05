@@ -7,10 +7,10 @@
 //   plan    [--repo-root <checkout>] [--folder <F>] [--json]
 //           read-only: the tasks Toolkit would keep for the checkout, what each needs (create,
 //           update, current or refused) and, when anything needs a change, the PowerShell line
-//           to run under the Toolkit task standing approval, or with approval. Setup prints this.
+//           to run under the Toolkit task standing approval, or with approval. Direct plan prints this.
 //   apply   [--repo-root <checkout>] [--folder <F>] [--no-first-run] [--repair-owned] [--json]
 //           creates or updates those tasks and records them in ~/.ai-agent-toolkit/user-state/tasks.json,
-//           then starts a new or changed programme sweep once and waits for its result. Agents may
+//           then starts a new or changed cleaner once and waits for its result. Agents may
 //           run the exact default-folder command under the global Toolkit task standing approval.
 //   remove  [--folder <F>] [--json]
 //           records durable owner stops before removing only Toolkit's owned tasks,
@@ -18,7 +18,7 @@
 //   adopt   --folder <F> --task <name> --id <id> --purpose <text> [--repository <owner/name>]
 //           records a task you made yourself so `toolkit tasks` lists it as known; Toolkit never
 //           changes or removes an adopted task.
-//   apply --repair-owned needs explicit approval naming both fixed tasks, paths and changes.
+//   apply --repair-owned needs explicit approval naming the affected fixed tasks, paths and changes.
 //           It repairs owned same-repository enrolments only; never an unowned task or corrupt registry.
 //
 // Tasks live in \<schedule_folder>\ (the merged binding's `schedule_folder`, else the repository
@@ -49,25 +49,22 @@ const STATUS_CONTROL_C_EXIT = 0xC000013A;
 const FIRST_RUN_WAIT_MS = 10 * 60 * 1000;
 const POLL_MS = 5000;
 
-// The jobs Toolkit registers. `applies` says whether a checkout gets the job, and why not.
-function governedTaskProblem({ governanceState, binding }) {
-  if (governanceState !== 'ENABLED') return `GitHub governance is ${governanceState || 'not readable'} here, so Toolkit tasks are not registered`;
-  if (!binding) return 'the binding merged on the default branch could not be read on this computer; run toolkit governance status online first';
-  return null;
-}
-
+// Fixed job definitions; desiredTasks and WindowsTaskOwner select one cleaner.
 const JOBS = Object.freeze({
   'programme-sweep': {
     task: 'PROGRAMME SWEEP',
-    schedule: Object.freeze({ kind: 'hourly', at: '08:00', hours: 16 }),
-    purpose: 'Brings the programme pages up to date, keeps the attention line and removes the cloud route footer from your own GitHub posts. No AI.',
-    applies: governedTaskProblem,
+    schedule: Object.freeze({ kind: 'hourly', at: '00:00', hours: 24 }),
+    purpose: 'Cleans your own GitHub posts first, then brings programme pages and attention up to date under governance guards. No AI.',
+  },
+  'footer-sweep': {
+    task: 'FOOTER SWEEP',
+    schedule: Object.freeze({ kind: 'hourly', at: '00:00', hours: 24 }),
+    purpose: 'Removes the cloud route footer from your own GitHub posts in this repository and its freshly verified evidence store. No AI.',
   },
   'shard-timings': {
     task: 'SHARD TIMINGS',
     schedule: Object.freeze({ kind: 'weekly', day: 'Monday', at: '09:15' }),
     purpose: 'Refreshes test times and opens a pull request when CI shards drift; no shards yet means no changes, and timing starts when the manifest becomes available in the registered checkout. No AI.',
-    applies: governedTaskProblem,
   },
 });
 
@@ -104,8 +101,9 @@ function parseMarker(description) {
 }
 
 function repositoryOf(identity) {
-  const parts = String(identity?.remote?.path || '').replace(/^\/+/, '').replace(/\.git$/i, '').split('/');
-  return parts.length === 2 && parts.every(Boolean) ? parts.join('/') : null;
+  if (identity?.valid !== true || !require('./toolkit-governance-state.cjs').isGitHubHost(identity.remote?.host)) return null;
+  const slug = String(identity.remote.path || '').replace(/^\//, '').replace(/\/$/, '').replace(/\.git$/i, '');
+  return /^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(slug) && !['.', '..'].includes(slug.split('/')[1]) ? slug : null;
 }
 
 const samePath = (a, b) => typeof a === 'string' && typeof b === 'string' && path.win32.normalize(a).replace(/\\+$/, '').toLowerCase() === path.win32.normalize(b).replace(/\\+$/, '').toLowerCase();
@@ -143,22 +141,41 @@ function readLocations({ checkout, toolkitRoot, home = os.homedir() }, deps = {}
   if (!samePath(managed, toolkit) || !samePath(realpath(toolkitRoot), managed)) throw new WindowsTasksError('invoke the recorded managed Toolkit checkout', 1);
   // Inspect the source repository as well as its location; an arbitrary repository is not Toolkit.
   const result = (deps.run || spawnSync)('git', ['-C', toolkit, 'config', '--get', 'remote.origin.url'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
-  if (result.error || result.status !== 0 || !/^(?:https:\/\/github\.com\/|git@github\.com:)weijunswj\/ai-agent-toolkit(?:\.git)?\s*$/i.test(String(result.stdout))) throw new WindowsTasksError('the managed checkout is not the expected Toolkit repository', 1);
+  const remote = require('./toolkit-repository-identity.cjs').validateRemoteIdentity(String(result.stdout || '').trim());
+  if (result.error || result.status !== 0 || repositoryOf({ valid: remote.valid, remote })?.toLowerCase() !== 'weijunswj/ai-agent-toolkit') throw new WindowsTasksError('the managed checkout is not the expected Toolkit repository', 1);
   return { toolkitRoot: toolkit, checkout: primary(checkout) };
 }
 
 // What the checkout's governance says: { root, repository, governanceState, binding }.
+function readTaskObservation(identity, home = os.homedir(), now = new Date()) {
+  const governance = require('./toolkit-governance-state.cjs');
+  const cache = require('./toolkit-governance-binding.cjs');
+  return governance.judgeMerged(cache.readBindingCache(identity, tasks.userStateDir(home)), identity, now);
+}
+
 function readCheckout(checkout, deps = {}) {
   const governance = deps.governance || require('./toolkit-governance-state.cjs');
-  const identity = governance.readIdentity(checkout);
-  if (!identity.valid) return { root: identity.root || null, repository: null, governanceState: null, binding: null };
-  let state = null;
-  try { state = governance.governanceState(identity.root).state; } catch { state = null; }
-  let binding = null;
-  try { binding = governance.mergedBinding(identity.root); } catch { /* unreadable grants nothing */ }
+  let identity;
+  try { identity = governance.readIdentity(checkout); } catch { return { root: null, refusal: 'checkout identity could not be read' }; }
   const repository = repositoryOf(identity);
-  if (binding && String(binding.repository).toLowerCase() !== String(repository).toLowerCase()) throw new WindowsTasksError('origin identity and merged binding repository disagree', 1);
-  return { root: identity.root, repository, governanceState: state, binding };
+  if (!repository) return { root: null, repository: null, refusalCode: identity?.valid || identity?.reason === 'origin-unsupported' ? 'no-github-origin' : null, refusal: 'no usable github.com origin repository' };
+  let status = null;
+  let observation = null;
+  try { status = governance.governanceState(identity.root); } catch { /* unreadable grants nothing */ }
+  try { observation = (deps.readObservation || governance.readObservation || readTaskObservation)(identity, deps.home, deps.now ? deps.now() : new Date()); } catch { /* unreadable grants nothing */ }
+  let binding = observation?.binding || null;
+  if (binding) {
+    if (String(binding.repository).toLowerCase() !== repository.toLowerCase()) throw new WindowsTasksError('origin identity and merged binding repository disagree', 1);
+    let source = binding;
+    if (source.schema === 'toolkit.programme-binding.v2') { const { parent_issue, record_prefix, writer_prefix, ...rest } = source; source = rest; }
+    if (require('./toolkit-governance-state.cjs').bindingProblems(source, identity).length) { binding = null; observation = null; }
+  }
+  const merged = status?.merged;
+  const certain = merged?.fresh === true && observation?.fresh === true && merged.status === observation.status
+    && ((status.state === 'ENABLED' && observation.status === 'enabled' && binding)
+      || (['DISABLED', 'UNDECIDED'].includes(status.state) && observation.status === 'none')
+      || (status.state === 'DISABLED' && observation.status === 'disabled' && binding));
+  return { root: identity.root, repository, governanceState: status?.state || null, binding, certain: Boolean(certain) };
 }
 
 function folderForCheckout(checkout, deps = {}) {
@@ -180,16 +197,17 @@ function durationText(iso) {
 const DAYS = Object.freeze(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
 const timeOf = start => (/T(\d{2}:\d{2})/.exec(String(start || '')) || [])[1] || '?';
 
-// One plain line for a task's triggers, such as "hourly, 08:00 to 23:59".
+// One plain line for a task's triggers, such as "hourly, 00:00 to 23:59".
 function describeTriggers(triggers) {
   const list = Array.isArray(triggers) ? triggers : triggers ? [triggers] : [];
   return list.map((trigger) => {
     const at = timeOf(trigger.start);
     const kind = String(trigger.kind || '');
     const every = durationText(trigger.interval);
-    if (/Daily/.test(kind) && trigger.interval === 'PT1H' && /^PT\d+H$/.test(String(trigger.duration))) {
+    const durationHours = trigger.duration === 'P1D' ? 24 : /^PT\d+H$/.test(String(trigger.duration)) ? Number(/\d+/.exec(trigger.duration)[0]) : null;
+    if (/Daily/.test(kind) && trigger.interval === 'PT1H' && durationHours !== null) {
       const [hours, minutes] = at.split(':').map(Number);
-      const end = (hours + Number(/\d+/.exec(trigger.duration)[0])) * 60 + minutes - 1;
+      const end = (hours + durationHours) * 60 + minutes - 1;
       return `hourly, ${at} to ${String(Math.floor(end / 60) % 24).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
     }
     if (/Daily/.test(kind)) return `daily at ${at}${every ? `, every ${every}` : ''}`;
@@ -227,20 +245,19 @@ function definitionDigest(definition) {
 }
 
 // { folder, repository, wanted: [definitions], skipped: [{ job, reason }] } for a checkout.
-function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__dirname, '..', '..'), nodePath = process.execPath, systemRoot = process.env.SystemRoot || 'C:\\Windows', home, deps = {} }) {
+function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__dirname, '..', '..'), nodePath = process.execPath, systemRoot = process.env.SystemRoot || 'C:\\Windows', home, checkoutRead = null, deps = {} }) {
   const identityReader = deps.identityReader || readLocations;
   const locations = identityReader({ checkout, toolkitRoot, home });
   checkout = locations.checkout;
   toolkitRoot = locations.toolkitRoot;
-  const read = readCheckout(checkout, deps);
+  const read = checkoutRead || readCheckout(checkout, { ...deps, home });
   if (!read.root) throw new WindowsTasksError(`${checkout} is not inside a git repository with an origin remote`);
   const chosen = folder || (read.binding && read.binding.schedule_folder) || defaultFolder(read.repository);
   if (!chosen || !FOLDER.test(chosen)) throw new WindowsTasksError(`no usable task folder for this repository (got ${JSON.stringify(chosen)}); set schedule_folder in its binding or pass --folder`);
   const wanted = [];
   const skipped = [];
+  const definitions = [];
   for (const [job, spec] of Object.entries(JOBS)) {
-    const reason = spec.applies({ checkout: read.root, governanceState: read.governanceState, binding: read.binding });
-    if (reason) { skipped.push({ job, name: taskName(chosen, job), reason }); continue; }
     const name = taskName(chosen, job);
     const problem = nameProblem(name);
     if (problem) throw new WindowsTasksError(`task name ${JSON.stringify(name)} ${problem}`);
@@ -256,9 +273,12 @@ function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__di
     quotePath(toolkitRoot, 'the Toolkit checkout');
     definition.def = definitionDigest(definition);
     definition.description = `${chosen}: ${spec.task}. ${spec.purpose} [toolkit-task v1 id=${id} def=${definition.def}]`;
-    wanted.push(definition);
+    definitions.push(definition);
+    const selected = read.certain && (read.governanceState === 'ENABLED' ? job !== 'footer-sweep' : job === 'footer-sweep');
+    if (selected) wanted.push(definition);
+    else if (job !== 'footer-sweep') skipped.push({ job, name, reason: read.certain ? 'governance is not enabled; the footer-only cleaner is selected' : 'fresh matching merged governance could not be verified; registration held' });
   }
-  return { folder: chosen, repository: read.repository, root: read.root, wanted, skipped, identityReader, locations: { checkout, toolkitRoot, home } };
+  return { folder: chosen, repository: read.repository, root: read.root, wanted, skipped, definitions, read, folderOverride: folder, checkoutDeps: deps, identityReader, locations: { checkout, toolkitRoot, home } };
 }
 
 function describeSchedule(schedule) {
@@ -398,19 +418,59 @@ const sameDefinition = (a, b) => JSON.stringify(ordered(a)) === JSON.stringify(o
 // Owns preflight, persistence and scheduler effects. Every command gets explicit boundaries;
 // tests substitute all four effect/identity/clock dependencies, never the user's scheduler/home.
 class WindowsTaskOwner {
-  constructor({ scheduler, home, registry = tasks, identityReader, now = () => new Date(), repairOwned = false, firstRunOptions = null }) {
-    Object.assign(this, { scheduler, home, registry, identityReader, now, repairOwned, firstRunOptions });
+  constructor({ scheduler, home, registry = tasks, identityReader, now = () => new Date(), repairOwned = false, firstRunOptions = null, takeLock = null }) {
+    Object.assign(this, { scheduler, home, registry, identityReader, now, repairOwned, firstRunOptions, takeLock });
   }
   plan(desired) {
     (this.identityReader || desired.identityReader || readLocations)({ ...desired.locations, home: this.home });
+    const plannedRead = desired.read;
+    const currentRead = desired.read ? readCheckout(desired.root, { ...desired.checkoutDeps, home: this.home }) : null;
+    desired = currentRead ? { ...desired, read: currentRead } : desired;
     const registry = this.registry.readRegistry(this.home);
     const entries = registry.status === 'ok' ? registry.tasks : [];
-    const live = this.scheduler.list(desired.folder);
-    const items = desired.wanted.map(definition => {
+    // Choose an already enrolled shape before considering governance. Stops are enrolments too.
+    const cleaners = entries.filter(entry => entry.host === 'windows' && isCleaner(entry.job)
+      && String(entry.repository).toLowerCase() === desired.repository.toLowerCase());
+    const selected = cleaners.length === 1 ? cleaners[0] : null;
+    const folder = selected && !desired.folderOverride ? selected.folder : desired.folder;
+    const definitions = [...desired.wanted, ...(desired.definitions || []).filter(d => !desired.wanted.some(w => w.job === d.job))];
+    const build = definition => {
+      if (definition.folder === folder) return definition;
+      const name = taskName(folder, definition.job), id = taskId(folder, definition.job);
+      const updated = { ...definition, folder, name, id, arguments: definition.arguments.replace(/--task-id [a-z0-9-]+$/, `--task-id ${id}`) };
+      updated.def = definitionDigest(updated);
+      updated.description = `${folder}: ${JOBS[updated.job].task}. ${updated.purpose} [toolkit-task v1 id=${id} def=${updated.def}]`;
+      return updated;
+    };
+    const wanted = selected ? definitions.filter(d => d.job === selected.job || d.job === 'shard-timings' && desired.read?.certain && desired.read.governanceState === 'ENABLED').map(build) : desired.wanted;
+    const live = this.scheduler.list(folder);
+    // Search marked folders and recorded folders, never import/adopt a discovered task.
+    const folders = new Set([folder, ...entries.filter(e => e.host === 'windows').map(e => e.folder), ...this.scheduler.markedFolders()]);
+    let conflict = cleaners.length > 1 ? 'conflicting cleaner enrolments; explicit owner recovery is required' : null;
+    for (const otherFolder of folders) for (const task of otherFolder === folder ? live : this.scheduler.list(otherFolder)) {
+      const marker = parseMarker(task.description);
+      const matched = definitions.find(d => isCleaner(d.job) && (sameTaskName(task.name, taskName(otherFolder, d.job)) || marker?.id === taskId(otherFolder, d.job)));
+      if (!matched) continue;
+      const target = /--repo-root "([^"\r\n]+)"/.exec(String(task.arguments || ''))?.[1];
+      let repository = null;
+      try { if (target) repository = repositoryOf((desired.checkoutDeps?.governance || require('./toolkit-governance-state.cjs')).readIdentity(target)); } catch { /* unknown target cannot prove this enrolment */ }
+      const relevant = otherFolder === folder || repository?.toLowerCase() === desired.repository.toLowerCase();
+      if (!relevant) continue;
+      const record = entries.find(e => e.host === 'windows' && e.folder === otherFolder && e.name === task.name);
+      if ((!record || record.adopted || !marker || marker.id !== record.id) && !wanted.some(d => d.folder === otherFolder && sameTaskName(d.name, task.name))) conflict = 'foreign or unrecorded cleaner conflict; left alone';
+      else if (record && !wanted.some(d => d.id === record.id)) conflict = 'another cleaner is enrolled for this repository; explicit owner recovery is required';
+    }
+    const items = wanted.map(definition => {
       const existing = live.find(task => sameTaskName(task.name, definition.name));
       const recorded = entries.find(entry => entry.id === definition.id);
       const refuse = reason => ({ definition, action: 'refused', reason });
       if (registry.status !== 'ok') return refuse('task registry could not be read');
+      if (conflict) return refuse(conflict);
+      if (currentRead && JSON.stringify([currentRead.repository, currentRead.certain, currentRead.governanceState, currentRead.binding]) !== JSON.stringify([plannedRead.repository, plannedRead.certain, plannedRead.governanceState, plannedRead.binding])) return refuse('origin or governance changed after planning; run a fresh plan');
+      if (currentRead && (!currentRead.repository || currentRead.repository.toLowerCase() !== definition.repository.toLowerCase())) return refuse('repository origin changed; left alone');
+      if (recorded?.stopped_by_owner && !this.repairOwned) return refuse('stopped by owner');
+      if (desired.read && !desired.read.certain) return refuse('fresh matching merged governance could not be verified; existing shape and folder retained');
+      if (definition.job !== 'footer-sweep' && desired.read && desired.read.governanceState !== 'ENABLED') return refuse('governance is not enabled; installed programme cleaner retained without registration changes');
       if (entries.some(entry => entry.host === 'windows' && !entry.adopted && entry.job === definition.job
         && String(entry.repository).toLowerCase() === String(definition.repository).toLowerCase() && entry.id !== definition.id)) return refuse('this repository already has this job enrolled in another folder; ask owner to reconcile it');
       if (recorded && (recorded.adopted || recorded.host !== 'windows' || recorded.folder !== definition.folder || recorded.name !== definition.name)) return refuse('adopted or unowned enrolment; Toolkit leaves it alone');
@@ -434,10 +494,24 @@ class WindowsTaskOwner {
     });
     // A conflict or stop on either fixed job holds the entire command, including current jobs.
     const blocked = items.find(item => item.action === 'refused');
-    if (blocked) for (const item of items) if (item.action !== 'refused') Object.assign(item, { action: 'refused', reason: `both jobs held: ${blocked.reason}` });
-    return { folder: desired.folder, repository: desired.repository, registry: registry.status, items, skipped: desired.skipped };
+    if (blocked) for (const item of items) if (item.action !== 'refused') Object.assign(item, { action: 'refused', reason: `all selected jobs held: ${blocked.reason}` });
+    return { folder, repository: desired.repository, registry: registry.status, items,
+      approval: items.length && !items.some(item => item.action === 'refused') ? desired.folderOverride || this.repairOwned ? 'explicit approval required' : 'standing approval with verified ownership' : 'verification held; no standing action',
+      coverage: selected?.job === 'footer-sweep' && desired.read?.governanceState === 'ENABLED' ? 'Programme refresh coverage is missing; the installed footer-only cleaner stays selected.' : null,
+      skipped: items.length ? [] : desired.skipped };
   }
   apply(desired) {
+    // Identity/ownership refusals precede even the local apply-lock write. Recheck under lock.
+    const preview = this.plan(desired);
+    if (preview.registry !== 'ok') throw new WindowsTasksError(`the task registry ${tasks.registryPath(this.home)} could not be read, so no task was changed`, 1);
+    if (preview.skipped.length || preview.items.some(item => item.action === 'refused')) return { ...preview, refused: true };
+    const takeLock = this.takeLock || require('../../skills/github-program-reconciler/scripts/programme-lock.cjs').takeLock;
+    const file = path.join(tasks.userStateDir(this.home), 'tasks', `apply-${crypto.createHash('sha256').update(desired.repository.toLowerCase()).digest('hex').slice(0, 20)}.lock`);
+    const lock = takeLock(file);
+    if (!lock) throw new WindowsTasksError('another task apply is running for this repository', 1);
+    try { return this.applyLocked(desired); } finally { lock.release(); }
+  }
+  applyLocked(desired) {
     const plan = this.plan(desired);
     if (plan.registry !== 'ok') throw new WindowsTasksError(`the task registry ${tasks.registryPath(this.home)} could not be read, so no task was changed`, 1);
     if (plan.skipped.length) return { ...plan, refused: true };
@@ -494,8 +568,8 @@ class WindowsTaskOwner {
         return { ...plan, items: results };
       }
     }
-    // Both jobs have been registered and read back before the potentially ten-minute wait.
-    const sweep = results.find(item => item.definition.job === 'programme-sweep' && item.action !== 'current');
+    // All selected jobs have been registered and read back before the potentially ten-minute wait.
+    const sweep = results.find(item => isCleaner(item.definition.job) && item.action !== 'current');
     if (sweep && this.firstRunOptions) {
       try { sweep.first_run = firstRun(sweep.definition, { scheduler: this.scheduler, home: this.home, now: this.now, ...this.firstRunOptions,
         beforeStart: () => { if (this.plan(desired).items.some(item => item.action !== 'current')) throw new Error('task definition or owner choice changed; no first start'); },
@@ -532,6 +606,8 @@ class WindowsTaskOwner {
   }
 }
 
+function isCleaner(job) { return job === 'programme-sweep' || job === 'footer-sweep'; }
+
 function verifiedDefinition(live, definition) {
   if (!live || live.state === 'Disabled' || live.description !== definition.description) return false;
   const actions = enrolledDefinition(live).actions;
@@ -543,7 +619,7 @@ function verifiedDefinition(live, definition) {
   if (live.principal && (live.principal.logon_type !== 'Interactive' || live.principal.run_level !== 'Limited')) return false;
   if (live.settings && (!live.settings.enabled || !live.settings.start_when_available || live.settings.multiple_instances !== 'IgnoreNew'
     || live.settings.execution_time_limit !== 'PT30M' || live.settings.disallow_start_if_on_batteries || live.settings.stop_if_going_on_batteries)) return false;
-  return definition.schedule.kind === 'hourly' ? /Daily/.test(tr.kind) && tr.interval === 'PT1H' && tr.duration === `PT${definition.schedule.hours}H`
+  return definition.schedule.kind === 'hourly' ? /Daily/.test(tr.kind) && tr.interval === 'PT1H' && (tr.duration === `PT${definition.schedule.hours}H` || definition.schedule.hours === 24 && tr.duration === 'P1D')
     : /Weekly/.test(tr.kind) && Number(tr.days_of_week) === 2 && (tr.weeks_interval === undefined || Number(tr.weeks_interval) === 1);
 }
 
@@ -635,10 +711,12 @@ function describePlan(plan, { command = null, applied = false } = {}) {
     if (item.backup) lines.push(`  Previous task and enrolment backup: ${item.backup}`);
     if (item.first_run) lines.push(`  First run: ${item.first_run.status}${item.first_run.detail ? ` (${item.first_run.detail})` : ''}.`);
   }
+  if (plan.coverage) lines.push(plan.coverage);
+  if (plan.approval) lines.push(`Approval: ${plan.approval}.`);
   for (const item of plan.skipped) lines.push(`- ${item.name}: not registered, because ${item.reason}.`);
-  if (!applied && command && / --(?:folder|repair-owned)\b/.test(command)) lines.push('This folder override or repair is outside standing approval. Explicit approval must name both fixed tasks, paths and changes.');
+  if (!applied && command && / --(?:folder|repair-owned)\b/.test(command)) lines.push('This folder override or repair is outside standing approval. Explicit approval must name the affected fixed tasks, paths and changes.');
   if (!applied && command && plan.items.some(item => item.action === 'create' || item.action === 'update')) {
-    lines.push('', 'An eligible local agent can register these fixed jobs from the recorded managed Toolkit checkout against this repository main checkout. Owner stops, edited tasks and host denials need the owner or host to resolve them. Both jobs register first; the first programme sweep can then take up to ten minutes. Registration alone does not prove a completed first run:', '', `    ${command}`);
+    lines.push('', 'An eligible local agent can register these fixed jobs from the recorded managed Toolkit checkout against this repository main checkout. Owner stops, edited tasks and host denials need the owner or host to resolve them. All selected jobs register first; the first cleaner can then take up to ten minutes. Registration alone does not prove a completed first run:', '', `    ${command}`);
   }
   return lines;
 }
@@ -648,7 +726,7 @@ function describePlan(plan, { command = null, applied = false } = {}) {
 const COMMANDS = Object.freeze(['plan', 'apply', 'remove', 'adopt']);
 const VALUE_FLAGS = Object.freeze({ plan: ['--repo-root', '--folder'], apply: ['--repo-root', '--folder'], remove: ['--folder'], adopt: ['--folder', '--task', '--id', '--purpose', '--repository'] });
 const USAGE = 'Usage: node repo/scripts/toolkit-windows-tasks.cjs plan|apply [--repo-root <checkout>] [--folder <F>] [--no-first-run] [--repair-owned] [--json]\n'
-  + '       --repair-owned needs explicit approval naming both fixed tasks, paths and changes; it grants no native permission.\n'
+  + '       --repair-owned needs explicit approval naming the affected fixed tasks, paths and changes; it grants no native permission.\n'
   + '       node repo/scripts/toolkit-windows-tasks.cjs remove [--folder <F>] [--json]\n'
   + '       node repo/scripts/toolkit-windows-tasks.cjs adopt --folder <F> --task <name> --id <id> --purpose <text> [--repository <owner/name>]\n';
 
@@ -689,13 +767,14 @@ function main(argv = process.argv.slice(2), deps = {}) {
     if (options.command === 'plan') {
       const desired = desiredTasks(desiredOptions);
       const plan = planTasks(desired, { scheduler, home, registry: deps.registry, identityReader: deps.identityReader });
-      const command = applyCommand(desired, { toolkitRoot: deps.toolkitRoot, folderOverride: options.folder, home });
+      const command = plan.items.some(item => ['create', 'update'].includes(item.action)) ? applyCommand(desired, { toolkitRoot: deps.toolkitRoot, folderOverride: options.folder, home }) : null;
       print({ ...plan, command }, describePlan(plan, { command }));
       return plan.items.some(item => item.action === 'refused') ? 1 : 0;
     }
     if (options.command === 'apply') {
       const desired = desiredTasks(desiredOptions);
       const result = applyTasks(desired, { scheduler, home, registry: deps.registry, identityReader: deps.identityReader, repairOwned: options.repairOwned, now: deps.now, firstRunOptions: options.firstRun ? (deps.firstRunOptions || {}) : null });
+      if (!options.firstRun && result.approval === 'standing approval with verified ownership') result.approval = 'explicit approval required; first-result verification was skipped';
       print(result, describePlan(result, { applied: true }));
       return result.refused || result.items.some(item => item.action === 'refused' || item.done === false || (item.first_run && item.first_run.status === 'failed')) ? 1 : 0;
     }
@@ -719,7 +798,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
 if (require.main === module) process.exitCode = main();
 
 module.exports = {
-  WindowsTaskOwner, readLocations, mainCheckout, samePath, enrolledDefinition, verifiedDefinition, JOBS, FOLDER, MARKER, STATUS_CONTROL_C_EXIT, WindowsTasksError, defaultFolder, nameProblem, taskName, taskId, parseMarker, readCheckout, folderForCheckout,
+  WindowsTaskOwner, repositoryOf, readTaskObservation, readLocations, mainCheckout, samePath, enrolledDefinition, verifiedDefinition, JOBS, FOLDER, MARKER, STATUS_CONTROL_C_EXIT, WindowsTasksError, defaultFolder, nameProblem, taskName, taskId, parseMarker, readCheckout, folderForCheckout,
   describeTriggers, describeResult, describeSchedule, desiredTasks, definitionDigest, powerShellScheduler, runPowerShell, SCRIPTS, planTasks, applyTasks, firstRun,
   removeTasks, adoptTask, applyCommand, powerShellPath, describePlan, parseArgs, main,
 };

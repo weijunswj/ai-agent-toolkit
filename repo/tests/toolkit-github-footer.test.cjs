@@ -221,6 +221,8 @@ function fakeGh(state) {
   const lines = (items) => items.map((item) => JSON.stringify(item)).join('\n') + (items.length ? '\n' : '');
   const gh = (args, input) => {
     calls.push({ args, input });
+    assert.deepEqual(args.slice(-2), ['--hostname', 'github.com']);
+    if (args[1] === 'repos/acme/app') return JSON.stringify({ full_name: 'repository' in state ? state.repository : 'acme/app' });
     if (args[1] === 'user') return 'me\n';
     if (args[1] === '--paginate') {
       const endpoint = args[2];
@@ -242,6 +244,22 @@ function fakeGh(state) {
   };
   return { gh, calls };
 }
+
+test('repository metadata and explicit API host prevent foreign target edits', () => {
+  for (const repository of ['acme/app', 'ACME/APP', 'foreign/repo', null]) {
+    const state = sampleState();
+    state.repository = repository;
+    const fake = fakeGh(state);
+    const results = sweep.sweep(sweep.parseArgs(['--repo', 'acme/app', '--apply']), { gh: fake.gh });
+    const accepted = ['acme/app', 'ACME/APP'].includes(repository);
+    assert.equal(fake.calls.some(call => call.args[1] === '-X'), accepted);
+    if (!accepted) {
+      assert.equal(results[0].status, 'FAILED');
+      assert.equal(results[0].reason, 'repository-identity-mismatch');
+    }
+    assert.ok(fake.calls.every(call => call.args.slice(-2).join(' ') === '--hostname github.com'));
+  }
+});
 
 // The body each post's edit path holds before any write.
 function stored(state) {

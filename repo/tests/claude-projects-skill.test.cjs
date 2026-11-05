@@ -774,10 +774,12 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
 });
 
 test('on a Windows device every governed repository gets its own programme sweep line, not only Toolkit', () => {
-  // Setup plans tasks only for the managed Toolkit checkout, so another governed repository's line
-  // comes from the read-only plan command run against that repository's checkout.
+  // Setup reports the managed and original project repositories; direct plan remains available.
   const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
-  assert.match(recurring, /Toolkit setup on the device lists it for the Toolkit repository only/);
+  assert.match(recurring, /Setup reports the managed repository and the original project/);
+  assert.match(recurring, /only PROGRAMME SWEEP counts as programme refresh coverage/);
+  assert.match(recurring, /fresh matching disabled binding or freshly confirmed binding absence/);
+  assert.match(recurring, /never repeat it after an owner stop/);
   assert.match(recurring, /recorded managed Toolkit checkout[\s\S]*main checkout, never a linked worktree/);
   assert.match(recurring, /read-only plan command `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <repo>`/);
   assert.match(recurring, /run exactly `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>`/);

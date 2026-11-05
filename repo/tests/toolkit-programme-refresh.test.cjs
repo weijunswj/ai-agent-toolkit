@@ -11,6 +11,7 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const state = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const cli = require('../../skills/github-program-reconciler/scripts/programme.cjs');
+const passLock = require('../../skills/github-program-reconciler/scripts/programme-lock.cjs');
 const trigger = require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs');
 const hook = require('../scripts/toolkit-programme-checkpoint-hook.cjs');
 const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
@@ -21,6 +22,27 @@ const GOVERNED = () => ({ state: 'ENABLED', governed_rules_bind: true, programme
 const temps = [];
 const tmp = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-refresh-')); temps.push(dir); return dir; };
 test.after(() => { for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true }); });
+
+test('the programme CLI shares the standalone lock and preserves its serialized file format', () => {
+  for (const name of ['takeLock', 'lockState', 'LOCK_STALE_MS', 'LOCK_ABANDONED_MS']) {
+    assert.equal(cli[name], passLock[name], name);
+  }
+  const file = path.join(tmp(), 'pass.lock');
+  const boot = { bootId: 'test-boot', uptime: 120 };
+  const nowMs = Date.parse('2026-01-01T00:00:00.000Z');
+  const handle = cli.takeLock(file, { nowMs, boot });
+  try {
+    assert.match(handle.token, /^[0-9a-f]{32}$/);
+    assert.equal(fs.readFileSync(file, 'utf8'), JSON.stringify({
+      schema: 'toolkit.programme-pass-lock.v1', token: handle.token, pid: process.pid,
+      host: os.hostname(), boot_id: boot.bootId, uptime: boot.uptime, at: new Date(nowMs).toISOString(),
+    }));
+    assert.equal(handle.owns(), true);
+  } finally {
+    handle.release();
+  }
+  assert.equal(fs.existsSync(file), false);
+});
 
 function fixture({ held = 'controller' } = {}) {
   if (held === true) held = 'controller';
