@@ -414,8 +414,9 @@ function isCredentialError(message = '') {
   );
 }
 
-function fetchWithCredentialFallback(repoPath, branch) {
-  const defaultFetch = gitCommand(repoPath, ['fetch', 'origin', branch], { timeout: 120000 });
+function fetchWithCredentialFallback(repoPath, branch, fetchRef) {
+  const refspec = `${branch}:${fetchRef}`;
+  const defaultFetch = gitCommand(repoPath, ['fetch', 'origin', refspec], { timeout: 120000 });
   if (defaultFetch.ok) return defaultFetch;
 
   let lastError = commandOutput(defaultFetch);
@@ -424,7 +425,7 @@ function fetchWithCredentialFallback(repoPath, branch) {
   for (const helper of GIT_CREDENTIAL_HELPERS) {
     const fallback = gitCommand(
       repoPath,
-      ['-c', `credential.helper=${helper}`, 'fetch', 'origin', branch],
+      ['-c', `credential.helper=${helper}`, 'fetch', 'origin', refspec],
       { timeout: 120000 }
     );
     if (fallback.ok) return fallback;
@@ -606,38 +607,44 @@ function validateAndUpdateRepo(state, args = {}) {
     branchSwitchedFrom = currentBranch;
   }
   const fromCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read current commit');
-  const fetchResult = fetchWithCredentialFallback(repoPath, branch);
-  if (!fetchResult.ok) {
-    const fetchError = commandOutput(fetchResult) || 'fetch failed';
-    const credentialHint = isCredentialError(fetchError)
-      ? `\nCredential hint: fetch failed in this environment. Run this command from the same shell/profile that already works for git fetch, or run \`gh auth login\` in this context, then rerun setup/refresh.`
-      : '';
-    throw repoUpdateError('skipped', `git fetch origin ${branch} failed: ${fetchError}${credentialHint}`, {
-      fromCommit,
-      branchSwitchedFrom,
-      error: 'fetch failed'
-    });
-  }
-  const fetchedCommit = requireGit(repoPath, ['rev-parse', 'FETCH_HEAD'], 'read fetched commit');
-  const ancestor = gitCommand(repoPath, ['merge-base', '--is-ancestor', fromCommit, fetchedCommit]);
-  if (!ancestor.ok) {
-    throw repoUpdateError('skipped', 'fetched update is not a fast-forward from the current repo commit', {
-      fromCommit,
-      toCommit: fetchedCommit,
-      branchSwitchedFrom,
-      error: 'not fast-forward'
-    });
-  }
-  if (fromCommit !== fetchedCommit) {
-    const merge = gitCommand(repoPath, ['merge', '--ff-only', 'FETCH_HEAD'], { timeout: 120000 });
-    if (!merge.ok) {
-      throw repoUpdateError('skipped', `git merge --ff-only FETCH_HEAD failed: ${commandOutput(merge)}`, {
+  // FETCH_HEAD is shared by unrelated fetches, including those in other worktrees.
+  const fetchRef = `refs/toolkit/fetch/${process.pid}-${crypto.randomBytes(12).toString('hex')}`;
+  try {
+    const fetchResult = fetchWithCredentialFallback(repoPath, branch, fetchRef);
+    if (!fetchResult.ok) {
+      const fetchError = commandOutput(fetchResult) || 'fetch failed';
+      const credentialHint = isCredentialError(fetchError)
+        ? `\nCredential hint: fetch failed in this environment. Run this command from the same shell/profile that already works for git fetch, or run \`gh auth login\` in this context, then rerun setup/refresh.`
+        : '';
+      throw repoUpdateError('skipped', `git fetch origin ${branch} failed: ${fetchError}${credentialHint}`, {
+        fromCommit,
+        branchSwitchedFrom,
+        error: 'fetch failed'
+      });
+    }
+    const fetchedCommit = requireGit(repoPath, ['rev-parse', `${fetchRef}^{commit}`], 'read fetched commit');
+    const ancestor = gitCommand(repoPath, ['merge-base', '--is-ancestor', fromCommit, fetchedCommit]);
+    if (!ancestor.ok) {
+      throw repoUpdateError('skipped', 'fetched update is not a fast-forward from the current repo commit', {
         fromCommit,
         toCommit: fetchedCommit,
         branchSwitchedFrom,
-        error: 'fast-forward failed'
+        error: 'not fast-forward'
       });
     }
+    if (fromCommit !== fetchedCommit) {
+      const merge = gitCommand(repoPath, ['merge', '--ff-only', fetchedCommit], { timeout: 120000 });
+      if (!merge.ok) {
+        throw repoUpdateError('skipped', `git merge --ff-only FETCH_HEAD failed: ${commandOutput(merge)}`, {
+          fromCommit,
+          toCommit: fetchedCommit,
+          branchSwitchedFrom,
+          error: 'fast-forward failed'
+        });
+      }
+    }
+  } finally {
+    requireGit(repoPath, ['update-ref', '-d', fetchRef], 'remove owned fetch ref');
   }
   const toCommit = requireGit(repoPath, ['rev-parse', 'HEAD'], 'read updated commit');
   const changedFiles = changedFilesBetween(repoPath, fromCommit, toCommit);

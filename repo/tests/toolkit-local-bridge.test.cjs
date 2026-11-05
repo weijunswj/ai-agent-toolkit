@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const test = require('node:test');
+const { fetchFixture, foreignFetch, loadWithCommands } = require('./support/toolkit-fetch-race-fixture.cjs');
 const {
   run: runBridge,
   runRepoValidation,
@@ -52,6 +53,62 @@ const {
   createRepoAutoUpdateFixture,
   currentCommit
 } = require('./support/toolkit-local-bridge-fixture.cjs');
+
+for (const mode of ['after-fetch', 'after-ancestry', 'credential-fallback', 'fetch-failure', 'ancestry-failure', 'merge-failure']) {
+  test(`repo update owns its fetched commit: ${mode}`, () => {
+    const fixture = fetchFixture();
+    try {
+      if (mode === 'ancestry-failure') {
+        writeFile(path.join(fixture.repo, 'local.txt'), 'local divergence\n');
+        commitAll(fixture.repo, 'local divergence');
+      }
+      const before = currentCommit(fixture.repo);
+      const fetchRefs = [];
+      let injected = false;
+      let ancestryTarget;
+      let mergeTarget;
+      const invoke = (program, args, options) => {
+        if (!/^git(?:\.exe)?$/i.test(path.basename(program))) return spawnSync(program, args, options);
+        const fetch = args.includes('fetch');
+        if (fetch) {
+          fetchRefs.push(args.at(-1));
+          if (mode === 'fetch-failure') return spawnSync(program, ['fetch', 'origin', 'refs/heads/missing'], options);
+          if (mode === 'credential-fallback' && fetchRefs.length === 1) return { status: 1, stdout: '', stderr: 'could not read Username' };
+        }
+        if (args[0] === 'merge') {
+          mergeTarget = args.at(-1);
+          if (mode === 'merge-failure') return { status: 1, stdout: '', stderr: 'injected merge failure' };
+        }
+        if (args[0] === 'merge-base') ancestryTarget = args.at(-1);
+        const result = spawnSync(program, args, options);
+        const atFetch = fetch && result.status === 0 && mode !== 'after-ancestry';
+        const atAncestry = args[0] === 'merge-base' && mode === 'after-ancestry';
+        if (!injected && (atFetch || atAncestry)) { foreignFetch(fixture); injected = true; }
+        return result;
+      };
+      const bridge = loadWithCommands('toolkit-local-bridge.cjs', ['validateAndUpdateRepo'], invoke, fixture.root);
+      const update = () => bridge.validateAndUpdateRepo({ repo_path: fixture.repo, repo_remote: fixture.origin, repo_branch: 'main' }, { hook: true });
+      if (mode.endsWith('failure')) {
+        assert.throws(update, mode === 'fetch-failure' ? /git fetch origin main failed/ : mode === 'ancestry-failure' ? /not a fast-forward/ : /fast-forward|git merge/);
+        assert.equal(currentCommit(fixture.repo), before, 'failure must not update HEAD');
+      } else {
+        const result = update();
+        assert.equal(result.toCommit, fixture.intended);
+        assert.equal(currentCommit(fixture.repo), fixture.intended);
+        assert.equal(ancestryTarget, fixture.intended, 'ancestry checks the intended SHA');
+        assert.equal(mergeTarget, fixture.intended, 'merge uses the immutable checked SHA');
+        assert.equal(git(fixture.repo, ['rev-parse', 'FETCH_HEAD']), fixture.foreign);
+      }
+      assert.equal(new Set(fetchRefs).size, 1, 'credential retries keep the same target');
+      assert.match(fetchRefs[0], /^main:refs\/toolkit\/fetch\/\d+-[a-f0-9]+$/);
+      assert.equal(git(fixture.repo, ['rev-parse', 'refs/toolkit/fetch/foreign-owner']), injected ? fixture.foreign : fixture.initialCommit);
+      assert.equal(git(fixture.repo, ['for-each-ref', '--format=%(refname)', 'refs/toolkit/fetch/']), 'refs/toolkit/fetch/foreign-owner');
+      assert.equal(git(fixture.repo, ['status', '--porcelain']), '');
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+}
 
 // Runs `fn` with this process's home, Claude config folder and Toolkit control root inside the
 // isolated `root`. An in-process bridge run then reads the isolated plugin registry, and the install
