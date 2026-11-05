@@ -146,6 +146,36 @@ function writeLastRun(id, record, home) {
 // records; the current runner no longer emits it.
 const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|binding is missing|binding is invalid|binding does not match origin|binding observation expired|binding refresh failed(?:: (?:default branch fetch failed|GitHub unreachable|origin transport refused|default branch unknown|default branch moved|fetch guards unavailable|commit unreadable|binding unreadable|cache unwritable|governance reads offline))?|no usable github\.com origin repository|governance status could not be read|governance is (?:ENABLED|DISABLED|UNDECIDED|UNAVAILABLE|ERROR)|this checkout has no CI shards to time)$/;
 const STALE_MS = 2 * 60 * 60 * 1000;
+const FOOTER_SETUP_NOTE = 'Footer task not set up; paste the apply line.';
+
+// Accept only the schedule text emitted for supported hourly Windows definitions.
+function installedHours(text) {
+  const match = /^hourly, ([01]\d|2[0-3]):00 to ([01]\d|2[0-3]):59$/.exec(String(text));
+  return match ? { hour: Number(match[1]), hours: (Number(match[2]) - Number(match[1]) + 24) % 24 + 1 } : null;
+}
+
+function footerSetupRepositories(home, registry = readRegistry(home)) {
+  const repositories = new Set();
+  for (const entry of registry.tasks || []) {
+    if (entry.host === 'windows' && !entry.adopted && entry.job === 'programme-sweep' && typeof entry.repository === 'string'
+      && readLastRun(entry.id, home)?.footer_setup === 'needed') repositories.add(entry.repository.toLowerCase());
+  }
+  // A lost/unreadable registry must not hide a condition the runner already recorded. Only
+  // repository-bound programme records count; arbitrary output and unrelated files never do.
+  let directories = [];
+  try { directories = fs.readdirSync(path.join(userStateDir(home), 'tasks'), { withFileTypes: true }); } catch { /* no task records */ }
+  for (const dir of directories.filter(dir => dir.isDirectory() && ID.test(dir.name))) {
+    const last = readLastRun(dir.name, home);
+    if (last?.schema === 'toolkit.task-last-run.v1' && last.id === dir.name && last.job === 'programme-sweep'
+      && typeof last.repository === 'string' && REPOSITORY.test(last.repository) && !looksSecret(last.repository)
+      && last.footer_setup === 'needed') repositories.add(last.repository.toLowerCase());
+  }
+  return repositories;
+}
+
+function footerSetupLine(repository, { home = os.homedir() } = {}) {
+  return typeof repository === 'string' && footerSetupRepositories(home).has(repository.toLowerCase()) ? FOOTER_SETUP_NOTE : null;
+}
 
 // HH:MMZ on now's UTC date, else with the date (always with it when now is null).
 function shortTime(iso, now) {
@@ -166,22 +196,24 @@ function skipText(last, now = null) {
 // The session-start line for this computer's programme sweep of a repository, or null when it is
 // fine or there is none: its last run held, skipped or failed, or there has been no run for over 2 hours
 // inside its hours. Fixed wording only.
-function sweepLine(repository, { home = os.homedir(), now = new Date() } = {}) {
+function sweepLine(repository, { home = os.homedir(), now = new Date(), advisoryOnly = false } = {}) {
+  const advisory = footerSetupLine(repository, { home });
+  if (advisoryOnly) return advisory;
   const registry = readRegistry(home);
-  if (registry.status !== 'ok' || typeof repository !== 'string') return null;
+  if (registry.status !== 'ok' || typeof repository !== 'string') return advisory;
   const entry = registry.tasks.find(item => item.host === 'windows' && item.job === 'programme-sweep' && !item.adopted
     && String(item.repository || '').toLowerCase() === repository.toLowerCase());
-  if (!entry) return null;
+  if (!entry) return advisory;
   const last = readLastRun(entry.id, home);
   const at = last && [last.finished, last.started].find(value => typeof value === 'string' && !Number.isNaN(Date.parse(value)));
-  const { schedule } = require('./toolkit-windows-tasks.cjs').JOBS['programme-sweep'];
-  const [hour, minute] = schedule.at.split(':').map(Number);
-  const intoWindow = ((now.getHours() * 60 + now.getMinutes()) - (hour * 60 + minute) + 1440) % 1440;
-  const stale = intoWindow >= STALE_MS / 60000 && intoWindow < schedule.hours * 60 && (!at || now.getTime() - Date.parse(at) > STALE_MS);
+  const schedule = installedHours(entry.schedule);
+  const intoWindow = schedule && ((now.getHours() * 60 + now.getMinutes()) - schedule.hour * 60 + 1440) % 1440;
+  const stale = schedule && intoWindow >= STALE_MS / 60000 && intoWindow < schedule.hours * 60 && (!at || now.getTime() - Date.parse(at) > STALE_MS);
   const status = skipText(last, now) || (last && ['failed', 'held'].includes(last.status) && at ? `${last.status} at ${shortTime(at, now)}` : null);
-  if (stale) return `Programme sweep: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}; see toolkit tasks.`;
-  if (status) return `Programme sweep: ${status.startsWith('failed') ? 'last run ' : ''}${status}; see toolkit tasks.`;
-  return null;
+  const line = !schedule ? 'Programme sweep: installed schedule unknown; see toolkit tasks.'
+    : stale ? `Programme sweep: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}; see toolkit tasks.`
+      : status ? `Programme sweep: ${status.startsWith('failed') ? 'last run ' : ''}${status}; see toolkit tasks.` : null;
+  return [line, advisory].filter(Boolean).join(' ') || null;
 }
 
 // ---- record and forget -----------------------------------------------------------------------
@@ -325,6 +357,9 @@ function listTasks({ cwd = process.cwd(), home = os.homedir(), platform = proces
   const tasks = registry.status === 'ok' ? registry.tasks : [];
   const rows = [];
   const notes = [];
+  for (const repository of footerSetupRepositories(home, registry)) {
+    notes.push(`${repository}: ${FOOTER_SETUP_NOTE} Run toolkit-windows-tasks.cjs plan --repo-root <checkout> to get it.`);
+  }
   if (registry.status !== 'ok') notes.push(`The task registry ${registryPath(home)} could not be read (${registry.reason}); recorded tasks are not shown.`);
   if (platform === 'win32') {
     const folders = new Set(tasks.filter(entry => entry.host === 'windows').map(entry => entry.folder));
@@ -409,5 +444,5 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = {
   SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, readLastRun, writeLastRun,
-  entryProblem, looksSecret, safeText, skipText, sweepLine, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
+  entryProblem, looksSecret, safeText, skipText, sweepLine, footerSetupLine, FOOTER_SETUP_NOTE, installedHours, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
 };

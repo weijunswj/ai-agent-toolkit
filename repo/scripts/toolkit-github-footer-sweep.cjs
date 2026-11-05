@@ -82,12 +82,17 @@ function findFooted(gh, repo, since) {
 }
 
 function sweep(options, deps = {}) {
-  const gh = deps.gh || defaultGh;
+  const transport = deps.gh || defaultGh;
+  const gh = (args, input) => transport([...args, '--hostname', 'github.com'], input);
   const login = options.anyAuthor ? null : gh(['api', 'user', '--jq', '.login']).trim();
   const results = [];
   for (const repo of options.repos) {
     let footed;
-    try { footed = findFooted(gh, repo, options.since); }
+    try {
+      const metadata = JSON.parse(gh(['api', `repos/${repo}`, '--jq', '{full_name}']));
+      if (typeof metadata.full_name !== 'string' || metadata.full_name.toLowerCase() !== repo.toLowerCase()) throw new Error('repository identity did not match the requested origin');
+      footed = findFooted(gh, repo, options.since);
+    }
     catch (error) { results.push({ repo, kind: 'scan', status: 'FAILED', detail: firstLine(error) }); continue; }
     for (const post of footed) {
       const row = { repo, kind: post.kind, url: post.url, author: post.author };

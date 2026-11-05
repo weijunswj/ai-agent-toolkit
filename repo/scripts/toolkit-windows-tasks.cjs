@@ -108,17 +108,44 @@ function parseMarker(description) {
 }
 
 function repositoryOf(identity) {
-  if (identity?.valid !== true || identity.remote?.host !== 'github.com') return null;
+  if (identity?.valid !== true || !require('./toolkit-governance-state.cjs').isGitHubHost(identity.remote?.host)) return null;
   const slug = String(identity.remote.path || '').replace(/^\//, '').replace(/\/$/, '').replace(/\.git$/i, '');
   return /^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(slug) && !['.', '..'].includes(slug.split('/')[1]) ? slug : null;
+}
+
+// A linked worktree is disposable. Only a proven primary checkout may own a task target.
+// Submodules have a gitdir pointer but no commondir, and remain their own checkout.
+function durableIdentity(checkout, governance) {
+  const identity = governance.readIdentity(checkout);
+  if (!repositoryOf(identity)) return { ...identity, refusal: 'no usable github.com origin repository; footer cleaning refused' };
+  const dotGit = path.join(identity.root, '.git');
+  // Injected identity readers in pure tests need no filesystem. Real readers always have .git.
+  if (governance.readIdentity !== require('./toolkit-governance-state.cjs').readIdentity) return identity;
+  try {
+    if (fs.lstatSync(dotGit).isDirectory()) return identity;
+    const pointer = /^gitdir:[ \t]*(.+?)[ \t]*$/m.exec(fs.readFileSync(dotGit, 'utf8'));
+    if (!pointer) throw new Error();
+    const gitDir = path.resolve(identity.root, pointer[1]);
+    const commonFile = path.join(gitDir, 'commondir');
+    if (!fs.existsSync(commonFile)) return identity;
+    const common = fs.realpathSync(path.resolve(gitDir, fs.readFileSync(commonFile, 'utf8').trim()));
+    const primary = path.dirname(common);
+    const primaryGit = path.join(primary, '.git');
+    if (!fs.lstatSync(primaryGit).isDirectory() || fs.realpathSync(primaryGit) !== common) throw new Error();
+    const resolved = governance.readIdentity(primary);
+    if (!repositoryOf(resolved) || resolved.repository_id !== identity.repository_id) throw new Error();
+    return resolved;
+  } catch { return { ...identity, valid: false, refusal: 'linked worktree has no verified primary checkout; scheduled tasks refused' }; }
 }
 
 // What the checkout's governance says: { root, repository, governanceState, binding }.
 function readCheckout(checkout, deps = {}) {
   const governance = deps.governance || require('./toolkit-governance-state.cjs');
-  const identity = governance.readIdentity(checkout);
+  let identity;
+  try { identity = durableIdentity(checkout, governance); }
+  catch { return { root: null, repository: null, refusal: 'checkout identity could not be read; scheduled tasks refused' }; }
   const repository = repositoryOf(identity);
-  if (!repository) return { root: null, repository: null, governanceState: null, binding: null };
+  if (!repository) return { root: null, repository: null, governanceState: null, binding: null, refusal: identity.refusal };
   let state = null;
   try { state = governance.governanceState(identity.root).state; } catch { state = null; }
   let binding = null;
@@ -198,7 +225,7 @@ function definitionDigest(definition) {
 // { folder, repository, wanted: [definitions], skipped: [{ job, reason }] } for a checkout.
 function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__dirname, '..', '..'), nodePath = process.execPath, systemRoot = process.env.SystemRoot || 'C:\\Windows', deps = {} }) {
   const read = readCheckout(checkout, deps);
-  if (!read.root) throw new WindowsTasksError(`${checkout} has no usable github.com origin repository; footer cleaning refused`);
+  if (!read.root) throw new WindowsTasksError(`${checkout}: ${read.refusal || 'no usable github.com origin repository; footer cleaning refused'}`);
   const chosen = folder || (read.binding && read.binding.schedule_folder) || defaultFolder(read.repository);
   if (!chosen || !FOLDER.test(chosen)) throw new WindowsTasksError(`no usable task folder for this repository (got ${JSON.stringify(chosen)}); set schedule_folder in its binding or pass --folder`);
   const wanted = [];
@@ -481,7 +508,13 @@ function describePlan(plan, { command = null, applied = false } = {}) {
   }
   for (const item of plan.skipped) lines.push(`- ${item.name}: not registered, because ${item.reason}.`);
   if (!applied && command && plan.items.some(item => item.action === 'create' || item.action === 'update')) {
-    lines.push('', 'Agents do not create scheduled tasks, so paste this line into PowerShell yourself (it registers the tasks above, then runs the programme sweep once and shows its result):', '', `    ${command}`);
+    const changed = plan.items.filter(item => ['create', 'update'].includes(item.action)).map(item => item.definition.job);
+    const effects = [];
+    if (changed.includes('programme-sweep')) effects.push('starts the programme sweep immediately');
+    if (changed.includes('footer-sweep')) effects.push("starts the footer sweep immediately, editing the signed-in account's own GitHub posts in this repository and, only when verified, its evidence store");
+    else if (changed.includes('programme-sweep')) effects.push("the programme sweep also cleans the signed-in account's own GitHub posts first if its independent footer task cannot be verified, adding the evidence store only when verified");
+    if (changed.includes('shard-timings')) effects.push('registers shard timings for its scheduled time without starting it immediately');
+    lines.push('', `Agents do not create scheduled tasks, so paste this line into PowerShell yourself (it registers only the tasks marked to create or update and ${effects.join('; ')}):`, '', `    ${command}`);
   }
   return lines;
 }

@@ -4154,7 +4154,7 @@ class ToolkitSetupExecution {
 
 async function execute(args){return new ToolkitSetupExecution(args).execute();}
 
-// The Windows scheduled tasks Toolkit keeps for the managed checkout's repository
+// The Windows scheduled tasks Toolkit offers for the managed and original project repositories
 // (toolkit-windows-tasks.cjs): each with its folder, name, schedule, purpose and state. Setup only
 // reports them: agents do not create scheduled tasks, so when one needs creating or updating the
 // report ends with the one PowerShell line the owner pastes. A failure here never stops setup.
@@ -4169,18 +4169,20 @@ function printWindowsTasks(args, { platform = process.platform, scheduler = null
     const plans = [];
     const seen = new Set();
     for (const checkout of [toolkitRoot, workingFolder]) {
-      const read = windowsTasks.readCheckout(checkout, checkoutDeps);
-      if (!read.root) continue;
-      // Tasks belong to a repository. Prefer the managed checkout when setup started in a
-      // second Toolkit clone or worktree, rather than printing two competing apply commands.
-      const key = read.repository.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const desired = windowsTasks.desiredTasks({ checkout: read.root, toolkitRoot, deps: checkoutDeps });
-      const plan = windowsTasks.planTasks(desired, { scheduler: scheduler || windowsTasks.powerShellScheduler(), home });
-      const command = windowsTasks.applyCommand(desired, { toolkitRoot, home });
-      for (const line of windowsTasks.describePlan(plan, { command })) log(line);
-      plans.push(plan);
+      try {
+        const read = windowsTasks.readCheckout(checkout, checkoutDeps);
+        if (!read.root) { log(`Windows scheduled tasks refused for ${checkout}: ${read.refusal || 'no usable github.com origin repository'}.`); continue; }
+        // Tasks belong to a repository. Prefer the managed checkout when setup started in a
+        // second Toolkit clone or worktree, rather than printing two competing apply commands.
+        const key = read.repository.toLowerCase();
+        if (seen.has(key)) continue;
+        const desired = windowsTasks.desiredTasks({ checkout: read.root, toolkitRoot, deps: checkoutDeps });
+        const plan = windowsTasks.planTasks(desired, { scheduler: scheduler || windowsTasks.powerShellScheduler(), home });
+        const command = windowsTasks.applyCommand(desired, { toolkitRoot, home });
+        for (const line of windowsTasks.describePlan(plan, { command })) log(line);
+        plans.push(plan);
+        seen.add(key);
+      } catch (error) { log(`Windows scheduled tasks refused for ${checkout}: ${error.message}`); }
     }
     return plans;
   } catch (error) {

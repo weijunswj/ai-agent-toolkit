@@ -379,11 +379,312 @@ const options = { job: 'programme-sweep', repoRoot: REPO_ROOT, taskId: 'toolkit-
 
 function runSweep(t, answers, home = tempHome(t), clock = '2026-10-29T09:00:00.000Z') {
   const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION, ...answers });
-  const record = job.runJob(options, { home, run: fake.run, ghPath: GH, nodePath: NODE, ...JOB_DEPS, now: () => new Date(clock) });
+  // Programme-only tests have a proven companion; migration tests below exercise its absence.
+  const scheduler = fakeScheduler();
+  const wanted = windowsTasks.desiredTasks({ checkout: REPO_ROOT, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, deps: { governance: governance() } });
+  const footer = wanted.wanted.find(d => d.job === 'footer-sweep');
+  scheduler.register(footer);
+  const readRegistry = () => ({ status: 'ok', tasks: [{ ...footer, schedule: footer.schedule_text, host: 'windows', definition: footer.def }] });
+  const record = job.runJob(options, { home, run: fake.run, ghPath: GH, nodePath: NODE, ...JOB_DEPS, scheduler, readRegistry, now: () => new Date(clock) });
   return { record, log: fake.log, home };
 }
 
 const footerOptions = { ...options, job: 'footer-sweep', taskId: 'toolkit-footer-sweep' };
+
+function migrationRun(t, { home = tempHome(t), scheduler = fakeScheduler(), answers = {}, deps = {}, clock = '2026-10-29T09:00:00.000Z', mode = 'programme-sweep' } = {}) {
+  const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION, ...answers });
+  const record = job.runJob(mode === 'programme-sweep' ? options : footerOptions,
+    { home, scheduler, run: fake.run, ghPath: GH, nodePath: NODE, ...JOB_DEPS, now: () => new Date(clock),
+      // File mtimes keep real time in clock-ahead tests; use that clock for the real lock too.
+      takeLock: file => require('../../skills/github-program-reconciler/scripts/programme.cjs').takeLock(file, { nowMs: Math.round(performance.timeOrigin + performance.now()) }), ...deps });
+  return { home, scheduler, record, log: fake.log };
+}
+function historical(home, since = '2026-10-01T00:00:00.000Z', extra = {}) {
+  const record = { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, repository: BINDING().repository,
+    started: '2026-10-29T08:00:00.000Z', finished: '2026-10-29T08:01:00.000Z', status: 'failed', footer_sweep_since: since, ...extra };
+  tasks.writeLastRun(options.taskId, record, home);
+  return record;
+}
+
+// Additional G0 delta rows: every family has effects and refusal controls.
+const DELTA_CLOSURE = [
+  ['Updated legacy runner, fresh and failed governance', t => {
+    for (const failed of [false, true]) {
+      const answers = failed ? { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { status: 'enabled', fresh: false }, refresh: { refreshed: false, reason: 'fetch-failed' } }) } } : {};
+      const { record, log, home } = migrationRun(t, { answers });
+      assert.equal(record.footer_setup, 'needed');
+      assert.equal(record.footer_status, failed ? 'held' : 'ok');
+      assert.equal(record.programme_status, failed ? 'skipped' : 'ok');
+      assert.equal(record.status, failed ? 'skipped' : 'ok');
+      assert.ok(log.findIndex(row => row[1] === job.SCRIPT.footerSweep) >= 0);
+      if (!failed) assert.ok(log.findIndex(row => row[1] === job.SCRIPT.footerSweep) < log.findIndex(row => row[1] === job.SCRIPT.programme));
+      else assert.ok(!log.some(row => row[1] === job.SCRIPT.programme));
+      assert.ok(record.summary.includes(tasks.FOOTER_SETUP_NOTE));
+      assert.equal(tasks.readLastRun(options.taskId, home).footer_setup, 'needed');
+      // No registry is present in this legacy-runner fixture.
+      assert.equal(tasks.sweepLine(BINDING().repository, { home, advisoryOnly: true }), tasks.FOOTER_SETUP_NOTE);
+      assert.match(tasks.formatList(tasks.listTasks({ home, platform: 'linux' })), /Footer task not set up/);
+    }
+  }],
+  ['Recorded and live companion ownership, action and stop controls', t => {
+    for (const variant of ['ready', 'absent', 'foreign', 'adopted', 'changed', 'marker', 'target', 'unreadable', 'registry-unreadable', 'disabled']) {
+      const home = tempHome(t), scheduler = fakeScheduler();
+      const wanted = desired(t);
+      windowsTasks.applyTasks(wanted, { home, scheduler });
+      const live = scheduler.folders.get('TOOLKIT').find(row => row.name.endsWith('FOOTER SWEEP'));
+      if (variant === 'absent') scheduler.folders.set('TOOLKIT', []);
+      if (variant === 'foreign' || variant === 'adopted') tasks.updateRegistry(home, rows => rows.map(row => row.job !== 'footer-sweep' ? row : { ...row, ...(variant === 'adopted' ? { adopted: true } : { repository: 'other/repository' }) }));
+      if (variant === 'changed') live.arguments += ' --changed';
+      if (variant === 'marker') live.description = 'Owner task';
+      if (variant === 'target') {
+        live.arguments = live.arguments.replace(/--repo-root "[^"]+"/, '--repo-root "C:\\foreign"');
+        tasks.updateRegistry(home, rows => rows.map(row => row.job === 'footer-sweep' ? { ...row, arguments: live.arguments } : row));
+      }
+      if (variant === 'disabled') live.state = 'Disabled';
+      if (variant === 'unreadable') scheduler.list = () => { throw new Error('private scheduler error'); };
+      if (variant === 'registry-unreadable') fs.writeFileSync(tasks.registryPath(home), '{broken');
+      const { record, log } = migrationRun(t, { home, scheduler, deps: { readIdentity: root => root === 'C:\\foreign' ? { ...IDENTITY(root), remote: { host: 'github.com', path: '/other/repository' } } : IDENTITY(root) } });
+      assert.equal(log.some(row => row[1] === job.SCRIPT.footerSweep), !['ready', 'disabled'].includes(variant), variant);
+      assert.equal(record.footer_status, variant === 'disabled' ? 'disabled' : variant === 'ready' ? 'ready' : 'ok', variant);
+      assert.equal(record.footer_setup, ['ready', 'disabled'].includes(variant) ? undefined : 'needed', variant);
+      assert.ok(!record.summary.join(' ').includes('private scheduler error'));
+      if (record.footer_setup) assert.match(tasks.formatList(tasks.listTasks({ home, platform: 'linux' })), variant === 'registry-unreadable' ? /could not be read/ : /Footer task not set up/);
+      if (record.footer_setup) assert.equal(tasks.sweepLine(BINDING().repository, { home, advisoryOnly: true }), tasks.FOOTER_SETUP_NOTE);
+      if (variant === 'registry-unreadable') {
+        const independent = migrationRun(t, { home, scheduler, mode: 'footer-sweep' });
+        assert.equal(independent.record.footer_status, 'recovery', 'first import cannot establish historical scope without the registry');
+        assert.ok(!independent.log.some(row => row[1] === job.SCRIPT.footerSweep));
+      }
+    }
+  }],
+  ['Concurrent starts and delayed apply retain oldest pending cursor', t => {
+    const home = tempHome(t), scheduler = fakeScheduler();
+    const legacy = desired(t); legacy.wanted = legacy.wanted.filter(row => row.job === 'programme-sweep');
+    windowsTasks.applyTasks(legacy, { home, scheduler });
+    historical(home);
+    let competing;
+    const first = migrationRun(t, { home, scheduler, answers: { 'toolkit-github-footer-sweep.cjs': () => {
+      competing = migrationRun(t, { home, scheduler, mode: 'footer-sweep' });
+      return { status: 1 };
+    } } });
+    assert.equal(competing.record.footer_status, 'locked');
+    assert.ok(!competing.log.some(row => row[1] === job.SCRIPT.footerSweep));
+    assert.equal(first.record.footer_sweep_since, '2026-10-01T00:00:00.000Z');
+    windowsTasks.applyTasks(desired(t), { home, scheduler });
+    const next = migrationRun(t, { home, scheduler, mode: 'footer-sweep', clock: '2026-11-05T09:00:00.000Z' });
+    assert.ok(next.log.find(row => row[1] === job.SCRIPT.footerSweep).includes('2026-10-01T00:00:00.000Z'));
+    assert.equal(next.record.footer_handover, BINDING().repository.toLowerCase());
+    const last = migrationRun(t, { home, scheduler, mode: 'footer-sweep', clock: '2026-11-05T10:00:00.000Z' });
+    assert.ok(last.log.find(row => row[1] === job.SCRIPT.footerSweep).includes('2026-11-05T09:00:00.000Z'), 'import only once');
+    for (const state of ['Ready', 'Disabled']) {
+      const arrivingHome = tempHome(t), arrivingScheduler = fakeScheduler();
+      const arriving = migrationRun(t, { home: arrivingHome, scheduler: arrivingScheduler, deps: { takeLock: file => {
+        const lock = require('../../skills/github-program-reconciler/scripts/programme.cjs').takeLock(file);
+        windowsTasks.applyTasks(desired(t), { home: arrivingHome, scheduler: arrivingScheduler });
+        arrivingScheduler.folders.get('TOOLKIT').find(row => row.name.endsWith('FOOTER SWEEP')).state = state;
+        return lock;
+      } } });
+      assert.ok(!arriving.log.some(row => row[1] === job.SCRIPT.footerSweep), 'handover is rechecked inside the lock');
+      assert.equal(arriving.record.footer_setup, undefined);
+      assert.ok(!arriving.record.summary.includes(tasks.FOOTER_SETUP_NOTE));
+    }
+  }],
+  ['Failure, interruption, store withholding, damage and successful handover', t => {
+    for (const variant of ['failed', 'interrupted', 'store-held', 'success', 'bad-time', 'impossible-date', 'future', 'foreign-record', 'record-shape', 'wrong-job', 'broken-record']) {
+      const home = tempHome(t), scheduler = fakeScheduler();
+      windowsTasks.applyTasks(desired(t), { home, scheduler });
+      historical(home, variant === 'bad-time' ? 'bad' : variant === 'impossible-date' ? '2026-02-30T00:00:00.000Z' : variant === 'future' ? '2099-01-01T00:00:00Z' : undefined,
+        variant === 'foreign-record' ? { repository: 'other/repo' } : variant === 'record-shape' ? { repository: [BINDING().repository] } : variant === 'wrong-job' ? { job: 'shard-timings' } : {});
+      if (variant === 'broken-record') fs.writeFileSync(tasks.lastRunPath(options.taskId, home), '{broken');
+      const damaged = ['bad-time', 'impossible-date', 'future', 'foreign-record', 'record-shape', 'wrong-job', 'broken-record'].includes(variant);
+      let during;
+      const answers = { 'toolkit-github-footer-sweep.cjs': () => {
+        during = tasks.readLastRun(footerOptions.taskId, home);
+        if (variant === 'interrupted') throw new Error('interrupt');
+        return { status: variant === 'failed' ? 1 : 4 };
+      } };
+      if (variant === 'store-held') answers['toolkit-governance.cjs'] = { status: 1, stdout: GOVERNED.stdout };
+      const { record, log } = migrationRun(t, { home, scheduler, mode: 'footer-sweep', answers });
+      if (damaged) { assert.equal(record.footer_status, 'recovery', variant); assert.ok(!log.some(row => row[1] === job.SCRIPT.footerSweep)); }
+      else {
+        assert.equal(during.footer_handover, BINDING().repository.toLowerCase());
+        assert.equal(during.footer_sweep_since, '2026-10-01T00:00:00.000Z');
+        assert.equal(record.footer_sweep_since, variant === 'success' ? '2026-10-29T09:00:00.000Z' : during.footer_sweep_since);
+        assert.equal(record.status, variant === 'success' ? 'ok' : variant === 'store-held' ? 'held' : 'failed');
+      }
+      if (damaged) {
+        const retry = migrationRun(t, { home, scheduler, mode: 'footer-sweep' });
+        assert.equal(retry.record.footer_status, 'recovery', 'a recovery hold survives later runs');
+        assert.ok(!retry.log.some(row => row[1] === job.SCRIPT.footerSweep));
+      }
+    }
+  }],
+  ['GitHub transport aliases, strict slugs and foreign binding controls', t => {
+    const real = require('../scripts/toolkit-governance-state.cjs');
+    for (const [origin, accepted] of [['https://github.com/acme/app.git', true], ['git@github.com:acme/app.git', true], ['git@github-work:acme/app.git', true], ['ssh://git@ssh.github.com:443/acme/app.git', true], ['https://github.com.evil.test/acme/app.git', false], ['https://other.test/acme/app.git', false], ['https://github.com/acme/app/extra.git', false]]) {
+      const root = checkout(t, { shards: false });
+      fs.mkdirSync(path.join(root, '.git')); fs.writeFileSync(path.join(root, '.git/config'), `[remote "origin"]\nurl = ${origin}\n`);
+      const identity = real.readIdentity(root);
+      assert.equal(windowsTasks.repositoryOf(identity), accepted ? 'acme/app' : null, origin);
+      const deps = { governance: { ...real, governanceState: () => ({ state: 'ENABLED' }), mergedBinding: () => ({ repository: 'foreign/repo', schedule_folder: 'FOREIGN' }) } };
+      const read = windowsTasks.readCheckout(root, deps);
+      if (accepted) { assert.equal(read.root, root); assert.equal(read.binding, null); assert.equal(windowsTasks.folderForCheckout(root, deps), 'APP'); }
+      else assert.equal(read.root, null);
+      const result = migrationRun(t, { mode: 'footer-sweep', deps: { readIdentity: () => identity, readObservation: OBSERVATION } });
+      const call = result.log.find(row => row[1] === job.SCRIPT.footerSweep);
+      assert.equal(Boolean(call), accepted);
+      if (call) { assert.deepEqual(call.slice(2, 4), ['--repo', 'acme/app']); assert.equal(call.filter(x => x === '--repo').length, 1); }
+      if (accepted) {
+        const binding = { ...BINDING(), repository: 'acme/app' };
+        const programme = migrationRun(t, { deps: { readIdentity: () => identity, readObservation: () => ({ status: 'enabled', fresh: true, binding }) } });
+        assert.equal(programme.record.programme_status, 'ok', origin);
+        assert.ok(programme.log.some(row => row[1] === job.SCRIPT.programme), origin);
+      }
+    }
+  }],
+  ['Status exit and JSON shape diagnostic controls', t => {
+    const error = { state: 'ERROR', rule: 'M0', merged: { status: 'invalid', fresh: true } };
+    for (const [answer, reason] of [[GOVERNED, null], [{ status: 2, stdout: JSON.stringify(error) }, 'binding is invalid'], ...[
+      { status: 1, stdout: GOVERNED.stdout }, { status: 3, stdout: GOVERNED.stdout }, { status: null, stdout: GOVERNED.stdout },
+      { status: 0, error: 'EIO', stdout: GOVERNED.stdout }, { status: 0, stdout: '' }, { status: 0, stdout: '{broken' },
+      { status: 0, stdout: '{"other":true}' }, { status: 0, stdout: JSON.stringify(error) }, { status: 2, stdout: GOVERNED.stdout },
+      { status: 2, stdout: JSON.stringify({ ...error, merged: { status: 'enabled', fresh: true } }) },
+    ].map(answer => [answer, 'governance status could not be read'])]) {
+      const { record, log } = runSweep(t, { 'toolkit-governance.cjs': answer });
+      assert.equal(record.reason || null, reason);
+      assert.equal(log.some(row => row[1] === job.SCRIPT.programme), reason === null);
+      const footer = runFooter(t, { 'toolkit-governance.cjs': answer });
+      assert.equal(footer.log.find(row => row[1] === job.SCRIPT.footerSweep).filter(x => x === '--repo').length, reason === null ? 2 : 1);
+      if (reason) assert.match(footer.record.summary[0], new RegExp(reason));
+    }
+  }],
+  ['Consent reflects actionable footer, programme, shard and mixed plans', t => {
+    const all = desired(t);
+    for (const [jobs, actions, expected] of [
+      [['footer-sweep'], ['create'], ['footer']], [['programme-sweep', 'footer-sweep'], ['update', 'create'], ['programme', 'footer']],
+      [['shard-timings'], ['create'], ['shard']], [['programme-sweep', 'footer-sweep', 'shard-timings'], ['current', 'refused', 'update'], ['shard']],
+      [['programme-sweep', 'footer-sweep'], ['create', 'refused'], ['programme']],
+      [['programme-sweep', 'footer-sweep'], ['current', 'refused'], []],
+    ]) {
+      const plan = { ...all, items: jobs.map((id, i) => ({ definition: all.wanted.find(d => d.job === id), action: actions[i] })) };
+      const text = windowsTasks.describePlan(plan, { command: 'node apply' }).join('\n');
+      const consent = text.split('paste this line')[1] || '';
+      assert.equal(consent.includes('starts the footer sweep immediately'), expected.includes('footer'));
+      assert.equal(consent.includes('starts the programme sweep immediately'), expected.includes('programme'));
+      assert.equal(consent.includes('without starting it immediately'), expected.includes('shard'));
+      if (expected.includes('footer')) assert.match(consent, /editing the signed-in account's own GitHub posts.*only when verified/);
+      if (expected.includes('programme') && !expected.includes('footer')) assert.match(consent, /also cleans the signed-in account's own GitHub posts first if its independent footer task cannot be verified/);
+      assert.equal(consent.length > 0, expected.length > 0);
+    }
+  }],
+  ['Both hourly first runs, retry, missing and failed result, timeout and no starts', t => {
+    for (const mode of ['programme-sweep', 'footer-sweep']) for (const variant of ['healthy', 'retry', 'missing', 'failed', 'timeout', 'current', 'refused', 'no-first-run']) {
+      const home = tempHome(t), scheduler = fakeScheduler();
+      const wanted = desired(t); wanted.wanted = wanted.wanted.filter(row => row.job === mode);
+      let count = 0, clock = Date.parse('2026-10-29T09:00:00Z');
+      if (variant === 'current') windowsTasks.applyTasks(wanted, { home, scheduler });
+      if (variant === 'refused') scheduler.folders.set('TOOLKIT', [unmarked(wanted.wanted[0].name)]);
+      scheduler.onStart = live => {
+        count += 1; live.state = variant === 'timeout' ? 'Running' : 'Ready'; live.last_run = new Date(clock).toISOString();
+        live.last_result = variant === 'retry' && count === 1 ? windowsTasks.STATUS_CONTROL_C_EXIT : 0;
+        if (variant !== 'missing') tasks.writeLastRun(wanted.wanted[0].id, { started: new Date(clock).toISOString(), exit: variant === 'failed' ? 1 : 0, status: variant === 'failed' ? 'failed' : 'ok', summary: [] }, home);
+      };
+      const result = windowsTasks.applyTasks(wanted, { home, scheduler, now: () => new Date(clock), firstRunOptions: variant === 'no-first-run' ? null : { wait: ms => { clock += ms; }, waitMs: 10, pollMs: 5 } });
+      assert.equal(count, ['current', 'refused', 'no-first-run'].includes(variant) ? 0 : variant === 'retry' ? 2 : 1, `${mode} ${variant}`);
+      if (count) assert.equal(result.items[0].first_run.status, variant === 'timeout' ? 'still running' : ['missing', 'failed'].includes(variant) ? 'failed' : 'ok');
+      // Exercise the actual command's switch too.
+      if (variant === 'no-first-run') {
+        const noStarts = fakeScheduler();
+        assert.equal(windowsTasks.main(['apply', '--no-first-run'], { platform: 'win32', home: tempHome(t), scheduler: noStarts, cwd: wanted.root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, checkoutDeps: { governance: governance() }, stdout: () => {}, stderr: () => {} }), 0);
+        assert.ok(!noStarts.calls.some(row => row[0] === 'start'));
+      }
+    }
+  }],
+  ['Installed legacy versus full-day overdue boundaries and malformed text', t => {
+    for (const schedule of ['hourly, 08:00 to 23:59', 'hourly, 00:00 to 23:59', 'not a schedule']) for (const [hour, minute] of [[3, 0], [7, 59], [8, 0], [10, 0]]) {
+      const { home } = listedHome(t);
+      tasks.updateRegistry(home, rows => rows.map(row => row.job === 'programme-sweep' ? { ...row, schedule } : row));
+      const line = tasks.sweepLine(BINDING().repository, { home, now: new Date(2026, 9, 29, hour, minute) });
+      if (schedule === 'not a schedule') assert.match(line, /installed schedule unknown/);
+      else assert.equal(Boolean(line?.includes('over 2 hours')), schedule.includes('00:00') || hour >= 10, `${schedule} ${hour}:${minute}`);
+    }
+    const hostile = require('./support/hostile-inputs.cjs');
+    hostile.expectDefaultDeny(assert, text => tasks.installedHours(text) !== null, hostile.cases(['free-text', 'invisible', 'line-breaks']));
+  }],
+];
+// Real .git layouts, with only status/binding injected to keep all homes and reads local.
+function layout(t, variant = 'linked') {
+  const root = checkout(t, { shards: false });
+  const primary = path.join(root, 'primary'), linked = path.join(root, 'linked');
+  fs.mkdirSync(path.join(primary, '.git/worktrees/linked'), { recursive: true });
+  fs.mkdirSync(path.join(primary, 'sub'), { recursive: true });
+  fs.mkdirSync(path.join(linked, 'sub'), { recursive: true });
+  const gitdir = path.join(primary, '.git/worktrees/linked');
+  fs.writeFileSync(path.join(primary, '.git/config'), '[remote "origin"]\nurl = git@github-work:acme/app.git\n');
+  fs.writeFileSync(path.join(linked, '.git'), `gitdir: ${gitdir}\n`);
+  fs.writeFileSync(path.join(gitdir, 'commondir'), '../..\n');
+  if (variant === 'broken') fs.writeFileSync(path.join(gitdir, 'commondir'), 'missing\n');
+  if (variant === 'bare') {
+    fs.writeFileSync(path.join(root, 'config'), '[remote "origin"]\nurl = https://github.com/acme/app.git\n');
+    fs.writeFileSync(path.join(gitdir, 'commondir'), `${root}\n`);
+  }
+  if (variant === 'foreign') {
+    fs.mkdirSync(path.join(root, 'foreign-common'));
+    fs.writeFileSync(path.join(root, 'foreign-common/config'), '[remote "origin"]\nurl = https://github.com/other/repo.git\n');
+    fs.writeFileSync(path.join(gitdir, 'commondir'), `${path.join(root, 'foreign-common')}\n`);
+  }
+  if (variant === 'unusable') fs.writeFileSync(path.join(primary, '.git/config'), '[remote "origin"]\nurl = https://other.test/acme/app.git\n');
+  if (variant === 'submodule') fs.unlinkSync(path.join(gitdir, 'commondir'));
+  const real = require('../scripts/toolkit-governance-state.cjs');
+  const checkoutDeps = { governance: { ...real, governanceState: () => ({ state: 'DISABLED' }), mergedBinding: () => null } };
+  return { primary, linked, checkoutDeps };
+}
+DELTA_CLOSURE.push(
+  ['Setup, plan and apply use the verified primary checkout', t => {
+    const { primary, linked, checkoutDeps } = layout(t);
+    const core = require('../scripts/setup-toolkit-core.cjs');
+    const results = [];
+    for (const from of [primary, path.join(primary, 'sub'), linked, path.join(linked, 'sub')]) {
+      const home = tempHome(t), scheduler = fakeScheduler(), output = [];
+      const deps = { home, scheduler, platform: 'win32', checkoutDeps, cwd: from, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, stdout: text => output.push(text), stderr: text => assert.fail(text) };
+      assert.equal(windowsTasks.main(['plan', '--json'], deps), 0);
+      assert.ok(scheduler.calls.every(row => row[0] === 'list'));
+      assert.equal(fs.existsSync(tasks.registryPath(home)), false);
+      const plan = JSON.parse(output.pop());
+      assert.ok(plan.command.includes(primary)); assert.ok(!plan.command.includes(linked));
+      results.push(plan.items.map(row => row.definition));
+      assert.equal(windowsTasks.main(['apply', '--no-first-run'], deps), 0);
+      const read = scheduler.list('APP')[0]; assert.ok(read.arguments.includes(primary)); assert.ok(!read.arguments.includes(linked));
+      const setupHome = tempHome(t), setupScheduler = fakeScheduler(), lines = [];
+      const plans = core.printWindowsTasks({ repoRoot: primary }, { platform: 'win32', home: setupHome, scheduler: setupScheduler, checkoutDeps, workingFolder: from, log: text => lines.push(text) });
+      assert.equal(plans.length, 1); assert.ok(lines.some(text => text.includes(primary)));
+      assert.ok(setupScheduler.calls.every(row => row[0] === 'list')); assert.equal(fs.existsSync(tasks.registryPath(setupHome)), false);
+    }
+    for (const definitions of results) assert.deepEqual(definitions, results[0]);
+    const submodule = layout(t, 'submodule');
+    // Without a commondir this is a submodule's gitdir, not a linked worktree.
+    fs.writeFileSync(path.join(submodule.primary, '.git/worktrees/linked/config'), '[remote "origin"]\nurl = https://github.com/acme/submodule.git\n');
+    assert.equal(windowsTasks.readCheckout(submodule.linked, submodule.checkoutDeps).root, submodule.linked);
+  }],
+  ['Unresolved, foreign, bare and unusable layouts refuse without hiding other plans', t => {
+    const core = require('../scripts/setup-toolkit-core.cjs');
+    for (const variant of ['broken', 'foreign', 'bare', 'unusable']) {
+      const { primary, linked, checkoutDeps } = layout(t, variant);
+      for (const command of ['plan', 'apply']) {
+        const scheduler = fakeScheduler(), home = tempHome(t), errors = [];
+        assert.equal(windowsTasks.main([command, '--repo-root', linked], { platform: 'win32', home, scheduler, checkoutDeps, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, stderr: text => errors.push(text), stdout: () => {} }), 2, variant);
+        assert.ok(errors.join('').includes('refused')); assert.deepEqual(scheduler.calls, []); assert.equal(fs.existsSync(tasks.registryPath(home)), false);
+      }
+      // A refused managed checkout must not discard the usable original project plan.
+      const good = layout(t), lines = [], home = tempHome(t), scheduler = fakeScheduler();
+      const plans = core.printWindowsTasks({ repoRoot: linked }, { platform: 'win32', home, scheduler, checkoutDeps, workingFolder: good.primary, log: text => lines.push(text) });
+      assert.equal(plans.length, 1); assert.match(lines.join('\n'), /refused/);
+      assert.ok(scheduler.calls.every(row => row[0] === 'list')); assert.equal(fs.existsSync(tasks.registryPath(home)), false);
+    }
+  }],
+);
+for (const [row, prove] of DELTA_CLOSURE) test(`Delta closure: ${row}`, prove);
+
 function runFooter(t, answers = {}, home = tempHome(t), clock = '2026-10-29T09:00:00.000Z', deps = {}) {
   const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, ...answers });
   const record = job.runJob(footerOptions, { home, run: fake.run, ghPath: GH, nodePath: NODE, ...JOB_DEPS, now: () => new Date(clock), ...deps });
@@ -417,14 +718,16 @@ test('J: gh signed out skips with no GitHub call; a stale binding skips before a
   assert.equal(out.record.status, 'skipped');
   assert.deepEqual(out.record.summary, ['skipped: gh not signed in']);
   assert.deepEqual(out.log.map(entry => entry.slice(0, 2)), [[GH, 'auth'], [NODE, '-e']], 'gh auth status, then only the github.com connection check');
-  const stale = runSweep(t, { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { fresh: false } }) } });
+  const stale = runSweep(t, { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { status: 'enabled', fresh: false } }) } });
   assert.deepEqual(stale.record.summary, ['skipped: binding observation expired']);
   assert.equal(stale.log.some(entry => /^(programme\.cjs|toolkit-github-footer-sweep\.cjs)$/.test(path.basename(entry[1] || ''))), false);
-  for (const state of ['DISABLED', 'ERROR', 'UNDECIDED']) {
+  for (const state of ['DISABLED', 'UNDECIDED']) {
     const off = runSweep(t, { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state, merged: { status: 'enabled', fresh: true } }) } });
     assert.deepEqual(off.record.summary, [`skipped: governance is ${state}`]);
     assert.equal(off.record.exit, 0);
   }
+  const invalid = runSweep(t, { 'toolkit-governance.cjs': { status: 2, stdout: JSON.stringify({ state: 'ERROR', rule: 'M0', merged: { status: 'invalid', fresh: true } }) } });
+  assert.equal(invalid.record.reason, 'binding is invalid');
 });
 
 test('J: offline is told apart from signed out, skips count up in a row, and the next good run notes the resume', (t) => {
@@ -768,7 +1071,7 @@ test('Acceptance: skip reporting accepts fixed reasons and refuses hostile or pr
   }
 });
 
-test('Acceptance: programme jobs do not consume the historical footer watermark or pass it to the new job', t => {
+test('Acceptance: a verified companion leaves the historical programme cursor untouched', t => {
   const home = tempHome(t);
   tasks.writeLastRun(options.taskId, { footer_sweep_since: '2000-01-01T00:00:00.000Z', status: 'ok' }, home);
   const { record, log } = runSweep(t, {}, home);
@@ -836,7 +1139,7 @@ test('L: skipped runs show their reason and count in toolkit tasks', (t) => {
 test('L: the session sweep line names a skip, a failure or a gap of over 2 hours, in fixed words only', (t) => {
   const { home } = listedHome(t);
   const repository = 'weijunswj/ai-agent-toolkit';
-  const noon = new Date(2026, 10, 1, 12, 0, 0); // local time, inside the 08:00 to 23:59 hours
+  const noon = new Date(2026, 10, 1, 12, 0, 0); // Local noon is inside legacy and full-day schedules.
   const ago = minutes => new Date(noon.getTime() - minutes * 60000).toISOString();
   const hhmm = iso => `${iso.slice(11, 16)}Z`;
   const write = record => tasks.writeLastRun('toolkit-programme-sweep', { exit: 0, summary: [], ...record }, home);
