@@ -1,1 +1,0 @@
-Raise the global instruction block budget from 18,500 to 19,400 bytes and the Projects skill budget from 44,200 to 44,900 bytes, preserving the existing wording and allowing for Windows CRLF line endings.

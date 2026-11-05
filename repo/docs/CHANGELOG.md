@@ -5,11 +5,13 @@
 ### Changed
 
 - Local agents register or update Toolkit's fixed Windows programme sweep and shard timing tasks under narrowly scoped standing approval, with verified enabled governance, ownership checks, owner stops and run-result verification. Setup continues to report tasks without changing them.
+- The standing command refuses, instead of updating, any task owned by another repository or checkout, any run from a plugin copy or linked worktree, and any task the owner removed, disabled or hand-edited. A removal now records a lasting owner stop. A narrow, owner-approved repair option restores only Toolkit-owned tasks of the same repository.
 - Every eligible governed repository gets the shard timing task. Runs report `no shards yet` without repository or external changes until the shard manifest appears, then use Toolkit's fixed refresher automatically.
 
 ### Fixed
 
-- Preserve the existing global rules and device-task setup wording alongside the task standing approval. Raise only the global instruction block budget from 18,500 to 19,400 bytes rather than shorten unrelated rules.
+- Raise the global instruction block budget from 18,500 to 19,400 bytes and the Projects skill budget from 44,200 to 44,900 bytes, preserving the existing wording and allowing for Windows CRLF line endings.
+- Remove the old advice to paste a registration line from the reconciler skill, the recurring-tasks reference and the hourly nudge.
 
 ## 3.48.4
 
