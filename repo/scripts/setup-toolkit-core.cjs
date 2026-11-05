@@ -4156,8 +4156,9 @@ async function execute(args){return new ToolkitSetupExecution(args).execute();}
 
 // The Windows scheduled tasks Toolkit keeps for the managed checkout's repository
 // (toolkit-windows-tasks.cjs): each with its folder, name, schedule, purpose and state. Setup only
-// reports them, ending with the command a local session runs under the Toolkit task standing
-// approval, or after obtaining approval when it does not apply. A failure here never stops setup.
+// reports what an eligible local agent can register from the recorded managed Toolkit checkout
+// against the repository main checkout. Owner stops, edited tasks and native denials remain stops;
+// setup registers nothing and clears no stops. A failure here never stops setup.
 // Tests pass a fake scheduler, checkout reads, home and log.
 function printWindowsTasks(args, { platform = process.platform, scheduler = null, checkoutDeps = {}, home = os.homedir(), log = console.log } = {}) {
   if (platform !== 'win32') return null;
@@ -4166,7 +4167,7 @@ function printWindowsTasks(args, { platform = process.platform, scheduler = null
   try {
     const windowsTasks = require('./toolkit-windows-tasks.cjs');
     const toolkitRoot = path.resolve(args.repoRoot);
-    const desired = windowsTasks.desiredTasks({ checkout: toolkitRoot, toolkitRoot, deps: checkoutDeps });
+    const desired = windowsTasks.desiredTasks({ checkout: toolkitRoot, toolkitRoot, home, deps: checkoutDeps });
     const plan = windowsTasks.planTasks(desired, { scheduler: scheduler || windowsTasks.powerShellScheduler(), home });
     const command = windowsTasks.applyCommand(desired, { toolkitRoot, home });
     for (const line of windowsTasks.describePlan(plan, { command })) log(line);

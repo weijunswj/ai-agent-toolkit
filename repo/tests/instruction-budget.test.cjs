@@ -41,8 +41,8 @@ test('each block stays inside its own budget', () => {
   // from 22,700 to the cap below, leaving headroom only for lanes already in flight. The governed
   // block took the issue rules from the global layer, so its cap rose a little. The combined Codex
   // limit above stays the hard cap.
-  // Owner raised the global cap to preserve existing wording alongside task standing approval;
-  // a later version will deal with instruction size. The combined Codex limit above still applies.
+  // Owner record 335 (5 November) confirms 19,400 and 44,900, overriding the 4 November
+  // cap decision, preserving wording and allowing Windows CRLF. The combined limit still applies.
   assert.ok(crlfBytes(GLOBAL) <= 19400, `global block ${crlfBytes(GLOBAL)} bytes`);
   assert.ok(crlfBytes(GOVERNED) <= 4250, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
@@ -67,12 +67,12 @@ test('the Projects controller skill fits a claude.ai skill card, with room for l
   // stricter 48,000-byte reading of the body (the text after the frontmatter) and is never raised.
   // The budget keeps the raw file about 4 KB under it, for lanes already in flight: detail goes into
   // the reference files beside it. Raise the budget only with a reason recorded here, and never above 47,000.
-  // Owner raised the cap to 44,900 for Windows CRLF headroom while preserving the existing wording;
-  // a later version will deal with instruction size. The skill-card body ceiling below still applies.
-  const skill = fs.readFileSync(path.join(ROOT, 'repo/contracts/claude-projects/web-controller-projects/SKILL.md'));
-  assert.ok(skill.length <= 44900, `Projects skill ${skill.length} bytes`);
-  const body = skill.toString('utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-  assert.ok(Buffer.byteLength(body) < 48000, `Projects skill body ${Buffer.byteLength(body)} bytes`);
+  // Owner record 335 (5 November) confirms the 44,900 cap, overriding the 4 November
+  // decision. Count CRLF on every checkout; the skill-card body ceiling stays unchanged.
+  const skill = read('repo/contracts/claude-projects/web-controller-projects/SKILL.md');
+  assert.ok(crlfBytes(skill) <= 44900, `Projects skill ${crlfBytes(skill)} bytes (CRLF)`);
+  const body = skill.replace(/^---\n[\s\S]*?\n---\n/, '');
+  assert.ok(crlfBytes(body) < 48000, `Projects skill body ${crlfBytes(body)} bytes (CRLF)`);
 });
 
 test('guidance moved out of root AGENTS.md is still reachable from a loaded layer', () => {

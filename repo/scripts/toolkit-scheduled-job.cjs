@@ -20,7 +20,8 @@
 //                         ended well (48 hours on the first run). It edits only the signed-in
 //                         account's own posts. It runs even when step 1 held: the two are separate.
 //   shard-timings    checks the repository's shard manifest on every run: "no shards yet" changes
-//                    nothing. Once shards appear, checks fresh enabled governance and runs Toolkit's
+//                    nothing beyond the local result. When the manifest becomes available in the
+//                    registered checkout, checks fresh enabled governance and runs Toolkit's
 //                    refresh-shard-timings.cjs --repo-root <checkout> --open-pr; a pull request opens
 //                    only when the measured times drifted. No repository-local script is needed.
 //
@@ -30,8 +31,10 @@
 // the skips in a row (skipped_streak, from skipped_since); the first ok or held run after them says
 // "Resumed after N skipped runs since <time>" and clears both, and a failed run keeps them. The
 // session-start line and `toolkit tasks` read these fields, because Task Scheduler shows every skip
-// as success. Exit 0 ok, held or skipped; 1 failed; 2 bad arguments.
+// as success. Expected no-shards skips keep no streak or recovery announcement.
+// Exit 0 ok, held or skipped; 1 failed; 2 bad arguments.
 
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -89,7 +92,7 @@ function lastJson(text) {
 }
 
 class Job {
-  #options; #run; #node; #gh; #binding; #now; #summary = [];
+  #options; #run; #node; #gh; #binding; #now; #repository; #summary = [];
 
   constructor(options, deps = {}) {
     this.#options = options;
@@ -98,6 +101,7 @@ class Job {
     this.#gh = deps.ghPath === undefined ? null : deps.ghPath;
     this.#binding = deps.mergedBinding || (root => require('./toolkit-governance-state.cjs').mergedBinding(root));
     this.#now = deps.now || (() => new Date());
+    this.#repository = deps.repositoryReader || localRepository;
   }
 
   get options() { return this.#options; }
@@ -136,6 +140,16 @@ class Job {
 
   binding() { try { return this.#binding(this.#options.repoRoot); } catch { return null; } }
   now() { return this.#now(); }
+  repository() { return this.#repository(this.#options.repoRoot); }
+}
+
+// Deliberately local, fixed Git reads only before a no-shards result. No fetch, GitHub
+// call, refresher start or repository write is needed to identify a real checkout.
+function localRepository(root, { run = spawnSync, stat = fs.statSync } = {}) {
+  if (!stat(root).isDirectory()) throw new Error('registered root is not a repository directory');
+  const result = run('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 10000, windowsHide: true });
+  if (result.error || result.status !== 0 || path.resolve(String(result.stdout).trim()).toLowerCase() !== path.resolve(root).toLowerCase()) throw new Error('registered root is not a repository checkout');
+  return true;
 }
 
 // Step 1 and 2: { status: ok|held|failed }.
@@ -198,6 +212,7 @@ function programmeSweep(job, previous) {
 }
 
 function shardTimings(job) {
+  if (job.repository() !== true) throw new Error('registered root is not a repository checkout');
   let manifest;
   try { manifest = shards.loadManifest(job.options.repoRoot); }
   catch (error) {
@@ -219,6 +234,7 @@ function shardTimings(job) {
 
 // The skips in a row so far, from the previous record: { skipped_streak, skipped_since } or {}.
 function skipStreak(previous) {
+  if (previous?.reason === 'no shards yet') return {};
   const count = previous && Number.isInteger(previous.skipped_streak) && previous.skipped_streak > 0 ? previous.skipped_streak : 0;
   const since = previous && typeof previous.skipped_since === 'string' && !Number.isNaN(Date.parse(previous.skipped_since)) ? previous.skipped_since : null;
   return count && since ? { skipped_streak: count, skipped_since: since } : {};
@@ -239,7 +255,7 @@ function runJob(options, deps = {}) {
   if (outcome.reason) job.note(`skipped: ${outcome.reason}`);
   let skips = {};
   if (outcome.status === 'skipped') {
-    skips = { reason: outcome.reason, skipped_streak: (streak.skipped_streak || 0) + 1, skipped_since: streak.skipped_since || started };
+    skips = outcome.reason === 'no shards yet' ? { reason: outcome.reason } : { reason: outcome.reason, skipped_streak: (streak.skipped_streak || 0) + 1, skipped_since: streak.skipped_since || started };
   } else if (outcome.status === 'failed') skips = streak;
   else if (streak.skipped_streak) {
     job.note(`Resumed after ${streak.skipped_streak} skipped run${streak.skipped_streak === 1 ? '' : 's'} since ${streak.skipped_since.slice(0, 16).replace('T', ' ')} UTC.`);
@@ -264,4 +280,4 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { JOBS, SCRIPT, SWEEP_OK, parseArgs, runJob, main, lastJson };
+module.exports = { JOBS, SCRIPT, SWEEP_OK, parseArgs, runJob, main, lastJson, localRepository };

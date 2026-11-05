@@ -21,8 +21,8 @@
 //            --purpose <text> [--model <model> --effort <effort>] [--repository <owner/name>]
 //            records a task another host runs (the Projects coordinator records each cloud task it
 //            creates); an entry with the same id is replaced
-//   --forget <id>   removes such an entry once its task is deleted (Windows entries are removed by
-//            toolkit-windows-tasks.cjs remove)
+//   --forget <id>   removes such an entry once its task is deleted (Windows enrolments and owner
+//            stops remain under toolkit-windows-tasks.cjs ownership)
 //
 // Exit 0 listed or recorded, 1 the registry could not be written, 2 bad arguments.
 
@@ -79,6 +79,16 @@ function entryProblem(entry) {
   if (entry.host !== 'windows' && entry.folder !== null) return 'folder';
   if (entry.repository !== null && !REPOSITORY.test(String(entry.repository))) return 'repository';
   for (const key of ['model', 'effort']) if (entry[key] !== null && !isText(entry[key], 80)) return key;
+  if (entry.stopped_by_owner !== undefined && entry.stopped_by_owner !== true) return 'stopped_by_owner';
+  if ((entry.stopped_by_owner === true) !== (entry.stopped_at !== undefined)) return 'stopped_at';
+  if (entry.stopped_at !== undefined && (typeof entry.stopped_at !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(entry.stopped_at) || !Number.isFinite(Date.parse(entry.stopped_at)))) return 'stopped_at';
+  for (const key of ['checkout', 'toolkit_root']) if (entry[key] !== undefined && (typeof entry[key] !== 'string' || !path.win32.isAbsolute(entry[key]) || /[\x00-\x1f\x7f"\u0085\u2028\u2029\ufeff]/.test(entry[key]))) return key;
+  if (entry.enrolled !== undefined && (!entry.enrolled || typeof entry.enrolled !== 'object' || Array.isArray(entry.enrolled)
+    || !Array.isArray(entry.enrolled.actions) || !entry.enrolled.actions.length || !Array.isArray(entry.enrolled.triggers)
+    || typeof entry.enrolled.description !== 'string' || typeof entry.enrolled.enabled !== 'boolean')) return 'enrolled definition';
+  if (entry.enrolled && (entry.enrolled.actions.some(action => !action || typeof action !== 'object'
+    || ['execute', 'arguments', 'working_directory'].some(key => typeof action[key] !== 'string'))
+    || entry.enrolled.triggers.some(trigger => !trigger || typeof trigger !== 'object' || typeof trigger.kind !== 'string' || typeof trigger.start !== 'string'))) return 'enrolled definition';
   if (Object.values(entry).some(value => looksSecret(typeof value === 'string' ? value : JSON.stringify(value)))) return 'secret-shaped value';
   return null;
 }
@@ -119,8 +129,21 @@ function updateRegistry(home, change) {
   const current = readRegistry(home);
   if (current.status !== 'ok') throw new TasksError(`the task registry ${registryPath(home)} could not be read (${current.reason}), so nothing was recorded. Move it aside and run again.`, 1);
   const next = change(current.tasks.map(entry => ({ ...entry })));
+  // Refuse a concurrent owner edit rather than replace a registry read earlier.
+  if (JSON.stringify(readRegistry(home)) !== JSON.stringify(current)) throw new TasksError('task registry changed before write', 1);
   writeRegistry(home, next);
+  const saved = readRegistry(home);
+  if (saved.status !== 'ok' || JSON.stringify([...saved.tasks].sort((a,b) => a.id.localeCompare(b.id))) !== JSON.stringify([...next].sort((a,b) => a.id.localeCompare(b.id)))) throw new TasksError('task registry readback failed', 1);
   return next;
+}
+
+function writeTaskBackup(home, id, snapshot) {
+  if (!ID.test(String(id))) throw new TasksError('invalid backup task id', 1);
+  const file = path.join(userStateDir(home), 'tasks', id, `definition-${crypto.randomBytes(8).toString('hex')}.json`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  if (JSON.stringify(JSON.parse(fs.readFileSync(file, 'utf8'))) !== JSON.stringify(snapshot)) throw new TasksError('task backup readback failed', 1);
+  return file;
 }
 
 // The job runner's last-run record, or null.
@@ -143,7 +166,7 @@ function writeLastRun(id, record, home) {
 
 // The skip reasons the job runner writes. Anything else is shown as a bare "skipped", so no command
 // output reaches a session line.
-const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|governance status could not be read|governance is [A-Z]+|no shards yet|this checkout has no CI shards to time)$/;
+const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|governance status could not be read|governance is [A-Z]+|no shards yet)$/;
 const STALE_MS = 2 * 60 * 60 * 1000;
 
 // HH:MMZ on now's UTC date, else with the date (always with it when now is null).
@@ -155,6 +178,7 @@ function shortTime(iso, now) {
 // "skipped (offline), 3 runs in a row since 04:00Z" for a skipped record, else null.
 function skipText(last, now = null) {
   if (!last || last.status !== 'skipped') return null;
+  if (last.reason === 'no shards yet') return 'skipped (no shards yet)';
   const reason = SKIP_REASON.test(String(last.reason || '')) ? ` (${last.reason})` : '';
   const count = Number.isInteger(last.skipped_streak) && last.skipped_streak > 0 ? last.skipped_streak : 1;
   const since = typeof last.skipped_since === 'string' && !Number.isNaN(Date.parse(last.skipped_since)) ? last.skipped_since : last.started;
@@ -171,6 +195,7 @@ function sweepLine(repository, { home = os.homedir(), now = new Date() } = {}) {
   const entry = registry.tasks.find(item => item.host === 'windows' && item.job === 'programme-sweep' && !item.adopted
     && String(item.repository || '').toLowerCase() === repository.toLowerCase());
   if (!entry) return null;
+  if (entry.stopped_by_owner) return 'Programme sweep: stopped by owner; see toolkit tasks.';
   const last = readLastRun(entry.id, home);
   const at = last && [last.finished, last.started].find(value => typeof value === 'string' && !Number.isNaN(Date.parse(value)));
   const { schedule } = require('./toolkit-windows-tasks.cjs').JOBS['programme-sweep'];
@@ -250,7 +275,8 @@ function windowsRows(registry, folders, scheduler, home) {
       };
       if (owned) {
         const last = readLastRun(recorded.id, home);
-        row.state = 'Toolkit';
+        const edited = recorded.enrolled && JSON.stringify(windowsTasks.enrolledDefinition(task)) !== JSON.stringify(recorded.enrolled);
+        row.state = recorded.stopped_by_owner || task.state === 'Disabled' || edited ? 'stopped by owner' : 'Toolkit';
         // The job writes its record as it starts and again as it ends, so a record that ended (or,
         // still running, started) before Task Scheduler's last run time, less 2 seconds, belongs to
         // an older run: the newer one stopped before writing anything, and is not shown as the
@@ -260,7 +286,7 @@ function windowsRows(registry, folders, scheduler, home) {
         const fresh = last && (!Number.isFinite(windowsTime) || Date.parse(last.finished || last.started) >= windowsTime - 2000);
         if (fresh) {
           Object.assign(row, { last_run: last.finished || last.started || row.last_run, result: safeText(skipText(last) || last.status), summary: (Array.isArray(last.summary) ? last.summary : []).slice(0, 4).map(line => safeText(line)) });
-          if (Number.isInteger(last.skipped_streak) && last.skipped_streak > 0) Object.assign(row, { skipped_streak: last.skipped_streak, skipped_since: safeText(last.skipped_since) });
+          if (last.reason !== 'no shards yet' && Number.isInteger(last.skipped_streak) && last.skipped_streak > 0) Object.assign(row, { skipped_streak: last.skipped_streak, skipped_since: safeText(last.skipped_since) });
         }
         else if (Number.isFinite(windowsTime)) row.result = 'no result recorded (the run stopped before writing one)';
       } else if (adopted) row.state = 'adopted (recorded, never changed by Toolkit)';
@@ -268,7 +294,7 @@ function windowsRows(registry, folders, scheduler, home) {
       rows.push(row);
     }
     for (const entry of entries.filter(item => item.folder === folder && !live.some(task => task.name === item.name))) {
-      rows.push({ host: 'windows', folder, name: entry.name, id: entry.id, schedule: entry.schedule, ai: aiText(entry), purpose: entry.purpose, source: RECORD, state: 'missing' });
+      rows.push({ host: 'windows', folder, name: entry.name, id: entry.id, schedule: entry.schedule, ai: aiText(entry), purpose: entry.purpose, source: RECORD, state: entry.stopped_by_owner ? 'stopped by owner' : 'missing' });
     }
   }
   try {
@@ -407,6 +433,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
 if (require.main === module) process.exitCode = main();
 
 module.exports = {
-  SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, readLastRun, writeLastRun,
+  SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, writeTaskBackup, readLastRun, writeLastRun,
   entryProblem, looksSecret, safeText, skipText, sweepLine, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
 };

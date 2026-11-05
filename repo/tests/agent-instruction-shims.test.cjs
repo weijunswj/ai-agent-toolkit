@@ -192,41 +192,55 @@ test('Windows task standing approval stays narrow on every changed approval surf
   const approval = global.split('**Toolkit task standing approval:**')[1].split('\n\n')[0];
   for (const rule of [
     /agents may run `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>` without asking only in ENABLED Toolkit-governed repos with verified merged bindings/,
-    /register\/update Toolkit's fixed PROGRAMME SWEEP and SHARD TIMINGS, with first sweep, in the binding's task folder/,
-    /Keep ownership checks and owner stops; verify results/,
+    /<Toolkit> is this computer's recorded managed checkout; <repo> is the target repository's main checkout, never a linked worktree/,
+    /Register\/update only Toolkit's fixed PROGRAMME SWEEP and SHARD TIMINGS, with first sweep, in the binding's task folder/,
+    /Refuse repository, checkout or Toolkit-copy changes, owner stops, disabled or hand-edited tasks; verify results/,
     /Other scheduler commands, folder overrides and custom tasks need approval; native denials stop/,
   ]) assert.match(approval, rule);
   assert.match(global, /Approval, assignment, custody and capability never supply a missing host-native permission/);
   assert.match(readText('AGENTS.md'), /except the global Toolkit task standing approval/);
   assert.match(readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit task standing approval/);
   for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/safety-gates.md`]) {
-    assert.match(readText(file), /global Safety Gates' Toolkit task standing approval covers only the exact `toolkit-windows-tasks\.cjs apply --repo-root <repo>` command under its eligibility, folder, ownership, owner-stop and native-permission checks, including result verification/);
+    const safety = readText(file);
+    for (const rule of [/toolkit-windows-tasks\.cjs apply --repo-root <repo>/, /recorded managed Toolkit checkout/,
+      /main checkout/, /owner stops/, /--repair-owned/, /explicit approval/, /native/]) assert.match(safety, rule, file);
   }
   const reference = readText('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
-  const matrix = [
-    ['Exact apply command + ENABLED governance + verified merged binding + default folder', 'No ask; register/update fixed jobs, including first sweep; verify results'],
-    ['Missing or unreadable binding, or governance not ENABLED', 'No standing permission; obtain approval before any effect'],
-    ['Other script or subcommand, folder override, extra flags or custom task definition', 'Approval still needed; outside this standing permission'],
-    ['Either task is `stopped by owner`', 'Stop; never re-arm or ask again'],
-    ['Host denies', 'Stop; never retry another route'],
-    ['Existing unowned or adopted task, or corrupt registry', 'Keep existing refusal; do not overwrite or bypass it'],
+  const tables = reference.split('\n\n').filter(part => part.startsWith('| '));
+  const rowsOf = table => table.split('\n').slice(2).filter(line => line.startsWith('| '));
+  const locations = tables.find(table => table.startsWith('| Toolkit copy used'));
+  const expectedLocations = ['Recorded managed checkout', 'Plugin copy', 'Linked worktree', 'Other copy'].flatMap((copy, index) =>
+    ['Main checkout', 'Linked worktree', 'Missing or not a repository'].map((target, targetIndex) => index === 0 && targetIndex === 0
+      ? `| ${copy} | ${target} | Apply state table | Apply state table | Preview state table |`
+      : `| ${copy} | ${target} | Refuse | Refuse | Refuse |`));
+  assert.deepEqual(rowsOf(locations), expectedLocations);
+  const states = [
+    ['Absent, never enrolled and no stop', 'Create', 'Create', 'Create, preview only'],
+    ['Healthy, same repository and checkout', 'Current', 'Current', 'Current'],
+    ['Healthy, other repository', 'Refuse', 'Refuse', 'Refuse'],
+    ['Healthy, other checkout', 'Refuse', 'Create with approved `--repair-owned`', 'Ask owner'],
+    ...['Disabled', 'Hand-edited action', 'Hand-edited trigger', 'Removed by owner'].map(state => [state, 'Refuse', 'Create with approved `--repair-owned`', 'Refuse; show stop']),
+    ...['Adopted or unowned', 'Corrupt registry'].map(state => [state, 'Refuse', 'Refuse', 'Refuse']),
   ];
-  const table = reference.split('| Command and state | Result |')[1].split('**Shard timings on Windows.**')[0];
-  const rows = table.split('\n').filter(line => /^\| .+ \| .+ \|$/.test(line)).slice(1);
-  assert.deepEqual(rows, matrix.map(([state, result]) => `| ${state} | ${result} |`));
+  assert.deepEqual(rowsOf(tables.find(table => table.startsWith('| Existing task state'))), states.map(row => `| ${row.join(' | ')} |`));
   for (const rule of [
-    /Use its `schedule_folder`, else the repository's default folder, with no `--folder` override/,
+    /Use the binding's `schedule_folder`, else the repository's default folder, with no `--folder` override/,
     /A working-tree binding alone is not verified/,
     /Read governance status and the merged binding on the device before acting; missing or unreadable evidence grants nothing/,
-    /since apply covers both jobs, a stop on either holds the whole command until the owner changes that stop/,
-    /never adopt or delete a conflicting task to get past a refusal/,
-    /only the job's own last-run record proves the sweep ended well/,
-    /A failed, held, skipped or missing result stays visible for recovery/,
+    /If either fixed job has an owner stop, ordinary apply refuses both before scheduler or registry writes/,
+    /never adopt or delete a conflicting task to get past a refusal/i,
+    /only the job's own last-run record proves the sweep ended well/i,
+    /a failed, held, skipped or missing result stays visible for recovery/i,
     /Apply registers SHARD TIMINGS in every eligible repository, even without shards/,
     /`no shards yet` means no repository or external changes \(only the local last-run record\)/,
-    /next run starts timing automatically using Toolkit's fixed refresher; no repository-local script is needed/,
+    /When the manifest becomes available in the registered checkout, the next run starts timing automatically using Toolkit's fixed refresher; no repository-local script or hidden fetch is needed/,
     /Invalid or unreadable shard configuration fails visibly/,
+    /records and reads back the stop before unregistering/,
+    /Only an explicitly approved successful repair clears the stop, after scheduler readback/,
+    /first sweep can take up to ten minutes/,
+    /Registration alone does not prove the first sweep completed/,
   ]) assert.match(reference, rule);
+  assert.doesNotMatch(reference, /put it on the owner's pending list until it exists|once the user pastes/);
 });
 
 test('the controller removes a merged lane worktree and branch without --force or -D and keeps what it cannot prove', () => {

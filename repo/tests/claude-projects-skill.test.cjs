@@ -764,7 +764,11 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
   assert.match(at('reference/setup.md'), /With governance in any other state, or no device, do not create it or suggest it/);
   assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(guided setup step 3\); in any other case, never create or suggest it\./);
   assert.match(at('SKILL.md'), /only when ENABLED and a device is named\)/);
-  assert.match(at('tasks/hourly-nudge.md'), /when project memory names a device, "; no device programme sweep task armed", and with no device named "; no device named, so cloud writes wait for the next session on a computer with gh signed in"/);
+  const nudge = at('tasks/hourly-nudge.md');
+  assert.match(nudge, /Check the `SCHEDULED TASKS:` line before claiming device-task coverage or absence/);
+  assert.match(nudge, /if the device programme sweep entry says `stopped by owner`, report "device programme sweep stopped by owner"/);
+  assert.match(nudge, /device programme sweep needs local setup; coordinator: follow reference\/recurring-tasks\.md/);
+  assert.doesNotMatch(nudge, /no device programme sweep task armed/);
   const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
   assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
 });
@@ -773,11 +777,16 @@ test('on a Windows device every governed repository gets its own programme sweep
   // Setup plans tasks only for the managed Toolkit checkout, so another governed repository's line
   // comes from the read-only plan command run against that repository's checkout.
   const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
-  assert.match(recurring, /Toolkit setup on the device lists it for the Toolkit repository only\. For any other governed repository, the device's local Remote Control thread runs `node <Toolkit checkout>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <that repository's checkout>`, which is read-only/);
-  assert.match(recurring, /that local session checks the eligibility table below, then runs exactly `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>` under the global Toolkit task standing approval/);
-  assert.match(recurring, /hand the user a device step only when the host blocks the session/);
-  assert.doesNotMatch(recurring, /paste the programme sweep line from setup/);
-  assert.match(read('skills/github-program-reconciler/SKILL.md'), /the line that setup prints for the Toolkit repository, or that `toolkit-windows-tasks\.cjs plan --repo-root <checkout>` prints, read-only, for any other governed repository/);
+  assert.match(recurring, /Toolkit setup on the device lists it for the Toolkit repository only/);
+  assert.match(recurring, /recorded managed Toolkit checkout[\s\S]*main checkout, never a linked worktree/);
+  assert.match(recurring, /read-only plan command `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <repo>`/);
+  assert.match(recurring, /run exactly `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>`/);
+  assert.match(recurring, /hand the owner a device step only when the host blocks the session/);
+  assert.match(recurring, /have a local device session follow the eligibility checks below; hand the owner a device step only when the host blocks that session/);
+  assert.doesNotMatch(recurring, /paste the programme sweep line from setup|put it on the owner's pending list until it exists|no device programme sweep task armed/);
+  const reconciler = read('skills/github-program-reconciler/SKILL.md');
+  assert.match(reconciler, /An eligible local agent registers it from the recorded managed Toolkit checkout against the repository's main checkout under the global Toolkit task standing approval\. Setup and `plan` only report what is needed\. Owner stops and native denials remain stops\./);
+  assert.doesNotMatch(reconciler, /once the user pastes|the line that setup prints/);
   const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
   assert.equal(windowsTasks.parseArgs(['plan', '--repo-root', 'C:\\work\\other']).repo_root, 'C:\\work\\other');
 });
