@@ -269,6 +269,7 @@ function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__di
   const wanted = [];
   const skipped = [];
   const definitions = [];
+  const confirmed = require('./toolkit-task-shape.cjs').confirmedTaskShape({ certain: read.certain, governanceState: read.governanceState });
   for (const [job, spec] of Object.entries(JOBS)) {
     const name = taskName(chosen, job);
     const problem = nameProblem(name);
@@ -286,7 +287,7 @@ function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__di
     definition.def = definitionDigest(definition);
     definition.description = `${chosen}: ${spec.task}. ${spec.purpose} [toolkit-task v1 id=${id} def=${definition.def}]`;
     definitions.push(definition);
-    const selected = read.enabled ? job !== 'footer-sweep' : read.certain && job === 'footer-sweep';
+    const selected = confirmed ? confirmed.includes(job) : read.enabled && job !== 'footer-sweep';
     if (selected) wanted.push(definition);
     else if (!read.certain || job !== 'footer-sweep') skipped.push({ job, name, reason: read.certain ? 'governance is not enabled; the footer-only cleaner is selected' : 'fresh matching merged governance could not be verified; refresh governance status, then retry the task plan' });
   }
@@ -468,7 +469,8 @@ class WindowsTaskOwner {
       return updated;
     });
     const fresh = read?.certain;
-    const desiredJob = fresh ? read.governanceState === 'ENABLED' ? 'programme-sweep' : 'footer-sweep'
+    const confirmed = require('./toolkit-task-shape.cjs').confirmedTaskShape({ certain: fresh, governanceState: read?.governanceState });
+    const desiredJob = confirmed ? confirmed[0]
       : selected?.job || (read?.enabled ? 'programme-sweep' : null);
     const source = cleaners.find(e => e.job !== desiredJob);
     const destination = cleaners.find(e => e.job === desiredJob);
@@ -496,7 +498,7 @@ class WindowsTaskOwner {
         + `; foreign or unrecorded task conflict; obtain approval for exact inspection/removal, then retry. Inspect Get-ScheduledTask -TaskPath '\\${otherFolder}\\' -TaskName '${task.name.replace(/'/g, "''")}'; only after approval: Unregister-ScheduledTask -TaskPath '\\${otherFolder}\\' -TaskName '${task.name.replace(/'/g, "''")}' -Confirm:$false`;
       else if (!ours.includes(record) || otherFolder !== folder) conflict = 'another cleaner is enrolled for this repository; explicit owner recovery is required';
     }
-    const wanted = definitions.filter(d => d.job === desiredJob || d.job === 'shard-timings' && (fresh ? read.governanceState === 'ENABLED' : read?.enabled && desiredJob === 'programme-sweep'));
+    const wanted = definitions.filter(d => confirmed ? confirmed.includes(d.job) : d.job === desiredJob || d.job === 'shard-timings' && read?.enabled && desiredJob === 'programme-sweep');
     // Retirement follows destination registration; shard effects come last.
     const ordered = [...wanted.filter(d => isCleaner(d.job)),
       ...definitions.filter(d => d.job === source?.job),

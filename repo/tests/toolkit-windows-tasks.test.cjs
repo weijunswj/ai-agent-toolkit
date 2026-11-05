@@ -1708,6 +1708,35 @@ function assertShape(w, state) {
   assert.ok((w.registry || tasks).readRegistry(w.home).tasks.every(e => !e.replaces), 'completed switches retain no relationship');
 }
 
+test('task advisory clears immediately after real owner ON/OFF/absent switches and removal with leftover records', async t => {
+  const w = switchWorld(t);
+  const gate = require('../scripts/toolkit-governance-gate.cjs');
+  const registryOptions = { registryPath: path.join(tasks.userStateDir(w.home), 'repository-governance.v1.json'), testOnly: true };
+  const start = source => {
+    const input = { session_id: `advisory-${source}`, source, cwd: w.root };
+    gate.startSession(input, { registryOptions, environment: { TOOLKIT_GOVERNANCE_OFFLINE: '1' } });
+    return gate.sessionLine(w.root, { registryOptions, programmeDeps: { home: w.home, environment: {}, platform: 'win32', mergedBinding: () => null } });
+  };
+  await w.gov('on');
+  assert.equal(w.cli('apply').code, 0);
+  for (const state of ['off','on','absent','on']) {
+    await w.gov(state);
+    for (const source of ['startup','resume','clear','compact']) assert.match(start(source), /Toolkit tasks: recorded Windows tasks/);
+    const wanted = require('../scripts/toolkit-task-shape.cjs').confirmedTaskShape({ certain: true, governanceState: state === 'on' ? 'ENABLED' : state === 'off' ? 'DISABLED' : 'UNDECIDED' });
+    assert.deepEqual(w.offer().wanted.map(d => d.job).sort(), [...wanted].sort());
+    assert.deepEqual(w.cli('plan').json.items.filter(item => !item.retiring).filter(item => ['create','current','update'].includes(item.action)).map(item => item.definition.job).sort(), [...wanted].sort());
+    assert.equal(w.cli('apply').code, 0);
+    assertShape(w, state);
+    for (const source of ['startup','resume','clear','compact']) assert.doesNotMatch(start(source), /Toolkit tasks:/);
+  }
+  const before = tasks.readRegistry(w.home).tasks;
+  assert.ok(before.some(row => tasks.readLastRun(row.id, w.home)), 'real first-run receipts exist');
+  assert.equal(w.cli('remove').code, 0);
+  assert.ok(before.some(row => tasks.readLastRun(row.id, w.home)), 'removal leaves run records');
+  await w.gov('off');
+  for (let repeat = 0; repeat < 2; repeat++) for (const source of ['startup','resume','clear','compact']) assert.doesNotMatch(start(source), /Toolkit tasks:/);
+});
+
 for (const days of [0,1,3]) for (const sequence of [['off','on','off','on'], ['absent','on','absent','on'], ['on','off','on','off']])
 test(`switch sequence: real status/apply ${sequence.join('/')} advancing ${days} days`, async t => {
   const w = switchWorld(t);
