@@ -769,17 +769,22 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
   assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
 });
 
-test('Windows device guidance separates full-day cleaning and programme work and plans each checkout', () => {
+test('Windows device guidance selects a conditional cleaner and records owner-run apply actions', () => {
   const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
   assert.match(recurring, /hourly from 00:00 to 23:59/);
-  assert.match(recurring, /independent `<FOLDER> - FOOTER SWEEP`/);
-  assert.match(recurring, /including where governance is off or cannot be refreshed/);
-  assert.match(recurring, /only from a fresh enabled binding matching origin/);
+  assert.ok(recurring.includes('a fresh ENABLED plan selects `PROGRAMME SWEEP`; a confirmed non-ENABLED plan selects `FOOTER SWEEP`.'));
+  assert.ok(recurring.includes('An installed programme task always cleans origin first at its installed hours, even when runtime governance cannot be refreshed;'));
+  assert.ok(recurring.includes('Runtime governance changes never switch the installed cleaner.'));
+  assert.ok(recurring.includes('Only owner-reviewed `apply` adds or replaces a task and installs the hourly full-day schedule; existing tasks keep their installed hours until apply.'));
+  assert.ok(recurring.includes('Replacement verifies the destination disabled, stops and quiesces the source, copies the earliest valid source or destination cursor'));
+  assert.ok(recurring.includes('Missing, unreadable, invalid, mismatched or future history uses this visible 48-hour fallback: `Footer history could not be read; scanning the last 48 hours. Older posts may need a separately authorised full-history cleanup.`'));
+  assert.ok(recurring.includes('there is no global single-writer guarantee.'));
   assert.match(recurring, /deduplicated plans for the managed Toolkit checkout and the original working checkout/);
   assert.match(recurring, /For any other GitHub checkout, the device's local Remote Control thread runs `node <Toolkit checkout>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <that repository's checkout>`, which is read-only/);
-  assert.match(recurring, /Hand the user that exact line, for that repository's checkout, and put "paste the scheduled task line for <owner\/repo>" on the owner's pending list/);
+  assert.match(recurring, /The owner reviews and pastes that exact line, then reads back the installed task and last result/);
+  assert.doesNotMatch(recurring, /verified disabled companion|first handover|damaged history holds for recovery|Footer task not set up; paste the apply line/);
   assert.doesNotMatch(recurring, /paste the programme sweep line from setup|then the footer sweep/);
-  assert.match(read('skills/github-program-reconciler/SKILL.md'), /Setup prints deduplicated plans for the managed Toolkit and original working checkouts/);
+  assert.match(read('skills/github-program-reconciler/SKILL.md'), /A read-only plan lists each checkout and ends with an explicit apply command when a task needs adding or replacing/);
   const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
   assert.equal(windowsTasks.parseArgs(['plan', '--repo-root', 'C:\\work\\other']).repo_root, 'C:\\work\\other');
 });
