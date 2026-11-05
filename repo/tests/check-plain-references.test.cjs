@@ -113,7 +113,54 @@ test('a rewritten reference leaves a stale entry that only a prune removes, and 
 
 test('a malformed baseline fails instead of allowing everything', t => {
   const root = fixture(t, { 'README.md': 'clean\n' }, [{ file: 'README.md', rule: 'number-reference', text: `${HASH}1`, count: 0 }]);
-  assert.throws(() => plain.check(root), /positive count/);
+  assert.throws(() => plain.check(root), /Baseline could not be read or is invalid/);
+});
+
+test('the wrapper recognises legacy entries, explicitly migrates without raising counts, and checks fingerprints', t => {
+  const link = `${GITHUB}/pull/3?reserved=RESERVED-WRAPPER-LINK-MARKER`;
+  const root = fixture(t, { 'repo/docs/A.md': `${link}\n${link}\n` }, [{ file: 'repo/docs/A.md', rule: 'github-link', text: link, count: 2 }]);
+  const file = path.join(root, plain.BASELINE_REL);
+  const before = fs.readFileSync(file);
+  const results = [];
+  const run = (...flags) => {
+    const result = spawnSync(process.execPath, [SCRIPT, '--root', root, ...flags], { encoding: 'utf8', timeout: 20000 });
+    results.push(result);
+    return result;
+  };
+  assert.equal(run().status, 0);
+  assert.equal(run('--files', 'repo/docs/A.md').status, 0);
+  assert.deepEqual(fs.readFileSync(file), before);
+  for (const flags of [['--migrate-baseline', '--files', 'repo/docs/A.md'], ['--migrate-baseline', '--prune-baseline']]) {
+    assert.equal(run(...flags).status, 2);
+    assert.deepEqual(fs.readFileSync(file), before);
+  }
+  assert.equal(run('--migrate-baseline').status, 0);
+  const migrated = fs.readFileSync(file);
+  const baseline = JSON.parse(migrated);
+  assert.equal(baseline.schema, check.BASELINE_SCHEMA);
+  assert.equal(baseline.allowed[0].count, 2);
+  assert.equal(Object.hasOwn(baseline.allowed[0], 'text'), false);
+  assert.match(baseline.allowed[0].fingerprint, /^[0-9a-f]{64}$/);
+  assert.equal(migrated.includes(Buffer.from(link)), false);
+  assert.equal(run().status, 0);
+  assert.deepEqual(fs.readFileSync(file), migrated);
+  fs.writeFileSync(path.join(root, 'repo/docs/A.md'), `${link}\n`);
+  assert.equal(run().status, 0);
+  assert.deepEqual(fs.readFileSync(file), migrated);
+  assert.equal(run('--prune-baseline').status, 0);
+  assert.equal(JSON.parse(fs.readFileSync(file)).allowed[0].count, 1);
+  fs.writeFileSync(path.join(root, 'repo/docs/A.md'), `${link}-edited\n`);
+  assert.equal(run('--files', 'repo/docs/A.md').status, 1);
+  fs.writeFileSync(file, `{"allowed":${link}`);
+  const malformed = fs.readFileSync(file);
+  for (const flags of [[], ['--files', 'repo/docs/A.md'], ['--prune-baseline'], ['--migrate-baseline']]) {
+    const result = run(...flags);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, 'Could not check: Baseline could not be read or is invalid.\n');
+    assert.deepEqual(fs.readFileSync(file), malformed);
+  }
+  for (const result of results) for (const stream of [result.stdout, result.stderr]) assert.equal(stream.includes('RESERVED-WRAPPER-LINK-MARKER'), false);
 });
 
 test('the command line exits 1 with the fix list and 0 when clean', t => {
