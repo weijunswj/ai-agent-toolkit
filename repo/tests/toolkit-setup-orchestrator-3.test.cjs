@@ -128,7 +128,8 @@ test('generated Codex and Claude instruction surfaces preserve the compact host-
     /Mutating siblings need disjoint files and scope; read-only siblings may investigate separable questions in parallel/,
   ]) assert.match(global, pattern);
   for (const text of [agents, global, gate]) {
-    assert.doesNotMatch(text, /RAM|reservation|CPU|Children default|never use Fast|medium non-fast|special-worker|host-parity|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/);
+    // Hardware tokens need word boundaries: PROGRAMME is a fixed task name, not a RAM policy.
+    assert.doesNotMatch(text, /\bRAM\b|reservation|\bCPU\b|Children default|never use Fast|medium non-fast|special-worker|host-parity|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/);
   }
   assert.equal(claude, '@AGENTS.md\n');
   assert.doesNotMatch(claude, /multi_agent_v2|max_concurrent_threads_per_session|agents\.max_threads/);

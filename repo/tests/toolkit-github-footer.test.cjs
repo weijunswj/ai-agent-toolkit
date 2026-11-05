@@ -222,7 +222,7 @@ function fakeGh(state) {
   const gh = (args, input) => {
     calls.push({ args, input });
     assert.deepEqual(args.slice(-2), ['--hostname', 'github.com']);
-    if (args[1] === 'repos/acme/app') return JSON.stringify({ full_name: state.repository || 'acme/app' });
+    if (args[1] === 'repos/acme/app') return JSON.stringify({ full_name: 'repository' in state ? state.repository : 'acme/app' });
     if (args[1] === 'user') return 'me\n';
     if (args[1] === '--paginate') {
       const endpoint = args[2];
@@ -250,8 +250,7 @@ test('repository metadata and explicit API host prevent foreign target edits', (
     const state = sampleState();
     state.repository = repository;
     const fake = fakeGh(state);
-    const gh = (args, input) => args[1] === 'repos/acme/app' && repository === null ? '{}' : fake.gh(args, input);
-    const results = sweep.sweep(sweep.parseArgs(['--repo', 'acme/app', '--apply']), { gh });
+    const results = sweep.sweep(sweep.parseArgs(['--repo', 'acme/app', '--apply']), { gh: fake.gh });
     const accepted = ['acme/app', 'ACME/APP'].includes(repository);
     assert.equal(fake.calls.some(call => call.args[1] === '-X'), accepted);
     if (!accepted) {

@@ -110,21 +110,54 @@ test('H-03: variants yields every line-break, byte order mark and tab form', () 
 });
 
 test('H-04: timing fails on quadratic work and passes on linear work', () => {
-  const started = Date.now();
-  const linear = text => { let count = 0; for (let index = 0; index < text.length; index += 1) if (text.charCodeAt(index) === 120) count += 1; return count; };
-  const quadratic = text => { let count = 0; for (let index = 0; index < text.length; index += 1) count += text.indexOf('x', index); return count; };
-  const build = size => 'a'.repeat(size);
-  const slow = hostile.timing(quadratic, build, { minMs: 2 });
-  assert.equal(slow.ok, false, slow.message);
-  const fast = hostile.timing(linear, build, { maxSize: 1 << 22 });
-  assert.equal(fast.ok, true, fast.message);
+  const measure = (cost, options) => {
+    let ticks = 0n;
+    let reads = 0;
+    const samples = [];
+    const built = [];
+    const result = hostile.timing(text => {
+      samples.push(text.length);
+      ticks += BigInt(cost(text.length)) * 1000000n;
+    }, size => { built.push(size); return 'a'.repeat(size); }, {
+      startSize: 2, maxSize: 128, minMs: 8, ...options,
+      clock: () => { reads += 1; return ticks; },
+    });
+    assert.equal(reads, samples.length * 2, 'one start and finish per sample');
+    return { result, samples, built };
+  };
+  for (const [cost, ok, times, ratio, largeRuns] of [
+    [size => size, true, [8, 32], 4, 1],
+    [size => size * size, false, [64, 1024], 16, 3],
+  ]) {
+    const { result, samples, built } = measure(cost);
+    assert.equal(result.ok, ok, result.message);
+    assert.equal(result.ratio, ratio);
+    assert.equal(result.size, 8, 'calibration stops at minMs');
+    assert.deepEqual(result.times, times);
+    assert.match(result.message, /limit 10x/);
+    assert.deepEqual(built, [2, 2, 8, 32]);
+    assert.deepEqual(samples, [2, 2, 2, 2, 8, 8, 8, ...Array(largeRuns).fill(32)]);
+  }
+  const capped = measure(size => size, { minMs: 10000 });
+  assert.equal(capped.result.size, 32, 'calibration stops before the larger input would exceed maxSize');
+  assert.deepEqual(capped.built, [2, 2, 8, 32, 128]);
+  assert.deepEqual(capped.samples, [2, 2, 2, 2, 8, 8, 8, 32, 32, 32, 128]);
+  const tooFast = measure(() => 0);
+  assert.equal(tooFast.result.ok, true, 'below minMs remains a pass');
+  assert.deepEqual(tooFast.result.times, [0, 0]);
+  assert.equal(tooFast.samples.length, 11, 'zero-duration work still has bounded sampling');
+  const boundary = measure(size => size === 32 ? 80 : size);
+  assert.equal(boundary.result.ratio, 10);
+  assert.equal(boundary.result.ok, true, 'the unchanged ratio threshold is inclusive');
+  const above = measure(size => size === 32 ? 81 : size);
+  assert.equal(above.result.ok, false, above.result.message);
+  assert.equal(above.samples.length, 10, 'over-limit larger runs use all three samples');
   for (const shape of hostile.cases(['large-input'])) {
     const text = shape.build(1000);
     assert.ok(text.length >= 1000, shape.id);
     const keys = text.split('\n').filter(Boolean).map(line => line.split(':')[0]);
     assert.equal(new Set(keys).size, keys.length, `${shape.id} repeats no key`);
   }
-  assert.ok(Date.now() - started < 2000, `timing self-test took ${Date.now() - started} ms`);
 });
 
 test('H-05: expectDefaultDeny reports accepted cases and stale or unknown exceptions', () => {

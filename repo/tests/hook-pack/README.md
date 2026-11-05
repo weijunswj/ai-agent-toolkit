@@ -9,7 +9,7 @@ One list of tool calls that every hook change must keep deciding the same way: c
 - `node repo/scripts/toolkit-hook-pack.cjs check-expectations`: lists every row removed, lowered to `known-bad` or changed in any other way since the base (hosts, event, payload, fixture, fault, expect, kind, source or note); only flipping a known-bad row toward passing (`status`, `known_bad_on`, `lane`, `added`) needs no reason. In a pull request each needs a line under a `## Pack changes` heading in the body: `<row id>: <why>`.
 - `node repo/scripts/toolkit-hook-pack.cjs validate`: checks the row format only.
 
-CI runs the pack on Linux and Windows in the `hook-pack` job of `validate.yml`, within a 6-minute budget each, and the `validate` job waits for it and runs the expectation-change check.
+CI runs the pack on Linux and Windows in the `hook-pack` job of `validate.yml`. Each job has a 15-minute timeout and a 360-second pack budget. The pack reports overdue work and fails the completed run if it exceeds that budget; the budget does not stop the process at six minutes. The `validate` job waits for both jobs and runs the expectation-change check.
 
 ## Rows
 

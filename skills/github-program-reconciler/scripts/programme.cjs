@@ -156,16 +156,15 @@ function toolkitVersion(file = VERSION_FILE) {
 // ends, and the owner runs one more refresh pass on the same store before it lets go, up to MAX_PASSES
 // in a row. If the owner fails or reaches the limit, the flag stays for the next refresh or sweep.
 const MAX_PASSES = 5;
-
 function defaultLockFile(repository = '') {
   const key = crypto.createHash('sha256').update(String(repository).toLowerCase()).digest('hex').slice(0, 12);
   return path.join(os.homedir(), '.ai-agent-toolkit', 'user-state', 'programme-refresh', `pass-${key}.lock`);
 }
-
 const againFile = file => `${file}.again`;
 const flagged = file => Boolean(file) && fs.existsSync(againFile(file));
 function setAgain(file) { fs.writeFileSync(againFile(file), `${new Date().toISOString()}\n`, { mode: 0o600 }); }
 function clearAgain(file) { try { fs.unlinkSync(againFile(file)); } catch { /* not set */ } }
+
 
 function readJsonFile(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); }

@@ -764,27 +764,31 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
   assert.match(at('reference/setup.md'), /With governance in any other state, or no device, do not create it or suggest it/);
   assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(guided setup step 3\); in any other case, never create or suggest it\./);
   assert.match(at('SKILL.md'), /only when ENABLED and a device is named\)/);
-  assert.match(at('tasks/hourly-nudge.md'), /when project memory names a device, "; no device programme sweep task armed", and with no device named "; no device named, so cloud writes wait for the next session on a computer with gh signed in"/);
+  const nudge = at('tasks/hourly-nudge.md');
+  assert.match(nudge, /Check the `SCHEDULED TASKS:` line before claiming device-task coverage or absence/);
+  assert.match(nudge, /if the device programme sweep entry says `stopped by owner`, report "device programme sweep stopped by owner"/);
+  assert.match(nudge, /device programme sweep needs local setup; coordinator: follow reference\/recurring-tasks\.md/);
+  assert.doesNotMatch(nudge, /no device programme sweep task armed/);
   const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
   assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
 });
 
-test('Windows device guidance selects a conditional cleaner and records owner-run apply actions', () => {
+test('on a Windows device every governed repository gets its own programme sweep line, not only Toolkit', () => {
+  // Setup reports the managed and original project repositories; direct plan remains available.
   const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
-  assert.match(recurring, /hourly from 00:00 to 23:59/);
-  assert.ok(recurring.includes('a fresh ENABLED plan selects `PROGRAMME SWEEP`; a confirmed non-ENABLED plan selects `FOOTER SWEEP`.'));
-  assert.ok(recurring.includes('An installed programme task always cleans origin first at its installed hours, even when runtime governance cannot be refreshed;'));
-  assert.ok(recurring.includes('Runtime governance changes never switch the installed cleaner.'));
-  assert.ok(recurring.includes('Only owner-reviewed `apply` adds or replaces a task and installs the hourly full-day schedule; existing tasks keep their installed hours until apply.'));
-  assert.ok(recurring.includes('Replacement verifies the destination disabled, stops and quiesces the source, copies the earliest valid source or destination cursor'));
-  assert.ok(recurring.includes('Missing, unreadable, invalid, mismatched or future history uses this visible 48-hour fallback: `Footer history could not be read; scanning the last 48 hours. Older posts may need a separately authorised full-history cleanup.`'));
-  assert.ok(recurring.includes('there is no global single-writer guarantee.'));
-  assert.match(recurring, /deduplicated plans for the managed Toolkit checkout and the original working checkout/);
-  assert.match(recurring, /For any other GitHub checkout, the device's local Remote Control thread runs `node <Toolkit checkout>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <that repository's checkout>`, which is read-only/);
-  assert.match(recurring, /The owner reviews and pastes that exact line, then reads back the installed task and last result/);
-  assert.doesNotMatch(recurring, /verified disabled companion|first handover|damaged history holds for recovery|Footer task not set up; paste the apply line/);
-  assert.doesNotMatch(recurring, /paste the programme sweep line from setup|then the footer sweep/);
-  assert.match(read('skills/github-program-reconciler/SKILL.md'), /A read-only plan lists each checkout and ends with an explicit apply command when a task needs adding or replacing/);
+  assert.match(recurring, /Setup reports the managed repository and the original project/);
+  assert.match(recurring, /only PROGRAMME SWEEP counts as programme refresh coverage/);
+  assert.match(recurring, /fresh matching disabled binding or freshly confirmed binding absence/);
+  assert.match(recurring, /never repeat it after an owner stop/);
+  assert.match(recurring, /recorded managed Toolkit checkout[\s\S]*main checkout, never a linked worktree/);
+  assert.match(recurring, /read-only plan command `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <repo>`/);
+  assert.match(recurring, /run exactly `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>`/);
+  assert.match(recurring, /hand the owner a device step only when the host blocks the session/);
+  assert.match(recurring, /have a local device session follow the eligibility checks below; hand the owner a device step only when the host blocks that session/);
+  assert.doesNotMatch(recurring, /paste the programme sweep line from setup|put it on the owner's pending list until it exists|no device programme sweep task armed/);
+  const reconciler = read('skills/github-program-reconciler/SKILL.md');
+  assert.match(reconciler, /An eligible local agent registers it from the recorded managed Toolkit checkout against the repository's main checkout under the global Toolkit task standing approval\. Setup and `plan` only report what is needed\. Owner stops and native denials remain stops\./);
+  assert.doesNotMatch(reconciler, /once the user pastes|the line that setup prints/);
   const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
   assert.equal(windowsTasks.parseArgs(['plan', '--repo-root', 'C:\\work\\other']).repo_root, 'C:\\work\\other');
 });

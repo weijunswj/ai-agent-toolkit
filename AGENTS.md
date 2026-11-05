@@ -1,6 +1,6 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.49.0 sha256=365395d20c4e -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.50.0 sha256=365395d20c4e -->
 # Toolkit-Governed Repository Rules
 
 On github.com, only the valid `.github/toolkit-programme.json` merged on origin's default branch decides on/off on every computer. Enabled binds this block: programme records, decision traces and evidence custody. Pending proposals and local answers decide nothing. Unreadable GitHub permits ordinary work with a note, without governance effects or standing task auto-merge. Coding gates and delegation always apply from the user-level global rules and gate rules. If missing, read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Outside rules win on conventions; only the floor's named evidence-store line can relax it.
@@ -38,7 +38,7 @@ This repository is the canonical AI Agent Toolkit, and this file applies to it o
 
 - Toolkit source changes go through a non-main branch and PR. Evidence custody follows the governed block above.
 - Never commit secrets, private values, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, runtime-only files, product code, customer data or business workflow JSON.
-- Live systems, Docker, n8n runtime, import/export, sync, activation, credentials, SSH to real servers, deployment, firewall or production config, and destructive or external-service actions need explicit current-turn approval naming the target and operation.
+- Live systems, Docker, n8n runtime, import/export, sync, activation, credentials, SSH to real servers, deployment, firewall or production config, and destructive or external-service actions need explicit current-turn approval naming the target and operation, except the global Toolkit task standing approval.
 - Never weaken tests, validation, schemas, guardrails, attribution, generated-output ownership or approval gates to pass a check, and never claim CI passed without checking it.
 
 ## Sources, Markers And Packaging

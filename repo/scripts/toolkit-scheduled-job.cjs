@@ -7,22 +7,13 @@
 // A fixed list of deterministic commands. It starts only node (Toolkit's own scripts) and gh, never
 // a model command line, and a job that needs judgement is never one of these.
 //
-//   programme-sweep  runs only when gh is signed in and `toolkit governance status` reads the
-//                    repository as ENABLED from a merged-binding read under 24 hours old; otherwise
-//                    it records "skipped: <reason>" for programme work. It always cleans first under a shared repository lock,
-//                    irrespective of programme governance. A failed `gh auth status`
-//                    is told apart by one short connection to github.com:443 (a node child, no
-//                    data sent): "skipped: offline" when it cannot connect, else "skipped: gh not
-//                    signed in". Then, in order:
-//                      1. programme.cjs refresh (the programme pages);
-//                      2. programme.cjs attention (its Attention: line is kept);
-//   footer-sweep     cleans the validated github.com origin independently of governance. A fresh,
-//                    enabled, matching binding adds its evidence store. Unverified store scope is
-//                    withheld and keeps the retry window. A complete successful batch advances the
-//                    watermark to scan start (48 hours on the first run). Only own posts are edited.
-//   shard-timings    for the Toolkit checkout only (it carries the shard manifest and the refresh
-//                    script): refresh-shard-timings.cjs --open-pr, which opens a pull request only
-//                    when the measured times drifted.
+//   programme-sweep  cleans own origin posts first, then runs programme refresh and attention
+//                    only with fresh matching enabled governance. A verified store joins cleaning.
+//   footer-sweep     performs the same cleaning without programme work. Uncertain store scope
+//                    retains the retry boundary; a complete batch saves scan start. Missing history
+//                    starts at 48 hours; damaged/future history reports a bounded fallback.
+//   shard-timings    preserves the general fixed Toolkit refresher: no shards yet is a quiet local
+//                    skip; a valid manifest requires fresh enabled governance before any refresh.
 //
 // Each run writes ~/.ai-agent-toolkit/user-state/tasks/<id>/last-run.json (mode 600): started,
 // finished, exit, status (ok, held, skipped, failed) and a few summary lines with anything shaped like
@@ -39,12 +30,14 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
 const tasks = require('./toolkit-tasks.cjs');
+const shards = require('./ci-test-shards.cjs');
 
 const RECONCILER = path.resolve(__dirname, '..', '..', 'skills', 'github-program-reconciler', 'scripts');
 const SCRIPT = Object.freeze({
   governance: path.join(__dirname, 'toolkit-governance.cjs'),
   programme: path.join(RECONCILER, 'programme.cjs'),
   footerSweep: path.join(__dirname, 'toolkit-github-footer-sweep.cjs'),
+  shardTimings: path.join(__dirname, 'refresh-shard-timings.cjs'),
 });
 const JOBS = Object.freeze(['programme-sweep', 'footer-sweep', 'shard-timings']);
 const FIRST_SWEEP_WINDOW_MS = 48 * 60 * 60 * 1000;
@@ -96,10 +89,10 @@ const REFRESH_REASONS = Object.freeze({
 
 function governanceReason(state) {
   if (!state || typeof state !== 'object') return 'governance status could not be read';
+  if (state.merged?.status === 'invalid') return 'binding is invalid';
+  if (state.merged?.status === 'foreign') return 'binding does not match origin';
   if (state.refresh?.refreshed === false) return Object.hasOwn(REFRESH_REASONS, state.refresh.reason) ? REFRESH_REASONS[state.refresh.reason] : 'binding refresh failed';
   if (!state.merged || ['unknown', 'none'].includes(state.merged.status)) return 'binding is missing';
-  if (state.merged.status === 'invalid') return 'binding is invalid';
-  if (state.merged.status === 'foreign') return 'binding does not match origin';
   if (state.merged.fresh !== true) return 'binding observation expired';
   return ['ENABLED', 'DISABLED', 'UNDECIDED', 'UNAVAILABLE', 'ERROR'].includes(state.state)
     ? state.state === 'ENABLED' ? null : `governance is ${state.state}` : 'governance status could not be read';
@@ -130,6 +123,9 @@ function statusResult(run) {
       || typeof state.merged.fresh !== 'boolean' || (run.status === 2) !== (state.state === 'ERROR')) return null;
     if (state.state === 'ERROR' && (state.rule !== 'M0' || state.merged.status !== 'invalid')) return null;
     if (state.state === 'ENABLED' && state.merged.status !== 'enabled') return null;
+    if (state.state === 'DISABLED' && !['disabled', 'none', 'unknown', 'foreign'].includes(state.merged.status)) return null;
+    if (state.state === 'UNDECIDED' && state.merged.status !== 'none') return null;
+    if (state.state === 'UNAVAILABLE' && !['unknown', 'none', 'foreign'].includes(state.merged.status)) return null;
     return state;
   } catch { return null; }
 }
@@ -147,7 +143,7 @@ function footerCursor(record, expected, repository, now) {
   const fallback = new Date(now.getTime() - FIRST_SWEEP_WINDOW_MS).toISOString();
   if (!record) return { since: fallback };
   const identityMismatch = record.schema !== 'toolkit.task-last-run.v1' || record.id !== expected.id || record.job !== expected.job
-    || (record.repository != null && (typeof record.repository !== 'string' || record.repository.toLowerCase() !== repository.toLowerCase()));
+    || (Object.hasOwn(record, 'repository') && (typeof record.repository !== 'string' || record.repository.toLowerCase() !== repository.toLowerCase()));
   if (identityMismatch || !validTime(record.footer_sweep_since, now)) {
     const future = !identityMismatch && Number.isFinite(Date.parse(record.footer_sweep_since)) && Date.parse(record.footer_sweep_since) > now.getTime();
     return { since: fallback, note: future ? `Footer clock anomaly; scanning the last 48 hours. Older posts may need a separately authorised full-history cleanup.` : HISTORY_NOTE };
@@ -155,13 +151,21 @@ function footerCursor(record, expected, repository, now) {
   return { since: record.footer_sweep_since };
 }
 
+function localRepository(root, { run = spawnSync, stat = fs.statSync } = {}) {
+  if (!stat(root).isDirectory()) throw new Error('registered root is not a repository directory');
+  const result = run('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 10000, windowsHide: true });
+  if (result.error || result.status !== 0 || path.resolve(String(result.stdout).trim()).toLowerCase() !== path.resolve(root).toLowerCase()) throw new Error('registered root is not a repository checkout');
+  return true;
+}
+
 class Job {
   #options; #run; #node; #gh; #resolveGh; #identity; #observation; #home; #now; #summary = [];
-  #record; #write; #lock; #heldLock = null; #writable = true;
-  #auth; #state; #observed; #readIdentity;
+  #record; #write; #lock; #retryBoundary; #heldLock = null; #writable = true;
+  #auth; #state; #observed; #readIdentity; #repository; #rootChecked = false;
 
   constructor(options, deps = {}) {
     this.#options = options;
+    this.#repository = deps.repositoryReader || localRepository;
     this.#run = deps.run || defaultRun;
     this.#node = deps.nodePath || process.execPath;
     this.#gh = deps.ghPath === undefined ? null : deps.ghPath;
@@ -203,6 +207,16 @@ class Job {
     return this.node('-e', [REACH_GITHUB], TIMEOUT.reach).status === 0 ? 'gh not signed in' : 'offline';
   }
 
+  repository() {
+    if (!this.#rootChecked) {
+      if (this.#repository(this.#options.repoRoot) !== true) throw new Error('registered root is not a repository checkout');
+      this.#rootChecked = true;
+    }
+    return true;
+  }
+
+  notGoverned() { return governanceReason(this.governanceStatus()); }
+
   governanceStatus() {
     if (this.#state === undefined) {
       try { this.#state = statusResult(this.node(SCRIPT.governance, ['status', '--json'], TIMEOUT.check)); }
@@ -228,7 +242,7 @@ class Job {
   observe(identity) {
     try {
       const observed = this.#observation(identity, this.#home, this.now());
-      if (observed?.status === 'enabled') {
+      if (['enabled', 'disabled'].includes(observed?.status)) {
         // judgeMerged returns validateBinding's normalized v2 view, which adds three derived
         // v1 fields. Validate its source shape; those derived fields never grant target scope.
         let binding = observed.binding;
@@ -243,11 +257,17 @@ class Job {
   }
   now() { return this.#now(); }
 
+  get retryBoundary() { return this.#retryBoundary; }
   readRecord() { return this.#record(this.#options.taskId); }
   writeRecord(record) { if (this.#writable) this.#write(this.#options.taskId, record); }
-  release() { if (this.#heldLock) this.#heldLock.release(); }
+  release() {
+    if (!this.#heldLock) return true;
+    try { this.#heldLock.release(); return true; }
+    catch { this.note('Footer lock release failed; inspect the local lock before retrying.'); return false; }
+  }
 
   clean(base) {
+    this.repository();
     const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(this.identity());
     if (!repository) return { status: 'skipped', reason: 'no usable github.com origin repository' };
     const file = footerLockPath(repository, this.#home);
@@ -263,6 +283,7 @@ class Job {
       const previous = this.readRecord();
       const selected = footerCursor(previous, base, repository, this.now());
       since = selected.since;
+      this.#retryBoundary = since;
       if (selected.note) this.note(selected.note);
       const carried = { footer_sweep_since: selected.since };
       this.writeRecord({ ...base, status: 'running', finished: null, exit: null, summary: [], ...carried, ...skipStreak(previous) });
@@ -318,12 +339,13 @@ function sweepStep(job, repos, since) {
 }
 
 function programmeSweep(job) {
+  job.repository();
+  const identity = job.identity();
+  if (!require('./toolkit-windows-tasks.cjs').repositoryOf(identity)) return { status: 'skipped', reason: 'no usable github.com origin repository' };
   const signedOut = job.ghSignedOut();
   if (signedOut) return { status: 'skipped', reason: signedOut };
   const notGoverned = governanceReason(job.governanceStatus());
   if (notGoverned) return { status: 'skipped', reason: notGoverned };
-  const identity = job.identity();
-  if (!require('./toolkit-windows-tasks.cjs').repositoryOf(identity)) return { status: 'skipped', reason: 'no usable github.com origin repository' };
   const observed = job.observation(identity);
   if (!observed) return { status: 'skipped', reason: 'binding is missing' };
   if (observed.status !== 'enabled') return { status: 'skipped', reason: 'binding is invalid' };
@@ -345,7 +367,7 @@ function footerSweep(job, watermark) {
   const verified = !reason && state.merged.status === 'enabled' && observation?.status === 'enabled' && observation.fresh === true;
   // A fresh off/absent decision proves there is no eligible store. All uncertain relationships
   // keep the shared window, including an unreadable status with no usable cached observation.
-  const noStore = state?.merged?.fresh === true && state.refresh?.refreshed !== false
+  const noStore = ['DISABLED', 'UNDECIDED'].includes(state?.state) && state?.merged?.fresh === true && state.refresh?.refreshed !== false
     && observation?.fresh === true && state.merged.status === observation.status && ['disabled', 'none'].includes(observation.status);
   const repos = [repository];
   if (verified) {
@@ -358,12 +380,19 @@ function footerSweep(job, watermark) {
 }
 
 function shardTimings(job) {
-  const manifest = path.join(job.options.repoRoot, 'repo', 'contracts', 'ci', 'test-shards.json');
-  const script = path.join(job.options.repoRoot, 'repo', 'scripts', 'refresh-shard-timings.cjs');
-  if (!fs.existsSync(manifest) || !fs.existsSync(script)) return { status: 'skipped', reason: 'this checkout has no CI shards to time' };
+  if (job.repository() !== true) throw new Error('registered root is not a repository checkout');
+  let manifest;
+  try { manifest = shards.loadManifest(job.options.repoRoot); }
+  catch (error) {
+    if (error.code === 'ENOENT') return { status: 'skipped', reason: 'no shards yet' };
+    throw error;
+  }
+  shards.assertManifest(manifest, shards.discoverTestFiles(job.options.repoRoot));
+  const notGoverned = job.notGoverned();
+  if (notGoverned) return { status: 'skipped', reason: notGoverned };
   const signedOut = job.ghSignedOut();
   if (signedOut) return { status: 'skipped', reason: signedOut };
-  const run = job.node(script, ['--open-pr'], TIMEOUT.shards);
+  const run = job.node(SCRIPT.shardTimings, ['--repo-root', job.options.repoRoot, '--open-pr'], TIMEOUT.shards);
   const lines = String(run.stdout || '').split(/\r?\n/).filter(Boolean).slice(-3);
   for (const line of lines) job.note(line);
   if (run.status === 0) return { status: 'ok' };
@@ -373,6 +402,7 @@ function shardTimings(job) {
 
 // The skips in a row so far, from the previous record: { skipped_streak, skipped_since } or {}.
 function skipStreak(previous) {
+  if (previous?.reason === 'no shards yet') return {};
   const count = previous && Number.isInteger(previous.skipped_streak) && previous.skipped_streak > 0 ? previous.skipped_streak : 0;
   const since = previous && typeof previous.skipped_since === 'string' && !Number.isNaN(Date.parse(previous.skipped_since)) ? previous.skipped_since : null;
   return count && since ? { skipped_streak: count, skipped_since: since } : {};
@@ -388,8 +418,9 @@ function runJob(options, deps = {}) {
     ? { footer_sweep_since: previous.footer_sweep_since }
     : {};
   const streak = skipStreak(previous);
+  const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(job.identity());
   const base = { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, started,
-    repository: require('./toolkit-windows-tasks.cjs').repositoryOf(job.identity()) || (typeof previous?.repository === 'string' ? previous.repository : null) };
+    ...(repository ? { repository } : previous && Object.hasOwn(previous, 'repository') ? { repository: previous.repository } : {}) };
   if (options.job === 'shard-timings') job.writeRecord({ ...base, finished: null, exit: null, status: 'running', summary: [], ...streak });
   let outcome;
   try {
@@ -400,23 +431,34 @@ function runJob(options, deps = {}) {
       catch { job.note('Programme work stopped; see the next run.'); programme = { status: 'failed' }; }
       const status = [footer.status, programme.status].includes('failed') ? 'failed'
         : programme.status === 'ok' ? footer.status === 'ok' ? 'ok' : 'held' : programme.status;
-      outcome = { ...footer, ...programme, status, footer_status: footer.status, programme_status: programme.status };
+      outcome = { ...footer, status, footer_status: footer.status, programme_status: programme.status,
+        ...(footer.reason ? { footer_reason: footer.reason } : {}),
+        ...(programme.reason ? { programme_reason: programme.reason } : {}),
+        ...(status === 'skipped' ? { reason: footer.reason || programme.reason } : {}) };
+      if (programme.reason && programme.reason !== footer.reason) job.note(`Programme work skipped: ${programme.reason}.`);
     } else outcome = options.job === 'footer-sweep' ? job.clean(base) : shardTimings(job);
   }
   catch (error) { job.note(`The job stopped: ${error.message}`); outcome = { status: 'failed' }; }
   if (outcome.reason) job.note(`skipped: ${outcome.reason}`);
   let skips = {};
-  if (outcome.status === 'skipped') {
+  if (outcome.status === 'skipped' && outcome.reason !== 'no shards yet') {
     skips = { reason: outcome.reason, skipped_streak: (streak.skipped_streak || 0) + 1, skipped_since: streak.skipped_since || started };
   } else if (outcome.status === 'failed') skips = streak;
   else if (streak.skipped_streak) {
     job.note(`Resumed after ${streak.skipped_streak} skipped run${streak.skipped_streak === 1 ? '' : 's'} since ${streak.skipped_since.slice(0, 16).replace('T', ' ')} UTC.`);
   }
   const exit = outcome.status === 'failed' ? 1 : 0;
-  const record = { ...base, finished: job.now().toISOString(), exit, status: outcome.status, summary: job.summary, ...carried,
-    ...Object.fromEntries(['footer_status', 'programme_status'].filter(key => outcome[key] !== undefined).map(key => [key, outcome[key]])),
+  const record = { ...base, finished: job.now().toISOString(), exit, status: outcome.status, summary: job.summary, ...carried, ...(outcome.reason ? { reason: outcome.reason } : {}),
+    ...Object.fromEntries(['footer_status', 'programme_status', 'footer_reason', 'programme_reason'].filter(key => outcome[key] !== undefined).map(key => [key, outcome[key]])),
     ...(outcome.footer_sweep_since ? { footer_sweep_since: outcome.footer_sweep_since } : {}), ...skips };
-  try { job.writeRecord(record); } finally { job.release(); }
+  try { job.writeRecord(record); }
+  finally {
+    if (!job.release()) {
+      record.status = 'failed'; record.exit = 1; record.summary = job.summary;
+      if (job.retryBoundary) record.footer_sweep_since = job.retryBoundary;
+      job.writeRecord(record);
+    }
+  }
   return record;
 }
 
@@ -433,4 +475,4 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { JOBS, SCRIPT, SWEEP_OK, parseArgs, runJob, main, lastJson, footerCursor, footerLockPath, HISTORY_NOTE };
+module.exports = { JOBS, SCRIPT, SWEEP_OK, parseArgs, runJob, main, lastJson, localRepository, footerCursor, footerLockPath, HISTORY_NOTE };

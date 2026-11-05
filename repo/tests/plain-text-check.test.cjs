@@ -38,7 +38,11 @@ function settings(root, extra = {}) {
   return check.resolveConfig(config);
 }
 
-const run = (args, cwd) => spawnSync(process.execPath, args, { cwd, encoding: 'utf8', timeout: 30000 });
+// A deliberately non-Git fixture must not discover the enclosing worktree and install there.
+const run = (args, cwd) => spawnSync(process.execPath, args, {
+  cwd, encoding: 'utf8', timeout: 30000,
+  env: { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(cwd) },
+});
 const banned = (extra = {}) => ({ banned_terms: [{ term: 'Q#', reason: 'a lane code', fix: 'say what the work is' }], ...extra });
 
 test('a banned term matches its digits as a whole token, case-sensitive unless told otherwise', () => {
@@ -146,6 +150,51 @@ test('the starting baseline is written once, then only shrinks', (t) => {
   check.pruneBaseline(root, config);
   const baseline = JSON.parse(fs.readFileSync(path.join(root, config.baseline), 'utf8'));
   assert.deepEqual(baseline.allowed.map((entry) => [entry.file, entry.count]), [['docs/a.md', 1]], 'the new file is never added');
+});
+
+test('stale matched links reach neither output stream while counts, failures and pruning remain enforced', (t) => {
+  const marker = 'RESERVED-STALE-LINK-MARKER';
+  const link = `${GITHUB}/issues/3?reserved=${marker}`;
+  const root = tempRepo(t, { 'docs/a.md': `${link}\n${link}\n`, 'docs/removed.md': `${link}\n` });
+  const config = settings(root);
+  check.initBaseline(root, config);
+  const baselinePath = path.join(root, config.baseline);
+  const before = fs.readFileSync(baselinePath);
+  fs.writeFileSync(path.join(root, 'docs', 'a.md'), `${link}\n`);
+  fs.unlinkSync(path.join(root, 'docs', 'removed.md'));
+  const stale = run([SCRIPT, '--repo', root], root);
+  assert.equal(stale.status, 0, stale.stderr);
+  assert.match(stale.stdout, /docs\/a\.md: github-link is in the baseline 2 time\(s\) but occurs 1; run with --prune-baseline/);
+  assert.match(stale.stdout, /docs\/removed\.md: github-link is in the baseline 1 time\(s\) but occurs 0/);
+  assert.deepEqual(fs.readFileSync(baselinePath), before, 'reporting does not migrate or rewrite existing baselines');
+  fs.writeFileSync(path.join(root, 'docs', 'new.md'), `${link}\n`);
+  const mixed = run([SCRIPT, '--repo', root], root);
+  assert.equal(mixed.status, 1);
+  assert.match(mixed.stdout, /occurs 1; run with --prune-baseline/);
+  assert.match(mixed.stderr, /FAIL: docs\/new\.md:1: github-link:/);
+  assert.match(mixed.stderr, /1 item\(s\) to rewrite/);
+  const scoped = run([SCRIPT, '--repo', root, '--files', 'docs/a.md'], root);
+  assert.equal(scoped.status, 0, scoped.stderr);
+  assert.doesNotMatch(scoped.stdout, /NOTE:|prune-baseline/);
+  const pruned = run([SCRIPT, '--repo', root, '--prune-baseline'], root);
+  assert.equal(pruned.status, 0, pruned.stderr);
+  const baseline = JSON.parse(fs.readFileSync(baselinePath));
+  assert.deepEqual(baseline.allowed.map(entry => [entry.file, entry.rule, entry.count]), [['docs/a.md', 'github-link', 1]]);
+  assert.equal(baseline.allowed[0].text, link, 'baseline format is retained; only reporting changes');
+  const fresh = run([SCRIPT, '--repo', root], root);
+  assert.equal(fresh.status, 1, 'new findings still fail after pruning');
+  assert.doesNotMatch(fresh.stdout, /NOTE:/);
+  assert.match(fresh.stderr, /FAIL: docs\/new\.md:1: github-link:/);
+  fs.appendFileSync(path.join(root, 'docs', 'a.md'), `${link}\n`);
+  const excess = run([SCRIPT, '--repo', root], root);
+  assert.equal(excess.status, 1, 'a count above the pruned allowance still fails');
+  assert.match(excess.stderr, /3 item\(s\) to rewrite/);
+  for (const result of [stale, mixed, scoped, pruned, fresh, excess]) {
+    for (const stream of [result.stdout, result.stderr]) {
+      assert.equal(stream.includes(marker), false);
+      assert.equal(stream.includes(link), false);
+    }
+  }
 });
 
 test('a recorded off reason switches the check off, and says so', (t) => {

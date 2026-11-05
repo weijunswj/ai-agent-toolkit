@@ -296,21 +296,24 @@ test('stale SessionStart and owned-state sentinels remain untouched through the 
   }
 });
 
-test('Claude plan and JSON plan are observational and launch no Claude session', () => {
-  for (const json of [false, true]) {
+test('Claude plan, JSON and explain are observational and launch no Claude session', () => {
+  for (const mode of [['--plan'], ['--plan', '--json'], ['--explain', '1.1']]) {
     const fixture = realManagedFixture();
     seedOwnedMutationSentinels(fixture.root);
-    const staleSessionStart = path.join(fixture.root, `plan-session-${json}.txt`);
+    writeFile(path.join(fixture.root, '.ai-agent-toolkit', 'user-state', 'task-auto-merge.claude-code.v1.json'), JSON.stringify({ schema: 'toolkit.task-auto-merge-preferences.v1', host: 'claude-code', value: 'off' }));
+    writeFile(path.join(fixture.root, '.ai-agent-toolkit', 'agent-control', 'profiles', 'claude-code.json'), '{ legacy profile');
+    const staleSessionStart = path.join(fixture.root, 'plan-session.txt');
     const fakeClaude = path.join(fixture.root, 'Claude Plan CLI', 'stale-claude.cjs');
     writeFile(fakeClaude, `require('node:fs').writeFileSync(${JSON.stringify(staleSessionStart)}, 'session');\n`);
     const env = isolatedHomeEnv(fixture.root);
     const before = snapshotOwned(fixture.root);
     const result = run([
-      '--plan', ...(json ? ['--json'] : []), '--host', 'claude-code', '--repo-root', fixture.managedPath,
+      ...mode, '--host', 'claude-code', '--repo-root', fixture.managedPath,
       '--repo-remote', fixture.origin, '--claude-cli', fakeClaude,
+      '--yes-recommended', '--task-auto-merge', 'after-gates', '--claude-settings', 'enable',
     ], { env, timeout: 300000 });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /root-only|root agent/i);
+    assert.match(result.stdout, mode.includes('--explain') ? /Update source/i : /root-only|root agent/i);
     assert.deepEqual(snapshotOwned(fixture.root), before);
     assert.equal(fs.existsSync(staleSessionStart), false);
   }

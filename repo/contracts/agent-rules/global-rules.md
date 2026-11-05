@@ -42,6 +42,8 @@ Deleting scratch this agent created in this task (temporary worktrees, briefs, o
 
 Before a gated action, confirm an approval covers it and the host-native permission exists. An approval binds the owner, action, target, resources, effects, recipient, conditions and expiry, and survives only a change of turn, worker, chat or transport for the same pending action; anything changed, new, revoked, expired or left unapproved by its outcome needs fresh approval. Approval, assignment, custody and capability never supply a missing host-native permission. Words like `continue`, `next`, `apply` or `do it` stay within the approved scope.
 
+**Toolkit task standing approval:** agents may run `node <Toolkit>/repo/scripts/toolkit-windows-tasks.cjs apply --repo-root <repo>`: <Toolkit> is the recorded managed checkout; <repo> the verified main checkout, never a worktree. PROGRAMME SWEEP and SHARD TIMINGS need fresh enabled matching merged governance; FOOTER SWEEP also accepts fresh matching disabled governance or confirmed binding absence for a verified github.com origin. Register/update one fixed cleaner only in the repository-default folder; verify registration and its first result. Refuse repository, checkout or Toolkit-copy changes, owner stops, disabled or edited tasks and conflicts. Removal, repair, folder overrides and custom tasks need explicit approval; native denials stop.
+
 **Standing permission asks:** if a step stops on the owner, check the ledger, else ask once (once, from now on for exactly this, or no). Only the owner's recorded answer grants, never a hard stop; never edit your own permission settings (safety-gates playbook).
 
 ## Coding Gates

@@ -1,10 +1,36 @@
 # Toolkit Changelog
 
-## 3.49.0
+## 3.50.0
 
 ### Fixed
 
-- Keep footer cleaning working in existing programme tasks after updates, even when governance cannot be refreshed. Offer one cleaner per configured GitHub repository: programme sweep where governance is enabled, otherwise footer sweep. Owner-run apply reconciles task shapes, preserves valid retry windows and installs full-day hourly schedules. Report skip and failure reasons accurately. Unreadable footer history uses a visible 48-hour fallback; older posts may require a separately authorised full-history cleanup.
+- Fixed Windows footer cleaning so installed programme tasks clean before governance-dependent work, preserve retry history and report failures accurately. Added per-repository footer-only scheduling, full-day cleaner schedules and clearer setup diagnostics while preserving task ownership and owner stops.
+
+### Changed
+
+- FOOTER SWEEP joins the fixed-task standing approval for verified github.com repositories with fresh matching disabled governance or confirmed binding absence. Removal, repair, folder overrides and custom tasks still require explicit approval.
+
+## 3.49.1
+
+### Fixed
+
+- Setup rejects restoration mixed with planning, explanation, execution or extra arguments before invoking recovery. Dedicated backup restoration still works.
+- Plain-text stale-baseline notes retain file names, rules, counts and pruning guidance without printing matched text. Baseline storage remains unchanged.
+- The hostile-input timing self-test uses a controlled monotonic clock to check growth, calibration and sample limits without scheduler-dependent assertions.
+- Hook test pack guidance distinguishes the 15-minute job timeout from the 360-second pack budget.
+
+## 3.49.0
+
+### Changed
+
+- Local agents register or update Toolkit's fixed Windows programme sweep and shard timing tasks under narrowly scoped standing approval, with verified enabled governance, ownership checks, owner stops and run-result verification. Setup continues to report tasks without changing them.
+- The standing command refuses, instead of updating, any task owned by another repository or checkout, any run from a plugin copy or linked worktree, and any task the owner removed, disabled or hand-edited. A removal now records a lasting owner stop. A narrow, owner-approved repair option restores only Toolkit-owned tasks of the same repository.
+- Every eligible governed repository gets the shard timing task. Runs report `no shards yet` without repository or external changes until the shard manifest appears, then use Toolkit's fixed refresher automatically.
+
+### Fixed
+
+- Raise the global instruction block budget from 18,500 to 19,400 bytes and the Projects skill budget from 44,200 to 44,900 bytes, preserving the existing wording and allowing for Windows CRLF line endings.
+- Remove the old advice to paste a registration line from the reconciler skill, the recurring-tasks reference and the hourly nudge.
 
 ## 3.48.4
 
