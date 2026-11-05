@@ -147,18 +147,6 @@ test('a refusal only because a hook failed meets a row only when the row names i
   assert.equal(pack.meets(named, 'claude', { ...deny, reason: 'toolkit-claude-attribution-hook' }), false);
 });
 
-test('fixed session context expectations require the advisory and keep the decision check', () => {
-  const expected = row({ expect: { decision: 'allow', context_contains: 'Footer task not set up; paste the apply line.' } });
-  assert.deepEqual(pack.rowErrors(expected), []);
-  for (const context of ['', 'unrelated', expected.expect.context_contains]) {
-    assert.equal(pack.meets(expected, 'claude', { decision: 'allow', context, problems: [], failed: [] }), context === expected.expect.context_contains);
-  }
-  assert.equal(pack.meets(expected, 'claude', { decision: 'deny', context: expected.expect.context_contains, problems: [], failed: [] }), false);
-  for (const value of ['', null, 7]) assert.ok(pack.rowErrors(row({ expect: { decision: 'allow', context_contains: value } })).length);
-  const hook = { command: 'node "x/repo/scripts/toolkit-codex-session-start.cjs"' };
-  assert.equal(pack.hookDecision('codex', hook, output(0, expected.expect.context_contains)).context, expected.expect.context_contains);
-});
-
 test('an expectation that changes, a removed row or a row lowered to known-bad needs a reason in the pull request body', () => {
   const base = [row({ id: 'A1' }), row({ id: 'A2' }), row({ id: 'A3', hosts: ['claude', 'codex'] }), row({ id: 'A4' })];
   const head = [

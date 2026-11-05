@@ -9,8 +9,7 @@
 //
 //   programme-sweep  runs only when gh is signed in and `toolkit governance status` reads the
 //                    repository as ENABLED from a merged-binding read under 24 hours old; otherwise
-//                    it records "skipped: <reason>" for programme work. Until its independent
-//                    footer task is verified, it cleans first under a shared repository lock,
+//                    it records "skipped: <reason>" for programme work. It always cleans first under a shared repository lock,
 //                    irrespective of programme governance. A failed `gh auth status`
 //                    is told apart by one short connection to github.com:443 (a node child, no
 //                    data sent): "skipped: offline" when it cannot connect, else "skipped: gh not
@@ -130,6 +129,7 @@ function statusResult(run) {
       || !state.merged || !['enabled', 'disabled', 'none', 'unknown', 'invalid', 'foreign'].includes(state.merged.status)
       || typeof state.merged.fresh !== 'boolean' || (run.status === 2) !== (state.state === 'ERROR')) return null;
     if (state.state === 'ERROR' && (state.rule !== 'M0' || state.merged.status !== 'invalid')) return null;
+    if (state.state === 'ENABLED' && state.merged.status !== 'enabled') return null;
     return state;
   } catch { return null; }
 }
@@ -138,9 +138,27 @@ const validTime = (value, now) => typeof value === 'string' && /^\d{4}-\d\d-\d\d
   && Number.isFinite(Date.parse(value)) && Date.parse(value) <= now.getTime()
   && new Date(value).toISOString() === (value.includes('.') ? value : value.replace(/Z$/, '.000Z'));
 
+const HISTORY_NOTE = 'Footer history could not be read; scanning the last 48 hours. Older posts may need a separately authorised full-history cleanup.';
+function footerLockPath(repository, home) {
+  return path.join(tasks.userStateDir(home), 'tasks', `footer-${crypto.createHash('sha256').update(repository.toLowerCase()).digest('hex').slice(0, 20)}.lock`);
+}
+
+function footerCursor(record, expected, repository, now) {
+  const fallback = new Date(now.getTime() - FIRST_SWEEP_WINDOW_MS).toISOString();
+  if (!record) return { since: fallback };
+  const identityMismatch = record.schema !== 'toolkit.task-last-run.v1' || record.id !== expected.id || record.job !== expected.job
+    || (record.repository != null && (typeof record.repository !== 'string' || record.repository.toLowerCase() !== repository.toLowerCase()));
+  if (identityMismatch || !validTime(record.footer_sweep_since, now)) {
+    const future = !identityMismatch && Number.isFinite(Date.parse(record.footer_sweep_since)) && Date.parse(record.footer_sweep_since) > now.getTime();
+    return { since: fallback, note: future ? `Footer clock anomaly; scanning the last 48 hours. Older posts may need a separately authorised full-history cleanup.` : HISTORY_NOTE };
+  }
+  return { since: record.footer_sweep_since };
+}
+
 class Job {
   #options; #run; #node; #gh; #resolveGh; #identity; #observation; #home; #now; #summary = [];
-  #scheduler; #registry; #record; #lock;
+  #record; #write; #lock; #heldLock = null; #writable = true;
+  #auth; #state; #observed; #readIdentity;
 
   constructor(options, deps = {}) {
     this.#options = options;
@@ -152,9 +170,8 @@ class Job {
     this.#observation = deps.readObservation || readObservation;
     this.#home = deps.home || os.homedir();
     this.#now = deps.now || (() => new Date());
-    this.#scheduler = deps.scheduler || null;
-    this.#registry = deps.readRegistry || (() => tasks.readRegistry(this.#home));
-    this.#record = deps.readRecord || (id => tasks.readLastRun(id, this.#home));
+    this.#record = deps.readRecord || (id => tasks.readLastRun(id, this.#home) || (fs.existsSync(tasks.lastRunPath(id, this.#home)) ? {} : null));
+    this.#write = deps.writeRecord || ((id, record) => tasks.writeLastRun(id, record, this.#home));
     this.#lock = deps.takeLock || require('../../skills/github-program-reconciler/scripts/programme.cjs').takeLock;
   }
 
@@ -175,6 +192,11 @@ class Job {
   // null when gh is signed in, else the reason. `gh auth status` checks the token online, so a
   // failure is "offline" when github.com cannot be reached at all.
   ghSignedOut() {
+    if (this.#auth !== undefined) return this.#auth;
+    return (this.#auth = this.checkAuth());
+  }
+
+  checkAuth() {
     let gh;
     try { gh = this.ghPath(); } catch { return 'gh is not installed'; }
     if (this.#exec(gh, ['auth', 'status'], TIMEOUT.check).status === 0) return null;
@@ -182,16 +204,28 @@ class Job {
   }
 
   governanceStatus() {
-    try {
-      return statusResult(this.node(SCRIPT.governance, ['status', '--json'], TIMEOUT.check));
-    } catch { return null; }
+    if (this.#state === undefined) {
+      try { this.#state = statusResult(this.node(SCRIPT.governance, ['status', '--json'], TIMEOUT.check)); }
+      catch { this.#state = null; }
+    }
+    return this.#state;
   }
 
-  identity() { try { return this.#identity(this.#options.repoRoot); } catch { return null; } }
+  identity() {
+    if (this.#readIdentity === undefined) {
+      try { this.#readIdentity = this.#identity(this.#options.repoRoot) || null; } catch { this.#readIdentity = null; }
+    }
+    return this.#readIdentity;
+  }
 
   // Validate the same cached observation that supplies the store, independently of the status
   // command. mergedBinding() alone can return stale data and cannot grant store effects.
   observation(identity) {
+    if (this.#observed === undefined) this.#observed = this.observe(identity);
+    return this.#observed;
+  }
+
+  observe(identity) {
     try {
       const observed = this.#observation(identity, this.#home, this.now());
       if (observed?.status === 'enabled') {
@@ -204,94 +238,41 @@ class Job {
         }
         if (require('./toolkit-governance-state.cjs').bindingProblems(binding, identity).length) return { status: 'invalid', fresh: false };
       }
-      return observed;
+      return observed || null;
     } catch { return null; }
   }
   now() { return this.#now(); }
 
-  // Narrow companion readback: the registry, marker and complete action must all agree.
-  companion(repository) {
-    const registry = this.#registry();
-    if (registry.status !== 'ok') return 'unreadable';
-    const candidates = registry.tasks.filter(row => row.host === 'windows' && row.job === 'footer-sweep' && !row.adopted
-      && typeof row.repository === 'string' && row.repository.toLowerCase() === repository.toLowerCase());
-    if (!candidates.length) return 'missing';
-    const windows = require('./toolkit-windows-tasks.cjs');
-    try {
-      const scheduler = this.#scheduler || windows.powerShellScheduler();
-      for (const row of candidates) {
-        const live = scheduler.list(row.folder).find(item => item.name === row.name);
-        const marker = live && windows.parseMarker(live.description);
-        const hours = tasks.installedHours(row.schedule);
-        const schedule = hours && { kind: 'hourly', at: `${String(hours.hour).padStart(2, '0')}:00`, hours: hours.hours };
-        // The stored digest already binds the complete action and schedule, including records
-        // written before handover support. Recompute it from live data rather than trusting a row.
-        if (!marker || marker.id !== row.id || marker.def !== row.definition || !schedule
-          || windows.describeTriggers(live.triggers) !== row.schedule
-          || windows.definitionDigest({ ...live, schedule }) !== row.definition) continue;
-        const args = /(?:^| )footer-sweep --repo-root "([^"]+)" --task-id ([a-z0-9-]+)$/.exec(live.arguments);
-        if (!args || args[2] !== row.id || windows.repositoryOf(this.#identity(args[1]))?.toLowerCase() !== repository.toLowerCase()) continue;
-        return live.state === 'Disabled' ? 'disabled' : ['Ready', 'Running', 'Queued'].includes(live.state) ? 'ready' : 'unreadable';
-      }
-      return 'changed';
-    } catch { return 'unreadable'; }
-  }
+  readRecord() { return this.#record(this.#options.taskId); }
+  writeRecord(record) { if (this.#writable) this.#write(this.#options.taskId, record); }
+  release() { if (this.#heldLock) this.#heldLock.release(); }
 
-  clean(previous, base, interim = false) {
+  clean(base) {
     const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(this.identity());
     if (!repository) return { status: 'skipped', reason: 'no usable github.com origin repository' };
-    const companion = interim ? this.companion(repository) : null;
-    const setup = interim && !['ready', 'disabled'].includes(companion);
-    const condition = setup ? { footer_setup: 'needed' } : {};
-    if (interim && ['ready', 'disabled'].includes(companion)) return { status: 'ok', footer_status: companion };
-    const file = path.join(tasks.userStateDir(this.#home), 'tasks', `footer-${crypto.createHash('sha256').update(repository.toLowerCase()).digest('hex').slice(0, 20)}.lock`);
-    const lock = this.#lock(file);
-    if (!lock) {
-      if (setup) this.note(tasks.FOOTER_SETUP_NOTE);
-      this.note('Footer cleaning held: another footer pass is running.');
-      return { status: 'held', footer_status: 'locked', ...condition };
-    }
+    const file = footerLockPath(repository, this.#home);
+    let since;
     try {
-      if (interim) {
-        const checked = this.companion(repository);
-        if (['ready', 'disabled'].includes(checked)) return { status: 'ok', footer_status: checked };
-        this.note(tasks.FOOTER_SETUP_NOTE);
-        if (checked === 'unreadable') this.note('Footer companion could not be verified; interim cleaning continues.');
+      this.#heldLock = this.#lock(file);
+      if (!this.#heldLock) {
+        this.#writable = false; // Do not overwrite the active cleaner's record.
+        this.note('Footer cleaning held: another footer pass is running.');
+        return { status: 'held', footer_status: 'locked' };
       }
-      const now = this.now();
-      const registry = this.#registry();
-      const cursors = [];
-      const handed = previous?.footer_handover === repository.toLowerCase();
-      // Interim cleaning already owns its cursor. Only first import needs the registry to find
-      // all historical records; an unreadable registry must not stop a valid interim window.
-      let damaged = previous?.footer_status === 'recovery' || (!interim && !handed && registry.status !== 'ok');
-      const inspect = (record, id, expectedJob, known = false) => {
-        if (!record) { if (known && fs.existsSync(tasks.lastRunPath(id, this.#home))) damaged = true; return; }
-        if (record.id !== id || record.job !== expectedJob || record.schema !== 'toolkit.task-last-run.v1'
-          || (record.footer_handover && record.footer_handover !== repository.toLowerCase())
-          || (record.repository !== undefined && (typeof record.repository !== 'string' || record.repository.toLowerCase() !== repository.toLowerCase()))
-          || !validTime(record.started, now) || (record.finished !== null && !validTime(record.finished, now))
-          || (record.footer_sweep_since !== undefined && (!validTime(record.footer_sweep_since, now)
-            || Date.parse(record.footer_sweep_since) > Date.parse(record.started)))) { damaged = true; return; }
-        cursors.push(record.footer_sweep_since || new Date(Date.parse(record.started) - FIRST_SWEEP_WINDOW_MS).toISOString());
-      };
-      if (previous) inspect(previous, base.id, base.job);
-      // Import once. Historical records are eligible only through a matching, non-adopted row.
-      if (!interim && !handed && registry.status === 'ok') {
-        for (const row of registry.tasks.filter(row => row.host === 'windows' && row.job === 'programme-sweep' && !row.adopted
-          && typeof row.repository === 'string' && row.repository.toLowerCase() === repository.toLowerCase())) inspect(this.#record(row.id), row.id, row.job, true);
-      }
-      if (damaged) { this.note('Footer cleaning held: migration history needs recovery; retry window was not reset.'); return { status: 'held', footer_status: 'recovery', ...condition }; }
-      const since = cursors.sort((a, b) => Date.parse(a) - Date.parse(b))[0] || new Date(now.getTime() - FIRST_SWEEP_WINDOW_MS).toISOString();
-      const carried = { footer_sweep_since: since, ...(!interim ? { footer_handover: repository.toLowerCase() } : {}), ...condition };
-      // Persist the imported window and repository binding before any interruptible process.
-      tasks.writeLastRun(base.id, { ...base, repository, status: 'running', finished: null, exit: null, summary: [], ...carried, ...skipStreak(previous) }, this.#home);
-      let outcome;
-      try { outcome = footerSweep(this, since); }
-      catch { this.note('Footer sweep stopped; the next run retains the retry window.'); outcome = { status: 'failed' }; }
-      return { ...carried, ...outcome, footer_status: outcome.status };
-    } finally { lock.release(); }
+      // Read inside the lock, before the start record overwrites the last retry boundary.
+      const previous = this.readRecord();
+      const selected = footerCursor(previous, base, repository, this.now());
+      since = selected.since;
+      if (selected.note) this.note(selected.note);
+      const carried = { footer_sweep_since: selected.since };
+      this.writeRecord({ ...base, status: 'running', finished: null, exit: null, summary: [], ...carried, ...skipStreak(previous) });
+      return { ...carried, ...footerSweep(this, selected.since) };
+    } catch {
+      this.note('Footer sweep stopped; the next run retains the retry window.');
+      return { status: 'failed', ...(since ? { footer_sweep_since: since } : {}) };
+    }
   }
+
 }
 
 // Step 1 and 2: { status: ok|held|failed }.
@@ -326,6 +307,7 @@ function sweepStep(job, repos, since) {
   const report = lastJson(run.stdout);
   const counts = {};
   for (const row of (report && Array.isArray(report.results) ? report.results : [])) counts[row.status] = (counts[row.status] || 0) + 1;
+  if (report?.results?.some(row => row.reason === 'repository-identity-mismatch')) job.note('Footer repository identity did not match origin; check for a renamed repository or stale origin.');
   const text = Object.entries(counts).map(([status, count]) => `${count} ${status}`).join(', ') || 'no posts with the footer';
   if (SWEEP_OK.has(run.status)) {
     job.note(`Footer sweep since ${since.slice(0, 16).replace('T', ' ')}: ${text}.`);
@@ -397,27 +379,29 @@ function skipStreak(previous) {
 }
 
 function runJob(options, deps = {}) {
-  const home = deps.home || os.homedir();
   const job = new Job(options, deps);
-  const previous = tasks.readLastRun(options.taskId, home) || (fs.existsSync(tasks.lastRunPath(options.taskId, home)) ? {} : null);
+  const previous = job.readRecord();
   const started = job.now().toISOString();
-  // Keep each task's cursor in its own record. Handover and scanning run under the footer lock.
-  const carried = previous && typeof previous.footer_sweep_since === 'string' && !Number.isNaN(Date.parse(previous.footer_sweep_since))
+  // The retry boundary is persisted before processes start, under the footer lock.
+  const carried = previous?.schema === 'toolkit.task-last-run.v1' && previous.id === options.taskId && previous.job === options.job
+    && typeof previous.footer_sweep_since === 'string' && !Number.isNaN(Date.parse(previous.footer_sweep_since))
     ? { footer_sweep_since: previous.footer_sweep_since }
     : {};
-  if (previous?.footer_handover) carried.footer_handover = previous.footer_handover;
   const streak = skipStreak(previous);
   const base = { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, started,
-    repository: require('./toolkit-windows-tasks.cjs').repositoryOf(job.identity()) };
-  tasks.writeLastRun(options.taskId, { ...base, finished: null, exit: null, status: 'running', summary: [], ...carried, ...streak }, home);
+    repository: require('./toolkit-windows-tasks.cjs').repositoryOf(job.identity()) || (typeof previous?.repository === 'string' ? previous.repository : null) };
+  if (options.job === 'shard-timings') job.writeRecord({ ...base, finished: null, exit: null, status: 'running', summary: [], ...streak });
   let outcome;
   try {
     if (options.job === 'programme-sweep') {
-      const footer = job.clean(previous, base, true);
-      const programme = programmeSweep(job);
-      outcome = { ...footer, ...programme, programme_status: programme.status };
-      if (programme.status === 'ok' && footer.status !== 'ok') outcome.status = footer.status === 'failed' ? 'failed' : 'held';
-    } else outcome = options.job === 'footer-sweep' ? job.clean(previous, base) : shardTimings(job);
+      const footer = job.clean(base);
+      let programme;
+      try { programme = programmeSweep(job); }
+      catch { job.note('Programme work stopped; see the next run.'); programme = { status: 'failed' }; }
+      const status = [footer.status, programme.status].includes('failed') ? 'failed'
+        : programme.status === 'ok' ? footer.status === 'ok' ? 'ok' : 'held' : programme.status;
+      outcome = { ...footer, ...programme, status, footer_status: footer.status, programme_status: programme.status };
+    } else outcome = options.job === 'footer-sweep' ? job.clean(base) : shardTimings(job);
   }
   catch (error) { job.note(`The job stopped: ${error.message}`); outcome = { status: 'failed' }; }
   if (outcome.reason) job.note(`skipped: ${outcome.reason}`);
@@ -430,9 +414,9 @@ function runJob(options, deps = {}) {
   }
   const exit = outcome.status === 'failed' ? 1 : 0;
   const record = { ...base, finished: job.now().toISOString(), exit, status: outcome.status, summary: job.summary, ...carried,
-    ...Object.fromEntries(['footer_setup', 'footer_status', 'programme_status', 'footer_handover'].filter(key => outcome[key] !== undefined).map(key => [key, outcome[key]])),
+    ...Object.fromEntries(['footer_status', 'programme_status'].filter(key => outcome[key] !== undefined).map(key => [key, outcome[key]])),
     ...(outcome.footer_sweep_since ? { footer_sweep_since: outcome.footer_sweep_since } : {}), ...skips };
-  tasks.writeLastRun(options.taskId, record, home);
+  try { job.writeRecord(record); } finally { job.release(); }
   return record;
 }
 
@@ -449,4 +433,4 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = { JOBS, SCRIPT, SWEEP_OK, parseArgs, runJob, main, lastJson };
+module.exports = { JOBS, SCRIPT, SWEEP_OK, parseArgs, runJob, main, lastJson, footerCursor, footerLockPath, HISTORY_NOTE };

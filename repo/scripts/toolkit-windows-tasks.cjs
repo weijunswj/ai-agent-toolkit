@@ -51,7 +51,7 @@ const JOBS = Object.freeze({
   'programme-sweep': {
     task: 'PROGRAMME SWEEP',
     schedule: Object.freeze({ kind: 'hourly', at: '00:00', hours: 24 }),
-    purpose: 'Brings the programme pages up to date and keeps the attention line. No AI.',
+    purpose: 'Cleans your own GitHub posts first, then brings programme pages and attention up to date under governance guards. No AI.',
     applies({ governanceState, binding }) {
       if (governanceState !== 'ENABLED') return `GitHub governance is ${governanceState || 'not readable'} here, so there is no programme to sweep`;
       if (!binding) return 'the binding merged on the default branch could not be read on this computer; run toolkit governance status online first';
@@ -149,12 +149,15 @@ function readCheckout(checkout, deps = {}) {
   catch { return { root: null, repository: null, refusal: 'checkout identity could not be read; scheduled tasks refused' }; }
   const repository = repositoryOf(identity);
   if (!repository) return { root: null, repository: null, governanceState: null, binding: null, refusal: identity.refusal, refusalCode: identity.refusalCode };
-  let state = null;
-  try { state = governance.governanceState(identity.root).state; } catch { state = null; }
+  let status = null;
+  try { status = governance.governanceState(identity.root); } catch { /* uncertain read preserves the installed shape */ }
+  const state = status?.state || null;
   let binding = null;
   try { binding = governance.mergedBinding(identity.root); } catch { /* planning can still offer origin cleaning */ }
   if (binding && String(binding.repository).toLowerCase() !== repository.toLowerCase()) binding = null;
-  return { root: identity.root, repository, governanceState: state, binding };
+  const certain = status?.merged?.fresh === true && ['enabled', 'disabled', 'none'].includes(status.merged.status)
+    && ((state === 'ENABLED' && status.merged.status === 'enabled' && binding) || (['DISABLED', 'UNDECIDED'].includes(state) && ['disabled', 'none'].includes(status.merged.status)));
+  return { root: identity.root, repository, governanceState: state, binding, certain: Boolean(certain) };
 }
 
 function folderForCheckout(checkout, deps = {}) {
@@ -233,9 +236,11 @@ function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__di
   if (!chosen || !FOLDER.test(chosen)) throw new WindowsTasksError(`no usable task folder for this repository (got ${JSON.stringify(chosen)}); set schedule_folder in its binding or pass --folder`);
   const wanted = [];
   const skipped = [];
+  const cleaners = [];
+  const selected = read.certain && read.governanceState === 'ENABLED' ? 'programme-sweep' : 'footer-sweep';
   for (const [job, spec] of Object.entries(JOBS)) {
     const reason = spec.applies({ checkout: read.root, governanceState: read.governanceState, binding: read.binding });
-    if (reason) { skipped.push({ job, name: taskName(chosen, job), reason }); continue; }
+    if (reason && !['programme-sweep', 'footer-sweep'].includes(job)) { skipped.push({ job, name: taskName(chosen, job), reason }); continue; }
     const name = taskName(chosen, job);
     const problem = nameProblem(name);
     if (problem) throw new WindowsTasksError(`task name ${JSON.stringify(name)} ${problem}`);
@@ -251,9 +256,12 @@ function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__di
     quotePath(toolkitRoot, 'the Toolkit checkout');
     definition.def = definitionDigest(definition);
     definition.description = `${chosen}: ${spec.task}. ${spec.purpose} [toolkit-task v1 id=${id} def=${definition.def}]`;
-    wanted.push(definition);
+    if (['programme-sweep', 'footer-sweep'].includes(job)) cleaners.push(definition);
+    if (!['programme-sweep', 'footer-sweep'].includes(job) || job === selected) wanted.push(definition);
+    else skipped.push({ job, name, reason: selected === 'programme-sweep' ? 'the programme task already performs footer cleaning' : reason || 'footer cleaning is selected until governance is freshly verified' });
   }
-  return { folder: chosen, repository: read.repository, root: read.root, wanted, skipped };
+  return { folder: chosen, repository: read.repository, root: read.root, wanted, cleaners, skipped, certain: read.certain,
+    readIdentity: (deps.governance || require('./toolkit-governance-state.cjs')).readIdentity };
 }
 
 function describeSchedule(schedule) {
@@ -300,8 +308,14 @@ if ($p.schedule.kind -eq 'hourly') {
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
 $task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description $p.description
+$task.Settings.Enabled = [bool]$p.enabled
 Register-ScheduledTask -TaskPath $path -TaskName $p.name -InputObject $task -Force | Out-Null
 ConvertTo-Json -InputObject @{ registered = $true } -Compress`,
+  enabled: String.raw`$path = PathOf $p.folder
+if ($p.enabled) { Enable-ScheduledTask -TaskPath $path -TaskName $p.name | Out-Null } else { Disable-ScheduledTask -TaskPath $path -TaskName $p.name | Out-Null }
+ConvertTo-Json -InputObject @{ changed = $true } -Compress`,
+  stop: String.raw`Stop-ScheduledTask -TaskPath (PathOf $p.folder) -TaskName $p.name
+ConvertTo-Json -InputObject @{ stopped = $true } -Compress`,
   unregister: String.raw`$path = PathOf $p.folder
 $t = Get-ScheduledTask -TaskPath $path -TaskName $p.name -ErrorAction SilentlyContinue
 if (-not $t -or $t.TaskPath -ne $path) { ConvertTo-Json -InputObject @{ removed = $false } -Compress }
@@ -350,10 +364,12 @@ function powerShellScheduler(options = {}) {
     markedFolders: () => asList(ps('marked-folders', {})),
     register: definition => ps('register', {
       folder: definition.folder, name: definition.name, execute: definition.execute, arguments: definition.arguments, working_directory: definition.working_directory,
-      schedule: definition.schedule, description: definition.description, marker_prefix: `[toolkit-task v1 id=${definition.id} `,
+      enabled: definition.enabled !== false, schedule: definition.schedule, description: definition.description, marker_prefix: `[toolkit-task v1 id=${definition.id} `,
     }),
     unregister: (folder, name, id) => ps('unregister', { folder, name, marker: `[toolkit-task v1 id=${id} ` }),
     removeFolderIfEmpty: folder => ps('remove-folder', { folder }),
+    setEnabled: (folder, name, enabled) => ps('enabled', { folder, name, enabled }),
+    stop: (folder, name) => ps('stop', { folder, name }),
     start: (folder, name) => ps('start', { folder, name }),
     info: (folder, name) => ps('info', { folder, name }),
   };
@@ -361,27 +377,194 @@ function powerShellScheduler(options = {}) {
 
 // ---- plan, apply, remove, adopt ---------------------------------------------------------------
 
-// What each wanted task needs: create, update, current or refused.
-function planTasks(desired, { scheduler, home }) {
-  const registry = tasks.readRegistry(home);
-  const entries = registry.status === 'ok' ? registry.tasks : [];
-  const live = scheduler.list(desired.folder);
-  const items = desired.wanted.map((definition) => {
-    const existing = live.find(task => task.name === definition.name);
-    const recorded = entries.find(entry => entry.id === definition.id);
-    if (!existing) return { definition, action: 'create' };
-    const marker = parseMarker(existing.description);
-    const owned = marker && marker.id === definition.id && recorded && !recorded.adopted && recorded.host === 'windows' && recorded.folder === definition.folder && recorded.name === definition.name;
-    if (!owned) {
-      return { definition, action: 'refused', reason: marker && marker.id === definition.id
-        ? `"${definition.name}" in \\${definition.folder}\\ carries Toolkit's marker but this computer's task registry does not list it, so Toolkit leaves it alone. Delete it in Task Scheduler, then run apply again.`
-        : `"${definition.name}" is already in \\${definition.folder}\\ and is not Toolkit's (no Toolkit marker, or not in this computer's task registry), so Toolkit leaves it alone. Rename or delete it in Task Scheduler, then run apply again.` };
-    }
-    const same = marker.def === definition.def && existing.execute === definition.execute && existing.arguments === definition.arguments && existing.working_directory === definition.working_directory;
-    return { definition, action: same ? 'current' : 'update' };
-  });
-  return { folder: desired.folder, repository: desired.repository, registry: registry.status, items, skipped: desired.skipped };
+const CLEANERS = new Set(['programme-sweep', 'footer-sweep']);
+const sameRepo = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
+
+function liveDefinition(live, entry) {
+  const hours = tasks.installedHours(describeTriggers(live.triggers));
+  const schedule = CLEANERS.has(entry.job) && hours ? { kind: 'hourly', at: `${String(hours.hour).padStart(2, '0')}:00`, hours: hours.hours }
+    : entry.job === 'shard-timings' ? JOBS['shard-timings'].schedule : null;
+  return schedule && { ...live, id: entry.id, folder: entry.folder, job: entry.job, repository: entry.repository, schedule };
 }
+
+// The selected repository is the only reconciliation scope. No runtime discovery or repair.
+class WindowsTaskReconciliation {
+  constructor(desired, { scheduler, home, now = () => new Date(), wait = sleep, takeLock, readRecord, writeRecord, writeRegistry } = {}) {
+    this.desired = desired; this.scheduler = scheduler; this.home = home; this.now = now;
+    this.takeLock = takeLock || require('../../skills/github-program-reconciler/scripts/programme.cjs').takeLock;
+    this.readRecord = readRecord || (id => tasks.readLastRun(id, home) || (fs.existsSync(tasks.lastRunPath(id, home)) ? {} : null));
+    this.writeRecord = writeRecord || ((id, record) => tasks.writeLastRun(id, record, home));
+    this.writeRegistry = writeRegistry || (rows => tasks.writeRegistry(home, rows));
+    this.wait = wait;
+  }
+
+  inspect() {
+    const registry = tasks.readRegistry(this.home);
+    this.entries = registry.tasks || [];
+    const folders = new Set([this.desired.folder, ...this.entries.filter(row => row.host === 'windows').map(row => row.folder), ...this.scheduler.markedFolders()]);
+    this.live = [...folders].flatMap(folder => this.scheduler.list(folder).map(row => ({ ...row, folder })));
+    const cleaners = this.live.filter(live => {
+      const marker = parseMarker(live.description);
+      const entry = this.entries.find(row => row.host === 'windows' && row.folder === live.folder && row.name === live.name);
+      const target = /(?:programme-sweep|footer-sweep) --repo-root "([^"]+)" --task-id [a-z0-9-]+$/.exec(live.arguments || '');
+      if (sameRepo(entry?.repository, this.desired.repository) && (CLEANERS.has(entry.job)
+        || (entry.adopted && (target || / - (?:PROGRAMME|FOOTER) SWEEP$/.test(live.name))))) return true;
+      // Unknown marked tasks still name their repository through the complete runner action.
+      if (!marker || !target) return false;
+      if (live.folder === this.desired.folder) return true;
+      try { return sameRepo(repositoryOf(this.desired.readIdentity(target[1])), this.desired.repository); } catch { return false; }
+    });
+    const installed = cleaners.find(live => CLEANERS.has(this.entries.find(row => row.folder === live.folder && row.name === live.name)?.job));
+    const installedJob = installed && this.entries.find(row => row.folder === installed.folder && row.name === installed.name).job;
+    const wanted = this.desired.wanted.map(definition => !this.desired.certain && CLEANERS.has(definition.job) && installedJob
+      ? this.desired.cleaners.find(row => row.job === installedJob) : definition);
+    const items = wanted.map(definition => {
+      const existing = this.live.find(row => row.folder === definition.folder && row.name === definition.name);
+      const recorded = this.entries.find(row => row.id === definition.id);
+      let reason = null;
+      if (this.entries.some(row => row.host === 'windows' && row.folder === definition.folder && typeof row.repository === 'string' && !sameRepo(row.repository, definition.repository))) reason = 'the destination folder belongs to another repository; it was left alone';
+      if (recorded && (!sameRepo(recorded.repository, definition.repository) || recorded.adopted)) reason = 'the destination ID belongs to another repository or an adopted task; it was left alone';
+      const sources = CLEANERS.has(definition.job) ? cleaners.filter(row => row !== existing) : [];
+      const retired = CLEANERS.has(definition.job) ? this.entries.filter(row => row.host === 'windows' && !row.adopted && CLEANERS.has(row.job)
+        && row.id !== definition.id && sameRepo(row.repository, definition.repository) && !this.live.some(live => live.folder === row.folder && live.name === row.name)) : [];
+      for (const live of [...sources, ...(existing ? [existing] : [])]) reason ||= this.ownershipProblem(live);
+      if (registry.status !== 'ok') reason = 'the task registry could not be read; no task was changed';
+      const same = existing && !recorded?.pending_definition && parseMarker(existing.description)?.def === definition.def && existing.execute === definition.execute
+        && existing.arguments === definition.arguments && existing.working_directory === definition.working_directory
+        && describeTriggers(existing.triggers) === definition.schedule_text;
+      return { definition, action: reason ? 'refused' : sources.length || retired.length ? 'replace' : !existing ? 'create' : same ? 'current' : 'update',
+        ...(reason ? { reason } : {}), existing, sources, retired };
+    });
+    return { folder: this.desired.folder, repository: this.desired.repository, registry: registry.status, items,
+      skipped: this.desired.skipped.filter(row => !wanted.some(definition => definition.job === row.job)),
+      ...(!this.desired.certain ? { note: 'Governance could not be freshly verified; preserving the installed cleaner shape, or offering footer cleaning if none exists.' } : {}) };
+  }
+
+  ownershipProblem(live) {
+    const marker = parseMarker(live.description);
+    const entry = this.entries.find(row => row.host === 'windows' && row.folder === live.folder && row.name === live.name);
+    if (!marker || !entry || entry.adopted || marker.id !== entry.id) return marker
+      ? `"${live.name}" carries Toolkit's marker but this computer's task registry does not list it as owned, so Toolkit leaves it alone.`
+      : `"${live.name}" is already in \\${live.folder}\\ and is not Toolkit's (no Toolkit marker, or not in this computer's task registry), so Toolkit leaves it alone.`;
+    const definition = liveDefinition(live, entry);
+    if (!sameRepo(entry.repository, this.desired.repository)) return 'the destination belongs to another repository; it was left alone';
+    if (!definition || ![entry.definition, entry.pending_definition].includes(marker.def) || definitionDigest(definition) !== marker.def) return 'the live task action or schedule changed outside apply; it was left alone';
+    const target = new RegExp(`${entry.job} --repo-root "([^"]+)" --task-id ${entry.id}$`).exec(live.arguments || '');
+    try { if (!target || !sameRepo(repositoryOf(this.desired.readIdentity(target[1])), entry.repository)) return 'the live task target no longer matches its recorded repository; it was left alone'; }
+    catch { return 'the live task target could not be verified; it was left alone'; }
+    if (!['Disabled', 'Ready', 'Running', 'Queued'].includes(live.state)) return 'the live task state could not be verified; it was left alone';
+    return null;
+  }
+
+  verify(definition, disabled) {
+    const live = this.scheduler.list(definition.folder).find(row => row.name === definition.name);
+    if (!live || live.execute !== definition.execute || live.arguments !== definition.arguments || live.working_directory !== definition.working_directory
+      || parseMarker(live.description)?.def !== definition.def || describeTriggers(live.triggers) !== describeSchedule(definition.schedule)
+      || (disabled ? live.state !== 'Disabled' : !['Ready', 'Running', 'Queued'].includes(live.state))) throw new Error('task definition read-back failed');
+  }
+
+  quiesce(live) {
+    this.scheduler.setEnabled(live.folder, live.name, false);
+    const state = this.scheduler.info(live.folder, live.name);
+    // Stop only the task being replaced, then prove it has stopped before cursor copying.
+    if (['Running', 'Queued'].includes(state?.state)) this.scheduler.stop(live.folder, live.name);
+    let after;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      after = this.scheduler.info(live.folder, live.name);
+      if (after?.state === 'Disabled') break;
+      this.wait(100);
+    }
+    if (!after || after.state !== 'Disabled') throw new Error('source task did not stop in a disabled state');
+  }
+
+  recordTasks(rows) {
+    this.writeRegistry(rows);
+    const expected = [...rows].sort((a, b) => a.id.localeCompare(b.id));
+    const actual = tasks.readRegistry(this.home);
+    if (actual.status !== 'ok' || JSON.stringify(actual.tasks) !== JSON.stringify(expected)) throw new Error('task registry read-back failed');
+  }
+
+  change(item) {
+    const d = item.definition;
+    const old = [...item.sources, ...(item.existing ? [item.existing] : [])];
+    const entries = tasks.readRegistry(this.home).tasks.map(row => ({ ...row }));
+    const backups = old.map(live => liveDefinition(live, entries.find(row => row.folder === live.folder && row.name === live.name)));
+    const disabled = old.some(live => live.state === 'Disabled');
+    const priorRecord = this.readRecord(d.id);
+    let notes = [];
+    try {
+      if (item.existing && ['Running', 'Queued'].includes(item.existing.state)) this.quiesce(item.existing);
+      // Record custody before registration so an interrupted prepare remains recognisable.
+      const existingEntry = entries.find(row => row.id === d.id);
+      // In-place replacement can be interrupted before or after native registration. Bind only
+      // these two exact definitions until final read-back; no arbitrary changed action is owned.
+      const preparing = item.existing ? { ...existingEntry, pending_definition: d.def } : registryEntry(d, existingEntry, this.now);
+      this.recordTasks([...entries.filter(row => row.id !== d.id), preparing]);
+      // Destination is born disabled, including an in-place schedule/action update.
+      this.scheduler.register({ ...d, enabled: false });
+      this.verify(d, true);
+      for (const live of item.sources) this.quiesce(live);
+      if (CLEANERS.has(d.job) && (item.sources.length || item.retired.length)) {
+        const runner = require('./toolkit-scheduled-job.cjs');
+        const now = this.now();
+        const records = [...backups, ...item.retired].map(source => ({ record: this.readRecord(source.id), expected: source }));
+        records.push({ record: priorRecord, expected: d });
+        // A new destination has no history of its own; it must not widen a usable source cursor.
+        const existingRecords = records.filter(row => row.record != null);
+        const selected = (existingRecords.length ? existingRecords : records.slice(-1))
+          .map(({ record, expected }) => runner.footerCursor(record, expected, d.repository, now));
+        const since = selected.map(row => row.since).sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+        notes = [...new Set(selected.map(row => row.note).filter(Boolean))];
+        this.writeRecord(d.id, { schema: 'toolkit.task-last-run.v1', id: d.id, job: d.job, repository: d.repository,
+          started: now.toISOString(), finished: null, status: 'held', exit: null, footer_sweep_since: since,
+          summary: notes });
+      }
+      for (const source of backups.filter(row => row.id !== d.id)) this.scheduler.unregister(source.folder, source.name, source.id);
+      this.recordTasks([...entries.filter(row => ![...backups, ...item.retired].some(source => source.id === row.id) && row.id !== d.id), registryEntry(d, entries.find(row => row.id === d.id), this.now)]);
+      if (!disabled) this.scheduler.setEnabled(d.folder, d.name, true);
+      this.verify(d, disabled);
+      for (const source of backups.filter(row => row.id !== d.id)) if (this.scheduler.list(source.folder).some(row => row.name === source.name)) throw new Error('source task retirement read-back failed');
+      return { ...item, done: true, disabled, notes };
+    } catch (error) {
+      let restored = false;
+      try {
+        // Keep every participant stopped while restoring the previous definitions and registry.
+        const destination = this.scheduler.list(d.folder).find(row => row.name === d.name);
+        if (destination) { this.quiesce({ ...destination, folder: d.folder }); this.scheduler.unregister(d.folder, d.name, d.id); }
+        for (const source of backups) { this.scheduler.register({ ...source, enabled: false }); this.verify({ ...source, def: parseMarker(source.description).def }, true); }
+        if (priorRecord) this.writeRecord(d.id, priorRecord);
+        this.recordTasks(entries);
+        for (let i = 0; i < backups.length; i++) {
+          if (old[i].state !== 'Disabled') this.scheduler.setEnabled(backups[i].folder, backups[i].name, true);
+          this.verify({ ...backups[i], def: parseMarker(backups[i].description).def }, old[i].state === 'Disabled');
+        }
+        restored = JSON.stringify(tasks.readRegistry(this.home).tasks) === JSON.stringify(entries);
+      } catch { restored = false; }
+      return { ...item, done: false, error: `${tasks.safeText(error.message)}; ${restored ? 'previous configuration restored and verified' : 'restoration incomplete; inspect the source and destination tasks and rerun apply'}` };
+    }
+  }
+
+  apply(firstRunOptions) {
+    const runner = require('./toolkit-scheduled-job.cjs');
+    const lock = this.takeLock(runner.footerLockPath(this.desired.repository, this.home));
+    if (!lock) throw new WindowsTasksError('another footer pass or apply is running; no task was changed', 1);
+    let plan;
+    try {
+      plan = this.inspect();
+      if (plan.registry !== 'ok') throw new WindowsTasksError('the task registry could not be read; no task was changed', 1);
+      // An unknown cleaner blocks the whole transition, not just a competing destination.
+      if (plan.items.some(item => CLEANERS.has(item.definition.job) && item.action === 'refused')) return plan;
+      plan.items = plan.items.map(item => item.action === 'refused' ? item : item.action === 'current' ? { ...item, done: true }
+        : this.change(item));
+    } finally { lock.release(); }
+    // First runs happen only after reconciliation and lock release.
+    for (const item of plan.items) if (item.done && item.action !== 'current' && !item.disabled && CLEANERS.has(item.definition.job) && firstRunOptions)
+      item.first_run = firstRun(item.definition, { scheduler: this.scheduler, home: this.home, now: this.now, ...firstRunOptions });
+    return plan;
+  }
+}
+
+function planTasks(desired, deps) { return new WindowsTaskReconciliation(desired, deps).inspect(); }
 
 function registryEntry(definition, existing, now) {
   return {
@@ -417,27 +600,8 @@ function firstRun(definition, { scheduler, home, now = () => new Date(), wait = 
   }
 }
 
-function applyTasks(desired, { scheduler, home, now = () => new Date(), firstRunOptions = null }) {
-  const plan = planTasks(desired, { scheduler, home });
-  if (plan.registry !== 'ok') throw new WindowsTasksError(`the task registry ${tasks.registryPath(home)} could not be read, so no task was changed. Move it aside and run again.`, 1);
-  const results = [];
-  for (const item of plan.items) {
-    const { definition } = item;
-    if (item.action === 'refused') { results.push({ ...item }); continue; }
-    try {
-      if (item.action !== 'current') scheduler.register(definition);
-      tasks.updateRegistry(home, list => {
-        const existing = list.find(entry => entry.id === definition.id);
-        return [...list.filter(entry => entry.id !== definition.id), registryEntry(definition, existing, now)];
-      });
-      const result = { ...item, done: true };
-      if (item.action !== 'current' && ['programme-sweep', 'footer-sweep'].includes(definition.job) && firstRunOptions) result.first_run = firstRun(definition, { scheduler, home, now, ...firstRunOptions });
-      results.push(result);
-    } catch (error) {
-      results.push({ ...item, done: false, error: tasks.safeText(error.message) });
-    }
-  }
-  return { ...plan, items: results };
+function applyTasks(desired, deps) {
+  return new WindowsTaskReconciliation(desired, deps).apply(deps.firstRunOptions);
 }
 
 function removeTasks({ folder = null, scheduler, home }) {
@@ -498,26 +662,28 @@ function applyCommand(desired, { toolkitRoot = path.resolve(__dirname, '..', '..
   return `node ${powerShellPath(script, home)} apply --repo-root ${powerShellPath(desired.root, home)}${folderOverride ? ` --folder ${folderOverride}` : ''}`;
 }
 
-const ACTION_TEXT = Object.freeze({ create: 'to create', update: 'to update in place', current: 'up to date', refused: 'refused' });
+const ACTION_TEXT = Object.freeze({ create: 'to create', update: 'to update in place', replace: 'to replace the existing cleaner', current: 'up to date', refused: 'refused' });
 
 function describePlan(plan, { command = null, applied = false } = {}) {
   const lines = [`Windows scheduled tasks for ${plan.repository || 'this repository'} in \\${plan.folder}\\:`];
+  if (plan.note) lines.push(plan.note);
   for (const item of plan.items) {
     const d = item.definition;
     const state = applied ? (item.action === 'refused' ? 'refused' : item.done === false ? `failed: ${item.error}` : item.action === 'current' ? 'up to date' : item.action === 'create' ? 'created' : 'updated') : ACTION_TEXT[item.action];
     lines.push(`- ${d.name} (${d.schedule_text}): ${state}. ${d.purpose}`);
     if (item.reason) lines.push(`  ${item.reason}`);
+    for (const note of item.notes || []) lines.push(`  ${note}`);
     if (item.first_run) lines.push(`  First run: ${item.first_run.status}${item.first_run.detail ? ` (${item.first_run.detail})` : ''}.`);
   }
   for (const item of plan.skipped) lines.push(`- ${item.name}: not registered, because ${item.reason}.`);
-  if (!applied && command && plan.items.some(item => item.action === 'create' || item.action === 'update')) {
-    const changed = plan.items.filter(item => ['create', 'update'].includes(item.action)).map(item => item.definition.job);
+  if (!applied && command && plan.items.some(item => ['create', 'update', 'replace'].includes(item.action))) {
+    const changed = plan.items.filter(item => ['create', 'update', 'replace'].includes(item.action)).map(item => item.definition.job);
     const effects = [];
     if (changed.includes('programme-sweep')) effects.push('starts the programme sweep immediately');
     if (changed.includes('footer-sweep')) effects.push("starts the footer sweep immediately, editing the signed-in account's own GitHub posts in this repository and, only when verified, its evidence store");
-    else if (changed.includes('programme-sweep')) effects.push("the programme sweep also cleans the signed-in account's own GitHub posts first if its independent footer task cannot be verified, adding the evidence store only when verified");
+    else if (changed.includes('programme-sweep')) effects.push("the programme sweep cleans the signed-in account's own GitHub posts first, adding the evidence store only when verified");
     if (changed.includes('shard-timings')) effects.push('registers shard timings for its scheduled time without starting it immediately');
-    lines.push('', `Agents do not create scheduled tasks, so paste this line into PowerShell yourself (it registers only the tasks marked to create or update and ${effects.join('; ')}):`, '', `    ${command}`);
+    lines.push('', `Agents do not create scheduled tasks, so paste this line into PowerShell yourself (it reconciles the tasks marked to create, update or replace, preserves disabled tasks, then ${effects.join('; ')} for changed enabled tasks only):`, '', `    ${command}`);
   }
   return lines;
 }
@@ -597,6 +763,6 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = {
   JOBS, FOLDER, MARKER, STATUS_CONTROL_C_EXIT, WindowsTasksError, defaultFolder, nameProblem, taskName, taskId, parseMarker, repositoryOf, readCheckout, folderForCheckout,
-  describeTriggers, describeResult, describeSchedule, desiredTasks, definitionDigest, powerShellScheduler, runPowerShell, SCRIPTS, planTasks, applyTasks, firstRun,
+  describeTriggers, describeResult, describeSchedule, desiredTasks, definitionDigest, powerShellScheduler, runPowerShell, SCRIPTS, planTasks, applyTasks, firstRun, WindowsTaskReconciliation,
   removeTasks, adoptTask, applyCommand, powerShellPath, describePlan, parseArgs, main,
 };

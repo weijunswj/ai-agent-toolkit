@@ -1593,19 +1593,6 @@ class ToolGate {
 
 function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {} } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
-  const line = verdictLine(verdict, registryOptions, programmeDeps);
-  // Advisory only: a migration reminder must survive governance early returns without changing
-  // their verdict or exposing arbitrary last-run text. Test registries never read the real home.
-  if (!programmeDeps.home && registryOptions.testOnly === true) return line;
-  try {
-    const identity = governance.readIdentity(cwd);
-    const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(identity);
-    const note = require('./toolkit-tasks.cjs').sweepLine(repository, { home: programmeDeps.home, advisoryOnly: true });
-    return note && !line.includes(note) ? `${line} ${note}` : line;
-  } catch { return line; }
-}
-
-function verdictLine(verdict, registryOptions, programmeDeps) {
   const state = verdict.state;
   if (verdict.pending) return verdict.pending.text;
   if (verdict.reason === 'unavailable') return "Toolkit: couldn't check governance. Continue with the global rules; no governance effects or standing task auto-merge until it can be checked.";
