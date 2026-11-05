@@ -212,7 +212,7 @@ test('Windows task standing approval stays narrow on every changed approval surf
       /fresh confirmed governance change can switch a proven owned cleaner in the same folder and checkout/,
       /modified proven-owned PROGRAMME SWEEP or SHARD TIMINGS task needs the owner's keep-or-replace answer/,
       /the deciding chat immediately reads the decision fresh from origin's default branch/,
-      /the next agent that reads this in that repository reads fresh status/]) assert.match(safety, rule, file);
+      /Session start informs an agent/]) assert.match(safety, rule, file);
   }
   const reference = readText('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
   const tables = reference.split('\n\n').filter(part => part.startsWith('| '));

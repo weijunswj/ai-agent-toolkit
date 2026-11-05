@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Session start warns when recorded Windows tasks disagree with fresh confirmed governance. The advisory grants no approval and disappears as soon as current enrolments match; offline, stale and uncertain reads stay silent.
+
 - Windows scheduled tasks follow confirmed governance changes, preserve footer scan history and leave existing GitHub material in place. Modified governance tasks ask whether to keep the owner's changes or restore Toolkit's definition. Interrupted switches hold when deletion is unproven and offer explicitly approved recovery. Task removal includes legacy and moved-checkout enrolments in the selected repository; agent guidance routes post-merge task checks to the device.
 
 ### Changed

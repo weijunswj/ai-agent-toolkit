@@ -1007,7 +1007,7 @@ test('recovery reports stay observational and both periodic findings route to th
 });
 
 
-test('merged governance routes immediately from Projects to the device; later readers are the backstop', () => {
+test('merged governance routes immediately from Projects to the device; session start informs the device agent', () => {
   for (const file of ['reference/setup.md', 'reference/recurring-tasks.md']) {
     const text = read(`repo/contracts/claude-projects/web-controller-projects/${file}`);
     assert.match(text, /After the owner merges a governance decision, the coordinator immediately relays the merged decision to the named device lane/);
@@ -1016,7 +1016,7 @@ test('merged governance routes immediately from Projects to the device; later re
     assert.match(text, /reads back installed tasks, enrolments and the cleaner's first result/);
     assert.match(text, /Update `SCHEDULED TASKS:` only after that read-back/);
     assert.match(text, /A pending proposal never triggers a switch/);
-    assert.match(text, /the next agent that reads this in the repository/);
+    assert.match(text, /Session start on the device informs an agent/);
   }
   const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
   assert.match(nudge, /else if fresh origin-default-branch status confirms ENABLED and it lists an active PROGRAMME SWEEP/);
