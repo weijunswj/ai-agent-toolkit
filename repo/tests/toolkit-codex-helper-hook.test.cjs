@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { fakeClosureEnvironment } = require('./support/issue-closure-transport.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs');
@@ -46,9 +47,10 @@ test('Codex records a direct Projects approval in a resumed launched session, ne
   const registryPath = path.join(process.env.USERPROFILE, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
   const session = 'codex-projects-approval';
   gate.startSession({ session_id: session, source: 'resume', cwd: dir }, { registryOptions: { registryPath, testOnly: true } });
-  const env = { TOOLKIT_GATE_ROLE: 'G1', TOOLKIT_HOST_SESSION: 'parent' };
+  const head = 'a1b2c3d'.padEnd(40, '0');
+  const env = fakeClosureEnvironment(dir, { ...process.env, TOOLKIT_GATE_ROLE: 'G1', TOOLKIT_HOST_SESSION: 'parent' }, head);
   const send = prompt => run({ hook_event_name: 'UserPromptSubmit', cwd: dir, session_id: session, prompt }, env);
-  const merge = { cwd: dir, session_id: session, tool_name: 'mcp__github__merge_pull_request', tool_input: { repository_full_name: 'owner/projects-fixture', pr_number: 9, expected_head_sha: 'a1b2c3d' } };
+  const merge = { cwd: dir, session_id: session, tool_name: 'mcp__github__merge_pull_request', tool_input: { repository_full_name: 'owner/projects-fixture', pr_number: 9, expected_head_sha: head } };
   const prompt = wake('merge owner/projects-fixture#9', { id: 'cmsg_codex_hook' });
   send(`<relay from="coordinator"><cited author="user">${prompt}</cited></relay>`);
   assert.equal(run(merge, env).status, 2);

@@ -145,7 +145,8 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -362,7 +363,7 @@ class Fixture {
       fs.writeFileSync(file, spec.repo.legacy_answer === 'damaged' ? '{damaged' : fs.readFileSync(path.join(ROOT, 'repo', 'tests', 'fixtures', 'governance-legacy-' + spec.repo.legacy_answer + '.json')));
     }
     if (spec.evidence_merge) this.#evidenceMerge(spec.evidence_merge);
-    else this.#githubFixture({}, spec.slow_proposal === true);
+    else this.#githubFixture(this.#closureFixture(spec), spec.slow_proposal === true);
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
       const repository = `toolkit-test-fixture/${spec.repo.name || 'fixture'}`;
@@ -461,10 +462,26 @@ class Fixture {
     fs.writeFileSync(file, text);
     support.recordMerged(parent, { home: this.home, text, now: this.#now(spec.binding === 'stale' ? 25 * 60 * 60 * 1000 : 0) });
     const repo = { full_name: store, private: true, permissions: { push: true }, default_branch: 'main' };
-    const pr = { number: 5, base: { repo: { full_name: store }, ref: 'main' }, head: { sha: this.head } };
+    const pr = { number: 5, title: 'Evidence update', body: '', commits: 0, base: { repo: { full_name: store }, ref: 'main' }, head: { sha: this.head } };
     if (spec.metadata === 'public') repo.private = false;
     if (spec.metadata === 'wrong-head') pr.head.sha = 'f'.repeat(40);
-    this.#githubFixture({ [`repos/${store}`]: repo, [`repos/${store}/pulls/5`]: pr });
+    this.#githubFixture({ [`repos/${store}`]: repo, [`repos/${store}/pulls/5`]: pr, [`repos/${store}/pulls/5/commits?per_page=100&page=1`]: [] });
+  }
+
+  #closureFixture(spec) {
+    if (!spec.issue_closure || spec.issue_closure === 'unavailable') return {};
+    const repository = `toolkit-test-fixture/${spec.repo.name || 'fixture'}`;
+    const issue = (number, state) => ({ number, state, url: `https://api.github.com/repos/${repository}/issues/${number}` });
+    const parent = issue(1, 'open');
+    const child = issue(2, spec.issue_closure === 'open-child' ? 'open' : 'closed');
+    const result = {};
+    for (const row of [parent, child, issue(3, 'open')]) {
+      result[`repos/${repository}/issues/${row.number}`] = row;
+      result[`repos/${repository}/issues/${row.number}/sub_issues?per_page=100&page=1`] = row.number === 1 ? [child] : row.number === 2 && spec.issue_closure === 'nested-open' ? [issue(3, 'open')] : [];
+    }
+    result[`repos/${repository}/pulls/7`] = { number: 7, title: 'Update', body: 'Refs #1', head: { sha: this.head }, commits: 0 };
+    result[`repos/${repository}/pulls/7/commits?per_page=100&page=1`] = [];
+    return result;
   }
 
   #githubFixture(responses, slowProposal = false) {
@@ -480,7 +497,14 @@ const responses = ${JSON.stringify(responses)};
 cp.spawnSync = function(file, args, options) {
   if (!/^gh(?:\\.exe)?$/i.test(require('node:path').basename(file))) return original(file, args, options);
   if (${slowProposal}) return original(process.execPath, [${JSON.stringify(slow)}, ...args], options);
-  const body = args[0] === 'api' && args[3] === 'GET' && responses[args[4]];
+  let body = args[0] === 'api' && args[3] === 'GET' && responses[args[4]];
+  // Authority-only rows have a PR without closing references. Explicit closure fixtures
+  // override these safe PR facts; all unspecified issue and repository reads still fail.
+  if (!body && args[0] === 'api' && args[3] === 'GET') {
+    const pr = /^repos\\/[^/]+\\/[^/]+\\/pulls\\/(\\d+)$/.exec(args[4]);
+    if (pr) body = { number: Number(pr[1]), title: 'Fixture change', body: '', commits: 0, head: { sha: ${JSON.stringify(this.head)} } };
+    else if (/^repos\\/[^/]+\\/[^/]+\\/pulls\\/\\d+\\/commits\\?/.test(args[4])) body = [];
+  }
   const status = body ? 200 : 404;
   return {status: status === 200 ? 0 : 1, stdout: 'HTTP/2.0 ' + status + '\\n\\n' + JSON.stringify(body || {}), stderr: ''};
 };

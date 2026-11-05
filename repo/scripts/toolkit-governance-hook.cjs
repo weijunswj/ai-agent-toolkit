@@ -45,6 +45,12 @@ function exportHostSession(input, environment, gate) {
 
 // The hook's stdout for one event. Never throws.
 function respond(event, input, options = {}) {
+  if (event === 'PreToolUse') {
+    let closure;
+    try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input, options); }
+    catch { if (/gh\b.*\b(?:pr\s+(?:create|edit)|issue\s+close|api)|(?:create|update|edit)_pull_request|close_issue|issue_write|update_issue|closeIssue/.test(JSON.stringify(input))) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+    if (closure) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } };
+  }
   if (cloudSession(options.environment || process.env)) {
     if (event !== 'SessionStart') return {};
     let inside = false;
@@ -106,7 +112,7 @@ const mergeHold = () => require('./toolkit-merge-hold.cjs');
 // The merge hold's decision (toolkit-merge-hold.cjs), failing closed for a call that may merge
 // when the module cannot run.
 function mergeDecision(input, options = {}) {
-  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env, host: 'claude', consume: options.consume !== false, readEvidenceGitHub: options.readEvidenceGitHub, evidenceResponses: options.evidenceResponses }); } catch {
+  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env, host: 'claude', consume: options.consume !== false, readEvidenceGitHub: options.readEvidenceGitHub, evidenceResponses: options.evidenceResponses, closureGuard: options.closureGuard, transport: options.transport }); } catch {
     let mayMerge = true;
     try { mayMerge = (options.mergeHold || mergeHold()).mayMerge(input); } catch { mayMerge = STATE_CHANGING_TOOLS.test(String(input && input.tool_name || '')) && /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: MERGE_CHECK_FAILED } : null;

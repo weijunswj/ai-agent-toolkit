@@ -176,8 +176,32 @@ jobs:
       - name: Check for personal data
         run: node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci
 
+  issue-closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Check current pull request closure references
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node repo/scripts/toolkit-issue-closure.cjs
+
   validate:
-    needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]
+    needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data, issue-closure]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -49,6 +49,10 @@ function promptEvent(input) {
 // namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
 // `notes` collects what a shell check could not check, for the caller to show the user.
 async function decide(input, environment = process.env, { notes } = {}) {
+  let closure;
+  try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input); }
+  catch { if (/gh\b.*\b(?:pr\s+(?:create|edit)|issue\s+close|api)|(?:create|update|edit)_pull_request|close_issue|issue_write|update_issue|closeIssue/.test(JSON.stringify(input))) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+  if (closure) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } };
   let governanceDenial;
   try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;

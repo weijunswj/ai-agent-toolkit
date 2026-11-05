@@ -11,11 +11,15 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-const hold = require('../scripts/toolkit-merge-hold.cjs');
+const holdCore = require('../scripts/toolkit-merge-hold.cjs');
+// Authority tests isolate closure reads; closure refusal/approval ordering is tested below.
+const closureGuard = { checkPullRequest: () => ({ status: 'allowed' }) };
+const hold = { ...holdCore, decide: (input, options) => holdCore.decide(input, { closureGuard, ...options }) };
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 const claudeHook = require('../scripts/toolkit-governance-hook.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const projects = require('./support/projects-approval.cjs');
+const { fakeClosureEnvironment } = require('./support/issue-closure-transport.cjs');
 
 const SHA = '62405ebd4c27859d66036e18f13c856c645d366d';
 // The Codex GitHub app's merge call that the hold could not read (repository, number and head SHA
@@ -47,7 +51,7 @@ function context(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-merge-hold-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const registryPath = path.join(root, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
-  const options = { registryOptions: { registryPath, testOnly: true, home: path.join(root, 'home') } };
+  const options = { closureGuard, registryOptions: { registryPath, testOnly: true, home: path.join(root, 'home') } };
   const repo = repository(root, 'a');
   const other = repository(root, 'b');
   return { root, repo, other, options, file: path.join(path.dirname(registryPath), hold.APPROVALS_BASENAME) };
@@ -56,6 +60,20 @@ function context(t) {
 const bash = (cwd, command) => ({ cwd, tool_name: 'Bash', tool_input: { command } });
 const connector = (tool, args, repo = 'a') => ({ cwd: os.tmpdir(), tool_name: `mcp__github__${tool}`, tool_input: { owner: 'owner', repo, ...args } });
 const decide = (ctx, input, environment = {}) => hold.decide(input, { ...ctx.options, environment });
+
+test('closure refusal precedes typed approval consumption and standing authority', t => {
+  const ctx = context(t);
+  typed(ctx, 'merge 17');
+  const input = bash(ctx.repo, `gh pr merge 17 --merge --match-head-commit ${SHA} --body 'Fixes #1'`);
+  const failingGuard = { checkPullRequest(number, options) {
+    assert.equal(number, 17); assert.deepEqual(options.mergeTexts, ['Fixes #1']);
+    return { status: 'refused', reason: 'Open native descendants' };
+  } };
+  assert.match(holdCore.decide(input, { ...ctx.options, closureGuard: failingGuard, environment: {} }).deny, /Open native descendants/);
+  assert.equal(decide(ctx, input), null, 'the typed approval was retained');
+  assert.match(decide(ctx, input).deny, /no unused approval/);
+  assert.match(holdCore.decide(input, { ...ctx.options, closureGuard: failingGuard, environment: {} }).deny, /Open native descendants/);
+});
 
 // The G0 authority matrix: only an exact fresh merged parent binding plus live target facts
 // grants evidence custody, for the same owner and a target with no enabled binding of its own.
@@ -1201,7 +1219,7 @@ test('the Codex hook refuses, records the user\'s approval, allows one merge and
   const ctx = context(t);
   const home = path.join(ctx.root, 'home');
   const script = path.resolve(__dirname, '..', 'scripts', 'toolkit-codex-helper-hook.cjs');
-  const env = { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_HOST_SESSION: '', TOOLKIT_GATE_ROLE: '', TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_CLAUDE_TASK_PROFILE_SHA256: '', CLAUDE_CODE_REMOTE: '' };
+  const env = fakeClosureEnvironment(ctx.root, { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_HOST_SESSION: '', TOOLKIT_GATE_ROLE: '', TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_CLAUDE_TASK_PROFILE_SHA256: '', CLAUDE_CODE_REMOTE: '' }, SHA);
   const run = (input) => spawnSync(process.execPath, [script], { input: JSON.stringify(input), encoding: 'utf8', env, cwd: ctx.root });
   const merge = { cwd: ctx.root, tool_name: 'mcp__github__merge_pull_request', tool_input: { owner: 'owner', repo: 'a', pullNumber: 618, expectedHeadSha: SHA } };
   const refusedFirst = run(merge);
@@ -1384,7 +1402,7 @@ test('row 15: the Codex hook refuses the Codex-shaped merge, records a code-span
   const ctx = context(t);
   const home = path.join(ctx.root, 'home');
   const script = path.resolve(__dirname, '..', 'scripts', 'toolkit-codex-helper-hook.cjs');
-  const env = { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_HOST_SESSION: '', TOOLKIT_GATE_ROLE: '', TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_CLAUDE_TASK_PROFILE_SHA256: '', CLAUDE_CODE_REMOTE: '' };
+  const env = fakeClosureEnvironment(ctx.root, { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_HOST_SESSION: '', TOOLKIT_GATE_ROLE: '', TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_CLAUDE_TASK_PROFILE_SHA256: '', CLAUDE_CODE_REMOTE: '' }, SHA);
   const run = (input) => spawnSync(process.execPath, [script], { input: JSON.stringify(input), encoding: 'utf8', env, cwd: ctx.root });
   const merge = { cwd: ctx.root, tool_name: CODEX_MERGE, tool_input: { repository_full_name: 'owner/a', pr_number: 618, expected_head_sha: SHA, merge_method: 'merge' } };
   const refused = run(merge);

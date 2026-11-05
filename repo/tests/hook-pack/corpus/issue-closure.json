@@ -1,0 +1,92 @@
+{
+  "schema": "toolkit-hook-pack/v1",
+  "family": "issue-closure",
+  "rows": [
+    {
+      "id": "CLOSURE.missing-guard-write", "source": "broken enforcement must hold only affected writes", "kind": "fault", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child" },
+      "fault": { "type": "remove-file", "file": "repo/scripts/toolkit-issue-closure.cjs" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --body 'Closes #1'" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.missing-guard-read", "source": "broken enforcement must preserve ordinary reads", "kind": "fault", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" } },
+      "fault": { "type": "remove-file", "file": "repo/scripts/toolkit-issue-closure.cjs" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git status" } },
+      "expect": { "decision": "allow" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.incident-resolved", "source": "parenthesised record-link incident", "kind": "hostile", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --title Update --body 'resolved (see [record](https://github.com/toolkit-test-fixture/fixture/issues/1#issuecomment-7))'" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.incident-closed", "source": "earlier closed record-link incident form", "kind": "hostile", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --title Update --body 'closed: [record](https://github.com/toolkit-test-fixture/fixture/issues/1#issuecomment-7)'" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.title", "source": "closing reference in a PR title", "kind": "hostile", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --title 'Fixes: #1' --body Details" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.explicit-close", "source": "native child state invariant", "kind": "hostile", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh issue close 1 -R toolkit-test-fixture/fixture" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.closed-intermediary", "source": "closed intermediary must not hide an open descendant", "kind": "hostile", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "nested-open" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh issue close 1 -R toolkit-test-fixture/fixture" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.rest-close", "source": "REST issue state closure", "kind": "hostile", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh api repos/toolkit-test-fixture/fixture/issues/1 -X PATCH -f state=closed" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.connector-close", "source": "connector issue state closure", "kind": "hostile", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child" },
+      "payload": { "tool_name": "mcp__github__issue_write", "tool_input": { "owner": "toolkit-test-fixture", "repo": "fixture", "issue_number": 1, "method": "update", "state": "closed" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.body-file", "source": "explicit readable file content", "kind": "hostile", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child", "files": { "body.txt": "Closes #1" } },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --title Update --body-file body.txt" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.unavailable", "source": "unreadable state cannot grant permission", "kind": "hostile", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "unavailable" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh issue close 1 -R toolkit-test-fixture/fixture" } },
+      "expect": { "decision": "deny" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.refs-control", "source": "ordinary parent link remains allowed", "kind": "benign", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "open-child" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --body 'Refs #1'" } },
+      "expect": { "decision": "allow" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.closed-tree-control", "source": "fully closed native tree permits explicit closure", "kind": "benign", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" }, "issue_closure": "closed-child" },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh issue close 1 -R toolkit-test-fixture/fixture" } },
+      "expect": { "decision": "allow" }, "status": "pass"
+    },
+    {
+      "id": "CLOSURE.read-control", "source": "ordinary issue reads remain allowed", "kind": "benign", "hosts": ["claude", "codex"],
+      "fixture": { "repo": { "governance": "none" } },
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "gh issue view 1 -R toolkit-test-fixture/fixture" } },
+      "expect": { "decision": "allow" }, "status": "pass"
+    }
+  ]
+}

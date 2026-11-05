@@ -39,6 +39,14 @@ test('evidence merge fixtures accept only isolated binding and metadata cases', 
     'a Codex hook crash must never count as a verified evidence merge');
 });
 
+test('closure fixtures are bounded native-state cases and cover both hosts', () => {
+  for (const value of ['open-child', 'closed-child', 'nested-open', 'unavailable']) assert.deepEqual(pack.rowErrors(row({ fixture: { repo: { governance: 'none' }, issue_closure: value } })), []);
+  assert.ok(pack.rowErrors(row({ fixture: { issue_closure: 'unknown' } })).length);
+  const rows = pack.loadCorpus().rows.filter(row => row.id.startsWith('CLOSURE.'));
+  assert.equal(rows.length, 14);
+  assert.ok(rows.every(row => row.hosts.includes('claude') && row.hosts.includes('codex')));
+});
+
 test('end to end: verified evidence merges pass both host entry points without real GitHub or user state', async () => {
   const lines = [];
   const code = await pack.main(['run', '--rows', 'MERGE.bound-evidence-gh,MERGE.bound-evidence-connector,MERGE.bound-evidence-explicit-target,MERGE.bound-evidence-launched-session'], { write: text => lines.push(text) });

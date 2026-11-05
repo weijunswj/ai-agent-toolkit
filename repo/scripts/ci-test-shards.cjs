@@ -246,7 +246,7 @@ const VERIFY_COMMAND = 'node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEM
 const GATE_STEP = 'Run validation';
 const AGGREGATE_HEADER = [
   '  validate:',
-  '    needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]',
+  '    needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data, issue-closure]',
   '    if: ${{ always() }}',
   '    runs-on: ubuntu-latest',
   '    timeout-minutes: 15',
@@ -397,6 +397,32 @@ const PERSONAL_DATA_JOB = [
   '        run: node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci',
 ].join('\n');
 
+const ISSUE_CLOSURE_JOB = [
+  '  issue-closure:',
+  '    runs-on: ubuntu-latest',
+  '    timeout-minutes: 5',
+  '    permissions:',
+  '      contents: read',
+  '      issues: read',
+  '      pull-requests: read',
+  '    steps:',
+  '      - name: Checkout',
+  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+  '        with:',
+  '          persist-credentials: false',
+  '',
+  '      - name: Set up Node',
+  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
+  '        with:',
+  '          node-version: 22',
+  '',
+  '      - name: Check current pull request closure references',
+  "        if: ${{ github.event_name == 'pull_request' }}",
+  '        env:',
+  '          GH_TOKEN: ${{ github.token }}',
+  '        run: node repo/scripts/toolkit-issue-closure.cjs',
+].join('\n');
+
 // The exact text of the validate job around its gate commands. The commands stay listed only in
 // validate.yml, the one gate list; each is checked on its own (PLAIN_GATE_COMMAND, VERIFY_COMMAND last).
 function validateJobText(commands) {
@@ -507,6 +533,8 @@ function workflowText(manifest, commands) {
     '',
     PERSONAL_DATA_JOB,
     '',
+    ISSUE_CLOSURE_JOB,
+    '',
     validateJobText(commands),
     '',
   ].join('\n');
@@ -562,7 +590,7 @@ function workflowErrors(source, manifest) {
   catch (error) { commandError = error.message; }
   const text = commands ? withPinUpdatesAccepted(raw, workflowText(manifest, commands)) : raw;
   const jobs = workflowJobs(text);
-  const expected = ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'personal-data', 'validate'];
+  const expected = ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'personal-data', 'issue-closure', 'validate'];
   if ([...jobs.keys()].join(',') !== expected.join(',')) errors.push(`validate.yml jobs must be exactly ${expected.join(', ')} in that order (found ${[...jobs.keys()].join(', ') || 'none'})`);
   for (const system of SYSTEMS) {
     const job = jobs.get(`tests-${system}`);
@@ -573,11 +601,13 @@ function workflowErrors(source, manifest) {
   const clockAhead = jobs.get('tests-clock-ahead');
   if (clockAhead !== undefined && clockAhead !== CLOCK_AHEAD_JOB) errors.push('the tests-clock-ahead job differs from its pinned text');
   const personalData = jobs.get('personal-data');
+  const issueClosure = jobs.get('issue-closure');
+  if (issueClosure !== undefined && issueClosure !== ISSUE_CLOSURE_JOB) errors.push('the issue-closure job differs from its pinned text');
   if (personalData !== undefined && personalData !== PERSONAL_DATA_JOB) errors.push('the personal-data job differs from its pinned text');
   const aggregate = jobs.get('validate');
   if (aggregate !== undefined) {
     const lines = aggregate.split('\n');
-    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
+    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data, issue-closure], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
     if (names.join('|') !== 'Checkout|Set up Node|Download test summaries|Set up Python|Run validation') errors.push('the validate job steps must be Checkout, Set up Node, Download test summaries, Set up Python, Run validation (Run validation is step 6)');
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the validate job may have a condition');
