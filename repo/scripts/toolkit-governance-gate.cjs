@@ -1536,7 +1536,14 @@ class ToolGate {
       }
       // The exception is one exact managed task command, after the owner-answer guard.
       // The CLI independently rechecks origin, ownership, stops and native permissions.
-      if (tool !== 'Monitor' && require('./toolkit-task-policy.cjs').independentTaskCommand(text, {
+      let independentTask = () => false;
+      // This module grants only an exception. A damaged module grants none and must
+      // never turn ordinary shell calls into hook process failures.
+      try {
+        const reader = require('./toolkit-task-policy.cjs').independentTaskCommand;
+        if (typeof reader === 'function') independentTask = reader;
+      } catch { /* no exception */ }
+      if (tool !== 'Monitor' && independentTask(text, {
         home: this.#registryOptions.userHome || os.homedir(), cwd: ShellCall.from(input).folder,
         certainIndependent: (target, command, independent) => {
           const state = this.#gate.evaluate(target, { sessionId }).state;

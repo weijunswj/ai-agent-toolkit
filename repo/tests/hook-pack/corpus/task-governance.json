@@ -421,6 +421,104 @@
         "decision": "allow"
       },
       "status": "pass"
+    },
+    {
+      "id": "TasksPlannerPrintedApplyBash",
+      "source": "Planner command must pass the governance hold",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "{planner_apply}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksPlannerPrintedApplyPowerShell",
+      "source": "Planner command must pass the governance hold",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "{planner_apply}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksPlannerPrintedRemoveBash",
+      "source": "Planner command must pass the governance hold",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "{planner_remove}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksPlannerPrintedRemovePowerShell",
+      "source": "Planner command must pass the governance hold",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "{planner_remove}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
     }
   ]
 }

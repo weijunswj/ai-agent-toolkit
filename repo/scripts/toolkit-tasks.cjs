@@ -52,6 +52,27 @@ class TasksError extends Error {
 
 function userStateDir(home = os.homedir()) { return path.join(home, '.ai-agent-toolkit', 'user-state'); }
 function registryPath(home) { return path.join(userStateDir(home), 'tasks.json'); }
+// Local identity survives a hostname change. Readers never create state; approved
+// task apply initialises it once while holding the registry lock.
+function computerIdentity(home, { create = false } = {}) {
+  const file = path.join(userStateDir(home), 'task-computer.json');
+  const read = () => {
+    const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!/^local-[a-f0-9-]{36}$/.test(value.id)) throw new TasksError('task computer identity is invalid; restore its saved local copy', 1);
+    return value;
+  };
+  try { return read(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (!create) return null;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try { fs.writeFileSync(file, JSON.stringify({ id: `local-${crypto.randomUUID()}`, label: os.hostname() }) + '\n', { flag: 'wx', mode: 0o600 }); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
+  return read();
+}
+function localTaskOwner(owner, id) {
+  // Pre-identity hostname records are local records, not proof of remote ownership.
+  return !owner || owner === id || (!id || /^local-[a-f0-9-]{36}$/.test(id)) && !/^local-[a-f0-9-]{36}$/.test(owner);
+}
+const OWNER_RECOVERY = 'obtain approval for scoped remove --repo-root <repo>, then apply --repo-root <repo> --repair-owned, including reactivation of stops';
 function lastRunPath(id, home) {
   if (!ID.test(String(id))) throw new TasksError(`task id ${JSON.stringify(id)} is not valid`);
   return path.join(userStateDir(home), 'tasks', id, 'last-run.json');
@@ -181,7 +202,7 @@ function shortTime(iso, now) {
 function skipText(last, now = null) {
   if (!last || last.status !== 'skipped') return null;
   if (last.reason === 'no shards yet') return 'skipped (no shards yet)';
-  const reason = SKIP_REASON.test(String(last.reason || '')) ? ` (${last.reason})` : '';
+  const reason = SKIP_REASON.test(String(last.reason || '')) || last.reason === 'ask the appointed controller to initialise the parent state in the private evidence store' ? ` (${last.reason})` : '';
   const count = Number.isInteger(last.skipped_streak) && last.skipped_streak > 0 ? last.skipped_streak : 1;
   const since = typeof last.skipped_since === 'string' && !Number.isNaN(Date.parse(last.skipped_since)) ? last.skipped_since : last.started;
   const when = typeof since === 'string' && !Number.isNaN(Date.parse(since)) ? ` since ${shortTime(since, now)}` : '';
@@ -200,13 +221,20 @@ function installedHours(text) {
 // inside its hours. Fixed wording only.
 function sweepLine(repository, { home = os.homedir(), now = new Date(), registry = readRegistry(home) } = {}) {
   if (registry.status !== 'ok' || typeof repository !== 'string') return null;
-  const entry = registry.tasks.find(item => item.host === 'windows' && ['programme-sweep', 'footer-sweep'].includes(item.job) && !item.adopted
+  const rows = registry.tasks.filter(item => item.host === 'windows' && ['programme-sweep', 'footer-sweep', 'shard-timings'].includes(item.job) && !item.adopted
     && String(item.repository || '').toLowerCase() === repository.toLowerCase());
+  if (!rows.length) return null;
+  const computerId = computerIdentity(home)?.id;
+  const foreign = rows.find(item => !localTaskOwner(item.job_owner, computerId));
+  if (foreign) return `Scheduled jobs: owned by ${safeText(foreign.job_owner_label || foreign.job_owner)}; ${OWNER_RECOVERY}.`;
+  const entry = rows.find(item => ['programme-sweep', 'footer-sweep'].includes(item.job));
   if (!entry) return null;
-  if (entry.job_owner && entry.job_owner !== os.hostname()) return null;
   const label = entry.job === 'footer-sweep' ? 'Footer sweep' : 'Programme sweep';
   if (entry.stopped_by_owner) return `${label}: stopped by owner; see toolkit tasks.`;
   const last = readLastRun(entry.id, home);
+  const deferredShard = registry.tasks.find(item => item.host === 'windows' && item.job === 'shard-timings' && !item.adopted && !item.stopped_by_owner
+    && String(item.repository || '').toLowerCase() === repository.toLowerCase() && readLastRun(item.id, home)?.status === 'deferred');
+  if (last?.status === 'deferred' || deferredShard) return `${deferredShard ? 'Shard timings' : label}: deferred; retries at the next hourly ${deferredShard ? 'programme sweep' : 'task slot'}; see toolkit tasks.`;
   const at = last && [last.finished, last.started].find(value => typeof value === 'string' && !Number.isNaN(Date.parse(value)));
   const schedule = installedHours(entry.schedule);
   const intoWindow = schedule ? ((now.getHours() * 60 + now.getMinutes()) - schedule.hour * 60 - schedule.minute + 1440) % 1440 : null;
@@ -328,7 +356,7 @@ function windowsRows(registry, folders, scheduler, home) {
       if (owned) {
         const last = readLastRun(recorded.id, home);
         const edited = recorded.enrolled && JSON.stringify(windowsTasks.enrolledDefinition(task)) !== JSON.stringify(recorded.enrolled);
-        row.state = recorded.job_owner && recorded.job_owner !== os.hostname() ? `owned by ${recorded.job_owner}` : recorded.stopped_by_owner || task.state === 'Disabled' ? 'stopped by owner'
+        row.state = !localTaskOwner(recorded.job_owner, computerIdentity(home)?.id) ? `owned by ${recorded.job_owner_label || recorded.job_owner}; ${OWNER_RECOVERY}` : recorded.stopped_by_owner || task.state === 'Disabled' ? 'stopped by owner'
           : edited ? ['programme-sweep', 'shard-timings'].includes(recorded.job) ? 'modified; owner choice required' : 'stopped by owner' : 'Toolkit';
         // The job writes its record as it starts and again as it ends, so a record that ended (or,
         // still running, started) before Task Scheduler's last run time, less 2 seconds, belongs to
@@ -338,7 +366,7 @@ function windowsRows(registry, folders, scheduler, home) {
         const windowsTime = task.last_run ? Date.parse(task.last_run) : NaN;
         const fresh = last && (!Number.isFinite(windowsTime) || Date.parse(last.finished || last.started) >= windowsTime - 2000);
         if (fresh) {
-          Object.assign(row, { last_run: last.finished || last.started || row.last_run, result: safeText(skipText(last) || last.status), summary: (Array.isArray(last.summary) ? last.summary : []).slice(0, 4).map(line => safeText(line)) });
+          Object.assign(row, { last_run: last.finished || last.started || row.last_run, result: safeText(skipText(last) || last.status), summary: (Array.isArray(last.summary) ? last.summary : []).filter(line => !last.reason || !String(line).includes(last.reason)).slice(0, 4).map(line => safeText(line)) });
           if (last.reason !== 'no shards yet' && Number.isInteger(last.skipped_streak) && last.skipped_streak > 0) Object.assign(row, { skipped_streak: last.skipped_streak, skipped_since: safeText(last.skipped_since) });
         }
         else if (Number.isFinite(windowsTime)) row.result = 'no result recorded (the run stopped before writing one)';
@@ -348,7 +376,7 @@ function windowsRows(registry, folders, scheduler, home) {
     }
     for (const entry of entries.filter(item => item.folder === folder && !live.some(task => task.name === item.name))) {
       rows.push({ host: 'windows', folder, name: entry.name, id: entry.id, schedule: entry.schedule, ai: aiText(entry), purpose: entry.purpose, source: RECORD,
-        state: entry.job_owner && entry.job_owner !== os.hostname() ? `owned by ${entry.job_owner}` : entry.stopped_by_owner ? 'stopped by owner' : 'missing' });
+        state: !localTaskOwner(entry.job_owner, computerIdentity(home)?.id) ? `owned by ${entry.job_owner_label || entry.job_owner}; ${OWNER_RECOVERY}` : entry.stopped_by_owner ? 'stopped by owner' : 'missing' });
     }
   }
   try {
@@ -488,6 +516,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 module.exports = {
   SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, writeTaskBackup, readLastRun, writeLastRun,
+  computerIdentity, localTaskOwner, OWNER_RECOVERY,
   entryProblem, looksSecret, safeText, skipText, sweepLine, taskGovernanceLine, installedHours, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
 };
 

@@ -16,12 +16,12 @@
 //                    skip; a valid manifest requires fresh enabled governance before any refresh.
 //
 // Each run writes ~/.ai-agent-toolkit/user-state/tasks/<id>/last-run.json (mode 600): started,
-// finished, exit, status (ok, held, skipped, failed) and a few summary lines with anything shaped like
+// finished, exit, status (ok, held, skipped, deferred, failed) and a few summary lines with anything shaped like
 // a secret removed; no other command output is kept. A skipped run also keeps its reason and counts
 // the skips in a row (skipped_streak, from skipped_since); the first ok or held run after them says
 // "Resumed after N skipped runs since <time>" and clears both, and a failed run keeps them. The
 // session-start line and `toolkit tasks` read these fields, because Task Scheduler shows every skip
-// as success. Exit 0 ok, held or skipped; 1 failed; 2 bad arguments.
+// as success. Exit 0 ok, held, deferred or skipped; 1 failed; 2 bad arguments.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -304,7 +304,6 @@ function refreshStep(job) {
   const report = lastJson(run.stdout);
   if (run.status === 2 && /^PARENT_STATE_MISSING: /.test(String(run.stderr || ''))
     || run.status === 1 && report?.holds?.length && report.holds.every(hold => hold.code === 'PARENT_STATE_MISSING')) {
-    job.note('Programme refresh skipped: ask the appointed controller to initialise the parent state in the private evidence store.');
     return 'skipped';
   }
   const lifecycle = report?.results?.filter(entry => ['set_parent_state', 'post_parent_repair'].includes(entry.kind)) || [];
@@ -422,18 +421,69 @@ function runJob(options, deps = {}) {
   const job = new Job(options, deps);
   const registry = (deps.registry || tasks).readRegistry(deps.home || os.homedir());
   const enrolled = registry.status === 'ok' && registry.tasks.find(entry => entry.id === options.taskId && entry.host === 'windows');
-  if (enrolled?.job_owner && enrolled.job_owner !== (deps.computerId || os.hostname())) {
-    return { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, status: 'skipped', exit: 0,
-      reason: 'scheduled jobs are owned by another computer; ask the owner to move them using the host question UI', summary: ['No job work started: this computer is not the recorded job owner.'] };
+  let lock, record;
+  const home = deps.home || os.homedir();
+  const finishWithoutWork = (status, reason) => {
+    const at = job.now().toISOString(), previous = job.readRecord();
+    const history = previous?.schema === 'toolkit.task-last-run.v1' && previous.id === options.taskId && previous.job === options.job ? previous : null;
+    const result = { ...skipStreak(history),
+      ...(typeof history?.footer_sweep_since === 'string' && Number.isFinite(Date.parse(history.footer_sweep_since)) ? { footer_sweep_since: history.footer_sweep_since } : {}),
+      schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job,
+      ...(enrolled?.repository ? { repository: enrolled.repository } : {}), started: at, finished: at,
+      status, exit: status === 'failed' ? 1 : 0, reason, summary: [reason] };
+    job.writeRecord(result);
+    return result;
+  };
+  try {
+    if (!tasks.localTaskOwner(enrolled?.job_owner, deps.computerId || tasks.computerIdentity(home)?.id)) {
+      return finishWithoutWork('skipped', `scheduled jobs are owned by another computer; ${tasks.OWNER_RECOVERY}`);
+    }
+    try { job.repository(); }
+    catch { return finishWithoutWork('failed', 'registered root is not a repository checkout'); }
+    const identity = job.identity();
+    const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(identity);
+    // status refreshes the cached binding. Never memoize an observation (or choose
+    // its store lock) until that refresh has completed. Sign-out still does no reads.
+    if (repository && !job.ghSignedOut()) job.governanceStatus();
+    const observed = repository && !job.ghSignedOut() ? job.observation(identity) : null;
+    const key = observed?.fresh === true && observed?.status === 'enabled' && observed?.binding?.store?.repository || repository || options.repoRoot;
+    lock = deps.takeProgrammeLock ? deps.takeProgrammeLock(key) : new (require('./toolkit-programme-lock.cjs').ProgrammeJobLock)({ home, key, log: line => job.note(line) }).take();
+    if (!lock) return finishWithoutWork('deferred', `Programme work deferred: another job owns the lock; retries at the next hourly ${options.job === 'shard-timings' ? 'programme sweep before the next weekly slot' : 'task slot'}.`);
+    record = runJobLocked(job, options, deps);
+  } catch {
+    return finishWithoutWork('failed', 'Programme job or lock failed; inspect local task state and retry the task.');
+  } finally {
+    if (lock) {
+      try { lock.release(); }
+      catch { record = finishWithoutWork('failed', 'Programme lock release failed; inspect the local lock before retrying.'); }
+    }
   }
-  const identity = job.identity();
-  const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(identity);
-  const observed = repository ? job.observation(identity) : null;
-  const key = observed?.fresh === true && observed?.binding?.store?.repository || repository || options.repoRoot;
-  const lock = deps.takeProgrammeLock ? deps.takeProgrammeLock(key) : new (require('./toolkit-programme-lock.cjs').ProgrammeJobLock)({ home: deps.home || os.homedir(), key, log: line => job.note(line) }).take();
-  if (!lock) return { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, status: 'held', exit: 0, summary: ['Programme work held: another job still owns the lock.'] };
-  try { return runJobLocked(job, options, deps); }
-  finally { lock.release(); }
+  // Start catch-up as a separate scheduled task, after releasing all writer locks.
+  // Adding a 25-minute shard step to a sweep would exceed its 30-minute limit.
+  if (options.job === 'programme-sweep') retryDeferredShards(job, options, deps);
+  return record;
+}
+
+function retryDeferredShards(job, options, deps) {
+  const home = deps.home || os.homedir(), windows = require('./toolkit-windows-tasks.cjs');
+  try {
+    if (job.ghSignedOut()) return;
+    const state = job.governanceStatus();
+    if (governanceReason(state) || job.observation(job.identity())?.fresh !== true) return;
+    const registry = (deps.registry || tasks).readRegistry(home);
+    if (registry.status !== 'ok') return;
+    for (const entry of registry.tasks) {
+      if (entry.host !== 'windows' || entry.job !== 'shard-timings' || entry.adopted || entry.stopped_by_owner
+        || entry.repository !== windows.repositoryOf(job.identity()) || !windows.samePath(entry.checkout, options.repoRoot)
+        || !tasks.localTaskOwner(entry.job_owner, deps.computerId || tasks.computerIdentity(home)?.id)
+        || tasks.readLastRun(entry.id, home)?.status !== 'deferred') continue;
+      const scheduler = deps.scheduler || windows.powerShellScheduler();
+      const live = scheduler.list(entry.folder).find(task => task.name === entry.name);
+      if (!live || ['Disabled', 'Running'].includes(live.state) || windows.parseMarker(live.description)?.id !== entry.id
+        || !entry.enrolled || JSON.stringify(windows.enrolledDefinition(live)) !== JSON.stringify(entry.enrolled)) continue;
+      scheduler.start(entry.folder, entry.name);
+    }
+  } catch { job.note('Deferred shard retry could not start; the next hourly programme sweep retries, or inspect toolkit tasks.'); }
 }
 
 function runJobLocked(job, options, deps) {
@@ -462,7 +512,7 @@ function runJobLocked(job, options, deps) {
         ...(footer.reason ? { footer_reason: footer.reason } : {}),
         ...(programme.reason ? { programme_reason: programme.reason } : {}),
         ...(status === 'skipped' ? { reason: footer.reason || programme.reason } : {}) };
-      if (programme.reason && programme.reason !== footer.reason) job.note(`Programme work skipped: ${programme.reason}.`);
+      if (programme.reason && programme.reason !== footer.reason && programme.reason !== outcome.reason) job.note(`Programme work skipped: ${programme.reason}.`);
     } else outcome = options.job === 'footer-sweep' ? job.clean(base) : shardTimings(job);
   }
   catch (error) { job.note(`The job stopped: ${error.message}`); outcome = { status: 'failed' }; }

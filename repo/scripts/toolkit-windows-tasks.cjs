@@ -446,11 +446,13 @@ const safeAnswerRef = value => typeof value === 'string' && value.trim() === val
 // Owns preflight, persistence and scheduler effects. Every command gets explicit boundaries;
 // tests substitute all four effect/identity/clock dependencies, never the user's scheduler/home.
 class WindowsTaskOwner {
-  constructor({ scheduler, home, registry = tasks, identityReader, now = () => new Date(), repairOwned = false, firstRunOptions = null, takeLock = null, taskChoice = null, readRecord = null, writeRecord = null, computerId = os.hostname() }) {
+  constructor({ scheduler, home, registry = tasks, identityReader, now = () => new Date(), repairOwned = false, firstRunOptions = null, takeLock = null, taskChoice = null, readRecord = null, writeRecord = null, computerId = null }) {
     const answers = taskChoice ? Array.isArray(taskChoice) ? taskChoice : [taskChoice] : [];
     for (const taskChoice of answers) if (!['keep', 'replace'].includes(taskChoice.outcome) || !tasks.ID.test(taskChoice.task || '') || !/^[a-f0-9]{64}$/.test(taskChoice.observed || '') || !safeAnswerRef(taskChoice.answer_ref)) throw new WindowsTasksError('task choice needs the exact observation and actual owner answer reference', 1);
     if (new Set(answers.map(a => a.task)).size !== answers.length || new Set(answers.map(a => a.answer_ref)).size !== answers.length) throw new WindowsTasksError('each task needs its own exact owner answer', 1);
     Object.assign(this, { scheduler, home, registry, identityReader, now, repairOwned, firstRunOptions, takeLock, answers, readRecord, writeRecord, computerId });
+    this.explicitComputerId = computerId;
+    this.computerId ||= tasks.computerIdentity(home)?.id || null;
     this.choiceAttempts = new Set();
   }
   // Discovery is shared only within this invocation. Every affected folder, registry and
@@ -469,7 +471,7 @@ class WindowsTaskOwner {
     const read = currentRead || plannedRead;
     const registry = this.registry.readRegistry(this.home);
     const entries = registry.status === 'ok' ? registry.tasks : [];
-    const assignment = scheduleOwner.assignment(entries, desired.repository, this.computerId);
+    const assignment = scheduleOwner.assignment(entries, desired.repository, this.computerId, { recoverStopped: this.repairOwned });
     const ours = entries.filter(e => e.host === 'windows' && String(e.repository).toLowerCase() === desired.repository.toLowerCase());
     const cleaners = ours.filter(e => isCleaner(e.job));
     const selected = cleaners[0];
@@ -577,7 +579,7 @@ class WindowsTaskOwner {
         }
       }
       if (reason && (!this.repairOwned || switching && existing && reason === 'stopped by owner: hand-edited task definition')) return refuse(reason);
-      return { definition, action: retiring ? 'retire' : reason || choice || !sameDefinition(observed, recorded.enrolled) || marker?.def !== definition.def ? 'update' : 'current', observed, recorded, ...(choice ? { choice } : {}), ...(reason ? { recovery: reason } : {}) };
+      return { definition, action: retiring ? 'retire' : reason || choice || !sameDefinition(observed, recorded.enrolled) || marker?.def !== definition.def || this.computerId && recorded.job_owner !== this.computerId ? 'update' : 'current', observed, recorded, ...(choice ? { choice } : {}), ...(reason ? { recovery: reason } : {}) };
     });
     // Historical shard stops also hold an ON switch before the destination is touched.
     if (this.answers.some(a => !items.some(i => i.choice?.outcome && i.choice.task === a.task))) {
@@ -636,6 +638,7 @@ class WindowsTaskOwner {
     let footerLock = null;
     const releaseFooter = () => { if (footerLock) { const held = footerLock; footerLock = null; held.release(); } };
     try {
+      this.computerId = this.explicitComputerId || tasks.computerIdentity(this.home, { create: true }).id;
       const guarded = this.plan(desired);
       if (kept(guarded)) {
         for (const item of guarded.items.filter(i => i.choice?.outcome)) this.consumeChoice(item);
@@ -839,9 +842,13 @@ const EARLIER_JOBS = Object.freeze([
   ...[
     'Refreshes the measured test times and opens a pull request when the CI shards drift. No AI.',
     'Refreshes test times and opens a pull request when CI shards drift; no shards yet means no changes, and timing starts automatically when shards appear. No AI.',
-    JOBS['shard-timings'].purpose,
+    'Refreshes test times and opens a pull request when CI shards drift; no shards yet means no changes, and timing starts when the manifest becomes available in the registered checkout. No AI.',
   ].map(purpose => ({ job: 'shard-timings', schedule: { kind: 'weekly', day: 'Monday', at: '09:15' }, purpose, withoutPurpose: true })),
-  ...Object.entries(JOBS).map(([job, spec]) => ({ job, purpose: spec.purpose, schedule: job === 'shard-timings' ? { kind: 'weekly', day: 'Monday', at: '09:15' } : { kind: 'hourly', at: '00:00', hours: 24 } })),
+  ...Object.entries({
+    'programme-sweep': 'Cleans your own GitHub posts first, then brings programme pages and attention up to date under governance guards. No AI.',
+    'footer-sweep': 'Removes the cloud route footer from your own GitHub posts in this repository and its freshly verified evidence store. No AI.',
+    'shard-timings': 'Refreshes test times and opens a pull request when CI shards drift; no shards yet means no changes, and timing starts when the manifest becomes available in the registered checkout. No AI.',
+  }).map(([job, purpose]) => ({ job, purpose, schedule: job === 'shard-timings' ? { kind: 'weekly', day: 'Monday', at: '09:15' } : { kind: 'hourly', at: '00:00', hours: 24 } })),
 ]);
 
 function recognisedEarlier(live, recorded, definition) {
@@ -880,7 +887,7 @@ function registryEntry(definition, existing, now, live) {
     id: definition.id, name: definition.name, host: 'windows', folder: definition.folder, schedule: definition.schedule_text, model: null, effort: null,
     purpose: definition.purpose, repository: definition.repository, created: existing ? existing.created : now().toISOString(), created_by: 'toolkit-windows-tasks apply',
     job: definition.job, definition: definition.def, checkout: definition.checkout, toolkit_root: definition.toolkit_root, enrolled: enrolledDefinition(live),
-    repo_minute: definition.repo_minute, job_owner: definition.job_owner,
+    repo_minute: definition.repo_minute, job_owner: definition.job_owner, job_owner_label: os.hostname(),
   };
 }
 
@@ -907,7 +914,7 @@ function firstRun(definition, { scheduler, home, now = () => new Date(), wait = 
     const fresh = last && Date.parse(last.started) >= started.getTime() - 2000;
     if (!fresh) return { status: 'failed', detail: `Windows reports ${describeResult(info.last_result)} but the job wrote no result${restarted ? ' (started twice after a console close)' : ''}` };
     const ok = last.exit === 0 && last.status === 'ok';
-    return { status: ok ? 'ok' : 'failed', detail: `${last.status}: ${(last.summary || []).slice(0, 3).join(' | ')}`, restarted };
+    return { status: ok ? 'ok' : last.status === 'deferred' ? 'deferred' : 'failed', detail: `${last.status}: ${(last.summary || []).slice(0, 3).join(' | ')}`, restarted };
   }
 }
 
@@ -935,17 +942,15 @@ function adoptTask({ folder, task, id, purpose, repository = null }, { scheduler
 
 // ---- output -------------------------------------------------------------------------------------
 
-// A path for a PowerShell line: the profile folder as $env:USERPROFILE.
+// Print literal managed paths so the same line is accepted by the hold on every host.
 function powerShellPath(file, home = os.homedir()) {
   quotePath(file, 'the command path');
   const literal = value => value.replace(/[`$]/g, character => '`' + character);
-  const lower = file.toLowerCase();
-  const prefix = home.toLowerCase();
-  return lower === prefix || lower.startsWith(`${prefix}\\`) ? `"$env:USERPROFILE${literal(file.slice(home.length))}"` : `"${literal(file)}"`;
+  return `"${literal(file)}"`;
 }
 
 function applyCommand(desired, { toolkitRoot = path.resolve(__dirname, '..', '..'), folderOverride = null, home } = {}) {
-  const script = path.win32.join(toolkitRoot, 'repo', 'scripts', 'toolkit-windows-tasks.cjs');
+  const script = (path.win32.isAbsolute(toolkitRoot) ? path.win32 : path).join(toolkitRoot, 'repo', 'scripts', 'toolkit-windows-tasks.cjs');
   return `node ${powerShellPath(script, home)} apply --repo-root ${powerShellPath(desired.root, home)}${folderOverride ? ` --folder ${folderOverride}` : ''}`;
 }
 
@@ -1055,7 +1060,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
       const desired = desiredTasks(desiredOptions);
       const result = applyTasks(desired, { scheduler, home, registry: deps.registry, identityReader: deps.identityReader, repairOwned: options.repairOwned, now: deps.now, firstRunOptions: options.firstRun ? (deps.firstRunOptions || {}) : null,
         taskChoice: options.taskChoices || null });
-      if (!options.firstRun && result.approval === 'standing approval with verified ownership') result.approval = 'explicit approval required; first-result verification was skipped';
+      if (!options.firstRun && result.approval === taskPolicy.STANDING_APPROVAL) result.approval = 'explicit approval required; first-result verification was skipped';
       print(result, describePlan(result, { applied: true }));
       return result.refused || result.items.some(item => item.action === 'refused' || item.done === false || (item.first_run && item.first_run.status === 'failed')) ? 1 : 0;
     }
