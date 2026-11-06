@@ -2806,7 +2806,7 @@ test('removal hints: plugin and linked Toolkit copies name the managed runner an
     assert.equal(windowsTasks.main(['remove','--repo-root',project],{...deps,toolkitRoot:copy,stdout:v=>{text+=v;},stderr:v=>{text+=v;}}),1);
     const command = /Use node "([^"\n]+)" remove --repo-root "([^"\n]+)"/.exec(text); assert.ok(command,text);
     const script=command[1].replace('$env:USERPROFILE',home), target=command[2].replace('$env:USERPROFILE',home);
-    assert.equal(script,path.win32.join(managed,'repo','scripts','toolkit-windows-tasks.cjs')); assert.equal(target,project);
+    assert.equal(script,(path.isAbsolute(managed) ? path : path.win32).join(managed,'repo','scripts','toolkit-windows-tasks.cjs')); assert.equal(target,project);
     assert.equal(windowsTasks.main(['remove','--repo-root',target],{...deps,toolkitRoot:managed,stdout(){},stderr(){}}),0);
   }
 });
