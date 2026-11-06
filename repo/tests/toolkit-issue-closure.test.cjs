@@ -146,6 +146,39 @@ test('PR title, body, every commit, overrides, partial edits and metadata drift'
   }
 });
 const shell = command => ({ cwd: process.cwd(), tool_name: 'Bash', tool_input: { command } });
+test('delta closure target and text matrix refuses writes while clean text makes no reads', t => {
+  const cwd=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'closure-no-origin-'));
+  const inheritedRepo=process.env.GH_REPO; delete process.env.GH_REPO;
+  t.after(()=>{fs.rmSync(cwd,{recursive:true,force:true});if(inheritedRepo===undefined)delete process.env.GH_REPO;else process.env.GH_REPO=inheritedRepo;});
+  const rows=[...require('./hook-pack/corpus/issue-closure.json').rows,...require('./hook-pack/corpus/closure-matrix.json').rows];
+  const ids=['target-placeholder','target-var-repo','target-var-repo-braced','target-var-number','target-loop','target-pull-closing','target-pull-number-closing','target-var-endpoint','wrap-if','wrap-while','wrap-until','wrap-elif','wrap-not','wrap-time','wrap-timeout','wrap-nohup','wrap-sudo','wrap-nice','wrap-env-flags','wrap-xargs','wrap-chain','wrap-cmd','wrap-powershell-command','wrap-powershell-bare','subst-dq','subst-backtick','subst-backtick-dq','subst-nested','ps-percent','ps-foreach-object','ps-invoke-command','ps-elseif','ps-switch','ps-function','ps-start-process','sh-function','repo-before-verb-close','repo-before-verb-edit','heredoc-chain-shell','heredoc-pipe-shell','text-backtick-subst'];
+  for(const id of ids) {
+    const row=rows.find(row=>row.id==='CLOSURE.'+id); assert.ok(row,id);
+    assert.ok(adapter.issueClosureDecision(row.payload,{guard:setup().guard})?.deny,id);
+  }
+  for(const id of ['text-backtick-body','text-backtick-title','text-dollar-body','literal-dollar-body','text-escaped-dollar','heredoc-body-clean','heredoc-dq-delim','heredoc-plain-clean','heredoc-literal-dollar','heredoc-body-quotes','heredoc-stdin-clean','here-string-body-clean','identity-cd-refs','identity-add-label','identity-title-only','identity-branch','identity-no-origin','identity-var-number','movement-clean']) {
+    const row=rows.find(row=>row.id==='CLOSURE.'+id);
+    assert.equal(adapter.issueClosureDecision({...row.payload,cwd},{transport:{request(){assert.fail('clean text must not read GitHub');}}}),null,id);
+  }
+  const {spawnSync}=require('node:child_process');
+  assert.equal(spawnSync('git',['init','--quiet',cwd]).status,0);
+  assert.equal(spawnSync('git',['-C',cwd,'remote','add','origin','git@forge-alias:example.test/app.git']).status,0);
+  assert.equal(adapter.issueClosureDecision({...shell("gh pr edit 7 --body 'Refs #1'"),cwd},{transport:{request(){assert.fail('an SSH alias is irrelevant to clean text');}}}),null);
+  assert.match(adapter.issueClosureDecision(shell('gh api -X PATCH repos/$REPO/issues/1 -f state=closed')).deny,/repository or number is not literal/);
+  for(const id of ['text-ps-backslash-dollar','text-native-backslash-dollar','text-bash-argv-dollar','text-ps-argv-dollar','text-outer-expansion','text-outer-literal-dollar','text-ps-escaped-dollar','wrap-env-split-expanding','text-ps-unicode-variable','text-ps-rest-expansion']) {
+    const row=rows.find(row=>row.id==='CLOSURE.'+id);assert.ok(row,id);
+    assert.equal(Boolean(adapter.issueClosureDecision(row.payload,{guard:setup().guard})?.deny),row.expect.decision==='deny',id);
+  }
+  for(const id of ['heredoc-data-substitution','here-string-data-substitution','heredoc-literal-substitution','here-string-literal-substitution','heredoc-expanding-data','heredoc-quoted-opener','subst-comment-delimiter','redirect-literal-body','ps-bash-backtick','bash-powershell-backtick-data','wrap-env-split','wrap-powershell-text','wrap-cmd-text','ps-start-process-unknown']) {
+    const row=rows.find(row=>row.id==='CLOSURE.'+id);assert.ok(row,id);
+    assert.equal(Boolean(adapter.issueClosureDecision(row.payload,{guard:setup().guard})?.deny),row.expect.decision==='deny',id);
+  }
+});
+
+test('create connectors accept absent or null text, retaining strict target identity', () => {
+  for(const body of [undefined,null]) assert.equal(adapter.issueClosureDecision({tool_name:'mcp__github__create_pull_request',tool_input:{owner:'example.test',repo:'app',title:'Safe',body}},{guard:setup().guard}),null);
+  assert.match(adapter.issueClosureDecision({tool_name:'mcp__github__create_pull_request',tool_input:{title:'Safe'}}).deny,/repository identity/);
+});
 test('shell and connector closure matrix with positive read controls', () => {
   for (const command of [
     `gh pr create -R ${repo} --title 'Fixes #1' --body 'Details'`,
@@ -159,12 +192,12 @@ test('shell and connector closure matrix with positive read controls', () => {
     `gh pr create -R ${repo} --fill`,
     `gh pr create -R ${repo} --title 'Change' --body-file -`,
     `gh pr create -R ${repo} --title 'Change' --body-file absent.txt`,
-    `gh pr create -R ${repo} --title 'Change' --body '$generated'`,
+    `gh pr create -R ${repo} --title 'Change' --body "$generated"`,
     `gh pr edit 7 -R ${repo}`,
     `cd another; gh pr edit 7 --body 'Closes #1'`,
     `GH_REPO=other.test/app gh pr edit 7 --body 'Closes #1'`,
   ]) assert.ok(adapter.issueClosureDecision(shell(command), { guard: setup().guard })?.deny, command);
-  for (const command of [`gh issue view 1 -R ${repo}`, `gh api repos/${repo}/issues/1`, "gh api graphql -f 'query=query($owner: String!) { viewer { login } }'", 'rg "closed" repo/docs', `gh pr create -R ${repo} --title 'Change' --body 'Refs #1'`, `gh -R${repo} pr create --title Change --body 'Refs #1'`]) assert.equal(adapter.issueClosureDecision(shell(command), { guard: setup().guard }), null, command);
+  for (const command of [`gh pr create -R ${repo} --title Change --body '$generated'`, `gh issue view 1 -R ${repo}`, `gh api repos/${repo}/issues/1`, "gh api graphql -f 'query=query($owner: String!) { viewer { login } }'", 'rg "closed" repo/docs', `gh pr create -R ${repo} --title 'Change' --body 'Refs #1'`, `gh -R${repo} pr create --title Change --body 'Refs #1'`]) assert.equal(adapter.issueClosureDecision(shell(command), { guard: setup().guard }), null, command);
   for (const [tool, args] of [['update_pull_request', { pull_number: 7, body: 'Closes #1' }], ['issue_write', { issue_number: 1, state: 'closed' }], ['close_issue', { issue_number: 1 }]]) {
     assert.ok(adapter.issueClosureDecision({ cwd: process.cwd(), tool_name: `mcp__github__${tool}`, tool_input: { owner: 'example.test', repo: 'app', ...args } }, { guard: prFixture().guard })?.deny);
   }

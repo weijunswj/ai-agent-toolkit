@@ -23,6 +23,42 @@ const path = require('node:path');
 const { SHELL_TOOL_NAMES, UNREADABLE, ShellCall, argvText, plainGitLine } = require('../scripts/toolkit-shell-call.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 
+test('generic token values and offsets stay pinned while expansion follows quoting', () => {
+  const source = "echo '$body' \"$body\" '\u0060literal\u0060' \\$body \"$ \"; gh pr edit 7";
+  const commands = closureReader.shellCommands(source);
+  assert.deepEqual(commands.map(({ words, offsets }) => ({ words, offsets })), [
+    { words: ['echo','$body','$body','`literal`','\\$body','$ '], offsets: [0,5,13,21,33,40] },
+    { words: ['gh','pr','edit','7'], offsets: [46,49,52,57] },
+  ]);
+  assert.deepEqual(commands[0].expanding, [false,false,true,false,false,false]);
+  assert.equal(closureReader.wordText({ words:['__heredoc_999__'], expanding:[false] },0).unresolved,true);
+});
+
+test('closure commands read supported positions, wrapper chains and nested scripts', () => {
+  const gh='gh issue close 1 -R example.test/app';
+  for(const command of [`if ${gh}`,`while ${gh}`,`until ${gh}`,`elif ${gh}`,`! ${gh}`,`time -p ${gh}`,`sudo -u me nohup timeout -k 5 30 ${gh}`,`env -u X ${gh}`,`nice -n 5 ${gh}`,`echo 1 | xargs ${gh}`,`cmd /c ${gh}`,`powershell -Command ${gh}`,`powershell ${gh}`,`x="$(${gh})"`,'x=`'+gh+'`',`cd x && bash <<'EOF'\n${gh}\nEOF`,`cat <<'EOF' | bash\n${gh}\nEOF`,`f() { ${gh}; }`,`1 | % { ${gh} }`,`switch (1) { 1 { ${gh} } }`]) {
+    assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command}}),true,command);
+  }
+  assert.deepEqual(closureReader.executableCommands('bash -c "bash -c \'bash -c echo\'"',5),[]);
+  assert.throws(()=>closureReader.executableCommands(gh,5),/bound exceeded/);
+});
+
+test('literal document text survives CRLF, tab-stripped heredocs and here-strings', () => {
+  for(const command of ["gh pr edit 7 --body \"$(cat <<'EOF'\nRefs #1\nEOF\n)\"", "gh pr edit 7 --body \"$(cat <<-EOF\r\n\tRefs #1\r\n\tEOF\r\n)\"", "gh pr edit 7 --body @'\nRefs #1\n'@"]) {
+    const read=closureReader.scriptCommands(command)[0];
+    assert.equal(closureReader.wordText(read,read.words.indexOf('--body')+1).value,'Refs #1',command);
+  }
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command:'cat <<< "gh issue close later"'}}),false);
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'PowerShell',tool_input:{command:'echo "a`ngh issue close 1`n"'}}),false,'PowerShell backticks escape instead of substituting');
+});
+
+test('closure scanner stays bounded on missing documents, substitutions and braces', () => {
+  for(const unit of ['a<<b ','<<a\n',"@'\n",'"$(', 'x{','{} ','`x ']) {
+    const result=hostile.timing(text=>closureReader.scriptCommands(text),size=>unit.repeat(Math.ceil(size/unit.length)),{startSize:4096,maxSize:131072,minMs:5});
+    assert.ok(result.ok,`${unit}: ${result.message}`);
+  }
+});
+
 const base = path.resolve(os.tmpdir(), 'toolkit-shell-call-session');
 const other = path.resolve(os.tmpdir(), 'toolkit-shell-call-other');
 const read = (tool, toolInput, extra = {}) => ShellCall.from({ tool_name: tool, cwd: base, tool_input: toolInput, ...extra });

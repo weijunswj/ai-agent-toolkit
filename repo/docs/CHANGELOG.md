@@ -2,6 +2,11 @@
 
 ## 3.50.0
 
+- Read supported wrappers, condition positions, substitutions and unresolved closing targets; inspect literal quoted heredoc text without executing expansion. Preserve merge approvals when another guarded write refuses the call, and check cloud connector merge-message overrides.
+- Preserve shell context and outer expansion across nested calls, and share generated-file and literal-stdin checks with merge-message overrides.
+- Split the Windows closure command matrix into its own family, retaining every row and the 360-second budget.
+- Codex code-mode exec shell calls remain an accepted gap, tracked separately.
+
 - Update every computer together: older readers reject the parent lifecycle binding and pending lifecycle intents, holding governed work until updated.
 - Repair executable command reading, flag arity, cloud unknown advisories, shared invocation deadlines, supplied-text edit checks and full unattended completion walks.
 

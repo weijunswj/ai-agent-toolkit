@@ -5,8 +5,8 @@
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
-const { ShellCall, executableCommands, connectorTarget, GRAPHQL_OPERATION, shellPath } = require('./toolkit-shell-call.cjs');
-const { IssueClosureGuard } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+const { ShellCall, executableCommands, scriptContext, connectorTarget, GRAPHQL_OPERATION, shellPath, wordText, stdinText, fileIsGenerated, ghCommand } = require('./toolkit-shell-call.cjs');
+const { IssueClosureGuard, closingReferences } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
 const { GitHubTransport } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const { resolveExecutable } = require('../../skills/github-program-reconciler/scripts/resolve-executable.cjs');
 const SLUG = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i;
@@ -27,8 +27,11 @@ function originRepository(cwd, options) {
   let git;
   try { git = resolveExecutable('git', { cwd }); } catch { throw new Error('git is unavailable for repository origin lookup. Run setup toolkit.'); }
   const result = spawnSync(git, ['-C', cwd, 'config', '--get', 'remote.origin.url'], { encoding: 'utf8', timeout: remaining(options), windowsHide: true });
-  if (result.status !== 0) throw new Error('Repository origin could not be read within the invocation deadline.');
-  return /github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\s*$/.exec(result.stdout)?.[1];
+  if (result.error?.code === 'ETIMEDOUT') throw new Error('Repository origin lookup exceeded the invocation deadline.');
+  if (result.status !== 0 || !result.stdout?.trim()) throw new Error('This repository has no readable origin remote. Name the repository explicitly.');
+  const repository = /github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\s*$/.exec(result.stdout)?.[1];
+  if (!repository) throw new Error('The origin remote is not on github.com. Name the repository explicitly.');
+  return repository;
 }
 function guardFor(repository, cwd, options = {}) {
   if (!SLUG.test(repository || '')) throw new Error('Repository unavailable.');
@@ -44,17 +47,17 @@ function guardFor(repository, cwd, options = {}) {
 const TABLES = {
   create: { values: ['repo:R','assignee:a','base:B','body:b','body-file:F','head:H','label:l','milestone:m','project:p','recover','reviewer:r','template:T','title:t'], booleans: ['draft:d','dry-run','editor:e','fill:f','fill-first','fill-verbose','no-maintainer-edit','web:w'] },
   edit: { values: ['repo:R','add-assignee','add-label','add-project','add-reviewer','base:B','body:b','body-file:F','milestone:m','remove-assignee','remove-label','remove-project','remove-reviewer','title:t'], booleans: ['remove-milestone'] },
-  close: { values: ['repo:R','comment:c','reason:r'], booleans: [] },
+  close: { values: ['repo:R','comment:c','reason:r','duplicate-of'], booleans: [] },
   api: { values: ['cache','field:F','header:H','hostname','input','jq:q','method:X','preview:p','raw-field:f','template:t'], booleans: ['include:i','paginate','silent','slurp','verbose'] },
 };
 const REPEAT = new Set(['assignee','label','project','reviewer','add-assignee','add-label','add-project','add-reviewer','remove-assignee','remove-label','remove-project','remove-reviewer','header','field','raw-field','preview']);
-function flagValues(words, kind) {
+function flagValues(words, kind, expanding = []) {
   const table = TABLES[kind]; const aliases = new Map();
   for (const [entries, takesValue] of [[table.values, true], [[...table.booleans, 'help:h'], false]]) for (const entry of entries) {
     const [long, short] = entry.split(':'); aliases.set(`--${long}`, { key: long, takesValue });
     if (short) aliases.set(`-${short}`, { key: long, takesValue });
   }
-  const flags = new Map(); const positional = [];
+  const flags = new Map(); const positional = []; const expansions = new Map();
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     if (word === '--') { positional.push(...words.slice(i + 1)); break; }
@@ -64,15 +67,23 @@ function flagValues(words, kind) {
     const spec = aliases.get(key);
     if (!spec) throw new Error(`Unknown flag ${/^--?[a-zA-Z][a-zA-Z-]*$/.test(key) ? key : '(unreadable name)'} on a guarded GitHub write. Use the documented subcommand flags.`);
     let value = true;
+    let expands = expanding[i] || false;
     if (spec.takesValue) {
       value = word.startsWith('--') ? equal > 0 ? word.slice(equal + 1) : words[++i] : word.length > 2 ? word.slice(word[2] === '=' ? 3 : 2) : words[++i];
+      expands ||= expanding[i] || false;
       if (value === undefined || /^-[a-zA-Z]/.test(value)) throw new Error(`Missing value for ${spec.key}.`);
-    } else if (equal > 0 || !word.startsWith('--') && word.length > 2) throw new Error('Boolean flags cannot carry values.');
+    } else if (equal > 0) throw new Error('Boolean flags cannot carry values.');
+    else if (!word.startsWith('--') && word.length > 2) {
+      // Re-read clustered short options; a value-taking final option keeps its tail.
+      words = [...words.slice(0, i + 1), '-' + word.slice(2), ...words.slice(i + 1)];
+      expanding = [...expanding.slice(0, i + 1), expands, ...expanding.slice(i + 1)];
+    }
     if (flags.has(spec.key) && !REPEAT.has(spec.key)) throw new Error(`Repeated ${spec.key} option is ambiguous.`);
     if (REPEAT.has(spec.key)) flags.set(spec.key, [...(flags.get(spec.key) || []), value]); else flags.set(spec.key, value);
+    if (REPEAT.has(spec.key)) expansions.set(spec.key, [...(expansions.get(spec.key) || []), expands]); else expansions.set(spec.key, expands);
   }
   if (flags.has('body') && flags.has('body-file')) throw new Error('Conflicting body sources.');
-  return { flags, positional };
+  return { flags, positional, expansions };
 }
 function explicit(value) { if (typeof value === 'string' && /[$`]|__unreadable_stdin__|__here_string__|__inert_block__/.test(value)) throw new Error('Generated GitHub text or identity cannot be inspected.'); return value; }
 // Comments and string contents are data; mutation fields (including aliases) are executable.
@@ -112,44 +123,77 @@ function graphqlRelevant(query) {
   if (braces || parens || /\bfragment\b|\.\.\./.test(stripped)) throw new Error('GraphQL query structure cannot be resolved.');
   return found;
 }
-function apiOperation(flags, positional, call, command, commandCount) {
+function textValue(value, expanding, command) {
+  const read = wordText({ words: [value], expanding: [expanding], docs: command.docs }, 0);
+  if (read.unresolved) throw new Error('Generated GitHub text cannot be inspected. Provide literal text or a readable body file.');
+  return read.value;
+}
+function contentFile(file, call, command, commands, index) {
+  if (file === '-') return stdinText(command);
+  if (fileIsGenerated(file, command, commands, index)) throw new Error('The content file may be generated by another command or stdin.');
+  return readFile(shellPath(call.folder, file));
+}
+function apiOperation(flags, positional, call, command, commands, index, expansions) {
   const endpoint = positional[0] || '';
   const method = String(flags.get('method') || (flags.has('field') || flags.has('raw-field') || flags.has('input') ? 'POST' : 'GET')).toUpperCase();
   if (method === 'GET' || method === 'HEAD') return null;
-  const target = /^(?:https:\/\/api\.github\.com\/)?\/?repos\/([^/]+\/[^/]+)\/(issues|pulls)(?:\/(\d+))?$/.exec(endpoint);
-  if (!target && endpoint !== 'graphql') return null;
-  const fields = [...(flags.get('field') || []), ...(flags.get('raw-field') || [])]; let payload = {};
+  const target = /^(?:https:\/\/api\.github\.com\/)?\/?repos\/(.+)\/(issues|pulls)(?:\/([^/?#]+))?\/?(?:[?#].*)?$/i.exec(endpoint);
+  if (!target && /^(?:https:\/\/api\.github\.com\/)?\/?repos\/.+\/(?:issues|pulls)\/[^/]+\//i.test(endpoint)) return null;
+  const unresolvedEndpoint = /[$`]|\{/.test(endpoint);
+  if (!target && endpoint !== 'graphql' && !unresolvedEndpoint) return null;
+  if (target && target[3] && !/^\d+$/.test(target[3]) && !/[$`{}]/.test(target[3])) return null;
+  const sensitive = endpoint === 'graphql' ? ['query'] : target?.[2].toLowerCase() === 'issues' ? ['state'] : target ? ['title','body'] : ['state','title','body'];
+  let payload = {};
   if (flags.has('input')) {
-    if (command.unreadableInput || commandCount !== 1) throw new Error('API input may be generated by another command or stdin.');
-    try { payload = JSON.parse(readFile(shellPath(call.folder, flags.get('input')))); } catch { throw new Error('API input must be a readable JSON file.'); }
+    if (index > 0) throw new Error('API input may be generated by another command or stdin.');
+    try { payload = JSON.parse(contentFile(flags.get('input'), call, command, commands, index)); } catch { throw new Error('API input must be a readable JSON file or literal heredoc.'); }
   }
-  for (const field of fields) {
+  for (const key of ['field','raw-field']) for (const [i, field] of (flags.get(key) || []).entries()) {
     const pair = /^([^=]+)=(.*)$/s.exec(field);
     if (!pair) throw new Error('API fields must be explicit.');
-    if (Object.hasOwn(payload, pair[1]) && ['state','title','body','query'].includes(pair[1])) throw new Error('Duplicate closure-sensitive API field.');
-    if (pair[2].startsWith('@') && commandCount !== 1) throw new Error('API field content may be generated by another command.');
-    payload[pair[1]] = pair[2].startsWith('@') ? readFile(shellPath(call.folder, pair[2].slice(1))) : pair[2];
+    if (!sensitive.includes(pair[1])) continue;
+    if (Object.hasOwn(payload, pair[1])) throw new Error('Duplicate closure-sensitive API field.');
+    payload[pair[1]] = key === 'field' && pair[2].startsWith('@')
+      ? contentFile(pair[2].slice(1), call, command, commands, index)
+      : pair[1] === 'state' ? explicit(pair[2]) : textValue(pair[2], expansions.get(key)?.[i], command);
   }
   if (endpoint === 'graphql') { if (graphqlRelevant(payload.query)) throw new Error('Guarded GraphQL mutation identity or text is unresolved. Use an explicit REST issue/PR target.'); return null; }
-  if (target[2] === 'issues') {
-    if (payload.state === undefined || payload.state === 'open') return null;
-    explicit(payload.state); if (payload.state !== 'closed') return null;
-    return { kind: 'close', repository: target[1], number: Number(target[3]) };
-  }
-  return { kind: target[3] ? 'edit' : 'create', repository: target[1], number: Number(target[3]), title: explicit(payload.title), body: explicit(payload.body) };
+  const closesIssue = payload.state !== undefined && payload.state !== 'open';
+  const closesPR = ['title','body'].some(key => typeof payload[key] !== 'string' && payload[key] != null || closingReferences(payload[key] || '', 'x/x').length);
+  if (target?.[2].toLowerCase() === 'issues' && !closesIssue || target?.[2].toLowerCase() === 'pulls' && !closesPR) return null;
+  if (!target && !closesIssue && !closesPR) return null;
+  const repository = target?.[1]; const number = /^\d+$/.test(target?.[3] || '') ? Number(target[3]) : null;
+  if (!SLUG.test(repository || '') || !number && (target?.[2].toLowerCase() !== 'pulls' || target?.[3])) throw new Error('This call closes an issue whose repository or number is not literal. Name both.');
+  if (target[2].toLowerCase() === 'issues') { explicit(payload.state); return payload.state === 'closed' ? { kind: 'close', repository, number } : null; }
+  return { kind: target[3] ? 'edit' : 'create', repository, number, title: payload.title, body: payload.body };
 }
 function shellOperations(input, options = {}) {
-  const call = ShellCall.from(input); const operations = []; const commands = executableCommands(call.text);
-  for (const command of commands) {
-    if (!/(?:^|[\\/])gh(?:\.exe)?$/i.test(command.words[0])) continue;
-    const words = command.words.slice(1); let inherited;
-    if (['-R','--repo'].includes(words[0])) { inherited = words[1]; words.splice(0,2); }
-    else if (/^(?:-R.+|--repo=)/.test(words[0] || '')) { inherited = words[0].startsWith('--') ? words[0].slice(7) : words[0].slice(2); words.shift(); }
-    const kind = words[0] === 'api' ? 'api' : words[0] === 'pr' && ['create','edit'].includes(words[1]) ? words[1] : words[0] === 'issue' && words[1] === 'close' ? 'close' : null;
+  const call = ShellCall.from(input); const operations = []; const commands = executableCommands(call.text, 0, scriptContext(input));
+  for (const [index, command] of commands.entries()) {
+    if (command.unreadableGh) throw new Error('Start-Process gh arguments cannot be inspected. Provide literal arguments.');
+    const gh = ghCommand(command.words); if (!gh) continue;
+    const { noun, verb, inherited, rest, start } = gh;
+    const kind = noun === 'api' ? 'api' : noun === 'pr' && ['create','edit'].includes(verb) ? verb : noun === 'issue' && verb === 'close' ? 'close' : null;
     if (!kind) continue;
-    const { flags, positional } = flagValues(words.slice(kind === 'api' ? 1 : 2), kind);
+    let parsed;
+    try { parsed = flagValues(rest, kind, command.expanding.slice(start)); }
+    catch (error) {
+      if (kind !== 'api' || rest.some(word => /^(?:https:\/\/api\.github\.com\/)?\/?repos\/.+\/(?:issues|pulls)(?:\/[^/]+)?\/?(?:[?#].*)?$|^graphql$/.test(word)) && rest.some(word => /^(?:-X|-f|-F|--method|--field|--raw-field|--input)/.test(word))) throw error;
+      continue;
+    }
+    const { flags, positional, expansions } = parsed;
     if (flags.has('help')) continue;
-    if (kind === 'api') { const op = apiOperation(flags, positional, call, command, commands.length); if (op) operations.push(op); continue; }
+    if (kind === 'api') { const op = apiOperation(flags, positional, call, command, commands, index, expansions); if (op) operations.push(op); continue; }
+    const op = { kind };
+    if (kind !== 'close') {
+      if (['fill','fill-first','fill-verbose','web','editor','template','recover'].some(key => flags.has(key))) throw new Error('Generated or editor PR content cannot be inspected.');
+      if (kind === 'create' && (!flags.has('title') || !flags.has('body') && !flags.has('body-file'))) throw new Error('PR creation needs an explicit title and body.');
+      op.title = textValue(flags.get('title'), expansions.get('title'), command);
+      op.body = textValue(flags.get('body'), expansions.get('body'), command);
+      if (flags.has('body-file')) op.body = contentFile(flags.get('body-file'), call, command, commands, index);
+      if (kind === 'edit' && op.title === undefined && op.body === undefined && [...flags.keys()].every(key => key === 'repo')) throw new Error('Editor PR content cannot be inspected.');
+      if (![op.title,op.body].some(text => closingReferences(text || '', 'x/x').length)) continue;
+    }
     let repository = flags.get('repo') || inherited; let number = Number(positional[0]);
     if (inherited && flags.has('repo') && inherited.toLowerCase() !== flags.get('repo').toLowerCase()) throw new Error('Conflicting repository options.');
     const url = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:pull|issues)\/(\d+)$/.exec(positional[0] || '');
@@ -157,42 +201,42 @@ function shellOperations(input, options = {}) {
     if (kind !== 'create' && (!Number.isSafeInteger(number) || number < 1)) throw new Error(`Missing or invalid ${kind === 'close' ? 'issue' : 'PR'} number.`);
     if (!repository && command.movesTarget) throw new Error('The command changes folder or GH_REPO. Name the repository explicitly.');
     repository ||= process.env.GH_REPO || originRepository(call.folder, options); explicit(repository);
-    const op = { kind, repository, number };
-    if (kind !== 'close') {
-      if (['fill','fill-first','fill-verbose','web','editor','template','recover'].some(key => flags.has(key))) throw new Error('Generated or editor PR content cannot be inspected.');
-      op.title = explicit(flags.get('title')); op.body = explicit(flags.get('body'));
-      if (flags.has('body-file')) {
-        if (commands.length !== 1 || command.unreadableInput) throw new Error('The PR body file may be generated by another command or stdin.');
-        op.body = readFile(shellPath(call.folder, flags.get('body-file')));
-      }
-      if (kind === 'edit' && op.title === undefined && op.body === undefined && [...flags.keys()].every(key => key === 'repo')) throw new Error('Editor PR content cannot be inspected.');
-    }
-    operations.push(op);
+    operations.push({ ...op, repository, number });
   }
   return { operations, cwd: call.folder };
 }
-function connectorOperations(input) {
+
+function connectorOperations(input, options = {}) {
   const tool = input?.tool_name || ''; const args = input?.tool_input || {};
   if (GRAPHQL_OPERATION.test(tool)) { if (graphqlRelevant(args.query)) throw new Error('Guarded GraphQL mutation identity or text is unresolved.'); return []; }
-  const kind = /create_pull_request$/.test(tool) ? 'create' : /(?:update|edit)_pull_request$/.test(tool) ? 'edit' : /close_issue$/.test(tool) || /(?:issue_write|update_issue)$/.test(tool) && String(args.state).toLowerCase() === 'closed' ? 'close' : null;
+  const cloudMerge = options.cloud && /^mcp__.+?[_-]merge[_-]?pull[_-]?request$/i.test(tool);
+  if (cloudMerge && !['commit_title','commit_message','commitTitle','commitMessage'].some(key => args[key] !== undefined)) return [];
+  const kind = cloudMerge ? 'edit' : /create_pull_request$/.test(tool) ? 'create' : /(?:update|edit)_pull_request$/.test(tool) ? 'edit' : /close_issue$/.test(tool) || /(?:issue_write|update_issue)$/.test(tool) && String(args.state).toLowerCase() === 'closed' ? 'close' : null;
   if (!kind) return [];
   const target = connectorTarget(args, ['pr_number','pull_number','pullNumber','pull_request_number','number','issue_number','issueNumber']);
   if (target.unclear) throw new Error(`Conflicting ${target.unclear} fields.`);
-  return [{ kind, repository: target.repository, number: target.pr, title: args.title, body: args.body }];
+  const variants = cloudMerge ? [{ title: args.commit_title, body: args.commit_message }, { title: args.commitTitle, body: args.commitMessage }] : [{ title: args.title, body: args.body }];
+  return variants.filter(text => !cloudMerge || text.title !== undefined || text.body !== undefined)
+    .map(text => ({ kind, repository: target.repository, number: target.pr, ...text }));
 }
 function issueClosureDecision(input, options = {}) {
   try {
     const shell = ShellCall.isShellTool(input?.tool_name);
-    const { operations, cwd } = shell ? shellOperations(input, options) : { operations: connectorOperations(input), cwd: input?.cwd || process.cwd() };
+    const { operations, cwd } = shell ? shellOperations(input, options) : { operations: connectorOperations(input, options), cwd: input?.cwd || process.cwd() };
     for (const op of operations) {
+      if (op.kind !== 'close') {
+        for (const key of ['title','body']) {
+          if (op[key] == null) op[key] = undefined;
+          else if (typeof op[key] !== 'string') throw new Error('PR text must be explicit strings.');
+        }
+      }
       if (!SLUG.test(op.repository || '')) throw new Error('Missing or invalid repository identity.');
       if (op.kind !== 'create' && (!Number.isSafeInteger(op.number) || op.number < 1)) throw new Error(`Missing or invalid ${op.kind === 'close' ? 'issue' : 'PR'} number.`);
       const guard = options.guard || guardFor(op.repository, cwd, options); let result;
       if (op.kind === 'close') result = guard.assertClosable(op.number);
       else {
         if (op.title !== undefined && typeof op.title !== 'string' || op.body !== undefined && typeof op.body !== 'string') throw new Error('PR text must be explicit strings.');
-        if (op.kind === 'create' && (op.title === undefined || op.body === undefined)) throw new Error('PR creation needs an explicit title and body.');
-        result = op.kind === 'edit' ? guard.checkEdit(op.number, { title: op.title, body: op.body }) : guard.checkTexts([op.title, op.body]);
+        result = op.kind === 'edit' ? guard.checkEdit(op.number, { title: op.title, body: op.body }) : guard.checkTexts([op.title, op.body].filter(value => value !== undefined));
       }
       if (result.status !== 'allowed') return { status: result.status, deny: `Toolkit: ${result.reason} ${RECOVERY}` };
     }

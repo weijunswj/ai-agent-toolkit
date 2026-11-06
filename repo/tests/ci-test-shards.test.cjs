@@ -243,6 +243,7 @@ function assertDriftGuard(WORKFLOW) {
     ['the hook pack job removed', WORKFLOW.replace(/\n  hook-pack:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
     ['the hook pack dropped on Windows', WORKFLOW.replace('    runs-on: windows-latest\n    timeout-minutes: 15', '    runs-on: ubuntu-latest\n    timeout-minutes: 15')],
     ['the Windows pack job removed', WORKFLOW.replace(/\n  hook-pack-windows:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
+    ['the closure matrix family dropped', WORKFLOW.replace('attribution, closure-matrix, fault', 'attribution, fault')],
     ['a Windows family dropped', WORKFLOW.replace('issue-closure, merge, push]', 'merge, push]')],
     ['a Windows family duplicated', WORKFLOW.replace('merge, push]', 'merge, push, push]')],
     ['a Windows family filter removed', WORKFLOW.replace(' --family ${{ matrix.family }}', '')],

@@ -134,7 +134,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELLS, SHELL_TOOLS, ShellCall, MOVES_TARGET, connectorTarget, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { SHELLS, SHELL_TOOLS, ShellCall, MOVES_TARGET, connectorTarget, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -1084,36 +1084,52 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     let mergeTexts = [];
     try {
       if (call.isShell) {
-        for (const command of shellCommands(call.text)) {
+        const commands = scriptCommands(call.text, scriptContext(input));
+        for (const [commandIndex, command] of commands.entries()) {
+          const gh = ghCommand(command.words);
+          if (!gh || (merge.kind === 'api' ? gh.noun !== 'api' : gh.noun !== 'pr' || gh.verb !== 'merge')) continue;
+          const unresolved = () => Object.assign(new Error('Generated merge text.'), { code: 'MERGE_TEXT_UNRESOLVED' });
+          const read = file => {
+            if (file === '-') return stdinText(command);
+            if (fileIsGenerated(file, command, commands, commandIndex)) throw unresolved();
+            return readClosureFile(shellPath(cwd, file));
+          };
           for (let i = 0; i < command.words.length; i += 1) {
             const word = command.words[i];
+            const literal = (index, slice = 0) => {
+              const value = command.words[index]?.slice(slice);
+              const result = wordText({ ...command, words: [value], expanding: [command.expanding[index]] }, 0);
+              if (result.unresolved) throw unresolved();
+              return result.value;
+            };
             if (merge.kind === 'api') {
-              const read = raw => readClosureFile(shellPath(cwd, raw));
               if (word === '--input' || word.startsWith('--input=')) {
+                if (commandIndex > 0) throw unresolved();
                 const body = JSON.parse(read(word === '--input' ? command.words[++i] : word.slice(8)));
                 for (const key of ['commit_title', 'commit_message']) if (body[key] !== undefined) mergeTexts.push(body[key]);
               } else if (['-f', '-F', '--field', '--raw-field'].includes(word) || /^(?:-[fF].+|--(?:field|raw-field)=)/.test(word)) {
                 const field = ['-f', '-F', '--field', '--raw-field'].includes(word) ? command.words[++i] : word.startsWith('--') ? word.slice(word.indexOf('=') + 1) : word.slice(word[2] === '=' ? 3 : 2);
                 if (/^commit_(?:title|message)=/.test(field || '')) {
                   const value = field.slice(field.indexOf('=') + 1);
-                  mergeTexts.push(value.startsWith('@') ? read(value.slice(1)) : value);
+                  const result = wordText({ ...command, words: [value], expanding: [command.expanding[i]] }, 0);
+                  if (result.unresolved) throw unresolved();
+                  mergeTexts.push((word === '-F' || word === '--field' || /^-F|^--field=/.test(word)) && value.startsWith('@') ? read(value.slice(1)) : result.value);
                 }
               }
               continue;
             }
-            if (['--subject', '-t', '--body', '-b'].includes(word)) mergeTexts.push(command.words[++i]);
-            else if (word === '--body-file' || word === '-F') mergeTexts.push(readClosureFile(shellPath(cwd, command.words[++i])));
-            else if (/^--body-file=/.test(word) || /^-F.+/.test(word)) mergeTexts.push(readClosureFile(shellPath(cwd, word.startsWith('--') ? word.slice(12) : word.slice(word[2] === '=' ? 3 : 2))));
-            else if (/^--(?:subject|body)=/.test(word)) mergeTexts.push(word.slice(word.indexOf('=') + 1));
-            else if (/^-[tb].+/.test(word)) mergeTexts.push(word.slice(word[2] === '=' ? 3 : 2));
+            if (['--subject', '-t', '--body', '-b'].includes(word)) mergeTexts.push(literal(++i));
+            else if (word === '--body-file' || word === '-F') mergeTexts.push(read(command.words[++i]));
+            else if (/^--body-file=/.test(word) || /^-F.+/.test(word)) mergeTexts.push(read(word.startsWith('--') ? word.slice(12) : word.slice(word[2] === '=' ? 3 : 2)));
+            else if (/^--(?:subject|body)=/.test(word)) mergeTexts.push(literal(i, word.indexOf('=') + 1));
+            else if (/^-[tb].+/.test(word)) mergeTexts.push(literal(i, word[2] === '=' ? 3 : 2));
           }
         }
-        if (mergeTexts.length && /[$`]|<</.test(call.text)) return refuse('merge-message content is generated or unresolved. Provide literal text or a readable body file.');
       } else {
         const args = input.tool_input || {};
         mergeTexts = ['commit_title', 'commit_message', 'commitTitle', 'commitMessage'].filter(key => args[key] !== undefined).map(key => args[key]);
       }
-    } catch { return refuse('the merge-message file could not be read. Provide a readable body file.'); }
+    } catch (error) { return refuse(error.code === 'MERGE_TEXT_UNRESOLVED' ? 'merge-message content is generated or unresolved. Provide literal text, or write the body file in a separate command before retrying.' : 'the merge-message file could not be read. Provide a readable body file or literal heredoc.'); }
     try {
       const guard = closureGuard || new IssueClosureGuard({ repository: merge.repository, deadlineMs, deadline, maxRequests,
         transport: transport || new GitHubTransport({ ghPath: resolveExecutable('gh', { cwd: cwd || process.cwd(), environment }), timeoutMs }) });

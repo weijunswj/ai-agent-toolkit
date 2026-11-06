@@ -114,6 +114,8 @@ A fail-open host requires an enforceable launcher or a disabled uncontrolled hel
 
 ## 15. Security and operational commitments
 
+Parent completion rechecks every native descendant with full planning and final walks before the fenced close. Hooks and CI may trust zero child summaries; stale summaries remain a known gap there. Local closure checks refuse unreadable gh state; cloud unknowns are advisory and required CI remains the backstop. Update every computer together when a binding enables parent lifecycle: older readers reject that binding and pending lifecycle intents, holding governed work until updated. Codex code-mode exec shell calls remain an accepted gap, tracked separately.
+
 Every Core includes the security, privacy, integrity and recovery its effects need, checked locally with evidence-backed findings. Security scanning, secret references, external-operation authority, backup and restore, deployment and rollback, and host-service capabilities remain programme outcomes in the parent catalogue.
 
 ## 16. Switching controllers and executors
@@ -160,5 +162,3 @@ Test the actual supported controller/launcher continuation path when section 7 r
 ## 20. History
 
 The dated owner decisions, launch reconciliation, the bounded evidence-integrity evaluation and the earlier retention clocks behind this contract are in git history at commit `1a64367`, with a copy in the Toolkit evidence store. History is evidence, never a competing current instruction.
-
-Parent completion rechecks every native descendant with full planning and final walks before the fenced close. Hooks and CI may trust zero child summaries; stale summaries remain a known gap there. Local closure checks refuse unreadable gh state; cloud unknowns are advisory and required CI remains the backstop. Update every computer together when a binding enables parent lifecycle: older readers reject that binding and pending lifecycle intents, holding governed work until updated.

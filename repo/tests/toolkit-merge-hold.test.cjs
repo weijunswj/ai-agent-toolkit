@@ -22,6 +22,30 @@ const projects = require('./support/projects-approval.cjs');
 const { fakeClosureEnvironment } = require('./support/issue-closure-transport.cjs');
 
 const SHA = '62405ebd4c27859d66036e18f13c856c645d366d';
+
+test('merge text distinguishes literal backticks and heredocs from expansion without consuming on refusal',t=>{
+  const ctx=context(t); const seen=[];
+  const closureGuard={checkPullRequest(pr,options){seen.push(options.mergeTexts);return {status:'allowed'};}};
+  typed(ctx,'merge 618');
+  const input=body=>({cwd:ctx.repo,tool_name:'Bash',tool_input:{command:`gh pr merge 618 --merge --match-head-commit ${SHA} ${body}`}});
+  assert.ok(holdCore.decide(input('--subject "$(cat body.md)"'),{...ctx.options,closureGuard})?.deny);
+  assert.equal(holdCore.decide(input("--subject 'Fix `x`'"),{...ctx.options,closureGuard}),null);
+  assert.deepEqual(seen.at(-1),['Fix `x`']);
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide(input("--body \"$(cat <<'EOF'\nRefs #1\nEOF\n)\""),{...ctx.options,closureGuard}),null);
+  assert.deepEqual(seen.at(-1),['Refs #1']);
+  typed(ctx,'merge 618');
+  const file=path.join(ctx.repo,'body.md');fs.writeFileSync(file,'Refs #1');
+  const generated={cwd:ctx.repo,tool_name:'Bash',tool_input:{command:`node build-message.cjs "${file}" && gh pr merge 618 --merge --match-head-commit ${SHA} --body-file "${file}"`}};
+  assert.match(holdCore.decide(generated,{...ctx.options,closureGuard}).deny,/generated or unresolved/);
+  assert.equal(holdCore.decide(input(`--body-file "${file}"`),{...ctx.options,closureGuard}),null,'a generated-file refusal keeps the approval');
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide(input("--body-file - <<'EOF'\nRefs #1\nEOF"),{...ctx.options,closureGuard}),null);
+  assert.deepEqual(seen.at(-1),['Refs #1']);
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide({cwd:ctx.repo,tool_name:'Bash',tool_input:{command:`echo --body '$body'; gh pr merge 618 --merge --match-head-commit ${SHA} --subject Safe`}},{...ctx.options,closureGuard}),null);
+  assert.deepEqual(seen.at(-1),['Safe']);
+});
 // The Codex GitHub app's merge call that the hold could not read (repository, number and head SHA
 // in their own field names), copied from the saved diagnostic.
 const DIAGNOSTIC_SHA = '7384901397e63407783c60f6656499db9edf6b12';

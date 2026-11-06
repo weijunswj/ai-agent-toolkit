@@ -115,7 +115,7 @@ function closureDecision(input, options) {
     try { if (require('./toolkit-shell-call.cjs').closureWriteCandidate(input)) closure = { status: 'unknown', deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
     catch { closure = { status: 'unknown', deny: 'Toolkit: executable command reader is unavailable. Run setup toolkit to repair the plugin.' }; }
   }
-  if (options.cloud && closure?.status !== 'refused') return closure ? { systemMessage: 'Toolkit advisory: ' + closure.deny + ' Required CI must verify closure safety.' } : {};
+  if (options.cloud && closure?.status !== 'refused') return closure ? { systemMessage: 'Toolkit advisory: ' + closure.deny.replace(/^Toolkit: /, '') + ' Required CI must verify closure safety.' } : {};
   return closure ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } } : {};
 }
 
