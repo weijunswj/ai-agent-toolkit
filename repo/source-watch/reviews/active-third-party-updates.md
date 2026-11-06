@@ -31,6 +31,27 @@ If meaningful host-harness drift is found, open a separate PR with evidence, rat
 
 ## Active Third-Party Updates
 
+### repo/source-watch/provenance/google-design-md
+
+- Source repo: `google-labs-code/design.md`
+- Source ref: `main`
+- Adopted commit: `9bf8eae67128b6cc55ad9bf86665767deb4c11cd`
+- Reviewed-through commit: `6e5da5382f41edbba9d73b2c62f33f32e9971f15`
+- Latest observed commit: `1ed38aa9dd4451b9039f9aeb9ed1d2579edafddf`
+- Why a new review is required: The latest observed upstream commit differs from the human-reviewed-through commit.
+- Prior disposition: `SEPARATE_IMPLEMENTATION_PR_RECOMMENDED`
+- Tracker at last review (history; find the current owner at triage): `#473`
+- Update policy: `manual_review_required`
+- Public attribution required: `true`
+
+Tracked files:
+- `adapted` `docs/spec.md` -> `skills/frontend-art-direction/references/design-md-contract.md` @ 5995e5482fc338a9f9923d5912551241a82e6e8a - Adapted into a concise, Toolkit-local DESIGN.md contract reference for the UI/UX skill. The Toolkit does not vendor or execute upstream package tooling.
+- `excluded` `LICENSE` -> `(excluded)` - Apache-2.0 license is summarized in the co-located Toolkit third-party notes; the full upstream license text is not vendored here.
+- `excluded` `README.md` -> `(excluded)` - Reviewed for orientation and CLI references, but not copied. Toolkit guidance is re-authored locally and avoids upstream package or CLI execution.
+- `excluded` `package.json` -> `(excluded)` - Excluded because Toolkit support is documentation/reference only and must not add the upstream package as a default dependency.
+- `excluded` `packages/cli/package.json` -> `(excluded)` - Excluded because the Toolkit does not vendor, install, wrap, or execute the upstream CLI.
+- `excluded` `bun.lock` -> `(excluded)` - Excluded because upstream package lockfiles and dependency state are outside the Toolkit local-only reference scope.
+
 ### repo/source-watch/provenance/ui-ux-pro-max
 
 - Source repo: `nextlevelbuilder/ui-ux-pro-max-skill`
