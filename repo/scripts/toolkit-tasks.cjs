@@ -479,9 +479,9 @@ function main(argv = process.argv.slice(2), deps = {}) {
   }
 }
 
-if (require.main === module) process.exitCode = main();
-
 module.exports = {
   SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, writeTaskBackup, readLastRun, writeLastRun,
   entryProblem, looksSecret, safeText, skipText, sweepLine, taskGovernanceLine, installedHours, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
 };
+
+if (require.main === module) process.exitCode = main();

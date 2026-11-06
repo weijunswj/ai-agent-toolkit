@@ -7,6 +7,43 @@ const path = require('node:path');
 const test = require('node:test');
 const tasks = require('../scripts/toolkit-tasks.cjs');
 const { confirmedTaskShape } = require('../scripts/toolkit-task-shape.cjs');
+const { recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+const { fixtureBinding } = require('./support/windows-task-switch-world.cjs');
+const { readIdentity } = require('../scripts/toolkit-governance-state.cjs');
+
+test('direct Windows task listing uses the merged schedule folder without a circular dependency warning', t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-direct-tasks-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const checkout = path.join(home, 'checkout');
+  const folder = 'FIXTURE-SCHEDULE';
+  fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(checkout, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/example/widget.git\n');
+  const identity = readIdentity(checkout);
+  assert.equal(identity.remote.canonical, 'https://github.com/example/widget.git');
+  recordMerged(checkout, { home, text: JSON.stringify(fixtureBinding('example/widget', folder)) });
+  const preload = path.join(home, 'win32.cjs');
+  fs.writeFileSync(preload, `
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    // Keep the real CLI path, but never start PowerShell or Task Scheduler.
+    const cp = require('node:child_process');
+    const spawnSync = cp.spawnSync;
+    cp.spawnSync = (command, ...args) => /powershell/i.test(String(command))
+      ? { status: 1, stdout: '', stderr: 'fixture scheduler unavailable' }
+      : spawnSync(command, ...args);
+  `);
+  const result = require('node:child_process').spawnSync(process.execPath,
+    ['--require', preload, path.resolve(__dirname, '../scripts/toolkit-tasks.cjs')], {
+      cwd: checkout, env: { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_GOVERNANCE_OFFLINE: '1', NODE_OPTIONS: '', NODE_NO_WARNINGS: '0' },
+      encoding: 'utf8', timeout: 15000, windowsHide: true,
+    });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Scheduled tasks/);
+  assert.ok(result.stdout.includes(`\\${folder}\\`), result.stdout + result.stderr);
+  assert.ok(!result.stdout.includes('\\WIDGET\\'), result.stdout);
+  assert.doesNotMatch(result.stderr, /circular dependency/i);
+});
+
 const LINE = 'Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers.';
 const P = 'programme-sweep', S = 'shard-timings', F = 'footer-sweep';
 const entry = (job, extra = {}) => ({ id: `fixture-${job}`, host: 'windows', folder: 'FIXTURE', repository: 'Example/Widget', job,

@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.50.1
+
+### Fixed
+
+- Direct task listings on Windows read the repository's configured schedule folder without circular dependency warnings.
+
 ## 3.50.0
 
 ### Fixed
