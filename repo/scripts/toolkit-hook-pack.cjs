@@ -148,7 +148,8 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'managed_tasks'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.managed_tasks !== undefined && (fixture.managed_tasks !== true || !fixture.repo)) errors.push('fixture.managed_tasks needs a repository and true');
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
@@ -388,6 +389,16 @@ class Fixture {
     // A session a Toolkit launcher started for a gate carries its role.
     if (spec.gate_role) this.env.TOOLKIT_GATE_ROLE = spec.gate_role;
     if (spec.repo) this.#repo(spec.repo);
+    if (spec.managed_tasks) {
+      const stateFile = path.join(this.home, '.ai-agent-toolkit', 'current', 'state.json');
+      fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+      fs.writeFileSync(stateFile, JSON.stringify({ repo_path: this.work }));
+      for (const name of ['toolkit-windows-tasks.cjs', 'toolkit-tasks.cjs']) {
+        const file = path.join(this.work, 'repo', 'scripts', name);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, '// Isolated managed task command fixture. Never executed.\n');
+      }
+    }
     if (spec.repo?.legacy_answer) {
       const file = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
       fs.mkdirSync(path.dirname(file), { recursive: true });

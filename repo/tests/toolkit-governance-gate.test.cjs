@@ -49,6 +49,27 @@ const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
 const QUESTION_LINE = 'Toolkit: message held. Turn on GitHub governance (issues, records, evidence store) for this repository?';
 
+test('task command exception is a literal managed command with independent scope', t => {
+  const policy = require('../scripts/toolkit-task-policy.cjs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-policy-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const managed = path.join(home, 'managed');
+  const current = path.join(home, '.ai-agent-toolkit', 'current');
+  fs.mkdirSync(current, { recursive: true });
+  fs.mkdirSync(path.join(managed, 'repo', 'scripts'), { recursive: true });
+  for (const name of ['toolkit-windows-tasks.cjs', 'toolkit-tasks.cjs']) fs.writeFileSync(path.join(managed, 'repo', 'scripts', name), '// fixture');
+  fs.writeFileSync(path.join(current, 'state.json'), JSON.stringify({ repo_path: managed }));
+  const script = path.join(managed, 'repo', 'scripts', 'toolkit-windows-tasks.cjs');
+  const base = `node "${script}" apply --repo-root "${managed}"`;
+  const read = text => policy.independentTaskCommand(text, { home, certainIndependent: () => true });
+  const listScript = path.join(managed, 'repo', 'scripts', 'toolkit-tasks.cjs');
+  for (const args of ['', ' --json', ' list', ' list --json']) assert.equal(read(`node "${listScript}"${args}`), true);
+  for (const command of policy.COMMANDS) assert.equal(read(base.replace(' apply ', ` ${command} `)), true, command);
+  assert.equal(policy.independentTaskCommand(base, { home, certainIndependent: () => false }), false);
+  for (const text of [base + ' --task programme-sweep', base + ' --folder CUSTOM', base + ' --repair-owned', base + ' --no-first-run', base + '; echo extra', base + ' && echo extra', base + ' > output', `echo ${base}`, base.replace('node ', 'node --eval '), base.replace(script, path.join(home, 'other', 'toolkit-windows-tasks.cjs')), base.replace('apply', 'adopt')]) assert.equal(read(text), false, text);
+  for (const row of require('./support/hostile-inputs.cjs').shapes.filter(row => row.syntax === 'shell')) assert.equal(read(row.text), false, row.id);
+});
+
 test('task advisory preserves every verdictLine branch, evaluates once and shares one registry read', t => {
   const ctx = scratch(t);
   const tasks = require('../scripts/toolkit-tasks.cjs');

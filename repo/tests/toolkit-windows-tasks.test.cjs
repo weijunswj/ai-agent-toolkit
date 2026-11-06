@@ -23,6 +23,85 @@ test.after(() => fs.rmSync(MEMORY_HOME, { recursive: true, force: true }));
 
 const hostile = require('./support/hostile-inputs.cjs');
 
+test('A1a: nine stable minutes, collision warning, and Monday morning shards', t => {
+  const home = tempHome(t), scheduler = fakeScheduler();
+  const minutes = [];
+  const repositories = new Map();
+  for (let index = 0; index < 10; index++) {
+    const wanted = desired(t, { repository: `example/repo-${index}`, folder: `REPO-${index}` });
+    repositories.set(wanted.root, `example/repo-${index}`);
+    wanted.checkoutDeps.governance.readIdentity = root => ({ valid: true, root, remote: { host: 'github.com', path: `/${repositories.get(root)}.git` } });
+    const result = windowsTasks.applyTasks(wanted, { scheduler, home });
+    assert.ok(result.items.every(item => item.done), JSON.stringify(result));
+    const minute = result.items[0].definition.schedule.at.slice(-2);
+    assert.match(minute, /^0[1-9]$/);
+    minutes.push(minute);
+    assert.equal(result.items[1].definition.schedule.at, `08:${minute}`);
+    const again = windowsTasks.planTasks(wanted, { scheduler, home });
+    assert.equal(again.items[0].definition.schedule.at.slice(-2), minute);
+    if (index === 9) assert.match(windowsTasks.describePlan(again).join('\n'), /minute.*shared/i);
+  }
+  assert.equal(new Set(minutes.slice(0, 9)).size, 9);
+  assert.equal(new Set(minutes).size, 9);
+});
+
+test('A1a: shard timings use Monday morning local time and require governance', t => {
+  for (const state of ['ENABLED', 'UNDECIDED']) {
+    const wanted = desired(t, { state });
+    const result = windowsTasks.planTasks(wanted, { scheduler: fakeScheduler(), home: tempHome(t) });
+    const shard = result.items.find(item => item.definition.job === 'shard-timings');
+    if (state === 'ENABLED') assert.deepEqual(shard.definition.schedule, { kind: 'weekly', day: 'Monday', at: '08:01' });
+    else assert.equal(shard, undefined);
+  }
+});
+
+test('A1a: known job owner on another computer is listed and never registered', t => {
+  const home = tempHome(t), scheduler = fakeScheduler(), wanted = desired(t);
+  windowsTasks.applyTasks(wanted, { scheduler, home, computerId: 'computer-one' });
+  const other = fakeScheduler(), otherHome = tempHome(t);
+  tasks.writeRegistry(otherHome, tasks.readRegistry(home).tasks);
+  const result = windowsTasks.applyTasks(wanted, { scheduler: other, home: otherHome, computerId: 'computer-two' });
+  assert.equal(result.refused, true);
+  assert.match(windowsTasks.describePlan(result).join('\n'), /owned.*computer-one/i);
+  assert.equal(other.calls.filter(call => call[0] === 'register').length, 0);
+  const outcome = job.runJob({ job: 'programme-sweep', repoRoot: wanted.root, taskId: wanted.wanted[0].id }, {
+    home: otherHome, computerId: 'computer-two', readIdentity: () => assert.fail('non-owner must not start job work'),
+  });
+  assert.equal(outcome.status, 'skipped');
+  assert.match(outcome.reason, /owned by another computer/);
+  assert.equal(tasks.readLastRun(wanted.wanted[0].id, otherHome), null);
+  assert.match(tasks.formatList(tasks.listTasks({ home: otherHome, platform: 'win32', scheduler: other, folderFor: () => wanted.folder })), /owned by computer-one/);
+});
+
+test('A1a: recognised earlier Toolkit definition updates without accepting hand edits', t => {
+  for (const generation of ['daytime', 'full-day']) {
+  const home = tempHome(t), scheduler = fakeScheduler(), wanted = desired(t);
+  const old = { ...wanted, wanted: wanted.wanted.map(d => ({ ...d })) };
+  for (const d of old.wanted) {
+    d.schedule = d.job === 'shard-timings' ? { kind: 'weekly', day: 'Monday', at: '09:15' } : { kind: 'hourly', at: '00:00', hours: 24 };
+    if (generation === 'daytime') {
+      d.schedule = d.job === 'shard-timings' ? d.schedule : { kind: 'hourly', at: '08:00', hours: 16 };
+      d.purpose = d.job === 'shard-timings' ? 'Refreshes the measured test times and opens a pull request when the CI shards drift. No AI.'
+        : 'Brings the programme pages up to date, keeps the attention line and removes the cloud route footer from your own GitHub posts. No AI.';
+    }
+    d.schedule_text = windowsTasks.describeSchedule(d.schedule);
+    d.def = windowsTasks.definitionDigest(d);
+    if (generation === 'daytime') d.def = require('node:crypto').createHash('sha256').update(JSON.stringify({ execute: d.execute, args: d.arguments, workingDirectory: d.working_directory, schedule: d.schedule, settings: 'v1 interactive start-when-available ignore-new 30m battery' })).digest('hex').slice(0, 12);
+    d.description = `${d.folder}: ${windowsTasks.JOBS[d.job].task}. ${d.purpose} [toolkit-task v1 id=${d.id} def=${d.def}]`;
+    scheduler.register(d);
+    const live = scheduler.list(d.folder).find(row => row.name === d.name);
+    tasks.updateRegistry(home, rows => [...rows, { id: d.id, host: 'windows', folder: d.folder, name: d.name, schedule: d.schedule_text, purpose: d.purpose,
+      repository: d.repository, job: d.job, definition: d.def, created: new Date().toISOString(), created_by: 'toolkit-windows-tasks apply', model: null, effort: null }]);
+    assert.ok(live);
+  }
+  const result = windowsTasks.applyTasks(wanted, { scheduler, home });
+  assert.deepEqual(result.items.map(item => item.action), ['update', 'update']);
+  assert.ok(result.items.every(item => item.done));
+  scheduler.folders.get(wanted.folder)[0].arguments += ' --owner-edit';
+  assert.ok(windowsTasks.planTasks(wanted, { scheduler, home }).items.some(item => ['refused', 'owner-choice-required'].includes(item.action)));
+  }
+});
+
 function memoryRegistry(initial = []) {
   let entries = structuredClone(initial);
   const calls = [];
@@ -117,10 +196,10 @@ test('G: an ENABLED Toolkit checkout gets both tasks in \\TOOLKIT\\, recorded in
   const registry = tasks.readRegistry(home);
   assert.equal(registry.status, 'ok');
   assert.deepEqual(registry.tasks.map(entry => [entry.id, entry.folder, entry.schedule, entry.model, entry.effort]),
-    [['toolkit-programme-sweep', 'TOOLKIT', 'hourly, 00:00 to 23:59', null, null], ['toolkit-shard-timings', 'TOOLKIT', 'weekly, Monday 09:15', null, null]]);
+    [['toolkit-programme-sweep', 'TOOLKIT', 'hourly, 00:01 to 00:00', null, null], ['toolkit-shard-timings', 'TOOLKIT', 'weekly, Monday 08:01', null, null]]);
   const report = windowsTasks.describePlan(result, { applied: true }).join('\n');
-  assert.match(report, /TOOLKIT - PROGRAMME SWEEP \(hourly, 00:00 to 23:59\): created\. Cleans your own GitHub posts/);
-  assert.match(report, /TOOLKIT - SHARD TIMINGS \(weekly, Monday 09:15\): created\./);
+  assert.match(report, /TOOLKIT - PROGRAMME SWEEP \(hourly, 00:01 to 00:00\): created\. Cleans your own GitHub posts/);
+  assert.match(report, /TOOLKIT - SHARD TIMINGS \(weekly, Monday 08:01\): created\./);
   if (process.platform !== 'win32') assert.equal((fs.statSync(tasks.registryPath(home)).mode & 0o777), 0o600);
   const sweep = wanted.wanted[0];
   assert.equal(sweep.execute, 'C:\\Windows\\System32\\conhost.exe');
@@ -215,7 +294,7 @@ test('G: the owner\'s own same-named task without the marker is untouched and To
   const lines = [];
   const code = windowsTasks.main(['apply', '--no-first-run'], { platform: 'win32', home, scheduler, cwd: checkout(t, { shards: false }), checkoutDeps: { identityReader, governance: governance() }, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, stdout: text => lines.push(text), stderr: () => {} });
   assert.equal(code, 1);
-  assert.match(lines.join(''), /PROGRAMME SWEEP \(hourly, 00:00 to 23:59\): refused/);
+  assert.match(lines.join(''), /PROGRAMME SWEEP \(hourly, 00:01 to 00:00\): refused/);
 });
 
 test('G: root-folder n8n backups and other repositories\' folders are never changed', (t) => {
@@ -716,6 +795,44 @@ function runSweep(t, answers, home = tempHome(t), clock = '2026-10-29T09:00:00.0
   return { record, log: fake.log, home };
 }
 
+test('A1a: first sweep without parent state skips with setup guidance and still cleans footers', t => {
+  const result = runSweep(t, { 'programme refresh': { status: 2, stderr: 'PARENT_STATE_MISSING: No parent state document yet.' } });
+  assert.equal(result.record.status, 'skipped');
+  assert.match(result.record.reason, /controller.*initialise.*parent state.*private evidence store/);
+  assert.doesNotMatch(result.record.summary.join(' '), /PARENT_STATE_MISSING/);
+  assert.ok(result.log.some(args => path.basename(args[1] || '') === 'toolkit-github-footer-sweep.cjs'));
+  assert.equal(result.log.some(args => args[2] === 'attention'), false);
+  assert.equal(runSweep(t, { 'programme refresh': { status: 1, stdout: JSON.stringify({ holds: [{ code: 'PARENT_STATE_MISSING' }] }) } }).record.status, 'skipped');
+  const mixed = runSweep(t, { 'programme refresh': { status: 1, stdout: JSON.stringify({ holds: [{ code: 'PARENT_STATE_MISSING' }, { code: 'STORE_UNREACHABLE' }] }) } });
+  assert.equal(mixed.record.status, 'held', 'unrelated holds remain visible');
+});
+
+test('A1a: programme job lock serialises processes and logs stale takeover after the task limit', async t => {
+  const { ProgrammeJobLock, STALE_MS } = require('../scripts/toolkit-programme-lock.cjs');
+  const home = tempHome(t), events = path.join(home, 'events');
+  assert.ok(STALE_MS >= 30 * 60 * 1000);
+  const script = `const fs=require('node:fs'); const {ProgrammeJobLock}=require(${JSON.stringify(require.resolve('../scripts/toolkit-programme-lock.cjs'))});
+    const lock=new ProgrammeJobLock({home:process.argv[1],key:'example/store',waitMs:5000}).take();
+    if(!lock) process.exit(2); fs.appendFileSync(process.argv[2],process.argv[3]+' start\\n');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);
+    fs.appendFileSync(process.argv[2],process.argv[3]+' end\\n');lock.release();`;
+  const { spawn } = require('node:child_process');
+  const launch = id => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', script, home, events, id], { windowsHide: true, stdio: 'pipe' });
+    child.on('error', reject); child.on('exit', code => code === 0 ? resolve() : reject(new Error(`lock child exit ${code}`)));
+  });
+  await Promise.all([launch('one'), launch('two')]);
+  const lines = fs.readFileSync(events, 'utf8').trim().split('\n');
+  assert.ok(lines.join(',') === 'one start,one end,two start,two end' || lines.join(',') === 'two start,two end,one start,one end');
+  const log = [], owner = new ProgrammeJobLock({ home, key: 'example/store', log: line => log.push(line) });
+  fs.writeFileSync(owner.file, JSON.stringify({ schema: 'toolkit.programme-pass-lock.v1', token: 'old-owner', host: 'other-computer', pid: 1, at: new Date(Date.now() - STALE_MS - 1000).toISOString() }));
+  const old = new Date(Date.now() - STALE_MS - 1000); fs.utimesSync(owner.file, old, old);
+  const held = owner.take(); assert.ok(held); assert.match(log.join(' '), /took over a stale job lock/); held.release();
+  const live = owner.take(); assert.ok(live);
+  const contender = new ProgrammeJobLock({ home, key: 'example/store', waitMs: 0 });
+  assert.equal(contender.take(), null); live.release();
+});
+
 test('J: ENABLED, gh signed in, a clean refresh and two footers: all three steps, footers cleaned, last-run ok', (t) => {
   const sweep = { status: 4, stdout: JSON.stringify({ apply: true, results: [{ status: 'CLEANED' }, { status: 'CLEANED' }] }) };
   const { record, log, home } = runSweep(t, { 'programme refresh': { status: 0, stdout: '{"outcome":"DONE","holds":[]}' }, 'toolkit-github-footer-sweep.cjs': sweep });
@@ -961,8 +1078,8 @@ test('L: a live Toolkit task shows its live schedule, last run and result', (t) 
   tasks.writeLastRun('toolkit-programme-sweep', { started: '2026-10-29T01:00:05.000Z', finished: '2026-10-29T01:03:00.000Z', exit: 0, status: 'ok', summary: ['Programme refresh: done.', 'Attention: clear'] }, home);
   const result = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null });
   const row = result.rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP');
-  assert.deepEqual([row.state, row.source, row.schedule, row.ai, row.result, row.last_result, row.last_run], ['Toolkit', tasks.LIVE, 'hourly, 00:00 to 23:59', 'no AI', 'ok', 'ok', '2026-10-29T01:03:00.000Z']);
-  assert.match(tasks.formatList(result), /TOOLKIT - PROGRAMME SWEEP: Toolkit\. Windows Task Scheduler \\TOOLKIT\\; hourly, 00:00 to 23:59; no AI; last run 2026-10-29 01:03 ok/);
+  assert.deepEqual([row.state, row.source, row.schedule, row.ai, row.result, row.last_result, row.last_run], ['Toolkit', tasks.LIVE, 'hourly, 00:01 to 00:00', 'no AI', 'ok', 'ok', '2026-10-29T01:03:00.000Z']);
+  assert.match(tasks.formatList(result), /TOOLKIT - PROGRAMME SWEEP: Toolkit\. Windows Task Scheduler \\TOOLKIT\\; hourly, 00:01 to 00:00; no AI; last run 2026-10-29 01:03 ok/);
 });
 
 test('L: a run that stopped before writing its record is not shown as the previous good run', (t) => {

@@ -78,6 +78,8 @@ function entryProblem(entry) {
   if (entry.host === 'windows' && !/^[A-Z0-9][A-Z0-9-]{0,31}$/.test(String(entry.folder))) return 'folder';
   if (entry.host !== 'windows' && entry.folder !== null) return 'folder';
   if (entry.repository !== null && !REPOSITORY.test(String(entry.repository))) return 'repository';
+  if (entry.repo_minute !== undefined && (!Number.isInteger(entry.repo_minute) || entry.repo_minute < 1 || entry.repo_minute > 9)) return 'repo_minute';
+  if (entry.job_owner !== undefined && (!isText(entry.job_owner, 80) || /[\x00-\x1f\x7f]/.test(entry.job_owner))) return 'job_owner';
   for (const key of ['model', 'effort']) if (entry[key] !== null && !isText(entry[key], 80)) return key;
   if (entry.stopped_by_owner !== undefined && entry.stopped_by_owner !== true) return 'stopped_by_owner';
   if ((entry.stopped_by_owner === true) !== (entry.stopped_at !== undefined)) return 'stopped_at';
@@ -187,8 +189,10 @@ function skipText(last, now = null) {
 }
 
 function installedHours(text) {
-  const match = /^hourly, ([01]\d|2[0-3]):00 to ([01]\d|2[0-3]):59$/.exec(String(text));
-  return match ? { hour: Number(match[1]), hours: (Number(match[2]) - Number(match[1]) + 24) % 24 + 1 } : null;
+  const match = /^hourly, ([01]\d|2[0-3]):([0-5]\d) to ([01]\d|2[0-3]):([0-5]\d)$/.exec(String(text));
+  if (!match) return null;
+  const duration = ((Number(match[3]) * 60 + Number(match[4]) - Number(match[1]) * 60 - Number(match[2]) + 1440) % 1440 + 1) / 60;
+  return Number.isInteger(duration) ? { hour: Number(match[1]), minute: Number(match[2]), hours: duration } : null;
 }
 
 // The session-start line for this computer's programme sweep of a repository, or null when it is
@@ -199,12 +203,13 @@ function sweepLine(repository, { home = os.homedir(), now = new Date(), registry
   const entry = registry.tasks.find(item => item.host === 'windows' && ['programme-sweep', 'footer-sweep'].includes(item.job) && !item.adopted
     && String(item.repository || '').toLowerCase() === repository.toLowerCase());
   if (!entry) return null;
+  if (entry.job_owner && entry.job_owner !== os.hostname()) return null;
   const label = entry.job === 'footer-sweep' ? 'Footer sweep' : 'Programme sweep';
   if (entry.stopped_by_owner) return `${label}: stopped by owner; see toolkit tasks.`;
   const last = readLastRun(entry.id, home);
   const at = last && [last.finished, last.started].find(value => typeof value === 'string' && !Number.isNaN(Date.parse(value)));
   const schedule = installedHours(entry.schedule);
-  const intoWindow = schedule ? ((now.getHours() * 60 + now.getMinutes()) - schedule.hour * 60 + 1440) % 1440 : null;
+  const intoWindow = schedule ? ((now.getHours() * 60 + now.getMinutes()) - schedule.hour * 60 - schedule.minute + 1440) % 1440 : null;
   const stale = schedule && (schedule.hours === 24 || intoWindow >= STALE_MS / 60000 && intoWindow < schedule.hours * 60) && (!at || now.getTime() - Date.parse(at) > STALE_MS);
   const status = skipText(last, now) || (last && ['failed', 'held'].includes(last.status) && at ? `${last.status} at ${shortTime(at, now)}` : null);
   if (stale) return `${label}: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}; see toolkit tasks.`;
@@ -323,7 +328,7 @@ function windowsRows(registry, folders, scheduler, home) {
       if (owned) {
         const last = readLastRun(recorded.id, home);
         const edited = recorded.enrolled && JSON.stringify(windowsTasks.enrolledDefinition(task)) !== JSON.stringify(recorded.enrolled);
-        row.state = recorded.stopped_by_owner || task.state === 'Disabled' ? 'stopped by owner'
+        row.state = recorded.job_owner && recorded.job_owner !== os.hostname() ? `owned by ${recorded.job_owner}` : recorded.stopped_by_owner || task.state === 'Disabled' ? 'stopped by owner'
           : edited ? ['programme-sweep', 'shard-timings'].includes(recorded.job) ? 'modified; owner choice required' : 'stopped by owner' : 'Toolkit';
         // The job writes its record as it starts and again as it ends, so a record that ended (or,
         // still running, started) before Task Scheduler's last run time, less 2 seconds, belongs to
@@ -342,7 +347,8 @@ function windowsRows(registry, folders, scheduler, home) {
       rows.push(row);
     }
     for (const entry of entries.filter(item => item.folder === folder && !live.some(task => task.name === item.name))) {
-      rows.push({ host: 'windows', folder, name: entry.name, id: entry.id, schedule: entry.schedule, ai: aiText(entry), purpose: entry.purpose, source: RECORD, state: entry.stopped_by_owner ? 'stopped by owner' : 'missing' });
+      rows.push({ host: 'windows', folder, name: entry.name, id: entry.id, schedule: entry.schedule, ai: aiText(entry), purpose: entry.purpose, source: RECORD,
+        state: entry.job_owner && entry.job_owner !== os.hostname() ? `owned by ${entry.job_owner}` : entry.stopped_by_owner ? 'stopped by owner' : 'missing' });
     }
   }
   try {
@@ -436,6 +442,7 @@ function formatList(result) {
 const VALUE_FLAGS = new Set(['--host', '--id', '--name', '--schedule', '--purpose', '--model', '--effort', '--repository', '--forget']);
 
 function parseArgs(argv) {
+  if (argv[0] === 'list') argv = argv.slice(1);
   const options = { json: false, record: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];

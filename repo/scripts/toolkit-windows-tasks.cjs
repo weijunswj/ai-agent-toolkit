@@ -4,6 +4,7 @@
 // The only Toolkit code that creates, changes or removes Windows scheduled tasks. Run as
 //   node <Toolkit checkout>/repo/scripts/toolkit-windows-tasks.cjs <command> [options]
 //
+//   list    [--repo-root <checkout>] [--json] lists recorded and live tasks without changes.
 //   plan    [--repo-root <checkout>] [--folder <F>] [--json]
 //           read-only: the tasks Toolkit would keep for the checkout, what each needs (create,
 //           update, current or refused) and, when anything needs a change, the PowerShell line
@@ -43,6 +44,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const tasks = require('./toolkit-tasks.cjs');
+const scheduleOwner = require('./toolkit-task-schedule.cjs');
+const taskPolicy = require('./toolkit-task-policy.cjs');
 
 const FOLDER = /^[A-Z0-9][A-Z0-9-]{0,31}$/;
 const MARKER = /\[toolkit-task v1 id=([a-z0-9][a-z0-9-]{0,79}) def=([0-9a-f]{12})\]/;
@@ -54,17 +57,17 @@ const POLL_MS = 5000;
 const JOBS = Object.freeze({
   'programme-sweep': {
     task: 'PROGRAMME SWEEP',
-    schedule: Object.freeze({ kind: 'hourly', at: '00:00', hours: 24 }),
+    schedule: Object.freeze({ kind: 'hourly', at: '00:01', hours: 24 }),
     purpose: 'Cleans your own GitHub posts first, then brings programme pages and attention up to date under governance guards. No AI.',
   },
   'footer-sweep': {
     task: 'FOOTER SWEEP',
-    schedule: Object.freeze({ kind: 'hourly', at: '00:00', hours: 24 }),
+    schedule: Object.freeze({ kind: 'hourly', at: '00:01', hours: 24 }),
     purpose: 'Removes the cloud route footer from your own GitHub posts in this repository and its freshly verified evidence store. No AI.',
   },
   'shard-timings': {
     task: 'SHARD TIMINGS',
-    schedule: Object.freeze({ kind: 'weekly', day: 'Monday', at: '09:15' }),
+    schedule: Object.freeze({ kind: 'weekly', day: 'Monday', at: '08:01' }),
     purpose: 'Refreshes test times and opens a pull request when CI shards drift; no shards yet means no changes, and timing starts when the manifest becomes available in the registered checkout. No AI.',
   },
 });
@@ -443,11 +446,11 @@ const safeAnswerRef = value => typeof value === 'string' && value.trim() === val
 // Owns preflight, persistence and scheduler effects. Every command gets explicit boundaries;
 // tests substitute all four effect/identity/clock dependencies, never the user's scheduler/home.
 class WindowsTaskOwner {
-  constructor({ scheduler, home, registry = tasks, identityReader, now = () => new Date(), repairOwned = false, firstRunOptions = null, takeLock = null, taskChoice = null, readRecord = null, writeRecord = null }) {
+  constructor({ scheduler, home, registry = tasks, identityReader, now = () => new Date(), repairOwned = false, firstRunOptions = null, takeLock = null, taskChoice = null, readRecord = null, writeRecord = null, computerId = os.hostname() }) {
     const answers = taskChoice ? Array.isArray(taskChoice) ? taskChoice : [taskChoice] : [];
     for (const taskChoice of answers) if (!['keep', 'replace'].includes(taskChoice.outcome) || !tasks.ID.test(taskChoice.task || '') || !/^[a-f0-9]{64}$/.test(taskChoice.observed || '') || !safeAnswerRef(taskChoice.answer_ref)) throw new WindowsTasksError('task choice needs the exact observation and actual owner answer reference', 1);
     if (new Set(answers.map(a => a.task)).size !== answers.length || new Set(answers.map(a => a.answer_ref)).size !== answers.length) throw new WindowsTasksError('each task needs its own exact owner answer', 1);
-    Object.assign(this, { scheduler, home, registry, identityReader, now, repairOwned, firstRunOptions, takeLock, answers, readRecord, writeRecord });
+    Object.assign(this, { scheduler, home, registry, identityReader, now, repairOwned, firstRunOptions, takeLock, answers, readRecord, writeRecord, computerId });
     this.choiceAttempts = new Set();
   }
   // Discovery is shared only within this invocation. Every affected folder, registry and
@@ -466,14 +469,17 @@ class WindowsTaskOwner {
     const read = currentRead || plannedRead;
     const registry = this.registry.readRegistry(this.home);
     const entries = registry.status === 'ok' ? registry.tasks : [];
+    const assignment = scheduleOwner.assignment(entries, desired.repository, this.computerId);
     const ours = entries.filter(e => e.host === 'windows' && String(e.repository).toLowerCase() === desired.repository.toLowerCase());
     const cleaners = ours.filter(e => isCleaner(e.job));
     const selected = cleaners[0];
     const folder = selected && !desired.folderOverride ? selected.folder : desired.folder;
     const definitions = [...desired.wanted, ...(desired.definitions || []).filter(d => !desired.wanted.some(w => w.job === d.job))].map(definition => {
-      if (definition.folder === folder) return definition;
       const id = taskId(folder, definition.job);
-      const updated = { ...definition, folder, name: taskName(folder, definition.job), id, arguments: definition.arguments.replace(/--task-id [a-z0-9-]+$/, `--task-id ${id}`) };
+      const schedule = sameDefinition(definition.schedule, JOBS[definition.job].schedule) ? scheduleOwner.scheduleFor(definition.job, assignment.minute || 1) : definition.schedule;
+      if (definition.folder === folder && sameDefinition(schedule, definition.schedule)) return { ...definition, repo_minute: assignment.minute, job_owner: this.computerId };
+      const updated = { ...definition, folder, name: taskName(folder, definition.job), id, schedule, schedule_text: describeSchedule(schedule),
+        repo_minute: assignment.minute, job_owner: this.computerId, arguments: definition.arguments.replace(/--task-id [a-z0-9-]+$/, `--task-id ${id}`) };
       updated.def = definitionDigest(updated);
       updated.description = `${folder}: ${JOBS[updated.job].task}. ${updated.purpose} [toolkit-task v1 id=${id} def=${updated.def}]`;
       return updated;
@@ -519,6 +525,7 @@ class WindowsTaskOwner {
       const retiring = definition.job === source?.job || definition.job === 'shard-timings' && desiredJob === 'footer-sweep';
       const refuse = reason => ({ definition, action: 'refused', reason });
       if (registry.status !== 'ok') return refuse('task registry could not be read');
+      if (assignment.conflict) return refuse(assignment.conflict);
       if (conflict) return refuse(conflict);
       if (currentRead && !sameDefinition(currentRead, plannedRead)) return refuse('origin or governance changed after planning; refresh status and run a fresh plan');
       if (read && (!read.repository || read.repository.toLowerCase() !== definition.repository.toLowerCase())) return refuse('repository origin changed; left alone');
@@ -534,9 +541,9 @@ class WindowsTaskOwner {
       let reason = null;
       if (recorded.stopped_by_owner) reason = 'stopped by owner';
       else if (!existing) reason = 'unproven absence: enrolled task is missing; no deletion attribution or owner stop inferred';
-      else if (!recorded.checkout || !recorded.toolkit_root || !recorded.enrolled) reason = 'legacy enrolment cannot prove checkout or definition; ask owner';
-      else if (!samePath(recorded.checkout, definition.checkout)) reason = 'checkout ownership differs; ask owner';
-      else if (!samePath(recorded.toolkit_root, definition.toolkit_root)) reason = 'Toolkit runner location differs; ask owner';
+      else if ((!recorded.checkout || !recorded.toolkit_root || !recorded.enrolled) && !recognisedEarlier(existing, recorded, definition)) reason = 'legacy enrolment cannot prove checkout or definition; ask owner';
+      else if (recorded.checkout && !samePath(recorded.checkout, definition.checkout)) reason = 'checkout ownership differs; ask owner';
+      else if (recorded.toolkit_root && !samePath(recorded.toolkit_root, definition.toolkit_root)) reason = 'Toolkit runner location differs; ask owner';
       else if (existing?.state === 'Disabled') reason = 'stopped by owner: disabled task';
       if (reason && !this.repairOwned) return refuse(reason);
       // Live participants retain their location guards even after a recorded stop. Explicit
@@ -598,7 +605,9 @@ class WindowsTaskOwner {
       relationshipUpdate: Boolean(!destination ? relationships.length : source
         ? !relationshipOK || relationships[0].id !== destination.id || !sameDefinition(destination.replaces.cleaner, this.proof(source))
         : relationships.length),
-      approval: items.length && !held ? desired.folderOverride || this.repairOwned ? 'explicit approval required' : 'standing approval with verified ownership' : 'verification held; no standing action',
+      assignment,
+      independent_jobs: taskPolicy.INDEPENDENT_JOBS,
+      approval: items.length && !held ? desired.folderOverride || this.repairOwned ? 'explicit approval required' : taskPolicy.STANDING_APPROVAL : 'verification held; no standing action',
       coverage: read?.governanceState !== 'ENABLED' ? 'Programme refresh is not selected by current governance.' : live.some(t => t.name === taskName(folder, 'programme-sweep') && t.state !== 'Disabled') ? 'PROGRAMME SWEEP is present; check its result for programme coverage.' : 'Programme refresh coverage is missing.',
       next_step: next, skipped: items.length ? [] : desired.skipped };
   }
@@ -621,9 +630,9 @@ class WindowsTaskOwner {
     const kept = plan => plan.items.find(i => i.action === 'owner-choice-required' && i.choice?.outcome === 'keep');
     if (preview.skipped.length || preview.items.some(item => ['refused', 'owner-choice-required'].includes(item.action)) && !kept(preview)) return { ...preview, refused: true };
     const takeLock = this.takeLock || require('../../skills/github-program-reconciler/scripts/programme-lock.cjs').takeLock;
-    const file = path.join(tasks.userStateDir(this.home), 'tasks', `apply-${crypto.createHash('sha256').update(desired.repository.toLowerCase()).digest('hex').slice(0, 20)}.lock`);
+    const file = path.join(tasks.userStateDir(this.home), 'tasks', 'apply-registry.lock');
     const lock = takeLock(file);
-    if (!lock) throw new WindowsTasksError('another task apply is running for this repository', 1);
+    if (!lock) throw new WindowsTasksError('another task apply is running on this computer', 1);
     let footerLock = null;
     const releaseFooter = () => { if (footerLock) { const held = footerLock; footerLock = null; held.release(); } };
     try {
@@ -823,6 +832,32 @@ class WindowsTaskOwner {
 
 function isCleaner(job) { return job === 'programme-sweep' || job === 'footer-sweep'; }
 
+// Frozen published definitions: original daytime jobs, shard wording updates and full-day
+// cleaners. An exact live shape plus enrolment and digest proves a baseline-less migration.
+const EARLIER_JOBS = Object.freeze([
+  { job: 'programme-sweep', schedule: { kind: 'hourly', at: '08:00', hours: 16 }, purpose: 'Brings the programme pages up to date, keeps the attention line and removes the cloud route footer from your own GitHub posts. No AI.', withoutPurpose: true },
+  ...[
+    'Refreshes the measured test times and opens a pull request when the CI shards drift. No AI.',
+    'Refreshes test times and opens a pull request when CI shards drift; no shards yet means no changes, and timing starts automatically when shards appear. No AI.',
+    JOBS['shard-timings'].purpose,
+  ].map(purpose => ({ job: 'shard-timings', schedule: { kind: 'weekly', day: 'Monday', at: '09:15' }, purpose, withoutPurpose: true })),
+  ...Object.entries(JOBS).map(([job, spec]) => ({ job, purpose: spec.purpose, schedule: job === 'shard-timings' ? { kind: 'weekly', day: 'Monday', at: '09:15' } : { kind: 'hourly', at: '00:00', hours: 24 } })),
+]);
+
+function recognisedEarlier(live, recorded, definition) {
+  if (!live || !recorded || recorded.adopted || recorded.stopped_by_owner || recorded.id !== definition.id
+    || recorded.job !== definition.job || recorded.name !== definition.name || recorded.folder !== definition.folder) return false;
+  if (recorded.enrolled) return false; // A stored baseline must always match independently.
+  return EARLIER_JOBS.filter(old => old.job === definition.job).some(old => {
+    const candidate = { ...definition, purpose: old.purpose, schedule: old.schedule };
+    const { execute, arguments: args, working_directory: workingDirectory, schedule } = candidate;
+    candidate.def = old.withoutPurpose ? crypto.createHash('sha256').update(JSON.stringify({ execute, args, workingDirectory, schedule, settings: 'v1 interactive start-when-available ignore-new 30m battery' })).digest('hex').slice(0, 12) : definitionDigest(candidate);
+    candidate.description = `${definition.folder}: ${JOBS[definition.job].task}. ${old.purpose} [toolkit-task v1 id=${definition.id} def=${candidate.def}]`;
+    return recorded.definition === candidate.def && recorded.purpose === candidate.purpose
+      && recorded.schedule === describeSchedule(candidate.schedule) && verifiedDefinition(live, candidate);
+  });
+}
+
 function verifiedDefinition(live, definition) {
   if (!live || live.state === 'Disabled' || live.description !== definition.description) return false;
   const actions = enrolledDefinition(live).actions;
@@ -845,6 +880,7 @@ function registryEntry(definition, existing, now, live) {
     id: definition.id, name: definition.name, host: 'windows', folder: definition.folder, schedule: definition.schedule_text, model: null, effort: null,
     purpose: definition.purpose, repository: definition.repository, created: existing ? existing.created : now().toISOString(), created_by: 'toolkit-windows-tasks apply',
     job: definition.job, definition: definition.def, checkout: definition.checkout, toolkit_root: definition.toolkit_root, enrolled: enrolledDefinition(live),
+    repo_minute: definition.repo_minute, job_owner: definition.job_owner,
   };
 }
 
@@ -917,6 +953,7 @@ const ACTION_TEXT = Object.freeze({ create: 'to create', update: 'to update in p
 
 function describePlan(plan, { command = null, applied = false, summaryOnly = false } = {}) {
   const lines = [`Windows scheduled tasks for ${plan.repository || 'this repository'} in \\${plan.folder}\\:`];
+  if (plan.assignment?.collision) lines.push(`Minute ${String(plan.assignment.minute).padStart(2, '0')} is shared: more than nine repositories are enrolled on this computer.`);
   for (const item of plan.items) {
     const d = item.definition;
     const state = applied ? (['refused', 'owner-choice-required'].includes(item.action) ? ACTION_TEXT[item.action] : item.done === false ? `failed: ${item.error}` : item.action === 'current' ? 'up to date' : item.action === 'create' ? 'created' : item.action === 'retire' ? item.recovery ? 'reconciled by owner-authorised recovery' : 'retired by Toolkit' : 'updated') : ACTION_TEXT[item.action];
@@ -947,9 +984,10 @@ function describePlan(plan, { command = null, applied = false, summaryOnly = fal
 
 // ---- command line ------------------------------------------------------------------------------
 
-const COMMANDS = Object.freeze(['plan', 'apply', 'remove', 'adopt']);
-const VALUE_FLAGS = Object.freeze({ plan: ['--repo-root', '--folder'], apply: ['--repo-root', '--folder', '--task-choice', '--task', '--observed', '--answer-ref'], remove: ['--repo-root', '--folder'], adopt: ['--folder', '--task', '--id', '--purpose', '--repository'] });
+const COMMANDS = Object.freeze(['plan', 'apply', 'remove', 'list', 'adopt']);
+const VALUE_FLAGS = Object.freeze({ list: ['--repo-root'], plan: ['--repo-root', '--folder'], apply: ['--repo-root', '--folder', '--task-choice', '--task', '--observed', '--answer-ref'], remove: ['--repo-root', '--folder'], adopt: ['--folder', '--task', '--id', '--purpose', '--repository'] });
 const USAGE = 'Usage: node repo/scripts/toolkit-windows-tasks.cjs plan|apply [--repo-root <checkout>] [--folder <F>] [--no-first-run] [--repair-owned] [--json]\n'
+  + '       node repo/scripts/toolkit-windows-tasks.cjs list [--repo-root <checkout>] [--json]\n'
   + '       --repair-owned needs explicit approval naming the affected fixed tasks, paths and changes; it grants no native permission.\n'
   + '       Owner answer: --task-choice keep|replace --task <id> --observed <fingerprint> --answer-ref <actual-owner-answer-reference>\n'
   + '       node repo/scripts/toolkit-windows-tasks.cjs remove [--repo-root <primary-checkout>] [--folder <F>] [--json]\n'
@@ -1004,6 +1042,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
   try {
     const scheduler = deps.scheduler || powerShellScheduler();
     const checkout = path.resolve(options.repo_root || deps.cwd || process.cwd());
+    if (options.command === 'list') return tasks.main(options.json ? ['--json'] : [], { ...deps, cwd: checkout, home, scheduler });
     const desiredOptions = { checkout, home, folder: options.folder || null, deps: deps.checkoutDeps || {}, ...(deps.toolkitRoot ? { toolkitRoot: deps.toolkitRoot } : {}), ...(deps.nodePath ? { nodePath: deps.nodePath } : {}), ...(deps.systemRoot ? { systemRoot: deps.systemRoot } : {}) };
     if (options.command === 'plan') {
       const desired = desiredTasks(desiredOptions);

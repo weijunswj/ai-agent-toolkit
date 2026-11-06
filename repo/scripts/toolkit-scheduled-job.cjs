@@ -302,6 +302,11 @@ class Job {
 function refreshStep(job) {
   const run = job.node(SCRIPT.programme, ['refresh', '--repo-root', job.options.repoRoot, '--json'], TIMEOUT.refresh);
   const report = lastJson(run.stdout);
+  if (run.status === 2 && /^PARENT_STATE_MISSING: /.test(String(run.stderr || ''))
+    || run.status === 1 && report?.holds?.length && report.holds.every(hold => hold.code === 'PARENT_STATE_MISSING')) {
+    job.note('Programme refresh skipped: ask the appointed controller to initialise the parent state in the private evidence store.');
+    return 'skipped';
+  }
   const lifecycle = report?.results?.filter(entry => ['set_parent_state', 'post_parent_repair'].includes(entry.kind)) || [];
   for (const entry of lifecycle) job.note(`Parent lifecycle: ${entry.kind === 'set_parent_state' ? entry.target.state === 'open' ? 'reopen' : 'complete' : 'repair notice'} ${entry.outcome}.`);
   if (run.status === 0) {
@@ -355,6 +360,7 @@ function programmeSweep(job) {
   if (observed.status !== 'enabled') return { status: 'skipped', reason: 'binding is invalid' };
   if (observed.fresh !== true) return { status: 'skipped', reason: 'binding observation expired' };
   const refresh = refreshStep(job);
+  if (refresh === 'skipped') return { status: 'skipped', reason: 'ask the appointed controller to initialise the parent state in the private evidence store' };
   const attention = attentionStep(job);
   return { status: refresh === 'failed' ? 'failed' : refresh === 'held' || attention === 'held' ? 'held' : 'ok' };
 }
@@ -414,6 +420,23 @@ function skipStreak(previous) {
 
 function runJob(options, deps = {}) {
   const job = new Job(options, deps);
+  const registry = (deps.registry || tasks).readRegistry(deps.home || os.homedir());
+  const enrolled = registry.status === 'ok' && registry.tasks.find(entry => entry.id === options.taskId && entry.host === 'windows');
+  if (enrolled?.job_owner && enrolled.job_owner !== (deps.computerId || os.hostname())) {
+    return { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, status: 'skipped', exit: 0,
+      reason: 'scheduled jobs are owned by another computer; ask the owner to move them using the host question UI', summary: ['No job work started: this computer is not the recorded job owner.'] };
+  }
+  const identity = job.identity();
+  const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(identity);
+  const observed = repository ? job.observation(identity) : null;
+  const key = observed?.fresh === true && observed?.binding?.store?.repository || repository || options.repoRoot;
+  const lock = deps.takeProgrammeLock ? deps.takeProgrammeLock(key) : new (require('./toolkit-programme-lock.cjs').ProgrammeJobLock)({ home: deps.home || os.homedir(), key, log: line => job.note(line) }).take();
+  if (!lock) return { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, status: 'held', exit: 0, summary: ['Programme work held: another job still owns the lock.'] };
+  try { return runJobLocked(job, options, deps); }
+  finally { lock.release(); }
+}
+
+function runJobLocked(job, options, deps) {
   const previous = job.readRecord();
   const started = job.now().toISOString();
   // The retry boundary is persisted before processes start, under the footer lock.
