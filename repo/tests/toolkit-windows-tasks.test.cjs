@@ -809,27 +809,34 @@ test('A1a: first sweep without parent state skips with setup guidance and still 
 
 test('A1a: programme job lock serialises processes and logs stale takeover after the task limit', async t => {
   const { ProgrammeJobLock, STALE_MS } = require('../scripts/toolkit-programme-lock.cjs');
+  const { takeLock } = require('../../skills/github-program-reconciler/scripts/programme-lock.cjs');
   const home = tempHome(t), events = path.join(home, 'events');
+  // File mtimes keep the real clock in clock-ahead runs. Use that same clock for every
+  // acquisition and the stale fixture, including acquisitions in the child processes.
+  const nowMs = Math.round(performance.timeOrigin + performance.now());
+  const acquire = (file, deps) => takeLock(file, { ...deps, nowMs });
   assert.ok(STALE_MS >= 30 * 60 * 1000);
   const script = `const fs=require('node:fs'); const {ProgrammeJobLock}=require(${JSON.stringify(require.resolve('../scripts/toolkit-programme-lock.cjs'))});
-    const lock=new ProgrammeJobLock({home:process.argv[1],key:'example/store',waitMs:5000}).take();
+    const {takeLock}=require(${JSON.stringify(require.resolve('../../skills/github-program-reconciler/scripts/programme-lock.cjs'))});
+    const acquire=(file,deps)=>takeLock(file,{...deps,nowMs:Number(process.argv[4])});
+    const lock=new ProgrammeJobLock({home:process.argv[1],key:'example/store',waitMs:5000,acquire}).take();
     if(!lock) process.exit(2); fs.appendFileSync(process.argv[2],process.argv[3]+' start\\n');
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);
     fs.appendFileSync(process.argv[2],process.argv[3]+' end\\n');lock.release();`;
   const { spawn } = require('node:child_process');
   const launch = id => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['-e', script, home, events, id], { windowsHide: true, stdio: 'pipe' });
+    const child = spawn(process.execPath, ['-e', script, home, events, id, String(nowMs)], { windowsHide: true, stdio: 'pipe' });
     child.on('error', reject); child.on('exit', code => code === 0 ? resolve() : reject(new Error(`lock child exit ${code}`)));
   });
   await Promise.all([launch('one'), launch('two')]);
   const lines = fs.readFileSync(events, 'utf8').trim().split('\n');
   assert.ok(lines.join(',') === 'one start,one end,two start,two end' || lines.join(',') === 'two start,two end,one start,one end');
-  const log = [], owner = new ProgrammeJobLock({ home, key: 'example/store', log: line => log.push(line) });
-  fs.writeFileSync(owner.file, JSON.stringify({ schema: 'toolkit.programme-pass-lock.v1', token: 'old-owner', host: 'other-computer', pid: 1, at: new Date(Date.now() - STALE_MS - 1000).toISOString() }));
-  const old = new Date(Date.now() - STALE_MS - 1000); fs.utimesSync(owner.file, old, old);
+  const log = [], owner = new ProgrammeJobLock({ home, key: 'example/store', acquire, log: line => log.push(line) });
+  fs.writeFileSync(owner.file, JSON.stringify({ schema: 'toolkit.programme-pass-lock.v1', token: 'old-owner', host: 'other-computer', pid: 1, at: new Date(nowMs - STALE_MS - 1000).toISOString() }));
+  const old = new Date(nowMs - STALE_MS - 1000); fs.utimesSync(owner.file, old, old);
   const held = owner.take(); assert.ok(held); assert.match(log.join(' '), /took over a stale job lock/); held.release();
   const live = owner.take(); assert.ok(live);
-  const contender = new ProgrammeJobLock({ home, key: 'example/store', waitMs: 0 });
+  const contender = new ProgrammeJobLock({ home, key: 'example/store', waitMs: 0, acquire });
   assert.equal(contender.take(), null); live.release();
 });
 
