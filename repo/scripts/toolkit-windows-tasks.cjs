@@ -501,7 +501,7 @@ class WindowsTaskOwner {
     if (ours.some(e => !this.validMetadata({ ...e, replaces: undefined }))) conflict = 'task choice metadata is invalid; exact owner inspection is required';
     if (!this.repairOwned && (relationships.length && !relationshipOK || cleaners.length > 1 && !relationshipOK)) conflict = 'conflicting or exhausted cleaner relationship metadata; explicit owner recovery is required';
     if (cleaners.some(e => e.folder !== folder)) conflict = 'cleaner folders differ; ask the owner to reconcile the recorded folders';
-    if (read?.binding?.schedule_folder && read.binding.schedule_folder !== folder && !desired.folderOverride) conflict = `binding folder changed from ${folder} to ${read.binding.schedule_folder}; with explicit approval to keep the recorded folder, run ${applyCommand(desired, { toolkitRoot: desired.locations.toolkitRoot, home: this.home, folderOverride: folder })}; future applies need that override until the binding folder agrees`;
+    if (read?.binding?.schedule_folder && read.binding.schedule_folder !== folder && !desired.folderOverride) conflict = `binding folder changed from ${folder} to ${read.binding.schedule_folder}; with explicit approval to keep the recorded folder, run ${applyCommand(desired, { toolkitRoot: desired.locations.toolkitRoot, folderOverride: folder })}; future applies need that override until the binding folder agrees`;
     for (const [otherFolder, rows] of new Map([...this.discover(entries, folder), [folder, live]])) for (const task of rows) {
       const marker = parseMarker(task.description);
       if (!definitions.some(d => sameTaskName(task.name, taskName(otherFolder, d.job)) || marker?.id === taskId(otherFolder, d.job))) continue;
@@ -587,7 +587,7 @@ class WindowsTaskOwner {
     }
     const held = items.find(item => ['refused', 'owner-choice-required'].includes(item.action));
     if (held) for (const item of items) if (!['refused', 'owner-choice-required'].includes(item.action)) Object.assign(item, { action: 'refused', reason: `all selected jobs held: ${held.reason}` });
-    const command = applyCommand(desired, { toolkitRoot: desired.locations.toolkitRoot, home: this.home });
+    const command = applyCommand(desired, { toolkitRoot: desired.locations.toolkitRoot });
     const reset = `approved reset: ${command.replace(' apply ', ' remove ')}; then ${command} --repair-owned`;
     const resetRequired = switching && items.some(i => {
       const record = entries.find(e => e.id === i.definition.id);
@@ -943,15 +943,18 @@ function adoptTask({ folder, task, id, purpose, repository = null }, { scheduler
 // ---- output -------------------------------------------------------------------------------------
 
 // Print literal managed paths so the same line is accepted by the hold on every host.
-function powerShellPath(file, home = os.homedir()) {
+function powerShellPath(file) {
   quotePath(file, 'the command path');
   const literal = value => value.replace(/[`$]/g, character => '`' + character);
   return `"${literal(file)}"`;
 }
 
-function applyCommand(desired, { toolkitRoot = path.resolve(__dirname, '..', '..'), folderOverride = null, home } = {}) {
-  const script = (path.win32.isAbsolute(toolkitRoot) ? path.win32 : path).join(toolkitRoot, 'repo', 'scripts', 'toolkit-windows-tasks.cjs');
-  return `node ${powerShellPath(script, home)} apply --repo-root ${powerShellPath(desired.root, home)}${folderOverride ? ` --folder ${folderOverride}` : ''}`;
+function taskScriptPath(toolkitRoot) {
+  return (path.isAbsolute(toolkitRoot) ? path : path.win32).join(toolkitRoot, 'repo', 'scripts', 'toolkit-windows-tasks.cjs');
+}
+
+function applyCommand(desired, { toolkitRoot = path.resolve(__dirname, '..', '..'), folderOverride = null } = {}) {
+  return `node ${powerShellPath(taskScriptPath(toolkitRoot))} apply --repo-root ${powerShellPath(desired.root)}${folderOverride ? ` --folder ${folderOverride}` : ''}`;
 }
 
 const ACTION_TEXT = Object.freeze({ create: 'to create', update: 'to update in place', retire: 'to retire after replacement', 'owner-choice-required': 'owner choice required', current: 'up to date', refused: 'refused' });
@@ -1052,7 +1055,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
     if (options.command === 'plan') {
       const desired = desiredTasks(desiredOptions);
       const plan = planTasks(desired, { scheduler, home, registry: deps.registry, identityReader: deps.identityReader });
-      const command = plan.items.some(item => ['create', 'update', 'retire'].includes(item.action)) ? applyCommand(desired, { toolkitRoot: deps.toolkitRoot, folderOverride: options.folder, home }) : null;
+      const command = plan.items.some(item => ['create', 'update', 'retire'].includes(item.action)) ? applyCommand(desired, { toolkitRoot: deps.toolkitRoot, folderOverride: options.folder }) : null;
       print({ ...plan, command }, describePlan(plan, { command }));
       return !plan.items.length || plan.items.some(item => ['refused', 'owner-choice-required'].includes(item.action)) ? 1 : 0;
     }
@@ -1079,7 +1082,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
     return 0;
   } catch (error) {
     err(`${error instanceof WindowsTasksError ? error.message : `Windows tasks failed: ${tasks.safeText(error.message)}`}\n`);
-    if (options.command === 'remove') err(`Removal is repository-scoped. Use node ${powerShellPath(path.win32.join(error.managedCheckout || deps.toolkitRoot || path.resolve(__dirname, '..', '..'), 'repo', 'scripts', 'toolkit-windows-tasks.cjs'), home)} remove --repo-root ${error.primaryCheckout ? powerShellPath(error.primaryCheckout, home) : '"<verified-primary-checkout>"'}.\n`);
+    if (options.command === 'remove') err(`Removal is repository-scoped. Use node ${powerShellPath(taskScriptPath(error.managedCheckout || deps.toolkitRoot || path.resolve(__dirname, '..', '..')))} remove --repo-root ${error.primaryCheckout ? powerShellPath(error.primaryCheckout) : '"<verified-primary-checkout>"'}.\n`);
     return error instanceof WindowsTasksError ? error.exitCode : 1;
   }
 }

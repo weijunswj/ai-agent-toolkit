@@ -216,6 +216,13 @@ function installedHours(text) {
   return Number.isInteger(duration) ? { hour: Number(match[1]), minute: Number(match[2]), hours: duration } : null;
 }
 
+function deferredText(last, now) {
+  const since = [last.deferred_since, last.started].find(value => typeof value === 'string' && Number.isFinite(Date.parse(value)) && Date.parse(value) <= now.getTime());
+  const minutes = since ? Math.floor((now.getTime() - Date.parse(since)) / 60000) : null;
+  const count = Number.isSafeInteger(last.deferred_count) && last.deferred_count > 0 ? last.deferred_count : 1;
+  return `deferred${minutes === null ? '' : ` for ${minutes} minute${minutes === 1 ? '' : 's'}`}, ${count} deferral${count === 1 ? '' : 's'}; awaiting an eligible task retry`;
+}
+
 // The session-start line for this computer's programme sweep of a repository, or null when it is
 // fine or there is none: its last run held, skipped or failed, or there has been no run for over 2 hours
 // inside its hours. Fixed wording only.
@@ -234,14 +241,17 @@ function sweepLine(repository, { home = os.homedir(), now = new Date(), registry
   const last = readLastRun(entry.id, home);
   const deferredShard = registry.tasks.find(item => item.host === 'windows' && item.job === 'shard-timings' && !item.adopted && !item.stopped_by_owner
     && String(item.repository || '').toLowerCase() === repository.toLowerCase() && readLastRun(item.id, home)?.status === 'deferred');
-  if (last?.status === 'deferred' || deferredShard) return `${deferredShard ? 'Shard timings' : label}: deferred; retries at the next hourly ${deferredShard ? 'programme sweep' : 'task slot'}; see toolkit tasks.`;
-  const at = last && [last.finished, last.started].find(value => typeof value === 'string' && !Number.isNaN(Date.parse(value)));
+  const withShard = line => [line, deferredShard ? `Shard timings: ${deferredText(readLastRun(deferredShard.id, home), now)}` : null].filter(Boolean).join('; ');
+  // Repeated deferrals do not count as completed work or reset the two-hour alarm.
+  const at = last && [last.status === 'deferred' ? last.deferred_since : null, last.finished, last.started].find(value => typeof value === 'string' && !Number.isNaN(Date.parse(value)));
   const schedule = installedHours(entry.schedule);
   const intoWindow = schedule ? ((now.getHours() * 60 + now.getMinutes()) - schedule.hour * 60 - schedule.minute + 1440) % 1440 : null;
   const stale = schedule && (schedule.hours === 24 || intoWindow >= STALE_MS / 60000 && intoWindow < schedule.hours * 60) && (!at || now.getTime() - Date.parse(at) > STALE_MS);
-  const status = skipText(last, now) || (last && ['failed', 'held'].includes(last.status) && at ? `${last.status} at ${shortTime(at, now)}` : null);
-  if (stale) return `${label}: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}; see toolkit tasks.`;
-  if (status) return `${label}: ${status.startsWith('failed') ? 'last run ' : ''}${status}; see toolkit tasks.`;
+  const status = skipText(last, now) || (last?.status === 'deferred' ? deferredText(last, now)
+    : last && ['failed', 'held'].includes(last.status) && at ? `${last.status} at ${shortTime(at, now)}` : null);
+  if (stale) return `${withShard(`${label}: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}`)}; see toolkit tasks.`;
+  if (status) return `${withShard(`${label}: ${status.startsWith('failed') ? 'last run ' : ''}${status}`)}; see toolkit tasks.`;
+  if (deferredShard) return `${withShard(null)}; see toolkit tasks.`;
   return null;
 }
 

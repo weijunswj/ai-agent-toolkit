@@ -44,6 +44,10 @@ const FIRST_SWEEP_WINDOW_MS = 48 * 60 * 60 * 1000;
 // Footer sweep exits that mean it ended well: nothing found, found and left, cleaned.
 const SWEEP_OK = new Set([0, 3, 4]);
 const MINUTE = 60 * 1000;
+// Refresh contention and retry together get at most 20 seconds, separate from the
+// one-second writer wait and well inside the native task's 30-minute limit.
+const REFRESH_WAIT_MS = 10000;
+const REFRESH_RETRY = new Set(['fetch-failed', 'cache-unwritable', 'ref-moved']);
 const TIMEOUT = Object.freeze({ check: 2 * MINUTE, reach: 15 * 1000, refresh: 12 * MINUTE, attention: 2 * MINUTE, sweep: 12 * MINUTE, shards: 25 * MINUTE });
 // Exits 0 when a TCP connection to github.com:443 opens within 8 seconds, else 3. Sends nothing.
 const REACH_GITHUB = "const s=require('node:net').connect({host:'github.com',port:443,timeout:8000});"
@@ -85,6 +89,7 @@ const REFRESH_REASONS = Object.freeze({
   'blob-unreadable': 'binding refresh failed: binding unreadable',
   'cache-unwritable': 'binding refresh failed: cache unwritable',
   offline: 'binding refresh failed: governance reads offline',
+  'refresh-busy': 'binding refresh failed: another checkout refresh is running',
 });
 
 function governanceReason(state) {
@@ -221,8 +226,27 @@ class Job {
 
   governanceStatus() {
     if (this.#state === undefined) {
-      try { this.#state = statusResult(this.node(SCRIPT.governance, ['status', '--json'], TIMEOUT.check)); }
+      let lock;
+      try {
+        lock = new (require('./toolkit-programme-lock.cjs').ProgrammeJobLock)({ home: this.#home,
+          key: `checkout-refresh:${path.resolve(this.#options.repoRoot)}`, waitMs: REFRESH_WAIT_MS }).take();
+        if (!lock) this.#state = { state: 'UNAVAILABLE', merged: { status: 'unknown', fresh: false }, refresh: { refreshed: false, reason: 'refresh-busy' } };
+        else {
+          const until = performance.now() + REFRESH_WAIT_MS;
+          this.#state = statusResult(this.node(SCRIPT.governance, ['status', '--json'], REFRESH_WAIT_MS));
+          // One retry handles a competing non-task reader or a transient fetch/cache
+          // failure. It shares the original refresh budget, never another full wait.
+          const remaining = Math.floor(until - performance.now());
+          if (REFRESH_RETRY.has(this.#state?.refresh?.reason) && remaining > 0) {
+            this.#state = statusResult(this.node(SCRIPT.governance, ['status', '--json'], remaining));
+          }
+          // Freeze the observation under the refresh lock. Both the writer key and
+          // every effect use this exact refreshed view, even if a later reader moves it.
+          this.#observed = this.observe(this.identity());
+        }
+      }
       catch { this.#state = null; }
+      finally { if (lock) lock.release(); }
     }
     return this.#state;
   }
@@ -398,7 +422,7 @@ function shardTimings(job) {
   }
   shards.assertManifest(manifest, shards.discoverTestFiles(job.options.repoRoot));
   const notGoverned = job.notGoverned();
-  if (notGoverned) return { status: 'skipped', reason: notGoverned };
+  if (notGoverned) return { status: job.governanceStatus()?.refresh?.refreshed === false ? 'deferred' : 'skipped', reason: notGoverned };
   const signedOut = job.ghSignedOut();
   if (signedOut) return { status: 'skipped', reason: signedOut };
   const run = job.node(SCRIPT.shardTimings, ['--repo-root', job.options.repoRoot, '--open-pr'], TIMEOUT.shards);
@@ -417,11 +441,17 @@ function skipStreak(previous) {
   return count && since ? { skipped_streak: count, skipped_since: since } : {};
 }
 
+function deferral(previous, at, key) {
+  const since = validTime(previous?.deferred_since, new Date(at)) ? previous.deferred_since : at;
+  const count = Number.isSafeInteger(previous?.deferred_count) && previous.deferred_count > 0 ? previous.deferred_count : 0;
+  return { deferred_since: since, deferred_count: count + 1, ...(key ? { deferred_lock_key: key } : {}) };
+}
+
 function runJob(options, deps = {}) {
   const job = new Job(options, deps);
   const registry = (deps.registry || tasks).readRegistry(deps.home || os.homedir());
   const enrolled = registry.status === 'ok' && registry.tasks.find(entry => entry.id === options.taskId && entry.host === 'windows');
-  let lock, record;
+  let lock, record, key;
   const home = deps.home || os.homedir();
   const finishWithoutWork = (status, reason) => {
     const at = job.now().toISOString(), previous = job.readRecord();
@@ -431,6 +461,7 @@ function runJob(options, deps = {}) {
       schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job,
       ...(enrolled?.repository ? { repository: enrolled.repository } : {}), started: at, finished: at,
       status, exit: status === 'failed' ? 1 : 0, reason, summary: [reason] };
+    if (status === 'deferred') Object.assign(result, deferral(history, at, key));
     job.writeRecord(result);
     return result;
   };
@@ -446,10 +477,10 @@ function runJob(options, deps = {}) {
     // its store lock) until that refresh has completed. Sign-out still does no reads.
     if (repository && !job.ghSignedOut()) job.governanceStatus();
     const observed = repository && !job.ghSignedOut() ? job.observation(identity) : null;
-    const key = observed?.fresh === true && observed?.status === 'enabled' && observed?.binding?.store?.repository || repository || options.repoRoot;
+    key = observed?.fresh === true && observed?.status === 'enabled' && observed?.binding?.store?.repository || repository || options.repoRoot;
     lock = deps.takeProgrammeLock ? deps.takeProgrammeLock(key) : new (require('./toolkit-programme-lock.cjs').ProgrammeJobLock)({ home, key, log: line => job.note(line) }).take();
     if (!lock) return finishWithoutWork('deferred', `Programme work deferred: another job owns the lock; retries at the next hourly ${options.job === 'shard-timings' ? 'programme sweep before the next weekly slot' : 'task slot'}.`);
-    record = runJobLocked(job, options, deps);
+    record = runJobLocked(job, options, deps, key);
   } catch {
     return finishWithoutWork('failed', 'Programme job or lock failed; inspect local task state and retry the task.');
   } finally {
@@ -458,35 +489,69 @@ function runJob(options, deps = {}) {
       catch { record = finishWithoutWork('failed', 'Programme lock release failed; inspect the local lock before retrying.'); }
     }
   }
-  // Start catch-up as a separate scheduled task, after releasing all writer locks.
-  // Adding a 25-minute shard step to a sweep would exceed its 30-minute limit.
-  if (options.job === 'programme-sweep') retryDeferredShards(job, options, deps);
+  // Native starts happen only after all writer locks are released. Each task then
+  // gets its own time budget; no work or retry loop runs inside the releasing job.
+  if (record?.status !== 'deferred') retryDeferredJobs(job, options, deps, key);
+  if (record && JSON.stringify(record.summary) !== JSON.stringify(job.summary)) {
+    record.summary = job.summary;
+    job.writeRecord(record);
+  }
   return record;
 }
 
-function retryDeferredShards(job, options, deps) {
+function retryDeferredJobs(job, options, deps, key) {
   const home = deps.home || os.homedir(), windows = require('./toolkit-windows-tasks.cjs');
   try {
-    if (job.ghSignedOut()) return;
-    const state = job.governanceStatus();
-    if (governanceReason(state) || job.observation(job.identity())?.fresh !== true) return;
+    const repository = windows.repositoryOf(job.identity());
+    if (!repository) return;
     const registry = (deps.registry || tasks).readRegistry(home);
     if (registry.status !== 'ok') return;
-    for (const entry of registry.tasks) {
-      if (entry.host !== 'windows' || entry.job !== 'shard-timings' || entry.adopted || entry.stopped_by_owner
-        || entry.repository !== windows.repositoryOf(job.identity()) || !windows.samePath(entry.checkout, options.repoRoot)
-        || !tasks.localTaskOwner(entry.job_owner, deps.computerId || tasks.computerIdentity(home)?.id)
-        || tasks.readLastRun(entry.id, home)?.status !== 'deferred') continue;
-      const scheduler = deps.scheduler || windows.powerShellScheduler();
-      const live = scheduler.list(entry.folder).find(task => task.name === entry.name);
-      if (!live || ['Disabled', 'Running'].includes(live.state) || windows.parseMarker(live.description)?.id !== entry.id
-        || !entry.enrolled || JSON.stringify(windows.enrolledDefinition(live)) !== JSON.stringify(entry.enrolled)) continue;
-      scheduler.start(entry.folder, entry.name);
+    const deferred = registry.tasks.filter(entry => entry.id !== options.taskId && entry.host === 'windows' && JOBS.includes(entry.job)
+      && !entry.adopted && !entry.stopped_by_owner && tasks.readLastRun(entry.id, home)?.status === 'deferred');
+    if (!deferred.length) return;
+    if (job.ghSignedOut()) return;
+    const state = job.governanceStatus();
+    const observed = job.observation(job.identity());
+    if (governanceReason(state) || observed?.fresh !== true || observed.status !== 'enabled'
+      || observed.binding.store.repository.toLowerCase() !== key.toLowerCase()) return;
+    for (const entry of deferred) {
+      if (entry.id === options.taskId || entry.host !== 'windows' || !JOBS.includes(entry.job) || entry.adopted || entry.stopped_by_owner
+        || !tasks.localTaskOwner(entry.job_owner, deps.computerId || tasks.computerIdentity(home)?.id)) continue;
+      const previous = tasks.readLastRun(entry.id, home);
+      if (previous?.status !== 'deferred') continue;
+      const sameRepository = String(entry.repository).toLowerCase() === repository.toLowerCase();
+      if (sameRepository && !windows.samePath(entry.checkout, options.repoRoot)) continue;
+      // Legacy shard deferrals have no stored key. They may retry only from their
+      // own verified repository/checkout; other repositories must name this store.
+      if (previous.deferred_lock_key ? !sameRepository && String(previous.deferred_lock_key).toLowerCase() !== key.toLowerCase()
+        : !sameRepository || entry.job !== 'shard-timings') continue;
+      try {
+        const scheduler = deps.scheduler || windows.powerShellScheduler();
+        const eligible = () => {
+          const current = (deps.registry || tasks).readRegistry(home);
+          if (current.status !== 'ok' || JSON.stringify(current.tasks.find(row => row.id === entry.id)) !== JSON.stringify(entry)) return false;
+          const live = scheduler.list(entry.folder).find(task => task.name === entry.name);
+          return live && !['Disabled', 'Running'].includes(live.state) && windows.parseMarker(live.description)?.id === entry.id
+            && entry.enrolled && JSON.stringify(windows.enrolledDefinition(live)) === JSON.stringify(entry.enrolled);
+        };
+        if (!eligible()) continue;
+        if (!sameRepository) {
+          const candidate = new Job({ job: entry.job, taskId: entry.id, repoRoot: entry.checkout }, deps);
+          candidate.repository();
+          if (windows.repositoryOf(candidate.identity())?.toLowerCase() !== String(entry.repository).toLowerCase()
+            || candidate.ghSignedOut() || candidate.notGoverned()) continue;
+          const refreshed = candidate.observation(candidate.identity());
+          if (refreshed?.fresh !== true || refreshed.status !== 'enabled' || refreshed.binding.store.repository.toLowerCase() !== key.toLowerCase()) continue;
+        }
+        // Status may take seconds. Owner stops or native edits during that read win.
+        if (!eligible() || tasks.readLastRun(entry.id, home)?.status !== 'deferred') continue;
+        scheduler.start(entry.folder, entry.name);
+      } catch { job.note('Deferred job retry could not start; inspect toolkit tasks. Eligible tasks can retry after a store release or at their next task slot.'); }
     }
-  } catch { job.note('Deferred shard retry could not start; the next hourly programme sweep retries, or inspect toolkit tasks.'); }
+  } catch { job.note('Deferred job retry could not start; inspect toolkit tasks.'); }
 }
 
-function runJobLocked(job, options, deps) {
+function runJobLocked(job, options, deps, key) {
   const previous = job.readRecord();
   const started = job.now().toISOString();
   // The retry boundary is persisted before processes start, under the footer lock.
@@ -516,7 +581,7 @@ function runJobLocked(job, options, deps) {
     } else outcome = options.job === 'footer-sweep' ? job.clean(base) : shardTimings(job);
   }
   catch (error) { job.note(`The job stopped: ${error.message}`); outcome = { status: 'failed' }; }
-  if (outcome.reason) job.note(`skipped: ${outcome.reason}`);
+  if (outcome.reason) job.note(`${outcome.status}: ${outcome.reason}`);
   let skips = {};
   if (outcome.status === 'skipped' && outcome.reason !== 'no shards yet') {
     skips = { reason: outcome.reason, skipped_streak: (streak.skipped_streak || 0) + 1, skipped_since: streak.skipped_since || started };
@@ -527,7 +592,8 @@ function runJobLocked(job, options, deps) {
   const exit = outcome.status === 'failed' ? 1 : 0;
   const record = { ...base, finished: job.now().toISOString(), exit, status: outcome.status, summary: job.summary, ...carried, ...(outcome.reason ? { reason: outcome.reason } : {}),
     ...Object.fromEntries(['footer_status', 'programme_status', 'footer_reason', 'programme_reason'].filter(key => outcome[key] !== undefined).map(key => [key, outcome[key]])),
-    ...(outcome.footer_sweep_since ? { footer_sweep_since: outcome.footer_sweep_since } : {}), ...skips };
+    ...(outcome.footer_sweep_since ? { footer_sweep_since: outcome.footer_sweep_since } : {}),
+    ...(outcome.status === 'deferred' ? deferral(previous, started, key) : {}), ...skips };
   try { job.writeRecord(record); }
   finally {
     if (!job.release()) {
