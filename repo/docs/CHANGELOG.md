@@ -16,6 +16,11 @@
 
 - The governance hold allows the managed checkout's exact default-folder commands for independent footer tasks while retaining holds on governed tasks and unrelated commands.
 - A first programme sweep without parent state skips with plain instructions for the appointed controller to initialise it in the private evidence store.
+- Jobs that find another job holding the programme lock record a visible deferred result and retry, and a deferred weekly shard run is started by the next hourly sweep.
+- The apply and remove commands the planner prints use the literal managed path, so the governance hold allows them.
+- Scheduled jobs refresh the governance binding before choosing the lock and effects, so a stale cache no longer skips a sweep.
+- Computer ownership uses a stable saved id instead of the host name, so renaming the computer keeps its jobs, and any other-owner state shows on the session line with a recovery step that exists.
+- The setup reason shows once, a broken task policy module no longer refuses every shell call, and a lock file error records a failed result.
 
 ## 3.51.0
 
