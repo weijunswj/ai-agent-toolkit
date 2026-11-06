@@ -134,7 +134,10 @@ function expectErrors(expect, label) {
   const errors = [];
   if (!['allow', 'deny'].includes(expect.decision)) errors.push(`${label}.decision must be allow or deny`);
   if (expect.reason !== undefined && (typeof expect.reason !== 'string' || !/^[a-z0-9.-]+(?::failure)?$/.test(expect.reason))) errors.push(`${label}.reason is a hook name (the script file name without .cjs), with :failure when the host blocked because the hook itself failed`);
-  for (const key of Object.keys(expect)) if (!['decision', 'reason'].includes(key)) errors.push(`${label} has unknown key ${key}`);
+  for (const key of ['context_contains', 'context_excludes']) if (expect[key] !== undefined
+    && (!Array.isArray(expect[key]) || !expect[key].length || expect[key].some(text => typeof text !== 'string' || !text.trim())
+      || new Set(expect[key]).size !== expect[key].length)) errors.push(`${label}.${key} must list unique nonempty strings`);
+  for (const key of Object.keys(expect)) if (!['decision', 'reason', 'context_contains', 'context_excludes'].includes(key)) errors.push(`${label} has unknown key ${key}`);
   return errors;
 }
 
@@ -145,11 +148,13 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
   if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
+  if (fixture.windows_tasks !== undefined && (!fixture.repo || !['enabled', 'disabled', 'undecided'].includes(fixture.repo.governance)
+    || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -290,6 +295,25 @@ function scriptName(command) {
   return match ? match[1] : 'hook';
 }
 
+// Read only the surface delivered as context by each host, never stderr diagnostics.
+function hookContext(host, event, result) {
+  if (result.status !== 0 || event !== 'SessionStart') return '';
+  if (host === 'codex') return result.stdout;
+  try {
+    const output = JSON.parse(result.stdout);
+    return typeof output.hookSpecificOutput?.additionalContext === 'string' ? output.hookSpecificOutput.additionalContext : '';
+  } catch { return ''; }
+}
+
+function contextProblems(expect, context = '') {
+  const problems = [];
+  for (const text of expect.context_contains || []) {
+    if (context.split(text).length !== 2) problems.push('required context absent or duplicated');
+  }
+  for (const text of expect.context_excludes || []) if (context.includes(text)) problems.push('excluded context present');
+  return problems;
+}
+
 // ---- Plugin copies ----
 
 class PluginRoots {
@@ -371,6 +395,29 @@ class Fixture {
     }
     if (spec.evidence_merge) this.#evidenceMerge(spec.evidence_merge);
     else this.#githubFixture(this.#closureFixture(spec), spec.slow_proposal === true, spec);
+    if (spec.windows_tasks) {
+      const tasks = require('./toolkit-tasks.cjs');
+      const name = spec.repo.name || 'fixture';
+      const repository = `toolkit-test-fixture/${spec.repo.governance === 'undecided' ? name : `hook-pack-${name}`}`;
+      tasks.writeRegistry(this.home, spec.windows_tasks.map((job, index) => ({
+        id: `fixture-${index}`, job, host: 'windows', folder: 'FIXTURE', repository, name: job, schedule: 'hourly',
+        purpose: 'Hook pack fixture', created: this.#now().toISOString(), created_by: 'fixture', model: null, effort: null,
+      })));
+      // Test-only injection into this one reader, including Linux positive rows. Production
+      // platform and offline checks remain intact; no environment switch enters the runtime.
+      const preload = path.join(this.dir, 'fake-github', 'transport.cjs');
+      fs.appendFileSync(preload, `
+const Module = require('node:module');
+const load = Module._load;
+Module._load = function(request, parent, main) {
+  const exported = load.call(this, request, parent, main);
+  if (/(?:^|[\\\\/])toolkit-tasks\\.cjs$/.test(request) && exported.taskGovernanceLine) {
+    return { ...exported, taskGovernanceLine: (state, options) => exported.taskGovernanceLine(state, { ...options, platform: 'win32', environment: {} }) };
+  }
+  return exported;
+};
+`);
+    }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
       const repository = `toolkit-test-fixture/${spec.repo.name || 'fixture'}`;
@@ -400,10 +447,12 @@ class Fixture {
 
   #repo(spec) {
     const name = spec.name || 'fixture';
-    if (spec.governance === 'enabled' || spec.governance === 'disabled') {
+    if (['enabled', 'disabled'].includes(spec.governance)) {
       const support = require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs'));
       support.makeGoverned(this.work, `hook-pack-${name}`, { home: this.home });
-      if (spec.governance === 'disabled') support.recordMerged(this.work, { home: this.home, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: `toolkit-test-fixture/hook-pack-${name}`, governance: 'disabled', parents: [{issue:1,record_prefix:'INT-FX',writer_prefix:'FX'}], store:{kind:'github',repository:'toolkit-test-fixture/store',branch:'main',path:'state/'}, required_checks:['validate'] }) });
+      if (spec.governance === 'disabled') support.recordMerged(this.work, { home: this.home, text: JSON.stringify({
+        schema: 'toolkit.programme-binding.v2', repository: `toolkit-test-fixture/hook-pack-${name}`, governance: 'disabled',
+      }), now: this.#now() });
       if (spec.task_auto_merge) this.#taskAutoMerge(`toolkit-test-fixture/hook-pack-${name}`, spec.task_auto_merge, support);
     } else {
       this.#git(this.work, ['init', '--quiet']);
@@ -680,18 +729,20 @@ async function runOnHost(row, host, fixture, roots) {
   const oldDecision = fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, 'utf8') : null;
   const before = fixture.snapshot();
   const decisions = [];
+  const contexts = [];
   for (const hook of hooks) {
     const own = (hook.timeout || DEFAULT_TIMEOUT_SECONDS) * 1000;
     const timeout = row.fault?.type === 'stall-module' ? Math.min(own, STALL_TIMEOUT_MS) : own;
     const result = await startProcess({ file: shell.file, args: shell.args(hostCommand(host, hook, pluginRoot)), input, env, cwd: fixture.work, timeout });
     decisions.push(hookDecision(host, hook, result));
+    contexts.push(hookContext(host, event, result));
   }
   const problems = [];
   if (row.postcondition === 'no-local-decision-write' && (fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, 'utf8') : null) !== oldDecision) problems.push('a local governance decision was written');
   if (JSON.stringify(fixture.snapshot()) !== JSON.stringify(before)) problems.push('a fixture file changed');
   if (!hooks.length) problems.push(`no ${host} hook matches this call`);
   const deny = decisions.find(entry => entry.decision === 'deny');
-  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems };
+  return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, context: contexts.join('\n'), failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems };
 }
 
 // The hosts a row is known to fail on (none for a passing row).
@@ -703,6 +754,7 @@ function knownBadHosts(row) {
 function meets(row, host, observed) {
   const expect = row.expect_by_host?.[host] || row.expect;
   if (observed.problems.length) return false;
+  if (contextProblems(expect, observed.context).length) return false;
   if (row.fixture?.evidence_merge && observed.failed?.length) return false;
   if (observed.decision !== expect.decision) return false;
   // A refusal only because a hook itself failed (onFailure: block) proves nothing about what the
@@ -714,6 +766,8 @@ function meets(row, host, observed) {
 function failureKind(row, host, observed) {
   const expect = row.expect_by_host?.[host] || row.expect;
   if (observed.problems.length) return observed.problems.join('; ');
+  const context = contextProblems(expect, observed.context);
+  if (context.length) return context.join('; ');
   if (expect.decision === 'allow' && observed.decision === 'deny') return `false block (refused by ${observed.reason})`;
   if (expect.decision === 'deny' && observed.decision === 'allow') return `leak (allowed${observed.failed.length ? `; ${observed.failed.join(', ')} failed and the host ran the call` : ''})`;
   if (expect.reason === undefined) return `refused only because ${observed.reason.replace(/:failure$/, '')} itself failed; a row that expects that names the reason`;
@@ -792,7 +846,7 @@ function scoreboard(results, seconds, { budgetSeconds, verbose }, out) {
       const kind = failureKind(row, host, observed);
       if (kind.startsWith('false block')) entry.falseBlocks += 1; else if (kind.startsWith('leak')) entry.leaks += 1; else entry.other += 1;
       lines.push(`FAIL ${row.id} on ${host}: ${kind}`);
-      if (verbose && observed.text) lines.push(`  refusal: ${observed.text.replace(/\s+/g, ' ').slice(0, 400)}`);
+      if (verbose && observed.text && !(row.expect_by_host?.[host] || row.expect).context_contains && !(row.expect_by_host?.[host] || row.expect).context_excludes) lines.push(`  refusal: ${observed.text.replace(/\s+/g, ' ').slice(0, 400)}`);
     }
   }
   out.write('family          cases  pass  known-bad  false-blocks  leaks  other\n');
@@ -920,5 +974,5 @@ if (require.main === module) main().then(code => { process.exitCode = code; });
 
 module.exports = Object.freeze({
   CORPUS_REL, FAULTS, HOSTS, KINDS, SCHEMA,
-  expectationChanges, explainedRows, hookDecision, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
+  expectationChanges, explainedRows, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
 });

@@ -1593,6 +1593,20 @@ class ToolGate {
 
 function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {} } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
+  let tasks;
+  let registry;
+  // A test registry without an isolated home must never read this computer's task registry.
+  if (programmeDeps.home || registryOptions.testOnly !== true) {
+    try { tasks = require('./toolkit-tasks.cjs'); registry = tasks.readRegistry(programmeDeps.home); } catch { /* retain original context */ }
+  }
+  const original = verdictLine(verdict, registryOptions, { ...programmeDeps, registry });
+  try {
+    const advisory = registry && tasks?.taskGovernanceLine(verdict.state, { ...programmeDeps, registry });
+    return advisory ? `${original} ${advisory}` : original;
+  } catch { return original; }
+}
+
+function verdictLine(verdict, registryOptions, programmeDeps) {
   const state = verdict.state;
   if (verdict.pending) return verdict.pending.text;
   if (verdict.reason === 'unavailable') return "Toolkit: couldn't check governance. Continue with the global rules; no governance effects or standing task auto-merge until it can be checked.";
@@ -1629,7 +1643,7 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
     // registry without its own home reads nothing.
     if (deps.home || registryOptions.testOnly !== true) {
       const now = deps.now ? new Date(deps.now()) : new Date();
-      const sweep = require('./toolkit-tasks.cjs').sweepLine(binding.repository, { home: deps.home, now });
+      const sweep = require('./toolkit-tasks.cjs').sweepLine(binding.repository, { home: deps.home, now, registry: deps.registry });
       if (sweep) lines.push(sweep);
     }
   } catch { /* no attention line */ }

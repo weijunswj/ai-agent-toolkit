@@ -48,6 +48,90 @@ const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
 const QUESTION_LINE = 'Toolkit: message held. Turn on GitHub governance (issues, records, evidence store) for this repository?';
+
+test('task advisory preserves every verdictLine branch, evaluates once and shares one registry read', t => {
+  const ctx = scratch(t);
+  const tasks = require('../scripts/toolkit-tasks.cjs');
+  const Module = require('node:module');
+  const originalEvaluate = gate.GovernanceGate.prototype.evaluate;
+  const originalRead = tasks.readRegistry, originalAdvisory = tasks.taskGovernanceLine, load = Module._load;
+  const registry = { status: 'ok', tasks: [{ id: 'fixture-p', job: 'programme-sweep', repository: 'example/widget', host: 'windows' }] };
+  const state = { state: 'UNDECIDED', repository: 'example/widget', repository_id: 'fixture', merged: { fresh: true, status: 'none' }, root: ctx.root };
+  const options = { registryOptions: ctx.options, programmeDeps: { home: ctx.options.home, environment: {}, platform: 'win32' } };
+  try {
+    for (const branch of ['pending','unavailable','not-now','hold','disabled','enabled','error','stale','refresh-failed']) {
+      let count = 0, reads = 0;
+      const s = { ...state, ...(branch === 'disabled' ? { state: 'DISABLED', merged: { fresh: true, status: 'disabled' } } : {}),
+        ...(branch === 'enabled' ? { state: 'ENABLED', programme_records_bind: true, merged: { fresh: true, status: 'enabled' } } : {}),
+        ...(branch === 'error' ? { state: 'ERROR', merged: { fresh: true, status: 'invalid' } } : {}),
+        ...(branch === 'stale' ? { state: 'DISABLED', rule: 'M2', notes: ['merged-binding-stale'], merged: { fresh: false, status: 'disabled' } } : {}),
+        ...(branch === 'refresh-failed' ? { state: 'DISABLED', notes: ['could-not-check-governance'], merged: { fresh: true, status: 'disabled' } } : {}) };
+      const verdict = { state: s, reason: branch, hold: branch === 'hold', ...(branch === 'pending' ? { pending: { text: 'Original pending line.' } } : {}) };
+      gate.GovernanceGate.prototype.evaluate = () => { count++; return verdict; };
+      tasks.readRegistry = () => { reads++; return registry; };
+      tasks.taskGovernanceLine = () => null;
+      const programmeDeps = { ...options.programmeDeps, mergedBinding: () => ({ repository: state.repository }), now: () => new Date() };
+      const call = () => gate.sessionLine(ctx.root, { ...options, programmeDeps });
+      const before = call();
+      tasks.taskGovernanceLine = originalAdvisory;
+      count = reads = 0;
+      const after = call();
+      const line = originalAdvisory(s, { ...programmeDeps, registry });
+      assert.equal(after, line ? `${before} ${line}` : before, branch);
+      assert.equal(count, 1, branch);
+      assert.equal(reads, 1, branch);
+      assert.deepEqual(verdict.state, s, 'no decision changes');
+      tasks.taskGovernanceLine = () => { throw new Error('format/read denied'); };
+      assert.equal(call(), before, branch);
+      tasks.taskGovernanceLine = originalAdvisory;
+      tasks.readRegistry = () => ({ status: 'unreadable' });
+      // The baseline health context may differ only if its own registry read changes.
+      tasks.taskGovernanceLine = () => null;
+      const unreadableBefore = call();
+      tasks.taskGovernanceLine = originalAdvisory;
+      assert.equal(call(), unreadableBefore, branch);
+      tasks.readRegistry = () => { throw new Error('registry read denied'); };
+      assert.equal(call(), unreadableBefore, branch);
+      Module._load = function(request, ...args) {
+        if (request === './toolkit-tasks.cjs') throw new Error('advisory load denied');
+        return load.call(this, request, ...args);
+      };
+      assert.equal(call(), unreadableBefore, branch);
+      Module._load = load;
+    }
+  } finally {
+    gate.GovernanceGate.prototype.evaluate = originalEvaluate;
+    tasks.readRegistry = originalRead; tasks.taskGovernanceLine = originalAdvisory; Module._load = load;
+  }
+});
+
+test('task advisory uses this start observation: refresh success, failure, stale and clear/compact', t => {
+  const ctx = scratch(t), repo = gitRepo(ctx, 'advisory-refresh');
+  const tasks = require('../scripts/toolkit-tasks.cjs');
+  const cache = require('../scripts/toolkit-governance-binding.cjs');
+  tasks.writeRegistry(ctx.options.home, [{ id: 'fixture-p', host: 'windows', job: 'programme-sweep', folder: 'FIXTURE',
+    repository: 'example-owner/example-repo', name: 'PROGRAMME SWEEP', schedule: 'hourly', purpose: 'fixture', created: new Date().toISOString(), created_by: 'fixture', model: null, effort: null }]);
+  const text = JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'disabled' });
+  const seed = now => recordMerged(repo, { registryPath: ctx.registryPath, text, now });
+  const options = { registryOptions: ctx.options, programmeDeps: { home: ctx.options.home, environment: {}, platform: 'win32' } };
+  const line = () => gate.sessionLine(repo, options);
+  for (const source of ['startup','resume','clear','compact']) {
+    seed(new Date(Date.now() - 26 * 3600000));
+    assert.doesNotMatch(line(), /Toolkit tasks:/);
+    let refreshed = 0;
+    gate.startSession({ cwd: repo, session_id: source, source }, { ...options, refreshBinding() { refreshed++; seed(new Date()); return { refreshed: true }; } });
+    assert.equal(refreshed, ['startup','resume'].includes(source) ? 1 : 0);
+    assert.equal(line().includes('Toolkit tasks:'), refreshed === 1);
+  }
+  seed(new Date());
+  const identity = governance.readIdentity(repo), dir = path.dirname(ctx.registryPath);
+  const entry = cache.readBindingCache(identity, dir);
+  cache.writeCache(dir, { ...entry, refresh_error: 'remote-unreachable' });
+  assert.doesNotMatch(line(), /Toolkit tasks:/);
+  assert.match(line(), /couldn't check governance/);
+  seed(new Date());
+  assert.doesNotMatch(gate.sessionLine(repo, { ...options, programmeDeps: { ...options.programmeDeps, environment: { TOOLKIT_GOVERNANCE_OFFLINE: '1' } } }), /Toolkit tasks:/);
+});
 const AGENT_LINE = `For agents: ${gate.NEVER_OWNER_SHORT}`;
 // The notice Claude is told to show as text on a held turn, next to the card.
 const noticeOf = context => (/word for word:\n([\s\S]*?)\n2\. Then call AskUserQuestion/.exec(context) || [])[1];

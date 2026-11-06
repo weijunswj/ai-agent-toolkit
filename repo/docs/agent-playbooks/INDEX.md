@@ -140,7 +140,7 @@ Only lightweight preflight is allowed before explicit confirmation. Stop before 
 
 ## Match: Risky Or Live-System Work
 
-Triggers: credentials, secrets, customer/private data, production behavior, external service writes, destructive commands, deployments, runtime state, live databases, auth/security settings, Docker, n8n live actions, SSH, or firewall changes.
+Triggers: governance decision merges, reading task-sync guidance, task-shape mismatches, credentials, secrets, customer/private data, production behavior, external service writes, destructive commands, deployments, runtime state, live databases, auth/security settings, Docker, n8n live actions, SSH, or firewall changes.
 
 Read: `repo/docs/agent-playbooks/safety-gates.md`.
 

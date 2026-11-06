@@ -380,7 +380,7 @@ const HOOK_PACK_JOB = [
 const HOOK_PACK_WINDOWS_JOB = HOOK_PACK_JOB
   .replace('  hook-pack:', '  hook-pack-windows:')
   .replace('    runs-on: ${{ matrix.os }}', '    runs-on: windows-latest')
-  .replace('        os: [ubuntu-latest]', '        family: [attribution, closure-matrix, fault, governance, issue-closure, merge, push]')
+  .replace('        os: [ubuntu-latest]', '        family: [attribution, closure-matrix, fault, governance, issue-closure, merge, push, task-governance]')
   .replace(' run --budget-seconds 360', ' run --family ${{ matrix.family }} --budget-seconds 360');
 
 // The exact text of the personal-data job: every commit of the pull request or push, its messages,

@@ -166,7 +166,7 @@ function writeLastRun(id, record, home) {
 
 // The skip reasons the job runner writes. Anything else is shown as a bare "skipped", so no command
 // output reaches a session line.
-const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|governance status could not be read|governance is [A-Z]+|no shards yet)$/;
+const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|binding is missing|binding is invalid|binding does not match origin|binding observation expired|binding refresh failed(?:: (?:default branch fetch failed|GitHub unreachable|origin transport refused|default branch unknown|default branch moved|fetch guards unavailable|commit unreadable|binding unreadable|cache unwritable|governance reads offline))?|no usable github\.com origin repository|governance status could not be read|governance is (?:ENABLED|DISABLED|UNDECIDED|UNAVAILABLE|ERROR)|no shards yet)$/;
 const STALE_MS = 2 * 60 * 60 * 1000;
 
 // HH:MMZ on now's UTC date, else with the date (always with it when now is null).
@@ -186,26 +186,73 @@ function skipText(last, now = null) {
   return `skipped${reason}, ${count} run${count === 1 ? '' : 's'} in a row${when}`;
 }
 
+function installedHours(text) {
+  const match = /^hourly, ([01]\d|2[0-3]):00 to ([01]\d|2[0-3]):59$/.exec(String(text));
+  return match ? { hour: Number(match[1]), hours: (Number(match[2]) - Number(match[1]) + 24) % 24 + 1 } : null;
+}
+
 // The session-start line for this computer's programme sweep of a repository, or null when it is
 // fine or there is none: its last run held, skipped or failed, or there has been no run for over 2 hours
 // inside its hours. Fixed wording only.
-function sweepLine(repository, { home = os.homedir(), now = new Date() } = {}) {
-  const registry = readRegistry(home);
+function sweepLine(repository, { home = os.homedir(), now = new Date(), registry = readRegistry(home) } = {}) {
   if (registry.status !== 'ok' || typeof repository !== 'string') return null;
-  const entry = registry.tasks.find(item => item.host === 'windows' && item.job === 'programme-sweep' && !item.adopted
+  const entry = registry.tasks.find(item => item.host === 'windows' && ['programme-sweep', 'footer-sweep'].includes(item.job) && !item.adopted
     && String(item.repository || '').toLowerCase() === repository.toLowerCase());
   if (!entry) return null;
-  if (entry.stopped_by_owner) return 'Programme sweep: stopped by owner; see toolkit tasks.';
+  const label = entry.job === 'footer-sweep' ? 'Footer sweep' : 'Programme sweep';
+  if (entry.stopped_by_owner) return `${label}: stopped by owner; see toolkit tasks.`;
   const last = readLastRun(entry.id, home);
   const at = last && [last.finished, last.started].find(value => typeof value === 'string' && !Number.isNaN(Date.parse(value)));
-  const { schedule } = require('./toolkit-windows-tasks.cjs').JOBS['programme-sweep'];
-  const [hour, minute] = schedule.at.split(':').map(Number);
-  const intoWindow = ((now.getHours() * 60 + now.getMinutes()) - (hour * 60 + minute) + 1440) % 1440;
-  const stale = intoWindow >= STALE_MS / 60000 && intoWindow < schedule.hours * 60 && (!at || now.getTime() - Date.parse(at) > STALE_MS);
+  const schedule = installedHours(entry.schedule);
+  const intoWindow = schedule ? ((now.getHours() * 60 + now.getMinutes()) - schedule.hour * 60 + 1440) % 1440 : null;
+  const stale = schedule && (schedule.hours === 24 || intoWindow >= STALE_MS / 60000 && intoWindow < schedule.hours * 60) && (!at || now.getTime() - Date.parse(at) > STALE_MS);
   const status = skipText(last, now) || (last && ['failed', 'held'].includes(last.status) && at ? `${last.status} at ${shortTime(at, now)}` : null);
-  if (stale) return `Programme sweep: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}; see toolkit tasks.`;
-  if (status) return `Programme sweep: ${status.startsWith('failed') ? 'last run ' : ''}${status}; see toolkit tasks.`;
+  if (stale) return `${label}: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}; see toolkit tasks.`;
+  if (status) return `${label}: ${status.startsWith('failed') ? 'last run ' : ''}${status}; see toolkit tasks.`;
   return null;
+}
+
+// Prevent obsolete recorded task shapes going unnoticed after a governance change. Advisory only:
+// uncertain reads fail quiet; no history, directory enumeration, scheduler, process or network work.
+function taskGovernanceLine(state, { home = os.homedir(), platform = process.platform, environment = process.env, registry } = {}) {
+  if (platform !== 'win32' || environment.TOOLKIT_GOVERNANCE_OFFLINE === '1') return null;
+  const merged = state?.merged;
+  const certain = merged?.fresh === true && !merged.unavailable && !state.notes?.includes('could-not-check-governance')
+    && (state.state === 'ENABLED' && merged.status === 'enabled'
+      || state.state === 'DISABLED' && ['disabled', 'none'].includes(merged.status)
+      || state.state === 'UNDECIDED' && merged.status === 'none');
+  const wanted = require('./toolkit-task-shape.cjs').confirmedTaskShape({ certain, governanceState: state?.state });
+  if (!wanted || typeof state.repository !== 'string' || !REPOSITORY.test(state.repository)) return null;
+  registry ??= readRegistry(home);
+  if (registry.status !== 'ok' || !Array.isArray(registry.tasks)) return null;
+  const jobs = ['programme-sweep', 'shard-timings', 'footer-sweep'];
+  const rows = registry.tasks.filter(row => row.host === 'windows' && !row.adopted
+    && String(row.repository || '').toLowerCase() === state.repository.toLowerCase());
+  if (!rows.length || rows.some(row => !jobs.includes(row.job) || row.stopped_by_owner)) return null;
+  // Choices can travel with a surviving row after retirement. Use the latest answer per task,
+  // rather than an earlier keep which a later replace has superseded.
+  const latest = new Map();
+  for (const row of rows) {
+    if (row.task_choices !== undefined && !Array.isArray(row.task_choices)) return null;
+    const rowChoices = new Map();
+    for (const choice of row.task_choices || []) {
+      if (!choice || !ID.test(choice.task || '') || !['keep', 'replace'].includes(choice.outcome) || !Number.isFinite(Date.parse(choice.at))) return null;
+      rowChoices.set(choice.task, choice);
+    }
+    for (const choice of rowChoices.values()) {
+      const previous = latest.get(choice.task);
+      if (previous && Date.parse(previous.at) === Date.parse(choice.at) && previous.outcome !== choice.outcome) return null;
+      if (!previous || Date.parse(choice.at) >= Date.parse(previous.at)) latest.set(choice.task, choice);
+    }
+    // A relationship is proof about a recorded cleaner, never another enrolment.
+    if (row.replaces !== undefined && (!row.replaces || Object.keys(row.replaces).join() !== 'cleaner'
+      || !['programme-sweep', 'footer-sweep'].includes(row.job)
+      || !['programme-sweep', 'footer-sweep'].includes(row.replaces.cleaner?.job)
+      || row.replaces.cleaner.job === row.job)) return null;
+  }
+  if ([...latest.values()].some(choice => choice.outcome === 'keep')) return null;
+  if (rows.length === wanted.length && wanted.every(job => rows.filter(row => row.job === job).length === 1)) return null;
+  return 'Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers.';
 }
 
 // ---- record and forget -----------------------------------------------------------------------
@@ -276,7 +323,8 @@ function windowsRows(registry, folders, scheduler, home) {
       if (owned) {
         const last = readLastRun(recorded.id, home);
         const edited = recorded.enrolled && JSON.stringify(windowsTasks.enrolledDefinition(task)) !== JSON.stringify(recorded.enrolled);
-        row.state = recorded.stopped_by_owner || task.state === 'Disabled' || edited ? 'stopped by owner' : 'Toolkit';
+        row.state = recorded.stopped_by_owner || task.state === 'Disabled' ? 'stopped by owner'
+          : edited ? ['programme-sweep', 'shard-timings'].includes(recorded.job) ? 'modified; owner choice required' : 'stopped by owner' : 'Toolkit';
         // The job writes its record as it starts and again as it ends, so a record that ended (or,
         // still running, started) before Task Scheduler's last run time, less 2 seconds, belongs to
         // an older run: the newer one stopped before writing anything, and is not shown as the
@@ -374,7 +422,8 @@ function formatList(result) {
   for (const row of result.rows) {
     const where = row.host === 'windows' ? `${HOST_TEXT.windows} ${row.folder ? `\\${row.folder}\\` : '(root folder)'}` : HOST_TEXT[row.host];
     const last = row.last_run ? `; last run ${String(row.last_run).slice(0, 16).replace('T', ' ')}${row.result ? ` ${row.result}` : ''}${row.last_result && row.last_result !== 'ok' ? ` (Windows: ${row.last_result})` : ''}` : '';
-    lines.push(`- ${row.name}: ${row.state}. ${where}; ${row.schedule}; ${row.ai}${last}. ${row.purpose ? `${row.purpose} ` : ''}(${row.source})`);
+    const disabled = row.windows_state === 'Disabled' ? '; Disabled (will not run)' : '';
+    lines.push(`- ${row.name}: ${row.state}${disabled}. ${where}; ${row.schedule}; ${row.ai}${last}. ${row.purpose ? `${row.purpose} ` : ''}(${row.source})`);
     for (const line of row.summary || []) lines.push(`    ${line}`);
   }
   if (!result.rows.length) lines.push('- none found');
@@ -434,5 +483,5 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = {
   SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, writeTaskBackup, readLastRun, writeLastRun,
-  entryProblem, looksSecret, safeText, skipText, sweepLine, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
+  entryProblem, looksSecret, safeText, skipText, sweepLine, taskGovernanceLine, installedHours, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
 };

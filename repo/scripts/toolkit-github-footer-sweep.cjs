@@ -82,13 +82,24 @@ function findFooted(gh, repo, since) {
 }
 
 function sweep(options, deps = {}) {
-  const gh = deps.gh || defaultGh;
+  const transport = deps.gh || defaultGh;
+  const gh = (args, input) => transport([...args, '--hostname', 'github.com'], input);
   const login = options.anyAuthor ? null : gh(['api', 'user', '--jq', '.login']).trim();
   const results = [];
   for (const repo of options.repos) {
     let footed;
-    try { footed = findFooted(gh, repo, options.since); }
-    catch (error) { results.push({ repo, kind: 'scan', status: 'FAILED', detail: firstLine(error) }); continue; }
+    try {
+      const metadata = JSON.parse(gh(['api', `repos/${repo}`, '--jq', '{full_name}']));
+      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)
+        || typeof metadata.full_name !== 'string' || metadata.full_name.toLowerCase() !== repo.toLowerCase()) {
+        throw Object.assign(new Error('repository identity did not match the requested origin'), { reason: 'repository-identity-mismatch' });
+      }
+      footed = findFooted(gh, repo, options.since);
+    }
+    catch (error) {
+      results.push({ repo, kind: 'scan', status: 'FAILED', detail: firstLine(error), ...(error.reason === 'repository-identity-mismatch' ? { reason: error.reason } : {}) });
+      continue;
+    }
     for (const post of footed) {
       const row = { repo, kind: post.kind, url: post.url, author: post.author };
       const body = stripFooter(post.body);

@@ -305,7 +305,7 @@ function createFakeManagedSetupScript(root, options = {}) {
       : ["  process.stdout.write(JSON.stringify({ protocol, question_bank_stream: 'stdout', control_fd: 3, acknowledgement_fd: 4, pause_status: 23 }) + '\\n');"]),
     "  process.exit(0);",
     "}",
-    ...(options.argsLogPath ? [`fs.writeFileSync(${JSON.stringify(options.argsLogPath)}, JSON.stringify({ argv: process.argv.slice(2), depth: process.env.AI_AGENT_TOOLKIT_MANAGED_DELEGATION_DEPTH || '' }));`] : []),
+    ...(options.argsLogPath ? [`fs.writeFileSync(${JSON.stringify(options.argsLogPath)}, JSON.stringify({ argv: process.argv.slice(2), depth: process.env.AI_AGENT_TOOLKIT_MANAGED_DELEGATION_DEPTH || '', workingFolder: process.env.AI_AGENT_TOOLKIT_SETUP_START_FOLDER || '' }));`] : []),
     ...(options.stdinLogPath ? [`fs.writeFileSync(${JSON.stringify(options.stdinLogPath)}, fs.readFileSync(0, 'utf8'));`] : []),
     ...(options.stdinHexLogPath ? [`fs.writeFileSync(${JSON.stringify(options.stdinHexLogPath)}, fs.readFileSync(0).toString('hex'));`] : []),
     ...(options.hang ? ["Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);"] : []),

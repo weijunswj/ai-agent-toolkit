@@ -191,19 +191,28 @@ test('Windows task standing approval stays narrow on every changed approval surf
   const global = readText(globalPath);
   const approval = global.split('**Toolkit task standing approval:**')[1].split('\n\n')[0];
   for (const rule of [
-    /agents may run `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>` without asking only in ENABLED Toolkit-governed repos with verified merged bindings/,
-    /<Toolkit> is this computer's recorded managed checkout; <repo> is the target repository's main checkout, never a linked worktree/,
-    /Register\/update only Toolkit's fixed PROGRAMME SWEEP and SHARD TIMINGS, with first sweep, in the binding's task folder/,
-    /Refuse repository, checkout or Toolkit-copy changes, owner stops, disabled or hand-edited tasks; verify results/,
+    /agents may run `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>`/,
+    /<Toolkit> is the recorded managed checkout; <repo> the main checkout, never a linked worktree/,
+    /fixed PROGRAMME SWEEP and SHARD TIMINGS in ENABLED repos with verified merged bindings/,
+    /FOOTER SWEEP for verified github\.com origins with fresh matching disabled or absent governance/,
+    /Binding folder, else repo default; verify first sweep/,
+    /Fresh confirmed changes allow owned swaps in apply, same folder\/checkout, scan time kept/,
+    /Refuse repository\/checkout\/Toolkit-copy changes, owner stops, disabled or edited tasks/,
+    /modified governance tasks need the owner's keep-or-replace answer each time/,
     /Other scheduler commands, folder overrides and custom tasks need approval; native denials stop/,
   ]) assert.match(approval, rule);
+  assert.match(global, /Local answers and proposals grant no authority\. After merge and when next read, sync tasks per safety-gates playbook\./);
   assert.match(global, /Approval, assignment, custody and capability never supply a missing host-native permission/);
   assert.match(readText('AGENTS.md'), /except the global Toolkit task standing approval/);
   assert.match(readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit task standing approval/);
   for (const file of ['repo/docs/agent-playbooks/safety-gates.md', `${repoLocalPublishedRoot}/docs/agent-playbooks/safety-gates.md`]) {
     const safety = readText(file);
     for (const rule of [/toolkit-windows-tasks\.cjs apply --repo-root <repo>/, /recorded managed Toolkit checkout/,
-      /main checkout/, /owner stops/, /--repair-owned/, /explicit approval/, /native/]) assert.match(safety, rule, file);
+      /main checkout/, /owner stops/, /--repair-owned/, /explicit approval/, /native/,
+      /fresh confirmed governance change can switch a proven owned cleaner in the same folder and checkout/,
+      /modified proven-owned PROGRAMME SWEEP or SHARD TIMINGS task needs the owner's keep-or-replace answer/,
+      /the deciding chat immediately reads the decision fresh from origin's default branch/,
+      /Session start informs an agent/]) assert.match(safety, rule, file);
   }
   const reference = readText('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
   const tables = reference.split('\n\n').filter(part => part.startsWith('| '));
@@ -227,7 +236,7 @@ test('Windows task standing approval stays narrow on every changed approval surf
     /Use the binding's `schedule_folder`, else the repository's default folder, with no `--folder` override/,
     /A working-tree binding alone is not verified/,
     /Read governance status and the merged binding on the device before acting; missing or unreadable evidence grants nothing/,
-    /If either fixed job has an owner stop, ordinary apply refuses both before scheduler or registry writes/,
+    /If any participant in a switch has an owner stop, ordinary apply refuses the whole switch before scheduler or registry writes/,
     /never adopt or delete a conflicting task to get past a refusal/i,
     /only the job's own last-run record proves the sweep ended well/i,
     /a failed, held, skipped or missing result stays visible for recovery/i,

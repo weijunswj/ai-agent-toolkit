@@ -11,16 +11,16 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..', '..');
+const { tempHome, checkout, addShards, fixtureBinding, fakeScheduler, assertDefinition, fakeRun, assertLiveRegistry, switchWorld, assertShape, printedRecovery, NODE, identityReader, testRepository, TOOLKIT_ROOT, GH, ATTENTION } = require('./support/windows-task-switch-world.cjs');
 const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
 const job = require('../scripts/toolkit-scheduled-job.cjs');
 const tasks = require('../scripts/toolkit-tasks.cjs');
 const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const shards = require('../scripts/ci-test-shards.cjs');
 
-const NODE = 'C:\\Program Files\\nodejs\\node.exe';
-const identityReader = ({ checkout, toolkitRoot }) => ({ checkout, toolkitRoot });
-const testRepository = root => { if (!fs.existsSync(path.join(root, '.git'))) throw new Error('registered root is not a repository checkout'); return true; };
-const TOOLKIT_ROOT = 'C:\\Toolkit\\ai-agent-toolkit';
+const MEMORY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-memory-'));
+test.after(() => fs.rmSync(MEMORY_HOME, { recursive: true, force: true }));
+
 const hostile = require('./support/hostile-inputs.cjs');
 
 function memoryRegistry(initial = []) {
@@ -42,21 +42,21 @@ const matrixKinds = ['managed checkout', 'plugin copy', 'linked worktree', 'othe
 const matrixTargets = ['main checkout', 'linked worktree', 'missing/not a repo'];
 const matrixStates = ['absent', 'healthy same repository', 'healthy other repository', 'healthy other checkout', 'disabled', 'edited action', 'edited trigger', 'removed by owner', 'adopted/unowned', 'corrupt registry'];
 const matrixRequesters = ['agent standing', 'owner explicit', 'setup plan'];
-for (const toolkit of matrixKinds) for (const target of matrixTargets) for (const state of matrixStates) for (const requester of matrixRequesters) {
-  test(`closure: ${toolkit} / ${target} / ${state} / ${requester}`, () => {
+for (const shape of ['programme', 'footer']) for (const toolkit of matrixKinds) for (const target of matrixTargets) for (const state of matrixStates) for (const requester of matrixRequesters) {
+  test(`closure: ${shape} / ${toolkit} / ${target} / ${state} / ${requester}`, () => {
     const scheduler = fakeScheduler();
     const registry = memoryRegistry();
     const root = 'C:\\Repositories\\widget';
-    const wanted = windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, deps: { identityReader, governance: governance({ repository: 'example/widget', folder: 'WIDGET' }) } });
-    const owner = () => new windowsTasks.WindowsTaskOwner({ scheduler, registry, home: 'fixture-home', identityReader,
+    const wanted = windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, deps: { identityReader, governance: governance({ repository: 'example/widget', folder: 'WIDGET', state: shape === 'footer' ? 'UNDECIDED' : 'ENABLED' }) } });
+    const owner = () => new windowsTasks.WindowsTaskOwner({ scheduler, registry, home: MEMORY_HOME, identityReader,
       now: () => new Date('2026-11-05T00:00:00.000Z'), repairOwned: requester === 'owner explicit' });
     if (state !== 'absent') assert.ok(owner().apply(wanted).items.every(item => item.done));
     if (state === 'healthy other repository') registry.updateRegistry(null, rows => rows.map(row => ({ ...row, repository: 'someone-else/widget' })));
     if (state === 'healthy other checkout') registry.updateRegistry(null, rows => rows.map(row => ({ ...row, checkout: 'C:\\Old\\widget' })));
     if (state === 'disabled') scheduler.folders.get('WIDGET')[0].state = 'Disabled';
     if (state === 'edited action') scheduler.folders.get('WIDGET')[0].arguments += ' --owner-edit';
-    if (state === 'edited trigger') scheduler.folders.get('WIDGET')[1].triggers = [{ kind: 'MSFT_TaskWeeklyTrigger', start: '2099-01-01T09:15:00', days_of_week: 2 }];
-    if (state === 'removed by owner') owner().remove('WIDGET');
+    if (state === 'edited trigger') scheduler.folders.get('WIDGET')[shape === 'footer' ? 0 : 1].triggers = [{ kind: 'MSFT_TaskWeeklyTrigger', start: '2099-01-01T09:15:00', days_of_week: 2 }];
+    if (state === 'removed by owner') owner().remove('WIDGET', wanted);
     if (state === 'adopted/unowned') registry.updateRegistry(null, rows => rows.map(row => ({ ...row, adopted: true })));
     if (state === 'corrupt registry') registry.corrupt = true;
     scheduler.calls.length = 0; registry.calls.length = 0;
@@ -68,12 +68,12 @@ for (const toolkit of matrixKinds) for (const target of matrixTargets) for (cons
     const reader = request => { if (!validLocation) throw new Error('unsupported invocation location'); return identityReader(request); };
     let result;
     const invoke = () => {
-      const instance = new windowsTasks.WindowsTaskOwner({ scheduler, registry, home: 'fixture-home', identityReader: reader,
+      const instance = new windowsTasks.WindowsTaskOwner({ scheduler, registry, home: MEMORY_HOME, identityReader: reader,
         now: () => new Date('2026-11-05T00:00:00.000Z'), repairOwned: requester === 'owner explicit' });
       return requester === 'setup plan' ? instance.plan(wanted) : instance.apply(wanted);
     };
     if (!validLocation || state === 'corrupt registry' && requester !== 'setup plan') assert.throws(invoke);
-    else { result = invoke(); assert.equal(result.items.every(item => item.action !== 'refused'), allowed); }
+    else { result = invoke(); assert.equal(result.items.every(item => !['refused', 'owner-choice-required'].includes(item.action)), allowed); }
     if (!allowed || requester === 'setup plan') {
       assert.deepEqual(registry.readRegistry(), beforeRegistry, 'registry unchanged');
       assert.deepEqual([...scheduler.folders], beforeTasks, 'scheduler unchanged');
@@ -86,79 +86,14 @@ for (const toolkit of matrixKinds) for (const target of matrixTargets) for (cons
   });
 }
 
-function tempHome(t) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-tasks-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  return home;
-}
-
-// A checkout folder; `shards` adds the Toolkit shard contract, not a local refresher script.
-function checkout(t, { shards = true } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-checkout-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, '.git'));
-  if (shards) {
-    addShards(root);
-  }
-  return root;
-}
-
-function addShards(root) {
-  fs.mkdirSync(path.join(root, 'repo', 'contracts', 'ci'), { recursive: true });
-  fs.mkdirSync(path.join(root, 'repo', 'tests'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'repo', 'tests', 'example.test.cjs'), '// fixture\n');
-  fs.writeFileSync(path.join(root, ...shards.MANIFEST_REL.split('/')), JSON.stringify({
-    schema: shards.MANIFEST_SCHEMA,
-    systems: Object.fromEntries(shards.SYSTEMS.map(system => [system, { shards: [{ id: `${system}-1`, rest: true }] }])),
-  }));
-}
-
 function governance({ state = 'ENABLED', folder = 'TOOLKIT', repository = 'weijunswj/ai-agent-toolkit', binding = true } = {}) {
+  const status = state === 'ENABLED' ? binding ? 'enabled' : 'unknown' : state === 'DISABLED' ? binding ? 'disabled' : 'none' : state === 'UNDECIDED' ? 'none' : 'unknown';
+  const source = binding && ['enabled', 'disabled'].includes(status) ? fixtureBinding(repository, folder, status === 'enabled') : null;
   return {
-    readIdentity: root => ({ valid: true, root, remote: { path: `/${repository}.git` } }),
-    governanceState: () => ({ state }),
-    mergedBinding: () => (binding && state === 'ENABLED' ? { repository, schedule_folder: folder, store: { repository: 'weijunswj/TRANSPORT-ai-agent-toolkit' } } : null),
-  };
-}
-
-// An in-memory Task Scheduler with the same methods as powerShellScheduler(). register and
-// unregister keep the PowerShell side's own marker check.
-function fakeScheduler(initial = {}) {
-  const folders = new Map(Object.entries(initial).map(([folder, list]) => [folder, list.map(task => ({ ...task }))]));
-  const calls = [];
-  const key = folder => folder || '';
-  const of = folder => folders.get(key(folder)) || [];
-  return {
-    calls, folders,
-    onStart: null,
-    list(folder) { calls.push(['list', folder]); return structuredClone(of(folder)); },
-    markedFolders() { return [...folders.entries()].filter(([name, list]) => name && list.some(task => String(task.description).includes('[toolkit-task v1 '))).map(([name]) => name); },
-    register(d) {
-      calls.push(['register', d.folder, d.name]);
-      const list = folders.get(d.folder) || [];
-      const existing = list.find(task => task.name === d.name);
-      if (existing && !String(existing.description).includes(`[toolkit-task v1 id=${d.id} `)) throw new Error('not Toolkit\'s');
-      const task = { name: d.name, description: d.description, state: 'Ready', execute: d.execute, arguments: d.arguments, working_directory: d.working_directory,
-        actions: [{ execute: d.execute, arguments: d.arguments, working_directory: d.working_directory }],
-        triggers: d.schedule.kind === 'hourly' ? [{ kind: 'MSFT_TaskDailyTrigger', start: `2026-10-29T${d.schedule.at}:00+08:00`, interval: 'PT1H', duration: `PT${d.schedule.hours}H` }]
-          : [{ kind: 'MSFT_TaskWeeklyTrigger', start: `2026-10-26T${d.schedule.at}:00+08:00`, days_of_week: 2 }], last_run: null, last_result: 0x41303 };
-      folders.set(d.folder, [...list.filter(item => item.name !== d.name), task]);
-    },
-    unregister(folder, name, id) {
-      calls.push(['unregister', folder, name]);
-      const task = of(folder).find(item => item.name === name);
-      if (task && !String(task.description).includes(`[toolkit-task v1 id=${id} `)) throw new Error('marker');
-      folders.set(folder, of(folder).filter(item => item.name !== name));
-    },
-    removeFolderIfEmpty(folder) {
-      calls.push(['remove-folder', folder]);
-      if (!folders.has(folder)) return { folder: 'absent' };
-      if (of(folder).length) return { folder: 'kept' };
-      folders.delete(folder);
-      return { folder: 'removed' };
-    },
-    start(folder, name) { calls.push(['start', folder, name]); if (this.onStart) this.onStart(of(folder).find(item => item.name === name)); },
-    info(folder, name) { const task = of(folder).find(item => item.name === name); return { state: task.state, last_run: task.last_run, last_result: task.last_result }; },
+    readIdentity: root => ({ valid: true, root, remote: { host: 'github.com', path: `/${repository}.git` } }),
+    governanceState: () => ({ state, merged: { status, fresh: status !== 'unknown' } }),
+    mergedBinding: () => source,
+    readObservation: () => ({ status, fresh: status !== 'unknown', binding: source }),
   };
 }
 
@@ -182,9 +117,9 @@ test('G: an ENABLED Toolkit checkout gets both tasks in \\TOOLKIT\\, recorded in
   const registry = tasks.readRegistry(home);
   assert.equal(registry.status, 'ok');
   assert.deepEqual(registry.tasks.map(entry => [entry.id, entry.folder, entry.schedule, entry.model, entry.effort]),
-    [['toolkit-programme-sweep', 'TOOLKIT', 'hourly, 08:00 to 23:59', null, null], ['toolkit-shard-timings', 'TOOLKIT', 'weekly, Monday 09:15', null, null]]);
+    [['toolkit-programme-sweep', 'TOOLKIT', 'hourly, 00:00 to 23:59', null, null], ['toolkit-shard-timings', 'TOOLKIT', 'weekly, Monday 09:15', null, null]]);
   const report = windowsTasks.describePlan(result, { applied: true }).join('\n');
-  assert.match(report, /TOOLKIT - PROGRAMME SWEEP \(hourly, 08:00 to 23:59\): created\. Brings the programme pages/);
+  assert.match(report, /TOOLKIT - PROGRAMME SWEEP \(hourly, 00:00 to 23:59\): created\. Cleans your own GitHub posts/);
   assert.match(report, /TOOLKIT - SHARD TIMINGS \(weekly, Monday 09:15\): created\./);
   if (process.platform !== 'win32') assert.equal((fs.statSync(tasks.registryPath(home)).mode & 0o777), 0o600);
   const sweep = wanted.wanted[0];
@@ -193,22 +128,22 @@ test('G: an ENABLED Toolkit checkout gets both tasks in \\TOOLKIT\\, recorded in
   assert.match(sweep.description, /^TOOLKIT: PROGRAMME SWEEP\. .*\[toolkit-task v1 id=toolkit-programme-sweep def=[0-9a-f]{12}\]$/);
 });
 
-test('G: both fixed jobs require ENABLED governance and a merged binding, with or without shards', (t) => {
+test('G: fresh enabled governance selects programme and shards; fresh off or absent selects footer; uncertainty refuses', (t) => {
   const cases = [
     { state: 'ENABLED', binding: true, allowed: true },
-    ...['DISABLED', 'UNDECIDED', 'ERROR', null].flatMap(state => [true, false].map(binding => ({ state, binding, allowed: false }))),
+    ...['DISABLED', 'UNDECIDED', 'ERROR', null].flatMap(state => [true, false].map(binding => ({ state, binding, allowed: state === 'DISABLED' || state === 'UNDECIDED', footer: state === 'DISABLED' || state === 'UNDECIDED' }))),
     { state: 'ENABLED', binding: false, allowed: false },
   ];
   for (const row of cases) for (const hasShards of [false, true]) {
     const scheduler = fakeScheduler();
     const wanted = desired(t, { ...row, shards: hasShards, repository: 'example/widget', folder: 'WIDGET' });
     const result = windowsTasks.applyTasks(wanted, { scheduler, home: tempHome(t) });
-    assert.deepEqual(result.items.map(item => item.definition.job), row.allowed ? ['programme-sweep', 'shard-timings'] : [], JSON.stringify({ ...row, hasShards }));
-    assert.equal(scheduler.calls.filter(call => call[0] === 'register').length, row.allowed ? 2 : 0);
+    assert.deepEqual(result.items.map(item => item.definition.job), row.footer ? ['footer-sweep'] : row.allowed ? ['programme-sweep', 'shard-timings'] : [], JSON.stringify({ ...row, hasShards }));
+    assert.equal(scheduler.calls.filter(call => call[0] === 'register').length, row.footer ? 1 : row.allowed ? 2 : 0);
     if (!row.allowed) {
       assert.equal(result.refused, true, 'unavailable governance is an apply refusal, never a success');
-      assert.equal(result.skipped.length, 2);
-      for (const item of result.skipped) assert.match(item.reason, row.state === 'ENABLED' ? /binding merged on the default branch could not be read/ : /GitHub governance is .* so Toolkit tasks are not registered/);
+      assert.equal(result.skipped.length, 3);
+      for (const item of result.skipped) assert.match(item.reason, /fresh matching merged governance could not be verified/);
       assert.doesNotMatch(windowsTasks.describePlan(result, { command: 'node x apply' }).join('\n'), /Run this command/);
       assert.equal(windowsTasks.main(['apply', '--no-first-run', '--repo-root', wanted.root], {
         platform: 'win32', home: tempHome(t), scheduler, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE,
@@ -229,12 +164,12 @@ test('G: binding folder or repository default selects both jobs; unreadable evid
     assert.equal(command, `node "${TOOLKIT_ROOT}\\repo\\scripts\\toolkit-windows-tasks.cjs" apply --repo-root "${root}"`);
     assert.doesNotMatch(command, /--folder|--no-first-run/);
   }
-  for (const failing of ['mergedBinding', 'governanceState']) {
+  for (const failing of ['readObservation', 'governanceState']) {
     const reader = governance();
     reader[failing] = () => { throw new Error('unreadable'); };
     const wanted = windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, deps: { identityReader, governance: reader } });
     assert.deepEqual(wanted.wanted, [], failing);
-    assert.equal(wanted.skipped.length, 2);
+    assert.equal(wanted.skipped.length, 3);
   }
 });
 
@@ -280,7 +215,7 @@ test('G: the owner\'s own same-named task without the marker is untouched and To
   const lines = [];
   const code = windowsTasks.main(['apply', '--no-first-run'], { platform: 'win32', home, scheduler, cwd: checkout(t, { shards: false }), checkoutDeps: { identityReader, governance: governance() }, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, stdout: text => lines.push(text), stderr: () => {} });
   assert.equal(code, 1);
-  assert.match(lines.join(''), /PROGRAMME SWEEP \(hourly, 08:00 to 23:59\): refused/);
+  assert.match(lines.join(''), /PROGRAMME SWEEP \(hourly, 00:00 to 23:59\): refused/);
 });
 
 test('G: root-folder n8n backups and other repositories\' folders are never changed', (t) => {
@@ -288,8 +223,9 @@ test('G: root-folder n8n backups and other repositories\' folders are never chan
   const n8n = unmarked('n8n-local-cli-backup-0123456789ab', { description: 'n8n backup' });
   const other = { ...unmarked('SAQG - PROGRAMME SWEEP'), description: 'SAQG: PROGRAMME SWEEP. x [toolkit-task v1 id=saqg-programme-sweep def=0123456789ab]' };
   const scheduler = fakeScheduler({ '': [n8n], SAQG: [other] });
-  windowsTasks.applyTasks(desired(t), { scheduler, home });
-  windowsTasks.removeTasks({ scheduler, home });
+  const wanted = desired(t);
+  windowsTasks.applyTasks(wanted, { scheduler, home });
+  windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   assert.deepEqual(scheduler.folders.get(''), [n8n]);
   assert.deepEqual(scheduler.folders.get('SAQG'), [other]);
   assert.equal(scheduler.calls.some(call => call[0] !== 'list' && (call[1] === 'SAQG' || call[1] === '' || call[1] === null)), false);
@@ -337,10 +273,11 @@ test('G: a native denial is reported without a second route or task effect', (t)
 test('G: --remove-toolkit-tasks removes only marked and recorded tasks; the folder only when empty', (t) => {
   const home = tempHome(t);
   const scheduler = fakeScheduler();
-  windowsTasks.applyTasks(desired(t), { scheduler, home });
+  const wanted = desired(t);
+  windowsTasks.applyTasks(wanted, { scheduler, home });
   scheduler.folders.get('TOOLKIT').push(unmarked('Session Digest'));
   windowsTasks.adoptTask({ folder: 'TOOLKIT', task: 'Session Digest', id: 'session-digest', purpose: 'Daily redacted session digest. No AI.' }, { scheduler, home });
-  const kept = windowsTasks.removeTasks({ scheduler, home });
+  const kept = windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   assert.deepEqual(kept.items.map(item => item.action), ['removed', 'removed']);
   assert.deepEqual(kept.folders, [{ folder: 'TOOLKIT', result: 'kept' }]);
   assert.deepEqual(scheduler.folders.get('TOOLKIT').map(task => task.name), ['Session Digest']);
@@ -348,16 +285,18 @@ test('G: --remove-toolkit-tasks removes only marked and recorded tasks; the fold
   // With nothing else in it, the folder goes too.
   const home2 = tempHome(t);
   const empty = fakeScheduler();
-  windowsTasks.applyTasks(desired(t), { scheduler: empty, home: home2 });
-  assert.deepEqual(windowsTasks.removeTasks({ scheduler: empty, home: home2 }).folders, [{ folder: 'TOOLKIT', result: 'removed' }]);
+  const wanted2 = desired(t);
+  windowsTasks.applyTasks(wanted2, { scheduler: empty, home: home2 });
+  assert.deepEqual(windowsTasks.removeTasks({ scope: wanted2, scheduler: empty, home: home2 }).folders, [{ folder: 'TOOLKIT', result: 'removed' }]);
   assert.equal(empty.folders.has('TOOLKIT'), false);
   assert.ok(tasks.readRegistry(home2).tasks.every(entry => entry.stopped_by_owner));
   // A recorded task whose marker was edited away is left alone.
   const home3 = tempHome(t);
   const edited = fakeScheduler();
-  windowsTasks.applyTasks(desired(t, { shards: false }), { scheduler: edited, home: home3 });
+  const wanted3 = desired(t, { shards: false });
+  windowsTasks.applyTasks(wanted3, { scheduler: edited, home: home3 });
   edited.folders.get('TOOLKIT')[0].description = 'changed by hand';
-  assert.equal(windowsTasks.removeTasks({ scheduler: edited, home: home3 }).items[0].action, 'refused');
+  assert.equal(windowsTasks.removeTasks({ scope: wanted3, scheduler: edited, home: home3 }).items[0].action, 'refused');
   assert.deepEqual(edited.folders.get('TOOLKIT').map(item => item.name), ['TOOLKIT - PROGRAMME SWEEP']);
 });
 
@@ -484,7 +423,7 @@ test('identity: canonical main locations and exact Toolkit origin, with no netwo
 
 test('identity: origin and merged binding must agree before any scheduler reads', t => {
   const reader = governance({ repository: 'example/widget' });
-  reader.mergedBinding = () => ({ repository: 'other/widget', schedule_folder: 'WIDGET' });
+  reader.readObservation = () => ({ status: 'enabled', fresh: true, binding: fixtureBinding('other/widget') });
   assert.throws(() => windowsTasks.desiredTasks({ checkout: checkout(t), toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, deps: { identityReader, governance: reader } }), /origin identity and merged binding/);
 });
 
@@ -496,7 +435,7 @@ test('ownership: Windows name collisions and folder changes cannot bypass enrolm
   assert.ok(scheduler.calls.every(call => call[0] === 'list'));
   const owned = fakeScheduler();
   windowsTasks.applyTasks(wanted, { scheduler: owned, home });
-  windowsTasks.removeTasks({ scheduler: owned, home });
+  windowsTasks.removeTasks({ scope: wanted, scheduler: owned, home });
   const moved = desired(t, { root: wanted.root, folder: 'NEW' });
   const stop = fs.readFileSync(tasks.registryPath(home)); owned.calls.length = 0;
   for (const repairOwned of [false, true]) assert.ok(windowsTasks.applyTasks(moved, { scheduler: owned, home, repairOwned }).items.every(row => row.action === 'refused'));
@@ -520,7 +459,7 @@ test('readers: hostile inputs cannot become paths, arguments or stop metadata', 
 });
 
 for (const edit of ['execute', 'arguments', 'directory', 'extra action', 'marker', 'principal', 'settings', 'trigger count', 'trigger disabled', 'future start', 'end', 'repetition', 'weekday', 'weekly interval']) {
-  test(`definition baseline: refuses ${edit} on either job before any mutation`, t => {
+  test(`definition baseline: requires an owner choice for ${edit} on either job before any mutation`, t => {
     const home = tempHome(t), scheduler = fakeScheduler(), wanted = desired(t);
     windowsTasks.applyTasks(wanted, { scheduler, home });
     const live = scheduler.folders.get('TOOLKIT')[1];
@@ -540,7 +479,7 @@ for (const edit of ['execute', 'arguments', 'directory', 'extra action', 'marker
     if (edit === 'weekly interval') live.triggers[0].weeks_interval = 2;
     const before = fs.readFileSync(tasks.registryPath(home));
     const snapshot = structuredClone([...scheduler.folders]); scheduler.calls.length = 0;
-    assert.ok(windowsTasks.applyTasks(wanted, { scheduler, home }).items.every(row => row.action === 'refused'));
+    assert.ok(windowsTasks.applyTasks(wanted, { scheduler, home }).items.every(row => ['refused', 'owner-choice-required'].includes(row.action)));
     assert.deepEqual([...scheduler.folders], snapshot);
     assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), before);
     assert.ok(scheduler.calls.every(call => call[0] === 'list'));
@@ -550,7 +489,7 @@ for (const edit of ['execute', 'arguments', 'directory', 'extra action', 'marker
 test('stop: remove, restart CLI, refuse, repeat remove and approved repair retain the right state', t => {
   const home = tempHome(t), scheduler = fakeScheduler(), root = checkout(t), wanted = desired(t, { root });
   windowsTasks.applyTasks(wanted, { scheduler, home });
-  windowsTasks.removeTasks({ scheduler, home });
+  windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   const stop = fs.readFileSync(tasks.registryPath(home));
   scheduler.calls.length = 0;
   const output = [];
@@ -563,7 +502,7 @@ test('stop: remove, restart CLI, refuse, repeat remove and approved repair retai
   assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), stop);
   assert.ok(scheduler.calls.every(call => call[0] === 'list'));
   assert.ok(tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => 'TOOLKIT' }).rows.every(row => row.state === 'stopped by owner'));
-  windowsTasks.removeTasks({ scheduler, home });
+  windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), stop, 'repeated remove preserves time and baseline');
   assert.equal(windowsTasks.main(['apply', '--repo-root', root, '--repair-owned', '--no-first-run'], deps), 0);
   assert.ok(tasks.readRegistry(home).tasks.every(row => !row.stopped_by_owner && row.enrolled));
@@ -572,12 +511,13 @@ test('stop: remove, restart CLI, refuse, repeat remove and approved repair retai
 
 test('stop: a fresh Node process reads the retained stop and performs no scheduler mutation', t => {
   const home = tempHome(t), scheduler = fakeScheduler(), root = checkout(t), wanted = desired(t, { root });
-  windowsTasks.applyTasks(wanted, { scheduler, home }); windowsTasks.removeTasks({ scheduler, home });
+  windowsTasks.applyTasks(wanted, { scheduler, home }); windowsTasks.removeTasks({ scope: wanted, scheduler, home });
   const before = fs.readFileSync(tasks.registryPath(home));
   const script = `const w=require(process.argv[1]);
     const identityReader=({checkout,toolkitRoot})=>({checkout,toolkitRoot});
-    const governance={readIdentity:root=>({valid:true,root,remote:{path:'/weijunswj/ai-agent-toolkit.git'}}),governanceState:()=>({state:'ENABLED'}),mergedBinding:()=>({repository:'weijunswj/ai-agent-toolkit',schedule_folder:'TOOLKIT'})};
-    const scheduler={list:()=>[],register:()=>{throw new Error('unexpected mutation')},start:()=>{throw new Error('unexpected start')}};
+    const binding=${JSON.stringify(fixtureBinding())};
+    const governance={readIdentity:root=>({valid:true,root,remote:{host:'github.com',path:'/weijunswj/ai-agent-toolkit.git'}}),governanceState:()=>({state:'ENABLED',merged:{status:'enabled',fresh:true}}),readObservation:()=>({status:'enabled',fresh:true,binding})};
+    const scheduler={list:()=>[],markedFolders:()=>[],register:()=>{throw new Error('unexpected mutation')},start:()=>{throw new Error('unexpected start')}};
     process.exitCode=w.main(['apply','--repo-root',process.argv[3],'--no-first-run'],{platform:'win32',home:process.argv[2],scheduler,toolkitRoot:process.argv[4],nodePath:process.argv[5],checkoutDeps:{identityReader,governance}});`;
   const result = require('node:child_process').spawnSync(process.execPath, ['-e', script, path.join(ROOT, 'repo/scripts/toolkit-windows-tasks.cjs'), home, root, TOOLKIT_ROOT, NODE], { encoding: 'utf8', timeout: 10000, windowsHide: true });
   assert.equal(result.status, 1, result.stderr);
@@ -595,7 +535,7 @@ test('stop: write failure prevents unregister; unregister failure preserves a du
     if (failure === 'write') registry.updateRegistry = () => { throw new Error('disk denied'); };
     if (failure === 'readback') { let reads = 0; registry.readRegistry = value => ++reads === 1 ? tasks.readRegistry(value) : { status: 'unreadable' }; }
     if (failure === 'unregister') scheduler.unregister = () => { throw new Error('native denial'); };
-    const result = windowsTasks.removeTasks({ scheduler, home, registry });
+    const result = windowsTasks.removeTasks({ scope: wanted, scheduler, home, registry });
     assert.ok(result.items.every(row => row.action === 'failed'));
     if (failure !== 'unregister') assert.equal(scheduler.calls.some(call => call[0] === 'unregister'), false);
     assert.equal(scheduler.folders.get('TOOLKIT').length, 2);
@@ -630,10 +570,10 @@ test('ordering: register/read back both jobs before starting the first sweep; no
 test('effects: registration failure holds the other job and never starts; bad readback never clears stop', t => {
   for (const failure of ['register', 'readback']) {
     const home = tempHome(t), scheduler = fakeScheduler(), wanted = desired(t);
-    windowsTasks.applyTasks(wanted, { scheduler, home }); windowsTasks.removeTasks({ scheduler, home });
+    windowsTasks.applyTasks(wanted, { scheduler, home }); windowsTasks.removeTasks({ scope: wanted, scheduler, home });
     const before = fs.readFileSync(tasks.registryPath(home)); scheduler.calls.length = 0;
     const register = scheduler.register;
-    scheduler.register = d => { if (failure === 'register') throw new Error('native denied'); register(d); scheduler.folders.get(d.folder)[0].arguments += ' unexpected'; };
+    scheduler.register = (d, old) => { if (failure === 'register') throw new Error('native denied'); register(d, old); scheduler.folders.get(d.folder)[0].arguments += ' unexpected'; };
     const result = windowsTasks.applyTasks(wanted, { scheduler, home, repairOwned: true, firstRunOptions: {} });
     assert.ok(result.items.every(row => row.done === false));
     assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), before);
@@ -711,7 +651,7 @@ test('ordering: a stop arriving after registration prevents the first start, inc
     if (next.length === 2) update(home, rows => rows.map(row => row.job === 'programme-sweep' ? { ...row, stopped_by_owner: true, stopped_at: '2026-11-05T00:00:00.000Z' } : row));
     return next;
   };
-  const result = windowsTasks.applyTasks(wanted, { scheduler, registry, home: 'fixture-home', repairOwned: true, firstRunOptions: { wait: () => {} } });
+  const result = windowsTasks.applyTasks(wanted, { scheduler, registry, home: MEMORY_HOME, repairOwned: true, firstRunOptions: { wait: () => {} } });
   assert.equal(result.items[0].first_run.status, 'failed');
   assert.match(result.items[0].first_run.detail, /no first start/);
   assert.equal(scheduler.calls.some(call => call[0] === 'start'), false);
@@ -724,11 +664,12 @@ test('G: setup only plans and reports the tasks, and --remove-toolkit-tasks remo
   const root = checkout(t);
   const scheduler = fakeScheduler();
   const lines = [];
-  const plan = core.printWindowsTasks({ repoRoot: root }, { platform: 'win32', scheduler, checkoutDeps: { identityReader, governance: governance() }, home, log: line => lines.push(line) });
-  assert.deepEqual(plan.items.map(item => item.action), ['create', 'create']);
+  const plan = core.printWindowsTasks({ repoRoot: root }, { platform: 'win32', scheduler, checkoutDeps: { identityReader, reportCheckout: root => root, governance: governance() }, workingFolder: root, home, log: line => lines.push(line) });
+  assert.deepEqual(plan[0].items.map(item => item.action), ['create', 'create']);
   const text = lines.join('\n');
   assert.match(text, /## Windows scheduled tasks\nWindows scheduled tasks for weijunswj\/ai-agent-toolkit in \\TOOLKIT\\:/);
-  assert.match(text, /An eligible local agent can register these fixed jobs[\s\S]*toolkit-windows-tasks\.cjs" apply --repo-root /);
+  assert.match(text, /Approval: standing approval with verified ownership/);
+  assert.equal(text.includes(root), false, 'setup never prints checkout paths');
   assert.deepEqual(scheduler.calls.map(call => call[0]), ['list'], 'setup never registers, starts or removes a task');
   assert.deepEqual(tasks.readRegistry(home).tasks, [], 'setup records nothing');
   assert.equal(core.printWindowsTasks({ repoRoot: root }, { platform: 'linux', scheduler, log: line => lines.push(line) }), null);
@@ -737,7 +678,7 @@ test('G: setup only plans and reports the tasks, and --remove-toolkit-tasks remo
   scheduler.folders.get('TOOLKIT').push(unmarked('Mine'));
   scheduler.calls.length = 0;
   const out = [];
-  const code = await core.main(['--remove-toolkit-tasks'], { platform: 'win32', windowsTasksDeps: { platform: 'win32', scheduler, home, stdout: text => out.push(text) } });
+  const code = await core.main(['--remove-toolkit-tasks'], { platform: 'win32', windowsTasksDeps: { platform: 'win32', scheduler, home, cwd: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, checkoutDeps: { identityReader, governance: governance() }, stdout: text => out.push(text) } });
   assert.equal(code, 0);
   assert.deepEqual(scheduler.folders.get('TOOLKIT').map(task => task.name), ['Mine']);
   assert.equal(scheduler.calls.some(call => call[0] === 'register' || call[0] === 'start'), false);
@@ -760,29 +701,18 @@ test('G: adopt records a task the owner made and refuses one carrying Toolkit\'s
 
 // ---- J. job runs ------------------------------------------------------------------------------
 
-const GH = 'C:\\gh\\gh.exe';
 const REPO_ROOT = path.join(os.tmpdir(), 'tk-job-checkout');
 
-// A fake process runner: answers by script and records every start.
-function fakeRun(answers = {}) {
-  const log = [];
-  const run = (file, args) => {
-    log.push([file, ...args]);
-    const name = file === GH ? `gh ${args[0]}` : args[0] === '-e' ? 'reach github' : path.basename(args[0]) === 'programme.cjs' ? `programme ${args[1]}` : path.basename(args[0]);
-    const answer = answers[name] || { status: 0, stdout: '' };
-    return { stdout: '', stderr: '', ...(typeof answer === 'function' ? answer(args) : answer) };
-  };
-  return { run, log };
-}
+const GOVERNED = { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { status: 'enabled', fresh: true } }) };
+const BINDING = () => fixtureBinding();
+const READ_IDENTITY = root => ({ valid: true, root, remote: { host: 'github.com', path: '/weijunswj/ai-agent-toolkit.git' } });
+const OBSERVATION = () => ({ status: 'enabled', fresh: true, binding: BINDING() });
 
-const GOVERNED = { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { fresh: true } }) };
-const BINDING = () => ({ repository: 'weijunswj/ai-agent-toolkit', store: { repository: 'weijunswj/TRANSPORT-ai-agent-toolkit' } });
-const ATTENTION = { status: 0, stdout: JSON.stringify({ line: 'Attention: clear', text: 'Attention: clear (stored on #421, written 3 min ago)' }) };
 const options = { job: 'programme-sweep', repoRoot: REPO_ROOT, taskId: 'toolkit-programme-sweep' };
 
 function runSweep(t, answers, home = tempHome(t), clock = '2026-10-29T09:00:00.000Z') {
   const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION, ...answers });
-  const record = job.runJob(options, { home, run: fake.run, repositoryReader: testRepository, ghPath: GH, nodePath: NODE, mergedBinding: BINDING, now: () => new Date(clock) });
+  const record = job.runJob({ ...options, repoRoot: checkout(t) }, { home, run: fake.run, repositoryReader: testRepository, ghPath: GH, nodePath: NODE, readIdentity: READ_IDENTITY, readObservation: OBSERVATION, now: () => new Date(clock) });
   return { record, log: fake.log, home };
 }
 
@@ -791,7 +721,7 @@ test('J: ENABLED, gh signed in, a clean refresh and two footers: all three steps
   const { record, log, home } = runSweep(t, { 'programme refresh': { status: 0, stdout: '{"outcome":"DONE","holds":[]}' }, 'toolkit-github-footer-sweep.cjs': sweep });
   assert.equal(record.status, 'ok');
   assert.equal(record.exit, 0);
-  assert.deepEqual(record.summary, ['Programme refresh: done.', 'Attention: clear (stored on #421, written 3 min ago)', 'Footer sweep since 2026-10-27 09:00: 2 CLEANED.']);
+  assert.deepEqual(record.summary, ['Footer sweep since 2026-10-27 09:00: 2 CLEANED.', 'Programme refresh: done.', 'Attention: clear (stored on #421, written 3 min ago)']);
   assert.equal(record.footer_sweep_since, '2026-10-29T09:00:00.000Z');
   const sweepArgs = log.find(entry => path.basename(entry[1] || '') === 'toolkit-github-footer-sweep.cjs');
   assert.deepEqual(sweepArgs.slice(2), ['--repo', 'weijunswj/ai-agent-toolkit', '--repo', 'weijunswj/TRANSPORT-ai-agent-toolkit', '--since', '2026-10-27T09:00:00.000Z', '--apply', '--json']);
@@ -804,7 +734,7 @@ test('J: ENABLED, gh signed in, a clean refresh and two footers: all three steps
 test('J: a refresh that holds is recorded and the footer sweep still runs', (t) => {
   const { record, log } = runSweep(t, { 'programme refresh': { status: 1, stdout: JSON.stringify({ holds: [{ code: 'STORE_UNREACHABLE', target: 'store', detail: 'x' }] }) } });
   assert.equal(record.status, 'held');
-  assert.match(record.summary[0], /Programme refresh held: STORE_UNREACHABLE store/);
+  assert.match(record.summary[1], /Programme refresh held: STORE_UNREACHABLE store/);
   assert.ok(log.some(entry => path.basename(entry[1] || '') === 'toolkit-github-footer-sweep.cjs'));
 });
 
@@ -817,19 +747,17 @@ test('J: the existing sweep reports parent lifecycle results without a second re
   assert.equal(log.filter(args => args.some(arg => arg === 'refresh')).length, 1);
 });
 
-test('J: gh signed out skips with no GitHub call; a stale binding skips before any write', (t) => {
+test('J: sign-out skips all edits; a stale binding permits origin cleaning only', (t) => {
   const out = runSweep(t, { 'gh auth': { status: 1 } });
   assert.equal(out.record.status, 'skipped');
   assert.deepEqual(out.record.summary, ['skipped: gh not signed in']);
   assert.deepEqual(out.log.map(entry => entry.slice(0, 2)), [[GH, 'auth'], [NODE, '-e']], 'gh auth status, then only the github.com connection check');
-  const stale = runSweep(t, { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { fresh: false } }) } });
-  assert.deepEqual(stale.record.summary, ['skipped: binding not read in 24 h']);
-  assert.equal(stale.log.some(entry => /programme\.cjs|footer-sweep/.test(entry[1] || '')), false);
-  for (const state of ['DISABLED', 'ERROR', 'UNDECIDED']) {
-    const off = runSweep(t, { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state, merged: { fresh: true } }) } });
-    assert.deepEqual(off.record.summary, [`skipped: governance is ${state}`]);
-    assert.equal(off.record.exit, 0);
-  }
+  const stale = runSweep(t, { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { status: 'enabled', fresh: false } }) } });
+  assert.equal(stale.record.programme_reason, 'binding observation expired');
+  assert.equal(stale.record.footer_status, 'held');
+  assert.ok(stale.log.some(entry => entry[1] === job.SCRIPT.footerSweep));
+  assert.equal(stale.log.some(entry => entry[1] === job.SCRIPT.programme), false);
+
 });
 
 test('J: offline is told apart from signed out, skips count up in a row, and the next good run notes the resume', (t) => {
@@ -865,7 +793,7 @@ test('J: a run stopped mid-way keeps the streak in its start record', (t) => {
   runSweep(t, { 'gh auth': { status: 1 }, 'reach github': { status: 3 } }, home, '2026-11-01T04:00:05.000Z');
   const seen = [];
   const fake = fakeRun({ 'toolkit-governance.cjs': () => { seen.push(tasks.readLastRun('toolkit-programme-sweep', home)); return GOVERNED; }, 'programme attention': ATTENTION });
-  job.runJob(options, { home, run: fake.run, repositoryReader: testRepository, ghPath: GH, nodePath: NODE, mergedBinding: BINDING, now: () => new Date('2026-11-01T05:00:05.000Z') });
+  job.runJob({ ...options, repoRoot: checkout(t) }, { home, run: fake.run, repositoryReader: testRepository, ghPath: GH, nodePath: NODE, readIdentity: READ_IDENTITY, readObservation: OBSERVATION, now: () => new Date('2026-11-01T05:00:05.000Z') });
   assert.deepEqual([seen[0].status, seen[0].skipped_streak, seen[0].skipped_since], ['running', 1, '2026-11-01T04:00:05.000Z']);
 });
 
@@ -874,7 +802,7 @@ test('J: a footer sweep MISMATCH fails the run with its code, and the next run r
   const first = runSweep(t, { 'toolkit-github-footer-sweep.cjs': { status: 1, stdout: JSON.stringify({ results: [{ status: 'MISMATCH' }] }) } }, home, '2026-10-29T09:00:00.000Z');
   assert.equal(first.record.status, 'failed');
   assert.equal(first.record.exit, 1);
-  assert.match(first.record.summary.at(-1), /Footer sweep failed \(exit 1\): 1 MISMATCH; the next run tries again from the same time/);
+  assert.match(first.record.summary[0], /Footer sweep failed \(exit 1\): 1 MISMATCH; the next run tries again from the same time/);
   assert.equal(first.record.footer_sweep_since, '2026-10-27T09:00:00.000Z');
   const second = runSweep(t, {}, home, '2026-10-29T10:00:00.000Z');
   const sweepArgs = second.log.find(entry => path.basename(entry[1] || '') === 'toolkit-github-footer-sweep.cjs');
@@ -974,9 +902,9 @@ test('J: invalid or unreadable shard configuration fails visibly before any proc
 
 test('J: shards still require fresh enabled governance and sign-in; child failure is visible', (t) => {
   const rows = [
-    ...['DISABLED', 'UNDECIDED', 'ERROR'].map(state => ({ answers: { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state }) } }, reason: `governance is ${state}` })),
+    ...['DISABLED', 'UNDECIDED', 'ERROR'].map(state => ({ answers: { 'toolkit-governance.cjs': { status: state === 'ERROR' ? 2 : 0, stdout: JSON.stringify({ state, ...(state === 'ERROR' ? { rule: 'M0' } : {}), merged: { status: state === 'ERROR' ? 'invalid' : state === 'DISABLED' ? 'disabled' : 'none', fresh: true } }) } }, reason: state === 'ERROR' ? 'binding is invalid' : state === 'UNDECIDED' ? 'binding is missing' : `governance is ${state}` })),
     { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{broken' } }, reason: 'governance status could not be read' },
-    { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{"state":"ENABLED","merged":{"fresh":false}}' } }, reason: 'binding not read in 24 h' },
+    { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{"state":"ENABLED","merged":{"status":"enabled","fresh":false}}' } }, reason: 'binding observation expired' },
     { answers: { 'gh auth': { status: 1 } }, reason: 'gh not signed in' },
     { answers: { 'gh auth': { status: 1 }, 'reach github': { status: 3 } }, reason: 'offline' },
     { answers: { 'refresh-shard-timings.cjs': { status: 2, stderr: 'invalid manifest' } }, failed: true },
@@ -1007,7 +935,7 @@ test('J: summaries never keep anything shaped like a secret', (t) => {
   const token = `ghp_${'a'.repeat(36)}`;
   const { record } = runSweep(t, { 'programme refresh': { status: 2, stderr: `boom ${token}` } });
   assert.equal(JSON.stringify(record).includes(token), false);
-  assert.match(record.summary[0], /removed: looked like a secret/);
+  assert.match(record.summary[1], /removed: looked like a secret/);
 });
 
 test('J: the runner takes only a known job, an absolute checkout and a task id', () => {
@@ -1021,7 +949,8 @@ test('J: the runner takes only a known job, an absolute checkout and a task id',
 function listedHome(t) {
   const home = tempHome(t);
   const scheduler = fakeScheduler();
-  windowsTasks.applyTasks(desired(t), { scheduler, home });
+  const wanted = desired(t);
+  windowsTasks.applyTasks(wanted, { scheduler, home });
   return { home, scheduler };
 }
 
@@ -1032,8 +961,8 @@ test('L: a live Toolkit task shows its live schedule, last run and result', (t) 
   tasks.writeLastRun('toolkit-programme-sweep', { started: '2026-10-29T01:00:05.000Z', finished: '2026-10-29T01:03:00.000Z', exit: 0, status: 'ok', summary: ['Programme refresh: done.', 'Attention: clear'] }, home);
   const result = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => null });
   const row = result.rows.find(item => item.name === 'TOOLKIT - PROGRAMME SWEEP');
-  assert.deepEqual([row.state, row.source, row.schedule, row.ai, row.result, row.last_result, row.last_run], ['Toolkit', tasks.LIVE, 'hourly, 08:00 to 23:59', 'no AI', 'ok', 'ok', '2026-10-29T01:03:00.000Z']);
-  assert.match(tasks.formatList(result), /TOOLKIT - PROGRAMME SWEEP: Toolkit\. Windows Task Scheduler \\TOOLKIT\\; hourly, 08:00 to 23:59; no AI; last run 2026-10-29 01:03 ok/);
+  assert.deepEqual([row.state, row.source, row.schedule, row.ai, row.result, row.last_result, row.last_run], ['Toolkit', tasks.LIVE, 'hourly, 00:00 to 23:59', 'no AI', 'ok', 'ok', '2026-10-29T01:03:00.000Z']);
+  assert.match(tasks.formatList(result), /TOOLKIT - PROGRAMME SWEEP: Toolkit\. Windows Task Scheduler \\TOOLKIT\\; hourly, 00:00 to 23:59; no AI; last run 2026-10-29 01:03 ok/);
 });
 
 test('L: a run that stopped before writing its record is not shown as the previous good run', (t) => {
@@ -1212,19 +1141,1448 @@ test('the binding takes an optional schedule_folder of capitals, digits and hyph
   assert.equal(schema.properties.schedule_folder.pattern, windowsTasks.FOLDER.source);
 });
 
-// ---- the one real registration (owner-run only) ------------------------------------------------
+// Real base code creates historical receipts. Fake processes and the clock are the only effects.
+let baseRunner;
+function baseRun(t, home, clock = '2026-10-01T09:00:00Z') {
+  if (!baseRunner) {
+    const Module = require('node:module');
+    const load = name => {
+      const file = path.join(ROOT, 'repo/scripts', name);
+      const bytes = require('node:child_process').execFileSync('git', ['show', `7affa3000:repo/scripts/${name}`], { cwd: ROOT, timeout: 10000 });
+      const mod = new Module(file);
+      const original = Module.createRequire(file);
+      mod.require = id => id === './toolkit-tasks.cjs' ? baseTasks : original(id);
+      mod._compile(bytes.toString(), file);
+      return mod.exports;
+    };
+    const baseTasks = load('toolkit-tasks.cjs');
+    baseRunner = load('toolkit-scheduled-job.cjs');
+  }
+  let tick = Date.parse(clock);
+  const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION });
+  const receipt = baseRunner.runJob(options, { home, ghPath: GH, nodePath: NODE, mergedBinding: BINDING,
+    now: () => new Date(tick += 1000), run: (...args) => { tick += 10000; return fake.run(...args); } });
+  assert.equal(receipt.status, 'ok');
+  assert.ok(Date.parse(receipt.started) < Date.parse(receipt.footer_sweep_since));
+  assert.ok(Date.parse(receipt.footer_sweep_since) < Date.parse(receipt.finished));
+  assert.equal(receipt.repository, undefined);
+  return receipt;
+}
+function movingRun(t, { home = tempHome(t), mode = 'programme-sweep', clock = '2026-10-29T09:00:00Z', answers = {}, deps = {} } = {}) {
+  let tick = Date.parse(clock);
+  const ticks = [];
+  const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION, ...answers });
+  const record = job.runJob({ ...options, job: mode, taskId: mode === 'programme-sweep' ? options.taskId : 'toolkit-footer-sweep', repoRoot: checkout(t) }, {
+    home, ghPath: GH, nodePath: NODE, repositoryReader: testRepository, readIdentity: READ_IDENTITY, readObservation: OBSERVATION,
+    now: () => { ticks.push(tick += 1000); return new Date(tick); },
+    run: (...args) => { tick += 10000; return fake.run(...args); }, ...deps,
+  });
+  return { record, log: fake.log, ticks, home };
+}
+const sweepCall = result => result.log.find(row => row[1] === job.SCRIPT.footerSweep);
+const sinceOf = result => { const call = sweepCall(result); return call && call[call.indexOf('--since') + 1]; };
+const stateAnswer = (status, fresh = true) => ({ status: status === 'invalid' ? 2 : 0, stdout: JSON.stringify({ state: status === 'enabled' ? 'ENABLED' : status === 'disabled' ? 'DISABLED' : status === 'none' ? 'UNDECIDED' : status === 'invalid' ? 'ERROR' : 'UNAVAILABLE', ...(status === 'invalid' ? { rule: 'M0' } : {}), merged: { status, fresh } }) });
+const stateObservation = (status, fresh = true) => () => ({ status, fresh, ...(['enabled','disabled'].includes(status) ? { binding: fixtureBinding(undefined, undefined, status === 'enabled') } : {}) });
 
-test('real Task Scheduler: register, list and remove under a scratch folder', { skip: process.platform !== 'win32' || process.env.TOOLKIT_REAL_TASK_SCHEDULER_TEST !== '1' ? 'owner-run only: set TOOLKIT_REAL_TASK_SCHEDULER_TEST=1 on Windows' : false }, (t) => {
-  const home = tempHome(t);
+test('H1 M1: actual main receipt cleans twice without apply on an advancing clock', t => {
+  const home = tempHome(t), old = baseRun(t, home);
+  let cursor = old.footer_sweep_since;
+  for (const clock of ['2026-10-29T09:00:00Z', '2026-11-03T09:00:00Z']) {
+    const result = movingRun(t, { home, clock });
+    assert.equal(sinceOf(result), cursor);
+    assert.equal(result.record.status, 'ok');
+    assert.ok(Date.parse(result.record.started) < Date.parse(result.record.footer_sweep_since));
+    assert.ok(Date.parse(result.record.footer_sweep_since) < Date.parse(result.record.finished));
+    assert.ok(result.ticks.every((v, i) => !i || v > result.ticks[i - 1]));
+    assert.equal(result.log.filter(row => row[1] === job.SCRIPT.governance).length, 1);
+    assert.equal(result.log.filter(row => row[0] === GH).length, 1);
+    assert.ok(result.log.indexOf(sweepCall(result)) < result.log.findIndex(row => row[2] === 'refresh'));
+    cursor = result.record.footer_sweep_since;
+  }
+});
+
+const RUNTIME_MATRIX = [
+  ['enabled', true, true, 2], ['disabled', true, false, 1], ['none', true, false, 1],
+  ['enabled', false, false, 1], ['unknown', false, false, 1], ['invalid', true, false, 1], ['foreign', true, false, 1],
+];
+for (const mode of ['programme-sweep', 'footer-sweep']) for (const [state, fresh, programme, targets] of RUNTIME_MATRIX) {
+  test(`closure runtime: ${mode} / ${state} / fresh=${fresh}, repeated beyond 48 hours`, t => {
+    const home = tempHome(t);
+    let cursor = mode === 'programme-sweep' ? baseRun(t, home).footer_sweep_since : movingRun(t, { home, mode, clock: '2026-10-01T09:00:00Z' }).record.footer_sweep_since;
+    for (const clock of ['2026-10-29T09:00:00Z', '2026-11-03T09:00:00Z']) {
+      const result = movingRun(t, { home, mode, clock, answers: { 'toolkit-governance.cjs': stateAnswer(state, fresh) }, deps: { readObservation: stateObservation(state, fresh) } });
+      assert.equal(sinceOf(result), cursor);
+      assert.equal(sweepCall(result).filter(arg => arg === '--repo').length, targets);
+      assert.equal(result.log.some(row => row[2] === 'refresh'), mode === 'programme-sweep' && programme);
+      assert.equal(result.record.exit, 0);
+      const complete = fresh && ['enabled', 'disabled', 'none'].includes(state);
+      if (complete) assert.ok(Date.parse(result.record.footer_sweep_since) > Date.parse(result.record.started));
+      else { assert.equal(result.record.footer_sweep_since, cursor); assert.match(result.record.summary.join(' '), /Evidence store cleaning withheld/); }
+      cursor = result.record.footer_sweep_since;
+    }
+  });
+}
+
+test('M6 M7 L12: damaged, future and mismatched history uses a visible bounded fallback then recovers', t => {
+  for (const variant of ['json', 'date', 'impossible', 'future', 'null-identity', 'foreign', 'id', 'job', 'schema']) {
+    const home = tempHome(t), old = baseRun(t, home), record = { ...old };
+    if (variant === 'date') record.footer_sweep_since = 'bad';
+    if (variant === 'impossible') record.footer_sweep_since = '2026-02-30T00:00:00.000Z';
+    if (variant === 'future') record.footer_sweep_since = '2099-01-01T00:00:00.000Z';
+    if (variant === 'null-identity') record.repository = null;
+    if (variant === 'foreign') record.repository = 'other/repo';
+    if (variant === 'id') record.id = 'another';
+    if (variant === 'job') record.job = 'footer-sweep';
+    if (variant === 'schema') record.schema = 'invalid';
+    tasks.writeLastRun(options.taskId, record, home);
+    if (variant === 'json') fs.writeFileSync(tasks.lastRunPath(options.taskId, home), '{broken');
+    const first = movingRun(t, { home });
+    assert.equal(first.record.status, 'ok', variant);
+    assert.ok(Date.parse(sinceOf(first)) >= Date.parse(first.record.started) - 48 * 3600000);
+    assert.match(first.record.summary.join(' '), variant === 'future' ? /clock anomaly/ : /Footer history could not be read/);
+    const next = movingRun(t, { home, clock: '2026-11-03T09:00:00Z' });
+    assert.equal(sinceOf(next), first.record.footer_sweep_since);
+    assert.equal(next.record.status, 'ok');
+    assert.doesNotMatch(next.record.summary.join(' '), /history could not|clock anomaly/);
+  }
+});
+
+test('L7 L9: footer failure wins every programme result; lock errors never prevent eligible programme work', t => {
+  for (const programme of ['ok', 'held', 'skipped', 'failed']) for (const failure of ['footer', 'acquire', 'release']) {
+    const home = tempHome(t), old = baseRun(t, home);
+    const result = movingRun(t, { home, answers: { 'programme refresh': { status: programme === 'failed' ? 2 : programme === 'held' ? 1 : 0 },
+      ...(programme === 'skipped' ? { 'toolkit-governance.cjs': stateAnswer('unknown', false) } : {}),
+      'toolkit-github-footer-sweep.cjs': { status: failure === 'footer' ? 1 : 0, stdout: '{"results":[{"status":"MISMATCH"}]}' } },
+      deps: failure === 'acquire' ? { takeLock: () => { throw new Error('lock unavailable'); } } : failure === 'release' ? { takeLock: () => ({ release() { throw new Error('release failed'); } }) } : {} });
+    assert.equal(result.record.exit, 1, `${programme}/${failure}`);
+    assert.equal(result.record.status, 'failed');
+    assert.equal(result.log.some(row => row[2] === 'refresh'), programme !== 'skipped');
+    assert.equal(result.record.footer_sweep_since, old.footer_sweep_since);
+  }
+});
+
+test('L9: lock contention leaves active writer receipt intact and still attempts programme work', t => {
+  const home = tempHome(t); baseRun(t, home); const before = fs.readFileSync(tasks.lastRunPath(options.taskId, home));
+  const result = movingRun(t, { home, deps: { takeLock: () => null } });
+  assert.equal(result.record.footer_status, 'held');
+  assert.ok(result.log.some(row => row[2] === 'refresh'));
+  assert.deepEqual(fs.readFileSync(tasks.lastRunPath(options.taskId, home)), before);
+});
+
+test('L11: deleted registered root fails before auth and cannot be reported offline', t => {
+  for (const mode of ['programme-sweep', 'footer-sweep']) {
+    const result = movingRun(t, { mode, deps: { repositoryReader: () => { throw new Error('registered root is not a repository checkout'); } } });
+    assert.equal(result.record.status, 'failed'); assert.deepEqual(result.log, []);
+    assert.match(result.record.summary.join(' '), /registered root is not a repository checkout/);
+    assert.doesNotMatch(result.record.summary.join(' '), /offline/);
+  }
+});
+
+test('M2: GitHub aliases share strict origin targeting; foreign hosts and metadata remain refused', t => {
+  const identity = require('../scripts/toolkit-repository-identity.cjs');
+  for (const [url, allowed] of [['https://github.com/acme/app.git', true], ['git@github-work:acme/app.git', true], ['ssh://git@ssh.github.com:443/acme/app.git', true], ['https://github.com.evil.test/acme/app.git', false], ['https://other.test/acme/app.git', false], ['https://github.com/acme/app/extra.git', false]]) {
+    const remote = identity.validateRemoteIdentity(url), readIdentity = root => ({ valid: remote.valid, root, remote });
+    assert.equal(windowsTasks.repositoryOf(readIdentity('fixture')), allowed ? 'acme/app' : null, url);
+    const result = movingRun(t, { mode: 'footer-sweep', deps: { readIdentity } });
+    assert.equal(Boolean(sweepCall(result)), allowed, url);
+    if (allowed) assert.deepEqual(sweepCall(result).slice(2, 4), ['--repo', 'acme/app']);
+    else assert.deepEqual(result.log, []);
+  }
+});
+
+test('store scope: stale, foreign, null, throwing and working-tree-only observations grant no store or programme effects', t => {
+  for (const observe of [() => null, () => { throw new Error('unreadable'); }, () => ({ ...OBSERVATION(), fresh: false }),
+    () => ({ ...OBSERVATION(), binding: fixtureBinding('other/repo') }), () => ({ status: 'unknown', fresh: false }),
+    () => ({ ...OBSERVATION(), binding: { repository: 'weijunswj/ai-agent-toolkit' } })]) {
+    const home = tempHome(t), old = baseRun(t, home);
+    const result = movingRun(t, { home, deps: { readObservation: observe } });
+    assert.equal(sweepCall(result).filter(arg => arg === '--repo').length, 1);
+    assert.equal(result.record.footer_sweep_since, old.footer_sweep_since);
+    assert.equal(result.log.some(row => row[2] === 'refresh'), false);
+  }
+  for (const mode of ['programme-sweep', 'footer-sweep']) for (const problem of ['offline', 'signed-out', 'identity']) {
+    const home = tempHome(t);
+    const old = mode === 'programme-sweep' ? baseRun(t, home) : movingRun(t, { home, mode, clock: '2026-10-01T09:00:00Z' }).record;
+    const result = movingRun(t, { home, mode, answers: problem === 'identity' ? {} : { 'gh auth': { status: 1 }, 'reach github': { status: problem === 'offline' ? 3 : 0 } }, deps: problem === 'identity' ? { readIdentity: () => null } : {} });
+    assert.equal(sweepCall(result), undefined); assert.equal(result.record.footer_sweep_since, old.footer_sweep_since);
+    const next = movingRun(t, { home, mode, clock: '2026-11-03T09:00:00Z' });
+    assert.equal(sinceOf(next), old.footer_sweep_since); assert.equal(next.record.status, 'ok');
+  }
+});
+
+test('M3: exact real offline status JSON including ERROR exit 2 flows unchanged into runner diagnostics', async t => {
+  const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
+  for (const invalid of [false, true]) {
+    const root = checkout(t, { shards: false }), home = tempHome(t);
+    fs.writeFileSync(path.join(root, '.git/config'), '[remote "origin"]\nurl = https://github.com/weijunswj/ai-agent-toolkit.git\n');
+    const registryPath = path.join(home, 'registry.json');
+    const support = require('./toolkit-governed-fixture-support.cjs');
+    if (invalid) support.recordMerged(root, { text: '{"schema":"invalid"}', registryPath });
+    else support.recordAbsent(root, { registryPath });
+    let stdout = '';
+    const cli = new ToolkitGovernanceCli({ cwd: root, registryOptions: { registryPath, testOnly: true, home }, discoveryGh: () => ({ ok: false, reason: 'offline' }), refresh: () => ({ refreshed: false, error: 'offline' }), queueReader: () => ({ pending: 0 }), hookReader: () => null, stdout: { write: text => { stdout += text; } }, stderr: { write() {} } });
+    const code = await cli.main(['status', '--json']);
+    assert.equal(code, invalid ? 2 : 0);
+    const result = movingRun(t, { answers: { 'toolkit-governance.cjs': { status: code, stdout } } });
+    assert.equal(result.record.programme_reason, invalid ? 'binding is invalid' : 'binding refresh failed: governance reads offline');
+    assert.equal(sweepCall(result).filter(arg => arg === '--repo').length, 1);
+  }
+  for (const answer of [{ status: 1, stdout: GOVERNED.stdout }, { status: 2, stdout: GOVERNED.stdout }, { status: 0, stdout: '{broken' },
+    ...hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'invisible', 'free-text']).map(row => ({ status: 0, stdout: row.text }))]) {
+    const result = movingRun(t, { answers: { 'toolkit-governance.cjs': answer } });
+    assert.equal(result.record.programme_reason, 'governance status could not be read');
+    assert.equal(sweepCall(result).filter(arg => arg === '--repo').length, 1);
+  }
+});
+
+for (const shape of ['programme-sweep', 'footer-sweep']) test(`closure registration: ${shape} switches only with fresh matching governance, retaining folder and stops`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+  const initial = desired(t, { root, state: shape === 'footer-sweep' ? 'UNDECIDED' : 'ENABLED', repository: 'example/widget', folder: 'WIDGET' });
+  assert.ok(windowsTasks.applyTasks(initial, { home, scheduler }).items.every(row => row.done));
+  for (const state of ['ENABLED', 'DISABLED', null, 'ENABLED']) {
+    const offer = desired(t, { root, state, repository: 'example/widget', folder: 'WIDGET' });
+    const before = structuredClone([...scheduler.folders]); scheduler.calls.length = 0;
+    const result = windowsTasks.applyTasks(offer, { home, scheduler });
+    assert.equal(result.folder, 'WIDGET');
+    if (!state) {
+      assert.ok(result.items.every(row => row.action === 'refused')); assert.deepEqual([...scheduler.folders], before);
+      assert.ok(scheduler.calls.every(row => row[0] === 'list'));
+    } else {
+      assert.ok(result.items.every(row => row.done), JSON.stringify(result));
+      assert.deepEqual(scheduler.list('WIDGET').map(r => r.name).sort(), state === 'ENABLED' ? ['WIDGET - PROGRAMME SWEEP','WIDGET - SHARD TIMINGS'] : ['WIDGET - FOOTER SWEEP']);
+      assert.ok(tasks.readRegistry(home).tasks.every(e => !e.stopped_by_owner));
+    }
+  }
+  windowsTasks.removeTasks({ scope: initial, home, scheduler });
+  const stopped = fs.readFileSync(tasks.registryPath(home));
+  for (const state of ['ENABLED','UNDECIDED']) {
+    const result = windowsTasks.applyTasks(desired(t, { root, state, repository: 'example/widget', folder: 'WIDGET' }), { home, scheduler });
+    assert.ok(result.items.every(row => row.action === 'refused'));
+    assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), stopped);
+  }
+});
+
+test('closure conflicts: ordinary apply holds both cleaners, unrecorded tasks and cross-folder stops', t => {
+  for (const mode of ['both', 'unrecorded', 'cross-folder-stop']) {
+    const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), offer = desired(t, { root });
+    windowsTasks.applyTasks(offer, { home, scheduler });
+    const other = offer.definitions.find(row => row.job === 'footer-sweep');
+    if (mode === 'cross-folder-stop') {
+      windowsTasks.removeTasks({ scope: offer, home, scheduler });
+      const changed = desired(t, { root, state: 'UNDECIDED', folder: 'OTHER' });
+      const result = windowsTasks.applyTasks(changed, { home, scheduler });
+      assert.ok(result.items.every(row => row.action === 'refused')); continue;
+    }
+    scheduler.register(other);
+    if (mode === 'both') tasks.updateRegistry(home, rows => [...rows, { ...rows[0], id: other.id, name: other.name, job: other.job, definition: other.def, enrolled: windowsTasks.enrolledDefinition(scheduler.folders.get('TOOLKIT').at(-1)) }]);
+    const before = structuredClone([...scheduler.folders]);
+    const result = windowsTasks.applyTasks(offer, { home, scheduler });
+    assert.ok(result.items.every(row => row.action === 'refused'));
+    assert.deepEqual([...scheduler.folders], before);
+  }
+});
+
+test('schedules: P1D and PT24H are equivalent, updates settle, and warnings use installed hours', t => {
+  assert.equal(windowsTasks.describeTriggers([{ kind: 'MSFT_TaskDailyTrigger', start: '2026-10-29T00:00:00', interval: 'PT1H', duration: 'P1D' }]), 'hourly, 00:00 to 23:59');
+  const home = tempHome(t), scheduler = fakeScheduler(), offer = desired(t);
+  windowsTasks.applyTasks(offer, { home, scheduler });
+  const live = scheduler.folders.get('TOOLKIT')[0]; live.triggers[0].duration = 'P1D';
+  tasks.updateRegistry(home, rows => rows.map(row => row.job === 'programme-sweep' ? { ...row, enrolled: windowsTasks.enrolledDefinition(live) } : row));
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler }).items[0].action, 'current');
+  for (const [schedule, at, expected] of [['hourly, 08:00 to 23:59', 7, false], ['hourly, 08:00 to 23:59', 9, false], ['hourly, 08:00 to 23:59', 10, true], ['hourly, 00:00 to 23:59', 1, true], ['broken', 12, false]]) {
+    tasks.updateRegistry(home, rows => rows.map(row => row.job === 'programme-sweep' ? { ...row, schedule } : row));
+    assert.equal(Boolean(tasks.sweepLine(offer.repository, { home, now: new Date(2026, 9, 29, at) })), expected, schedule + at);
+  }
+});
+
+test('setup: both projects share report reads, deduplicate and print no paths; apply always reads afresh', t => {
+  const core = require('../scripts/setup-toolkit-core.cjs'), home = tempHome(t), managed = checkout(t), project = checkout(t), scheduler = fakeScheduler();
+  for (let i = 0; i < 30; i++) scheduler.folders.set('UNRELATED-' + i, [unmarked('Other', { description: `[toolkit-task v1 id=unrelated-${i} def=0123456789ab]` })]);
+  const counts = new Map();
+  const count = key => counts.set(key, (counts.get(key) || 0) + 1);
+  let origin = 'example/widget';
+  const gov = root => governance({ repository: root === managed ? 'weijunswj/ai-agent-toolkit' : origin, folder: root === managed ? 'TOOLKIT' : 'WIDGET' });
+  const deps = { identityReader: request => { count('location:' + request.checkout); return request; }, reportCheckout: root => root,
+    governance: { readIdentity(root) { count('identity:' + root); return gov(root).readIdentity(root); },
+      governanceState(root) { count('status:' + root); return gov(root).governanceState(root); } },
+    readObservation(identity) { count('observation:' + identity.root); return gov(identity.root).readObservation(); } };
+  const lines = [];
+  const plans = core.printWindowsTasks({ repoRoot: managed }, { platform: 'win32', scheduler, home, workingFolder: project, checkoutDeps: deps, log: line => lines.push(line) });
+  assert.equal(plans.length, 2);
+  assert.ok([...counts.values()].every(value => value === 1), JSON.stringify([...counts]));
+  assert.equal(scheduler.calls.filter(row => row[0] === 'list').length, 32);
+  for (let i = 0; i < 30; i++) assert.equal(scheduler.calls.filter(row => row[0] === 'list' && row[1] === 'UNRELATED-' + i).length, 1);
+  assert.equal(lines.join(' ').includes(managed) || lines.join(' ').includes(project), false);
+  assert.ok(scheduler.calls.every(row => row[0] === 'list'));
+  const offer = windowsTasks.desiredTasks({ checkout: project, toolkitRoot: managed, nodePath: NODE, home, deps });
+  origin = 'other/widget';
+  const applied = windowsTasks.applyTasks(offer, { home, scheduler });
+  assert.ok(applied.items.every(row => row.action === 'refused'));
+  assert.ok([...counts.values()].some(value => value > 1));
+  assert.ok(scheduler.calls.every(row => row[0] === 'list'));
+});
+
+for (const mode of ['programme-sweep','footer-sweep']) test(`L5: ${mode} registration and repeated first runs use real job records`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+  const offer = desired(t, { root, state: mode === 'programme-sweep' ? 'ENABLED' : 'UNDECIDED' });
+  let tick = Date.parse('2026-10-29T09:00:00Z'), failed = false;
+  const now = () => new Date(tick += 1000);
+  scheduler.onStart = task => {
+    const definition = offer.definitions.find(d => d.name === task.name);
+    const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION, 'toolkit-github-footer-sweep.cjs': { status: failed ? 1 : 0 } });
+    const record = job.runJob({ job: definition.job, repoRoot: root, taskId: definition.id }, { home, now, ghPath: GH, nodePath: NODE, repositoryReader: testRepository, readIdentity: READ_IDENTITY, readObservation: OBSERVATION,
+      run: (...args) => { tick += 10000; return fake.run(...args); } });
+    Object.assign(task, { state: 'Ready', last_run: record.started, last_result: 0 });
+  };
+  const applied = windowsTasks.applyTasks(offer, { home, scheduler, now, firstRunOptions: { wait() {} } });
+  assert.equal(applied.items[0].first_run.status, 'ok');
+  const d = applied.items[0].definition, first = tasks.readLastRun(d.id, home);
+  assert.ok(Date.parse(first.footer_sweep_since) > Date.parse(first.started));
+  assert.equal(windowsTasks.firstRun(d, { home, scheduler, now, wait() {} }).status, 'ok');
+  const second = tasks.readLastRun(d.id, home);
+  assert.ok(Date.parse(second.footer_sweep_since) > Date.parse(first.footer_sweep_since));
+  failed = true;
+  assert.equal(windowsTasks.firstRun(d, { home, scheduler, now, wait() {} }).status, 'failed');
+  assert.equal(tasks.readLastRun(d.id, home).footer_sweep_since, second.footer_sweep_since);
+});
+
+test('M9: snapshots at each in-place boundary never silently disable or claim an unfinished registration succeeded', t => {
+  for (const mode of ['programme-sweep','footer-sweep']) for (const boundary of ['register', 'readback', 'registry']) {
+    const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+    const offer = desired(t, { root, state: mode === 'programme-sweep' ? 'ENABLED' : 'UNDECIDED' });
+    const legacy = { ...offer, wanted: offer.wanted.map(d => d.job === 'shard-timings' ? d : ({ ...d, schedule: { kind: 'hourly', at: '08:00', hours: 16 }, schedule_text: 'hourly, 08:00 to 23:59' })) };
+    for (const d of legacy.wanted) { const old = d.def; d.def = windowsTasks.definitionDigest(d); d.description = d.description.replace(old, d.def); }
+    windowsTasks.applyTasks(legacy, { home, scheduler });
+    let snapshot = null;
+    const capture = () => { if (!snapshot) snapshot = { live: Object.fromEntries(structuredClone([...scheduler.folders])), registry: tasks.readRegistry(home).tasks }; };
+    const register = scheduler.register, list = scheduler.list;
+    let written = false;
+    scheduler.register = (...args) => { register(...args); written = true; if (boundary === 'register') capture(); };
+    scheduler.list = (...args) => { const result = list(...args); if (written && boundary === 'readback') capture(); return result; };
+    const registry = { ...tasks, updateRegistry(...args) { const result = tasks.updateRegistry(...args); if (written && boundary === 'registry') capture(); return result; } };
+    windowsTasks.applyTasks(offer, { home, scheduler, registry });
+    assert.ok(snapshot, boundary);
+    const replayHome = tempHome(t), replay = fakeScheduler(snapshot.live);
+    tasks.writeRegistry(replayHome, snapshot.registry);
+    const repeated = windowsTasks.applyTasks(offer, { home: replayHome, scheduler: replay });
+    assert.ok(repeated.items.every(row => ['refused', 'owner-choice-required'].includes(row.action) || row.action === 'current' && row.done));
+    assert.ok([...replay.folders.values()].flat().every(task => task.state !== 'Disabled'));
+    assert.equal(replay.calls.some(row => row[0] === 'start'), false);
+  }
+});
+
+test('M5 L4: real primary, subdirectory and worktree reporting stays path-free; direct worktree targeting refuses', t => {
+  const core = require('../scripts/setup-toolkit-core.cjs'), real = require('../scripts/toolkit-governance-state.cjs');
+  const home = tempHome(t), scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-layouts-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const git = (root, args) => require('node:child_process').execFileSync('git', ['-C', root, ...args], { timeout: 10000, encoding: 'utf8', windowsHide: true });
+  const make = (name, remote) => { const root = path.join(scratch, name); fs.mkdirSync(root); git(root, ['init', '--quiet']); git(root, ['remote', 'add', 'origin', remote]); git(root, ['-c','user.name=Fixture','-c','user.email=fixture@example.com','commit','--quiet','--allow-empty','-m','fixture']); return root; };
+  const managed = make('toolkit', 'https://github.com/weijunswj/ai-agent-toolkit.git');
+  const project = make('project', 'https://github.com/example/widget.git');
+  const linked = path.join(scratch, 'linked'); git(project, ['worktree','add','--quiet','-b','fixture-linked',linked]);
+  const sub = path.join(project, 'sub'); fs.mkdirSync(sub);
+  const linkedSub = path.join(linked, 'sub'); fs.mkdirSync(linkedSub);
+  const plain = path.join(scratch, 'plain'); fs.mkdirSync(plain);
+  const local = make('local', path.join(scratch, 'local-origin.git'));
+  const deps = { identityReader: request => ({ ...request, checkout: windowsTasks.mainCheckout(request.checkout), toolkitRoot: windowsTasks.mainCheckout(request.toolkitRoot) }),
+    governance: { ...real, readIdentity: root => root === plain ? { valid: false, root: null } : real.readIdentity(root), governanceState: () => ({ state: 'UNDECIDED', merged: { status: 'none', fresh: true } }) }, readObservation: () => ({ status: 'none', fresh: true }) };
+  for (const workingFolder of [managed, project, sub, linked, linkedSub, plain, local]) {
+    const scheduler = fakeScheduler(), lines = [];
+    const plans = core.printWindowsTasks({ repoRoot: managed }, { platform: 'win32', scheduler, home, workingFolder, checkoutDeps: deps, log: line => lines.push(line) });
+    const text = lines.join(' ');
+    assert.equal(text.includes(scratch), false);
+    assert.ok(scheduler.calls.every(row => row[0] === 'list'));
+    if ([project, sub, linked, linkedSub].includes(workingFolder)) { assert.equal(plans.length, 2); assert.equal(plans[1].items[0].definition.checkout, project); }
+    else assert.equal(plans.length, 1);
+    if ([plain, local].includes(workingFolder)) assert.match(text, /refused for this project/);
+  }
+  assert.throws(() => windowsTasks.desiredTasks({ checkout: linked, toolkitRoot: managed, home, nodePath: NODE, deps }), /main checkout/);
+  const lines = [];
+  core.printWindowsTasks({ repoRoot: local }, { platform: 'win32', scheduler: fakeScheduler(), home, workingFolder: local, checkoutDeps: deps, log: line => lines.push(line) });
+  assert.doesNotMatch(lines.join(' '), /refused for the managed/);
+});
+
+test('apply lock: both shapes share one repository lock, with identity refusals before the lock write', t => {
+  const home = tempHome(t), root = checkout(t), files = [];
+  for (const state of ['ENABLED','UNDECIDED']) {
+    const offer = desired(t, { root, state });
+    const scheduler = fakeScheduler();
+    assert.throws(() => windowsTasks.applyTasks(offer, { home, scheduler, takeLock: file => { files.push(file); return null; } }), /another task apply is running/);
+    assert.ok(scheduler.calls.every(row => row[0] === 'list'));
+    assert.throws(() => windowsTasks.applyTasks(offer, { home, scheduler, identityReader: () => { throw new Error('wrong location'); }, takeLock: () => assert.fail('identity must precede lock') }), /wrong location/);
+  }
+  assert.equal(files[0], files[1]);
+  assert.deepEqual(fs.readdirSync(home), []);
+});
+
+test('status contradictions never authorise store scope, programme work or cursor advancement', t => {
+  for (const [state, status] of [['ENABLED','disabled'], ['UNDECIDED','disabled'], ['DISABLED','enabled'], ['UNAVAILABLE','disabled']]) {
+    const home = tempHome(t), old = baseRun(t, home);
+    const result = movingRun(t, { home, answers: { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state, merged: { status, fresh: true } }) } }, deps: { readObservation: stateObservation(status) } });
+    assert.equal(sweepCall(result).filter(arg => arg === '--repo').length, 1);
+    assert.equal(result.record.footer_sweep_since, old.footer_sweep_since);
+    assert.equal(result.log.some(row => row[2] === 'refresh'), false);
+    assert.equal(result.record.programme_reason, 'governance status could not be read');
+  }
+});
+
+test('L8: metadata mismatch names the identity failure, retains history and recovers on the next run', t => {
+  const home = tempHome(t), old = baseRun(t, home);
+  const result = movingRun(t, { home, answers: { 'toolkit-github-footer-sweep.cjs': { status: 1, stdout: JSON.stringify({ results: [{ status: 'FAILED', reason: 'repository-identity-mismatch' }] }) } } });
+  assert.equal(result.record.exit, 1);
+  assert.match(result.record.summary.join(' '), /Footer repository identity did not match origin/);
+  assert.equal(result.record.footer_sweep_since, old.footer_sweep_since);
+  const next = movingRun(t, { home, clock: '2026-11-03T09:00:00Z' });
+  assert.equal(sinceOf(next), old.footer_sweep_since);
+  assert.equal(next.record.status, 'ok');
+});
+
+test('approval metadata: --no-first-run is outside the exact standing command', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+  let output = '';
+  assert.equal(windowsTasks.main(['apply','--repo-root',root,'--no-first-run','--json'], { platform: 'win32', home, scheduler, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE,
+    checkoutDeps: { identityReader, governance: governance() }, stdout: text => { output += text; }, stderr: text => assert.fail(text) }), 0);
+  assert.equal(JSON.parse(output).approval, 'explicit approval required; first-result verification was skipped');
+  assert.equal(scheduler.calls.some(row => row[0] === 'start'), false);
+});
+
+function switchOffer(t, shape, root) { return desired(t, { root, state: shape === 'programme-sweep' ? 'ENABLED' : 'DISABLED' }); }
+
+let currentMainRunner;
+function currentMainReceipt(home, root, clock, taskId = 'toolkit-programme-sweep') {
+  if (!currentMainRunner) {
+    const Module = require('node:module'), file = path.join(ROOT, 'repo/scripts/toolkit-scheduled-job.cjs');
+    const bytes = require('node:child_process').execFileSync('git', ['show', 'cbd3d6078:repo/scripts/toolkit-scheduled-job.cjs'], { cwd: ROOT, timeout: 10000 });
+    const loaded = new Module(file); loaded.require = Module.createRequire(file); loaded._compile(bytes.toString(), file); currentMainRunner = loaded.exports;
+  }
+  let tick = Date.parse(clock);
+  const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION });
+  const receipt = currentMainRunner.runJob({ job: 'programme-sweep', taskId, repoRoot: root }, { home, ghPath: GH, nodePath: NODE,
+    repositoryReader: testRepository, mergedBinding: BINDING, now: () => new Date(tick += 1000), run: (...args) => { tick += 10000; return fake.run(...args); } });
+  assert.equal(receipt.status, 'ok'); assert.ok(receipt.footer_sweep_since); return receipt;
+}
+
+test('task advisory clears immediately after real owner ON/OFF/absent switches and removal with leftover records', async t => {
+  const w = switchWorld(t);
+  const gate = require('../scripts/toolkit-governance-gate.cjs');
+  const registryOptions = { registryPath: path.join(tasks.userStateDir(w.home), 'repository-governance.v1.json'), testOnly: true };
+  const start = source => {
+    const input = { session_id: `advisory-${source}`, source, cwd: w.root };
+    gate.startSession(input, { registryOptions, environment: { TOOLKIT_GOVERNANCE_OFFLINE: '1' } });
+    return gate.sessionLine(w.root, { registryOptions, programmeDeps: { home: w.home, environment: {}, platform: 'win32', mergedBinding: () => null } });
+  };
+  await w.gov('on');
+  assert.equal(w.cli('apply').code, 0);
+  for (const state of ['off','on','absent','on']) {
+    await w.gov(state);
+    for (const source of ['startup','resume','clear','compact']) assert.match(start(source), /Toolkit tasks: recorded Windows tasks/);
+    const wanted = require('../scripts/toolkit-task-shape.cjs').confirmedTaskShape({ certain: true, governanceState: state === 'on' ? 'ENABLED' : state === 'off' ? 'DISABLED' : 'UNDECIDED' });
+    assert.deepEqual(w.offer().wanted.map(d => d.job).sort(), [...wanted].sort());
+    assert.deepEqual(w.cli('plan').json.items.filter(item => !item.retiring).filter(item => ['create','current','update'].includes(item.action)).map(item => item.definition.job).sort(), [...wanted].sort());
+    assert.equal(w.cli('apply').code, 0);
+    assertShape(w, state);
+    for (const source of ['startup','resume','clear','compact']) assert.doesNotMatch(start(source), /Toolkit tasks:/);
+  }
+  const before = tasks.readRegistry(w.home).tasks;
+  assert.ok(before.some(row => tasks.readLastRun(row.id, w.home)), 'real first-run receipts exist');
+  assert.equal(w.cli('remove').code, 0);
+  assert.ok(before.some(row => tasks.readLastRun(row.id, w.home)), 'removal leaves run records');
+  await w.gov('off');
+  for (let repeat = 0; repeat < 2; repeat++) for (const source of ['startup','resume','clear','compact']) assert.doesNotMatch(start(source), /Toolkit tasks:/);
+});
+
+for (const days of [0,1,3]) for (const sequence of [['off','on','off','on'], ['absent','on','absent','on'], ['on','off','on','off']])
+test(`switch sequence: real status/apply ${sequence.join('/')} advancing ${days} days`, async t => {
+  const w = switchWorld(t);
+  for (const [index, state] of sequence.entries()) {
+    w.advance(days); await w.gov(state);
+    assert.equal(w.cli('plan').code, 0);
+    const result = w.cli('apply'); assert.equal(result.code, 0, result.err + JSON.stringify(result.json));
+    assert.equal(result.json.items.find(i => i.first_run)?.first_run.status, 'ok'); assertShape(w, state);
+    if (index === 1) {
+      const receipt = currentMainReceipt(w.home, w.root, w.now().toISOString(), 'ai-agent-toolkit-programme-sweep'); w.advance(4);
+      const prior = state === 'on' && receipt.footer_sweep_since;
+      if (prior) assert.equal(tasks.readLastRun(receipt.id, w.home).footer_sweep_since, prior);
+    }
+  }
+});
+
+const switchFaultPoints = ['history', 'history-read', 'register', 'destination-readback', 'enrolment', 'unregister', 'source-readback', 'cleanup', 'shards', 'start', 'result-readback', 'final-readback', 'registry-read', 'registry-write', 'rename', 'persisted-readback'];
+// Reuses probe-stuck, probe-stuck2 and probe-qual-loop's continuous registry/history sequence.
+// Every row must reach its fault, then prove either convergence or the printed approved recovery.
+test('switch fault loop: continuous real status/apply, same-day and cross-day failures', async t => {
+  const w = switchWorld(t);
+  for (const state of ['off','on','off','on']) { await w.gov(state); assert.equal(w.cli('apply').code, 0); assertShape(w, state); }
+  let rows = 0;
+  for (const target of ['off','on']) for (const point of switchFaultPoints) for (const side of ['before','after']) {
+    const source = target === 'on' ? 'off' : 'on';
+    w.advance(side === 'after' ? 3 : 0); await w.gov(source); assert.equal(w.cli('apply').code, 0); assertShape(w, source);
+    await w.gov(target);
+    let fired = false, registered = false, removed = false, resultRead = false, persisted = false;
+    const at = (label, when) => { if (!fired && point === label && side === when) { fired = true; throw new Error(`injected ${label} ${when}`); } };
+    const around = (label, effect) => { at(label, 'before'); const out = effect(); at(label, 'after'); return out; };
+    const native = w.scheduler;
+    const adapter = { ...native,
+      list: f => around(resultRead ? 'final-readback' : removed ? 'source-readback' : registered ? 'destination-readback' : 'list', () => native.list(f)),
+      register: (d, old) => around(d.job === 'shard-timings' ? 'shards' : 'register', () => { const out = native.register(d, old); if (d.job !== 'shard-timings') registered = true; return out; }),
+      unregister: (f, name, id, old) => around(id.endsWith('shard-timings') ? 'shards' : 'unregister', () => { const out = native.unregister(f, name, id, old); if (!id.endsWith('shard-timings')) removed = true; return out; }),
+      start: (f, name) => around('start', () => native.start(f, name)),
+      info: (f, name) => around('result-readback', () => { const out = native.info(f, name); resultRead = true; return out; }),
+    };
+    const registry = { ...tasks,
+      readRegistry: (...args) => around('registry-read', () => tasks.readRegistry(...args)),
+      updateRegistry: (...args) => around(removed ? 'cleanup' : 'enrolment', () => tasks.updateRegistry(...args)),
+    };
+    const rename = fs.renameSync, readFile = fs.readFileSync, writeFile = fs.writeFileSync;
+    const watched = file => String(file).includes(tasks.userStateDir(w.home)) && /(?:tasks\.json|last-run\.json)/.test(String(file));
+    const mocks = [
+      t.mock.method(fs, 'renameSync', (...args) => watched(args[1]) ? around('rename', () => { const out = rename(...args); persisted = true; return out; }) : rename(...args)),
+      t.mock.method(fs, 'readFileSync', (...args) => persisted && watched(args[0]) ? around('persisted-readback', () => readFile(...args)) : readFile(...args)),
+      t.mock.method(fs, 'writeFileSync', (...args) => watched(args[0]) ? around('registry-write', () => writeFile(...args)) : writeFile(...args)),
+    ];
+    try { windowsTasks.applyTasks(w.offer(), { scheduler: adapter, registry, home: w.home, now: w.now,
+      readRecord: id => around('history-read', () => tasks.readLastRun(id, w.home)),
+      writeRecord: (id, rec) => around('history', () => tasks.writeLastRun(id, rec, w.home)), firstRunOptions: { wait() {}, pollMs: 1, waitMs: 2 } }); }
+    catch (error) { assert.match(error.message, /injected|history readback failed/); }
+    finally { for (const mock of mocks) mock.mock.restore(); }
+    assert.equal(fired, true, `${target} ${point} ${side} fired`); rows++;
+    const snapshot = { live: structuredClone([...native.folders]), entries: (w.registry || tasks).readRegistry(w.home).tasks };
+    assert.ok(snapshot.entries.every(e => !e.stopped_by_owner));
+    const records = Object.fromEntries(w.offer().definitions.map(d => [d.id, tasks.readLastRun(d.id, w.home)]));
+    // Probe-switch's retain/reverse/uncertain replays use the same interrupted native and registry state.
+    const onStart = native.onStart;
+    native.onStart = live => { tasks.writeRegistry(w.home, w.registry.readRegistry(w.home).tasks); onStart(live); };
+    for (const decision of [target, source, 'uncertain']) for (const reset of [false,true]) {
+      native.folders.clear(); for (const [f, rows] of structuredClone(snapshot.live)) native.folders.set(f, rows);
+      w.registry = memoryRegistry(snapshot.entries);
+      for (const [id, record] of Object.entries(records)) {
+        if (record) tasks.writeLastRun(id, record, w.home);
+        else if (fs.existsSync(tasks.lastRunPath(id, w.home))) fs.unlinkSync(tasks.lastRunPath(id, w.home));
+      }
+      await w.gov(decision);
+      const before = JSON.stringify([...native.folders]), prior = JSON.stringify(w.registry.readRegistry(w.home));
+      const retry = w.cli('apply');
+      if (decision === 'uncertain') {
+        assert.equal(retry.code, 1); assert.equal(JSON.stringify([...native.folders]), before);
+        assert.equal(JSON.stringify(w.registry.readRegistry(w.home)), prior);
+        break;
+      }
+      if (retry.code !== 0) {
+        assert.ok((w.registry || tasks).readRegistry(w.home).tasks.every(e => !e.stopped_by_owner));
+        printedRecovery(w, reset);
+      }
+      assertShape(w, decision);
+      if (retry.code === 0) break; // No hold exists from which a reset needs proving.
+    }
+    native.onStart = onStart;
+    tasks.writeRegistry(w.home, w.registry.readRegistry(w.home).tasks); w.registry = null;
+    await w.gov(target);
+    const current = w.cli('apply'); if (current.code !== 0) printedRecovery(w);
+    assertShape(w, target);
+  }
+  assert.equal(rows, switchFaultPoints.length * 4);
+});
+
+for (const switchNumber of [1,2,3]) for (const from of ['programme-sweep','footer-sweep']) test(`interruption table: switch ${switchNumber}, restart before/after every effect and read-back from ${from}`, async t => {
+  const w = switchWorld(t), { home, root, scheduler } = w;
+  const to = from === 'programme-sweep' ? 'footer-sweep' : 'programme-sweep';
+  for (let index = 0; index < switchNumber; index++) {
+    const mode = (switchNumber - 1 - index) % 2 === 0 ? from : to;
+    w.advance(switchNumber === 2 ? 1 : 0); await w.gov(mode === 'programme-sweep' ? 'on' : 'off');
+    assert.equal(w.cli('apply').code, 0); assertShape(w, mode === 'programme-sweep' ? 'on' : 'off');
+  }
+  currentMainReceipt(home, root, w.now().toISOString(), 'ai-agent-toolkit-programme-sweep');
+  await w.gov(to === 'programme-sweep' ? 'on' : 'off'); const offer = w.offer();
+  const snapshots = []; let capturing = false;
+  const capture = boundary => {
+    if (capturing) return;
+    capturing = true;
+    try { snapshots.push({ boundary, live: Object.fromEntries(structuredClone([...scheduler.folders])), entries: tasks.readRegistry(home).tasks,
+      records: Object.fromEntries(offer.definitions.map(d => [d.id, tasks.readLastRun(d.id, home)])) }); }
+    finally { capturing = false; }
+  };
+  // Observe the real atomic rename and its independent read-back inside updateRegistry,
+  // including the otherwise hidden write/read window. Snapshots never count their own reads.
+  const observedFiles = new Set([tasks.registryPath(home), ...offer.definitions.map(d => tasks.lastRunPath(d.id, home))]);
+  const pendingReadback = new Set(), rename = fs.renameSync, readFile = fs.readFileSync;
+  t.mock.method(fs, 'renameSync', function(from, to, ...args) {
+    const observed = observedFiles.has(to);
+    if (observed) capture('before atomic rename');
+    const result = rename.call(this, from, to, ...args);
+    if (observed) { capture('after atomic rename'); pendingReadback.add(to); }
+    return result;
+  });
+  t.mock.method(fs, 'readFileSync', function(file, ...args) {
+    if (capturing || !pendingReadback.delete(file)) return readFile.call(this, file, ...args);
+    capture('before persisted readback');
+    try { return readFile.call(this, file, ...args); } finally { capture('after persisted readback'); }
+  });
+  const wrap = (object, key) => { const original = object[key]; object[key] = (...args) => { capture('before ' + key); const result = original.apply(object, args); capture('after ' + key); return result; }; };
+  const registry = { ...tasks };
+  const now = w.now;
+  scheduler.onStart = live => {
+    const definition = offer.definitions.find(d => d.name === live.name);
+    const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'programme attention': ATTENTION });
+    const record = job.runJob({ job: definition.job, taskId: definition.id, repoRoot: root }, { home, now, ghPath: GH, nodePath: NODE,
+      repositoryReader: testRepository, readIdentity: READ_IDENTITY, readObservation: OBSERVATION, run: (...args) => { w.advance(10 / 86400); return fake.run(...args); } });
+    Object.assign(live, { state: 'Ready', last_run: record.started, last_result: 0 });
+  };
+  for (const name of ['list','register','unregister','start','info']) wrap(scheduler, name);
+  for (const name of ['readRegistry','updateRegistry']) wrap(registry, name);
+  const owner = new windowsTasks.WindowsTaskOwner({ scheduler, registry, home, now, firstRunOptions: { wait() {} },
+    readRecord: id => { capture('before history read'); const result = tasks.readLastRun(id, home); capture('after history read'); return result; },
+    writeRecord: (id, record) => { capture('before atomic history write'); tasks.writeLastRun(id, record, home); capture('after atomic history write'); } });
+  const applied = owner.apply(offer); assert.ok(applied.items.every(i => i.done), JSON.stringify(applied));
+  assert.ok(snapshots.some(s => s.boundary === 'before atomic history write')); assert.ok(snapshots.some(s => s.boundary === 'after unregister'));
+  assert.ok(snapshots.some(s => s.boundary === 'before start')); assert.ok(snapshots.some(s => s.boundary === 'after info'));
+  assert.ok(snapshots.some(s => s.boundary === 'after atomic rename')); assert.ok(snapshots.some(s => s.boundary === 'before persisted readback'));
+  const replayHome = tempHome(t), provenStates = new Set(), replayAt = w.now();
+  for (const snap of snapshots) {
+    // Identical native, registry and history inputs share one restart proof. All effect and
+    // read-back boundaries are still captured; a repeated label never creates another state.
+    const stateKey = JSON.stringify([snap.live, snap.entries, snap.records]);
+    if (provenStates.has(stateKey)) continue;
+    provenStates.add(stateKey);
+    const replay = fakeScheduler(snap.live), replayRegistry = memoryRegistry(snap.entries);
+    for (const d of offer.definitions) if (fs.existsSync(tasks.lastRunPath(d.id, replayHome))) fs.unlinkSync(tasks.lastRunPath(d.id, replayHome));
+    for (const [id, record] of Object.entries(snap.records)) if (record) tasks.writeLastRun(id, record, replayHome);
+    const unrecorded = Object.values(snap.live).flat().some(l => !snap.entries.some(e => e.name === l.name));
+    const result = windowsTasks.applyTasks(offer, { home: replayHome, scheduler: replay, registry: replayRegistry, takeLock: () => ({ release() {} }), now: () => replayAt });
+    if (unrecorded) {
+      assert.ok(result.items.every(i => i.action === 'refused'), snap.boundary); assert.ok(replay.calls.every(c => c[0] === 'list'));
+      assert.deepEqual([...replay.folders], Object.entries(snap.live)); assert.match(result.next_step, /inspection\/removal/);
+    } else if (snap.entries.some(e => !(snap.live[e.folder] || []).some(l => l.name === e.name))) {
+      assert.equal(result.refused, true, snap.boundary);
+      assert.match(result.next_step, /unproven absence/);
+      assert.deepEqual([...replay.folders], Object.entries(snap.live));
+      const recovered = windowsTasks.applyTasks(offer, { home: replayHome, scheduler: replay, registry: replayRegistry, takeLock: () => ({ release() {} }), repairOwned: true });
+      assert.ok(recovered.items.every(i => i.done), JSON.stringify(recovered)); assertLiveRegistry(replayHome, replay, replayRegistry);
+    } else {
+      assert.ok(result.items.every(i => i.done), snap.boundary + JSON.stringify(result));
+      assert.deepEqual(replay.list('AI-AGENT-TOOLKIT').map(t => t.name).sort(), to === 'programme-sweep' ? ['AI-AGENT-TOOLKIT - PROGRAMME SWEEP','AI-AGENT-TOOLKIT - SHARD TIMINGS'] : ['AI-AGENT-TOOLKIT - FOOTER SWEEP']);
+      assertLiveRegistry(replayHome, replay, replayRegistry);
+    }
+    assert.equal(result.items.some(i => i.first_run?.status === 'ok'), false, 'interruption cannot invent a completed first run');
+    assert.ok(replayRegistry.readRegistry(replayHome).tasks.every(e => !e.stopped_by_owner));
+  }
+});
+
+for (const task of ['programme-sweep','shard-timings']) for (const edit of ['action','trigger','settings']) test(`modified-task choice: ${task} ${edit} needs a scoped one-use answer`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), offer = switchOffer(t, 'programme-sweep', root);
+  windowsTasks.applyTasks(offer, { home, scheduler });
+  const live = scheduler.folders.get('TOOLKIT').find(l => l.name === windowsTasks.taskName('TOOLKIT', task));
+  if (edit === 'action') live.arguments += ' --owner-edit';
+  if (edit === 'trigger') live.triggers[0].start = '2026-11-05T10:30:00';
+  if (edit === 'settings') live.settings = { start_when_available: false };
+  const before = structuredClone([...scheduler.folders]);
+  const plan = windowsTasks.planTasks(offer, { home, scheduler }), item = plan.items.find(i => i.action === 'owner-choice-required');
+  assert.equal(item.choice.task, windowsTasks.taskId('TOOLKIT', task)); assert.ok(item.choice.changed.length); assert.ok(plan.next_step.includes('Keep your changes'));
+  const answer = { task: item.choice.task, observed: item.choice.fingerprint, answer_ref: 'owner-message:keep-1', outcome: 'keep' };
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: answer }).refused, true); assert.deepEqual([...scheduler.folders], before);
+  const recorded = tasks.readRegistry(home).tasks.find(e => e.id === answer.task);
+  // The fingerprint already binds the exact observation. Repeating XML in every answer
+  // grows the bounded registry without adding replay or ownership protection.
+  assert.equal(recorded.task_choices[0].outcome, 'keep'); assert.equal(recorded.task_choices[0].observed, item.choice.fingerprint);
+  assert.equal(Object.hasOwn(recorded.task_choices[0], 'definition'), false);
+  assert.equal(recorded.task_choices[0].answer_ref, answer.answer_ref);
+  assert.ok(Number.isFinite(Date.parse(recorded.task_choices[0].at)));
+  assert.notDeepEqual(recorded.enrolled, windowsTasks.enrolledDefinition(live), 'keep never adopts edits');
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { ...answer, outcome: 'replace' } }).refused, true);
+  const replaced = windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { ...answer, answer_ref: 'owner-message:replace-2', outcome: 'replace' } });
+  assert.ok(replaced.items.every(i => i.done), JSON.stringify(replaced)); assertLiveRegistry(home, scheduler);
+  scheduler.folders.get('TOOLKIT').find(l => l.name === live.name).arguments += ' --later-edit';
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { ...answer, answer_ref: 'owner-message:replace-2', outcome: 'replace' } }).refused, true);
+  assert.equal(windowsTasks.applyTasks(switchOffer(t, 'footer-sweep', root), { home, scheduler, taskChoice: { ...answer, answer_ref: 'owner-message:new', outcome: 'replace' } }).refused, true);
+});
+
+test('choice flags cannot supply a missing exact observation or actual answer reference; hostile and corrupt metadata refuse', t => {
+  for (const args of [['--task-choice','replace'], ['--task-choice','keep','--task','toolkit-programme-sweep'], ['--observed','a'.repeat(64)], ['--task-choice','replace','--task','toolkit-programme-sweep','--observed','a'.repeat(64)]]) assert.throws(() => windowsTasks.parseArgs(['apply', ...args]), /choice needs/);
+  for (const row of hostile.cases(['line-breaks','continued-lines','invisible','quoting','free-text'])) assert.throws(() => windowsTasks.parseArgs(['apply','--task-choice','replace','--task',row.text,'--observed','a'.repeat(64),'--answer-ref','owner-message:1']));
+  const home = tempHome(t), scheduler = fakeScheduler(), offer = desired(t); windowsTasks.applyTasks(offer, { home, scheduler });
+  tasks.updateRegistry(home, rows => rows.map(e => ({ ...e, replaces: { cleaner: { id: 'other', job: 'footer-sweep', identity: 'a'.repeat(64) } } })));
+  const before = structuredClone([...scheduler.folders]);
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: { outcome: 'replace', task: 'toolkit-programme-sweep', observed: 'a'.repeat(64), answer_ref: 'agent:unsupported-claim' } }).refused, true);
+  assert.deepEqual([...scheduler.folders], before);
+});
+
+for (const from of ['programme-sweep','footer-sweep']) for (const state of ['removed','disabled','stopped','running']) test(`whole switch: ${from} ${state} participant holds every effect`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), source = switchOffer(t, from, root); windowsTasks.applyTasks(source, { home, scheduler });
+  for (const participant of tasks.readRegistry(home).tasks) {
+    const saved = structuredClone([...scheduler.folders]), entries = tasks.readRegistry(home).tasks;
+    if (state === 'removed') scheduler.folders.set('TOOLKIT', scheduler.folders.get('TOOLKIT').filter(l => l.name !== participant.name));
+    if (state === 'disabled' || state === 'running') scheduler.folders.get('TOOLKIT').find(l => l.name === participant.name).state = state === 'disabled' ? 'Disabled' : 'Running';
+    if (state === 'stopped') tasks.updateRegistry(home, rows => rows.map(e => e.id === participant.id ? { ...e, stopped_by_owner: true, stopped_at: '2026-11-05T00:00:00.000Z' } : e));
+    const before = structuredClone([...scheduler.folders]); scheduler.calls.length = 0;
+    const result = windowsTasks.applyTasks(switchOffer(t, from === 'programme-sweep' ? 'footer-sweep' : 'programme-sweep', root), { home, scheduler });
+    assert.equal(result.refused, true, JSON.stringify(result)); assert.deepEqual([...scheduler.folders], before); assert.ok(scheduler.calls.every(c => c[0] === 'list'));
+    scheduler.folders.clear(); for (const [f, rows] of saved) scheduler.folders.set(f, rows); tasks.writeRegistry(home, entries);
+  }
+});
+
+test('Low 3/4: strict managed origin, changed-folder recovery and uncertain-plan next step', t => {
+  const request = { checkout: 'C:\\Repositories\\widget', toolkitRoot: TOOLKIT_ROOT, home: MEMORY_HOME };
+  const deps = { readFile: () => JSON.stringify({ repo_path: TOOLKIT_ROOT }), realpath: value => value, mainCheckout: value => value };
+  for (const remote of ['git@my-github-mirror:weijunswj/ai-agent-toolkit.git','ssh://git@github.com/weijunswj/ai-agent-toolkit.git','https://github.com.evil.test/weijunswj/ai-agent-toolkit']) assert.throws(() => windowsTasks.readLocations(request, { ...deps, run: () => ({ status: 0, stdout: remote }) }), /expected Toolkit/);
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), initial = desired(t, { root }); windowsTasks.applyTasks(initial, { home, scheduler });
+  const changed = desired(t, { root, folder: 'NEW' }); changed.folderOverride = null;
+  const result = windowsTasks.applyTasks(changed, { home, scheduler }); assert.equal(result.refused, true); assert.match(result.next_step, /folder changed from TOOLKIT to NEW/);
+  assert.match(windowsTasks.planTasks(desired(t, { root, state: 'ERROR' }), { home, scheduler }).next_step, /refresh governance status/i);
+});
+
+test('history: cursor-free main receipt is silent; an unenrolled old destination cannot widen the source window', t => {
+  const home = tempHome(t), main = baseRun(t, home), at = new Date('2026-11-05T00:00:00Z'), expected = { id: main.id, job: main.job };
+  const cursorFree = { ...main }; delete cursorFree.footer_sweep_since;
+  assert.deepEqual(job.footerCursor(cursorFree, expected, 'weijunswj/ai-agent-toolkit', at), { since: '2026-11-03T00:00:00.000Z' });
+  for (const record of [{}, { ...main, footer_sweep_since: 'bad' }, { ...main, footer_sweep_since: '2099-01-01T00:00:00.000Z' }, { ...main, repository: 'other/repository' }]) assert.ok(job.footerCursor(record, expected, 'weijunswj/ai-agent-toolkit', at).note);
+  const root = checkout(t), scheduler = fakeScheduler(); windowsTasks.applyTasks(switchOffer(t, 'programme-sweep', root), { home, scheduler });
+  tasks.writeLastRun('toolkit-footer-sweep', { ...main, id: 'toolkit-footer-sweep', job: 'footer-sweep', footer_sweep_since: '2026-09-01T00:00:00.000Z' }, home);
+  const result = windowsTasks.applyTasks(switchOffer(t, 'footer-sweep', root), { home, scheduler, now: () => at }); assert.ok(result.items.every(i => i.done));
+  assert.equal(tasks.readLastRun('toolkit-footer-sweep', home).footer_sweep_since, main.footer_sweep_since);
+  assert.equal(tasks.readLastRun('toolkit-footer-sweep', home).status, undefined); assert.deepEqual(tasks.readLastRun('toolkit-programme-sweep', home), main);
+});
+
+test('Low 6: unrelated folders list once per invocation, affected mutation guards remain fresh', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+  for (let i = 0; i < 30; i++) scheduler.folders.set('OTHER-' + i, [unmarked('Other', { description: '[toolkit-task v1 id=other-' + i + ' def=0123456789ab]' })]);
+  const offer = desired(t, { root }), started = performance.now();
+  for (let repeat = 0; repeat < 2; repeat++) {
+    scheduler.calls.length = 0; assert.ok(windowsTasks.applyTasks(offer, { home, scheduler }).items.every(i => i.done));
+    for (let i = 0; i < 30; i++) assert.equal(scheduler.calls.filter(c => c[0] === 'list' && c[1] === 'OTHER-' + i).length, 1);
+    assert.ok(scheduler.calls.filter(c => c[0] === 'list' && c[1] === 'TOOLKIT').length > 2);
+  }
+  const core = require('../scripts/setup-toolkit-core.cjs'); scheduler.calls.length = 0;
+  core.printWindowsTasks({ repoRoot: TOOLKIT_ROOT }, { platform: 'win32', scheduler, home, workingFolder: root,
+    checkoutDeps: { identityReader, reportCheckout: r => r, governance: governance() }, log() {} });
+  for (let i = 0; i < 30; i++) assert.equal(scheduler.calls.filter(c => c[0] === 'list' && c[1] === 'OTHER-' + i).length, 1, 'setup shares unrelated discovery across reports');
+  t.diagnostic('fake scheduler two-apply time: ' + (performance.now() - started).toFixed(1) + ' ms; real PowerShell timing is unverified');
+});
+
+test('closure stale enabled preserves main registration eligibility, but never authorises a shape switch', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler();
+  const gov = governance(), old = gov.governanceState, observe = gov.readObservation;
+  gov.governanceState = () => ({ ...old(), merged: { status: 'enabled', fresh: false } });
+  gov.readObservation = () => ({ ...observe(), fresh: false });
+  const offer = windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, home, deps: { identityReader, governance: gov } });
+  assert.ok(windowsTasks.applyTasks(offer, { home, scheduler }).items.every(i => i.done)); assertLiveRegistry(home, scheduler);
+  const other = tempHome(t), source = fakeScheduler(); windowsTasks.applyTasks(switchOffer(t, 'footer-sweep', root), { home: other, scheduler: source });
+  const before = structuredClone([...source.folders]);
+  assert.equal(windowsTasks.applyTasks(offer, { home: other, scheduler: source }).refused, true); assert.deepEqual([...source.folders], before);
+});
+
+test('closure matrix: intact P with never-enrolled S creates S or switches OFF without inventing a stop', t => {
+  for (const next of ['programme-sweep','footer-sweep']) {
+    const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), on = switchOffer(t, 'programme-sweep', root);
+    windowsTasks.applyTasks(on, { home, scheduler }); baseRun(t, home);
+    // A historical P-only enrolment has no missing S enrolment, so it is not an owner stop.
+    scheduler.folders.set('TOOLKIT', scheduler.folders.get('TOOLKIT').filter(l => !l.name.endsWith('SHARD TIMINGS')));
+    tasks.updateRegistry(home, rows => rows.filter(e => e.job !== 'shard-timings'));
+    const result = windowsTasks.applyTasks(switchOffer(t, next, root), { home, scheduler });
+    assert.ok(result.items.every(i => i.done), JSON.stringify(result)); assertLiveRegistry(home, scheduler);
+    assert.deepEqual(tasks.readRegistry(home).tasks.map(e => e.job).sort(), next === 'programme-sweep' ? ['programme-sweep','shard-timings'] : ['footer-sweep']);
+    if (next === 'programme-sweep') assert.equal(result.items.find(i => i.definition.job === 'shard-timings').action, 'create');
+  }
+});
+
+test('modified-task answer is bound to governance revision even when binding and native definition are identical', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), gov = governance(); let revision = 'a'.repeat(40);
+  const status = gov.governanceState, observation = gov.readObservation;
+  gov.governanceState = () => { const s = status(); return { ...s, merged: { ...s.merged, commit: revision } }; };
+  gov.readObservation = () => ({ ...observation(), commit: revision });
+  const offer = () => windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, home, deps: { identityReader, governance: gov } });
+  windowsTasks.applyTasks(offer(), { home, scheduler }); scheduler.folders.get('TOOLKIT')[0].arguments += ' --owner-edit';
+  const choice = windowsTasks.planTasks(offer(), { home, scheduler }).items.find(i => i.choice).choice;
+  const before = structuredClone([...scheduler.folders]); revision = 'b'.repeat(40);
+  assert.equal(windowsTasks.applyTasks(offer(), { home, scheduler, taskChoice: { outcome: 'replace', task: choice.task, observed: choice.fingerprint, answer_ref: 'owner-message:previous-revision' } }).refused, true);
+  assert.deepEqual([...scheduler.folders], before);
+});
+
+test('interrupted proven pair follows a new governance decision and preserves newly observed owner edits/stops', t => {
+  for (const from of ['programme-sweep','footer-sweep']) {
+    const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), first = switchOffer(t, from, root);
+    windowsTasks.applyTasks(first, { home, scheduler });
+    let snap;
+    const registry = { ...tasks, updateRegistry(...args) {
+      const result = tasks.updateRegistry(...args), entries = tasks.readRegistry(home).tasks;
+      if (!snap && entries.filter(e => ['programme-sweep','footer-sweep'].includes(e.job)).length === 2) snap = { entries, live: Object.fromEntries(structuredClone([...scheduler.folders])) };
+      return result;
+    } };
+    windowsTasks.applyTasks(switchOffer(t, from === 'programme-sweep' ? 'footer-sweep' : 'programme-sweep', root), { home, scheduler, registry });
+    assert.ok(snap);
+    for (const stop of [false, true]) {
+      const replayHome = tempHome(t), replay = fakeScheduler(snap.live); tasks.writeRegistry(replayHome, snap.entries);
+      if (stop) replay.folders.get('TOOLKIT')[0].state = 'Disabled';
+      const before = structuredClone([...replay.folders]);
+      const result = windowsTasks.applyTasks(first, { home: replayHome, scheduler: replay });
+      if (stop) { assert.equal(result.refused, true); assert.deepEqual([...replay.folders], before); }
+      else { assert.ok(result.items.every(i => i.done), JSON.stringify(result)); assertLiveRegistry(replayHome, replay); assert.deepEqual(tasks.readRegistry(replayHome).tasks.map(e => e.job).sort(), from === 'programme-sweep' ? ['programme-sweep','shard-timings'] : ['footer-sweep']); }
+    }
+  }
+});
+
+test('retirement-only restart never starts the retired source or invents destination first-run verification', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), source = switchOffer(t, 'programme-sweep', root);
+  windowsTasks.applyTasks(source, { home, scheduler }); let pair;
+  const registry = { ...tasks, updateRegistry(...args) {
+    const result = tasks.updateRegistry(...args), entries = tasks.readRegistry(home).tasks;
+    if (!pair && entries.some(e => e.job === 'footer-sweep')) pair = { entries, live: Object.fromEntries(structuredClone([...scheduler.folders])) };
+    return result;
+  } };
+  const off = switchOffer(t, 'footer-sweep', root); windowsTasks.applyTasks(off, { home, scheduler, registry }); assert.ok(pair);
+  const replayHome = tempHome(t), replay = fakeScheduler(pair.live); tasks.writeRegistry(replayHome, pair.entries);
+  const result = windowsTasks.applyTasks(off, { home: replayHome, scheduler: replay, firstRunOptions: { wait() {}, waitMs: 0, pollMs: 1 } });
+  assert.ok(result.items.every(i => i.done)); assertLiveRegistry(replayHome, replay);
+  assert.equal(replay.calls.some(c => c[0] === 'start'), false);
+  assert.equal(result.items.some(i => i.first_run), false);
+});
+
+test('footer lock defers with no effects and is released before a racing destination first run', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(); windowsTasks.applyTasks(switchOffer(t, 'footer-sweep', root), { home, scheduler });
+  const offer = switchOffer(t, 'programme-sweep', root), before = structuredClone([...scheduler.folders]); let count = 0;
+  const held = windowsTasks.applyTasks(offer, { home, scheduler, takeLock: () => ++count === 1 ? { release() {} } : null });
+  assert.equal(held.refused, true); assert.match(held.next_step, /retry apply/); assert.deepEqual([...scheduler.folders], before);
+  let footerHeld = false;
+  scheduler.onStart = task => { assert.equal(footerHeld, false); task.last_run = new Date().toISOString(); task.state = 'Running'; };
+  const result = windowsTasks.applyTasks(offer, { home, scheduler, takeLock: file => { if (file.includes('footer-')) footerHeld = true; return { release() { if (file.includes('footer-')) footerHeld = false; } }; }, firstRunOptions: { wait() {}, waitMs: 0, pollMs: 1 } });
+  assert.equal(result.items.find(i => i.first_run).first_run.status, 'still running'); assertLiveRegistry(home, scheduler);
+});
+
+test('multiple modified governance tasks require distinct answers for each exact task', t => {
+  const home = tempHome(t), scheduler = fakeScheduler(), offer = desired(t); windowsTasks.applyTasks(offer, { home, scheduler });
+  scheduler.folders.get('TOOLKIT').forEach(l => { l.arguments += ' --owner-edit'; });
+  const plan = windowsTasks.planTasks(offer, { home, scheduler });
+  const answers = plan.items.map((i, index) => ({ task: i.definition.id, observed: i.choice.fingerprint, outcome: 'replace', answer_ref: `owner-message:${index}` }));
+  const before = structuredClone([...scheduler.folders]);
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: answers[0] }).refused, true); assert.deepEqual([...scheduler.folders], before);
+  const args = ['apply', ...answers.flatMap(a => ['--task-choice',a.outcome,'--task',a.task,'--observed',a.observed,'--answer-ref',a.answer_ref])];
+  assert.deepEqual(windowsTasks.parseArgs(args).taskChoices, answers);
+  assert.ok(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: answers }).items.every(i => i.done)); assertLiveRegistry(home, scheduler);
+  assert.equal(windowsTasks.applyTasks(offer, { home, scheduler, taskChoice: answers }).refused, true, 'unused/reused answers refuse even when definitions are current');
+});
+
+test('answered modified P/S switch retires both without owner stops and retains the consumed answer references', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(); windowsTasks.applyTasks(switchOffer(t, 'programme-sweep', root), { home, scheduler });
+  scheduler.folders.get('TOOLKIT').forEach(l => { l.arguments += ' --owner-edit'; });
+  const off = switchOffer(t, 'footer-sweep', root), plan = windowsTasks.planTasks(off, { home, scheduler });
+  const answers = plan.items.filter(i => i.choice).map((i, index) => ({ task: i.definition.id, observed: i.choice.fingerprint, outcome: 'replace', answer_ref: `owner-message:switch-${index}` }));
+  assert.equal(answers.length, 2);
+  const result = windowsTasks.applyTasks(off, { home, scheduler, taskChoice: answers });
+  assert.ok(result.items.every(i => i.done), JSON.stringify(result)); assertLiveRegistry(home, scheduler);
+  const entries = tasks.readRegistry(home).tasks; assert.equal(entries.length, 1); assert.equal(entries[0].job, 'footer-sweep');
+  assert.deepEqual(entries[0].task_choices.map(c => c.answer_ref).sort(), answers.map(a => a.answer_ref).sort());
+  assert.equal(windowsTasks.applyTasks(off, { home, scheduler, taskChoice: answers }).refused, true);
+});
+
+test('history interruption keeps the real source receipt and replaces an unenrolled damaged destination', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), source = switchOffer(t, 'programme-sweep', root);
+  windowsTasks.applyTasks(source, { home, scheduler }); const receipt = baseRun(t, home);
+  const offer = switchOffer(t, 'footer-sweep', root);
+  assert.throws(() => windowsTasks.applyTasks(offer, { home, scheduler, writeRecord(id) { tasks.writeLastRun(id, {}, home); throw new Error('interrupted history write'); } }), /interrupted history/);
+  assert.deepEqual(tasks.readLastRun(receipt.id, home), receipt); assert.equal(scheduler.list('TOOLKIT').length, 2);
+  const result = windowsTasks.applyTasks(offer, { home, scheduler, now: () => new Date('2026-11-05T00:00:00Z') });
+  assert.ok(result.items.every(i => i.done)); assert.deepEqual(result.history_notes, []);
+  assert.equal(tasks.readLastRun('toolkit-footer-sweep', home).footer_sweep_since, receipt.footer_sweep_since);
+});
+
+for (const change of ['origin','binding folder','checkout','Toolkit location','native definition']) test(`switch guard rechecks ${change} between preview and locked effect`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), source = switchOffer(t, 'programme-sweep', root);
+  windowsTasks.applyTasks(source, { home, scheduler });
+  const offer = switchOffer(t, 'footer-sweep', root), before = structuredClone([...scheduler.folders]);
+  const gov = offer.checkoutDeps.governance, originalObservation = gov.readObservation;
+  let locks = 0, result, failure; scheduler.calls.length = 0;
+  try { result = windowsTasks.applyTasks(offer, { home, scheduler, takeLock() {
+    if (++locks === 1) {
+      if (change === 'origin') gov.readIdentity = root => ({ valid: true, root, remote: { host: 'github.com', path: '/other/repository.git' } });
+      if (change === 'binding folder') gov.readObservation = () => ({ ...originalObservation(), binding: fixtureBinding(undefined, 'OTHER', false) });
+      if (change === 'checkout' || change === 'Toolkit location') tasks.updateRegistry(home, rows => rows.map(e => ({ ...e, [change === 'checkout' ? 'checkout' : 'toolkit_root']: 'C:\\Moved\\checkout' })));
+      if (change === 'native definition') scheduler.folders.get('TOOLKIT')[0].arguments += ' --concurrent-owner-edit';
+    }
+    return { release() {} };
+  } }); } catch (error) { failure = error; }
+  if (failure) { assert.equal(change, 'origin'); assert.match(failure.message, /origin identity and merged binding/); }
+  else assert.equal(result.refused, true);
+  assert.ok(scheduler.calls.every(c => c[0] === 'list'));
+  if (change !== 'native definition') assert.deepEqual([...scheduler.folders], before);
+  else assert.equal(scheduler.list('TOOLKIT').filter(l => /FOOTER/.test(l.name)).length, 0);
+});
+
+test('repository removal: shared folder preserves repository B definitions and registry entries byte for byte', t => {
+  const home = tempHome(t), a = checkout(t), b = checkout(t), scheduler = fakeScheduler(), scope = desired(t, { root: a }); windowsTasks.applyTasks(scope, { home, scheduler });
+  const foreign = tasks.readRegistry(home).tasks.map((e, index) => ({ ...e, id: e.id.replace('toolkit-', 'other-'), name: e.name.replace('TOOLKIT -', 'OTHER -'), repository: 'example/other', checkout: b }));
+  tasks.writeRegistry(home, [...tasks.readRegistry(home).tasks, ...foreign]); for (const e of foreign) scheduler.folders.get('TOOLKIT').push(unmarked(e.name));
+  const before = structuredClone(scheduler.folders.get('TOOLKIT').filter(l => l.name.startsWith('OTHER')));
+  assert.equal(windowsTasks.removeTasks({ scope, home, scheduler }).items.length, 2);
+  assert.deepEqual(tasks.readRegistry(home).tasks.filter(e => e.id.startsWith('other-')), foreign);
+  assert.deepEqual(scheduler.folders.get('TOOLKIT').filter(l => l.name.startsWith('OTHER')), before);
+  assert.throws(() => windowsTasks.removeTasks({ home, scheduler }), /verified repository main checkout/);
+});
+
+for (const kind of ['no checkout', 'legacy', 'moved checkout']) for (const caller of ['remove','setup'])
+test(`repository removal: ${kind} through ${caller}, off-governance reset and foreign bytes`, async t => {
+  const w = switchWorld(t); await w.gov('on'); assert.equal(w.cli('apply').code, 0);
+  const foreign = { ...tasks.readRegistry(w.home).tasks[0], id: 'other-programme-sweep', name: 'OTHER - PROGRAMME SWEEP', repository: 'example/other' };
+  const foreignLive = { ...w.scheduler.list('AI-AGENT-TOOLKIT')[0], name: foreign.name, description: '[toolkit-task v1 id=other-programme-sweep def=0123456789ab]' };
+  w.scheduler.folders.get(foreign.folder).push(foreignLive);
+  tasks.updateRegistry(w.home, list => [...list.map(entry => {
+    if (kind === 'moved checkout') return { ...entry, checkout: 'C:\\Old\\widget' };
+    const next = { ...entry }; delete next.checkout;
+    if (kind === 'legacy') { delete next.enrolled; delete next.toolkit_root; }
+    return next;
+  }), foreign]);
+  const bytes = JSON.stringify(foreign), liveBytes = JSON.stringify(foreignLive);
+  let code;
+  if (caller === 'remove') code = w.cli('remove').code;
+  else {
+    const core = require('../scripts/setup-toolkit-core.cjs'), offer = w.offer();
+    code = await core.main(['--remove-toolkit-tasks'], { platform: 'win32', windowsTasksDeps: { platform: 'win32', scheduler: w.scheduler, home: w.home,
+      cwd: w.root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, checkoutDeps: offer.checkoutDeps, stdout() {}, stderr() {} } });
+  }
+  assert.equal(code, 0);
+  assert.equal(JSON.stringify(tasks.readRegistry(w.home).tasks.find(e => e.id === foreign.id)), bytes);
+  assert.equal(JSON.stringify(w.scheduler.list(foreign.folder).find(l => l.name === foreign.name)), liveBytes);
+  assert.ok(tasks.readRegistry(w.home).tasks.filter(e => e.id !== foreign.id).every(e => e.stopped_by_owner));
+  assert.deepEqual(w.scheduler.list(foreign.folder).map(l => l.name), [foreign.name]);
+  // Isolate the recovery proof after establishing the foreign bytes are untouched by removal.
+  tasks.updateRegistry(w.home, list => list.filter(e => e.id !== foreign.id));
+  w.scheduler.folders.get(foreign.folder).splice(0, 1);
+  await w.gov('off'); assert.equal(w.cli('apply').code, 1);
+  // Approved removal proved absence; explicit repair can now reconcile old paths.
+  // Ordinary apply above still holds, including the moved-checkout case.
+  printedRecovery(w); assertShape(w, 'off');
+});
+
+test('removal: empty repository scope says nothing about other repositories; managed-copy hint executes', t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), offer = desired(t, { root });
+  windowsTasks.applyTasks(offer, { home, scheduler });
+  let out = '';
+  const deps = { platform: 'win32', scheduler, home, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE,
+    checkoutDeps: { identityReader, governance: governance({ repository: 'example/empty' }) }, stdout: text => { out += text; }, stderr: text => { out += text; } };
+  assert.equal(windowsTasks.main(['remove','--repo-root',root], deps), 0);
+  assert.match(out, /No Toolkit tasks match this repository; other repositories are unchanged/);
+  assert.doesNotMatch(out, /No Toolkit tasks are recorded on this computer/);
+  assert.equal(scheduler.list('TOOLKIT').length, 2);
+  const request = { checkout: root, toolkitRoot: 'C:\\Copy\\toolkit', home };
+  let error;
+  try { windowsTasks.readLocations(request, { readFile: () => JSON.stringify({ repo_path: TOOLKIT_ROOT }), mainCheckout: x => x, realpath: x => x }); }
+  catch (caught) { error = caught; }
+  assert.equal(error.managedCheckout, TOOLKIT_ROOT); assert.equal(error.primaryCheckout, root);
+  out = '';
+  assert.equal(windowsTasks.main(['remove','--repo-root',root], { ...deps, toolkitRoot: request.toolkitRoot,
+    checkoutDeps: { identityReader: () => { throw error; } } }), 1);
+  const match = /Use node "([^"\n]+)" remove --repo-root "([^"\n]+)"/.exec(out); assert.ok(match, out);
+  assert.equal(match[1], TOOLKIT_ROOT + '\\repo\\scripts\\toolkit-windows-tasks.cjs'); assert.equal(match[2], root);
+  assert.equal(windowsTasks.main(['remove','--repo-root',match[2]], { ...deps, checkoutDeps: offer.checkoutDeps }), 0);
+  assert.equal(scheduler.list('TOOLKIT').length, 0);
+});
+
+test('switch metadata: one relationship, reordered and conflicting records, metadata-only reversal, then printed recovery', async t => {
+  const w = switchWorld(t); await w.gov('off'); assert.equal(w.cli('apply').code, 0); await w.gov('on');
+  const register = w.scheduler.unregister; let fired = false;
+  w.scheduler.unregister = () => { fired = true; throw new Error('retain intact pair'); };
+  assert.equal(w.cli('apply').code, 1); w.scheduler.unregister = register; assert.equal(fired, true);
+  const pair = tasks.readRegistry(w.home).tasks, live = structuredClone([...w.scheduler.folders]);
+  assert.equal(pair.filter(e => e.replaces).length, 1);
+  for (const kind of ['reverse','reordered','duplicate','exhausted','shard proof']) {
+    w.scheduler.folders.clear(); for (const [f, rows] of structuredClone(live)) w.scheduler.folders.set(f, rows);
+    tasks.writeRegistry(w.home, pair);
+    if (kind === 'reordered') tasks.updateRegistry(w.home, list => list.reverse());
+    if (kind === 'duplicate') tasks.updateRegistry(w.home, list => list.map(e => ({ ...e, replaces: { cleaner: new windowsTasks.WindowsTaskOwner({}).proof(list.find(p => p.id !== e.id)) } })));
+    if (kind === 'exhausted') tasks.updateRegistry(w.home, list => list.map(e => e.replaces ? { ...e, replaces: { cleaner: { ...e.replaces.cleaner, identity: 'a'.repeat(64) } } } : e));
+    if (kind === 'shard proof') tasks.updateRegistry(w.home, list => list.map(e => e.replaces ? { ...e, replaces: { ...e.replaces, shard: { id: 'ai-agent-toolkit-shard-timings', job: 'shard-timings', identity: 'b'.repeat(64) } } } : e));
+    await w.gov(kind === 'reverse' ? 'off' : 'on');
+    w.scheduler.calls.length = 0;
+    const result = w.cli('apply');
+    if (['duplicate','exhausted','shard proof'].includes(kind)) {
+      assert.equal(result.code, 1); assert.ok(w.scheduler.calls.every(c => c[0] === 'list'));
+      printedRecovery(w); assertShape(w, 'on');
+    } else {
+      assert.equal(result.code, 0); assertShape(w, kind === 'reverse' ? 'off' : 'on');
+      assert.ok(!w.scheduler.calls.some(c => c[0] === 'register' && /SWEEP$/.test(c[2])), 'relationship movement never re-registers an unchanged cleaner');
+    }
+  }
+});
+
+for (const participant of ['programme-sweep','footer-sweep','shard-timings']) test(`unproven deletion: ${participant} never implies retirement; repair and reset are printed routes`, async t => {
+  const w = switchWorld(t); await w.gov(participant === 'footer-sweep' ? 'off' : 'on'); assert.equal(w.cli('apply').code, 0);
+  const entries = tasks.readRegistry(w.home).tasks, live = structuredClone([...w.scheduler.folders]);
+  for (const reset of [false,true]) {
+    tasks.writeRegistry(w.home, entries); w.scheduler.folders.clear(); for (const [f, rows] of structuredClone(live)) w.scheduler.folders.set(f, rows);
+    const entry = entries.find(e => e.job === participant);
+    w.scheduler.folders.set(entry.folder, w.scheduler.folders.get(entry.folder).filter(l => l.name !== entry.name));
+    await w.gov(participant === 'footer-sweep' ? 'on' : 'off');
+    const before = fs.readFileSync(tasks.registryPath(w.home)); const result = w.cli('apply');
+    assert.equal(result.code, 1); assert.match(result.json.next_step, /unproven absence/);
+    assert.doesNotMatch(result.json.next_step, /stopped by owner/); assert.deepEqual(fs.readFileSync(tasks.registryPath(w.home)), before);
+    printedRecovery(w, reset); assertShape(w, participant === 'footer-sweep' ? 'on' : 'off');
+  }
+});
+
+test('history carry-over: old inactive 720-hour records and absent destinations do not widen a one-hour main receipt; active retries keep the earlier window', async t => {
+  const w = switchWorld(t); await w.gov('on'); assert.equal(w.cli('apply').code, 0);
+  const receipt = currentMainReceipt(w.home, w.root, w.now().toISOString(), 'ai-agent-toolkit-programme-sweep');
+  w.advance(1/24);
+  const off = () => w.offer().definitions.find(d => d.job === 'footer-sweep');
+  const stale = new Date(w.now().getTime() - 720 * 3600000).toISOString();
+  tasks.writeLastRun(off().id, { ...receipt, id: off().id, job: 'footer-sweep', footer_sweep_since: stale }, w.home);
+  await w.gov('off'); assert.equal(w.cli('apply','--no-first-run').code, 0);
+  assert.equal(tasks.readLastRun(off().id, w.home).footer_sweep_since, receipt.footer_sweep_since);
+  assert.deepEqual(tasks.readLastRun(receipt.id, w.home), receipt, 'source history retained');
+  await w.gov('on'); assert.equal(w.cli('apply','--no-first-run').code, 0);
+  const missing = tasks.lastRunPath(off().id, w.home); fs.unlinkSync(missing);
+  await w.gov('off'); assert.equal(w.cli('apply','--no-first-run').code, 0);
+  assert.equal(tasks.readLastRun(off().id, w.home).footer_sweep_since, receipt.footer_sweep_since, 'no destination does not add a 48-hour fallback');
+  await w.gov('on'); assert.equal(w.cli('apply','--no-first-run').code, 0);
+  await w.gov('off'); const unregister = w.scheduler.unregister; let fired = false;
+  w.scheduler.unregister = () => { fired = true; throw new Error('retain active destination retry'); };
+  assert.equal(w.cli('apply').code, 1); w.scheduler.unregister = unregister; assert.equal(fired, true);
+  tasks.writeLastRun(off().id, { ...receipt, id: off().id, job: 'footer-sweep', footer_sweep_since: stale }, w.home);
+  assert.equal(w.cli('apply','--no-first-run').code, 0);
+  assert.equal(tasks.readLastRun(off().id, w.home).footer_sweep_since, stale, 'an enrolled destination still has a pending retry window');
+  assertShape(w, 'off');
+});
+
+test('native acknowledgement: already absent between guard and unregister cannot establish retirement', async t => {
+  const w = switchWorld(t); await w.gov('off'); assert.equal(w.cli('apply').code, 0); await w.gov('on');
+  const unregister = w.scheduler.unregister; let fired = false;
+  w.scheduler.unregister = (folder, name, id, previous) => {
+    fired = true; w.scheduler.folders.set(folder, w.scheduler.folders.get(folder).filter(l => l.name !== name));
+    return unregister(folder, name, id, previous);
+  };
+  const result = w.cli('apply'); w.scheduler.unregister = unregister;
+  assert.equal(fired, true); assert.equal(result.code, 1); assert.match(result.json.items.find(i => !i.done).error, /not acknowledged/);
+  assert.ok(tasks.readRegistry(w.home).tasks.some(e => e.job === 'footer-sweep'));
+  assert.ok(tasks.readRegistry(w.home).tasks.every(e => !e.stopped_by_owner));
+  const held = w.cli('apply'); assert.equal(held.code, 1); assert.match(held.json.next_step, /unproven absence/);
+  printedRecovery(w); assertShape(w, 'on');
+});
+
+test('completion: a newly appearing unrecorded SHARD TIMINGS prevents off success and prints exact native recovery', async t => {
+  const w = switchWorld(t); await w.gov('on'); assert.equal(w.cli('apply').code, 0);
+  const orphan = w.scheduler.list('AI-AGENT-TOOLKIT').find(l => /SHARD TIMINGS$/.test(l.name));
+  await w.gov('off'); const info = w.scheduler.info; let fired = false;
+  w.scheduler.info = (...args) => { const out = info(...args); if (!fired) { fired = true; w.scheduler.folders.get('AI-AGENT-TOOLKIT').push(orphan); } return out; };
+  const result = w.cli('apply'); w.scheduler.info = info;
+  assert.equal(fired, true); assert.equal(result.code, 1); assert.match(result.json.next_step, /Final shape verification held/);
+  printedRecovery(w); assertShape(w, 'off');
+});
+
+test('plan text: earlier Keep, named answer flags, honest off/absent coverage and exact approved folder recovery', async t => {
+  const w = switchWorld(t); await w.gov('on'); assert.equal(w.cli('apply').code, 0);
+  w.scheduler.folders.get('AI-AGENT-TOOLKIT')[0].triggers[0].start = '2026-11-05T10:30:00';
+  const item = w.cli('plan').json.items.find(i => i.choice);
+  assert.equal(w.cli('apply','--task-choice','keep','--task',item.choice.task,'--observed',item.choice.fingerprint,'--answer-ref','owner:keep').code, 1);
+  const plan = w.cli('plan').json, text = windowsTasks.describePlan(plan).join(' ');
+  assert.match(text, /Earlier owner answer: keep; reference: owner:keep/);
+  assert.match(text, /--task-choice keep\|replace --task .* --observed .* --answer-ref/);
+  const replace = plan.items.find(i => i.choice);
+  assert.equal(w.cli('apply','--task-choice','replace','--task',replace.choice.task,'--observed',replace.choice.fingerprint,'--answer-ref','owner:replace').code, 0);
+  for (const state of ['off','absent']) {
+    await w.gov(state); assert.equal(w.cli('apply').code, 0);
+    assert.doesNotMatch(windowsTasks.describePlan(w.cli('plan').json).join(' '), /Programme refresh coverage is missing/);
+  }
+  await w.gov('on', { folder: 'NEW' });
+  const held = w.cli('plan').json;
+  assert.match(held.next_step, /with explicit approval to keep the recorded folder, run node .* --folder AI-AGENT-TOOLKIT/);
+  const match = /apply --repo-root "([^"\n]+)" --folder ([A-Z0-9-]+)/.exec(held.next_step); assert.ok(match);
+  assert.equal(match[1], w.root);
+  const recovered = w.cli('apply','--folder',match[2]);
+  assert.equal(recovered.code, 0, JSON.stringify(recovered)); assertShape(w, 'on');
+  assert.equal(recovered.json.approval, 'explicit approval required');
+
+});
+
+for (const participant of ['programme-sweep','footer-sweep','shard-timings']) test(`edited recovery: ${participant} cannot use repair to answer a choice; printed reset works`, async t => {
+  const w = switchWorld(t); await w.gov(participant === 'footer-sweep' ? 'off' : 'on'); assert.equal(w.cli('apply').code, 0);
+  const live = w.scheduler.folders.get('AI-AGENT-TOOLKIT').find(l => l.name === windowsTasks.taskName('AI-AGENT-TOOLKIT', participant));
+  live.arguments += ' --owner-edit';
+  if (participant !== 'footer-sweep') live.state = 'Disabled';
+  await w.gov(participant === 'footer-sweep' ? 'on' : 'off');
+  const before = JSON.stringify([...w.scheduler.folders]), entries = fs.readFileSync(tasks.registryPath(w.home));
+  assert.equal(w.cli('apply','--repair-owned').code, 1);
+  assert.equal(JSON.stringify([...w.scheduler.folders]), before); assert.deepEqual(fs.readFileSync(tasks.registryPath(w.home)), entries);
+  printedRecovery(w, true); assertShape(w, participant === 'footer-sweep' ? 'on' : 'off');
+});
+
+test('metadata recovery: unsupported relationship on retained S clears before creating a missing cleaner', async t => {
+  const w = switchWorld(t); await w.gov('on'); assert.equal(w.cli('apply').code, 0);
+  const entries = tasks.readRegistry(w.home).tasks, cleaner = entries.find(e => e.job === 'programme-sweep'), shard = entries.find(e => e.job === 'shard-timings');
+  // A retained candidate-only unsupported row is never silently accepted by ordinary apply.
+  tasks.writeRegistry(w.home, [{ ...shard, replaces: { cleaner: new windowsTasks.WindowsTaskOwner({}).proof(cleaner) } }]);
+  w.scheduler.folders.set(shard.folder, w.scheduler.folders.get(shard.folder).filter(l => l.name === shard.name));
+  assert.equal(w.cli('apply').code, 1);
+  printedRecovery(w); assertShape(w, 'on');
+});
+
+test('identity collision control: native XML varies within one day without leaving stale relationships', async t => {
+  const w = switchWorld(t), register = w.scheduler.register; let writes = 0;
+  w.scheduler.register = (d, previous) => {
+    const result = register(d, previous);
+    w.scheduler.folders.get(d.folder).find(l => l.name === d.name).definition_xml = `<Task fixture="${++writes}"/>`;
+    return result;
+  };
+  const day = w.now().toISOString().slice(0,10);
+  for (const state of ['off','on','off','on']) {
+    await w.gov(state); assert.equal(w.cli('apply').code, 0); assertShape(w, state);
+  }
+  assert.ok(writes >= 6); assert.equal(w.now().toISOString().slice(0,10), day);
+});
+
+for (const point of ['write','readback']) for (const side of ['before','after']) test(`backup interruption: ${point} ${side} retains native definitions and retries`, t => {
+  const home = tempHome(t), root = checkout(t), scheduler = fakeScheduler(), initial = desired(t, { root });
+  windowsTasks.applyTasks(initial, { home, scheduler });
+  const offer = desired(t, { root, nodePath: 'C:\\New\\node.exe' }), live = structuredClone([...scheduler.folders]), entries = tasks.readRegistry(home).tasks;
+  let fired = false;
+  const key = point === 'write' ? 'writeFileSync' : 'readFileSync', original = fs[key];
+  const mock = t.mock.method(fs, key, (...args) => {
+    const matches = /definition-[0-9a-f]+\.json$/.test(String(args[0]));
+    if (matches && !fired && side === 'before') { fired = true; throw new Error('injected backup interruption'); }
+    const result = original(...args);
+    if (matches && !fired && side === 'after') { fired = true; throw new Error('injected backup interruption'); }
+    return result;
+  });
+  const result = windowsTasks.applyTasks(offer, { home, scheduler }); mock.mock.restore();
+  assert.equal(fired, true); assert.ok(result.items.every(i => !i.done));
+  assert.deepEqual([...scheduler.folders], live); assert.deepEqual(tasks.readRegistry(home).tasks, entries);
+  assert.ok(windowsTasks.applyTasks(offer, { home, scheduler }).items.every(i => i.done)); assertLiveRegistry(home, scheduler);
+});
+
+// Disposable-folder qualification, gated by separate owner permission. The installed candidate
+// runner executes repeatedly with fake processes and an isolated home; no real GitHub route exists.
+test('real Task Scheduler: disposable repeated cleaner qualification', { skip: process.platform !== 'win32' || process.env.TOOLKIT_REAL_TASK_SCHEDULER_TEST !== '1' ? 'requires owner approval for disposable scheduler mutations' : false }, t => {
   const scheduler = windowsTasks.powerShellScheduler();
-  const folder = 'TOOLKIT-TEST-SCRATCH';
-  const wanted = windowsTasks.desiredTasks({ checkout: ROOT, folder, deps: {} });
-  t.after(() => { try { windowsTasks.removeTasks({ folder, scheduler, home }); } catch { /* reported by the assertions */ } });
-  const before = scheduler.list(null).map(task => task.name).sort();
-  windowsTasks.applyTasks(wanted, { scheduler, home });
-  assert.deepEqual(scheduler.list(folder).map(task => task.name).sort(), wanted.wanted.map(d => d.name).sort());
-  assert.ok(scheduler.list(folder).every(task => windowsTasks.parseMarker(task.description)));
-  const removed = windowsTasks.removeTasks({ folder, scheduler, home });
-  assert.deepEqual(removed.folders, [{ folder, result: 'removed' }]);
-  assert.deepEqual(scheduler.list(null).map(task => task.name).sort(), before, 'root-folder tasks unchanged');
+  const folder = `TOOLKIT-TEST-${process.pid}`;
+  assert.deepEqual(scheduler.list(folder), [], 'never enter an occupied qualification folder');
+  const snapshot = name => scheduler.list(name).map(row => ({ name: row.name, definition: windowsTasks.enrolledDefinition(row) }));
+  const before = new Map([null, ...scheduler.markedFolders()].map(name => [name, snapshot(name)]));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-qualification-home-')), root = checkout(t, { shards: false });
+  const runner = path.join(root, 'qualified-job.cjs');
+  const repository = `qualification/cleaner-${process.pid}`;
+  const knownDefinitions = new Map();
+  let qualificationComplete = false;
+  const binding = fixtureBinding(repository, folder);
+  const events = path.join(home, 'events.jsonl');
+  const failureFile = path.join(home, 'fail-footer');
+  const pauseFile = path.join(home, 'pause-runner');
+  const clockFile = path.join(home, 'clock'); fs.writeFileSync(clockFile, String(Date.now()));
+  fs.writeFileSync(runner, `const fs=require('node:fs');const j=require(${JSON.stringify(path.join(ROOT, 'repo/scripts/toolkit-scheduled-job.cjs'))});
+const options=j.parseArgs(process.argv.slice(2));
+while(fs.existsSync(${JSON.stringify(pauseFile)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);
+const now=()=>{const value=Math.max(Date.now(),Number(fs.readFileSync(${JSON.stringify(clockFile)},'utf8'))+1);fs.writeFileSync(${JSON.stringify(clockFile)},String(value));return new Date(value);};
+const record=j.runJob(options,{home:${JSON.stringify(home)},ghPath:'fake-gh',nodePath:process.execPath,
+repositoryReader:root=>root===${JSON.stringify(root)} && fs.existsSync(root),
+readIdentity:root=>root===${JSON.stringify(root)}?({valid:true,root,remote:{host:'github.com',path:${JSON.stringify('/' + repository + '.git')}}}):null,
+readObservation:()=>({status:'enabled',fresh:true,binding:${JSON.stringify(binding)}}),now,
+run:(file,args)=>{now();fs.appendFileSync(${JSON.stringify(events)},JSON.stringify({id:options.taskId,args})+'\\n');
+if(args[0]===j.SCRIPT.footerSweep && fs.existsSync(${JSON.stringify(failureFile)}))return {status:1,stdout:'{"results":[{"status":"MISMATCH"}]}'};
+if(args[0]===j.SCRIPT.governance)return ${JSON.stringify(GOVERNED)};if(args[1]==='attention')return ${JSON.stringify(ATTENTION)};return {status:0,stdout:'',stderr:''};}});process.exitCode=record.exit;`);
+  const realGovernance = require('../scripts/toolkit-governance-state.cjs');
+  const location = request => { assert.equal(request.checkout, root); assert.equal(request.toolkitRoot, ROOT); return request; };
+  const desiredFor = mode => {
+    const gov = governance({ state: mode === 'programme-sweep' ? 'ENABLED' : 'UNDECIDED', repository, folder });
+    const read = gov.readIdentity;
+    gov.readIdentity = target => target === root ? read(target) : realGovernance.readIdentity(target);
+    const desired = windowsTasks.desiredTasks({ checkout: root, folder, toolkitRoot: ROOT, nodePath: process.execPath, home,
+      deps: { identityReader: location, governance: gov } });
+    for (const d of desired.definitions) {
+      const digest = d.def;
+      d.arguments = `--headless "${process.execPath}" "${runner}" ${d.job} --repo-root "${root}" --task-id ${d.id}`;
+      d.def = windowsTasks.definitionDigest(d); d.description = d.description.replace(digest, d.def);
+      knownDefinitions.set(d.id, d);
+    }
+    return desired;
+  };
+  const native = (verb, name) => {
+    assert.ok(['Disable-ScheduledTask', 'Stop-ScheduledTask', 'Unregister-ScheduledTask'].includes(verb));
+    assert.ok(name.startsWith(`${folder} - `));
+    const script = `$p=$env:TOOLKIT_QUALIFY_TASK | ConvertFrom-Json; ${verb} -TaskPath ('\\'+$p.folder+'\\') -TaskName $p.name ${verb === 'Unregister-ScheduledTask' ? '-Confirm:$false ' : ''}-ErrorAction Stop | Out-Null`;
+    const result = require('node:child_process').spawnSync(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')], { timeout: 30000, windowsHide: true, encoding: 'utf8', env: { ...process.env, TOOLKIT_QUALIFY_TASK: JSON.stringify({ folder, name }) } });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  t.after(() => {
+    for (const mode of ['programme-sweep', 'footer-sweep', null]) {
+      const modeHome = mode ? path.join(home, mode) : home;
+      for (const row of tasks.readRegistry(modeHome).tasks || []) {
+        const live = scheduler.list(folder).find(task => task.name === row.name);
+        if (live?.state === 'Running' && windowsTasks.parseMarker(live.description)?.id === row.id) native('Stop-ScheduledTask', row.name);
+      }
+      const result = windowsTasks.removeTasks({ scope: desiredFor('programme-sweep'), folder, scheduler, home: modeHome });
+      assert.ok(result.items.every(row => row.action === 'removed' || row.action.startsWith('stopped by owner')));
+    }
+    // A denied/killed registration may be unrecorded. Only this occupied-folder-checked test's
+    // exact known definitions are eligible for separately authorised disposable cleanup.
+    for (const live of scheduler.list(folder)) {
+      const marker = windowsTasks.parseMarker(live.description);
+      assert.ok(marker && knownDefinitions.get(marker.id)?.name === live.name);
+      if (live.state === 'Running') native('Stop-ScheduledTask', live.name);
+      scheduler.unregister(folder, live.name, marker.id, scheduler.list(folder).find(l => l.name === live.name));
+    }
+    assert.deepEqual(scheduler.list(folder), []);
+    for (const [name, rows] of before) assert.deepEqual(snapshot(name), rows, 'unrelated installed definitions unchanged');
+    if (qualificationComplete) fs.rmSync(home, { recursive: true, force: true });
+    else t.diagnostic(`Qualification failed; evidence retained at ${home}. Disposable task cleanup was verified.`);
+  });
+  // Separate registries exercise lasting owner stops and same-job repair before the switch sequence.
+  for (const mode of ['programme-sweep', 'footer-sweep']) {
+    const modeHome = path.join(home, mode); fs.mkdirSync(modeHome);
+    const desired = desiredFor(mode);
+    const deps = { scheduler, home: modeHome, identityReader: location, firstRunOptions: { home } };
+    const legacy = { ...desired, wanted: desired.wanted.map(d => d.job === 'shard-timings' ? d : ({ ...d, schedule: { kind: 'hourly', at: '08:00', hours: 16 }, schedule_text: 'hourly, 08:00 to 23:59' })) };
+    for (const d of legacy.wanted) { const digest = d.def; d.def = windowsTasks.definitionDigest(d); d.description = d.description.replace(digest, d.def); }
+    assert.equal(windowsTasks.applyTasks(legacy, { ...deps, firstRunOptions: null }).items[0].done, true);
+    const applied = windowsTasks.applyTasks(desired, deps);
+    assert.equal(applied.items[0].first_run.status, 'ok', JSON.stringify(applied));
+    const d = applied.items[0].definition;
+    // The subprocess writes to `home`; supply that reader to strict first-run checks below.
+    const live = scheduler.list(folder).find(row => row.name === d.name);
+    assert.ok(['P1D', 'PT24H'].includes(live.triggers[0].duration));
+    const first = tasks.readLastRun(d.id, home);
+    fs.writeFileSync(failureFile, 'fail');
+    assert.equal(windowsTasks.firstRun(d, { scheduler, home }).status, 'failed', 'a failed real job is never healthy registration');
+    assert.equal(tasks.readLastRun(d.id, home).footer_sweep_since, first.footer_sweep_since);
+    fs.unlinkSync(failureFile);
+    const second = windowsTasks.firstRun(d, { scheduler, home });
+    assert.equal(second.status, 'ok');
+    const record = tasks.readLastRun(d.id, home);
+    assert.ok(Date.parse(record.footer_sweep_since) > Date.parse(first.footer_sweep_since));
+    const calls = fs.readFileSync(events, 'utf8').trim().split(/\r?\n/).map(JSON.parse).filter(row => row.id === d.id);
+    assert.ok(calls.filter(row => row.args[0] === job.SCRIPT.footerSweep).length >= 2);
+    assert.equal(windowsTasks.applyTasks(desired, { ...deps, firstRunOptions: null }).items[0].action, 'current');
+    const removed = windowsTasks.removeTasks({ scope: desired, folder, scheduler, home: modeHome });
+    assert.equal(removed.items[0].action, 'removed');
+    assert.equal(windowsTasks.applyTasks(desired, deps).items[0].action, 'refused');
+    const repaired = windowsTasks.applyTasks(desired, { ...deps, repairOwned: true, firstRunOptions: null });
+    assert.equal(repaired.items[0].done, true);
+    // Copy the real native disabled state only through the scheduler's own command.
+    native('Disable-ScheduledTask', d.name);
+    assert.equal(windowsTasks.applyTasks(desired, deps).items[0].action, 'refused');
+    assert.match(tasks.formatList(tasks.listTasks({ home: modeHome, scheduler, platform: 'win32', folderFor: () => folder })), /Disabled/);
+    windowsTasks.removeTasks({ scope: desired, folder, scheduler, home: modeHome });
+  }
+  // The same real native folder and registry change shape OFF/ON/OFF/ON. The managed runner
+  // writes each real result; fake GitHub processes stay inside the generated qualification runner.
+  for (const mode of ['footer-sweep','programme-sweep','footer-sweep','programme-sweep']) {
+    const offer = desiredFor(mode), old = tasks.readRegistry(home).tasks.find(e => e.job !== mode && ['programme-sweep','footer-sweep'].includes(e.job));
+    const boundary = old && tasks.readLastRun(old.id, home)?.footer_sweep_since;
+    const adapter = { ...scheduler, start(f, name) {
+      if (boundary) assert.ok(Date.parse(tasks.readLastRun(windowsTasks.taskId(folder, mode), home).footer_sweep_since) <= Date.parse(boundary));
+      scheduler.start(f, name);
+    } };
+    const applied = windowsTasks.applyTasks(offer, { scheduler: adapter, home, identityReader: location, firstRunOptions: { home } });
+    assert.ok(applied.items.every(i => i.done), JSON.stringify(applied));
+    assert.equal(applied.items.find(i => i.first_run)?.first_run.status, 'ok'); assertLiveRegistry(home, scheduler);
+    assert.deepEqual(tasks.readRegistry(home).tasks.map(e => e.job).sort(), mode === 'programme-sweep' ? ['programme-sweep','shard-timings'] : ['footer-sweep']);
+  }
+  // Real native definition changes use the same enrolled baseline and one-use answer path.
+  const on = desiredFor('programme-sweep'), d = on.definitions.find(d => d.job === 'programme-sweep');
+  for (const changed of on.definitions.filter(d => d.job !== 'footer-sweep')) {
+    scheduler.register({ ...changed, schedule: { ...changed.schedule, at: '01:00' } }, scheduler.list(folder).find(l => l.name === changed.name));
+    const choice = windowsTasks.planTasks(on, { scheduler, home, identityReader: location }).items.find(i => i.action === 'owner-choice-required'); assert.ok(choice);
+    const answer = { task: changed.id, observed: choice.choice.fingerprint, outcome: 'keep', answer_ref: `qualification:${changed.job}:simulated-owner-keep` };
+    assert.equal(windowsTasks.applyTasks(on, { scheduler, home, identityReader: location, taskChoice: answer }).refused, true);
+    const replaced = windowsTasks.applyTasks(on, { scheduler, home, identityReader: location, taskChoice: { ...answer, outcome: 'replace', answer_ref: `qualification:${changed.job}:simulated-owner-replace` }, firstRunOptions: { home } });
+    assert.ok(replaced.items.every(i => i.done)); assertLiveRegistry(home, scheduler);
+    assert.equal(windowsTasks.applyTasks(on, { scheduler, home, identityReader: location, taskChoice: answer }).refused, true);
+  }
+  fs.writeFileSync(pauseFile, 'qualification latch'); scheduler.start(folder, d.name);
+  const waitReady = name => {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (scheduler.info(folder, name)?.state !== 'Running') return;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+    }
+    assert.fail('disposable task is still running; preserve evidence and clean up its exact folder');
+  };
+  try {
+    let running = false;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (scheduler.info(folder, d.name)?.state === 'Running') { running = true; break; }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+    }
+    assert.equal(running, true);
+    const beforeSwitch = snapshot(folder);
+    assert.equal(windowsTasks.applyTasks(desiredFor('footer-sweep'), { scheduler, home, identityReader: location }).refused, true);
+    assert.deepEqual(snapshot(folder), beforeSwitch);
+  } finally { fs.unlinkSync(pauseFile); }
+  waitReady(d.name);
+  // Faults leave the native result in place, exactly as a stopped process would. There is no
+  // cross-shape rollback. A native/registry gap needs the test's separately authorised exact cleanup.
+  for (const target of ['footer-sweep','programme-sweep']) for (const point of ['history','register','destination-readback','enrolment','unregister','cleanup','shards','start','result-readback']) for (const side of ['before','after']) {
+    const sourceMode = target === 'footer-sweep' ? 'programme-sweep' : 'footer-sweep';
+    const sourceOffer = desiredFor(sourceMode);
+    assert.ok(windowsTasks.applyTasks(sourceOffer, { scheduler, home, identityReader: location }).items.every(i => i.done));
+    for (const row of scheduler.list(folder)) if (row.state === 'Running') waitReady(row.name);
+    const retainedChoices = tasks.readRegistry(home).tasks.flatMap(e => (e.task_choices || []).map(c => c.answer_ref));
+    const sourceEntry = tasks.readRegistry(home).tasks.find(e => e.job === sourceMode);
+    const pendingBoundary = tasks.readLastRun(sourceEntry.id, home)?.footer_sweep_since;
+    const offer = desiredFor(target); let fired = false, registered = false, removed = false;
+    const at = (label, when) => { if (!fired && point === label && side === when) { fired = true; throw new Error(`qualification interruption ${label} ${when}`); } };
+    const around = (label, effect) => { at(label, 'before'); const result = effect(); at(label, 'after'); return result; };
+    const adapter = { ...scheduler,
+      register(def, old) { return around(def.job === 'shard-timings' ? 'shards' : 'register', () => { const result = scheduler.register(def, old); if (def.job === target) registered = true; return result; }); },
+      list(f) { return registered ? around('destination-readback', () => scheduler.list(f)) : scheduler.list(f); },
+      unregister(f, name, id, old) { return around(id.endsWith('shard-timings') ? 'shards' : 'unregister', () => { const result = scheduler.unregister(f, name, id, old); if (!id.endsWith('shard-timings')) removed = true; return result; }); },
+      start: (f, name) => around('start', () => scheduler.start(f, name)),
+      info: (f, name) => around('result-readback', () => scheduler.info(f, name)),
+    };
+    const registry = { ...tasks, updateRegistry: (...args) => around(removed ? 'cleanup' : 'enrolment', () => tasks.updateRegistry(...args)) };
+    let result;
+    try { result = windowsTasks.applyTasks(offer, { scheduler: adapter, registry, home, identityReader: location,
+      writeRecord: (id, record) => around('history', () => tasks.writeLastRun(id, record, home)), firstRunOptions: { home } }); }
+    catch (error) { assert.match(error.message, /qualification interruption/); }
+    assert.equal(fired, true, `${target} ${point} ${side} was exercised`);
+    assert.ok(!result || result.refused || result.items.some(i => i.done === false || i.first_run?.status === 'failed'));
+    const saved = tasks.readRegistry(home);
+    for (const live of scheduler.list(folder)) {
+      if (live.state === 'Running') waitReady(live.name);
+      if (saved.tasks.some(e => e.name === live.name)) continue;
+      const marker = windowsTasks.parseMarker(live.description);
+      assert.ok(marker && offer.definitions.some(def => def.id === marker.id && def.name === live.name));
+      assert.equal(windowsTasks.applyTasks(offer, { scheduler, home, identityReader: location }).refused, true, 'never take over an unrecorded native write');
+      const held = windowsTasks.planTasks(offer, { scheduler, home, identityReader: location });
+      const nativeCommand = `Unregister-ScheduledTask -TaskPath '\\${folder}\\' -TaskName '${live.name}' -Confirm:$false`;
+      assert.ok(held.next_step.includes(nativeCommand), held.next_step);
+      native('Unregister-ScheduledTask', live.name);
+      assert.ok(!scheduler.list(folder).some(l => l.name === live.name));
+    }
+    let resumed = windowsTasks.applyTasks(offer, { scheduler, home, identityReader: location });
+    if (resumed.refused) {
+      const held = windowsTasks.planTasks(offer, { scheduler, home, identityReader: location });
+      assert.match(held.next_step, /Owner-authorised recovery:.* --repair-owned/);
+      resumed = windowsTasks.applyTasks(offer, { scheduler, home, identityReader: location, repairOwned: true });
+    }
+    assert.ok(resumed.items.every(i => i.done), JSON.stringify(resumed)); assertLiveRegistry(home, scheduler);
+    assert.deepEqual(tasks.readRegistry(home).tasks.map(e => e.job).sort(), target === 'programme-sweep' ? ['programme-sweep','shard-timings'] : ['footer-sweep']);
+    assert.ok(tasks.readRegistry(home).tasks.every(e => !e.replaces));
+    const choices = tasks.readRegistry(home).tasks.flatMap(e => (e.task_choices || []).map(c => c.answer_ref));
+    for (const ref of retainedChoices) assert.ok(choices.includes(ref), 'spent owner answer survives interruption and recovery');
+    const resultRecord = tasks.readLastRun(windowsTasks.taskId(folder, target), home);
+    if (pendingBoundary && resultRecord?.status !== 'ok') assert.ok(Date.parse(resultRecord.footer_sweep_since) <= Date.parse(pendingBoundary), 'an incomplete run never loses the retry window');
+  }
+  // A second repository in the same disposable folder must survive A's removal unchanged.
+  const otherRoot = checkout(t, { shards: false }), otherRepo = 'qualification/other';
+  const other = { ...desiredFor('programme-sweep').definitions.find(d => d.job === 'programme-sweep'),
+    id: 'qualification-other-programme-sweep', name: `${folder} - OTHER PROGRAMME SWEEP`, repository: otherRepo, checkout: otherRoot };
+  other.arguments = other.arguments.replace(root, otherRoot).replace(/--task-id [a-z0-9-]+$/, '--task-id ' + other.id);
+  other.def = windowsTasks.definitionDigest(other); other.description = `Qualification other [toolkit-task v1 id=${other.id} def=${other.def}]`;
+  knownDefinitions.set(other.id, other); scheduler.register(other);
+  const otherLive = scheduler.list(folder).find(l => l.name === other.name), template = tasks.readRegistry(home).tasks.find(e => e.job === 'programme-sweep');
+  const otherEntry = { ...template, id: other.id, name: other.name, repository: otherRepo, checkout: otherRoot, definition: other.def, enrolled: windowsTasks.enrolledDefinition(otherLive) };
+  delete otherEntry.replaces; delete otherEntry.task_choices;
+  tasks.updateRegistry(home, rows => [...rows, otherEntry]);
+  assert.ok(windowsTasks.removeTasks({ scope: desiredFor('programme-sweep'), folder, scheduler, home }).items.every(i => i.action === 'removed'));
+  assert.deepEqual(scheduler.list(folder).find(l => l.name === other.name), otherLive);
+  assert.deepEqual(tasks.readRegistry(home).tasks.find(e => e.id === other.id), otherEntry);
+  const otherScope = windowsTasks.desiredTasks({ checkout: otherRoot, folder, toolkitRoot: ROOT, nodePath: process.execPath, home, deps: { identityReader: request => request, governance: governance({ repository: otherRepo, folder }) } });
+  assert.equal(windowsTasks.removeTasks({ scope: otherScope, folder, scheduler, home }).items[0].action, 'removed');
+  qualificationComplete = true;
+});
+
+test('setup held plans omit recovery paths and commands, while direct plan retains them', async t => {
+  const w = switchWorld(t); await w.gov('on'); assert.equal(w.cli('apply').code, 0);
+  await w.gov('off');
+  tasks.updateRegistry(w.home, rows => rows.map(e => ({ ...e, stopped_by_owner: true, stopped_at: w.now().toISOString() })));
+  const lines = [], core = require('../scripts/setup-toolkit-core.cjs');
+  core.printWindowsTasks({ repoRoot: w.root }, { platform: 'win32', scheduler: w.scheduler, home: w.home, workingFolder: w.root,
+    checkoutDeps: { ...w.offer().checkoutDeps, reportCheckout: root => root }, log: line => lines.push(line) });
+  const text = lines.join('\n');
+  for (const location of [w.root, w.toolkitRoot, w.home]) assert.equal(text.includes(location), false);
+  assert.doesNotMatch(text, /--repo-root|--repair-owned|node |USERPROFILE/);
+  assert.match(text, /direct task plan/);
+  assert.match(windowsTasks.describePlan(w.cli('plan').json).join('\n'), /node .* --repair-owned/);
+});
+
+for (const mode of ['success','register failure','first-run failure']) test(`apply next step describes ${mode} without asking to run apply`, t => {
+  const home = tempHome(t), scheduler = fakeScheduler(), offer = desired(t);
+  if (mode === 'register failure') scheduler.register = () => { throw new Error('fixture denied'); };
+  const result = windowsTasks.applyTasks(offer, { home, scheduler, firstRunOptions: mode === 'first-run failure' ? { wait() {}, waitMs: 1, pollMs: 1 } : null });
+  assert.doesNotMatch(result.next_step, /^Run apply/);
+  if (mode === 'register failure') assert.ok(result.items.some(i => i.done === false));
+  if (mode === 'first-run failure') assert.equal(result.items[0].first_run.status, 'failed');
+});
+
+for (const jobName of ['programme-sweep','shard-timings']) test(`task list: edited ${jobName} needs a choice, with no owner stop`, t => {
+  const home = tempHome(t), scheduler = fakeScheduler(), offer = desired(t);
+  windowsTasks.applyTasks(offer, { home, scheduler });
+  const live = scheduler.folders.get('TOOLKIT').find(l => l.name === windowsTasks.taskName('TOOLKIT',jobName));
+  live.arguments += ' --owner-edit';
+  const before = fs.readFileSync(tasks.registryPath(home));
+  const listed = tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => 'TOOLKIT' });
+  assert.equal(listed.rows.find(r => r.name === live.name).state, 'modified; owner choice required');
+  assert.equal(windowsTasks.planTasks(offer, { home, scheduler }).items.find(i => i.definition.job === jobName).action, 'owner-choice-required');
+  assert.deepEqual(fs.readFileSync(tasks.registryPath(home)), before);
+  assert.ok(tasks.readRegistry(home).tasks.every(e => !e.stopped_by_owner));
+});
+
+test('removal hints: plugin and linked Toolkit copies name the managed runner and target primary, then execute', t => {
+  const base = tempHome(t), home = path.join(base,'home'), managed = path.join(base,'managed'), project = path.join(base,'project');
+  const git = (root,...args) => require('node:child_process').execFileSync('git',['-C',root,...args],{encoding:'utf8',windowsHide:true,timeout:10000});
+  for (const [root,origin] of [[managed,'https://github.com/weijunswj/ai-agent-toolkit.git'],[project,'https://github.com/example/widget.git']]) {
+    fs.mkdirSync(root); git(root,'init','--quiet'); git(root,'remote','add','origin',origin);
+    git(root,'-c','user.name=Fixture','-c','user.email=fixture@example.test','commit','--quiet','--allow-empty','-m','fixture');
+  }
+  const plugin = path.join(base,'plugin'), linked = path.join(base,'linked'); fs.mkdirSync(plugin);
+  git(managed,'worktree','add','--quiet','-b','fixture',linked);
+  const state = path.join(home,'.ai-agent-toolkit','current','state.json');
+  fs.mkdirSync(path.dirname(state),{recursive:true}); fs.writeFileSync(state,JSON.stringify({repo_path:managed}));
+  const real = require('../scripts/toolkit-governance-state.cjs'), scheduler = fakeScheduler();
+  const deps = { platform:'win32',home,scheduler,nodePath:NODE,
+    checkoutDeps:{governance:{...governance({repository:'example/widget'}),readIdentity:real.readIdentity}} };
+  for (const copy of [plugin,linked]) {
+    let text='';
+    assert.equal(windowsTasks.main(['remove','--repo-root',project],{...deps,toolkitRoot:copy,stdout:v=>{text+=v;},stderr:v=>{text+=v;}}),1);
+    const command = /Use node "([^"\n]+)" remove --repo-root "([^"\n]+)"/.exec(text); assert.ok(command,text);
+    const script=command[1].replace('$env:USERPROFILE',home), target=command[2].replace('$env:USERPROFILE',home);
+    assert.equal(script,path.win32.join(managed,'repo','scripts','toolkit-windows-tasks.cjs')); assert.equal(target,project);
+    assert.equal(windowsTasks.main(['remove','--repo-root',target],{...deps,toolkitRoot:managed,stdout(){},stderr(){}}),0);
+  }
+});
+
+test('choice history: repeated real large edits store fingerprints and retain bounded-reader recovery', t => {
+  const home=tempHome(t),scheduler=fakeScheduler(),offer=desired(t);
+  windowsTasks.applyTasks(offer,{home,scheduler});
+  const live=scheduler.folders.get('TOOLKIT')[0];
+  for (let index=0;index<90;index++) {
+    live.definition_xml='<Task>'+String(index)+'x'.repeat(4096)+'</Task>';
+    const item=windowsTasks.planTasks(offer,{home,scheduler}).items.find(i=>i.choice);
+    assert.ok(item);
+    const answer={task:item.choice.task,observed:item.choice.fingerprint,outcome:'keep',answer_ref:`owner-message:large-${index}`};
+    assert.equal(windowsTasks.applyTasks(offer,{home,scheduler,taskChoice:answer}).refused,true);
+  }
+  const read=tasks.readRegistry(home); assert.equal(read.status,'ok');
+  const history=read.tasks[0].task_choices; assert.equal(history.length,90);
+  assert.ok(history.every(c=>!Object.hasOwn(c,'definition')&&/^[a-f0-9]{64}$/.test(c.observed)&&c.answer_ref&&c.outcome==='keep'&&c.at));
+  assert.ok(fs.statSync(tasks.registryPath(home)).size<512*1024);
+  assert.equal(windowsTasks.removeTasks({scope:offer,home,scheduler}).items.every(i=>i.action==='removed'),true);
+});
+
+for (const target of ['on','off']) for (const failure of ['native denial','XML race','recreated source'])
+test(`moved recovery interruption: ${target} / ${failure}`, async t => {
+  const w=switchWorld(t); await w.gov(target==='on'?'off':'on'); assert.equal(w.cli('apply').code,0);
+  const folder='AI-AGENT-TOOLKIT', original=structuredClone(w.scheduler.folders.get(folder)[0]);
+  w.move('checkout'); await w.gov(target);
+  if (failure!=='recreated source') {
+    const unregister=w.scheduler.unregister; let fired=false;
+    w.scheduler.unregister=(...args)=>{
+      if (!fired) {
+        fired=true;
+        if (failure==='native denial') throw new Error('fixture native denial');
+        w.scheduler.folders.get(folder).find(l=>l.name===args[1]).definition_xml='<concurrent-owner-edit/>';
+      }
+      return unregister(...args);
+    };
+    assert.equal(w.cli('remove').code,1); assert.equal(fired,true);
+    const entries=tasks.readRegistry(w.home).tasks;
+    assert.ok(entries.some(e=>e.stopped_by_owner));
+    assert.ok(w.scheduler.list(folder).some(l=>l.name===original.name));
+    const before={live:JSON.stringify([...w.scheduler.folders]),registry:fs.readFileSync(tasks.registryPath(w.home))};
+    assert.equal(w.cli('apply','--repair-owned').code,1);
+    assert.equal(JSON.stringify([...w.scheduler.folders]),before.live); assert.deepEqual(fs.readFileSync(tasks.registryPath(w.home)),before.registry);
+    w.scheduler.unregister=unregister;
+  } else {
+    assert.equal(w.cli('remove').code,0);
+    const register=w.scheduler.register; let fired=false;
+    w.scheduler.register=(...args)=>{if(!fired){fired=true;w.scheduler.folders.set(folder,[original]);}return register(...args);};
+    assert.equal(w.cli('apply','--repair-owned').code,1); assert.equal(fired,true);
+    assert.ok(w.scheduler.list(folder).some(l=>l.name===original.name));
+    w.scheduler.register=register;
+  }
+  printedRecovery(w,true); assertShape(w,target);
 });

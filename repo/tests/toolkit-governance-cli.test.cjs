@@ -50,6 +50,18 @@ function sink() {
   return { write: (text) => { chunks.push(String(text)); return true; }, text: () => chunks.join('') };
 }
 
+test('Delta closure: status prints recognised ERROR data with exit 2 and valid state with exit 0', async t => {
+  for (const invalid of [false, true]) {
+    const ctx = scratch(t), repo = gitRepo(ctx, 'status');
+    if (invalid) recordMerged(repo, { text: JSON.stringify({ schema: 'invalid-binding' }), registryPath: ctx.registryPath });
+    const result = await run(ctx, repo, ['status', '--json']);
+    const state = JSON.parse(result.stdout);
+    assert.equal(result.code, invalid ? 2 : 0);
+    assert.equal(state.state, invalid ? 'ERROR' : 'UNDECIDED');
+    if (invalid) { assert.equal(state.rule, 'M0'); assert.equal(state.merged.status, 'invalid'); }
+  }
+});
+
 const PROTECTED = () => ({ ok: true, rulesets: [{ enforcement: 'active', target: 'branch', conditions: { ref_name: { include: ['~ALL'], exclude: [] } }, rules: [{ type: 'non_fast_forward' }], bypass_actors: [] }] });
 
 // Every dependency and security setting on, on a public repository.

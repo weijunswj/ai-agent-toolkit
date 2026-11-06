@@ -767,22 +767,31 @@ test('the device programme sweep needs both GitHub governance ENABLED and a name
   const nudge = at('tasks/hourly-nudge.md');
   assert.match(nudge, /Check the `SCHEDULED TASKS:` line before claiming device-task coverage or absence/);
   assert.match(nudge, /if the device programme sweep entry says `stopped by owner`, report "device programme sweep stopped by owner"/);
-  assert.match(nudge, /device programme sweep needs local setup; coordinator: follow reference\/recurring-tasks\.md/);
+  assert.match(nudge, /device programme sweep needs a fresh local plan\/apply check; coordinator: follow reference\/recurring-tasks\.md/);
+  assert.doesNotMatch(nudge, /needs local setup/);
   assert.doesNotMatch(nudge, /no device programme sweep task armed/);
   const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
   assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
 });
 
 test('on a Windows device every governed repository gets its own programme sweep line, not only Toolkit', () => {
-  // Setup plans tasks only for the managed Toolkit checkout, so another governed repository's line
-  // comes from the read-only plan command run against that repository's checkout.
+  // Setup reports the managed and original project repositories; direct plan remains available.
   const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
-  assert.match(recurring, /Toolkit setup on the device lists it for the Toolkit repository only/);
+  assert.match(recurring, /Setup reports the managed repository and the original project/);
+  assert.match(recurring, /only PROGRAMME SWEEP counts as programme refresh coverage/);
+  assert.match(recurring, /fresh matching disabled governance or confirmed binding absence/);
+  assert.match(recurring, /never repeat it after an owner stop/);
   assert.match(recurring, /recorded managed Toolkit checkout[\s\S]*main checkout, never a linked worktree/);
   assert.match(recurring, /read-only plan command `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <repo>`/);
   assert.match(recurring, /run exactly `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>`/);
   assert.match(recurring, /hand the owner a device step only when the host blocks the session/);
-  assert.match(recurring, /have a local device session follow the eligibility checks below; hand the owner a device step only when the host blocks that session/);
+  assert.match(recurring, /when the nudge reports a missing device task, have a local device session follow the plan\/apply route below/);
+  assert.match(recurring, /A fresh confirmed governance change lets `apply` switch the proven owned cleaner shape in the same folder and checkout/);
+  assert.match(recurring, /carries its earlier valid scan boundary/);
+  assert.match(recurring, /registers and reads back the destination before retiring the source/);
+  assert.match(recurring, /modified proven-owned PROGRAMME SWEEP or SHARD TIMINGS task requires the owner's keep-or-replace answer for that exact observed definition each time/);
+  assert.match(recurring, /Keep leaves it unchanged and holds the switch/);
+  assert.match(recurring, /before updating `SCHEDULED TASKS:`/);
   assert.doesNotMatch(recurring, /paste the programme sweep line from setup|put it on the owner's pending list until it exists|no device programme sweep task armed/);
   const reconciler = read('skills/github-program-reconciler/SKILL.md');
   assert.match(reconciler, /An eligible local agent registers it from the recorded managed Toolkit checkout against the repository's main checkout under the global Toolkit task standing approval\. Setup and `plan` only report what is needed\. Owner stops and native denials remain stops\./);
@@ -995,4 +1004,22 @@ test('recovery reports stay observational and both periodic findings route to th
   for (const phrase of ['A materially changed action or target is a new ask; rewording or rediscovering the same step is not',
     'A reply or reaction does not complete an outstanding native step']) assert.ok(skill.includes(phrase), phrase);
   assert.ok(nudge.includes('This task never wakes lanes, posts a separate recovery announcement or edits the coordinator'));
+});
+
+
+test('merged governance routes immediately from Projects to the device; session start informs the device agent', () => {
+  for (const file of ['reference/setup.md', 'reference/recurring-tasks.md']) {
+    const text = read(`repo/contracts/claude-projects/web-controller-projects/${file}`);
+    assert.match(text, /After the owner merges a governance decision, the coordinator immediately relays the merged decision to the named device lane/);
+    assert.match(text, /reads fresh status from origin's default branch, runs `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <repo>`/);
+    assert.match(text, /applies a verified mismatch with `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>` under standing approval/);
+    assert.match(text, /reads back installed tasks, enrolments and the cleaner's first result/);
+    assert.match(text, /Update `SCHEDULED TASKS:` only after that read-back/);
+    assert.match(text, /A pending proposal never triggers a switch/);
+    assert.match(text, /Session start on the device informs an agent/);
+  }
+  const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
+  assert.match(nudge, /else if fresh origin-default-branch status confirms ENABLED and it lists an active PROGRAMME SWEEP/);
+  assert.match(nudge, /else if fresh status confirms disabled or absent governance, report "programme refresh is not selected; coordinator: relay the merged decision to the device lane/);
+  assert.match(read('repo/docs/agent-playbooks/INDEX.md'), /Triggers: governance decision merges, reading task-sync guidance, task-shape mismatches/);
 });
