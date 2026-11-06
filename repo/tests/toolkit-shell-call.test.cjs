@@ -22,6 +22,10 @@ const path = require('node:path');
 
 const { SHELL_TOOL_NAMES, UNREADABLE, ShellCall, argvText, plainGitLine } = require('../scripts/toolkit-shell-call.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
+// Closure scans are linear (about the same time per character from 4K to 1M characters), but from
+// 16K to 64K the per-character cost still steps up, so on a busy runner a 5ms sample at 16K grew past
+// the 10x limit. Start at 16K, grow until the smaller sample takes 15ms, and keep the best of five.
+const SCAN_TIMING = Object.freeze({ startSize: 16384, maxSize: 524288, minMs: 15, runs: 5 });
 
 test('generic token values and offsets stay pinned while expansion follows quoting', () => {
   const source = "echo '$body' \"$body\" '\u0060literal\u0060' \\$body \"$ \"; gh pr edit 7";
@@ -54,7 +58,7 @@ test('literal document text survives CRLF, tab-stripped heredocs and here-string
 
 test('closure scanner stays bounded on missing documents, substitutions and braces', () => {
   for(const unit of ['a<<b ','<<a\n',"@'\n",'"$(', 'x{','{} ','`x ']) {
-    const result=hostile.timing(text=>closureReader.scriptCommands(text),size=>unit.repeat(Math.ceil(size/unit.length)),{startSize:4096,maxSize:131072,minMs:5});
+    const result=hostile.timing(text=>closureReader.scriptCommands(text),size=>unit.repeat(Math.ceil(size/unit.length)),SCAN_TIMING);
     assert.ok(result.ok,`${unit}: ${result.message}`);
   }
 });
@@ -282,7 +286,7 @@ test('closure shell quoting, braces, documents and script options retain the exe
 
 test('wrapper, hidden-position and document scans grow within their existing bound',()=>{
   for(const [unit,powershell,tail]of [['time ',false,''],['<<EOF\n',false,'\tEOF'],['x gh ',false,''],['$x = ',true,''],['$x=',true,''],['W { ',true,''],['command ',false,''],['x bash ',false,'']]) {
-    const result=hostile.timing(text=>closureReader.scriptCommands(text,{powershell}),size=>unit.repeat(Math.ceil(size/unit.length))+tail,{startSize:4096,maxSize:131072,minMs:5});
+    const result=hostile.timing(text=>closureReader.scriptCommands(text,{powershell}),size=>unit.repeat(Math.ceil(size/unit.length))+tail,SCAN_TIMING);
     assert.ok(result.ok,`${unit}: ${result.message}`);
   }
 });
@@ -339,7 +343,7 @@ test('attached blocks, comments and stop-parsing scans retain the hostile input 
     }, size => {
       const count = Math.ceil(size/unit.length);
       return unit.repeat(count) + (unit === 'f { ' ? '} '.repeat(count) : '');
-    }, {startSize:4096,maxSize:131072,minMs:5});
+    }, SCAN_TIMING);
     assert.ok(result.ok, `${unit}: ${result.message}`);
   }
 });
