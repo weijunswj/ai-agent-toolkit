@@ -3749,6 +3749,846 @@
           }
         }
       ]
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
     }
   ]
 }

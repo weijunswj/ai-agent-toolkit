@@ -167,7 +167,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        family: [attribution, closure-matrix, fault, governance, issue-closure, merge, push, task-governance]
+        family: [attribution, closure-matrix, closure-shell, fault, governance, issue-closure, merge, push, task-governance]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

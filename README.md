@@ -8,6 +8,8 @@ Skills and working rules for AI coding agents. Toolkit installs them into Codex 
 
 **Evidence custody:** the private evidence (transport) store can be any backend. It is separate from the reconciler's state store.
 
+**Closure safety:** Local hooks refuse guarded GitHub writes hidden in assignments, script blocks and unknown wrappers, and merge commands whose messages cannot be found. Quoted examples and listed data commands remain data. Some clean writes assigned to variables are deliberately refused; run the write as its own command. The [closure guard guidance](skills/github-program-reconciler/SKILL.md#parent-lifecycle) lists accepted gaps.
+
 ## Install
 
 You need Git, Node.js and Codex or Claude Code on a Windows computer.

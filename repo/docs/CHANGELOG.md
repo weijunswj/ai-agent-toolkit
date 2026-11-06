@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- Refuse guarded GitHub writes hidden in assignments, unknown wrappers and unreadable Start-Process arguments, and unmatched merge commands before consuming approval. Keep data commands and quoted examples inert.
+
+- Add a separate Windows closure shell family with retained controls; keep every family budget unchanged. Bound repeated wrapper and document scans, allow literal read-only query text, and name folder changes and proven refusals accurately.
+
 - Read supported wrappers, condition positions, substitutions and unresolved closing targets; inspect literal quoted heredoc text without executing expansion. Preserve merge approvals when another guarded write refuses the call, and check cloud connector merge-message overrides.
 
 - Preserve shell context and outer expansion across nested calls, and share generated-file and literal-stdin checks with merge-message overrides.

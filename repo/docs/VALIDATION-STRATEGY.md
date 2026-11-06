@@ -10,7 +10,7 @@ Release maintenance uses `repo/tests/toolkit-version.test.cjs` and `repo/tests/t
 
 ## Canonical Merge Gate
 
-The hook pack runs in `hook-pack` on Linux and in the `hook-pack-windows` family matrix on Windows. Each Windows family (attribution, closure-matrix, fault, governance, issue-closure, merge, push and task-governance) runs once, with the unchanged 360-second pack budget and 15-minute job timeout. The required `validate` job waits for both jobs, including every family; missing, failed, cancelled or skipped results fail the aggregate. Corpus coverage tests require the family matrix to cover every row and host exactly once.
+The hook pack runs in `hook-pack` on Linux and in the `hook-pack-windows` family matrix on Windows. Each Windows family (attribution, closure-matrix, closure-shell, fault, governance, issue-closure, merge, push and task-governance) runs once, with the unchanged 360-second pack budget and 15-minute job timeout. The required `validate` job waits for both jobs, including every family; missing, failed, cancelled or skipped results fail the aggregate. Corpus coverage tests require the family matrix to cover every row and host exactly once.
 
 The read-only `issue-closure` job checks the current pull request title, body and every commit message against live native descendant state. It feeds the required `validate` result and reruns on title or body edits. It has only contents, issues and pull-request read permissions; stale heads and incomplete state fail the check. The existing fenced programme refresh owns parent repair and automatic completion under explicit merged binding permission.
 

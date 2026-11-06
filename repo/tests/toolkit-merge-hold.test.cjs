@@ -1493,3 +1493,16 @@ test('the ask text shows the approval line as plain text', (t) => {
   assert.match(deny, /as plain text and not in quotes, a line with the word merge and the pull request number, such as merge owner\/name#N/);
   assert.doesNotMatch(deny, /"merge N"/);
 });
+
+test('unmatched and hidden merges refuse before consuming approval while a quoted program path counts once',t=>{
+  const ctx=context(t);let reads=0;const closureGuard={checkPullRequest(){reads++;return {status:'allowed'};}};
+  const merge=`gh pr merge 618 --merge --match-head-commit ${SHA}`;
+  for(const command of [`$x = ${merge}`,`$x = ${merge} --subject 'Closes #1'`,`stdbuf -oL ${merge} --subject 'Closes #1'`]) {
+    typed(ctx,'merge 618');
+    assert.match(holdCore.decide({cwd:ctx.repo,tool_name:'PowerShell',tool_input:{command}},{...ctx.options,closureGuard})?.deny,/generated or unresolved/,command);
+    assert.equal(holdCore.decide({cwd:ctx.repo,tool_name:'Bash',tool_input:{command:merge}},{...ctx.options,closureGuard}),null,'refusal keeps the typed approval');
+  }
+  assert.equal(reads,3,'only the final plain merges reach the closure check');
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide({cwd:ctx.repo,tool_name:'Bash',tool_input:{command:`"C:/Program Files/GitHub CLI/gh.exe" pr merge 618 --merge --match-head-commit ${SHA}`}},{...ctx.options,closureGuard}),null);
+});

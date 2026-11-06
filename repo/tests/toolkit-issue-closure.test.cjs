@@ -369,3 +369,46 @@ test('full walks distrust a zero descendant summary and share a remaining-time r
   const guard = new IssueClosureGuard({ repository: repo, transport: github, now: () => time, deadlineMs: 1000 });
   assert.equal(guard.tree(repo, 1, guard.budget(), new Set(), { full: true }).descendants.some(c => c.number === 3 && c.state === 'open'), true);
 });
+
+test('hidden writes refuse by name before any transport read and hidden API reads stay data',()=>{
+  let calls=0;const guard={assertClosable(){calls++;return {status:'allowed'};},checkTexts(){calls++;return {status:'allowed'};},checkEdit(){calls++;return {status:'allowed'};}};
+  for(const command of [`$x = gh issue close 1 -R ${repo}`,`$x=gh issue close 1 -R ${repo}`,`[string]$x += gh issue close 1 -R ${repo}`,`$pr = gh pr create -R ${repo} --title T --body 'Refs #1'`,`stdbuf gh pr edit 7 -R ${repo} --body 'Closes #1'`,`$r = gh api -X PATCH repos/${repo}/issues/1 -f state=closed`,`1 | Where-Object { gh issue close 1 -R ${repo} }`])for(const tool_name of ['Bash','PowerShell','exec_command']){
+    const result=adapter.issueClosureDecision({tool_name,tool_input:{command}},{guard});
+    assert.match(result?.deny,/inside an assignment, script block or wrapper Toolkit does not read/ ,command);
+    assert.doesNotMatch(result.deny,/retry when GitHub is readable/);
+  }
+  for(const command of ['$x = gh pr view 7','$x = gh pr create --help','$x = gh issue close 1 --help',`$x = gh api repos/${repo}/issues/1`,`$x = gh api -X POST repos/${repo}/issues/1/comments -f body=Refs`])assert.equal(adapter.issueClosureDecision({tool_name:'PowerShell',tool_input:{command}},{guard}),null,command);
+  assert.equal(calls,0);
+});
+
+test('Start-Process reads one literal argument string with known options and refuses other gh forms',()=>{
+  let calls=0;const guard={assertClosable(){calls++;return {status:'refused',reason:'open native descendants'};}};
+  for(const command of [`Start-Process gh -ArgumentList 'issue close 1 -R ${repo}' -Wait -NoNewWindow`,`saps -FilePath gh.exe -PassThru -ArgumentList 'issue close 1 -R ${repo}'`,`start gh -ArgumentList 'issue close 1 -R ${repo}'`]){
+    assert.match(adapter.issueClosureDecision({tool_name:'PowerShell',tool_input:{command}},{guard})?.deny,/open native descendants/,command);
+  }
+  assert.equal(calls,3,'literal closes reach assertClosable');
+  for(const command of ["Start-Process gh -ArgumentList 'issue','close','1'","Start-Process gh -ArgumentList @('issue','close','1')","Start-Process gh -ArgumentList 'issue close 1' -Bogus","Start-Process -FilePath:gh -ArgumentList 'issue close 1'",`Start-Process bash -ArgumentList '-c','gh issue close 1 -R ${repo}'`])assert.match(adapter.issueClosureDecision({tool_name:'PowerShell',tool_input:{command}},{guard})?.deny,/Start-Process.*one literal argument string/,command);
+  for(const command of ["Start-Process gh -ArgumentList 'pr view 7' -Wait","Start-Process notepad -ArgumentList 'notes.txt'","Start-Process pwsh -ArgumentList '-File','x.ps1'"])assert.equal(adapter.issueClosureDecision({tool_name:'PowerShell',tool_input:{command}},{guard}),null,command);
+  assert.equal(calls,3);
+});
+
+test('read-only API text, literal dash values and document markers keep their controls',()=>{
+  const allow=[`gh api graphql -f query="query { repository(owner: '$O') { id } }"`,`Q='query { viewer { login } }'; gh api graphql -f query="$Q"`,`$Q = 'query { viewer { login } }'; gh api graphql -f query="$Q"`,`gh api repos/${repo}/issues/5 -X GET --brand-new`,`gh api repos/${repo}/issues/5 --method=HEAD --brand-new`,`gh pr create -R ${repo} --title T --body '-x starts with dash'`,`gh pr create -R ${repo} --title T --body-file - <<'PR-BODY'\nRefs #1\nPR-BODY`,`cat <<\\EOF\ngh issue close 1\nEOF`];
+  for(const command of allow)assert.equal(adapter.issueClosureDecision(shell(command),{guard:setup().guard}),null,command);
+  for(const command of ['gh api graphql -f query="$Q"',`Q='mutation { closeIssue(input: {issueId: "x"}) { issue { id } } }'; gh api graphql -f query="$Q"`,'gh api graphql -f query="query { a } $M"','gh api graphql -f query="query A { a } $M { b }"',`Q='query { a }'; Q='query { b }'; gh api graphql -f query="$Q"`,`gh pr create -R ${repo} --title T --body --title`])assert.ok(adapter.issueClosureDecision(shell(command),{guard:setup().guard})?.deny,command);
+  assert.match(adapter.issueClosureDecision({tool_name:'PowerShell',tool_input:{command:`$env:GH_REPO = 'x'; gh pr edit 7 --body 'Closes #1'`}},{guard:setup().guard})?.deny,/changes folder or GH_REPO/);
+});
+
+test('proven refusals omit unreadable-state recovery and moved body files name the actual recovery',()=>{
+  const refused=adapter.issueClosureDecision(shell(`gh issue close 1 -R ${repo}`),{guard:setup().guard});
+  assert.match(refused.deny,/open native descendants/);assert.doesNotMatch(refused.deny,/retry when GitHub is readable/);
+  const moved=adapter.issueClosureDecision(shell(`cd sub && gh pr create -R ${repo} --title T --body-file f.md`),{guard:setup().guard});
+  assert.match(moved.deny,/changes folder first.*absolute path/);assert.doesNotMatch(moved.deny,/may be generated/);
+  const unknown=adapter.issueClosureDecision(shell(`gh issue close 1 -R ${repo}`),{guard:{assertClosable(){return {status:'unknown',reason:'unavailable'};}}});assert.match(unknown.deny,/retry when GitHub is readable/);
+});
+
+test('query variables require an executable literal assignment before the API call',()=>{
+  assert.equal(adapter.issueClosureDecision({tool_name:'PowerShell',tool_input:{command:"$q = 'query { viewer { login } }'; gh api graphql -f query=\"$Q\""}},{guard:setup().guard}),null,'PowerShell variable names ignore case');
+  assert.match(adapter.issueClosureDecision(shell("q='query { viewer { login } }'; gh api graphql -f query=\"$Q\""),{guard:setup().guard})?.deny,/query variable is unresolved/,'POSIX variables keep their case');
+  for(const command of ["cat <<'EOF'\nQ='query { viewer { login } }'\nEOF\ngh api graphql -f query=\"$Q\"", "gh api graphql -f query=\"$Q\"; Q='query { viewer { login } }'", "if false; then Q='query { viewer { login } }'; fi; gh api graphql -f query=\"$Q\"", "function f {\nQ='query { viewer { login } }'\n}; gh api graphql -f query=\"$Q\"", "echo ready; Q='query { viewer { login } }'; gh api graphql -f query=\"$Q\""]) assert.match(adapter.issueClosureDecision(shell(command),{guard:setup().guard})?.deny,/query variable is unresolved/,command);
+});

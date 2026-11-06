@@ -1085,10 +1085,15 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     try {
       if (call.isShell) {
         const commands = scriptCommands(call.text, scriptContext(input));
+        const unresolved = () => Object.assign(new Error('Generated merge text.'), { code: 'MERGE_TEXT_UNRESOLVED' });
+        const matched = commands.filter(command => {
+          const gh = ghCommand(command.words);
+          return gh && !command.hidden && (gh.noun === 'pr' && gh.verb === 'merge' || gh.noun === 'api' && command.words.some(word => PULL_MERGE_PATH.test(word)));
+        }).length;
+        if (matched < merges.length) throw unresolved();
         for (const [commandIndex, command] of commands.entries()) {
           const gh = ghCommand(command.words);
-          if (!gh || (merge.kind === 'api' ? gh.noun !== 'api' : gh.noun !== 'pr' || gh.verb !== 'merge')) continue;
-          const unresolved = () => Object.assign(new Error('Generated merge text.'), { code: 'MERGE_TEXT_UNRESOLVED' });
+          if (command.hidden || !gh || (merge.kind === 'api' ? gh.noun !== 'api' : gh.noun !== 'pr' || gh.verb !== 'merge')) continue;
           const read = file => {
             if (file === '-') return stdinText(command);
             if (fileIsGenerated(file, command, commands, commandIndex)) throw unresolved();
