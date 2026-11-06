@@ -8,8 +8,6 @@ Skills and working rules for AI coding agents. Toolkit installs them into Codex 
 
 **Evidence custody:** the private evidence (transport) store can be any backend. It is separate from the reconciler's state store.
 
-**Closure safety:** Local hooks refuse guarded GitHub writes hidden in assignments, script blocks and unknown wrappers, and merge commands whose messages cannot be found. Quoted examples and listed data commands remain data. Some clean writes assigned to variables are deliberately refused; run the write as its own command. The [closure guard guidance](skills/github-program-reconciler/SKILL.md#parent-lifecycle) lists accepted gaps.
-
 ## Install
 
 You need Git, Node.js and Codex or Claude Code on a Windows computer.
@@ -77,7 +75,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.51.0 sha256=292d20379c1a -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.50.1 sha256=292d20379c1a -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

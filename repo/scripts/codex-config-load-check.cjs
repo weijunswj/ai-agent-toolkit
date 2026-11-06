@@ -102,11 +102,11 @@ async function probeAppServer(codexHome, explicit) {
   return { status: 'unverified', detail: UNVERIFIED };
 }
 
+module.exports = { CodexConfigLoadCheck, probeErrorVerdict, screenedHostError };
+
 if (require.main === module && process.argv[2] === '--probe') {
   probeAppServer(process.argv[3], process.argv[4]).then(
     result => process.stdout.write(JSON.stringify(result)),
     () => process.stdout.write(JSON.stringify({ status: 'rejected', detail: 'Codex configuration load check failed.' })),
   );
 }
-
-module.exports = { CodexConfigLoadCheck, probeErrorVerdict, screenedHostError };

@@ -477,6 +477,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
   return record.exit;
 }
 
-if (require.main === module) process.exitCode = main();
-
 module.exports = { JOBS, SCRIPT, SWEEP_OK, parseArgs, runJob, main, lastJson, localRepository, footerCursor, footerLockPath, HISTORY_NOTE };
+
+if (require.main === module) process.exitCode = main();
