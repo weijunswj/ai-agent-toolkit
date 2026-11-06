@@ -12,7 +12,7 @@
 
 ### Fixed
 
-- Refuse guarded GitHub writes hidden in assignments, unknown wrappers and unreadable Start-Process arguments, and unmatched merge commands before consuming approval. Keep data commands and quoted examples inert.
+- Refuse guarded GitHub writes hidden in assignments, unknown wrappers and unreadable Start-Process arguments, and unmatched merge commands before consuming approval. Keep data commands and quoted examples inert. Also read gh with a brace or equals sign attached, PowerShell's stop-parsing word and block comments, and more shell option spellings; refuse gh commands whose noun or verb comes from a variable.
 
 - Add a separate Windows closure shell family with retained controls; keep every family budget unchanged. Bound repeated wrapper and document scans, allow literal read-only query text, and name folder changes and proven refusals accurately.
 

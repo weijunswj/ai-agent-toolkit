@@ -286,3 +286,60 @@ test('wrapper, hidden-position and document scans grow within their existing bou
     assert.ok(result.ok,`${unit}: ${result.message}`);
   }
 });
+
+test('attached gh words, variable commands and shell option spellings remain guarded on every shell', () => {
+  const close = 'gh issue close 1 -R example.test/app';
+  const commands = [
+    `$sb={${close}}`, `?{${close}}`, `Where-Object{${close}}`, `Sort-Object{${close}}`,
+    `Select-Object @{n='x';e={${close}}}`, `$h=@{a={${close}}}`, '$sb={gh pr create}',
+    `$sb={gh api -X PATCH repos/example.test/app/issues/1 -f state=closed}`,
+    `$r = if ($a) {${close}}`, `$r = try {${close}} catch {0}`, `1 | Where-Object {${close}}`,
+    `Start-ThreadJob {${close}}`, `foo {${close}}`, `foo {gh api repos/example.test/app/issues/1} {${close}}`,
+    `?{${close}`, `$x =${close}`, `$x +=${close}`, `$r =bash -c '${close}'`,
+    `gh --% issue close 1`, `gh issue --% close 1`, `gh pr --% create --title T --body Safe`,
+    'gh --% api -X PATCH repos/example.test/app/issues/1 -f state=closed',
+    `pwsh -Command 'gh --% issue close 1'`, 'gh issue $v 1', 'gh $n close', 'gh @a', '& gh $a',
+    'gh "$@"', 'gh "${a[@]}"', 'gh pr $v 7', 'function g { gh @args }; g issue close 1',
+    'g() { gh "$@"; }; g issue close 1', 'stdbuf -oL gh $n close 1',
+    `<# note #> ${close}`, `<# a\nb #> ${close}`, `gh pr view 7 <# x #>; ${close}`,
+    `cmd /c"${close}"`, `pwsh /c '${close}'`, `pwsh --command '${close}'`,
+    `pwsh -Command:'${close}'`, `pwsh -cwa '${close}'`, `stdbuf -oL pwsh --command '${close}'`,
+    `env -iS '${close}'`, `env --split-string='${close}'`,
+  ];
+  for (const tool_name of ['PowerShell', 'Bash', 'exec_command']) for (const command of commands) {
+    assert.equal(closureReader.closureWriteCandidate({tool_name,tool_input:{command}}), true, `${tool_name}: ${command}`);
+  }
+});
+
+test('word-level controls preserve read commands, data owners and generic stop-parsing words', () => {
+  const close = 'gh issue close 1 -R example.test/app';
+  for (const tool_name of ['PowerShell','Bash','exec_command']) for (const command of [
+    '$h=@{a=1}', '{a,b}', 'foo {a,b}', '$x = {gh pr view 7}', '$x={gh pr view 7}', '$h=@{a={gh pr view 7}}',
+    `echo {${close}}`, `echo a={${close}}`, 'echo {gh pr view 7}', 'node x --name=gh issue close 1',
+    'gh run list --limit $n', 'gh pr list --search $q', 'foo ${gh}', '<# note #> gh pr view 7',
+    "echo '<# a #>'", 'gh --% pr view 7', 'gh --% pr list --assignee @me', 'echo --%',
+    "pwsh /c 'gh pr view 7'", 'pwsh -ConfigurationName x -File y', "env -S 'gh pr view 7'",
+    `Write-Warning ${close}`, `Write-Error ${close}`, `Write-Verbose ${close}`, `<# ${close} #> gh pr view 7`,
+  ]) assert.equal(closureReader.closureWriteCandidate({tool_name,tool_input:{command}}), false, `${tool_name}: ${command}`);
+  assert.ok(closureReader.shellCommands('gh --% issue close 1')[0].words.includes('--%'));
+  assert.deepEqual(closureReader.scriptCommands('gh --% issue close 1')[0].words, ['gh','issue','close','1']);
+  assert.ok(closureReader.scriptCommands("gh '--%' pr view 7")[0].words.includes('--%'));
+  const attached = closureReader.scriptCommands('$x =gh pr view 7')[0];
+  assert.equal(attached.words[0], 'gh'); assert.equal(attached.hidden, true);
+  for (const command of ['gh api repos/{owner}/{repo}/pulls/7', 'gh --% api repos/{owner}/{repo}/pulls/7']) {
+    assert.equal(closureReader.scriptCommands(command)[0].words.at(-1), 'repos/{owner}/{repo}/pulls/7');
+  }
+});
+
+test('attached blocks, comments and stop-parsing scans retain the hostile input bound', () => {
+  for (const [unit,powershell] of [['x {gh ',false],['a{gh} ',false],['<# ',true],['--% ',true],['$x =y ',true],['f { ',false]]) {
+    const result = hostile.timing(text => {
+      try { closureReader.scriptCommands(text,{powershell}); }
+      catch (error) { assert.match(error.message,/bound exceeded/); }
+    }, size => {
+      const count = Math.ceil(size/unit.length);
+      return unit.repeat(count) + (unit === 'f { ' ? '} '.repeat(count) : '');
+    }, {startSize:4096,maxSize:131072,minMs:5});
+    assert.ok(result.ok, `${unit}: ${result.message}`);
+  }
+});

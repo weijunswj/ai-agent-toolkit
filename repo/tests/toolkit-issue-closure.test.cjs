@@ -9,6 +9,55 @@ const { GitHubTransport } = require('../../skills/github-program-reconciler/scri
 const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
 const SHA = 'a'.repeat(40);
 const repo = 'example.test/app';
+
+test('attached hidden writes and variable command words refuse before guard calls', () => {
+  let calls = 0;
+  const guard = {assertClosable(){calls++;return {status:'allowed'};},checkTexts(){calls++;return {status:'allowed'};},checkEdit(){calls++;return {status:'allowed'};}};
+  const close = `gh issue close 1 -R ${repo}`;
+  for (const command of [`$sb={${close}}`,`?{${close}}`,`Where-Object{${close}}`,`Sort-Object{${close}}`,
+    `Select-Object @{n='x';e={${close}}}`,`$h=@{a={${close}}}`,`$x =${close}`,`$x +=${close}`,
+    `$r =bash -c '${close}'`,`$r = if ($a) {${close}}`,`foo {${close}}`,`Start-ThreadJob {${close}}`,
+    '$sb={gh pr create}',`$sb={gh api -X PATCH repos/${repo}/issues/1 -f state=closed}`]) {
+    for (const tool_name of ['PowerShell','Bash','exec_command']) {
+      const result = adapter.issueClosureDecision({tool_name,tool_input:{command}},{guard});
+      assert.match(result?.deny,/inside an assignment, script block or wrapper Toolkit does not read/,command);
+      assert.match(result.deny,/quote it if it is only text/);
+      assert.doesNotMatch(result.deny,/retry when GitHub is readable/);
+    }
+  }
+  for (const command of ['gh issue $v 1','gh $n close','gh @a','& gh $a','gh "$@"','gh "${a[@]}"','gh pr $v 7',
+    'function g { gh @args }; g issue close 1','g() { gh "$@"; }; g issue close 1','stdbuf -oL gh $n close 1']) {
+    for (const tool_name of ['PowerShell','Bash','exec_command']) {
+      const result = adapter.issueClosureDecision({tool_name,tool_input:{command}},{guard});
+      assert.match(result?.deny,/takes its command words from a variable/ ,command);
+      assert.doesNotMatch(result.deny,/retry when GitHub is readable/);
+    }
+  }
+  assert.equal(calls,0);
+});
+
+test('stop-parsing and block comments reach closure guards while data and clean PR text pass', () => {
+  let calls = 0;
+  const guard = {assertClosable(){calls++;return {status:'refused',reason:'open native descendants'};}};
+  for (const tool_name of ['PowerShell','Bash','exec_command']) for (const command of [
+    `gh --% issue close 1 -R ${repo}`,`gh issue --% close 1 -R ${repo}`,`<# x #> gh issue close 1 -R ${repo}`,
+  ]) assert.match(adapter.issueClosureDecision({tool_name,tool_input:{command}},{guard})?.deny,/open native descendants/,command);
+  assert.equal(calls,9,'normalised commands reach assertClosable');
+  for (const tool_name of ['PowerShell','Bash','exec_command']) for (const command of [
+    'Write-Warning gh issue close 1','Write-Error gh issue close 1','Write-Verbose gh issue close 1',
+    '<# gh issue close 1 #> gh pr view 7',`gh pr create --% -R ${repo} --title T --body 'Refs #1'`,
+    `query='query { a }'; gh api graphql -f query="$query"`,
+  ]) assert.equal(adapter.issueClosureDecision({tool_name,tool_input:{command}},{guard}),null,command);
+  assert.equal(calls,9);
+});
+
+test('append, export and read cannot reuse a stale literal GraphQL query', () => {
+  const mutation = 'mutation { closeIssue(input: {issueId: "x"}) { issue { id } } }';
+  for (const middle of [`q+=' ${mutation}'`,`export q='${mutation}'`,'read q']) {
+    const command = `q='query { a }'; ${middle}; gh api graphql -f query="$q"`;
+    assert.match(adapter.issueClosureDecision(shell(command))?.deny,/GraphQL query variable is unresolved/,command);
+  }
+});
 test('closure transport preserves existing Node options and quoted preload paths with spaces', t => {
   const { spawnSync } = require('node:child_process');
   const { fakeClosureEnvironment } = require('./support/issue-closure-transport.cjs');

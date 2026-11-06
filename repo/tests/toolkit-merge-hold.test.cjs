@@ -1506,3 +1506,25 @@ test('unmatched and hidden merges refuse before consuming approval while a quote
   typed(ctx,'merge 618');
   assert.equal(holdCore.decide({cwd:ctx.repo,tool_name:'Bash',tool_input:{command:`"C:/Program Files/GitHub CLI/gh.exe" pr merge 618 --merge --match-head-commit ${SHA}`}},{...ctx.options,closureGuard}),null);
 });
+
+test('stop-parsing merge forms require approval and hidden merge recovery keeps it', t => {
+  const ctx = context(t); let reads = 0;
+  const closureGuard = {checkPullRequest(){reads++;return {status:'allowed'};}};
+  const call = command => ({cwd:ctx.repo,tool_name:'PowerShell',tool_input:{command}});
+  const merge = `gh pr merge 618 --merge --match-head-commit ${SHA}`;
+  for (const command of [merge.replace('gh ','gh --% '),merge.replace('pr ','pr --% '),
+    `gh --% api -X PUT repos/owner/a/pulls/618/merge -f sha=${SHA}`,'gh --% repo sync']) {
+    assert.ok(holdCore.decide(call(command),{...ctx.options,closureGuard})?.deny,command);
+  }
+  assert.equal(reads,0);
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide(call(merge.replace('gh ','gh --% ')),{...ctx.options,closureGuard}),null);
+  assert.equal(reads,1,'typed stop-parsing merge reaches the closure check');
+  typed(ctx,'merge 618');
+  assert.match(holdCore.decide(call('$x ='+merge),{...ctx.options,closureGuard})?.deny,/Run the merge as its own command/);
+  assert.equal(holdCore.decide(call(merge),{...ctx.options,closureGuard}),null,'hidden refusal keeps approval');
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide(call('<# x #> '+merge),{...ctx.options,closureGuard}),null,'a block comment is data');
+  assert.equal(reads,3);
+  assert.equal(holdCore.decide(call('gh pr view 5 --%'),{...ctx.options,closureGuard}),null);
+});

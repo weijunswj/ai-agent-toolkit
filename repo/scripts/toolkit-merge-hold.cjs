@@ -1,5 +1,7 @@
 'use strict';
 
+const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
+
 // The merge hold (global rules: never merge without the owner's OK). Shared by the Claude Code
 // governance hook and the Codex helper hook.
 //
@@ -1042,7 +1044,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     // (Codex's workdir before the session folder). A line continuation (\, a PowerShell backtick or
     // a cmd caret before a line break) joins the next line.
     const call = ShellCall.from(input);
-    const text = call.text.replace(/[\\`^]\r?\n/g, ' ');
+    const text = call.text.replace(/[\\`^]\r?\n/g, ' ').replace(STOP_PARSING, '$1');
     if (text.length > MAX_COMMAND_CHARS) return /merge|push/i.test(text) ? refuse('this command is too long to check for a merge or push, so it is refused. Split it.') : null;
     cwd = call.folder;
     // The host's shell wrapper is already unwrapped; only a runner inside its script is nested.
@@ -1051,7 +1053,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
     // An argument list is read both ways, as its words quoted and joined unquoted (as before the
     // shared reader), so a quoted program path such as `C:\Program Files\GitHub CLI\gh.exe` cannot
     // hide a merge. A merge both readings find counts once.
-    const joined = call.joinedWords && call.joinedWords !== call.text ? call.joinedWords.replace(/[\\`^]\r?\n/g, ' ') : '';
+    const joined = call.joinedWords && call.joinedWords !== call.text ? call.joinedWords.replace(/[\\`^]\r?\n/g, ' ').replace(STOP_PARSING, '$1') : '';
     // An unknown shell is judged under each reading (shellReadings); the first refusal stands.
     const refusal = shellReadings(shellOf(input, host)).map(shell => shellRefusal(joined ? `${text}\n${joined}` : text, cwd, registryOptions, shell)).find(Boolean);
     if (refusal) return refusal;
@@ -1090,7 +1092,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
           const gh = ghCommand(command.words);
           return gh && !command.hidden && (gh.noun === 'pr' && gh.verb === 'merge' || gh.noun === 'api' && command.words.some(word => PULL_MERGE_PATH.test(word)));
         }).length;
-        if (matched < merges.length) throw unresolved();
+        if (matched < merges.length) throw Object.assign(unresolved(), { unmatched: true });
         for (const [commandIndex, command] of commands.entries()) {
           const gh = ghCommand(command.words);
           if (command.hidden || !gh || (merge.kind === 'api' ? gh.noun !== 'api' : gh.noun !== 'pr' || gh.verb !== 'merge')) continue;
@@ -1134,7 +1136,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
         const args = input.tool_input || {};
         mergeTexts = ['commit_title', 'commit_message', 'commitTitle', 'commitMessage'].filter(key => args[key] !== undefined).map(key => args[key]);
       }
-    } catch (error) { return refuse(error.code === 'MERGE_TEXT_UNRESOLVED' ? 'merge-message content is generated or unresolved. Provide literal text, or write the body file in a separate command before retrying.' : 'the merge-message file could not be read. Provide a readable body file or literal heredoc.'); }
+    } catch (error) { return refuse(error.unmatched ? 'this merge sits inside an assignment, script block or wrapper Toolkit does not read, or a quoted mention sits beside it, so its merge text stays generated or unresolved and it was refused. The approval is kept. Run the merge as its own command.' : error.code === 'MERGE_TEXT_UNRESOLVED' ? 'merge-message content is generated or unresolved. Provide literal text, or write the body file in a separate command before retrying.' : 'the merge-message file could not be read. Provide a readable body file or literal heredoc.'); }
     try {
       const guard = closureGuard || new IssueClosureGuard({ repository: merge.repository, deadlineMs, deadline, maxRequests,
         transport: transport || new GitHubTransport({ ghPath: resolveExecutable('gh', { cwd: cwd || process.cwd(), environment }), timeoutMs }) });

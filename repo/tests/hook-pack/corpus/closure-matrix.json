@@ -4589,6 +4589,731 @@
         "decision": "allow"
       },
       "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-api-owner-braces-bash",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh api repos/{owner}/{repo}/pulls/7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-api-owner-braces-ps",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "gh api repos/{owner}/{repo}/pulls/7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-hash-tight-ps",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$h=@{a=1}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-hash-tight-exec",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "$h=@{a=1}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-brace-list",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "{a,b}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-brace-list-owner",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "foo {a,b}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-block-read-ps",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x = {gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-block-read-bash",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "$x = {gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-block-read-exec",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "$x = {gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-block-read-tight",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x={gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-hash-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$h=@{a={gh pr view 7}}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-block-ps",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo {gh issue close 1 -R toolkit-test-fixture/fixture}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-block-bash",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo {gh issue close 1 -R toolkit-test-fixture/fixture}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-block-exec",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "echo {gh issue close 1 -R toolkit-test-fixture/fixture}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo {gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-equals",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo a={gh issue close 1 -R toolkit-test-fixture/fixture}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-option-value",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node x --name=gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-variable-run",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh run list --limit $n"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-variable-search",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "gh pr list --search $q"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-dollar-brace",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "foo ${gh}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-comment-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "<# note #> gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-comment-quoted",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo '<# a #>'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-stop-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "gh --% pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-stop-assignee",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "gh --% pr list --assignee @me"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-stop-data",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo --%"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-pwsh-slash-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "pwsh /c 'gh pr view 7'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-pwsh-config",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "pwsh -ConfigurationName x -File y"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-env-split-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "env -S 'gh pr view 7'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-query-named",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "query='query { a }'; gh api graphql -f query=\"$query\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
     }
   ]
 }

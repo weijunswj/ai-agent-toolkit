@@ -338,7 +338,8 @@ class ShellCall {
 }
 
 // Default-deny closure reader: unknown positions containing guarded gh words are marked hidden.
-// Data consumers keep their arguments as data. No expansion or execution occurs.
+// Attached punctuation, stop-parsing and variable command words are read; documented data stays data.
+// This bounded word reader performs no expansion or execution and does not cover all shell syntax.
 function scriptContext(input) {
   const args = input?.tool_input ?? input?.toolInput ?? {};
   const values = [args.command,args.cmd].filter(value => value != null);
@@ -432,6 +433,8 @@ function readScript(text, { powershell = false, interpolation = false } = {}) {
   }
   const source = parts.join('\n');
   const chunks = []; let prefixText = ''; let quote = ''; let unbalancedBlock = false; const blocks = [];
+  let noBlockComment = false; let bodyReadTo = -1; let noBody = false;
+  const runsGh = (prefix, body) => !DATA_COMMAND.test(programName(prefix.split(/\s/)[0])) && /\bgh\b/i.test(body);
   const emit = value => { chunks.push(value); if (prefixText.length < 64) prefixText += value.slice(0, 64 - prefixText.length); };
   const boundary = () => { prefixText = ''; };
   const balanced = (start, open, close) => {
@@ -467,6 +470,7 @@ function readScript(text, { powershell = false, interpolation = false } = {}) {
     if (interpolation) { emit(c); continue; }
     if (quote) { if (c === quote) quote = ''; emit(c); continue; }
     if (c === "'" || c === '"') { quote = c; emit(c); continue; }
+    if (c === '<' && source[i + 1] === '#' && !noBlockComment && (i === 0 || /[\s;&|{}]/.test(source[i - 1]))) { const close = source.indexOf('#>', i + 2); if (close >= 0) { emit(' '); i = close + 1; continue; } noBlockComment = true; }
     if (c === '#' && (i === 0 || /[\s;&|{}]/.test(source[i - 1]))) { while (i + 1 < source.length && source[i + 1] !== '\n') i++; continue; }
     if (c === '{') {
       if (unbalancedBlock) { emit(c); continue; }
@@ -476,15 +480,16 @@ function readScript(text, { powershell = false, interpolation = false } = {}) {
       if (attached) {
         const end = balanced(i, '{', '}');
         if (end < 0) { emit(source.slice(i)); break; }
+        if (source[i - 1] !== '$' && runsGh(prefix, source.slice(i + 1, end))) nested.push({ text: source.slice(i + 1, end), hidden: true });
         emit(source.slice(i, end + 1)); i = end; continue;
       }
       if (!prefix || keyword || blocks.at(-1) === 'switch') {
         blocks.push(/^switch\b/i.test(prefix) ? 'switch' : 'block'); emit(';'); boundary(); continue;
       }
-      if (!powershell) { emit(c); continue; }
+      if (!powershell) { if (i > bodyReadTo && !noBody) { const end = balanced(i, '{', '}'); if (end < 0) noBody = true; else { bodyReadTo = end; if (runsGh(prefix, source.slice(i + 1, end))) nested.push({ text: source.slice(i + 1, end), hidden: true }); } } emit(c); continue; }
       const end = balanced(i, '{', '}');
       if (end < 0) { unbalancedBlock = true; emit(c); continue; }
-      if (!DATA_COMMAND.test(programName(prefix.split(/\s/)[0])) && /\bgh\b/i.test(source.slice(i + 1, end))) nested.push({ text: source.slice(i + 1, end), hidden: true });
+      if (runsGh(prefix, source.slice(i + 1, end))) nested.push({ text: source.slice(i + 1, end), hidden: true });
       emit(" '__inert_block__' "); i = end; boundary(); continue;
     }
     if (c === '}' && blocks.length) { blocks.pop(); emit(';'); boundary(); continue; }
@@ -508,6 +513,8 @@ function unwrap(command) {
     if (assignment.test(word(0) || '') && /^(?:=|\+=|-=|\*=|\/=|%=|\?\?=)$/.test(word(1) || '')) {
       movesTarget ||= /GH_REPO$/i.test(word(0)); hidden = true; drop(2); continue;
     }
+    const attachedValue = /^(?:=|\+=|-=|\*=|\/=|%=|\?\?=)(.+)$/s.exec(word(1) || '');
+    if (assignment.test(word(0) || '') && attachedValue) { movesTarget ||= /GH_REPO$/i.test(word(0)); hidden = true; drop(1); tight = attachedValue[1]; continue; }
     const joined = /^(?:\[[^\]]+\])*\$([\w:]+)(?:\?\?=|[+*/%=-]?=)(.*)$/.exec(word(0) || '');
     if (joined && tightReads++ < 8) { movesTarget ||= /GH_REPO$/i.test(joined[1]); hidden = true; if (joined[2]) tight = joined[2]; else drop(1); continue; }
     while (/^(?:[A-Za-z_]\w*=|\$env:GH_REPO\s*=)/i.test(word(0) || '')) { if (/^(?:GH_REPO=|\$env:GH_REPO)/i.test(word(0))) movesTarget = true; drop(1); }
@@ -519,7 +526,8 @@ function unwrap(command) {
       while ((command.words.length - at)) {
         if (/^[A-Za-z_]\w*=/.test(word(0))) { if (/^GH_REPO=/.test(word(0))) movesTarget = true; drop(1); continue; }
         if (word(0) === '--') { drop(1); break; }
-        if (name === 'env' && (word(0) === '-S' || word(0) === '--split-string')) { script = word(1); scriptExpanding = Boolean(command.expanding[at + 1]); drop(2); break; }
+        const split = name === 'env' && /^(?:-[iv0]*S|--split-string(?==|$))=?(.*)$/s.exec(word(0));
+        if (split) { script = split[1] || word(1); scriptExpanding = Boolean(command.expanding[at + (split[1] ? 0 : 1)]); drop(split[1] ? 1 : 2); break; }
         if (name === 'env' && /^(?:-C|--chdir)(?:=|$)/.test(word(0))) movesTarget = true;
         if (!word(0).startsWith('-')) break;
         const flag = word(0); drop(1);
@@ -554,8 +562,12 @@ function fileIsGenerated(file, command, commands, index) {
   return commands.some((earlier, j) => j !== index && (j < index || earlier.nested) && (earlier.allWords || earlier.words).some(word => word.includes(basename))) ? 'named' : false;
 }
 
-const DATA_COMMAND = /^(?:echo|printf|write-output|write-host|grep|rg|select-string|cat|get-content|git|command)$/i;
-function guardedGh(gh) { return gh && (gh.noun === 'api' || gh.noun === 'pr' && ['create','new','edit'].includes(gh.verb) || gh.noun === 'issue' && gh.verb === 'close'); }
+const DATA_COMMAND = /^(?:echo|printf|write-output|write-host|write-warning|write-error|write-verbose|grep|rg|select-string|cat|get-content|git|command)$/i;
+// Attached punctuation still runs gh; --name=gh is an option value.
+function attachedProgram(word) { return /^-[^{]*=/.test(word) ? word : word.slice(Math.max(word.lastIndexOf('{'), word.lastIndexOf('=')) + 1); }
+// POSIX gh refuses this word too. A quoted '--%' stays data.
+function dropStopParsing(command, raw) { const keep = command.words.map((word, i) => !(word === '--%' && raw.startsWith('--%', command.offsets[i]))); if (keep.every(Boolean)) return; for (const key of ['words', 'offsets', 'expanding']) command[key] = command[key].filter((_, i) => keep[i]); }
+function guardedGh(gh) { return gh && (gh.variable || gh.noun === 'api' || gh.noun === 'pr' && ['create','new','edit'].includes(gh.verb) || gh.noun === 'issue' && gh.verb === 'close'); }
 function startProcess(words, expanding, raw, offsets) {
   let target; let argument; let argumentAt; let strict = true; let movesTarget = false;
   const flags = /^(?:-Wait|-NoNewWindow|-PassThru|-UseNewEnvironment)$/i;
@@ -597,6 +609,7 @@ function executableCommands(text, depth = 0, context = {}) {
   const masked = clean.replace(/\$\((?:cat __heredoc_\d+__|__subst__)\)/g, value => { substitutions.push(value); return `__subword_${substitutions.length - 1}__`; });
   let movesTarget = Boolean(context.movesTarget); const result = [];
   for (const command of shellCommands(masked, context)) {
+    dropStopParsing(command, masked);
     command.words = command.words.map((word, i) => word.replace(/__subword_(\d+)__/g, (_, n) => { command.expanding[i] = true; return substitutions[n]; }));
     if (context.outerExpansion) command.expanding = command.expanding.map((value,i) => value || /\$/.test(command.words[i]));
     const unwrapped = unwrap(command); let { words, expanding } = unwrapped;
@@ -617,13 +630,15 @@ function executableCommands(text, depth = 0, context = {}) {
       script = start.script;
     } else if (SHELLS.test(words[0])) {
       const kind = POSIX_SHELL.test(program) ? 'posix' : POWERSHELL.test(program) ? 'powershell' : 'cmd';
-      const index = words.findIndex((word, i) => i > 0 && (kind === 'posix' ? /^-[A-Za-z]*c[A-Za-z]*$/.test(word) : SCRIPT_OPTION[kind].test(word)));
+      const scriptOption = kind === 'posix' ? /^-[A-Za-z]*c[A-Za-z]*$/ : kind === 'powershell' ? /^(?:--?|\/)(?:c|co|com|comm|comma|comman|command|cwa|commandwithargs)(?::(.*))?$/is : /^\/[ck](.*)$/is;
+      const index = words.findIndex((word, i) => i > 0 && scriptOption.test(word));
+      const attachedScript = kind !== 'posix' && index >= 0 ? scriptOption.exec(words[index])[1] || '' : '';
       let scriptAt = index + 1;
       if (kind === 'posix' && index >= 0) while (words[scriptAt]?.startsWith('-')) { const flag = words[scriptAt++]; if (['-o','-O','--rcfile','--init-file'].includes(flag)) scriptAt++; }
       const here = kind === 'posix' ? words.findIndex(word => word.startsWith('<<<')) : -1;
       const expression = /^(?:eval|iex|invoke-expression)$/.test(program);
-      script = expression ? words.slice(1).join(' ') : index >= 0 ? (kind === 'posix' ? words[scriptAt] : words.slice(index + 1).join(' ')) : here >= 0 ? words[here].slice(3) || words[here + 1] : program === 'powershell' ? words.slice(1).join(' ') : null;
-      outerExpansion ||= expression ? expanding.slice(1).some(Boolean) : index >= 0 ? kind === 'posix' ? Boolean(expanding[scriptAt]) : expanding.slice(index + 1).some(Boolean) : here >= 0 ? Boolean(expanding[here] || expanding[here + 1]) : program === 'powershell' && expanding.slice(1).some(Boolean);
+      script = expression ? words.slice(1).join(' ') : index >= 0 ? (kind === 'posix' ? words[scriptAt] : [attachedScript, ...words.slice(index + 1)].filter(Boolean).join(' ')) : here >= 0 ? words[here].slice(3) || words[here + 1] : program === 'powershell' ? words.slice(1).join(' ') : null;
+      outerExpansion ||= expression ? expanding.slice(1).some(Boolean) : index >= 0 ? kind === 'posix' ? Boolean(expanding[scriptAt]) : expanding.slice(attachedScript ? index : index + 1).some(Boolean) : here >= 0 ? Boolean(expanding[here] || expanding[here + 1]) : program === 'powershell' && expanding.slice(1).some(Boolean);
     }
     if (script) {
       const knownShell = POSIX_SHELL.test(program) || POWERSHELL.test(program);
@@ -643,10 +658,11 @@ function executableCommands(text, depth = 0, context = {}) {
     const record = { words: kept, expanding: keptFlags, allWords, sourceWords: command.words, powershell: context.powershell, docs, movesTarget, hidden, unreadableInput: allWords.some(word => docs.has(word)), offsets: command.offsets };
     result.push(record);
     if (ghCommand(kept) || DATA_COMMAND.test(programName(kept[0] || ''))) continue;
-    for (let at = 1; at < kept.length; at++) {
-      if (guardedGh(ghCommand(kept.slice(at, at + 7)))) { result.push({ ...record, words: kept.slice(at), expanding: keptFlags.slice(at), hidden: true }); break; }
-      if (SHELLS.test(kept[at]) && (/^(?:eval|iex|invoke-expression|powershell)$/.test(programName(kept[at])) || kept.slice(at + 1, at + 5).some(word => /^(?:-[A-Za-z]*c[A-Za-z]*|-command|\/[ck]|<<<)/i.test(word)))) {
-        result.push(...executableCommands(scriptWords(kept.slice(at), keptFlags.slice(at)), depth + 1, { ...context, hidden: true, movesTarget })); break;
+    for (let at = 0; at < kept.length; at++) {
+      const bare = attachedProgram(kept[at]); if (at === 0 && bare === kept[0]) continue;
+      if (guardedGh(ghCommand([bare, ...kept.slice(at + 1, at + 7)]))) { result.push({ ...record, words: [bare, ...kept.slice(at + 1)], expanding: keptFlags.slice(at), hidden: true }); break; }
+      if (SHELLS.test(bare) && (/^(?:eval|iex|invoke-expression|powershell)$/.test(programName(bare)) || kept.slice(at + 1, at + 5).some(word => /^(?:-[A-Za-z]*c[A-Za-z]*|--?command|\/[ck]|<<<)/i.test(word)))) {
+        result.push(...executableCommands(scriptWords([bare, ...kept.slice(at + 1)], keptFlags.slice(at)), depth + 1, { ...context, hidden: true, movesTarget })); break;
       }
     }
   }
@@ -673,7 +689,8 @@ function ghCommand(words) {
     return false;
   };
   repo(); const noun = words[i++]; repo(); const verb = noun === 'api' ? null : words[i++];
-  return { inherited, noun, verb, rest: words.slice(i), start: i };
+  const loose = word => /^@|\$/.test(word || '');
+  return { inherited, noun, verb, rest: words.slice(i), start: i, variable: loose(noun) || (noun === 'pr' || noun === 'issue') && loose(verb) };
 }
 function closureWriteCandidate(input) {
   const tool = input?.tool_name || '';

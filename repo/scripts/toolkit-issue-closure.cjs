@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 // Prevent actual PR writes and issue closes with unfinished native descendants.
-// Known executable positions are read; hidden guarded writes refuse by name and data stays data.
+// Known executable positions and attached gh words are read; hidden writes and variable command
+// words refuse by name, while listed data stays data. Accepted syntax gaps live in the Projects skill.
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
@@ -141,8 +142,8 @@ function queryText(value, expanding, command, call, commands, index) {
   if (variable) {
     // Resolve only a leading literal assignment. An assignment under a condition or function
     // might never run, leaving an older closeIssue mutation in the variable.
-    const assignmentName = new RegExp(`^\\$?${variable[1]}(?:=|$)`, command.powershell ? 'i' : '');
-    const assignments = commands.filter(part => assignmentName.test((part.sourceWords || part.allWords || part.words)[0] || ''));
+    const assignmentName = new RegExp(`^\\$?${variable[1]}(?:\\+?=|$)`, command.powershell ? 'i' : '');
+    const assignments = commands.filter((part, at) => at !== index && (part.sourceWords || part.allWords || part.words).some(word => assignmentName.test(word)));
     const literal = new RegExp(`(?:^|[;\\n])\\s*\\$?${variable[1]}\\s*=\\s*'((?:[^']|'')*)'\\s*(?=;|\\r?\\n|$)`, command.powershell ? 'gi' : 'g');
     const matches = [...call.text.matchAll(literal)];
     if (assignments.length !== 1 || commands.indexOf(assignments[0]) >= index || matches.length !== 1 || call.text.slice(0, matches[0].index).trim()) throw new Error('GraphQL query variable is unresolved. Put its literal assignment first, or use single quotes or a readable query file.');
@@ -197,10 +198,11 @@ function shellOperations(input, options = {}) {
   for (const [index, command] of commands.entries()) {
     if (command.unreadableGh) throw new Error('Start-Process gh arguments cannot be inspected. Use one literal argument string and supported options, or run gh as its own command.');
     const gh = ghCommand(command.words); if (!gh) continue;
+    if (gh.variable) throw Object.assign(new Error('This gh command takes its command words from a variable, so Toolkit cannot tell what it runs and it was refused. Write the gh command out in full.'), { complete: true });
     const { noun, verb, inherited, rest, start } = gh;
     const kind = noun === 'api' ? 'api' : noun === 'pr' && ['create','new','edit'].includes(verb) ? verb === 'new' ? 'create' : verb : noun === 'issue' && verb === 'close' ? 'close' : null;
     if (!kind) continue;
-    const hidden = () => Object.assign(new Error(`This command runs gh ${noun}${verb ? ' ' + verb : ''} inside an assignment, script block or wrapper Toolkit does not read, so it was refused. Run it as its own command.`), { complete: true });
+    const hidden = () => Object.assign(new Error(`This command runs gh ${noun}${verb ? ' ' + verb : ''} inside an assignment, script block or wrapper Toolkit does not read, so it was refused. Run it as its own command, or quote it if it is only text.`), { complete: true });
     let parsed;
     try { parsed = flagValues(rest, kind, command.expanding.slice(start)); }
     catch (error) {
