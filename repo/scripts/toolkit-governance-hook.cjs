@@ -8,7 +8,7 @@
 //   PreToolUse        refuses every tool there but the card, and agent answers everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs).
 //   PostToolUse       records the answer tapped on the card (AskUserQuestion).
-//   SessionStart      adds one line stating the effective governance state, exports the session's
+//   SessionStart      adds context stating the effective governance state, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
 //                     one of them is known not to be the user typing, and records the run's session
 //                     mark, so a later process that resumes the session cannot answer.

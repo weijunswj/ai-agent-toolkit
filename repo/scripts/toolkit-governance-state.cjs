@@ -386,7 +386,8 @@ function result(fields) {
   const state = fields.state;
   const complete = state === 'ENABLED' && fields.materials_complete === true;
   const effectsHold = state === 'ERROR' || state === 'UNAVAILABLE' || state === 'UNDECIDED' || (complete && fields.merged_fresh !== true);
-  return Object.freeze({
+  // The canonical slug stays local to the advisory; serialised status and diagnostics stay unchanged.
+  return Object.freeze(Object.defineProperty({
     schema: SCHEMA,
     state,
     rule: fields.rule,
@@ -413,7 +414,7 @@ function result(fields) {
     error_code: fields.error_code || null,
     host: fields.host || null,
     folder: fields.folder || null,
-  });
+  }, 'repository', { value: fields.repository || null }));
 }
 
 // What the cached default-branch binding says: { status: 'none' | 'unknown' | 'invalid' | 'foreign'
@@ -453,7 +454,7 @@ class GovernanceState {
   // `store` is evidenceStoreOf's answer and `scratch` whether the repository is a clone of another
   // repository in a decided repository's ignored `.tmp/` folder (both read only for github.com).
   static derive({ identity, materials, merged = { status: 'unknown', fresh: false }, store = null, scratch = false }) {
-    const base = { root: identity.root, repository_id: identity.repository_id, materials };
+    const base = { root: identity.root, repository_id: identity.repository_id, repository: remoteSlug(identity.remote), materials };
     const notGitHub = notGitHubOf(identity);
     if (notGitHub) {
       const fields = { ...base, host: notGitHub.host, reason: notGitHub.reason };

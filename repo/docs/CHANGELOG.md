@@ -1,5 +1,17 @@
 # Toolkit Changelog
 
+## 3.50.0
+
+### Fixed
+
+- Session start warns when recorded Windows tasks disagree with fresh confirmed governance. The advisory grants no approval and disappears as soon as current enrolments match; offline, stale and uncertain reads stay silent.
+
+- Windows scheduled tasks follow confirmed governance changes, preserve footer scan history and leave existing GitHub material in place. Modified governance tasks ask whether to keep the owner's changes or restore Toolkit's definition. Interrupted switches hold when deletion is unproven and offer explicitly approved recovery. Task removal includes legacy and moved-checkout enrolments in the selected repository; agent guidance routes post-merge task checks to the device.
+
+### Changed
+
+- FOOTER SWEEP joins the fixed-task standing approval for verified github.com repositories with fresh matching disabled governance or confirmed binding absence. Fresh confirmed governance changes allow owned cleaner swaps in the same checkout and folder. Modified PROGRAMME SWEEP or SHARD TIMINGS tasks require the owner's keep-or-replace answer each time. Direct task removal, same-job repair, folder overrides and custom tasks still require explicit approval; the approved apply switch is the removal exception.
+
 ## 3.49.2
 
 ### Fixed
