@@ -59,23 +59,30 @@ for (const guard of ['control', 'owner stop', 'foreign owner', 'adopted', 'disab
       binding: id.root === roots[1] && guard === 'wrong store' ? { ...binding(id.root), store: { ...binding(id.root).store, repository: 'example/elsewhere' } } : binding(id.root) }) });
     assert.deepEqual(started, guard === 'control' ? [b.id] : []);
     assert.equal(tasks.readLastRun(b.id, home).status, guard === 'cleared during refresh' ? 'ok' : 'deferred');
+    if (guard === 'bad checkout') assert.ok(tasks.readLastRun(a.id, home).summary.some(line => line.includes(b.name) && line.includes(b.repository)), 'failed retry names its candidate');
   });
 }
 
-test('a sweep retries a transient status refresh once within the original read budget', t => {
+test('a sweep gives each transient status refresh a full bounded read budget', t => {
   const home = s.tempHome(t), root = s.checkout(t), binding = s.fixtureBinding();
   const timeouts = [];
+  let refreshWait;
+  t.mock.method(require('../scripts/toolkit-programme-lock.cjs'), 'ProgrammeJobLock', function (options) {
+    refreshWait = options.waitMs; this.take = () => ({ release() {} });
+  });
   const fake = s.fakeRun({ 'toolkit-governance.cjs': () => ({ status: 0, stdout: JSON.stringify(timeouts.length === 1
     ? { ...enabled, refresh: { refreshed: false, reason: 'fetch-failed' } } : enabled) }), 'programme attention': s.ATTENTION });
   const result = job.runJob({ job: 'programme-sweep', taskId: 'retry-programme-sweep', repoRoot: root }, { home, ghPath: s.GH,
+    takeProgrammeLock: () => ({ release() {} }),
     repositoryReader: s.testRepository, readIdentity: root => ({ valid: true, root, remote: { host: 'github.com', path: `/${binding.repository}.git` } }),
     readObservation: () => ({ status: 'enabled', fresh: true, binding }), run(file, args, opts) {
       if (args[0] === job.SCRIPT.governance) timeouts.push(opts.timeout);
       return fake.run(file, args);
     } });
   assert.equal(result.status, 'ok'); assert.equal(timeouts.length, 2);
-  assert.ok(timeouts.every(timeout => timeout > 0 && timeout <= 10000));
-  assert.ok(timeouts[1] <= timeouts[0]);
+  assert.ok(timeouts.every(timeout => timeout >= 25000 && timeout <= 30000), 'each read fits two 5-second network limits, local work and busy-host margin');
+  assert.equal(timeouts[1], timeouts[0], 'a transient retry gets the same complete budget');
+  assert.ok(refreshWait >= timeouts[0] + timeouts[1] + 5000, 'the waiter covers two reads and local capture');
 });
 
 test('deferral age and count survive repeated busy locks and clear after work', t => {
@@ -98,7 +105,9 @@ test('deferral age and count survive repeated busy locks and clear after work', 
 test('new retry files are discovered once by both CI rest shards', () => {
   const shards = require('../scripts/ci-test-shards.cjs'), root = path.resolve(__dirname, '../..');
   const discovered = shards.discoverTestFiles(root), manifest = shards.loadManifest(root);
-  for (const file of ['toolkit-scheduled-job-retry.test.cjs', 'toolkit-scheduled-job-retry-guards.test.cjs', 'toolkit-windows-task-layouts.test.cjs']) {
+  for (const file of ['toolkit-scheduled-job-retry.test.cjs', 'toolkit-scheduled-job-retry-guards.test.cjs', 'toolkit-windows-task-layouts.test.cjs',
+    'toolkit-scheduled-job-gap.test.cjs', 'toolkit-scheduled-job-status-process.test.cjs', 'toolkit-scheduled-job-status-retry.test.cjs',
+    'toolkit-scheduled-job-status-guards.test.cjs', 'toolkit-scheduled-job-status-link.test.cjs']) {
     const rel = `repo/tests/${file}`; assert.equal(discovered.filter(item => item === rel).length, 1);
     for (const system of shards.SYSTEMS) {
       const owners = shards.systemShards(manifest, system, discovered);

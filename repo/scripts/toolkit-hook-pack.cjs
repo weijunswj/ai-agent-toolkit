@@ -636,7 +636,7 @@ cp.spawnSync = function(file, args, options) {
         // Use the tested plugin's real output, including in --against runs. A literal
         // hand-written command cannot detect a planner/hold disagreement.
         const command = require(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-windows-tasks.cjs'))
-          .applyCommand({ root: this.work }, { toolkitRoot: this.work, home: this.home });
+          .applyCommand({ root: this.work }, { toolkitRoot: this.work });
         value = value.replaceAll('{planner_apply}', command).replaceAll('{planner_remove}', command.replace(' apply ', ' remove '));
       }
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)

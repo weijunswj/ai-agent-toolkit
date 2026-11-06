@@ -189,7 +189,7 @@ function writeLastRun(id, record, home) {
 
 // The skip reasons the job runner writes. Anything else is shown as a bare "skipped", so no command
 // output reaches a session line.
-const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|binding is missing|binding is invalid|binding does not match origin|binding observation expired|binding refresh failed(?:: (?:default branch fetch failed|GitHub unreachable|origin transport refused|default branch unknown|default branch moved|fetch guards unavailable|commit unreadable|binding unreadable|cache unwritable|governance reads offline))?|no usable github\.com origin repository|governance status could not be read|governance is (?:ENABLED|DISABLED|UNDECIDED|UNAVAILABLE|ERROR)|no shards yet)$/;
+const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|binding is missing|binding is invalid|binding does not match origin|binding observation expired|binding refresh failed(?:: (?:default branch fetch failed|GitHub unreachable|origin transport refused|default branch unknown|default branch moved|fetch guards unavailable|commit unreadable|binding unreadable|cache unwritable|governance reads offline|another checkout refresh is running))?|no usable github\.com origin repository|governance status could not be read|governance is (?:ENABLED|DISABLED|UNDECIDED|UNAVAILABLE|ERROR)|no shards yet)$/;
 const STALE_MS = 2 * 60 * 60 * 1000;
 
 // HH:MMZ on now's UTC date, else with the date (always with it when now is null).
@@ -220,7 +220,8 @@ function deferredText(last, now) {
   const since = [last.deferred_since, last.started].find(value => typeof value === 'string' && Number.isFinite(Date.parse(value)) && Date.parse(value) <= now.getTime());
   const minutes = since ? Math.floor((now.getTime() - Date.parse(since)) / 60000) : null;
   const count = Number.isSafeInteger(last.deferred_count) && last.deferred_count > 0 ? last.deferred_count : 1;
-  return `deferred${minutes === null ? '' : ` for ${minutes} minute${minutes === 1 ? '' : 's'}`}, ${count} deferral${count === 1 ? '' : 's'}; awaiting an eligible task retry`;
+  const reason = last.reason === 'task time budget exhausted' || SKIP_REASON.test(String(last.reason || '')) ? ` (${last.reason})` : '';
+  return `deferred${minutes === null ? '' : ` for ${minutes} minute${minutes === 1 ? '' : 's'}`}, ${count} deferral${count === 1 ? '' : 's'}${reason}; awaiting an eligible task retry`;
 }
 
 // The session-start line for this computer's programme sweep of a repository, or null when it is

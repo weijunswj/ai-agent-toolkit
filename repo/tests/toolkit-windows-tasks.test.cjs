@@ -1206,8 +1206,8 @@ test('J: invalid or unreadable shard configuration fails visibly before any proc
 test('J: shards still require fresh enabled governance and sign-in; child failure is visible', (t) => {
   const rows = [
     ...['DISABLED', 'UNDECIDED', 'ERROR'].map(state => ({ answers: { 'toolkit-governance.cjs': { status: state === 'ERROR' ? 2 : 0, stdout: JSON.stringify({ state, ...(state === 'ERROR' ? { rule: 'M0' } : {}), merged: { status: state === 'ERROR' ? 'invalid' : state === 'DISABLED' ? 'disabled' : 'none', fresh: true } }) } }, reason: state === 'ERROR' ? 'binding is invalid' : state === 'UNDECIDED' ? 'binding is missing' : `governance is ${state}` })),
-    { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{broken' } }, reason: 'governance status could not be read' },
-    { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{"state":"ENABLED","merged":{"status":"enabled","fresh":false}}' } }, reason: 'binding observation expired' },
+    { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{broken' } }, reason: 'governance status could not be read', deferred: true },
+    { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{"state":"ENABLED","merged":{"status":"enabled","fresh":false}}' } }, reason: 'binding observation expired', deferred: true },
     { answers: { 'gh auth': { status: 1 } }, reason: 'gh not signed in' },
     { answers: { 'gh auth': { status: 1 }, 'reach github': { status: 3 } }, reason: 'offline' },
     { answers: { 'refresh-shard-timings.cjs': { status: 2, stderr: 'invalid manifest' } }, failed: true },
@@ -1215,9 +1215,9 @@ test('J: shards still require fresh enabled governance and sign-in; child failur
   for (const row of rows) {
     const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, ...row.answers });
     const record = job.runJob({ job: 'shard-timings', repoRoot: checkout(t), taskId: 'x-shard-timings' }, { home: tempHome(t), run: fake.run, repositoryReader: testRepository, ghPath: GH, nodePath: NODE });
-    assert.equal(record.status, row.failed ? 'failed' : 'skipped');
+    assert.equal(record.status, row.failed ? 'failed' : row.deferred ? 'deferred' : 'skipped');
     assert.equal(record.exit, row.failed ? 1 : 0);
-    if (row.reason) assert.deepEqual(record.summary, [`skipped: ${row.reason}`]);
+    if (row.reason) assert.deepEqual(record.summary, [`${row.deferred ? 'deferred' : 'skipped'}: ${row.reason}`]);
     else assert.match(record.summary.join('\n'), /invalid manifest/);
     assert.equal(fake.log.some(entry => entry[1] === job.SCRIPT.shardTimings), !!row.failed);
   }

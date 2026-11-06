@@ -221,7 +221,7 @@ function printedRecovery(w, reset = false) {
   const commands = [...plan.next_step.matchAll(/node "([^"\n]+)" (apply|remove) --repo-root "([^"\n]+)"(?: --folder ([A-Z0-9-]+))?( --repair-owned)?/g)];
   assert.ok(commands.length, plan.next_step);
   const run = match => {
-    assert.equal(match[1].replace('$env:USERPROFILE', w.home), (path.isAbsolute(w.toolkitRoot) ? path : path.win32).join(w.toolkitRoot, 'repo', 'scripts', 'toolkit-windows-tasks.cjs')); assert.equal(match[3].replace('$env:USERPROFILE', w.home), w.root);
+    assert.equal(match[1], (path.isAbsolute(w.toolkitRoot) ? path : path.win32).join(w.toolkitRoot, 'repo', 'scripts', 'toolkit-windows-tasks.cjs')); assert.equal(match[3], w.root);
     return w.cli(match[2], ...(match[4] ? ['--folder', match[4]] : []), ...(match[5] ? ['--repair-owned'] : []));
   };
   if (reset) {
