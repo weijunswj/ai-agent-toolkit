@@ -40,4 +40,3 @@ test('M5 L4: real primary, subdirectory and worktree reporting stays path-free; 
   core.printWindowsTasks({ repoRoot: local }, { platform: 'win32', scheduler: fakeScheduler(), home, workingFolder: local, checkoutDeps: deps, log: line => lines.push(line) });
   assert.doesNotMatch(lines.join(' '), /refused for the managed/);
 });
-
