@@ -57,7 +57,8 @@ test('PR read refusals identify metadata or commits and timeout or HTTP status',
         : { status: 1, stdout: 'HTTP/2.0 403\n\n{}', stderr: '' };
       return { status: 0, stdout: 'HTTP/2.0 200\n\n' + JSON.stringify({ number: 7, title: 'Safe change', body: 'Refs #1', commits: 0, head: { sha: SHA } }) };
     } });
-    const result = new IssueClosureGuard({ transport, repository: repo }).checkPullRequest(7, { head: SHA });
+    // A fixed clock keeps each per-read timeout at exactly the 30 s deadline on a slow runner.
+    const result = new IssueClosureGuard({ transport, repository: repo, now: () => 0 }).checkPullRequest(7, { head: SHA });
     assert.equal(result.status, 'unknown');
     assert.ok(result.reason.includes(`GET ${endpoint} failed: ${failure === 'timeout' ? 'timeout' : 'HTTP 403'}`), result.reason);
   }
