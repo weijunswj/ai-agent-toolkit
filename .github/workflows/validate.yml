@@ -22,12 +22,15 @@ concurrency:
 # failed, cancelled or skipped shard fails it. The tests-clock-ahead job runs the test files that
 # pin a calendar date with Node's clock 400 days ahead, so a test that only passes near the date
 # it pins fails now rather than months later; validate waits for it. The hook-pack job runs the
-# hook test pack on Linux and Windows, and validate waits for it too. The personal-data job checks
+# full pack on Linux; hook-pack-windows runs every family separately. Both are required by validate.
+# The personal-data job checks
 # every commit of the pull request or push, the commit messages, the branch name and the pull
 # request title and body for email addresses, phone numbers and WhatsApp links, and the title and
 # body for home-folder paths and AI attribution (values are never printed); validate waits for it
 # too, so a hit or a scan error fails the required check. An edit to the title or body runs the
 # whole workflow again, so a fixed body clears the required check without a new commit.
+# The issue-closure job checks live PR text and all commits against native descendant state;
+# validate also waits for that read-only closure backstop.
 jobs:
   tests-linux:
     runs-on: ubuntu-latest
@@ -139,7 +142,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -157,6 +160,31 @@ jobs:
 
       - name: Run the hook pack
         run: node repo/scripts/toolkit-hook-pack.cjs run --budget-seconds 360
+
+  hook-pack-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [attribution, closure-matrix, closure-shell, fault, governance, issue-closure, merge, push, task-governance]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run the hook pack
+        run: node repo/scripts/toolkit-hook-pack.cjs run --family ${{ matrix.family }} --budget-seconds 360
 
   personal-data:
     runs-on: ubuntu-latest
@@ -176,8 +204,33 @@ jobs:
       - name: Check for personal data
         run: node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci
 
+  issue-closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Check current pull request closure references
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node repo/scripts/toolkit-issue-closure.cjs
+
   validate:
-    needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]
+    needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows, personal-data, issue-closure]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

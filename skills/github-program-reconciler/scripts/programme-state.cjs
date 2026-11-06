@@ -65,7 +65,7 @@ const CHECK_STATES = ['GREEN', 'PENDING', 'RED', 'UNKNOWN'];
 const UAT_STATES = ['NOT_REQUIRED', 'PENDING', 'PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'];
 const REVIEW_STATES = ['NOT_STARTED', 'IN_REVIEW', 'PASSED', 'NOT_PASSED'];
 const REVIEW_VERDICTS = ['PASSED', 'NOT_PASSED'];
-const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'replace_pr_nav'];
+const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'replace_pr_nav', 'set_parent_state', 'post_parent_repair'];
 const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
 // observation timestamps, pending effects (an intent write must not make the rendered state stale),
@@ -653,6 +653,10 @@ function validateBinding(binding) {
     check(errors, REPO.test(String(binding.repository || '')), 'repository must be owner/name');
     let enabled = true;
     if (v2) {
+      if (binding.parent_lifecycle !== undefined) {
+        const policy = binding.parent_lifecycle;
+        check(errors, isObject(policy) && Object.keys(policy).length === 2 && ['reopen_incomplete', 'complete_when_children_closed'].every(key => typeof policy[key] === 'boolean'), 'parent_lifecycle must explicitly name reopen_incomplete and complete_when_children_closed booleans');
+      }
       const unknown = Object.keys(binding).filter(key => !BINDING_V2_KEYS.includes(key));
       check(errors, unknown.length === 0, `${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a version 2 binding key`);
       if (binding.state !== undefined) validateStateBlock(errors, binding);
@@ -672,6 +676,7 @@ function validateBinding(binding) {
       }
     } else {
       check(errors, binding.governance === undefined && binding.parents === undefined, 'governance and parents belong to v2');
+      check(errors, binding.parent_lifecycle === undefined, 'parent_lifecycle belongs to v2');
       check(errors, isInt(binding.parent_issue, 1), 'parent_issue must be an issue number');
       check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
       check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
@@ -710,7 +715,7 @@ function validateBinding(binding) {
 }
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
-const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection', 'schedule_folder', 'state']);
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection', 'schedule_folder', 'state', 'parent_lifecycle']);
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
@@ -1802,12 +1807,12 @@ class GitHubTransport {
     this.timeoutMs = timeoutMs;
   }
 
-  request(method, apiPath, body) {
+  request(method, apiPath, body, { timeoutMs = this.timeoutMs } = {}) {
     const args = ['api', '-i', '-X', method, apiPath, '-H', 'Accept: application/vnd.github+json'];
     if (body !== undefined) args.push('--input', '-');
     const result = this.run(this.ghPath, args, {
       encoding: 'utf8', input: body === undefined ? undefined : JSON.stringify(body),
-      maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: this.timeoutMs,
+      maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: Math.max(1, Math.floor(Math.min(this.timeoutMs, timeoutMs))),
     });
     if (result.error) throw new ProgrammeError('GH_FAILED', `gh could not run: ${result.error.message}`);
     // gh exits 4 when it is not signed in, before any request: a refusal, never "unreachable".
@@ -2592,6 +2597,17 @@ function parentFromUrl(url, repository) {
 
 // Read-only view of the programme on GitHub.
 class ProgrammeGraphReader {
+  nativeChildState(number) {
+    return new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.transport, repository: this.repository }).tree(this.repository, number);
+  }
+
+  issueEvents(number) {
+    const guard = new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.transport, repository: this.repository });
+    const events = guard.pages(`repos/${this.repository}/issues/${number}/events`, guard.budget());
+    if (events.some(event => !Number.isSafeInteger(event?.id) || typeof event.event !== 'string' || typeof event.created_at !== 'string')) throw new ProgrammeError('GH_FAILED', 'Issue events were malformed.');
+    return events;
+  }
+
   constructor({ transport, repository }) {
     this.transport = transport;
     this.repository = repository;
@@ -2905,7 +2921,27 @@ function mergedSelection(candidates) {
 }
 
 // Native hierarchy and body mutations; each returns the raw status. Readback decides the outcome.
+function lifecycleSnapshot(tree) {
+  // Projection writes update the parent's timestamp in this same pass. The lifecycle
+  // snapshot binds only the native state and membership that authorise this effect.
+  return JSON.stringify([tree.issue.state, tree.descendants.map(child => [child.repository, child.number, child.state]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]);
+}
+
 class GitHubMutator {
+  setIssueState(number, state, { binding, expected, fence }) {
+    const policy = binding.parent_lifecycle;
+    if (binding.governance !== 'enabled' || binding.schema !== SCHEMA.bindingV2 || number !== binding.parent_issue || binding.repository.toLowerCase() !== this.repository.toLowerCase()
+      || !(state === 'open' ? policy?.reopen_incomplete : state === 'closed' && policy?.complete_when_children_closed)) throw new ProgrammeError('LIFECYCLE_REFUSED', 'No bound permission for this parent lifecycle write.');
+    const closure = new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.transport, repository: this.repository, deadlineMs: state === 'closed' ? 120000 : 30000 });
+    const fresh = closure.tree(this.repository, number, closure.budget(), new Set(), { full: state === 'closed' });
+    if (lifecycleSnapshot(fresh) !== expected) throw new ProgrammeError('LIFECYCLE_MOVED', 'Native parent or child state changed; re-plan before writing.');
+    if (state === 'closed' && (!fresh.descendants.length || fresh.descendants.some(child => child.state !== 'closed'))
+      || state === 'open' && !fresh.descendants.some(child => child.state === 'open')) throw new ProgrammeError('LIFECYCLE_REFUSED', 'Native child state does not permit this lifecycle write.');
+    fence();
+    this.mutations += 1;
+    return this.transport.request('PATCH', `repos/${this.repository}/issues/${number}`, { state, ...(state === 'closed' ? { state_reason: 'completed' } : {}) });
+  }
+
   constructor({ transport, repository }) {
     this.transport = transport;
     this.repository = repository;
@@ -2994,6 +3030,8 @@ function registeredParents(binding) {
 const FOLD_FIELDS = ['gate', 'journals_seen', 'next_action'];
 
 const EFFECT_TEXT = {
+  set_parent_state: effect => `${effect.target.state === 'open' ? 'Reopen' : 'Complete'} the programme parent #${effect.target.issue} from every native descendant's state`,
+  post_parent_repair: effect => `Report the repaired parent closure on #${effect.target.issue}`,
   create_state: effect => `Create the state document for #${effect.target.issue}`,
   update_state: effect => `Update the state document for #${effect.target.issue} (${effect.fields.join(', ')})`,
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
@@ -3019,6 +3057,7 @@ function describeEffect(effect) {
 
 // What a hold on an issue stops for the rest of a pass: its body, its links, or everything.
 function holdScope(kind) {
+  if (kind === 'set_parent_state' || kind === 'post_parent_repair') return 'lifecycle';
   if (kind === 'replace_block' || kind === 'post_index_comment') return 'body';
   if (kind === 'replace_pr_nav') return 'pr';
   if (kind === 'attach' || kind === 'reparent' || kind === 'reorder') return 'links';
@@ -3027,6 +3066,43 @@ function holdScope(kind) {
 
 // One reconcile pass: bind, observe, recover, diff, plan and (with apply) run each effect.
 class Reconciler {
+  diffParentLifecycle(parent, observed, effects, findings, holds) {
+    const policy = this.binding.parent_lifecycle;
+    if (!policy || this.binding.schema !== SCHEMA.bindingV2 || this.binding.governance !== 'enabled') return;
+    const number = parent.parent_issue;
+    try {
+      const tree = this.reader.nativeChildState(number);
+      observed.lifecycle = tree;
+      const open = tree.descendants.some(child => child.state === 'open');
+      if (tree.issue.state === 'closed' && open && policy.reopen_incomplete) {
+        const events = this.reader.issueEvents(number);
+        let closed = null;
+        for (const event of events) { if (event.event === 'closed') closed = event; else if (event.event === 'reopened') closed = null; }
+        if (!closed) throw new Error('The latest unmatched closure event is unavailable.');
+        const marker = `<!-- toolkit-parent-repair:${number}:${closed.id} -->`;
+        const source = closed.commit_id ? `Closing commit: ${closed.commit_id}.` : 'Closing source unavailable.';
+        const body = `${marker}\nReopened the programme parent because native descendants remain open. Closure event ${closed.id}, actor ${closed.actor?.login || 'unavailable'}, time ${closed.created_at}. ${source}`;
+        const repair = { issue: number, marker, body };
+        effects.push({ kind: 'set_parent_state', target: { issue: number, state: 'open', expected: lifecycleSnapshot(tree), repair } });
+        effects.push({ kind: 'post_parent_repair', target: repair });
+        findings.push({ code: 'PARENT_CLOSED_INCOMPLETE', issue: number, detail: 'The parent closed while native descendants remain open; lifecycle permission permits repair.' });
+      } else if (tree.issue.state === 'open' && tree.descendants.length && !open && policy.complete_when_children_closed) {
+        const closure = new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.reader.transport, repository: this.binding.repository, deadlineMs: 120000 });
+        const full = closure.tree(this.binding.repository, number, closure.budget(), new Set(), { full: true });
+        observed.lifecycle = full;
+        if (full.issue.state !== 'open' || !full.descendants.length || full.descendants.some(child => child.state !== 'closed')) throw new Error('Full native child walk changed the completion decision.');
+        effects.push({ kind: 'set_parent_state', target: { issue: number, state: 'closed', expected: lifecycleSnapshot(full) } });
+      }
+      // A flag intent is recorded before reopening, so interrupted repair never loses its notice.
+      for (const pending of parent.pending_effects.filter(effect => policy.reopen_incomplete && effect.kind === 'post_parent_repair')) {
+        if (!effects.some(effect => effect.kind === pending.kind && effect.target.marker === pending.target.marker)
+          && !this.reader.comments(number).some(comment => comment.body.includes(pending.target.marker))) effects.push({ kind: pending.kind, target: pending.target });
+      }
+    } catch {
+      holds.push({ code: 'PARENT_LIFECYCLE_UNKNOWN', target: `#${number}`, scope: 'lifecycle', detail: 'Native child state or closure events could not be read completely; no parent lifecycle change.' });
+    }
+  }
+
   constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null }) {
     this.store = store;
     // The clock attention findings are dated by (the store's clock dates only its own commits).
@@ -3461,7 +3537,11 @@ class Reconciler {
       for (const effect of doc.pending_effects) {
         let done = null;
         const target = effect.target;
-        if (effect.kind === 'attach' || effect.kind === 'reparent') {
+        if (effect.kind === 'set_parent_state') {
+          try { const issue = this.reader.issue(target.issue); done = issue ? issue.state === target.state : null; } catch { done = null; }
+        } else if (effect.kind === 'post_parent_repair') {
+          try { done = this.reader.comments(target.issue).some(comment => comment.body.includes(target.marker)); } catch { done = null; }
+        } else if (effect.kind === 'attach' || effect.kind === 'reparent') {
           const issue = observed.issues.has(target.issue) ? observed.issues.get(target.issue) : this.reader.issue(target.issue);
           done = issue ? issue.parent === target.parent : null;
         } else if (effect.kind === 'reorder') {
@@ -3573,6 +3653,7 @@ class Reconciler {
     ], observed, holds);
     const findings = [];
     const effects = [];
+    this.diffParentLifecycle(parent, observed, effects, findings, holds);
     const desiredDocs = new Map();
     for (const outcome of parent.outcomes) {
       const existing = children.get(outcome.issue)?.doc || null;
@@ -3990,6 +4071,33 @@ class Reconciler {
       }
     }
 
+    // Lifecycle changes run after native links and page writes, using the same fence and intents.
+    for (const effect of plan.effects.filter(entry => ['set_parent_state', 'post_parent_repair'].includes(entry.kind))) {
+      if (isHeld(`#${parentNumber}`, 'lifecycle')) { record(effect, 'SKIPPED', 'parent lifecycle held earlier'); continue; }
+      if (effect.kind === 'post_parent_repair' && this.binding.parent_lifecycle?.reopen_incomplete !== true) { record(effect, 'SKIPPED', 'repair permission is absent'); continue; }
+      if (effect.kind === 'set_parent_state' && effect.target.state === 'closed' && (!plan.complete || holds.length)) { record(effect, 'SKIPPED', 'the pass is incomplete'); continue; }
+      if (effect.target.repair) {
+        const repair = { intent_id: intentId('post_parent_repair', effect.target.repair), kind: 'post_parent_repair', target: effect.target.repair, state: 'IN_FLIGHT' };
+        mutateDoc('parent', parentNumber, { change: doc => { if (doc.pending_effects.some(entry => entry.intent_id === repair.intent_id)) return null; doc.pending_effects.push(repair); return doc; } });
+      }
+      withIntent(effect, 'parent', parentNumber, () => {
+        guard();
+        if (effect.kind === 'set_parent_state') {
+          const response = this.mutator.setIssueState(parentNumber, effect.target.state, { binding: this.binding, expected: effect.target.expected, fence: guard });
+          const after = this.reader.issue(parentNumber);
+          if (after?.state === effect.target.state && (effect.target.state !== 'closed' || after.state_reason === 'completed')) return { outcome: 'DONE' };
+          return { outcome: okStatus(response.status) ? 'UNKNOWN' : 'NOT_DONE', detail: 'Parent lifecycle did not read back as requested.' };
+        }
+        const before = this.reader.issue(parentNumber);
+        if (before?.state !== 'open') return { outcome: 'NOT_DONE', detail: 'The repaired parent is not open.' };
+        if (!this.reader.comments(parentNumber).some(comment => comment.body.includes(effect.target.marker))) {
+          guard();
+          this.mutator.postComment(parentNumber, effect.target.body);
+        }
+        return { outcome: this.reader.comments(parentNumber).some(comment => comment.body.includes(effect.target.marker)) ? 'DONE' : 'UNKNOWN' };
+      });
+    }
+
     if (plan.complete && !holds.length && verifiedBodies.size) {
       mutateDoc('parent', parentNumber, { change: doc => {
         let changed = false;
@@ -4077,6 +4185,7 @@ function bindRepository({ transport, originUrl, binding }) {
 }
 
 module.exports = Object.freeze({
+  get IssueClosureGuard() { return require('./issue-closure.cjs').IssueClosureGuard; },
   SCHEMA, BINDING_FILE, CLASSES, LIFECYCLES, PATCHABLE_CHILD_FIELDS, PATCHABLE_PARENT_FIELDS, BLOCK_SOURCE, BLOCK_NAME, TRACE_BLOCK_NAME,
   ProgrammeError, GitHubTransport, StateStore, STORE_BACKENDS, ProgrammeGraphReader, GitHubMutator, Reconciler,
   canonical, canonicalText, contentDigest, sameState, validateParent, validateChild, validateBinding, bindingEnabled, assertValid, loadBinding,

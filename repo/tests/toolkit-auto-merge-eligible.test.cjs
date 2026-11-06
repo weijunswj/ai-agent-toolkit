@@ -34,6 +34,7 @@ test('merge-authority paths and a major bump wait for the owner; everything else
   }
   // Both hook manifests/entrypoints, setup and governance require typed merge too.
   const protectedPaths = [
+    'repo/scripts/toolkit-issue-closure.cjs', 'skills/github-program-reconciler/scripts/issue-closure.cjs',
     'hooks/hooks.json', '.claude-plugin/hooks/hooks.json', '.codex-plugin/hooks/hooks.json',
     'repo/contracts/toolkit-local-bridge/claude-plugin/hooks/hooks.json', 'repo/contracts/toolkit-local-bridge/codex-plugin/hooks/hooks.json',
     'repo/scripts/toolkit-governance-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.cjs', 'repo/scripts/toolkit-codex-helper-hook.ps1',

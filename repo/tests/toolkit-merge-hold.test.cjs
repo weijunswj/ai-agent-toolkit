@@ -11,13 +11,41 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-const hold = require('../scripts/toolkit-merge-hold.cjs');
+const holdCore = require('../scripts/toolkit-merge-hold.cjs');
+// Authority tests isolate closure reads; closure refusal/approval ordering is tested below.
+const closureGuard = { checkPullRequest: () => ({ status: 'allowed' }) };
+const hold = { ...holdCore, decide: (input, options) => holdCore.decide(input, { closureGuard, ...options }) };
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 const claudeHook = require('../scripts/toolkit-governance-hook.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const projects = require('./support/projects-approval.cjs');
+const { fakeClosureEnvironment } = require('./support/issue-closure-transport.cjs');
 
 const SHA = '62405ebd4c27859d66036e18f13c856c645d366d';
+
+test('merge text distinguishes literal backticks and heredocs from expansion without consuming on refusal',t=>{
+  const ctx=context(t); const seen=[];
+  const closureGuard={checkPullRequest(pr,options){seen.push(options.mergeTexts);return {status:'allowed'};}};
+  typed(ctx,'merge 618');
+  const input=body=>({cwd:ctx.repo,tool_name:'Bash',tool_input:{command:`gh pr merge 618 --merge --match-head-commit ${SHA} ${body}`}});
+  assert.ok(holdCore.decide(input('--subject "$(cat body.md)"'),{...ctx.options,closureGuard})?.deny);
+  assert.equal(holdCore.decide(input("--subject 'Fix `x`'"),{...ctx.options,closureGuard}),null);
+  assert.deepEqual(seen.at(-1),['Fix `x`']);
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide(input("--body \"$(cat <<'EOF'\nRefs #1\nEOF\n)\""),{...ctx.options,closureGuard}),null);
+  assert.deepEqual(seen.at(-1),['Refs #1']);
+  typed(ctx,'merge 618');
+  const file=path.join(ctx.repo,'body.md');fs.writeFileSync(file,'Refs #1');
+  const generated={cwd:ctx.repo,tool_name:'Bash',tool_input:{command:`node build-message.cjs "${file}" && gh pr merge 618 --merge --match-head-commit ${SHA} --body-file "${file}"`}};
+  assert.match(holdCore.decide(generated,{...ctx.options,closureGuard}).deny,/generated or unresolved/);
+  assert.equal(holdCore.decide(input(`--body-file "${file}"`),{...ctx.options,closureGuard}),null,'a generated-file refusal keeps the approval');
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide(input("--body-file - <<'EOF'\nRefs #1\nEOF"),{...ctx.options,closureGuard}),null);
+  assert.deepEqual(seen.at(-1),['Refs #1']);
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide({cwd:ctx.repo,tool_name:'Bash',tool_input:{command:`echo --body '$body'; gh pr merge 618 --merge --match-head-commit ${SHA} --subject Safe`}},{...ctx.options,closureGuard}),null);
+  assert.deepEqual(seen.at(-1),['Safe']);
+});
 // The Codex GitHub app's merge call that the hold could not read (repository, number and head SHA
 // in their own field names), copied from the saved diagnostic.
 const DIAGNOSTIC_SHA = '7384901397e63407783c60f6656499db9edf6b12';
@@ -47,7 +75,7 @@ function context(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-merge-hold-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const registryPath = path.join(root, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
-  const options = { registryOptions: { registryPath, testOnly: true, home: path.join(root, 'home') } };
+  const options = { closureGuard, registryOptions: { registryPath, testOnly: true, home: path.join(root, 'home') } };
   const repo = repository(root, 'a');
   const other = repository(root, 'b');
   return { root, repo, other, options, file: path.join(path.dirname(registryPath), hold.APPROVALS_BASENAME) };
@@ -56,6 +84,34 @@ function context(t) {
 const bash = (cwd, command) => ({ cwd, tool_name: 'Bash', tool_input: { command } });
 const connector = (tool, args, repo = 'a') => ({ cwd: os.tmpdir(), tool_name: `mcp__github__${tool}`, tool_input: { owner: 'owner', repo, ...args } });
 const decide = (ctx, input, environment = {}) => hold.decide(input, { ...ctx.options, environment });
+
+test('closure refusal precedes typed approval consumption', t => {
+  const ctx = context(t);
+  typed(ctx, 'merge 17');
+  const input = bash(ctx.repo, `gh pr merge 17 --merge --match-head-commit ${SHA} --body 'Fixes #1'`);
+  const failingGuard = { checkPullRequest(number, options) {
+    assert.equal(number, 17); assert.deepEqual(options.mergeTexts, ['Fixes #1']);
+    return { status: 'refused', reason: 'Open native descendants' };
+  } };
+  assert.match(holdCore.decide(input, { ...ctx.options, closureGuard: failingGuard, environment: {} }).deny, /Open native descendants/);
+  assert.equal(decide(ctx, input), null, 'the typed approval was retained');
+  assert.match(decide(ctx, input).deny, /no unused approval/);
+  typed(ctx, 'merge 17');
+  assert.match(holdCore.decide(input, { ...ctx.options, closureGuard: failingGuard, environment: {} }).deny, /Open native descendants/);
+});
+
+test('the non-consuming pre-pass skips closure and the final pass reads once before consuming', t => {
+  const ctx = context(t); typed(ctx, 'merge 17');
+  const input = bash(ctx.repo, `gh pr merge 17 --merge --match-head-commit ${SHA}`);
+  let reads = 0;
+  const closureGuard = { checkPullRequest() { reads++; return { status: 'unknown', reason: 'Invocation deadline expired' }; } };
+  const options = { ...ctx.options, environment: {}, closureGuard };
+  assert.equal(holdCore.decide(input, { ...options, consume: false }), null);
+  assert.equal(reads, 0);
+  assert.match(holdCore.decide(input, options).deny, /deadline/);
+  assert.equal(reads, 1);
+  assert.equal(holdCore.decide(input, ctx.options), null, 'refusal retained the typed approval');
+});
 
 // The G0 authority matrix: only an exact fresh merged parent binding plus live target facts
 // grants evidence custody, for the same owner and a target with no enabled binding of its own.
@@ -251,6 +307,10 @@ test('evidence merges retain generic shell and ambiguity checks, and judge every
   git(ctx.repo, ['remote', 'add', 'second', 'https://github.com/owner/second.git']);
   assert.match(hold.decide(bash(ctx.repo, command), { ...ctx.options, environment: {}, readEvidenceGitHub }).deny, /cannot tell which repository/);
   assert.equal(hold.decide(bash(ctx.repo, `${command} --repo owner/a`), { ...ctx.options, environment: {}, readEvidenceGitHub }), null);
+  let closureReads = 0;
+  assert.match(holdCore.decide(bash(ctx.repo, `${command} --repo owner/a`), { ...ctx.options, environment: {}, readEvidenceGitHub,
+    closureGuard: { checkPullRequest() { closureReads++; return { status: 'refused', reason: 'Open native descendants' }; } } }).deny, /Open native descendants/);
+  assert.equal(closureReads, 1, 'verified evidence authority still reaches closure enforcement');
   assert.equal(typed(ctx, 'merge 17'), 1);
   assert.equal(hold.decide(bash(ctx.repo, `${command} --repo owner/a`), { ...ctx.options, environment: {}, readEvidenceGitHub() { assert.fail('typed approval needs no lookup'); } }), null);
 });
@@ -266,7 +326,7 @@ test('evidence verification refuses conflicting connector fields before lookup a
       ...ctx.options, environment: {}, readEvidenceGitHub() { assert.fail('ambiguous input must not reach GitHub'); } })?.deny);
   }
   let clock = 0;
-  t.mock.method(Date, 'now', () => clock);
+  t.mock.method(require('node:perf_hooks').performance, 'now', () => clock);
   for (const elapsed of [1500, 2500]) {
     clock = 0;
     const timeouts = [];
@@ -1201,7 +1261,7 @@ test('the Codex hook refuses, records the user\'s approval, allows one merge and
   const ctx = context(t);
   const home = path.join(ctx.root, 'home');
   const script = path.resolve(__dirname, '..', 'scripts', 'toolkit-codex-helper-hook.cjs');
-  const env = { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_HOST_SESSION: '', TOOLKIT_GATE_ROLE: '', TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_CLAUDE_TASK_PROFILE_SHA256: '', CLAUDE_CODE_REMOTE: '' };
+  const env = fakeClosureEnvironment(ctx.root, { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_HOST_SESSION: '', TOOLKIT_GATE_ROLE: '', TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_CLAUDE_TASK_PROFILE_SHA256: '', CLAUDE_CODE_REMOTE: '' }, SHA);
   const run = (input) => spawnSync(process.execPath, [script], { input: JSON.stringify(input), encoding: 'utf8', env, cwd: ctx.root });
   const merge = { cwd: ctx.root, tool_name: 'mcp__github__merge_pull_request', tool_input: { owner: 'owner', repo: 'a', pullNumber: 618, expectedHeadSha: SHA } };
   const refusedFirst = run(merge);
@@ -1384,7 +1444,7 @@ test('row 15: the Codex hook refuses the Codex-shaped merge, records a code-span
   const ctx = context(t);
   const home = path.join(ctx.root, 'home');
   const script = path.resolve(__dirname, '..', 'scripts', 'toolkit-codex-helper-hook.cjs');
-  const env = { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_HOST_SESSION: '', TOOLKIT_GATE_ROLE: '', TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_CLAUDE_TASK_PROFILE_SHA256: '', CLAUDE_CODE_REMOTE: '' };
+  const env = fakeClosureEnvironment(ctx.root, { ...process.env, HOME: home, USERPROFILE: home, TOOLKIT_HOST_SESSION: '', TOOLKIT_GATE_ROLE: '', TOOLKIT_NATIVE_HELPER_BINDING: '', TOOLKIT_CLAUDE_TASK_PROFILE_SHA256: '', CLAUDE_CODE_REMOTE: '' }, SHA);
   const run = (input) => spawnSync(process.execPath, [script], { input: JSON.stringify(input), encoding: 'utf8', env, cwd: ctx.root });
   const merge = { cwd: ctx.root, tool_name: CODEX_MERGE, tool_input: { repository_full_name: 'owner/a', pr_number: 618, expected_head_sha: SHA, merge_method: 'merge' } };
   const refused = run(merge);
@@ -1432,4 +1492,39 @@ test('the ask text shows the approval line as plain text', (t) => {
   const deny = decide(ctx, codexCall()).deny;
   assert.match(deny, /as plain text and not in quotes, a line with the word merge and the pull request number, such as merge owner\/name#N/);
   assert.doesNotMatch(deny, /"merge N"/);
+});
+
+test('unmatched and hidden merges refuse before consuming approval while a quoted program path counts once',t=>{
+  const ctx=context(t);let reads=0;const closureGuard={checkPullRequest(){reads++;return {status:'allowed'};}};
+  const merge=`gh pr merge 618 --merge --match-head-commit ${SHA}`;
+  for(const command of [`$x = ${merge}`,`$x = ${merge} --subject 'Closes #1'`,`stdbuf -oL ${merge} --subject 'Closes #1'`]) {
+    typed(ctx,'merge 618');
+    assert.match(holdCore.decide({cwd:ctx.repo,tool_name:'PowerShell',tool_input:{command}},{...ctx.options,closureGuard})?.deny,/generated or unresolved/,command);
+    assert.equal(holdCore.decide({cwd:ctx.repo,tool_name:'Bash',tool_input:{command:merge}},{...ctx.options,closureGuard}),null,'refusal keeps the typed approval');
+  }
+  assert.equal(reads,3,'only the final plain merges reach the closure check');
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide({cwd:ctx.repo,tool_name:'Bash',tool_input:{command:`"C:/Program Files/GitHub CLI/gh.exe" pr merge 618 --merge --match-head-commit ${SHA}`}},{...ctx.options,closureGuard}),null);
+});
+
+test('stop-parsing merge forms require approval and hidden merge recovery keeps it', t => {
+  const ctx = context(t); let reads = 0;
+  const closureGuard = {checkPullRequest(){reads++;return {status:'allowed'};}};
+  const call = command => ({cwd:ctx.repo,tool_name:'PowerShell',tool_input:{command}});
+  const merge = `gh pr merge 618 --merge --match-head-commit ${SHA}`;
+  for (const command of [merge.replace('gh ','gh --% '),merge.replace('pr ','pr --% '),
+    `gh --% api -X PUT repos/owner/a/pulls/618/merge -f sha=${SHA}`,'gh --% repo sync']) {
+    assert.ok(holdCore.decide(call(command),{...ctx.options,closureGuard})?.deny,command);
+  }
+  assert.equal(reads,0);
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide(call(merge.replace('gh ','gh --% ')),{...ctx.options,closureGuard}),null);
+  assert.equal(reads,1,'typed stop-parsing merge reaches the closure check');
+  typed(ctx,'merge 618');
+  assert.match(holdCore.decide(call('$x ='+merge),{...ctx.options,closureGuard})?.deny,/Run the merge as its own command/);
+  assert.equal(holdCore.decide(call(merge),{...ctx.options,closureGuard}),null,'hidden refusal keeps approval');
+  typed(ctx,'merge 618');
+  assert.equal(holdCore.decide(call('<# x #> '+merge),{...ctx.options,closureGuard}),null,'a block comment is data');
+  assert.equal(reads,3);
+  assert.equal(holdCore.decide(call('gh pr view 5 --%'),{...ctx.options,closureGuard}),null);
 });

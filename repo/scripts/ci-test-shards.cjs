@@ -17,6 +17,7 @@ const TEST_DIR_REL = 'repo/tests';
 const TEST_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.test\.cjs$/;
 const SYSTEMS = Object.freeze(['linux', 'windows']);
 const SHARD_ID = /^[a-z]+-[1-9][0-9]*$/;
+const REQUIRED_JOBS = Object.freeze(['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'hook-pack-windows', 'personal-data', 'issue-closure']);
 
 function platformSystem(platform = process.platform) {
   if (platform === 'win32') return 'windows';
@@ -183,9 +184,12 @@ function verifyCiSummaries({ manifest, discovered, summaries, needs }) {
   try { assertManifest(manifest, discovered); }
   catch (error) { return { errors: [error.message], totals }; }
   if (!needs || typeof needs !== 'object' || Array.isArray(needs) || Object.keys(needs).length === 0) errors.push('the test leg results (needs) are missing');
-  else for (const [job, value] of Object.entries(needs)) {
-    const result = value && value.result;
-    if (result !== 'success') errors.push(`test job ${job} finished as ${result || 'unknown'}, not success`);
+  else {
+    for (const job of REQUIRED_JOBS) if (!Object.hasOwn(needs, job)) errors.push(`required job ${job} is missing from needs`);
+    for (const [job, value] of Object.entries(needs)) {
+      const result = value && value.result;
+      if (result !== 'success') errors.push(`test job ${job} finished as ${result || 'unknown'}, not success`);
+    }
   }
   const bySystem = new Map(SYSTEMS.map((system) => [system, new Map()]));
   for (const summary of summaries) {
@@ -246,7 +250,7 @@ const VERIFY_COMMAND = 'node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEM
 const GATE_STEP = 'Run validation';
 const AGGREGATE_HEADER = [
   '  validate:',
-  '    needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data]',
+  `    needs: [${REQUIRED_JOBS.join(', ')}]`,
   '    if: ${{ always() }}',
   '    runs-on: ubuntu-latest',
   '    timeout-minutes: 15',
@@ -344,9 +348,8 @@ const CLOCK_AHEAD_JOB = [
   '        run: node repo/scripts/run-tests.cjs --clock-ahead --clock-offset-days 400 --temp-root "${{ runner.temp }}/tests"',
 ].join('\n');
 
-// The exact text of the hook-pack job: the hook test pack (toolkit-hook-pack.cjs) on Linux and
-// Windows, every hook started the way Claude Code and Codex start it. The validate job waits for it,
-// so a failed or skipped system fails the required check.
+// Linux runs the full hook pack; Windows runs each family separately to keep the same budget
+// with room for slower hosts. Both jobs are required, and fail-fast stays off for every family.
 const HOOK_PACK_JOB = [
   '  hook-pack:',
   '    runs-on: ${{ matrix.os }}',
@@ -354,7 +357,7 @@ const HOOK_PACK_JOB = [
   '    strategy:',
   '      fail-fast: false',
   '      matrix:',
-  '        os: [ubuntu-latest, windows-latest]',
+  '        os: [ubuntu-latest]',
   '    steps:',
   '      - name: Checkout',
   '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
@@ -373,6 +376,12 @@ const HOOK_PACK_JOB = [
   '      - name: Run the hook pack',
   '        run: node repo/scripts/toolkit-hook-pack.cjs run --budget-seconds 360',
 ].join('\n');
+
+const HOOK_PACK_WINDOWS_JOB = HOOK_PACK_JOB
+  .replace('  hook-pack:', '  hook-pack-windows:')
+  .replace('    runs-on: ${{ matrix.os }}', '    runs-on: windows-latest')
+  .replace('        os: [ubuntu-latest]', '        family: [attribution, closure-matrix, closure-shell, fault, governance, issue-closure, merge, push, task-governance]')
+  .replace(' run --budget-seconds 360', ' run --family ${{ matrix.family }} --budget-seconds 360');
 
 // The exact text of the personal-data job: every commit of the pull request or push, its messages,
 // branch name and pull request text, checked by the personal-data guard. The validate job waits
@@ -395,6 +404,33 @@ const PERSONAL_DATA_JOB = [
   '',
   '      - name: Check for personal data',
   '        run: node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci',
+].join('\n');
+
+const ISSUE_CLOSURE_JOB = [
+  '  issue-closure:',
+  '    runs-on: ubuntu-latest',
+  '    timeout-minutes: 5',
+  '    permissions:',
+  '      contents: read',
+  '      issues: read',
+  '      pull-requests: read',
+  '    steps:',
+  '      - name: Checkout',
+  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+  '        with:',
+  '          fetch-depth: 0',
+  '          persist-credentials: false',
+  '',
+  '      - name: Set up Node',
+  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
+  '        with:',
+  '          node-version: 22',
+  '',
+  '      - name: Check current pull request closure references',
+  "        if: ${{ github.event_name == 'pull_request' }}",
+  '        env:',
+  '          GH_TOKEN: ${{ github.token }}',
+  '        run: node repo/scripts/toolkit-issue-closure.cjs',
 ].join('\n');
 
 // The exact text of the validate job around its gate commands. The commands stay listed only in
@@ -482,12 +518,15 @@ const WORKFLOW_HEADER = [
   '# failed, cancelled or skipped shard fails it. The tests-clock-ahead job runs the test files that',
   '# pin a calendar date with Node\'s clock 400 days ahead, so a test that only passes near the date',
   '# it pins fails now rather than months later; validate waits for it. The hook-pack job runs the',
-  '# hook test pack on Linux and Windows, and validate waits for it too. The personal-data job checks',
+  '# full pack on Linux; hook-pack-windows runs every family separately. Both are required by validate.',
+  '# The personal-data job checks',
   '# every commit of the pull request or push, the commit messages, the branch name and the pull',
   '# request title and body for email addresses, phone numbers and WhatsApp links, and the title and',
   '# body for home-folder paths and AI attribution (values are never printed); validate waits for it',
   '# too, so a hit or a scan error fails the required check. An edit to the title or body runs the',
   '# whole workflow again, so a fixed body clears the required check without a new commit.',
+  '# The issue-closure job checks live PR text and all commits against native descendant state;',
+  '# validate also waits for that read-only closure backstop.',
   'jobs:',
 ].join('\n');
 
@@ -505,7 +544,11 @@ function workflowText(manifest, commands) {
     '',
     HOOK_PACK_JOB,
     '',
+    HOOK_PACK_WINDOWS_JOB,
+    '',
     PERSONAL_DATA_JOB,
+    '',
+    ISSUE_CLOSURE_JOB,
     '',
     validateJobText(commands),
     '',
@@ -562,7 +605,7 @@ function workflowErrors(source, manifest) {
   catch (error) { commandError = error.message; }
   const text = commands ? withPinUpdatesAccepted(raw, workflowText(manifest, commands)) : raw;
   const jobs = workflowJobs(text);
-  const expected = ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'personal-data', 'validate'];
+  const expected = [...REQUIRED_JOBS, 'validate'];
   if ([...jobs.keys()].join(',') !== expected.join(',')) errors.push(`validate.yml jobs must be exactly ${expected.join(', ')} in that order (found ${[...jobs.keys()].join(', ') || 'none'})`);
   for (const system of SYSTEMS) {
     const job = jobs.get(`tests-${system}`);
@@ -570,14 +613,18 @@ function workflowErrors(source, manifest) {
   }
   const hookPack = jobs.get('hook-pack');
   if (hookPack !== undefined && hookPack !== HOOK_PACK_JOB) errors.push('the hook-pack job differs from its pinned text');
+  const hookPackWindows = jobs.get('hook-pack-windows');
+  if (hookPackWindows !== undefined && hookPackWindows !== HOOK_PACK_WINDOWS_JOB) errors.push('the hook-pack-windows job differs from its pinned text');
   const clockAhead = jobs.get('tests-clock-ahead');
   if (clockAhead !== undefined && clockAhead !== CLOCK_AHEAD_JOB) errors.push('the tests-clock-ahead job differs from its pinned text');
   const personalData = jobs.get('personal-data');
+  const issueClosure = jobs.get('issue-closure');
+  if (issueClosure !== undefined && issueClosure !== ISSUE_CLOSURE_JOB) errors.push('the issue-closure job differs from its pinned text');
   if (personalData !== undefined && personalData !== PERSONAL_DATA_JOB) errors.push('the personal-data job differs from its pinned text');
   const aggregate = jobs.get('validate');
   if (aggregate !== undefined) {
     const lines = aggregate.split('\n');
-    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push('the validate job must start with needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, personal-data], if: ${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15');
+    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push(`the validate job must start with needs: [${REQUIRED_JOBS.join(', ')}], if: \${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15`);
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
     if (names.join('|') !== 'Checkout|Set up Node|Download test summaries|Set up Python|Run validation') errors.push('the validate job steps must be Checkout, Set up Node, Download test summaries, Set up Python, Run validation (Run validation is step 6)');
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the validate job may have a condition');

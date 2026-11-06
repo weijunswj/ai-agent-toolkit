@@ -48,19 +48,35 @@ function promptEvent(input) {
 // alias, and the flattened V2 `multi_agent_v2` name `<namespace>spawn_agent` for any host-valid
 // namespace, hyphenated ones included (`collaborationspawn_agent`, `multi-agentspawn_agent`).
 // `notes` collects what a shell check could not check, for the caller to show the user.
-async function decide(input, environment = process.env, { notes } = {}) {
+const CODEX_DEADLINE_MS = 50000;
+async function decide(input, environment = process.env, { notes, transport } = {}) {
+  const deadline = require('node:perf_hooks').performance.now() + CODEX_DEADLINE_MS;
+  const shared = { deadline, transport, evidenceResponses: new Map() };
   let governanceDenial;
   try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
   }
   if (governanceDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: governanceDenial.deny } };
   // Merges: the merge hold, a tripwire that waits for the user's own "merge N" (toolkit-merge-hold.cjs), in every folder.
-  const mergeDenial = mergeDecision(input);
+  const mergeDenial = mergeDecision(input, { ...shared, consume: false });
   if (mergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: mergeDenial.deny } };
   // Shell commands, under any of the shell tool names Codex may report: refuse AI attribution in
   // commits and pull requests, force pushes and pushes that carry a credential.
   // Codex's top-level cwd is the chat's folder, which may not be where a call with no workdir runs.
-  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes, sessionFolderOnly: true });
+  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) {
+    const attribution = require('./toolkit-attribution-guard.cjs').attributionDecision(input, { notes, sessionFolderOnly: true });
+    if (attribution?.hookSpecificOutput?.permissionDecision === 'deny' || notes?.length) return attribution;
+  }
+  let closure;
+  try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input, shared); }
+  catch {
+    try { if (require('./toolkit-shell-call.cjs').closureWriteCandidate(input)) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+    catch { closure = { deny: 'Toolkit: executable command reader is unavailable. Run setup toolkit to repair the plugin.' }; }
+  }
+  if (closure) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } };
+  const finalMergeDenial = mergeDecision(input, shared);
+  if (finalMergeDenial) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: finalMergeDenial.deny } };
+  if (require('./toolkit-shell-call.cjs').ShellCall.isShellTool(input?.tool_name)) return {};
   if (!gateRun(environment)) return {};
   const state = governance(input, environment);
   if (!state.governed) return {};
@@ -78,8 +94,8 @@ async function decide(input, environment = process.env, { notes } = {}) {
 }
 
 // The merge hold's decision, failing closed for a call that may merge when the module cannot run.
-function mergeDecision(input) {
-  try { return require('./toolkit-merge-hold.cjs').decide(input || {}, { host: 'codex' }); } catch {
+function mergeDecision(input, options = {}) {
+  try { return require('./toolkit-merge-hold.cjs').decide(input || {}, { host: 'codex', ...options }); } catch {
     let mayMerge = true;
     try { mayMerge = require('./toolkit-merge-hold.cjs').mayMerge(input || {}); } catch { mayMerge = /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: 'Toolkit: the merge check failed, so this merge or push is refused. Retry it; if this repeats, run `setup toolkit` to repair the Toolkit plugin.' } : null;
@@ -156,4 +172,4 @@ async function main() {
   // hook failure and continues). An admitted request is exit 0 with empty output.
 }
 if (require.main === module) main().catch(() => deny(HELD));
-module.exports = { main, decide, decidePrompt, governed, promptEvent, NEVER_OWNER, PROMPT_FAILED };
+module.exports = { CODEX_DEADLINE_MS, main, decide, decidePrompt, governed, promptEvent, NEVER_OWNER, PROMPT_FAILED };

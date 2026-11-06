@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { fakeClosureEnvironment } = require('./support/issue-closure-transport.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HOOK = path.join(ROOT, 'repo', 'scripts', 'toolkit-codex-helper-hook.cjs');
@@ -12,6 +13,51 @@ const { CodexHookMatcher } = require('../scripts/toolkit-v3-native-helper-adapte
 // The launcher markers and the host session id, which a test run from a Claude Code shell inherits.
 const MARKERS = ['TOOLKIT_NATIVE_HELPER_BINDING', 'TOOLKIT_NATIVE_HELPER_BINDING_SHA256', 'TOOLKIT_NATIVE_HELPER_IDENTITY', 'TOOLKIT_GATE_ROLE', 'TOOLKIT_CLAUDE_TASK_PROFILE_SHA256',
   require('../scripts/toolkit-governance-gate.cjs').HOST_SESSION_VARIABLE];
+
+test('Codex closure deadline shrinks across reads and leaves manifest shutdown margin', async t => {
+  const {performance}=require('node:perf_hooks'); let clock=0;
+  t.mock.method(performance,'now',()=>clock);
+  const hook=require('../scripts/toolkit-codex-helper-hook.cjs');
+  const manifest=JSON.parse(fs.readFileSync(path.join(ROOT,'.codex-plugin/hooks/hooks.json'),'utf8'));
+  const entry=manifest.hooks.PreToolUse.flatMap(row=>row.hooks).find(row=>row.command.includes('toolkit-codex-helper-hook'));
+  assert.ok(hook.CODEX_DEADLINE_MS <= entry.timeout*1000-5000);
+  const timeouts=[];
+  const transport={timeoutMs:5000,request(method,endpoint,body,options){
+    timeouts.push(options.timeoutMs); clock+=Math.min(20000,options.timeoutMs);
+    if(options.timeoutMs<20000) throw Object.assign(new Error('timeout'),{code:'ETIMEDOUT'});
+    return endpoint.includes('sub_issues') ? {status:200,json:[{number:2,state:'closed',url:'https://api.github.com/repos/example.test/app/issues/2'}]} : {status:200,json:{number:endpoint.endsWith('/2')?2:1,state:'open',sub_issues_summary:{total:1,completed:0}}};
+  }};
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-deadline-')); t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const result=await hook.decide({cwd:dir,tool_name:'Bash',tool_input:{command:'gh issue close 1 -R example.test/app'}},{},{transport});
+  assert.equal(result.hookSpecificOutput.permissionDecision,'deny');
+  assert.match(result.hookSpecificOutput.permissionDecisionReason,/deadline|timeout/);
+  assert.ok(timeouts.length>=2 && timeouts.length<=3);
+  for(let i=1;i<timeouts.length;i++) assert.ok(timeouts[i]<timeouts[i-1]);
+  assert.ok(clock<=50000,'the remaining-time timeout denies before the native hook limit');
+  assert.deepEqual(timeouts,[50000,30000,10000]);
+});
+
+test('Codex uses one evidence cache and consumes a merge only after attribution and closure',async t=>{
+  const gatePath=require.resolve('../scripts/toolkit-governance-gate.cjs');
+  const holdPath=require.resolve('../scripts/toolkit-merge-hold.cjs');
+  const closurePath=require.resolve('../scripts/toolkit-issue-closure.cjs');
+  const attributionPath=require.resolve('../scripts/toolkit-attribution-guard.cjs');
+  for(const file of [gatePath,holdPath,closurePath,attributionPath]) require(file);
+  const saved=new Map([gatePath,holdPath,closurePath,attributionPath].map(file=>[file,require.cache[file].exports]));
+  t.after(()=>{for(const [file,value] of saved) require.cache[file].exports=value;});
+  const calls=[];const caches=[];let deny=true;
+  require.cache[gatePath].exports={ToolGate:class{decide(){return null;}}};
+  require.cache[holdPath].exports={decide(input,opts){calls.push(opts.consume===false?'pre':'consume');caches.push(opts.evidenceResponses);return null;}};
+  require.cache[attributionPath].exports={attributionDecision(){calls.push('attribution');return {};}};
+  require.cache[closurePath].exports={issueClosureDecision(){calls.push('closure');return deny?{deny:'closure refusal'}:null;}};
+  const input={tool_name:'Bash',tool_input:{command:'gh pr merge 5'}};
+  assert.equal((await require(HOOK).decide(input,{})).hookSpecificOutput.permissionDecision,'deny');
+  assert.deepEqual(calls,['pre','attribution','closure']);
+  calls.length=0;caches.length=0;deny=false;
+  assert.deepEqual(await require(HOOK).decide(input,{}),{});
+  assert.deepEqual(calls,['pre','attribution','closure','consume']);
+  assert.ok(caches[0] instanceof Map);assert.equal(caches[0],caches[1]);
+});
 // The Toolkit checkout is governed here by the user's recorded yes, in a scratch home this test
 // process and its hooks use (the governed block and binding alone are not an answer).
 require('./toolkit-governed-fixture-support.cjs').recordEnabled(ROOT);
@@ -46,7 +92,8 @@ test('Codex records a direct Projects approval in a resumed launched session, ne
   const registryPath = path.join(process.env.USERPROFILE, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
   const session = 'codex-projects-approval';
   gate.startSession({ session_id: session, source: 'resume', cwd: dir }, { registryOptions: { registryPath, testOnly: true } });
-  const env = { TOOLKIT_GATE_ROLE: 'G1', TOOLKIT_HOST_SESSION: 'parent' };
+  const head = 'a1b2c3d'.padEnd(40, '0');
+  const env = fakeClosureEnvironment(dir, { ...process.env, TOOLKIT_GATE_ROLE: 'G1', TOOLKIT_HOST_SESSION: 'parent' }, head);
   const send = prompt => run({ hook_event_name: 'UserPromptSubmit', cwd: dir, session_id: session, prompt }, env);
   const merge = { cwd: dir, session_id: session, tool_name: 'mcp__github__merge_pull_request', tool_input: { repository_full_name: 'owner/projects-fixture', pr_number: 9, expected_head_sha: 'a1b2c3d' } };
   const prompt = wake('merge owner/projects-fixture#9', { id: 'cmsg_codex_hook' });

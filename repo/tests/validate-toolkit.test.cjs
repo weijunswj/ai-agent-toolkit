@@ -414,7 +414,8 @@ function jobCheckoutErrors(source, jobName) {
     step.source.includes('npm run validate:all') ||
     step.source.includes('npm run validate:toolkit') ||
     step.source.includes('node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci') ||
-    step.source.includes('node repo/scripts/toolkit-hook-pack.cjs run')
+    step.source.includes('node repo/scripts/toolkit-hook-pack.cjs run') ||
+    step.source.includes('node repo/scripts/toolkit-issue-closure.cjs')
   ));
   if (validationIndex === -1) errors.push('existing validation floor is missing');
   else if (parsed.steps.indexOf(checkout) >= validationIndex) errors.push('checkout must precede the existing validation floor');
@@ -710,7 +711,7 @@ test('every validation job fetches full history before its own validation floor'
   const relPath = '.github/workflows/validate.yml';
   const source = readText(relPath);
   assert.deepEqual(validationWorkflowCheckoutErrors(source), [], relPath);
-  assert.deepEqual(workflowJobNames(source), ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'personal-data', 'validate']);
+  assert.deepEqual(workflowJobNames(source), ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'hook-pack-windows', 'personal-data', 'issue-closure', 'validate']);
   assert.match(source, /^permissions:\n  contents: read$/m, relPath + ' read-only permissions');
   assert.match(source, /^on:\n  pull_request:\n/m, relPath + ' pull_request trigger');
   assert.match(source, /^  push:\n    branches:\n      - main$/m, relPath + ' main push trigger');
@@ -720,9 +721,11 @@ test('every validation job fetches full history before its own validation floor'
 test('validation workflow checkout regressions reject missing, shallow, misplaced, overridden, or bypassed acquisition', () => {
   const relPath = '.github/workflows/validate.yml';
   const full = readText(relPath);
-  // Each mutation is applied to the first job (a test shard) and to the validate job.
+  // Each mutation covers a test shard, the closure backstop and the aggregate validator.
   const split = full.indexOf('\n  validate:\n');
-  const targets = [['first job', '', full], ['validate job', full.slice(0, split), full.slice(split)]];
+  const closureSplit = full.indexOf('\n  issue-closure:\n');
+  const targets = [['first job', '', full], ['validate job', full.slice(0, split), full.slice(split)],
+    ['issue-closure job', full.slice(0, closureSplit), full.slice(closureSplit)]];
   for (const [where, head, source] of targets) {
     const withoutDepth = source.replace(/^          fetch-depth: 0\n/m, '');
     const variants = [

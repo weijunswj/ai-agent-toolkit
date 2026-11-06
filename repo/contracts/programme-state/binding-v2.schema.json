@@ -7,6 +7,16 @@
   "additionalProperties": false,
   "required": ["schema", "repository", "governance"],
   "properties": {
+    "parent_lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reopen_incomplete", "complete_when_children_closed"],
+      "properties": {
+        "reopen_incomplete": { "type": "boolean" },
+        "complete_when_children_closed": { "type": "boolean" }
+      },
+      "description": "Explicit authority for the fenced refresh to repair and complete only the bound parent using every native descendant. Absence grants no lifecycle writes."
+    },
     "schema": { "const": "toolkit.programme-binding.v2" },
     "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
     "governance": { "enum": ["enabled", "disabled"], "description": "enabled turns Toolkit's GitHub governance on for this repository; disabled keeps it off, and only an owner-merged pull request changes it." },

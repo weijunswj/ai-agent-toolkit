@@ -92,6 +92,16 @@ function merged(ctx, value, { ageMs = 0 } = {}) {
 
 const YES = binding();
 
+test('genuine standing task authority still reaches and cannot bypass closure refusal', t => {
+  const ctx = context(t); merged(ctx, YES); const session = userSession(ctx);
+  const input = bash(ctx, `gh pr merge 5 --merge --match-head-commit ${ctx.head}`, session);
+  let calls = 0;
+  const output = hold.decide(input, { registryOptions:ctx.registryOptions,environment:{},host:ctx.host, closureGuard:{checkPullRequest(){ calls++; return {status:'refused',reason:'Open native descendants'}; }} });
+  assert.match(output.deny, /Open native descendants/);
+  assert.equal(calls, 1);
+  assert.equal(decide(ctx,input), null);
+});
+
 function machine(ctx, value, host = ctx.host) {
   const owner = new TaskAutoMergePreferences({ host, home: ctx.registryOptions.home });
   if (value === null) {
@@ -101,7 +111,15 @@ function machine(ctx, value, host = ctx.host) {
 
 const userSession = (ctx, id = 'user') => { gate.startSession({ session_id: id, source: 'startup', cwd: ctx.repo }, { registryOptions: ctx.registryOptions, environment: {}, host: ctx.host }); return id; };
 const bash = (ctx, command, session) => ({ cwd: ctx.repo, session_id: session, tool_name: 'Bash', tool_input: { command } });
-const decide = (ctx, input, environment = {}) => hold.decide(input, { registryOptions: ctx.registryOptions, environment, host: ctx.host });
+const decide = (ctx, input, environment = {}) => hold.decide(input, {
+  registryOptions: ctx.registryOptions, environment, host: ctx.host,
+  transport: { request(method, endpoint) {
+    const pr = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)$/.exec(endpoint);
+    if (pr) return { status: 200, json: { number: Number(pr[1]), title: 'Fixture change', body: 'Refs only', commits: 0, head: { sha: ctx.prHead || ctx.head } } };
+    if (/\/pulls\/\d+\/commits\?/.test(endpoint)) return { status: 200, json: [] };
+    return { status: 404 };
+  } },
+});
 
 test('terminal check names missing native session context before app preferences', t => {
   const ctx = context(t);
@@ -458,6 +476,7 @@ test('hold: with yes, a head that changes the merge rules, or one this computer 
   git(ctx.repo, ['update-ref', '-d', 'refs/remotes/origin/main']);
   assert.match(decide(ctx, bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.head}`, session)).deny, /cannot read the changes/);
   // The owner's typed merge still covers a merge-authority pull request.
+  ctx.prHead = ctx.authority;
   git(ctx.repo, ['update-ref', 'refs/remotes/origin/main', ctx.main]);
   assert.equal(hold.recordPrompt({ cwd: ctx.repo, prompt: 'merge 7', session_id: session }, { registryOptions: ctx.registryOptions, environment: {} }), 1);
   assert.equal(decide(ctx, bash(ctx, `gh pr merge 7 --merge --match-head-commit ${ctx.authority}`, session)), null);

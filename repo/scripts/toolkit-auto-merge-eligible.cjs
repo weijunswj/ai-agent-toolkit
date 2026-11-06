@@ -46,6 +46,7 @@ const GENERAL = Object.freeze([
 // The Toolkit repository's own merge rules (applied when the diff's repository is the Toolkit: it
 // has the global rules source).
 const TOOLKIT = Object.freeze([
+  [/^(?:repo\/scripts\/toolkit-issue-closure|skills\/github-program-reconciler\/scripts\/issue-closure)\.cjs$/, 'the issue closure guard'],
   [/^repo\/contracts\/toolkit-local-bridge\/(?:claude|codex)-plugin\/hooks\/hooks\.json$/, 'a host hook manifest source'],
   [/^repo\/contracts\/agent-rules\/(?:global|gate|toolkit-governed)-rules\.md$/, 'the agent rules on merging'],
   [/^repo\/CONTROLLER\.md$/, 'the controller rules'],

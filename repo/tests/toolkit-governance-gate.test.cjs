@@ -1,5 +1,27 @@
 'use strict';
 
+require('node:test')('cloud connector merge overrides refuse closing text and advise unknowns without a doubled prefix',()=>{
+  const assert=require('node:assert/strict');
+  const hook=require('../scripts/toolkit-governance-hook.cjs');
+  const {IssueClosureGuard}=require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  const guard=new IssueClosureGuard({repository:'example.test/app',transport:{request(method,endpoint){
+    if(endpoint.endsWith('/pulls/7')) return {status:200,json:{number:7,title:'Safe',body:'Refs #1',head:{sha:'a'.repeat(40)},commits:0}};
+    return endpoint.includes('sub_issues')?{status:200,json:[{number:2,state:'open',url:'https://api.github.com/repos/example.test/app/issues/2',sub_issues_summary:{total:0}}]}:{status:200,json:{number:1,state:'open',sub_issues_summary:{total:1,completed:0}}};
+  }}});
+  for(const key of ['commit_title','commit_message','commitTitle','commitMessage']) {
+    const input={tool_name:'mcp__github__merge_pull_request',tool_input:{owner:'example.test',repo:'app',pull_number:7,[key]:'Closes #1'}};
+    const result=hook.respond('PreToolUse',input,{environment:{CLAUDE_CODE_REMOTE:'true'},guard});
+    assert.equal(result.hookSpecificOutput.permissionDecision,'deny',key);
+    input.tool_input[key]={};
+    const unknown=hook.respond('PreToolUse',input,{environment:{CLAUDE_CODE_REMOTE:'true'},guard});
+    assert.match(unknown.systemMessage,/Toolkit advisory:/);assert.doesNotMatch(unknown.systemMessage,/advisory: Toolkit:/);
+    input.tool_input[key]='Refs #1';
+    assert.deepEqual(hook.respond('PreToolUse',input,{environment:{CLAUDE_CODE_REMOTE:'true'},guard}),{});
+  }
+  const both={tool_name:'mcp__github__merge_pull_request',tool_input:{owner:'example.test',repo:'app',pull_number:7,commit_message:'Safe',commitMessage:'Closes #1'}};
+  assert.equal(hook.respond('PreToolUse',both,{environment:{CLAUDE_CODE_REMOTE:'true'},guard}).hookSpecificOutput.permissionDecision,'deny','a clean alias cannot mask closing text in another supplied alias');
+});
+
 // The governance hook gate (#542 M3, owner rule of 23 Oct: a hard stop that keeps stopping until the
 // user decides). Closure rows H-01 to H-09, H-12, H-13, H-15 and H-16 at unit level, plus nothing
 // written into the repository or folder, bypass attempts, fail-closed paths, the cloud exemption and
@@ -2662,7 +2684,7 @@ test('H-15: held prompts stay private, are never echoed in the hold message, and
   assert.equal(Object.values(JSON.parse(fs.readFileSync(ctx.heldPath, 'utf8')).repositories)[0].length, gate.MAX_HELD);
 });
 
-test('cloud sessions are not enforced and write nothing; the session line says so inside a repository', (t) => {
+test('cloud governance remains advisory and writes nothing; the session line explains closure enforcement', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   const environment = { CLAUDE_CODE_REMOTE: 'true' };
@@ -2672,6 +2694,16 @@ test('cloud sessions are not enforced and write nothing; the session line says s
   assert.deepEqual(claudeHook.respond('SessionStart', { cwd: ctx.root }, { environment }), {});
   writesNothingIn(repo);
   assert.equal(fs.existsSync(ctx.heldPath), false);
+});
+
+test('cloud closure unknowns advise, proven open descendants refuse, and local unknowns name gh', () => {
+  const input = { tool_name: 'mcp__github__close_issue', tool_input: { owner: 'example.test', repo: 'app', issue_number: 1 } };
+  for (const status of ['unknown','refused']) {
+    const options = { environment: {CLAUDE_CODE_REMOTE:'true'}, guard: { assertClosable: () => ({status,reason:'gh is not signed in; run gh auth login'}) } };
+    const result = claudeHook.respond('PreToolUse', input, options);
+    if (status === 'unknown') { assert.equal(result.hookSpecificOutput, undefined); assert.match(result.systemMessage, /advisory.*gh.*Required CI/); }
+    else assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+  }
 });
 
 test('hosts: the Claude hook script holds and answers end to end with the real user-state location', (t) => {

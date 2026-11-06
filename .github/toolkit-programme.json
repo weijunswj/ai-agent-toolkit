@@ -2,6 +2,7 @@
   "schema": "toolkit.programme-binding.v2",
   "repository": "weijunswj/ai-agent-toolkit",
   "governance": "enabled",
+  "parent_lifecycle": { "reopen_incomplete": true, "complete_when_children_closed": true },
   "parents": [
     { "issue": 421, "record_prefix": "INT-TK421-", "writer_prefix": "INT-TK421-" }
   ],

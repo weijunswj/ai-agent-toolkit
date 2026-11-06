@@ -9,7 +9,11 @@ One list of tool calls that every hook change must keep deciding the same way: c
 - `node repo/scripts/toolkit-hook-pack.cjs check-expectations`: lists every row removed, lowered to `known-bad` or changed in any other way since the base (hosts, event, payload, fixture, fault, expect, kind, source or note); only flipping a known-bad row toward passing (`status`, `known_bad_on`, `lane`, `added`) needs no reason. In a pull request each needs a line under a `## Pack changes` heading in the body: `<row id>: <why>`.
 - `node repo/scripts/toolkit-hook-pack.cjs validate`: checks the row format only.
 
-CI runs the pack on Linux and Windows in the `hook-pack` job of `validate.yml`. Each job has a 15-minute timeout and a 360-second pack budget. The pack reports overdue work and fails the completed run if it exceeds that budget; the budget does not stop the process at six minutes. The `validate` job waits for both jobs and runs the expectation-change check.
+CI runs the full pack on Linux in `hook-pack` and each Windows family separately in the `hook-pack-windows` matrix of `validate.yml`. The Windows families are attribution, closure-matrix, closure-shell, fault, governance, issue-closure, merge, push and task-governance; their union covers every row and host exactly once. Each job has a 15-minute timeout and a 360-second pack budget. The pack reports overdue work and fails the completed run if it exceeds that budget; the budget does not stop the process at six minutes. The `validate` job waits for the Linux job and every Windows family and runs the expectation-change check.
+
+The closure shell family covers hidden writes, strict Start-Process arguments and shell syntax, with retained read and data controls. It keeps new cases out of the issue-closure and merge families.
+
+The closure matrix includes ordinary command data across folders and tool names, clean identity and body-file controls, and API, connector and approval-ordering cases. Keeping those rows together leaves headroom in the executable issue-closure family without changing any row, host or expectation.
 
 ## Rows
 

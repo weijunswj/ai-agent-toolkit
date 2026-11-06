@@ -2,6 +2,10 @@
 
 // Isolated GitHub binding observations for test repositories. No laptop answer is written.
 // The shared scratch home keeps in-process and spawned hooks away from real user-state.
+// Spawned SessionStart hooks must also keep the supplied observations: live reads of fake
+// repositories turn them into unavailable state and can release an unrelated governance hold.
+// Tests of refresh inject their own transport/git runner, which the offline mode still permits.
+process.env.TOOLKIT_GOVERNANCE_OFFLINE = '1';
 
 const fs = require('node:fs');
 const os = require('node:os');

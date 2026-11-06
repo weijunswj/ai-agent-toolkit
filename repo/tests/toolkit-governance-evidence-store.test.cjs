@@ -114,6 +114,13 @@ test('never-governed store classification alone grants no merge; fresh exact bin
     owner: 'example-owner', repo: 'evidence', pullNumber: 17, expectedHeadSha: sha, merge_method: 'merge' } };
   let reads = 0;
   const options = { registryOptions: { ...ctx.options, home: path.join(ctx.root, 'home') }, environment: {},
+    transport: { request(method, apiPath) {
+      assert.equal(method, 'GET');
+      if (apiPath === 'repos/example-owner/evidence/pulls/17') return { status: 200, json: {
+        number: 17, title: 'Evidence update', body: 'Refs only', head: { sha }, commits: 0 } };
+      if (apiPath === 'repos/example-owner/evidence/pulls/17/commits?per_page=100&page=1') return { status: 200, json: [] };
+      throw new Error(`Unexpected closure read: ${apiPath}`);
+    } },
     readEvidenceGitHub(apiPath) {
       reads += 1;
       return { status: 200, json: apiPath.endsWith('/pulls/17')

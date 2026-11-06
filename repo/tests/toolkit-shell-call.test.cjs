@@ -1,4 +1,20 @@
 'use strict';
+
+const closureReader = require('../scripts/toolkit-shell-call.cjs');
+require('node:test')('executable closure reader separates scripts from data without changing generic words', () => {
+  const assert = require('node:assert/strict');
+  for (const command of ['echo "gh issue close 1"', 'grep -rn "gh pr create" docs', "cat <<'EOF'\ngh issue close later\nEOF", "Write-Output @'\ngh pr edit later\n'@", 'for x in a b; do echo "gh pr edit $x"; done']) assert.equal(closureReader.closureWriteCandidate({ tool_name:'Bash',tool_input:{command} }), false, command);
+  for (const command of ['bash -c "gh issue close 1"', "bash <<'EOF'\ngh issue close 1\nEOF", 'for x in a b; do gh issue close 1; done', '& { gh pr edit 7 --body Safe }']) assert.equal(closureReader.closureWriteCandidate({ tool_name:'Bash',tool_input:{command} }), true, command);
+  assert.equal(closureReader.executableCommands('git push origin feature && gh pr create --title T --body B')[1].movesTarget, false);
+  assert.equal(closureReader.executableCommands('cd another; gh pr edit 7 --body B')[1].movesTarget, true);
+  for (const prefix of ['export GH_REPO=other.test/app', 'unset GH_REPO', "eval 'cd another'", "eval 'GH_REPO=other.test/app'"]) assert.equal(closureReader.executableCommands(prefix + '; gh pr edit 7 --body B').at(-1).movesTarget, true, prefix);
+  assert.equal(closureReader.executableCommands("eval 'echo GH_REPO=example.test/app'; gh pr edit 7 --body B").at(-1).movesTarget, false);
+  assert.equal(closureReader.executableCommands('NOTE=GH_REPO; gh pr create --title T --body B').at(-1).movesTarget, false);
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command:"gh pr create --title 'Closes #1' --body '--help'"}}), true);
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command:'gh pr create --help'}}), false);
+  for (const command of ['echo { gh pr edit later }', 'Write-Output {\n gh pr edit later\n}', 'Write-Output { echo { gh pr edit later } }']) assert.equal(closureReader.closureWriteCandidate({tool_name:'PowerShell',tool_input:{command}}), false, command);
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command:'# an unmatched { in a comment\ngh issue close 1'}}), true);
+});
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const os = require('node:os');
@@ -6,6 +22,42 @@ const path = require('node:path');
 
 const { SHELL_TOOL_NAMES, UNREADABLE, ShellCall, argvText, plainGitLine } = require('../scripts/toolkit-shell-call.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
+
+test('generic token values and offsets stay pinned while expansion follows quoting', () => {
+  const source = "echo '$body' \"$body\" '\u0060literal\u0060' \\$body \"$ \"; gh pr edit 7";
+  const commands = closureReader.shellCommands(source);
+  assert.deepEqual(commands.map(({ words, offsets }) => ({ words, offsets })), [
+    { words: ['echo','$body','$body','`literal`','\\$body','$ '], offsets: [0,5,13,21,33,40] },
+    { words: ['gh','pr','edit','7'], offsets: [46,49,52,57] },
+  ]);
+  assert.deepEqual(commands[0].expanding, [false,false,true,false,false,false]);
+  assert.equal(closureReader.wordText({ words:['__heredoc_999__'], expanding:[false] },0).unresolved,true);
+});
+
+test('closure commands read supported positions, wrapper chains and nested scripts', () => {
+  const gh='gh issue close 1 -R example.test/app';
+  for(const command of [`if ${gh}`,`while ${gh}`,`until ${gh}`,`elif ${gh}`,`! ${gh}`,`time -p ${gh}`,`sudo -u me nohup timeout -k 5 30 ${gh}`,`env -u X ${gh}`,`nice -n 5 ${gh}`,`echo 1 | xargs ${gh}`,`cmd /c ${gh}`,`powershell -Command ${gh}`,`powershell ${gh}`,`x="$(${gh})"`,'x=`'+gh+'`',`cd x && bash <<'EOF'\n${gh}\nEOF`,`cat <<'EOF' | bash\n${gh}\nEOF`,`f() { ${gh}; }`,`1 | % { ${gh} }`,`switch (1) { 1 { ${gh} } }`]) {
+    assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command}}),true,command);
+  }
+  assert.deepEqual(closureReader.executableCommands('bash -c "bash -c \'bash -c echo\'"',5),[]);
+  assert.throws(()=>closureReader.executableCommands(gh,5),/bound exceeded/);
+});
+
+test('literal document text survives CRLF, tab-stripped heredocs and here-strings', () => {
+  for(const command of ["gh pr edit 7 --body \"$(cat <<'EOF'\nRefs #1\nEOF\n)\"", "gh pr edit 7 --body \"$(cat <<-EOF\r\n\tRefs #1\r\n\tEOF\r\n)\"", "gh pr edit 7 --body @'\nRefs #1\n'@"]) {
+    const read=closureReader.scriptCommands(command)[0];
+    assert.equal(closureReader.wordText(read,read.words.indexOf('--body')+1).value,'Refs #1',command);
+  }
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command:'cat <<< "gh issue close later"'}}),false);
+  assert.equal(closureReader.closureWriteCandidate({tool_name:'PowerShell',tool_input:{command:'echo "a`ngh issue close 1`n"'}}),false,'PowerShell backticks escape instead of substituting');
+});
+
+test('closure scanner stays bounded on missing documents, substitutions and braces', () => {
+  for(const unit of ['a<<b ','<<a\n',"@'\n",'"$(', 'x{','{} ','`x ']) {
+    const result=hostile.timing(text=>closureReader.scriptCommands(text),size=>unit.repeat(Math.ceil(size/unit.length)),{startSize:4096,maxSize:131072,minMs:5});
+    assert.ok(result.ok,`${unit}: ${result.message}`);
+  }
+});
 
 const base = path.resolve(os.tmpdir(), 'toolkit-shell-call-session');
 const other = path.resolve(os.tmpdir(), 'toolkit-shell-call-other');
@@ -198,4 +250,96 @@ test('C7: the governance gate refuses a Codex call whose run folder waits for it
 test('reading a large argument list stays linear', () => {
   const result = hostile.timing(argv => ShellCall.from({ tool_name: 'shell', tool_input: { command: argv } }).text, size => Array.from({ length: size }, (_, index) => `word ${index}'`));
   assert.ok(result.ok, result.message);
+});
+
+test('unknown executable positions mark guarded words hidden and keep data consumers inert', () => {
+  const close='gh issue close 1 -R example.test/app';
+  const hidden=[`$x = ${close}`,`$x=${close}`,`[string]$x += ${close}`,`stdbuf -oL ${close}`,`wsl bash -c '${close}'`,`$r = iex '${close}'`,`1 | Where-Object { ${close} }`,`W { ${close} }`];
+  for(const command of hidden)for(const powershell of [false,true]) {
+    const commands=closureReader.executableCommands(command,0,{powershell});
+    assert.ok(commands.some(command=>command.hidden && closureReader.ghCommand(command.words)?.verb==='close'),command);
+  }
+  for(const program of ['echo','printf','Write-Output','Write-Host','grep','rg','Select-String','cat','Get-Content','git','command -v']) {
+    assert.equal(closureReader.closureWriteCandidate({tool_name:'PowerShell',tool_input:{command:`$x = ${program} ${close}`}}),false,program);
+  }
+  for(const command of ["$x = 'gh issue close 1'",'node x "gh issue close 1"','gh pr view 7']) assert.equal(closureReader.closureWriteCandidate({tool_name:'PowerShell',tool_input:{command}}),false,command);
+  hostile.expectDefaultDeny(assert,text=>{
+    try{return !closureReader.closureWriteCandidate({tool_name:'PowerShell',tool_input:{command:`$x = ${close} ${text}`}});}catch{return false;}
+  },hostile.cases(hostile.FAMILIES,['shell']));
+});
+
+test('closure shell quoting, braces, documents and script options retain the executable boundary',()=>{
+  const close='gh issue close 1 -R example.test/app';
+  assert.equal(closureReader.shellCommands('cd "C:\\x\\"; '+close,{powershell:true}).length,2);
+  for(const command of [`echo {\n${close}`,`echo { ; ${close} ; }`,`foo { ; ${close} ; }`,`bash <<< '${close}'`,`bash <<<'${close}'`,`bash -ce '${close}'`,`bash -c -- '${close}'`,`bash -c -o pipefail '${close}'`,`cmd /c "gh issue ^\nclose 1 -R example.test/app"`]) assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command}}),true,command);
+  assert.throws(()=>closureReader.closureWriteCandidate({tool_name:'exec_command',tool_input:{cmd:'cd "C:\\x\\"; '+close}}),/shell quoting/);
+  assert.equal(closureReader.scriptCommands('gh api repos/{owner}/{repo}/issues/1')[0].words.at(-1),'repos/{owner}/{repo}/issues/1');
+  for(const marker of ["'PR-BODY'",'\\EOF']) {
+    const end=marker==="'PR-BODY'"?'PR-BODY':'EOF';
+    assert.equal(closureReader.closureWriteCandidate({tool_name:'Bash',tool_input:{command:`cat <<${marker}\n${close}\n${end}`}}),false);
+  }
+});
+
+test('wrapper, hidden-position and document scans grow within their existing bound',()=>{
+  for(const [unit,powershell,tail]of [['time ',false,''],['<<EOF\n',false,'\tEOF'],['x gh ',false,''],['$x = ',true,''],['$x=',true,''],['W { ',true,''],['command ',false,''],['x bash ',false,'']]) {
+    const result=hostile.timing(text=>closureReader.scriptCommands(text,{powershell}),size=>unit.repeat(Math.ceil(size/unit.length))+tail,{startSize:4096,maxSize:131072,minMs:5});
+    assert.ok(result.ok,`${unit}: ${result.message}`);
+  }
+});
+
+test('attached gh words, variable commands and shell option spellings remain guarded on every shell', () => {
+  const close = 'gh issue close 1 -R example.test/app';
+  const commands = [
+    `$sb={${close}}`, `?{${close}}`, `Where-Object{${close}}`, `Sort-Object{${close}}`,
+    `Select-Object @{n='x';e={${close}}}`, `$h=@{a={${close}}}`, '$sb={gh pr create}',
+    `$sb={gh api -X PATCH repos/example.test/app/issues/1 -f state=closed}`,
+    `$r = if ($a) {${close}}`, `$r = try {${close}} catch {0}`, `1 | Where-Object {${close}}`,
+    `Start-ThreadJob {${close}}`, `foo {${close}}`, `foo {gh api repos/example.test/app/issues/1} {${close}}`,
+    `?{${close}`, `$x =${close}`, `$x +=${close}`, `$r =bash -c '${close}'`,
+    `gh --% issue close 1`, `gh issue --% close 1`, `gh pr --% create --title T --body Safe`,
+    'gh --% api -X PATCH repos/example.test/app/issues/1 -f state=closed',
+    `pwsh -Command 'gh --% issue close 1'`, 'gh issue $v 1', 'gh $n close', 'gh @a', '& gh $a',
+    'gh "$@"', 'gh "${a[@]}"', 'gh pr $v 7', 'function g { gh @args }; g issue close 1',
+    'g() { gh "$@"; }; g issue close 1', 'stdbuf -oL gh $n close 1',
+    `<# note #> ${close}`, `<# a\nb #> ${close}`, `gh pr view 7 <# x #>; ${close}`,
+    `cmd /c"${close}"`, `pwsh /c '${close}'`, `pwsh --command '${close}'`,
+    `pwsh -Command:'${close}'`, `pwsh -cwa '${close}'`, `stdbuf -oL pwsh --command '${close}'`,
+    `env -iS '${close}'`, `env --split-string='${close}'`,
+  ];
+  for (const tool_name of ['PowerShell', 'Bash', 'exec_command']) for (const command of commands) {
+    assert.equal(closureReader.closureWriteCandidate({tool_name,tool_input:{command}}), true, `${tool_name}: ${command}`);
+  }
+});
+
+test('word-level controls preserve read commands, data owners and generic stop-parsing words', () => {
+  const close = 'gh issue close 1 -R example.test/app';
+  for (const tool_name of ['PowerShell','Bash','exec_command']) for (const command of [
+    '$h=@{a=1}', '{a,b}', 'foo {a,b}', '$x = {gh pr view 7}', '$x={gh pr view 7}', '$h=@{a={gh pr view 7}}',
+    `echo {${close}}`, `echo a={${close}}`, 'echo {gh pr view 7}', 'node x --name=gh issue close 1',
+    'gh run list --limit $n', 'gh pr list --search $q', 'foo ${gh}', '<# note #> gh pr view 7',
+    "echo '<# a #>'", 'gh --% pr view 7', 'gh --% pr list --assignee @me', 'echo --%',
+    "pwsh /c 'gh pr view 7'", 'pwsh -ConfigurationName x -File y', "env -S 'gh pr view 7'",
+    `Write-Warning ${close}`, `Write-Error ${close}`, `Write-Verbose ${close}`, `<# ${close} #> gh pr view 7`,
+  ]) assert.equal(closureReader.closureWriteCandidate({tool_name,tool_input:{command}}), false, `${tool_name}: ${command}`);
+  assert.ok(closureReader.shellCommands('gh --% issue close 1')[0].words.includes('--%'));
+  assert.deepEqual(closureReader.scriptCommands('gh --% issue close 1')[0].words, ['gh','issue','close','1']);
+  assert.ok(closureReader.scriptCommands("gh '--%' pr view 7")[0].words.includes('--%'));
+  const attached = closureReader.scriptCommands('$x =gh pr view 7')[0];
+  assert.equal(attached.words[0], 'gh'); assert.equal(attached.hidden, true);
+  for (const command of ['gh api repos/{owner}/{repo}/pulls/7', 'gh --% api repos/{owner}/{repo}/pulls/7']) {
+    assert.equal(closureReader.scriptCommands(command)[0].words.at(-1), 'repos/{owner}/{repo}/pulls/7');
+  }
+});
+
+test('attached blocks, comments and stop-parsing scans retain the hostile input bound', () => {
+  for (const [unit,powershell] of [['x {gh ',false],['a{gh} ',false],['<# ',true],['--% ',true],['$x =y ',true],['f { ',false]]) {
+    const result = hostile.timing(text => {
+      try { closureReader.scriptCommands(text,{powershell}); }
+      catch (error) { assert.match(error.message,/bound exceeded/); }
+    }, size => {
+      const count = Math.ceil(size/unit.length);
+      return unit.repeat(count) + (unit === 'f { ' ? '} '.repeat(count) : '');
+    }, {startSize:4096,maxSize:131072,minMs:5});
+    assert.ok(result.ok, `${unit}: ${result.message}`);
+  }
 });

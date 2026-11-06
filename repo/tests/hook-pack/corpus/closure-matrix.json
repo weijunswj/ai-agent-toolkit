@@ -1,0 +1,5319 @@
+{
+  "schema": "toolkit-hook-pack/v1",
+  "family": "closure-matrix",
+  "rows": [
+    {
+      "id": "CLOSURE.matrix-grep-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "Write-Output @'\ngh pr edit later\n'@"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "head -c 200 notes.md | grep -n \"gh issue close\""
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "cat <<'EOF'\ngh issue close later\nEOF"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "cat <<< \"gh pr edit later\""
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "for file in a b; do echo \"gh pr create $file\"; done"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "Write-Output @'\ngh pr edit later\n'@"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "head -c 200 notes.md | grep -n \"gh issue close\""
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "cat <<'EOF'\ngh issue close later\nEOF"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "cat <<< \"gh pr edit later\""
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "for file in a b; do echo \"gh pr create $file\"; done"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "Write-Output @'\ngh pr edit later\n'@"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "head -c 200 notes.md | grep -n \"gh issue close\""
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "cat <<'EOF'\ngh issue close later\nEOF"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "cat <<< \"gh pr edit later\""
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "for file in a b; do echo \"gh pr create $file\"; done"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-grep-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "grep -rn \"gh pr create\" repo/docs"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-head-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "head -c 200 notes.md | grep -n \"gh issue close\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-heredoc-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "cat <<'EOF'\ngh issue close later\nEOF"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-herestring-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "cat <<< \"gh pr edit later\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-loop-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "for file in a b; do echo \"gh pr create $file\"; done"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-ssh-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "ssh example.test 'grep -rn \"gh issue close\" /srv/notes'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.redirect-2to1",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature",
+          "remote_main": true
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --body-file body.md 2>&1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.redirect-all",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature",
+          "remote_main": true
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --body-file body.md &> log.txt"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.chain-body-file",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature",
+          "remote_main": true
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push -u origin feature && gh pr create --title T --body-file body.md"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pipe-body-file",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature",
+          "remote_main": true
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit 7 --body-file body.md | tail -5"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.body-file-then-remove",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature",
+          "remote_main": true
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit 7 --body-file body.md; rm body.md"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.api-input-pipe",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature",
+          "remote_main": true
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh api -X PATCH repos/toolkit-test-fixture/fixture/pulls/7 --input input.json | jq ."
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-cd-refs",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature",
+          "remote_main": true
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "sub/.keep": "fixture",
+          "another/.keep": "fixture"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cd sub && gh pr create --title T --body 'Refs #1'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-add-label",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit --add-label x"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-title-only",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit --title 'New title'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-branch",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit feature-branch --add-label x"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-no-origin",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit 7 --body 'Refs #1'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-var-number",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit $N --body 'Refs #1'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.movement-clean",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "branch": "feature",
+          "remote_main": true
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "sub/.keep": "fixture",
+          "another/.keep": "fixture"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "eval 'cd another'; gh pr create --title T --body B"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-cd-closing",
+      "source": "closure reader boundary regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "sub/.keep": "fixture",
+          "another/.keep": "fixture"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cd sub && gh pr create --title T --body 'Closes #1'"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-number-closing",
+      "source": "closure reader boundary regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit $N --body 'Closes #1'"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-no-origin-closing",
+      "source": "closure reader boundary regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit 7 --body 'Closes #1'"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.approval-kept",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "owner_session": true,
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr merge 5 --merge --match-head-commit {head7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "steps": [
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "merge 5"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge --match-head-commit {head7} && gh issue close 1 -R toolkit-test-fixture/fixture"
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        }
+      ]
+    },
+    {
+      "id": "CLOSURE.api-read-cluster",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh api -iq . repos/toolkit-test-fixture/fixture/issues/1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.api-read-unknown-flag",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh api --unknown repos/toolkit-test-fixture/fixture/issues/1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.api-unknown-flag-close",
+      "source": "closure reader boundary regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh api --unknown -X PATCH repos/toolkit-test-fixture/fixture/issues/1 -f state=closed"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.api-field-at-literal",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh api -X PATCH repos/toolkit-test-fixture/fixture/pulls/7 -f body=@alice"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.api-file-field-unrelated",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo work; gh api -X PATCH repos/toolkit-test-fixture/fixture/issues/1 -F body=@missing.md"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.api-file-field-closing",
+      "source": "closure reader boundary regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh api -X PATCH repos/toolkit-test-fixture/fixture/pulls/7 -F body=@close.md"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.close-duplicate-of",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "closed-child",
+        "files": {
+          "body.md": "Refs #1",
+          "close.md": "Closes #1",
+          "input.json": "{\"body\":\"Refs #1\"}"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh issue close 1 -R toolkit-test-fixture/fixture --duplicate-of 2"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.connector-create-no-body",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "mcp__github__create_pull_request",
+        "tool_input": {
+          "owner": "toolkit-test-fixture",
+          "repo": "fixture",
+          "title": "T"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.connector-create-null-body",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "mcp__github__create_pull_request",
+        "tool_input": {
+          "owner": "toolkit-test-fixture",
+          "repo": "fixture",
+          "title": "T",
+          "body": null
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.connector-create-closing",
+      "source": "closure reader boundary regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "mcp__github__create_pull_request",
+        "tool_input": {
+          "owner": "toolkit-test-fixture",
+          "repo": "fixture",
+          "title": "T",
+          "body": "Closes #1"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.cloud-merge-message-closing",
+      "source": "closure reader boundary regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "closure_cloud": true
+      },
+      "payload": {
+        "tool_name": "mcp__github__merge_pull_request",
+        "tool_input": {
+          "owner": "toolkit-test-fixture",
+          "repo": "fixture",
+          "pull_number": 7,
+          "commit_message": "Closes #1"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.cloud-merge-title-closing",
+      "source": "closure reader boundary regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "closure_cloud": true
+      },
+      "payload": {
+        "tool_name": "mcp__github__merge_pull_request",
+        "tool_input": {
+          "owner": "toolkit-test-fixture",
+          "repo": "fixture",
+          "pull_number": 7,
+          "commitTitle": "Closes #1"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.cloud-merge-clean",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "closure_cloud": true
+      },
+      "payload": {
+        "tool_name": "mcp__github__merge_pull_request",
+        "tool_input": {
+          "owner": "toolkit-test-fixture",
+          "repo": "fixture",
+          "pull_number": 7,
+          "commit_message": "Refs #1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.cloud-merge-unknown",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "closure_cloud": true
+      },
+      "payload": {
+        "tool_name": "mcp__github__merge_pull_request",
+        "tool_input": {
+          "owner": "toolkit-test-fixture",
+          "repo": "fixture",
+          "pull_number": 7,
+          "commit_message": {}
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.rest-create-no-body",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh api -X POST repos/toolkit-test-fixture/fixture/pulls -f title=T"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.cloud-merge-alias-closing",
+      "source": "closure reader boundary regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child",
+        "closure_cloud": true
+      },
+      "payload": {
+        "tool_name": "mcp__github__merge_pull_request",
+        "tool_input": {
+          "owner": "toolkit-test-fixture",
+          "repo": "fixture",
+          "pull_number": 7,
+          "commit_message": "Safe",
+          "commitMessage": "Closes #1"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.redirect-literal-body",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit 7 -R toolkit-test-fixture/fixture --body '2>&1'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.bash-powershell-backtick-data",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "powershell -Command 'Write-Output \"a`ngh issue close later`n\"'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.identity-ssh-alias",
+      "source": "closure reader boundary regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "files": {
+          ".git/config": "[core]\nrepositoryformatversion = 0\n[remote \"origin\"]\nurl = git@forge-alias:toolkit-test-fixture/fixture.git\n"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr edit 7 --body 'Refs #1'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.merge-generated-file",
+      "source": "closure correction state and host boundary",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node build-message.cjs body.md && gh pr merge 5 --merge --match-head-commit {head7} --body-file body.md"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "owner_session": true,
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "steps": [
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "merge 5"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "CLOSURE.merge-file-after-read",
+      "source": "closure correction state and host boundary",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status && gh pr merge 5 --merge --match-head-commit {head7} --body-file body.md"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "owner_session": true,
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "steps": [
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "merge 5"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "CLOSURE.merge-unrelated-data",
+      "source": "closure correction state and host boundary",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo --body '$body' && gh pr merge 5 --merge --match-head-commit {head7} --subject Safe"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "owner_session": true,
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "steps": [
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "merge 5"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "CLOSURE.merge-stdin-heredoc",
+      "source": "closure correction state and host boundary",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr merge 5 --merge --match-head-commit {head7} --body-file - <<'EOF'\nRefs #1\nEOF"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "owner_session": true,
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass",
+      "steps": [
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "merge 5"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "CLOSURE.merge-stdin-closing",
+      "source": "closure correction state and host boundary",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr merge 5 --merge --match-head-commit {head7} --body-file - <<'EOF'\nCloses toolkit-test-fixture/fixture#1\nEOF"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "owner_session": true,
+        "issue_closure": "open-child",
+        "files": {
+          "body.md": "Refs #1"
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "steps": [
+        {
+          "event": "UserPromptSubmit",
+          "payload": {
+            "prompt": "merge 5"
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ]
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-enabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-disabled-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        }
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-Bash",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-PowerShell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-Monitor",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "Monitor",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-exec_command",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "cmd": [
+            "bash",
+            "-lc",
+            "grep -rn \"gh pr create\" repo/docs"
+          ],
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-assignread-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "$x = gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.matrix-echobare-plain-local_shell",
+      "source": "ordinary command data across folders and tools",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {},
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": "echo gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-api-owner-braces-bash",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh api repos/{owner}/{repo}/pulls/7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-api-owner-braces-ps",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "gh api repos/{owner}/{repo}/pulls/7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-hash-tight-ps",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$h=@{a=1}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-hash-tight-exec",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "$h=@{a=1}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-brace-list",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "{a,b}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-brace-list-owner",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "foo {a,b}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-block-read-ps",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x = {gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-block-read-bash",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "$x = {gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-block-read-exec",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "$x = {gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-block-read-tight",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$x={gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-hash-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "$h=@{a={gh pr view 7}}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-block-ps",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo {gh issue close 1 -R toolkit-test-fixture/fixture}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-block-bash",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo {gh issue close 1 -R toolkit-test-fixture/fixture}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-block-exec",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": "echo {gh issue close 1 -R toolkit-test-fixture/fixture}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo {gh pr view 7}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-echo-equals",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo a={gh issue close 1 -R toolkit-test-fixture/fixture}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-option-value",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node x --name=gh issue close 1"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-variable-run",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh run list --limit $n"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-variable-search",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "gh pr list --search $q"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-dollar-brace",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "foo ${gh}"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-comment-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "<# note #> gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-comment-quoted",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "echo '<# a #>'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-stop-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "gh --% pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-stop-assignee",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "gh --% pr list --assignee @me"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-stop-data",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo --%"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-pwsh-slash-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "pwsh /c 'gh pr view 7'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-pwsh-config",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "pwsh -ConfigurationName x -File y"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-env-split-read",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "env -S 'gh pr view 7'"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.pass-query-named",
+      "source": "word-level closure reader regressions and retained controls",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "query='query { a }'; gh api graphql -f query=\"$query\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    }
+  ]
+}

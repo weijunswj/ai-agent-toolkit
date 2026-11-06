@@ -166,8 +166,8 @@ test('the read-only Codex setup plan launches no Codex command', (t) => {
   write(path.join(cache, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: '3.19.0' }));
   write(path.join(cache, '.codex-plugin', 'hooks', 'hooks.json'), HOOKS);
   const spy = spyPreload(root, { codexOnly: true });
-  // NODE_OPTIONS reads backslashes as escapes, so the path goes in with forward slashes.
-  const result = support.run(['--plan', '--host', 'codex'], { env: { ...env, NODE_OPTIONS: `--require "${spy.file.replace(/\\/g, '/')}"` } });
+  const preload = spy.file.replace(/[\\"]/g, (char) => `\\${char}`);
+  const result = support.run(['--plan', '--host', 'codex'], { env: { ...env, NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require "${preload}"`].filter(Boolean).join(' ') } });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.equal(fs.existsSync(spy.log), false, fs.existsSync(spy.log) ? fs.readFileSync(spy.log, 'utf8') : '');
   assert.match(result.stdout, /\| 3\.1 \| Keep Toolkit available in Codex\? \| On, 3\.19\.0 \([^|]*\) \| B\. Install or refresh/);
@@ -267,9 +267,10 @@ test('at setup time Keep current and Show instructions only run no Codex plugin 
     write(path.join(cache, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: '1.0.0' }));
     write(path.join(cache, '.codex-plugin', 'hooks', 'hooks.json'), HOOKS);
     const spy = spyPreload(root, { codexOnly: true });
+    const preload = spy.file.replace(/[\\"]/g, (char) => `\\${char}`);
     const result = support.run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh',
       '--codex-helper-capacity', 'keep', '--codex-plugin-behavior', behavior], {
-      env: { ...support.isolatedHomeEnv(root), SETUP_FAKE_CODEX_REFRESH_REQUIRED: '1', NODE_OPTIONS: `--require "${spy.file.replace(/\\/g, '/')}"` },
+      env: { ...support.isolatedHomeEnv(root), SETUP_FAKE_CODEX_REFRESH_REQUIRED: '1', NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require "${preload}"`].filter(Boolean).join(' ') },
       timeout: 300000,
     });
     assert.equal(result.status, 0, `${behavior}: ${result.stdout}\n${result.stderr}`);
