@@ -15,7 +15,7 @@ CI runs the full pack on Linux in `hook-pack` and each Windows family separately
 
 The closure shell family covers hidden writes, strict Start-Process arguments and shell syntax, with retained read and data controls. It keeps new cases out of the issue-closure and merge families.
 
-The closure matrix includes ordinary command data across folders and tool names, clean identity and body-file controls, and API, connector and approval-ordering cases. Keeping those rows together leaves headroom in the executable issue-closure family without changing any row, host or expectation.
+The closure matrix includes ordinary command data across folders and tool names, clean identity and body-file controls, and API, connector and approval-ordering cases. Keeping those rows together leaves headroom in the executable issue-closure family without changing any row, host or expectation. Step rows share one fixture to check merge, attribution and push decisions across Codex shell names and input shapes.
 
 ## Rows
 
