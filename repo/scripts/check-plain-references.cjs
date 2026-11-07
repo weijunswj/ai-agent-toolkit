@@ -2,7 +2,7 @@
 'use strict';
 
 // Toolkit's own run of the plain-text check (skills/secure-ci-cd/scripts/plain-text-check.cjs), with
-// Toolkit's settings in repo/contracts/plain-references/config.json. User-facing docs, skills and
+// Toolkit's settings in .github/plain-text.json. User-facing docs, skills and
 // AI-facing instructions carry no GitHub issue, pull request, discussion, commit or compare links,
 // no `#123` references, no "PR 237" labels, no Codex mode class names and none of Toolkit's own
 // shorthand codes (release, lane, record or test-row codes). Links to repository files are fine.
@@ -17,7 +17,7 @@
 const path = require('node:path');
 const portable = require('../../skills/secure-ci-cd/scripts/plain-text-check.cjs');
 
-const CONFIG_FILE = path.join(__dirname, '..', 'contracts', 'plain-references', 'config.json');
+const CONFIG_FILE = path.join(__dirname, '..', '..', portable.DEFAULT_CONFIG);
 const CONFIG = portable.readConfigFile(CONFIG_FILE);
 const BASELINE_REL = CONFIG.baseline;
 const RULES = portable.REFERENCE_RULES;

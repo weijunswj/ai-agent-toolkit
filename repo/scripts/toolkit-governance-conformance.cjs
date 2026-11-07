@@ -176,11 +176,11 @@ function rulesetFindings(result) {
 }
 
 // Every governed repository carries the plain-text check (secure-ci-cd), installed with the governed
-// materials through a pull request. The Toolkit source checkout runs it from source instead. A
+// materials through a pull request. The Toolkit source checkout runs it through its wrapper instead. A
 // repository may switch it off only with a recorded reason (`off_reason` in its settings).
 function plainTextFindings(repoRoot, toolkitRoot) {
   if (fs.existsSync(path.join(repoRoot, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'))
-    && fs.existsSync(path.join(repoRoot, 'repo', 'contracts', 'plain-references', 'config.json'))) return [];
+    && fs.existsSync(path.join(repoRoot, 'repo', 'scripts', 'check-plain-references.cjs'))) return [];
   let installer;
   try { installer = require(path.join(toolkitRoot, 'skills', 'secure-ci-cd', 'scripts', 'install-plain-text-check.cjs')); }
   catch { return [finding('PLAIN_TEXT_CHECK_NOT_CHECKED', 'info', 'This Toolkit copy has no plain-text check to compare with.')]; }

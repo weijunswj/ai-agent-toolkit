@@ -30,6 +30,19 @@ function fixture(t, files, allowed = []) {
 
 const rules = text => plain.findReferences(text).map(finding => [finding.rule, finding.text]);
 
+test('Toolkit source settings serve both the wrapper and the portable CLI', () => {
+  assert.deepEqual(plain.CONFIG, check.readConfigFile(path.join(ROOT, '.github', 'plain-text.json')));
+  assert.ok(fs.existsSync(path.join(ROOT, plain.BASELINE_REL)), 'the existing baseline keeps baseline initialisation refused');
+  const portableScript = path.join(ROOT, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs');
+  for (const flags of [[], ['--files', 'README.md']]) {
+    const result = spawnSync(process.execPath, [portableScript, '--repo', ROOT, ...flags], {
+      encoding: 'utf8', timeout: 20000, windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Plain-text check passed\./);
+  }
+});
+
 test('flags GitHub issue, pull request, discussion, commit and compare links', () => {
   for (const kind of ['issues/12', 'pull/34', 'discussions/5', 'commit/abc1234', 'compare/main...topic']) {
     assert.deepEqual(rules(`See [it](${GITHUB}/${kind}).`).map(([rule]) => rule).filter(rule => rule === 'github-link'), ['github-link'], kind);
