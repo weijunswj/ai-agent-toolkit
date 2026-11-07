@@ -90,7 +90,7 @@ if (mode === 'status') {
 } else {
 let statusCalls = 0;
 const run = (file, args, opts) => {
-  if (file === GH) return { status: config.signedOut ? 1 : 0, stdout: '' };
+  if (file === GH) return { status: config.signedOut ? 1 : 0, stdout: '', stderr: config.signedOut ? 'You are not logged into any GitHub hosts.' : '' };
   if (args[0] === '-e') return { status: 0, stdout: '' };
   if (args[0] === job.SCRIPT.governance) {
     event('status-enter');

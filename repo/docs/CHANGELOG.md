@@ -1,5 +1,30 @@
 # Toolkit Changelog
 
+## 3.54.0
+
+### Added
+
+- A daily no-AI task checks scheduled jobs, reports missing and unhealthy runs, and shares a path-free health file through a verified private evidence store.
+- Scheduled task updates cover enrolled and discovered GitHub checkouts under one saved owner approval, with host questions for hand edits and computer ownership.
+- A surviving task launcher reports a missing Toolkit checkout and disables its own task after three misses without deleting it.
+
+### Changed
+
+- Setup asks about scheduled task updates in its task section and uses the same guarded updater. Cloud schedules remain coordinator work.
+- The existing session task line includes cached health findings and explains when no verified evidence store is available.
+
+### Fixed
+
+- Computer-wide task health no longer borrows repository ownership or minutes, and repository removal leaves it alone. Existing mixed records are migrated during an approved update.
+- Task updates preserve hand-edit questions for older enrolments and continue with other repositories when one is held. Setup still refreshes global rules and helper definitions when task work is held.
+- A failed native task write stops the rest of the update run, including the computer-wide health task, and the update report always prints, including any health task failure. A damaged missing-checkout count or receipt no longer stops the launcher's self-disable.
+- Concurrent missing-checkout launchers retain both disabled records and preserve footer scan, skip and deferral history. Current task updates restore missing launchers and refresh their code version.
+- Health waits for busy stores, serialises checkout status reads, keeps a local report when sharing fails and records a safe failure reason. Expected quiet skips and stopped health checks no longer raise alerts.
+- Explicit setup flags resolve the scheduled-task question without waiting for input. Setup regression suites are split without changing their coverage or time budget.
+- Uncertain GitHub authentication reads defer weekly work visibly instead of treating a failed read as confirmed sign-out.
+- Refresh lock takeovers log a plain line, and retry notes survive an exhausted task budget.
+- The refresh-wait changelog wording now states the actual bounded wait.
+
 ## 3.53.0
 
 ### Fixed
@@ -31,7 +56,7 @@
 - Killed, failed or unreadable shard status reads remain visibly deferred for retry. Each status attempt has a complete busy-computer budget, a killed retry keeps the first failure, and checkout waiters allow the holder to finish within the shared task deadline.
 - Lock release failures retain their summary, deferred shards retain skip history until work resumes, and failed catch-up notes name the repository and task.
 - Printed task commands preserve native Linux paths, including removal recovery hints; Windows command paths retain their existing form.
-- Scheduled jobs serialise checkout status refreshes with a short bounded wait and one bounded retry, and failed shard refreshes remain deferred for catch-up.
+- Scheduled jobs serialise checkout status refreshes with a sixty-five-second bounded wait and one bounded retry, and failed shard refreshes remain deferred for catch-up.
 - Releasing a store lock starts eligible deferred jobs from other local repositories sharing that store. Deferrals retain their first time and count, show their age without hiding sweep failures or sign-out, and still raise the two-hour warning. Catch-up saves failed-start notes and matches repository names without case sensitivity.
 - The governance hold allows the managed checkout's exact default-folder commands for independent footer tasks while retaining holds on governed tasks and unrelated commands.
 - A first programme sweep without parent state skips with plain instructions for the appointed controller to initialise it in the private evidence store.

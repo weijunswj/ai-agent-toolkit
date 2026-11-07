@@ -102,6 +102,9 @@ function entryProblem(entry) {
   if (entry.repo_minute !== undefined && (!Number.isInteger(entry.repo_minute) || entry.repo_minute < 1 || entry.repo_minute > 9)) return 'repo_minute';
   if (entry.job_owner !== undefined && (!isText(entry.job_owner, 80) || /[\x00-\x1f\x7f]/.test(entry.job_owner))) return 'job_owner';
   for (const key of ['model', 'effort']) if (entry[key] !== null && !isText(entry[key], 80)) return key;
+  if (entry.toolkit_missing !== undefined && entry.toolkit_missing !== true) return 'toolkit_missing';
+  if (entry.ownership_transferred !== undefined && entry.ownership_transferred !== true) return 'ownership_transferred';
+  if (entry.toolkit_version !== undefined && !/^\d+\.\d+\.\d+$/.test(String(entry.toolkit_version))) return 'toolkit_version';
   if (entry.stopped_by_owner !== undefined && entry.stopped_by_owner !== true) return 'stopped_by_owner';
   if ((entry.stopped_by_owner === true) !== (entry.stopped_at !== undefined)) return 'stopped_at';
   if (entry.stopped_at !== undefined && (typeof entry.stopped_at !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(entry.stopped_at) || !Number.isFinite(Date.parse(entry.stopped_at)))) return 'stopped_at';
@@ -189,7 +192,7 @@ function writeLastRun(id, record, home) {
 
 // The skip reasons the job runner writes. Anything else is shown as a bare "skipped", so no command
 // output reaches a session line.
-const SKIP_REASON = /^(offline|gh not signed in|gh is not installed|binding not read in 24 h|binding is missing|binding is invalid|binding does not match origin|binding observation expired|binding refresh failed(?:: (?:default branch fetch failed|GitHub unreachable|origin transport refused|default branch unknown|default branch moved|fetch guards unavailable|commit unreadable|binding unreadable|cache unwritable|governance reads offline|another checkout refresh is running))?|no usable github\.com origin repository|governance status could not be read|governance is (?:ENABLED|DISABLED|UNDECIDED|UNAVAILABLE|ERROR)|no shards yet)$/;
+const SKIP_REASON = /^(offline|GitHub authentication status could not be read|gh not signed in|gh is not installed|binding not read in 24 h|binding is missing|binding is invalid|binding does not match origin|binding observation expired|binding refresh failed(?:: (?:default branch fetch failed|GitHub unreachable|origin transport refused|default branch unknown|default branch moved|fetch guards unavailable|commit unreadable|binding unreadable|cache unwritable|governance reads offline|another checkout refresh is running))?|no usable github\.com origin repository|governance status could not be read|governance is (?:ENABLED|DISABLED|UNDECIDED|UNAVAILABLE|ERROR)|no shards yet)$/;
 const STALE_MS = 2 * 60 * 60 * 1000;
 
 // HH:MMZ on now's UTC date, else with the date (always with it when now is null).
@@ -227,7 +230,7 @@ function deferredText(last, now) {
 // The session-start line for this computer's programme sweep of a repository, or null when it is
 // fine or there is none: its last run held, skipped or failed, or there has been no run for over 2 hours
 // inside its hours. Fixed wording only.
-function sweepLine(repository, { home = os.homedir(), now = new Date(), registry = readRegistry(home) } = {}) {
+function legacySweepLine(repository, { home = os.homedir(), now = new Date(), registry = readRegistry(home) } = {}) {
   if (registry.status !== 'ok' || typeof repository !== 'string') return null;
   const rows = registry.tasks.filter(item => item.host === 'windows' && ['programme-sweep', 'footer-sweep', 'shard-timings'].includes(item.job) && !item.adopted
     && String(item.repository || '').toLowerCase() === repository.toLowerCase());
@@ -236,7 +239,10 @@ function sweepLine(repository, { home = os.homedir(), now = new Date(), registry
   const foreign = rows.find(item => !localTaskOwner(item.job_owner, computerId));
   if (foreign) return `Scheduled jobs: owned by ${safeText(foreign.job_owner_label || foreign.job_owner)}; ${OWNER_RECOVERY}.`;
   const entry = rows.find(item => ['programme-sweep', 'footer-sweep'].includes(item.job));
-  if (!entry) return null;
+  if (!entry) {
+    const shard = rows.find(row => row.job === 'shard-timings' && !row.stopped_by_owner && readLastRun(row.id, home)?.status === 'deferred');
+    return shard ? `Shard timings: ${deferredText(readLastRun(shard.id, home), now)}; see toolkit tasks.` : null;
+  }
   const label = entry.job === 'footer-sweep' ? 'Footer sweep' : 'Programme sweep';
   if (entry.stopped_by_owner) return `${label}: stopped by owner; see toolkit tasks.`;
   const last = readLastRun(entry.id, home);
@@ -256,9 +262,18 @@ function sweepLine(repository, { home = os.homedir(), now = new Date(), registry
   return null;
 }
 
+// One task line, extended by the cached health result without live hook reads.
+function sweepLine(repository, options = {}) {
+  options = { ...options, registry: options.registry || readRegistry(options.home || os.homedir()) };
+  const sweep = legacySweepLine(repository, options);
+  let health = null;
+  try { health = require('./toolkit-task-health.cjs').sessionHealth(repository, options.home || os.homedir(), options.registry); } catch { /* Advisory enrichment cannot erase the existing task line. */ }
+  return [sweep, health].filter(Boolean).join('; ') || null;
+}
+
 // Prevent obsolete recorded task shapes going unnoticed after a governance change. Advisory only:
 // uncertain reads fail quiet; no history, directory enumeration, scheduler, process or network work.
-function taskGovernanceLine(state, { home = os.homedir(), platform = process.platform, environment = process.env, registry } = {}) {
+function legacyTaskGovernanceLine(state, { home = os.homedir(), platform = process.platform, environment = process.env, registry } = {}) {
   if (platform !== 'win32' || environment.TOOLKIT_GOVERNANCE_OFFLINE === '1') return null;
   const merged = state?.merged;
   const certain = merged?.fresh === true && !merged.unavailable && !state.notes?.includes('could-not-check-governance')
@@ -270,7 +285,7 @@ function taskGovernanceLine(state, { home = os.homedir(), platform = process.pla
   registry ??= readRegistry(home);
   if (registry.status !== 'ok' || !Array.isArray(registry.tasks)) return null;
   const jobs = ['programme-sweep', 'shard-timings', 'footer-sweep'];
-  const rows = registry.tasks.filter(row => row.host === 'windows' && !row.adopted
+  const rows = registry.tasks.filter(row => row.host === 'windows' && !row.adopted && row.job !== 'task-health'
     && String(row.repository || '').toLowerCase() === state.repository.toLowerCase());
   if (!rows.length || rows.some(row => !jobs.includes(row.job) || row.stopped_by_owner)) return null;
   // Choices can travel with a surviving row after retirement. Use the latest answer per task,
@@ -297,6 +312,17 @@ function taskGovernanceLine(state, { home = os.homedir(), platform = process.pla
   if ([...latest.values()].some(choice => choice.outcome === 'keep')) return null;
   if (rows.length === wanted.length && wanted.every(job => rows.filter(row => row.job === job).length === 1)) return null;
   return 'Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers.';
+}
+
+function taskGovernanceLine(state, options = {}) {
+  const advisory = legacyTaskGovernanceLine(state, options);
+  // ENABLED sessions already call sweepLine; the other modes use this same task
+  // advisory slot. Never perform scheduler, process or network reads in a hook.
+  let health = null;
+  try {
+    if ((options.platform || process.platform) === 'win32' && state?.repository && state.state !== 'ENABLED') health = require('./toolkit-task-health.cjs').sessionHealth(state.repository, options.home || os.homedir(), options.registry);
+  } catch { /* Keep the original task advisory when optional cached health is unreadable. */ }
+  return [advisory, health].filter(Boolean).join('; ') || null;
 }
 
 // ---- record and forget -----------------------------------------------------------------------
@@ -355,19 +381,22 @@ function windowsRows(registry, folders, scheduler, home) {
     for (const task of live) {
       const marker = windowsTasks.parseMarker(task.description);
       const recorded = entries.find(entry => entry.folder === folder && entry.name === task.name);
-      const owned = recorded && !recorded.adopted && marker && marker.id === recorded.id;
+      const missingDisabled = recorded?.toolkit_missing === true && task.state === 'Disabled'
+        && task.description === require('./toolkit-task-launcher.cjs').DISABLED_DESCRIPTION
+        && recorded.enrolled && JSON.stringify(windowsTasks.enrolledDefinition(task)) === JSON.stringify(recorded.enrolled);
+      const owned = recorded && !recorded.adopted && (marker && marker.id === recorded.id || missingDisabled);
       const adopted = recorded && recorded.adopted;
       const row = {
         host: 'windows', folder, name: task.name, id: recorded ? recorded.id : null,
         schedule: windowsTasks.describeTriggers(task.triggers) || (recorded ? recorded.schedule : 'no trigger'),
         ai: recorded ? aiText(recorded) : 'not known', purpose: recorded ? recorded.purpose : safeText(task.description),
-        source: LIVE, windows_state: task.state, last_run: task.last_run, next_run: task.next_run,
+        source: LIVE, windows_state: task.state, definition_drift: Boolean(recorded?.enrolled && JSON.stringify(windowsTasks.enrolledDefinition(task)) !== JSON.stringify(recorded.enrolled)), native_failed: Number.isInteger(task.last_result) && ![0, 0x41301, 0x41303].includes(task.last_result), last_run: task.last_run, next_run: task.next_run,
         last_result: windowsTasks.describeResult(task.last_result),
       };
       if (owned) {
         const last = readLastRun(recorded.id, home);
         const edited = recorded.enrolled && JSON.stringify(windowsTasks.enrolledDefinition(task)) !== JSON.stringify(recorded.enrolled);
-        row.state = !localTaskOwner(recorded.job_owner, computerIdentity(home)?.id) ? `owned by ${recorded.job_owner_label || recorded.job_owner}; ${OWNER_RECOVERY}` : recorded.stopped_by_owner || task.state === 'Disabled' ? 'stopped by owner'
+        row.state = !localTaskOwner(recorded.job_owner, computerIdentity(home)?.id) ? `owned by ${recorded.job_owner_label || recorded.job_owner}; ${OWNER_RECOVERY}` : missingDisabled ? 'Toolkit missing; disabled automatically' : recorded.stopped_by_owner || task.state === 'Disabled' ? 'stopped by owner'
           : edited ? ['programme-sweep', 'shard-timings'].includes(recorded.job) ? 'modified; owner choice required' : 'stopped by owner' : 'Toolkit';
         // The job writes its record as it starts and again as it ends, so a record that ended (or,
         // still running, started) before Task Scheduler's last run time, less 2 seconds, belongs to
@@ -528,7 +557,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
 module.exports = {
   SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, writeTaskBackup, readLastRun, writeLastRun,
   computerIdentity, localTaskOwner, OWNER_RECOVERY,
-  entryProblem, looksSecret, safeText, skipText, sweepLine, taskGovernanceLine, installedHours, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
+  SKIP_REASON, REPOSITORY, entryProblem, looksSecret, safeText, skipText, sweepLine, taskGovernanceLine, installedHours, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
 };
 
 if (require.main === module) process.exitCode = main();

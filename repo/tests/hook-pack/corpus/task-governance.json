@@ -519,6 +519,219 @@
         "decision": "allow"
       },
       "status": "pass"
+    },
+    {
+      "id": "TasksIndependentHealthRegisteredAllowsPlan",
+      "source": "Scheduled task health and independent-policy regression",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "PreToolUse",
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "{planner_apply}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "windows_tasks": [
+          "footer-sweep",
+          "task-health"
+        ],
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksHealthLocalOnlyUsesExistingLine",
+      "source": "Scheduled task health and independent-policy regression",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        },
+        "windows_tasks": [
+          "footer-sweep",
+          "task-health"
+        ],
+        "task_health": "local-only"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "health file not shared: no verified evidence store"
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksHealthFailedUsesExistingLine",
+      "source": "Scheduled task health and independent-policy regression",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "windows_tasks": [
+          "programme-sweep",
+          "shard-timings",
+          "task-health"
+        ],
+        "task_health": "failed"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "Task health: footer-sweep: last run failed"
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksHealthStoppedIsQuiet",
+      "source": "Scheduled task health and independent-policy regression",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        },
+        "windows_tasks": [
+          "footer-sweep",
+          "task-health"
+        ],
+        "task_health": "stopped"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_excludes": [
+          "Task health:",
+          "health file not shared: no verified evidence store"
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksHealthUpdaterStillNeedsGovernance",
+      "source": "Scheduled task health and independent-policy regression",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "PreToolUse",
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-update-scheduled-task.cjs\" --apply"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "windows_tasks": [
+          "footer-sweep",
+          "task-health"
+        ],
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksUncertainAuthDeferredShardLine",
+      "source": "Weekly authentication failure must stay visible without a cleaner",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "windows_tasks": [
+          "shard-timings"
+        ],
+        "windows_deferred_auth": true
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "GitHub authentication status could not be read"
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksStoppedHealthDoesNotNag",
+      "source": "Stopped computer health must suppress old-file and sharing reminders",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        },
+        "windows_tasks": [
+          "footer-sweep",
+          "task-health"
+        ],
+        "task_health": "health-stopped"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_excludes": [
+          "Task health:",
+          "Task health file is over 26 hours old",
+          "health file not shared: no verified evidence store"
+        ]
+      },
+      "status": "pass"
     }
   ]
 }

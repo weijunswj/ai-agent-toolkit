@@ -4,7 +4,7 @@
 function confirmedTaskShape({ certain, governanceState } = {}) {
   if (certain !== true) return null;
   if (governanceState === 'ENABLED') return [...require('./toolkit-task-policy.cjs').GOVERNED_JOBS];
-  if (['DISABLED', 'UNDECIDED'].includes(governanceState)) return [...require('./toolkit-task-policy.cjs').INDEPENDENT_JOBS];
+  if (['DISABLED', 'UNDECIDED'].includes(governanceState)) return [...require('./toolkit-task-policy.cjs').INDEPENDENT_JOBS.filter(job => job !== 'task-health')];
   return null;
 }
 
