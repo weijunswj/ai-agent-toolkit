@@ -109,6 +109,11 @@
     }
   ],
   "kept_terms": [
+    {"file": "repo/docs/agent-playbooks/controller-takeover.md", "text": "R1", "reason": "Relay pack group machine identifier required by the pack/result protocol; controller and relay consume it to match replies. Controller procedure owns it; remove when that protocol is replaced."},
+    {"file": "repo/docs/agent-playbooks/controller-takeover.md", "text": "R2", "reason": "Relay pack group machine identifier required by the pack/result protocol; controller and relay consume it to match replies. Controller procedure owns it; remove when that protocol is replaced."},
+    {"file": "repo/docs/agent-playbooks/controller-takeover.md", "text": "R3", "reason": "Relay pack group machine identifier required by the pack/result protocol; controller and relay consume it to match replies. Controller procedure owns it; remove when that protocol is replaced."},
+    {"file": "repo/docs/agent-playbooks/controller-takeover.md", "text": "R4", "reason": "Relay pack group machine identifier required by the pack/result protocol; controller and relay consume it to match replies. Controller procedure owns it; remove when that protocol is replaced."},
+    {"file": "repo/docs/agent-playbooks/controller-takeover.md", "text": "R5", "reason": "Relay pack group machine identifier required by the pack/result protocol; controller and relay consume it to match replies. Controller procedure owns it; remove when that protocol is replaced."},
     {
       "file": "repo/docs/SETUP-QUESTIONS.generated.md",
       "text": "E293",
