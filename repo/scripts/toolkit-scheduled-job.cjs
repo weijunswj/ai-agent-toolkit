@@ -12,6 +12,7 @@
 //   footer-sweep     performs the same cleaning without programme work. Uncertain store scope
 //                    retains the retry boundary; a complete batch saves scan start. Missing history
 //                    starts at 48 hours; damaged/future history reports a bounded fallback.
+//   task-health      checks this computer without AI or an authentication prerequisite.
 //   shard-timings    preserves the general fixed Toolkit refresher: no shards yet is a quiet local
 //                    skip; a valid manifest requires fresh enabled governance before any refresh.
 //
@@ -39,7 +40,7 @@ const SCRIPT = Object.freeze({
   footerSweep: path.join(__dirname, 'toolkit-github-footer-sweep.cjs'),
   shardTimings: path.join(__dirname, 'refresh-shard-timings.cjs'),
 });
-const JOBS = Object.freeze(['programme-sweep', 'footer-sweep', 'shard-timings']);
+const JOBS = Object.freeze(['programme-sweep', 'footer-sweep', 'shard-timings', 'task-health']);
 const FIRST_SWEEP_WINDOW_MS = 48 * 60 * 60 * 1000;
 // Footer sweep exits that mean it ended well: nothing found, found and left, cleaned.
 const SWEEP_OK = new Set([0, 3, 4]);
@@ -234,8 +235,13 @@ class Job {
   checkAuth() {
     let gh;
     try { gh = this.ghPath(); } catch { return 'gh is not installed'; }
-    if (this.#exec(gh, ['auth', 'status'], TIMEOUT.check).status === 0) return null;
-    return this.node('-e', [REACH_GITHUB], TIMEOUT.reach).status === 0 ? 'gh not signed in' : 'offline';
+    const result = this.#exec(gh, ['auth', 'status'], TIMEOUT.check);
+    if (!result.error && result.status === 0) return null;
+    // Only gh's explicit no-host answer proves sign-out. A bad token, timeout or
+    // uncertain read must remain retryable; reachability cannot prove authentication.
+    if (!result.error && result.status === 1 && /^You are not logged into any GitHub hosts\./m.test(result.stderr || '')) return 'gh not signed in';
+    if (!result.error && result.status !== null && this.node('-e', [REACH_GITHUB], TIMEOUT.reach).status === 3) return 'offline';
+    return 'GitHub authentication status could not be read';
   }
 
   repository() {
@@ -253,7 +259,7 @@ class Job {
       let lock;
       try {
         lock = new (require('./toolkit-programme-lock.cjs').ProgrammeJobLock)({ home: this.#home,
-          key: `checkout-refresh:${path.resolve(this.#options.repoRoot)}`, waitMs: this.budget(REFRESH_WAIT_MS) }).take();
+          key: `checkout-refresh:${path.resolve(this.#options.repoRoot)}`, waitMs: this.budget(REFRESH_WAIT_MS), log: line => this.note(line) }).take();
         if (!lock) this.#state = { state: 'UNAVAILABLE', merged: { status: 'unknown', fresh: false }, refresh: { refreshed: false, reason: 'refresh-busy' } };
         else {
           const read = () => {
@@ -404,7 +410,7 @@ function programmeSweep(job) {
   const identity = job.identity();
   if (!require('./toolkit-windows-tasks.cjs').repositoryOf(identity)) return { status: 'skipped', reason: 'no usable github.com origin repository' };
   const signedOut = job.ghSignedOut();
-  if (signedOut) return { status: 'skipped', reason: signedOut };
+  if (signedOut) return { status: signedOut === 'GitHub authentication status could not be read' ? 'deferred' : 'skipped', reason: signedOut };
   const notGoverned = governanceReason(job.governanceStatus());
   if (notGoverned) return { status: 'skipped', reason: notGoverned };
   const observed = job.observation(identity);
@@ -422,7 +428,7 @@ function footerSweep(job, watermark) {
   const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(identity);
   if (!repository) return { status: 'skipped', reason: 'no usable github.com origin repository' };
   const signedOut = job.ghSignedOut();
-  if (signedOut) return { status: 'skipped', reason: signedOut };
+  if (signedOut) return { status: signedOut === 'GitHub authentication status could not be read' ? 'deferred' : 'skipped', reason: signedOut };
   const state = job.governanceStatus();
   const observation = job.observation(identity);
   const reason = governanceReason(state);
@@ -437,7 +443,7 @@ function footerSweep(job, watermark) {
     if (store.toLowerCase() !== repository.toLowerCase()) repos.push(store);
   } else if (!noStore) job.note(`Evidence store cleaning withheld: ${reason || 'binding could not be verified'}; the retry window is retained.`);
   const sweep = sweepStep(job, repos, watermark);
-  return { status: sweep.status === 'failed' ? 'failed' : verified || noStore ? 'ok' : 'held',
+  return { ...(reason && !noStore ? { reason } : {}), status: sweep.status === 'failed' ? 'failed' : verified || noStore ? 'ok' : 'held',
     footer_sweep_since: (verified || noStore) && sweep.since || watermark };
 }
 
@@ -453,7 +459,7 @@ function shardTimings(job) {
   const notGoverned = shardGovernanceOutcome(job.governanceStatus());
   if (notGoverned) return notGoverned;
   const signedOut = job.ghSignedOut();
-  if (signedOut) return { status: 'skipped', reason: signedOut };
+  if (signedOut) return { status: signedOut === 'gh not signed in' ? 'skipped' : 'deferred', reason: signedOut };
   const run = job.node(SCRIPT.shardTimings, ['--repo-root', job.options.repoRoot, '--open-pr'], TIMEOUT.shards);
   const lines = String(run.stdout || '').split(/\r?\n/).filter(Boolean).slice(-3);
   for (const line of lines) job.note(line);
@@ -477,6 +483,7 @@ function deferral(previous, at, key) {
 }
 
 function runJob(options, deps = {}) {
+  if (options.job === 'task-health') return require('./toolkit-task-health.cjs').runHealthJob({ ...deps, taskId: options.taskId });
   const job = new Job(options, deps);
   const registry = (deps.registry || tasks).readRegistry(deps.home || os.homedir());
   const enrolled = registry.status === 'ok' && registry.tasks.find(entry => entry.id === options.taskId && entry.host === 'windows');
@@ -489,7 +496,7 @@ function runJob(options, deps = {}) {
       ...(typeof history?.footer_sweep_since === 'string' && Number.isFinite(Date.parse(history.footer_sweep_since)) ? { footer_sweep_since: history.footer_sweep_since } : {}),
       schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job,
       ...(enrolled?.repository ? { repository: enrolled.repository } : {}), started: at, finished: at,
-      status, exit: status === 'failed' ? 1 : 0, reason, summary: [reason] };
+      status, exit: status === 'failed' ? 1 : 0, reason, summary: [...job.summary, reason] };
     if (status === 'deferred') Object.assign(result, deferral(history, at, key));
     job.writeRecord(result);
     return result;
@@ -611,11 +618,11 @@ function runJobLocked(job, options, deps, key) {
       try { programme = programmeSweep(job); }
       catch { job.note('Programme work stopped; see the next run.'); programme = { status: 'failed' }; }
       const status = [footer.status, programme.status].includes('failed') ? 'failed'
-        : programme.status === 'ok' ? footer.status === 'ok' ? 'ok' : 'held' : programme.status;
+        : [footer.status, programme.status].includes('deferred') ? 'deferred' : programme.status === 'ok' ? footer.status === 'ok' ? 'ok' : 'held' : programme.status;
       outcome = { ...footer, status, footer_status: footer.status, programme_status: programme.status,
         ...(footer.reason ? { footer_reason: footer.reason } : {}),
         ...(programme.reason ? { programme_reason: programme.reason } : {}),
-        ...(status === 'skipped' ? { reason: footer.reason || programme.reason } : {}) };
+        ...(['skipped', 'deferred'].includes(status) ? { reason: footer.reason || programme.reason } : {}) };
       if (programme.reason && programme.reason !== footer.reason && programme.reason !== outcome.reason) job.note(`Programme work skipped: ${programme.reason}.`);
     } else outcome = options.job === 'footer-sweep' ? job.clean(base) : shardTimings(job);
   }

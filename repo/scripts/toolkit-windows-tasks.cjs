@@ -29,7 +29,7 @@
 // entry agrees on identity. Standing apply also checks repository, canonical checkout/runner paths,
 // owner stops and the full enrolled definition. --folder overrides need separate approval.
 //
-// Each task runs `conhost.exe --headless node.exe toolkit-scheduled-job.cjs <job> ...` as you, only
+// Each task runs a surviving user-state launcher through headless conhost, then the job as you, only
 // while you are logged on, with no stored password and no console window. Settings: start when
 // available, a second start is ignored while one runs, a 30 minute limit, runs on battery. A headless
 // console host does not pass the job's exit code on, so the job's own result is in its last-run file.
@@ -53,8 +53,18 @@ const STATUS_CONTROL_C_EXIT = 0xC000013A;
 const FIRST_RUN_WAIT_MS = 10 * 60 * 1000;
 const POLL_MS = 5000;
 
+// Bind the bootstrap bytes for this invocation. A refresh during apply cannot
+// change the installed payload after its content-addressed path was planned.
+const LAUNCHER_SOURCE = fs.readFileSync(path.join(__dirname, 'toolkit-task-launcher.cjs'), 'utf8');
+const LAUNCHER_HASH = crypto.createHash('sha256').update(LAUNCHER_SOURCE).digest('hex').slice(0, 16);
+
 // Fixed job definitions; desiredTasks and WindowsTaskOwner select one cleaner.
 const JOBS = Object.freeze({
+  'task-health': {
+    task: 'TASK HEALTH',
+    schedule: Object.freeze({ kind: 'daily', at: '07:51' }),
+    purpose: 'Checks scheduled jobs on this computer and shares a path-free health file with a verified evidence store. No AI.',
+  },
   'programme-sweep': {
     task: 'PROGRAMME SWEEP',
     schedule: Object.freeze({ kind: 'hourly', at: '00:01', hours: 24 }),
@@ -289,18 +299,20 @@ function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__di
     if (problem) throw new WindowsTasksError(`task name ${JSON.stringify(name)} ${problem}`);
     const id = taskId(chosen, job);
     // Task definitions are Windows paths on every computer, so they read the same in tests anywhere.
+    const launcher = launcherPath(home);
     const runner = path.win32.join(toolkitRoot, 'repo', 'scripts', 'toolkit-scheduled-job.cjs');
     const definition = {
-      id, job, folder: chosen, name, repository: read.repository, checkout: read.root, toolkit_root: toolkitRoot, purpose: spec.purpose, schedule: spec.schedule, schedule_text: describeSchedule(spec.schedule),
+      id, job, launcher, folder: chosen, name, repository: read.repository, checkout: read.root, toolkit_root: toolkitRoot, purpose: spec.purpose, schedule: spec.schedule, schedule_text: describeSchedule(spec.schedule),
       execute: path.win32.join(systemRoot, 'System32', 'conhost.exe'),
-      arguments: ['--headless', quotePath(nodePath, 'node'), quotePath(runner, 'the job runner'), job, '--repo-root', quotePath(read.root, 'the checkout'), '--task-id', id].join(' '),
-      working_directory: toolkitRoot,
+      arguments: ['--headless', quotePath(nodePath, 'node'), quotePath(launcher, 'the task launcher'), quotePath(toolkitRoot, 'the Toolkit checkout'), job, '--repo-root', quotePath(read.root, 'the checkout'), '--task-id', id].join(' '),
+      working_directory: path.dirname(launcher),
     };
     quotePath(toolkitRoot, 'the Toolkit checkout');
     definition.def = definitionDigest(definition);
     definition.description = `${chosen}: ${spec.task}. ${spec.purpose} [toolkit-task v1 id=${id} def=${definition.def}]`;
     definitions.push(definition);
     const selected = confirmed ? confirmed.includes(job) : read.enabled && job !== 'footer-sweep';
+    if (job === 'task-health') continue; // One computer-wide job, installed by the update owner.
     if (selected) wanted.push(definition);
     else if (!read.certain || job !== 'footer-sweep') skipped.push({ job, name, reason: read.certain ? 'governance is not enabled; the footer-only cleaner is selected' : 'fresh matching merged governance could not be verified; refresh governance status, then retry the task plan' });
   }
@@ -309,6 +321,7 @@ function desiredTasks({ checkout, folder = null, toolkitRoot = path.resolve(__di
 
 function describeSchedule(schedule) {
   if (schedule.kind === 'hourly') return describeTriggers([{ kind: 'MSFT_TaskDailyTrigger', start: `2000-01-01T${schedule.at}:00`, interval: 'PT1H', duration: `PT${schedule.hours}H` }]);
+  if (schedule.kind === 'daily') return `daily, ${schedule.at}`;
   return `weekly, ${schedule.day} ${schedule.at}`;
 }
 
@@ -347,11 +360,13 @@ ConvertTo-Json -InputObject @($rows) -Depth 6 -Compress`,
 $existing = @(ReadTasks $path) | Where-Object { $_.TaskName -ieq $p.name }
 if ($p.expected_xml) { if (-not $existing -or (Export-ScheduledTask -TaskPath $path -TaskName $p.name) -cne $p.expected_xml) { throw 'Task changed after preflight; nothing replaced.' } }
 elseif ($p.expect_absent -and $existing) { throw 'Task appeared after preflight; nothing replaced.' }
-if ($existing -and $existing.TaskPath -eq $path -and ([string]$existing.Description).IndexOf($p.marker_prefix) -lt 0) { throw "A task with this name is already in $path and is not Toolkit's; it was left alone." }
+if ($existing -and $existing.TaskPath -eq $path -and ([string]$existing.Description).IndexOf($p.marker_prefix) -lt 0 -and -not ($p.expected_xml -and [string]$existing.Description -ceq 'Disabled: Toolkit removed. Delete this task or re-run setup toolkit.')) { throw "A task with this name is already in $path and is not Toolkit's; it was left alone." }
 $action = New-ScheduledTaskAction -Execute $p.execute -Argument $p.arguments -WorkingDirectory $p.working_directory
 if ($p.schedule.kind -eq 'hourly') {
   $trigger = New-ScheduledTaskTrigger -Daily -At $p.schedule.at
   $trigger.Repetition = (New-ScheduledTaskTrigger -Once -At $p.schedule.at -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration (New-TimeSpan -Hours $p.schedule.hours)).Repetition
+} elseif ($p.schedule.kind -eq 'daily') {
+  $trigger = New-ScheduledTaskTrigger -Daily -At $p.schedule.at
 } else {
   $trigger = New-ScheduledTaskTrigger -Weekly -WeeksInterval 1 -DaysOfWeek $p.schedule.day -At $p.schedule.at
 }
@@ -446,11 +461,11 @@ const safeAnswerRef = value => typeof value === 'string' && value.trim() === val
 // Owns preflight, persistence and scheduler effects. Every command gets explicit boundaries;
 // tests substitute all four effect/identity/clock dependencies, never the user's scheduler/home.
 class WindowsTaskOwner {
-  constructor({ scheduler, home, registry = tasks, identityReader, now = () => new Date(), repairOwned = false, firstRunOptions = null, takeLock = null, taskChoice = null, readRecord = null, writeRecord = null, computerId = null }) {
+  constructor({ scheduler, home, registry = tasks, identityReader, now = () => new Date(), repairOwned = false, firstRunOptions = null, takeLock = null, taskChoice = null, readRecord = null, writeRecord = null, computerId = null, allowIndependentChoice = false, preserveOwnerStops = false }) {
     const answers = taskChoice ? Array.isArray(taskChoice) ? taskChoice : [taskChoice] : [];
     for (const taskChoice of answers) if (!['keep', 'replace'].includes(taskChoice.outcome) || !tasks.ID.test(taskChoice.task || '') || !/^[a-f0-9]{64}$/.test(taskChoice.observed || '') || !safeAnswerRef(taskChoice.answer_ref)) throw new WindowsTasksError('task choice needs the exact observation and actual owner answer reference', 1);
     if (new Set(answers.map(a => a.task)).size !== answers.length || new Set(answers.map(a => a.answer_ref)).size !== answers.length) throw new WindowsTasksError('each task needs its own exact owner answer', 1);
-    Object.assign(this, { scheduler, home, registry, identityReader, now, repairOwned, firstRunOptions, takeLock, answers, readRecord, writeRecord, computerId });
+    Object.assign(this, { preserveOwnerStops, allowIndependentChoice, scheduler, home, registry, identityReader, now, repairOwned, firstRunOptions, takeLock, answers, readRecord, writeRecord, computerId });
     this.explicitComputerId = computerId;
     this.computerId ||= tasks.computerIdentity(home)?.id || null;
     this.choiceAttempts = new Set();
@@ -476,7 +491,7 @@ class WindowsTaskOwner {
     const cleaners = ours.filter(e => isCleaner(e.job));
     const selected = cleaners[0];
     const folder = selected && !desired.folderOverride ? selected.folder : desired.folder;
-    const definitions = [...desired.wanted, ...(desired.definitions || []).filter(d => !desired.wanted.some(w => w.job === d.job))].map(definition => {
+    const definitions = [...desired.wanted, ...(desired.definitions || []).filter(d => !desired.wanted.some(w => w.job === d.job))].filter(d => d.job !== 'task-health').map(definition => {
       const id = taskId(folder, definition.job);
       const schedule = sameDefinition(definition.schedule, JOBS[definition.job].schedule) ? scheduleOwner.scheduleFor(definition.job, assignment.minute || 1) : definition.schedule;
       if (definition.folder === folder && sameDefinition(schedule, definition.schedule)) return { ...definition, repo_minute: assignment.minute, job_owner: this.computerId };
@@ -503,7 +518,8 @@ class WindowsTaskOwner {
     if (cleaners.some(e => e.folder !== folder)) conflict = 'cleaner folders differ; ask the owner to reconcile the recorded folders';
     if (read?.binding?.schedule_folder && read.binding.schedule_folder !== folder && !desired.folderOverride) conflict = `binding folder changed from ${folder} to ${read.binding.schedule_folder}; with explicit approval to keep the recorded folder, run ${applyCommand(desired, { toolkitRoot: desired.locations.toolkitRoot, folderOverride: folder })}; future applies need that override until the binding folder agrees`;
     for (const [otherFolder, rows] of new Map([...this.discover(entries, folder), [folder, live]])) for (const task of rows) {
-      const marker = parseMarker(task.description);
+      const missingRecord = entries.find(e => e.toolkit_missing && e.folder === otherFolder && e.name === task.name && task.state === 'Disabled' && sameDefinition(enrolledDefinition(task), e.enrolled));
+      const marker = parseMarker(task.description) || (missingRecord ? { id: missingRecord.id } : null);
       if (!definitions.some(d => sameTaskName(task.name, taskName(otherFolder, d.job)) || marker?.id === taskId(otherFolder, d.job))) continue;
       const target = /--repo-root "([^"\r\n]+)"/.exec(String(task.arguments || ''))?.[1];
       let repository = null;
@@ -532,11 +548,15 @@ class WindowsTaskOwner {
       if (currentRead && !sameDefinition(currentRead, plannedRead)) return refuse('origin or governance changed after planning; refresh status and run a fresh plan');
       if (read && (!read.repository || read.repository.toLowerCase() !== definition.repository.toLowerCase())) return refuse('repository origin changed; left alone');
       if (!fresh && (switching || desiredJob !== 'programme-sweep' || !read?.enabled)) return refuse('fresh matching merged governance could not be verified; existing shape and folder retained; refresh governance status, then retry plan');
-      if (recorded?.stopped_by_owner && !this.repairOwned) return refuse('stopped by owner');
+      if (recorded?.stopped_by_owner && (!this.repairOwned || this.preserveOwnerStops)) return refuse('stopped by owner');
       if (ours.some(e => e.job === definition.job && e.id !== definition.id)) return refuse('this repository already has this job enrolled in another folder; ask owner to reconcile it');
       if (recorded && (recorded.adopted || recorded.host !== 'windows' || recorded.folder !== definition.folder || recorded.name !== definition.name)) return refuse('adopted or unowned enrolment; Toolkit leaves it alone');
       if (recorded && String(recorded.repository).toLowerCase() !== definition.repository.toLowerCase()) return refuse('repository ownership differs; Toolkit leaves it alone');
-      const marker = existing && parseMarker(existing.description);
+      const missingDisabled = recorded?.toolkit_missing === true && existing?.state === 'Disabled'
+        && existing.description === require('./toolkit-task-launcher.cjs').DISABLED_DESCRIPTION
+        && sameDefinition(enrolledDefinition(existing), recorded.enrolled);
+      if (this.preserveOwnerStops && existing?.state === 'Disabled' && !missingDisabled) return refuse('disabled by owner; left alone');
+      const marker = existing && (parseMarker(existing.description) || (missingDisabled ? { id: recorded.id } : null));
       if (existing && existing.name !== definition.name) return refuse('task name differs from its fixed name; Toolkit leaves it alone');
       if (existing && (!marker || marker.id !== definition.id || !recorded)) return refuse('task is unowned or unrecorded; obtain approval for exact inspection/removal, then retry');
       if (!recorded) return { definition, action: 'create', observed: null, recorded: null };
@@ -560,10 +580,10 @@ class WindowsTaskOwner {
       const observed = existing ? enrolledDefinition(existing) : null;
       if (switching && existing?.state === 'Disabled' && recorded.enrolled
         && !sameDefinition({ ...observed, enabled: recorded.enrolled.enabled }, recorded.enrolled)) return refuse('disabled participant also has an edited definition; approved scoped remove followed by repair is required');
-      if (existing && switching && (!samePath(existing.working_directory, recorded.toolkit_root)
+      if (existing && switching && (!samePath(existing.working_directory, recorded.enrolled?.working_directory || recorded.toolkit_root)
         || !samePath(/--repo-root "([^"\r\n]+)"/.exec(existing.arguments || '')?.[1], definition.checkout))) return refuse('live checkout or Toolkit runner location differs; explicit owner recovery is required');
-      if (existing && recorded.enrolled && !sameDefinition(observed, recorded.enrolled) && existing.state !== 'Disabled' && !(this.repairOwned && !switching)) {
-        if (definition.job === 'footer-sweep') reason = 'stopped by owner: hand-edited task definition';
+      if (existing && recorded.enrolled && !sameDefinition(observed, recorded.enrolled) && existing.state !== 'Disabled' && !(this.repairOwned && !switching && !this.allowIndependentChoice)) {
+        if (definition.job === 'footer-sweep' && !this.allowIndependentChoice) reason = 'stopped by owner: hand-edited task definition';
         else if (!fresh) return refuse('modified governance task needs fresh status and the owner keep-or-replace answer');
         else {
           const fingerprint = digest({ repository: desired.repository, checkout: definition.checkout, folder, task: definition.id, revision: read.revision, binding: read.binding, observed });
@@ -593,7 +613,7 @@ class WindowsTaskOwner {
       const record = entries.find(e => e.id === i.definition.id);
       const task = live.find(t => sameTaskName(t.name, i.definition.name));
       return record && (task && (!samePath(record.checkout, i.definition.checkout) || !samePath(record.toolkit_root, i.definition.toolkit_root)
-        || !samePath(task.working_directory, record.toolkit_root) || !samePath(/--repo-root "([^"\r\n]+)"/.exec(task.arguments || '')?.[1], i.definition.checkout))
+        || !samePath(task.working_directory, record.enrolled?.working_directory || record.toolkit_root) || !samePath(/--repo-root "([^"\r\n]+)"/.exec(task.arguments || '')?.[1], i.definition.checkout))
         || (!record.checkout || !record.toolkit_root || !record.enrolled) && !(record.stopped_by_owner && !task));
     });
     const recovery = `Explicit approval must name affected tasks, paths, recreation, obsolete-record removal and any owner-stop reactivation. ${resetRequired ? `Complete ${reset}; removal temporarily leaves no cleaner` : `Owner-authorised recovery: ${command} --repair-owned. If edits or legacy proof prevent that, ${reset}`}.`;
@@ -744,6 +764,7 @@ class WindowsTaskOwner {
           continue;
         }
         if (previous) backup = this.registry.writeTaskBackup(this.home, definition.id, { task: previous, registry: expected.recorded });
+        installLauncher(this.home);
         this.scheduler.register(definition, previous);
         const live = this.scheduler.list(definition.folder).find(row => row.name === definition.name);
         if (!verifiedDefinition(live, definition)) throw new Error('scheduler readback failed; registration is not verified; preserve the backup and inspect the live task');
@@ -856,7 +877,8 @@ function recognisedEarlier(live, recorded, definition) {
     || recorded.job !== definition.job || recorded.name !== definition.name || recorded.folder !== definition.folder) return false;
   if (recorded.enrolled) return false; // A stored baseline must always match independently.
   return EARLIER_JOBS.filter(old => old.job === definition.job).some(old => {
-    const candidate = { ...definition, purpose: old.purpose, schedule: old.schedule };
+    const legacyRunner = path.win32.join(definition.toolkit_root, 'repo', 'scripts', 'toolkit-scheduled-job.cjs');
+    const candidate = { ...definition, working_directory: definition.toolkit_root, purpose: old.purpose, schedule: old.schedule, arguments: definition.arguments.replace(`${quotePath(definition.launcher, 'launcher')} ${quotePath(definition.toolkit_root, 'root')}`, quotePath(legacyRunner, 'runner')) };
     const { execute, arguments: args, working_directory: workingDirectory, schedule } = candidate;
     candidate.def = old.withoutPurpose ? crypto.createHash('sha256').update(JSON.stringify({ execute, args, workingDirectory, schedule, settings: 'v1 interactive start-when-available ignore-new 30m battery' })).digest('hex').slice(0, 12) : definitionDigest(candidate);
     candidate.description = `${definition.folder}: ${JOBS[definition.job].task}. ${old.purpose} [toolkit-task v1 id=${definition.id} def=${candidate.def}]`;
@@ -877,6 +899,7 @@ function verifiedDefinition(live, definition) {
   if (live.settings && (!live.settings.enabled || !live.settings.start_when_available || live.settings.multiple_instances !== 'IgnoreNew'
     || live.settings.execution_time_limit !== 'PT30M' || live.settings.disallow_start_if_on_batteries || live.settings.stop_if_going_on_batteries)) return false;
   return definition.schedule.kind === 'hourly' ? /Daily/.test(tr.kind) && tr.interval === 'PT1H' && (tr.duration === `PT${definition.schedule.hours}H` || definition.schedule.hours === 24 && tr.duration === 'P1D')
+    : definition.schedule.kind === 'daily' ? /Daily/.test(tr.kind) && !tr.interval && (tr.days_interval === undefined || Number(tr.days_interval) === 1)
     : /Weekly/.test(tr.kind) && Number(tr.days_of_week) === 2 && (tr.weeks_interval === undefined || Number(tr.weeks_interval) === 1);
 }
 
@@ -886,6 +909,7 @@ function registryEntry(definition, existing, now, live) {
   return {
     id: definition.id, name: definition.name, host: 'windows', folder: definition.folder, schedule: definition.schedule_text, model: null, effort: null,
     purpose: definition.purpose, repository: definition.repository, created: existing ? existing.created : now().toISOString(), created_by: 'toolkit-windows-tasks apply',
+    toolkit_version: JSON.parse(fs.readFileSync(path.join(__dirname, '../contracts/toolkit-local-bridge/version.json'), 'utf8')).version,
     job: definition.job, definition: definition.def, checkout: definition.checkout, toolkit_root: definition.toolkit_root, enrolled: enrolledDefinition(live),
     repo_minute: definition.repo_minute, job_owner: definition.job_owner, job_owner_label: os.hostname(),
   };
@@ -1087,7 +1111,17 @@ function main(argv = process.argv.slice(2), deps = {}) {
   }
 }
 
-module.exports = {
+function launcherPath(home = os.homedir()) {
+  return path.join(tasks.userStateDir(home), 'task-runners', `runner-${LAUNCHER_HASH}.cjs`);
+}
+function installLauncher(home) {
+  const file = launcherPath(home), source = LAUNCHER_SOURCE;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try { fs.writeFileSync(file, source, { flag: 'wx', mode: 0o600 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+  if (fs.readFileSync(file, 'utf8') !== source) throw new WindowsTasksError('Task launcher readback failed', 1);
+  return file;
+}
+module.exports = { launcherPath, installLauncher,
   WindowsTaskOwner, repositoryOf, readTaskObservation, readLocations, mainCheckout, samePath, enrolledDefinition, verifiedDefinition, JOBS, FOLDER, MARKER, STATUS_CONTROL_C_EXIT, WindowsTasksError, defaultFolder, nameProblem, taskName, taskId, parseMarker, readCheckout, folderForCheckout,
   describeTriggers, describeResult, describeSchedule, desiredTasks, definitionDigest, powerShellScheduler, runPowerShell, SCRIPTS, planTasks, applyTasks, firstRun,
   removeTasks, adoptTask, applyCommand, powerShellPath, describePlan, parseArgs, main,

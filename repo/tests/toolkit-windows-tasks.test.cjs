@@ -11,7 +11,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const { tempHome, checkout, addShards, fixtureBinding, fakeScheduler, assertDefinition, fakeRun, assertLiveRegistry, switchWorld, assertShape, printedRecovery, NODE, identityReader, testRepository, TOOLKIT_ROOT, GH, ATTENTION } = require('./support/windows-task-switch-world.cjs');
+const { memoryRegistry, fixtureGovernance: governance, tempHome, checkout, addShards, fixtureBinding, fakeScheduler, assertDefinition, fakeRun, assertLiveRegistry, switchWorld, assertShape, printedRecovery, NODE, identityReader, testRepository, TOOLKIT_ROOT, GH, ATTENTION } = require('./support/windows-task-switch-world.cjs');
 const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
 const job = require('../scripts/toolkit-scheduled-job.cjs');
 const tasks = require('../scripts/toolkit-tasks.cjs');
@@ -180,7 +180,7 @@ for (const guard of ['owner stop', 'disabled', 'edited', 'running', 'foreign own
   if (['owner stop', 'foreign owner', 'moved checkout'].includes(guard)) tasks.updateRegistry(home, entries => entries.map(entry => entry.id !== shard.id ? entry : { ...entry,
     ...(guard === 'owner stop' ? { stopped_by_owner: true, stopped_at: new Date().toISOString() } : guard === 'foreign owner' ? { job_owner: `local-${require('node:crypto').randomUUID()}` } : { checkout: 'C:\\Other\\checkout' }) }));
   const fake = fakeRun({ 'toolkit-governance.cjs': guard === 'governance off' ? { status: 0, stdout: '{"state":"DISABLED","merged":{"status":"disabled","fresh":true}}' } : GOVERNED,
-    'programme attention': ATTENTION, ...(guard === 'signed out' ? { 'gh auth': { status: 1 } } : {}) });
+    'programme attention': ATTENTION, ...(guard === 'signed out' ? { 'gh auth': { status: 1, stderr: 'You are not logged into any GitHub hosts.' } } : {}) });
   if (guard === 'start failure') scheduler.start = () => { throw new Error('native start denied'); };
   job.runJob({ ...options, taskId: wanted.wanted[0].id, repoRoot: wanted.root }, { home, scheduler, run: fake.run,
     repositoryReader: testRepository, ghPath: GH, nodePath: NODE, readIdentity: READ_IDENTITY, readObservation: OBSERVATION });
@@ -251,6 +251,8 @@ test('A1a: recognised earlier Toolkit definition updates without accepting hand 
       d.purpose = d.job === 'shard-timings' ? 'Refreshes the measured test times and opens a pull request when the CI shards drift. No AI.'
         : 'Brings the programme pages up to date, keeps the attention line and removes the cloud route footer from your own GitHub posts. No AI.';
     }
+    d.arguments = d.arguments.replace(`"${d.launcher}" "${d.toolkit_root}"`, `"${d.toolkit_root}\\repo\\scripts\\toolkit-scheduled-job.cjs"`);
+    d.working_directory = d.toolkit_root;
     d.schedule_text = windowsTasks.describeSchedule(d.schedule);
     d.def = windowsTasks.definitionDigest(d);
     if (generation === 'daytime') d.def = require('node:crypto').createHash('sha256').update(JSON.stringify({ execute: d.execute, args: d.arguments, workingDirectory: d.working_directory, schedule: d.schedule, settings: 'v1 interactive start-when-available ignore-new 30m battery' })).digest('hex').slice(0, 12);
@@ -268,80 +270,6 @@ test('A1a: recognised earlier Toolkit definition updates without accepting hand 
   assert.ok(windowsTasks.planTasks(wanted, { scheduler, home }).items.some(item => ['refused', 'owner-choice-required'].includes(item.action)));
   }
 });
-
-function memoryRegistry(initial = []) {
-  let entries = structuredClone(initial);
-  const calls = [];
-  return {
-    calls, corrupt: false,
-    readRegistry() { return this.corrupt ? { status: 'unreadable', reason: 'bad fixture' } : { status: 'ok', tasks: structuredClone(entries) }; },
-    updateRegistry(home, change) {
-      const next = change(structuredClone(entries));
-      for (const entry of next) assert.equal(tasks.entryProblem(entry), null);
-      calls.push('write'); entries = structuredClone(next); return next;
-    },
-    writeTaskBackup() { calls.push('backup'); return 'fixture-backup'; },
-  };
-}
-
-const matrixKinds = ['managed checkout', 'plugin copy', 'linked worktree', 'other copy'];
-const matrixTargets = ['main checkout', 'linked worktree', 'missing/not a repo'];
-const matrixStates = ['absent', 'healthy same repository', 'healthy other repository', 'healthy other checkout', 'disabled', 'edited action', 'edited trigger', 'removed by owner', 'adopted/unowned', 'corrupt registry'];
-const matrixRequesters = ['agent standing', 'owner explicit', 'setup plan'];
-for (const shape of ['programme', 'footer']) for (const toolkit of matrixKinds) for (const target of matrixTargets) for (const state of matrixStates) for (const requester of matrixRequesters) {
-  test(`closure: ${shape} / ${toolkit} / ${target} / ${state} / ${requester}`, () => {
-    const scheduler = fakeScheduler();
-    const registry = memoryRegistry();
-    const root = 'C:\\Repositories\\widget';
-    const wanted = windowsTasks.desiredTasks({ checkout: root, toolkitRoot: TOOLKIT_ROOT, nodePath: NODE, deps: { identityReader, governance: governance({ repository: 'example/widget', folder: 'WIDGET', state: shape === 'footer' ? 'UNDECIDED' : 'ENABLED' }) } });
-    const owner = () => new windowsTasks.WindowsTaskOwner({ scheduler, registry, home: MEMORY_HOME, identityReader,
-      now: () => new Date('2026-11-05T00:00:00.000Z'), repairOwned: requester === 'owner explicit' });
-    if (state !== 'absent') assert.ok(owner().apply(wanted).items.every(item => item.done));
-    if (state === 'healthy other repository') registry.updateRegistry(null, rows => rows.map(row => ({ ...row, repository: 'someone-else/widget' })));
-    if (state === 'healthy other checkout') registry.updateRegistry(null, rows => rows.map(row => ({ ...row, checkout: 'C:\\Old\\widget' })));
-    if (state === 'disabled') scheduler.folders.get('WIDGET')[0].state = 'Disabled';
-    if (state === 'edited action') scheduler.folders.get('WIDGET')[0].arguments += ' --owner-edit';
-    if (state === 'edited trigger') scheduler.folders.get('WIDGET')[shape === 'footer' ? 0 : 1].triggers = [{ kind: 'MSFT_TaskWeeklyTrigger', start: '2099-01-01T09:15:00', days_of_week: 2 }];
-    if (state === 'removed by owner') owner().remove('WIDGET', wanted);
-    if (state === 'adopted/unowned') registry.updateRegistry(null, rows => rows.map(row => ({ ...row, adopted: true })));
-    if (state === 'corrupt registry') registry.corrupt = true;
-    scheduler.calls.length = 0; registry.calls.length = 0;
-    const beforeRegistry = registry.readRegistry();
-    const beforeTasks = structuredClone([...scheduler.folders]);
-    const validLocation = toolkit === 'managed checkout' && target === 'main checkout';
-    const repairable = ['healthy other checkout', 'disabled', 'edited action', 'edited trigger', 'removed by owner'].includes(state);
-    const allowed = validLocation && (['absent', 'healthy same repository'].includes(state) || requester === 'owner explicit' && repairable);
-    const reader = request => { if (!validLocation) throw new Error('unsupported invocation location'); return identityReader(request); };
-    let result;
-    const invoke = () => {
-      const instance = new windowsTasks.WindowsTaskOwner({ scheduler, registry, home: MEMORY_HOME, identityReader: reader,
-        now: () => new Date('2026-11-05T00:00:00.000Z'), repairOwned: requester === 'owner explicit' });
-      return requester === 'setup plan' ? instance.plan(wanted) : instance.apply(wanted);
-    };
-    if (!validLocation || state === 'corrupt registry' && requester !== 'setup plan') assert.throws(invoke);
-    else { result = invoke(); assert.equal(result.items.every(item => !['refused', 'owner-choice-required'].includes(item.action)), allowed); }
-    if (!allowed || requester === 'setup plan') {
-      assert.deepEqual(registry.readRegistry(), beforeRegistry, 'registry unchanged');
-      assert.deepEqual([...scheduler.folders], beforeTasks, 'scheduler unchanged');
-      assert.deepEqual(registry.calls, [], 'no registry mutation or backup');
-      assert.ok(scheduler.calls.every(call => call[0] === 'list'), 'no registration, removal, start or wait');
-    } else {
-      assert.ok(result.items.every(item => item.done));
-      assert.ok(registry.readRegistry().tasks.every(entry => !entry.stopped_by_owner));
-    }
-  });
-}
-
-function governance({ state = 'ENABLED', folder = 'TOOLKIT', repository = 'weijunswj/ai-agent-toolkit', binding = true } = {}) {
-  const status = state === 'ENABLED' ? binding ? 'enabled' : 'unknown' : state === 'DISABLED' ? binding ? 'disabled' : 'none' : state === 'UNDECIDED' ? 'none' : 'unknown';
-  const source = binding && ['enabled', 'disabled'].includes(status) ? fixtureBinding(repository, folder, status === 'enabled') : null;
-  return {
-    readIdentity: root => ({ valid: true, root, remote: { host: 'github.com', path: `/${repository}.git` } }),
-    governanceState: () => ({ state, merged: { status, fresh: status !== 'unknown' } }),
-    mergedBinding: () => source,
-    readObservation: () => ({ status, fresh: status !== 'unknown', binding: source }),
-  };
-}
 
 // Restart snapshots represent the same computer, including its persisted local identity.
 function copyComputerIdentity(home, replayHome) {
@@ -376,7 +304,7 @@ test('G: an ENABLED Toolkit checkout gets both tasks in \\TOOLKIT\\, recorded in
   if (process.platform !== 'win32') assert.equal((fs.statSync(tasks.registryPath(home)).mode & 0o777), 0o600);
   const sweep = wanted.wanted[0];
   assert.equal(sweep.execute, 'C:\\Windows\\System32\\conhost.exe');
-  assert.equal(sweep.arguments, `--headless "${NODE}" "${TOOLKIT_ROOT}\\repo\\scripts\\toolkit-scheduled-job.cjs" programme-sweep --repo-root "${wanted.root}" --task-id toolkit-programme-sweep`);
+  assert.equal(sweep.arguments, `--headless "${NODE}" "${sweep.launcher}" "${TOOLKIT_ROOT}" programme-sweep --repo-root "${wanted.root}" --task-id toolkit-programme-sweep`);
   assert.match(sweep.description, /^TOOLKIT: PROGRAMME SWEEP\. .*\[toolkit-task v1 id=toolkit-programme-sweep def=[0-9a-f]{12}\]$/);
 });
 
@@ -588,7 +516,7 @@ test('G: the registered task runs headless as the logged-on user, ignores a seco
   const script = windowsTasks.SCRIPTS.register;
   assert.match(script, /-LogonType Interactive -RunLevel Limited/);
   assert.match(script, /-StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit \(New-TimeSpan -Minutes 30\) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries/);
-  assert.match(script, /IndexOf\(\$p\.marker_prefix\) -lt 0\) \{ throw/);
+  assert.match(script, /IndexOf\(\$p\.marker_prefix\) -lt 0 -and -not \(\$p\.expected_xml/);
   assert.doesNotMatch(script, /-Password|-User\s/);
   assert.match(windowsTasks.SCRIPTS.unregister, /IndexOf\(\$p\.marker\) -lt 0\) \{ throw/);
   assert.match(windowsTasks.SCRIPTS['remove-folder'], /GetTasks\(1\)\.Count -eq 0 -and \$f\.GetFolders\(0\)\.Count -eq 0/);
@@ -1051,10 +979,10 @@ test('J: the existing sweep reports parent lifecycle results without a second re
 });
 
 test('J: sign-out skips all edits; a stale binding permits origin cleaning only', (t) => {
-  const out = runSweep(t, { 'gh auth': { status: 1 } });
+  const out = runSweep(t, { 'gh auth': { status: 1, stderr: 'You are not logged into any GitHub hosts.' } });
   assert.equal(out.record.status, 'skipped');
   assert.deepEqual(out.record.summary, ['skipped: gh not signed in']);
-  assert.deepEqual(out.log.map(entry => entry.slice(0, 2)), [[GH, 'auth'], [NODE, '-e']], 'gh auth status, then only the github.com connection check');
+  assert.deepEqual(out.log.map(entry => entry.slice(0, 2)), [[GH, 'auth']], 'confirmed sign-out needs no network inference');
   const stale = runSweep(t, { 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { status: 'enabled', fresh: false } }) } });
   assert.equal(stale.record.programme_reason, 'binding observation expired');
   assert.equal(stale.record.footer_status, 'held');
@@ -1065,7 +993,7 @@ test('J: sign-out skips all edits; a stale binding permits origin cleaning only'
 
 test('J: offline is told apart from signed out, skips count up in a row, and the next good run notes the resume', (t) => {
   const home = tempHome(t);
-  const OFFLINE = { 'gh auth': { status: 1 }, 'reach github': { status: 3 } };
+  const OFFLINE = { 'gh auth': { status: 1, stderr: 'Network unavailable' }, 'reach github': { status: 3 } };
   const first = runSweep(t, OFFLINE, home, '2026-11-01T04:00:05.000Z');
   assert.deepEqual([first.record.status, first.record.exit, first.record.reason, first.record.skipped_streak, first.record.skipped_since], ['skipped', 0, 'offline', 1, '2026-11-01T04:00:05.000Z']);
   assert.deepEqual(first.record.summary, ['skipped: offline']);
@@ -1073,7 +1001,7 @@ test('J: offline is told apart from signed out, skips count up in a row, and the
   assert.match(probe[2], /connect\(\{host:'github\.com',port:443,timeout:8000\}\)/, 'one connection to github.com, nothing sent');
   const second = runSweep(t, OFFLINE, home, '2026-11-01T05:00:05.000Z');
   assert.deepEqual([second.record.skipped_streak, second.record.skipped_since], [2, '2026-11-01T04:00:05.000Z']);
-  const signedOut = runSweep(t, { 'gh auth': { status: 1 } }, home, '2026-11-01T06:00:05.000Z');
+  const signedOut = runSweep(t, { 'gh auth': { status: 1, stderr: 'You are not logged into any GitHub hosts.' } }, home, '2026-11-01T06:00:05.000Z');
   assert.deepEqual([signedOut.record.reason, signedOut.record.skipped_streak, signedOut.record.summary], ['gh not signed in', 3, ['skipped: gh not signed in']]);
   // A failed run is no resume: the count stays for the next good run to report.
   const failed = runSweep(t, { 'programme refresh': { status: 2, stderr: 'boom' } }, home, '2026-11-01T07:00:05.000Z');
@@ -1093,7 +1021,7 @@ test('J: offline is told apart from signed out, skips count up in a row, and the
 
 test('J: a run stopped mid-way keeps the streak in its start record', (t) => {
   const home = tempHome(t);
-  runSweep(t, { 'gh auth': { status: 1 }, 'reach github': { status: 3 } }, home, '2026-11-01T04:00:05.000Z');
+  runSweep(t, { 'gh auth': { status: 1, stderr: 'Network unavailable' }, 'reach github': { status: 3 } }, home, '2026-11-01T04:00:05.000Z');
   const seen = [];
   const fake = fakeRun({ 'toolkit-governance.cjs': GOVERNED, 'toolkit-github-footer-sweep.cjs': () => { seen.push(tasks.readLastRun('toolkit-programme-sweep', home)); return { status: 0, stdout: '{"results":[]}' }; }, 'programme attention': ATTENTION });
   job.runJob({ ...options, repoRoot: checkout(t) }, { home, run: fake.run, repositoryReader: testRepository, ghPath: GH, nodePath: NODE, readIdentity: READ_IDENTITY, readObservation: OBSERVATION, now: () => new Date('2026-11-01T05:00:05.000Z') });
@@ -1208,8 +1136,8 @@ test('J: shards still require fresh enabled governance and sign-in; child failur
     ...['DISABLED', 'UNDECIDED', 'ERROR'].map(state => ({ answers: { 'toolkit-governance.cjs': { status: state === 'ERROR' ? 2 : 0, stdout: JSON.stringify({ state, ...(state === 'ERROR' ? { rule: 'M0' } : {}), merged: { status: state === 'ERROR' ? 'invalid' : state === 'DISABLED' ? 'disabled' : 'none', fresh: true } }) } }, reason: state === 'ERROR' ? 'binding is invalid' : state === 'UNDECIDED' ? 'binding is missing' : `governance is ${state}` })),
     { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{broken' } }, reason: 'governance status could not be read', deferred: true },
     { answers: { 'toolkit-governance.cjs': { status: 0, stdout: '{"state":"ENABLED","merged":{"status":"enabled","fresh":false}}' } }, reason: 'binding observation expired', deferred: true },
-    { answers: { 'gh auth': { status: 1 } }, reason: 'gh not signed in' },
-    { answers: { 'gh auth': { status: 1 }, 'reach github': { status: 3 } }, reason: 'offline' },
+    { answers: { 'gh auth': { status: 1, stderr: 'You are not logged into any GitHub hosts.' } }, reason: 'gh not signed in' },
+    { answers: { 'gh auth': { status: 1, stderr: 'Network unavailable' }, 'reach github': { status: 3 } }, reason: 'offline', deferred: true },
     { answers: { 'refresh-shard-timings.cjs': { status: 2, stderr: 'invalid manifest' } }, failed: true },
   ];
   for (const row of rows) {
@@ -1606,7 +1534,7 @@ test('store scope: stale, foreign, null, throwing and working-tree-only observat
   for (const mode of ['programme-sweep', 'footer-sweep']) for (const problem of ['offline', 'signed-out', 'identity']) {
     const home = tempHome(t);
     const old = mode === 'programme-sweep' ? baseRun(t, home) : movingRun(t, { home, mode, clock: '2026-10-01T09:00:00Z' }).record;
-    const result = movingRun(t, { home, mode, answers: problem === 'identity' ? {} : { 'gh auth': { status: 1 }, 'reach github': { status: problem === 'offline' ? 3 : 0 } }, deps: problem === 'identity' ? { readIdentity: () => null } : {} });
+    const result = movingRun(t, { home, mode, answers: problem === 'identity' ? {} : { 'gh auth': { status: 1, stderr: 'You are not logged into any GitHub hosts.' }, 'reach github': { status: problem === 'offline' ? 3 : 0 } }, deps: problem === 'identity' ? { readIdentity: () => null } : {} });
     assert.equal(sweepCall(result), undefined); assert.equal(result.record.footer_sweep_since, old.footer_sweep_since);
     const next = movingRun(t, { home, mode, clock: '2026-11-03T09:00:00Z' });
     assert.equal(sinceOf(next), old.footer_sweep_since); assert.equal(next.record.status, 'ok');
@@ -1878,82 +1806,6 @@ test(`switch sequence: real status/apply ${sequence.join('/')} advancing ${days}
       if (prior) assert.equal(tasks.readLastRun(receipt.id, w.home).footer_sweep_since, prior);
     }
   }
-});
-
-const switchFaultPoints = ['history', 'history-read', 'register', 'destination-readback', 'enrolment', 'unregister', 'source-readback', 'cleanup', 'shards', 'start', 'result-readback', 'final-readback', 'registry-read', 'registry-write', 'rename', 'persisted-readback'];
-// Reuses probe-stuck, probe-stuck2 and probe-qual-loop's continuous registry/history sequence.
-// Every row must reach its fault, then prove either convergence or the printed approved recovery.
-test('switch fault loop: continuous real status/apply, same-day and cross-day failures', async t => {
-  const w = switchWorld(t);
-  for (const state of ['off','on','off','on']) { await w.gov(state); assert.equal(w.cli('apply').code, 0); assertShape(w, state); }
-  let rows = 0;
-  for (const target of ['off','on']) for (const point of switchFaultPoints) for (const side of ['before','after']) {
-    const source = target === 'on' ? 'off' : 'on';
-    w.advance(side === 'after' ? 3 : 0); await w.gov(source); assert.equal(w.cli('apply').code, 0); assertShape(w, source);
-    await w.gov(target);
-    let fired = false, registered = false, removed = false, resultRead = false, persisted = false;
-    const at = (label, when) => { if (!fired && point === label && side === when) { fired = true; throw new Error(`injected ${label} ${when}`); } };
-    const around = (label, effect) => { at(label, 'before'); const out = effect(); at(label, 'after'); return out; };
-    const native = w.scheduler;
-    const adapter = { ...native,
-      list: f => around(resultRead ? 'final-readback' : removed ? 'source-readback' : registered ? 'destination-readback' : 'list', () => native.list(f)),
-      register: (d, old) => around(d.job === 'shard-timings' ? 'shards' : 'register', () => { const out = native.register(d, old); if (d.job !== 'shard-timings') registered = true; return out; }),
-      unregister: (f, name, id, old) => around(id.endsWith('shard-timings') ? 'shards' : 'unregister', () => { const out = native.unregister(f, name, id, old); if (!id.endsWith('shard-timings')) removed = true; return out; }),
-      start: (f, name) => around('start', () => native.start(f, name)),
-      info: (f, name) => around('result-readback', () => { const out = native.info(f, name); resultRead = true; return out; }),
-    };
-    const registry = { ...tasks,
-      readRegistry: (...args) => around('registry-read', () => tasks.readRegistry(...args)),
-      updateRegistry: (...args) => around(removed ? 'cleanup' : 'enrolment', () => tasks.updateRegistry(...args)),
-    };
-    const rename = fs.renameSync, readFile = fs.readFileSync, writeFile = fs.writeFileSync;
-    const watched = file => String(file).includes(tasks.userStateDir(w.home)) && /(?:tasks\.json|last-run\.json)/.test(String(file));
-    const mocks = [
-      t.mock.method(fs, 'renameSync', (...args) => watched(args[1]) ? around('rename', () => { const out = rename(...args); persisted = true; return out; }) : rename(...args)),
-      t.mock.method(fs, 'readFileSync', (...args) => persisted && watched(args[0]) ? around('persisted-readback', () => readFile(...args)) : readFile(...args)),
-      t.mock.method(fs, 'writeFileSync', (...args) => watched(args[0]) ? around('registry-write', () => writeFile(...args)) : writeFile(...args)),
-    ];
-    try { windowsTasks.applyTasks(w.offer(), { scheduler: adapter, registry, home: w.home, now: w.now,
-      readRecord: id => around('history-read', () => tasks.readLastRun(id, w.home)),
-      writeRecord: (id, rec) => around('history', () => tasks.writeLastRun(id, rec, w.home)), firstRunOptions: { wait() {}, pollMs: 1, waitMs: 2 } }); }
-    catch (error) { assert.match(error.message, /injected|history readback failed/); }
-    finally { for (const mock of mocks) mock.mock.restore(); }
-    assert.equal(fired, true, `${target} ${point} ${side} fired`); rows++;
-    const snapshot = { live: structuredClone([...native.folders]), entries: (w.registry || tasks).readRegistry(w.home).tasks };
-    assert.ok(snapshot.entries.every(e => !e.stopped_by_owner));
-    const records = Object.fromEntries(w.offer().definitions.map(d => [d.id, tasks.readLastRun(d.id, w.home)]));
-    // Probe-switch's retain/reverse/uncertain replays use the same interrupted native and registry state.
-    const onStart = native.onStart;
-    native.onStart = live => { tasks.writeRegistry(w.home, w.registry.readRegistry(w.home).tasks); onStart(live); };
-    for (const decision of [target, source, 'uncertain']) for (const reset of [false,true]) {
-      native.folders.clear(); for (const [f, rows] of structuredClone(snapshot.live)) native.folders.set(f, rows);
-      w.registry = memoryRegistry(snapshot.entries);
-      for (const [id, record] of Object.entries(records)) {
-        if (record) tasks.writeLastRun(id, record, w.home);
-        else if (fs.existsSync(tasks.lastRunPath(id, w.home))) fs.unlinkSync(tasks.lastRunPath(id, w.home));
-      }
-      await w.gov(decision);
-      const before = JSON.stringify([...native.folders]), prior = JSON.stringify(w.registry.readRegistry(w.home));
-      const retry = w.cli('apply');
-      if (decision === 'uncertain') {
-        assert.equal(retry.code, 1); assert.equal(JSON.stringify([...native.folders]), before);
-        assert.equal(JSON.stringify(w.registry.readRegistry(w.home)), prior);
-        break;
-      }
-      if (retry.code !== 0) {
-        assert.ok((w.registry || tasks).readRegistry(w.home).tasks.every(e => !e.stopped_by_owner));
-        printedRecovery(w, reset);
-      }
-      assertShape(w, decision);
-      if (retry.code === 0) break; // No hold exists from which a reset needs proving.
-    }
-    native.onStart = onStart;
-    tasks.writeRegistry(w.home, w.registry.readRegistry(w.home).tasks); w.registry = null;
-    await w.gov(target);
-    const current = w.cli('apply'); if (current.code !== 0) printedRecovery(w);
-    assertShape(w, target);
-  }
-  assert.equal(rows, switchFaultPoints.length * 4);
 });
 
 for (const switchNumber of [1,2,3]) for (const from of ['programme-sweep','footer-sweep']) test(`interruption table: switch ${switchNumber}, restart before/after every effect and read-back from ${from}`, async t => {

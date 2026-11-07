@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 10 questions across 4 sections
+Toolkit setup choices - 11 questions across 5 sections
 
-Bank reference: NDFT-9Y6E-6GQ6-W00N
+Bank reference: DFVP-VH1B-CN8B-1QRD
 
 Quick index
 
@@ -20,6 +20,7 @@ Quick index
 3.2 Copy Toolkit's skills into Antigravity? - Recommended: A - Keep current
 Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 4.1 May Codex merge finished task pull requests without you typing merge? - Recommended: B - On
+5.1 May Toolkit update scheduled tasks on this computer? - Recommended: A - No standing approval
 
 
 ## 1. Updates and reports
@@ -301,6 +302,34 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ---
 
+
+## 5. Windows scheduled tasks
+
+### 5.1 May Toolkit update scheduled tasks on this computer?
+
+**What this controls:** Create, update and remove the listed fixed laptop tasks across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.
+
+**Current:** No answer saved
+
+**Verification:** verified
+
+**Recommended:** A - No standing approval
+
+**Recommended outcome:** Preserve your current task authority.
+
+**Why:** A standing approval is always your own choice.
+
+**Choices:**
+
+- **A. No standing approval** - Leave existing tasks alone; the update command waits for your approval.
+- **B. Allow these fixed task kinds** - Allow future updates of the listed fixed task kinds, after fresh ownership checks. Hand edits and new task kinds ask again.
+
+**After applying:** The dated answer and task kinds are saved locally. This grants no native permission and never changes cloud triggers.
+
+**Selected:** A - No standing approval
+
+---
+
 Reply with either:
 
 - `all recommended`
@@ -312,9 +341,9 @@ Anything you do not list takes its recommendation.
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 11 questions across 4 sections
+Toolkit setup choices - 12 questions across 5 sections
 
-Bank reference: VJFN-VAX3-TMQ1-YFBX
+Bank reference: RPGD-XZQA-0KHH-ES1J
 
 Quick index
 
@@ -329,6 +358,7 @@ Quick index
 3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: A - Keep current
 3.5 Claude Code setting: Read AGENTS.md too? - Recommended: B - Turn on
 4.1 May Claude Code merge finished task pull requests without you typing merge? - Recommended: B - On
+5.1 May Toolkit update scheduled tasks on this computer? - Recommended: A - No standing approval
 
 
 ## 1. Updates and reports
@@ -617,5 +647,33 @@ Quick index
 **After applying:** The app-local answer is saved separately from app settings. Rule-refresh pull requests always wait for your typed merge.
 
 **Selected:** B - On
+
+---
+
+
+## 5. Windows scheduled tasks
+
+### 5.1 May Toolkit update scheduled tasks on this computer?
+
+**What this controls:** Create, update and remove the listed fixed laptop tasks across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.
+
+**Current:** No answer saved
+
+**Verification:** verified
+
+**Recommended:** A - No standing approval
+
+**Recommended outcome:** Preserve your current task authority.
+
+**Why:** A standing approval is always your own choice.
+
+**Choices:**
+
+- **A. No standing approval** - Leave existing tasks alone; the update command waits for your approval.
+- **B. Allow these fixed task kinds** - Allow future updates of the listed fixed task kinds, after fresh ownership checks. Hand edits and new task kinds ask again.
+
+**After applying:** The dated answer and task kinds are saved locally. This grants no native permission and never changes cloud triggers.
+
+**Selected:** A - No standing approval
 
 ---

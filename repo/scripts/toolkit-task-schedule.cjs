@@ -21,6 +21,7 @@ function assignment(entries, repository, computerId, { recoverStopped = false } 
 
 function scheduleFor(job, minute) {
   const m = String(minute).padStart(2, '0');
+  if (job === 'task-health') return { kind: 'daily', at: `07:5${minute}` };
   return job === 'shard-timings' ? { kind: 'weekly', day: 'Monday', at: `08:${m}` } : { kind: 'hourly', at: `00:${m}`, hours: 24 };
 }
 

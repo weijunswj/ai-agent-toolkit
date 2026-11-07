@@ -64,11 +64,12 @@ function fakeScheduler(initial = {}) {
       calls.push(['register', d.folder, d.name]);
       const list = folders.get(d.folder) || [];
       const existing = list.find(task => task.name === d.name);
-      if (existing && !String(existing.description).includes(`[toolkit-task v1 id=${d.id} `)) throw new Error('not Toolkit\'s');
+      if (existing && !String(existing.description).includes(`[toolkit-task v1 id=${d.id} `) && !(existing.description === require('../../scripts/toolkit-task-launcher.cjs').DISABLED_DESCRIPTION && previous && assertDefinition(existing, previous))) throw new Error('not Toolkit\'s');
       if (existing && (!previous || !assertDefinition(existing, previous)) || !existing && previous) throw new Error('changed before registration');
       const task = { name: d.name, description: d.description, state: 'Ready', execute: d.execute, arguments: d.arguments, working_directory: d.working_directory,
         actions: [{ execute: d.execute, arguments: d.arguments, working_directory: d.working_directory }],
         triggers: d.schedule.kind === 'hourly' ? [{ kind: 'MSFT_TaskDailyTrigger', start: `2026-10-29T${d.schedule.at}:00+08:00`, interval: 'PT1H', duration: `PT${d.schedule.hours}H` }]
+          : d.schedule.kind === 'daily' ? [{ kind: 'MSFT_TaskDailyTrigger', start: `2026-10-29T${d.schedule.at}:00+08:00`, days_interval: 1 }]
           : [{ kind: 'MSFT_TaskWeeklyTrigger', start: `2026-10-26T${d.schedule.at}:00+08:00`, days_of_week: 2 }], last_run: null, last_result: 0x41303 };
       folders.set(d.folder, [...list.filter(item => item.name !== d.name), task]);
     },
@@ -233,4 +234,30 @@ function printedRecovery(w, reset = false) {
   const result = run(repair); assert.equal(result.code, 0, result.err + JSON.stringify(result.json)); return result;
 }
 
-module.exports = { tempHome, checkout, addShards, fixtureBinding, fakeScheduler, assertDefinition, fakeRun, assertLiveRegistry, switchWorld, assertShape, printedRecovery, NODE, identityReader, testRepository, TOOLKIT_ROOT, GH, ATTENTION };
+function memoryRegistry(initial = []) {
+  let entries = structuredClone(initial);
+  const calls = [];
+  return {
+    calls, corrupt: false,
+    readRegistry() { return this.corrupt ? { status: 'unreadable', reason: 'bad fixture' } : { status: 'ok', tasks: structuredClone(entries) }; },
+    updateRegistry(home, change) {
+      const next = change(structuredClone(entries));
+      for (const entry of next) assert.equal(tasks.entryProblem(entry), null);
+      calls.push('write'); entries = structuredClone(next); return next;
+    },
+    writeTaskBackup() { calls.push('backup'); return 'fixture-backup'; },
+  };
+}
+
+function fixtureGovernance({ state = 'ENABLED', folder = 'TOOLKIT', repository = 'weijunswj/ai-agent-toolkit', binding = true } = {}) {
+  const status = state === 'ENABLED' ? binding ? 'enabled' : 'unknown' : state === 'DISABLED' ? binding ? 'disabled' : 'none' : state === 'UNDECIDED' ? 'none' : 'unknown';
+  const source = binding && ['enabled', 'disabled'].includes(status) ? fixtureBinding(repository, folder, status === 'enabled') : null;
+  return {
+    readIdentity: root => ({ valid: true, root, remote: { host: 'github.com', path: `/${repository}.git` } }),
+    governanceState: () => ({ state, merged: { status, fresh: status !== 'unknown' } }),
+    mergedBinding: () => source,
+    readObservation: () => ({ status, fresh: status !== 'unknown', binding: source }),
+  };
+}
+
+module.exports = { memoryRegistry, fixtureGovernance, tempHome, checkout, addShards, fixtureBinding, fakeScheduler, assertDefinition, fakeRun, assertLiveRegistry, switchWorld, assertShape, printedRecovery, NODE, identityReader, testRepository, TOOLKIT_ROOT, GH, ATTENTION };
