@@ -52,8 +52,11 @@ function write(file, text) {
 // This suite needs only the all-approved file state; other install states stay in the reader suite.
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-launch-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const codexHome = path.join(root, '.codex');
+  t.after(async () => {
+    await stopFakes({ codexHome });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
   const cache = path.join(codexHome, 'plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.19.3');
   write(path.join(cache, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: '3.19.3' }));
   write(path.join(cache, '.codex-plugin/hooks/hooks.json'), HOOKS);
@@ -65,10 +68,20 @@ function fixture(t) {
 
 // Each fake owns its pids. Always stop keepers before the fixture's working folder is removed,
 // including on a failed assertion or a deliberately simulated failed production shutdown.
-function stopFakes(f) {
-  for (const line of calls(f).filter(line => /^(pid|keeper) \d+$/.test(line))) {
-    try { process.kill(Number(line.split(' ')[1]), 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-  }
+async function stopFakes(f) {
+  const pids = [...new Set(calls(f).filter(line => /^(pid|keeper) \d+$/.test(line)).map(line => Number(line.split(' ')[1])))];
+  // Attempt every PID even if another kill fails, and finish all waits before removing the home.
+  const results = await Promise.allSettled(pids.map(async pid => {
+    try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; }
+      if (Date.now() >= deadline) throw new Error(`Fake Codex process ${pid} did not exit within 5 s`);
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  }));
+  const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
+  if (errors.length) throw new AggregateError(errors, 'Could not stop all fake Codex processes');
 }
 const keeperPid = f => Number(calls(f).find(line => line.startsWith('keeper '))?.split(' ')[1]);
 
@@ -77,20 +90,18 @@ test('AT16c: an answer already received is kept when Codex cannot be stopped; no
     const f = fixture(t);
     write(path.join(f.codexHome, 'fake-hooks-list.json'), JSON.stringify({ mode: mode === 'write-caller' ? 'answer-orphan' : mode, result: trustedReply(f) }));
     const started = Date.now();
-    try {
-      if (mode === 'write-caller') {
-        const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
-        await assert.rejects(runAppServerRequest(FAKE, f.codexHome, { method: 'hooks/list', params: {} },
-          { cwd: f.codexHome, timeoutMs: 5000, closeTimeoutMs: 200, forceExitTimeoutMs: 200, direct: true }),
-        error => error.reason === 'stuck' && /did not exit after bounded process-tree termination/.test(error.message));
-      } else {
-        const r = await launchCheck({ codexHome: f.codexHome, codex: FAKE, timeoutMs: 500 });
-        assert.equal(r.code, mode === 'hang-orphan' ? 1 : 0, r.line);
-        assert.match(r.line, mode === 'hang-orphan' ? /\(timeout\)/ : /^All 6 Toolkit hooks are on in Codex\.$/);
-      }
-      assert.ok(Date.now() - started < 10000, mode);
-      if (mode !== 'answer-stay') { assert.ok(keeperPid(f)); assert.doesNotThrow(() => process.kill(keeperPid(f), 0)); }
-    } finally { stopFakes(f); }
+    if (mode === 'write-caller') {
+      const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
+      await assert.rejects(runAppServerRequest(FAKE, f.codexHome, { method: 'hooks/list', params: {} },
+        { cwd: f.codexHome, timeoutMs: 5000, closeTimeoutMs: 200, forceExitTimeoutMs: 200, direct: true }),
+      error => error.reason === 'stuck' && /did not exit after bounded process-tree termination/.test(error.message));
+    } else {
+      const r = await launchCheck({ codexHome: f.codexHome, codex: FAKE, timeoutMs: 500 });
+      assert.equal(r.code, mode === 'hang-orphan' ? 1 : 0, r.line);
+      assert.match(r.line, mode === 'hang-orphan' ? /\(timeout\)/ : /^All 6 Toolkit hooks are on in Codex\.$/);
+    }
+    assert.ok(Date.now() - started < 10000, mode);
+    if (mode !== 'answer-stay') { assert.ok(keeperPid(f)); assert.doesNotThrow(() => process.kill(keeperPid(f), 0)); }
   });
 });
 
@@ -158,16 +169,14 @@ test('AT22: --check ends within its bound when Codex cannot be stopped, with or 
     const f = fixture(t);
     write(path.join(f.codexHome, 'fake-hooks-list.json'), JSON.stringify({ mode, result: trustedReply(f) }));
     const harness = `require(${JSON.stringify(SCRIPT)}).launchCheck({codexHome:process.env.CODEX_HOME,codex:process.env.CODEX_TOOLKIT_CODEX_CLI,timeoutMs:500}).then(r=>{console.log(r.line);process.exitCode=r.code;});`;
-    try {
-      const r = await boundedCheck(f, mode === 'answer-orphan' ? [SCRIPT, '--check'] : ['-e', harness]);
-      assert.equal(r.guarded, false, `${mode}: 45 s guard fired`);
-      assert.equal(r.status, mode === 'answer-orphan' ? 0 : 1, r.stdout + r.stderr);
-      assert.ok(r.seconds < 10, `${mode}: ${r.seconds} s`);
-      assert.match(r.stdout, mode === 'answer-orphan' ? /^All 6 Toolkit hooks are on in Codex\.\r?\n$/ : /\(timeout\)/);
-      assert.ok(keeperPid(f)); assert.doesNotThrow(() => process.kill(keeperPid(f), 0));
-    } finally { stopFakes(f); }
+    const r = await boundedCheck(f, mode === 'answer-orphan' ? [SCRIPT, '--check'] : ['-e', harness]);
+    assert.equal(r.guarded, false, `${mode}: 45 s guard fired`);
+    assert.equal(r.status, mode === 'answer-orphan' ? 0 : 1, r.stdout + r.stderr);
+    assert.ok(r.seconds < 10, `${mode}: ${r.seconds} s`);
+    assert.match(r.stdout, mode === 'answer-orphan' ? /^All 6 Toolkit hooks are on in Codex\.\r?\n$/ : /\(timeout\)/);
+    assert.ok(keeperPid(f)); assert.doesNotThrow(() => process.kill(keeperPid(f), 0));
   }));
-  // Even a failed control must wait for the other guarded command and its cleanup before t.after.
+  // Even a failed control must wait for the other guarded command before the ordered teardown.
   for (const result of results) if (result.status === 'rejected') throw result.reason;
 });
 

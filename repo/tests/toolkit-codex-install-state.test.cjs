@@ -28,6 +28,22 @@ const calls = f => {
   const log = path.join(f.codexHome, 'fake-hooks-list.log');
   return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\r?\n/) : [];
 };
+// Stop every logged fake before removing its home, including after a failed assertion.
+async function stopFakes(f) {
+  const pids = [...new Set(calls(f).filter(line => /^(pid|keeper) \d+$/.test(line)).map(line => Number(line.split(' ')[1])))];
+  // Attempt every PID even if another kill fails, and finish all waits before removing the home.
+  const results = await Promise.allSettled(pids.map(async pid => {
+    try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; }
+      if (Date.now() >= deadline) throw new Error(`Fake Codex process ${pid} did not exit within 5 s`);
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  }));
+  const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
+  if (errors.length) throw new AggregateError(errors, 'Could not stop all fake Codex processes');
+}
 function trustedReply(f, edit = () => {}) {
   const fingerprint = pluginBundleFingerprint(cacheRoot(f));
   const result = { data: [{ hooks: expectedToolkitHooks(cacheRoot(f)).map(hook => ({
@@ -68,8 +84,11 @@ function hookTables(hooks, contentHash = '') {
 
 function fixture(t, { versions = ['3.19.3'], source = '3.19.3', plugin = 'true', hooks = 'on', docLimit = 'raised', config = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-state-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const codexHome = path.join(root, '.codex');
+  t.after(async () => {
+    await stopFakes({ codexHome });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
   const managed = path.join(root, 'managed');
   write(path.join(managed, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: source }));
   for (const version of versions) {
@@ -511,19 +530,13 @@ test('AT16b: an answer that never comes or cannot be read holds within the time 
     const f = fixture(t);
     write(path.join(f.codexHome, 'fake-hooks-list.json'), JSON.stringify({ mode }));
     const started = Date.now();
-    try {
-      const r = await launchCheck({ codexHome: f.codexHome, codex: FAKE, timeoutMs: 500 });
-      assert.equal(r.code, 1);
-      assert.match(r.line, /unverified/);
-      assert.match(r.line, /\(timeout\)/);
-      assert.ok(Date.now() - started < 10000, mode);
-      const pid = Number(calls(f).find(line => line.startsWith('pid ')).slice(4));
-      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `${mode}: fake app-server pid ${pid} must be gone`);
-    } finally {
-      // Also clean up when a new reason assertion fails on the old client in the revert proof.
-      const pid = Number(calls(f).find(line => line.startsWith('pid '))?.slice(4));
-      if (pid) try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-    }
+    const r = await launchCheck({ codexHome: f.codexHome, codex: FAKE, timeoutMs: 500 });
+    assert.equal(r.code, 1);
+    assert.match(r.line, /unverified/);
+    assert.match(r.line, /\(timeout\)/);
+    assert.ok(Date.now() - started < 10000, mode);
+    const pid = Number(calls(f).find(line => line.startsWith('pid ')).slice(4));
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `${mode}: fake app-server pid ${pid} must be gone`);
   });
 });
 
