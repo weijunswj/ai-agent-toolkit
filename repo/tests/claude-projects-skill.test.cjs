@@ -131,11 +131,14 @@ const projectsEntryContracts = [
     'it never transfers controller identity or allows general controller work']],
   ['ordinary gate continuation', 'executor', ['Every thread is an executor (G0, G1, G2, reviewer or helper): follow its brief',
     "a thread that finds `main`'s blob different says so to the coordinator in its first reply, then continues on its brief"]],
-  ['setup action exception', 'setup', ["No records, gates or GitHub writes except a setup step's own brief",
+  ['setup action exception', 'setup', ["No controller actions (records, gates or GitHub writes) until its last step except a setup step's own brief",
     "generic step 7's record and claim", 'These exceptions never allow general controller work or transfer identity to a thread']],
   ['guided action exception', 'guided', ["No controller actions (records, gates or GitHub writes) until its last step except a setup step's own brief"]],
 ];
 function assertProjectsEntry(surfaces, ids = projectsEntryContracts.map(([id]) => id)) {
+  if (ids.includes('setup action exception')) {
+    assert.equal(surfaces.setup.split("a setup step's own brief").length - 1, 1, 'the setup action restriction is stated once');
+  }
   for (const [id, surface, clauses] of projectsEntryContracts) {
     if (!ids.includes(id)) continue;
     for (const clause of clauses) assert.ok(surfaces[surface].includes(clause), `${id}: ${clause}`);

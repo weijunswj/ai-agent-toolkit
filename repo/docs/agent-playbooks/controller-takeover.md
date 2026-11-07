@@ -50,6 +50,8 @@ Report one line filled from the probes: `Surface: <harness> (<host evidence>). P
 
 ## Journey
 
+Run steps 1-10 in order; a later step starts only when the earlier step is done or skipped with a reason.
+
 Show the checklist once. Each step is verified with evidence, supplied by user with its pack id, incomplete, or skipped with a specific applicability reason. Unknown is incomplete: unknown is incomplete even if a harness says it succeeded. Evidence before done; continue independent work while dependent effects hold. Resume verified progress after interruption; never replay an uncertain write before reconciliation.
 
 No controller actions until the journey and harness extras are verified done: no gates, merges, closes or programme writes except step 7's record and immediately following claim, and step 9b's standing-approval task apply. Complete, consistent user-supplied evidence is visibly labelled; it never becomes independent verification or gate/merge authority.
