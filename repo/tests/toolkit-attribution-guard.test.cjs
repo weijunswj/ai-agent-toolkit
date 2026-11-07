@@ -478,7 +478,7 @@ function pushFixtures() {
   }
   for (const name of ['exceptions', 'range', 'targets', 'more']) repos[name] = scenario(withSettings, name, changes.clean);
   repos['toolkit-plain'] = scenario(without, 'toolkit-plain', {
-    'repo/contracts/plain-references/config.json': '{}\n', 'repo/scripts/check-plain-references.cjs': '\'use strict\';\n', ...changes.plain
+    '.github/plain-text.json': '{}\n', 'repo/scripts/check-plain-references.cjs': '\'use strict\';\n', ...changes.plain
   });
   repos['switched-off'] = scenario(without, 'switched-off', { '.github/plain-text.json': '{ "off_reason": "this fixture does not run the check" }\n', ...changes.plain });
   repos['broken-settings'] = scenario(without, 'broken-settings', { '.github/plain-text.json': '{ not json\n', ...changes.secret, ...changes.plain });

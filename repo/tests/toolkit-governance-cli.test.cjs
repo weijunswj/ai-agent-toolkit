@@ -364,6 +364,27 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   }
 });
 
+test('Toolkit source wrapper exempts its checkout from the vendored plain-text check', async t => {
+  const ctx = scratch(t);
+  const repo = gitRepo(ctx, 'toolkit-source');
+  writeGoverned(repo, { plainText: false });
+  for (const [rel, text] of Object.entries({
+    'skills/secure-ci-cd/scripts/plain-text-check.cjs': "'use strict';\n",
+    'repo/scripts/check-plain-references.cjs': "'use strict';\n",
+    '.github/plain-text.json': '{"schema":"toolkit-plain-text-config/v1"}\n',
+  })) {
+    fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+    fs.writeFileSync(path.join(repo, rel), text);
+  }
+  enable(ctx, repo);
+  const checkIds = async () => JSON.parse((await run(ctx, repo, ['check', '--json'])).stdout)
+    .findings.map(entry => entry.id).filter(id => id.startsWith('PLAIN_TEXT_CHECK_'));
+  assert.equal(fs.existsSync(path.join(repo, '.github', 'scripts', 'plain-text-check.cjs')), false);
+  assert.deepEqual(await checkIds(), []);
+  fs.rmSync(path.join(repo, 'repo', 'scripts', 'check-plain-references.cjs'));
+  assert.deepEqual(await checkIds(), ['PLAIN_TEXT_CHECK_DRIFT']);
+});
+
 test('SC-01: security turns on the free settings of a governed repository without a question, and only there', async (t) => {
   const ctx = scratch(t);
   const governed = gitRepo(ctx, 'governed');

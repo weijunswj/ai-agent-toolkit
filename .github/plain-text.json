@@ -1,6 +1,6 @@
 {
   "schema": "toolkit-plain-text-config/v1",
-  "description": "Toolkit's own settings for the plain-text check (skills/secure-ci-cd/scripts/plain-text-check.cjs, run by repo/scripts/check-plain-references.cjs inside the required validate check). Banned terms are Toolkit's own shorthand codes; ordinary words are left to people and reviewers.",
+  "description": "Toolkit's own settings for the plain-text check. This repository runs the check from source, with no copy under .github/scripts: skills/secure-ci-cd/scripts/plain-text-check.cjs reads this file directly, and repo/scripts/check-plain-references.cjs runs it with this file inside the required validate check. Banned terms are Toolkit's own shorthand codes; ordinary words are left to people and reviewers. The baseline is empty and only shrinks; while it exists, --init-baseline refuses to write a new one.",
   "include": [
     ".agents/",
     ".claude-plugin/",
