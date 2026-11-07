@@ -28,11 +28,11 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-function copyPath(sourcePath, targetPath) {
+function copyPath(sourcePath, targetPath, { materialiseSkills = false } = {}) {
   if (!fs.existsSync(sourcePath)) return;
   const stat = fs.statSync(sourcePath);
   if (stat.isDirectory()) {
-    if (path.basename(sourcePath) === 'skills') {
+    if (path.basename(sourcePath) === 'skills' && !materialiseSkills) {
       try {
         fs.mkdirSync(path.dirname(targetPath), { recursive: true });
         fs.symlinkSync(sourcePath, targetPath, process.platform === 'win32' ? 'junction' : 'dir');
@@ -48,19 +48,19 @@ function copyPath(sourcePath, targetPath) {
   }
 }
 
-function copyPackageFingerprint(sourceRoot, cacheRoot) {
+function copyPackageFingerprint(sourceRoot, cacheRoot, options = {}) {
   for (const relPath of setup.CACHE_FINGERPRINT_PATHS) {
     copyPath(path.join(sourceRoot, ...relPath.split('/')), path.join(cacheRoot, ...relPath.split('/')));
   }
   for (const relDir of setup.CACHE_FINGERPRINT_DIRS) {
-    copyPath(path.join(sourceRoot, ...relDir.split('/')), path.join(cacheRoot, ...relDir.split('/')));
+    copyPath(path.join(sourceRoot, ...relDir.split('/')), path.join(cacheRoot, ...relDir.split('/')), options);
   }
 }
 
 function writeInstalledCache(codexHome, options = {}) {
   const version = options.version || setup.EXPECTED_TOOLKIT_VERSION;
   const root = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', version);
-  copyPackageFingerprint(repoRoot, root);
+  copyPackageFingerprint(repoRoot, root, { materialiseSkills: options.readableBundle === true });
   if (process.platform === 'win32') setup.prepareInstalledSessionStart(root);
   if (version !== setup.EXPECTED_TOOLKIT_VERSION) {
     const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
@@ -820,7 +820,9 @@ test('Codex Toolkit plugin setup verifier rejects install-time auth policy from 
 
 test('Codex Toolkit verifier falls back to config and cache when CLI list omits installed plugin', () => {
   const codexHome = tmpRoot();
-  const cacheRoot = writeInstalledCache(codexHome);
+  // A readable bundle is required to distinguish unreviewed hooks from an unverified install.
+  // Other fixture cases keep the fast skills link; this one exercises the real bundle fingerprint.
+  const cacheRoot = writeInstalledCache(codexHome, { readableBundle: true });
   writeCodexConfig(codexHome, { trustedHook: true });
 
   const state = setup.evaluateCodexToolkitPluginState({ installed: [], available: [] }, {
@@ -970,7 +972,9 @@ test('Codex Toolkit Windows alias detection helper recognizes Access denied fall
 
 test('Codex Toolkit verify-only human output reports the hook state Codex recorded', () => {
   const codexHome = tmpRoot();
-  writeInstalledCache(codexHome);
+  // A readable bundle is required to distinguish unreviewed hooks from an unverified install.
+  // Other fixture cases keep the fast skills link; this one exercises the real bundle fingerprint.
+  writeInstalledCache(codexHome, { readableBundle: true });
   writeCodexConfig(codexHome);
   const fakeCodex = writeFakeHangingCodex(codexHome);
 
