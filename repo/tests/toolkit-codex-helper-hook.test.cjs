@@ -381,6 +381,15 @@ function runBrokenWindowsLauncher(t, input, { runtime } = {}) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, pluginRoot };
 }
 
+test('AT10: broken Windows launcher refuses gh issue close with recovery', { skip: process.platform !== 'win32' }, t => {
+  for (const tool_name of ['Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) {
+    const r = runBrokenWindowsLauncher(t, { tool_name, tool_input: { command: 'gh issue close 9001 -R example.test/app' } });
+    assert.equal(r.status, 2, `${tool_name}: ${r.stderr}`);
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(r.stderr, /setup toolkit.*repair/);
+  }
+});
+
 test('Windows launcher without Node blocks helper launches and unreadable input with exit 2 and a deny', { skip: process.platform !== 'win32' }, t => {
   const cases = [
     { tool_name: 'spawn_agent', cwd: ROOT, tool_input: { agent_type: 'toolkit-g1-helper' } },

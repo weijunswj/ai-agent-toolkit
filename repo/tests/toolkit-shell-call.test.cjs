@@ -22,6 +22,86 @@ const path = require('node:path');
 
 const { SHELL_TOOL_NAMES, UNREADABLE, ShellCall, argvText, plainGitLine } = require('../scripts/toolkit-shell-call.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
+
+test('AT7: M3 readable call shapes preserve closure decisions across Codex shell names', () => {
+  const { IssueClosureGuard } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
+  const github = new FakeGitHub({ repository: 'example.test/app' });
+  github.addIssue(9001); github.addIssue(9002, { parent: 9001 });
+  const guard = new IssueClosureGuard({ repository: 'example.test/app', transport: github });
+  const closure = require('../scripts/toolkit-issue-closure.cjs');
+  const close = 'gh issue close 9001 -R example.test/app';
+  const cases = [
+    ['git status', false], ['gh pr view 7', false], ['echo "gh issue close 9001"', false], ['git log --grep=push', false],
+    [close, true], ['gh issue close 9002 -R example.test/app', true],
+    ['gh pr create --title T --body "Closes #9001"', true], ['gh pr create --title T --body "Refs #9001"', true],
+    ['gh pr merge 7', false], ['gh api repos/example.test/app/issues/9001 -X PATCH -f state=closed', true],
+    ['git commit -m "Co-Authored-By: Example <a@example.test>"', false], ['git push origin main', false], ['git push origin side', false],
+  ];
+  // Candidate means inspect, not refuse: leaf closures and Refs writes are permitted by the hook.
+  for (const tool_name of ['Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) {
+    for (const [command, candidate] of cases) {
+      for (const tool_input of [{ command }, { cmd: command }, { command, workdir: process.cwd() }, { command: [tool_name === 'PowerShell' ? 'pwsh' : 'bash', '-c', command] }]) {
+        assert.equal(closureReader.closureWriteCandidate({ tool_name, tool_input }, { host: 'codex' }), candidate, `${tool_name}: ${command}`);
+        const guarded = command.includes('issue close 9001') && !command.startsWith('echo') || command.includes('Closes #9001') || command.startsWith('gh api');
+        const withRepo = { ...tool_input };
+        // Explicit identity keeps this decision table offline, including the PR text cases.
+        if (command.startsWith('gh pr create')) {
+          if (typeof withRepo.command === 'string') withRepo.command += ' -R example.test/app';
+          else if (typeof withRepo.cmd === 'string') withRepo.cmd += ' -R example.test/app';
+          else withRepo.command = [...withRepo.command.slice(0, 2), withRepo.command[2] + ' -R example.test/app'];
+        }
+        assert.equal(Boolean(closure.issueClosureDecision({ tool_name, tool_input: withRepo }, { host: 'codex', guard })?.deny), guarded, `${tool_name}: closure decision for ${command}`);
+      }
+    }
+  }
+});
+
+test('AT13: closure-shell retains every parent row and expectation', () => {
+  const { spawnSync } = require('node:child_process');
+  const pack = require('../scripts/toolkit-hook-pack.cjs');
+  const result = spawnSync('git', ['show', 'HEAD:repo/tests/hook-pack/corpus/closure-shell.json'], { cwd: path.join(__dirname, '../..'), encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr);
+  const base = JSON.parse(result.stdout).rows;
+  const current = require('./hook-pack/corpus/closure-shell.json').rows;
+  assert.deepEqual(pack.expectationChanges(base, current), []);
+  assert.ok(current.length >= base.length);
+});
+
+test('AT8: Codex Bash gets the PowerShell alternate reading without changing Claude Bash', () => {
+  const command = String.raw`echo "a\" ; gh issue close 9001 ; echo \"b"`;
+  const input = { tool_name: 'Bash', tool_input: { command } };
+  assert.throws(() => closureReader.closureCommands(input, { host: 'codex' }), /shell quoting/);
+  assert.equal(closureReader.closureWriteCandidate(input, { host: 'claude' }), false);
+  assert.equal(closureReader.closureWriteCandidate({ ...input, tool_input: { command, shell: 'bash' } }, { host: 'codex' }), false, 'a named POSIX shell is unambiguous');
+  const issue = require('../scripts/toolkit-issue-closure.cjs');
+  assert.match(issue.issueClosureDecision(input, { host: 'codex' }).deny, /shell quoting/);
+});
+
+test('AT9: alternate reading retains ordinary escaped quotes, reads and Refs text', () => {
+  for (const command of [String.raw`echo "a\"b"`, 'gh pr view 7', String.raw`gh pr create --title T --body "Refs #9001 \"quoted\""`]) {
+    assert.doesNotThrow(() => closureReader.closureCommands({ tool_name: 'Bash', tool_input: { command } }, { host: 'codex' }), command);
+  }
+});
+
+test('AT11: unreadable shapes with issue close refuse; harmless unreadable shapes pass', () => {
+  for (const tool_name of ['Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) {
+    for (const tool_input of [{ command: { a: 'gh issue close 9001' } }, { command: ['gh issue close 9001', 7] }, { command: 7, hint: 'gh issue close 9001' }, { hint: 'gh issue close 9001' }, 'gh issue close 9001']) {
+      assert.equal(Boolean(ShellCall.from({ tool_name, tool_input }).refusal()), true, `${tool_name}: ${JSON.stringify(tool_input)}`);
+    }
+    for (const tool_input of [{ command: 7 }, { command: { a: 'git status' } }, null]) assert.equal(Boolean(ShellCall.from({ tool_name, tool_input }).refusal()), false);
+  }
+  // Shared hostile inputs supply line break and BOM variants of the guarded raw shape.
+  for (const { id, text } of hostile.variants('gh issue close 9001\n')) assert.ok(ShellCall.from({ tool_name: 'Bash', tool_input: { command: { text } } }).refusal(), id);
+});
+
+test('AT12: shipped matchers cover nested shell calls but not the outer code cell or stdin', () => {
+  const fs = require('node:fs');
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../../.codex-plugin/hooks/hooks.json'), 'utf8'));
+  const matchers = manifest.hooks.PreToolUse.map(group => new RegExp(group.matcher));
+  for (const tool of ['Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) assert.ok(matchers.some(m => m.test(tool)), tool);
+  for (const tool of ['exec', 'code_mode_exec', 'wait', 'write_stdin']) assert.equal(matchers.some(m => m.test(tool)), false, tool);
+});
 // Closure scans are linear (about the same time per character from 4K to 1M characters), but from
 // 16K to 64K the per-character cost still steps up, so on a busy runner a 5ms sample at 16K grew past
 // the 10x limit. Start at 16K, grow until the smaller sample takes 15ms, and keep the best of five.

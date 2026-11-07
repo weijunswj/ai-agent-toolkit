@@ -7,7 +7,7 @@
 //     the top-level `cwd`;
 //   - Codex documents Bash with a string `command`, but its shell and exec tools also carry `cmd`,
 //     an argument list, and `workdir`, the folder the command runs in, which can differ from `cwd`.
-//     Codex Desktop's code-mode exec shell calls are an accepted delivery gap, tracked separately.
+//     Nested code-mode shell calls arrive as Bash, including when Codex uses PowerShell.
 //     This reader only inspects calls the host actually delivers to the hook.
 // ShellCall.from(input) reads all of these the same way:
 //   - text: a string `command` and a string `cmd` (both, a line apart, when both are given), or an
@@ -29,8 +29,8 @@ const SHELL_TOOL_NAMES = Object.freeze(['Bash', 'PowerShell', 'Monitor', 'exec_c
 const SHELL_TOOLS = new RegExp(`^(?:${SHELL_TOOL_NAMES.join('|')})$`);
 const UNREADABLE = 'Toolkit could not read this shell command, so it was refused. Retry it; if this repeats, run `setup toolkit`.';
 // The same broad screen the hooks use when a check cannot run: git ... commit or push, gh pr
-// create, edit or merge, and gh ... merge, sync, alias or api.
-const GUARDED = [/\bgit\b[\s\S]*\b(?:commit|push)\b/i, /\bgh\s+pr\s+(?:create|edit|merge)\b/i, /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i];
+// create, edit or merge, gh issue close, and gh ... merge, sync, alias or api.
+const GUARDED = [/\bgit\b[\s\S]*\b(?:commit|push)\b/i, /\bgh\s+pr\s+(?:create|edit|merge)\b/i, /\bgh\s+issue\s+close\b/i, /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i];
 
 // A shell program at the start of an argument list, and the option that hands it a script.
 const POSIX_SHELL = /^(?:bash|sh|zsh|dash|ksh)$/;
@@ -330,7 +330,7 @@ class ShellCall {
   get unreadable() { return this.#unreadable; }
 
   // The refusal for an unreadable call whose raw input (every key and string in it) could commit,
-  // push or touch a pull request, or ''.
+  // push, close an issue or touch a pull request, or ''.
   refusal() {
     if (!this.#unreadable) return '';
     return GUARDED.some(pattern => pattern.test(this.#raw)) ? UNREADABLE : '';
@@ -340,14 +340,14 @@ class ShellCall {
 // Default-deny closure reader: unknown positions containing guarded gh words are marked hidden.
 // Attached punctuation, stop-parsing and variable command words are read; documented data stays data.
 // This bounded word reader performs no expansion or execution and does not cover all shell syntax.
-function scriptContext(input) {
+function scriptContext(input, { host } = {}) {
   const args = input?.tool_input ?? input?.toolInput ?? {};
   const values = [args.command,args.cmd].filter(value => value != null);
   const name = values.length === 1 && Array.isArray(values[0]) && typeof values[0][0] === 'string' ? programName(values[0][0]) : typeof args.shell === 'string' ? programName(args.shell) : '';
   if (POWERSHELL.test(name)) return { powershell: true, uncertainShell: false };
   if (POSIX_SHELL.test(name)) return { powershell: false, uncertainShell: false };
   const tool = input?.tool_name || input?.toolName;
-  return { powershell: tool === 'PowerShell', uncertainShell: tool !== 'PowerShell' && tool !== 'Bash' };
+  return { powershell: tool === 'PowerShell', uncertainShell: tool !== 'PowerShell' && tool !== 'Bash', codexBash: host === 'codex' && tool === 'Bash' };
 }
 const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl)\s|\bGH_REPO\s*=/i;
 const NUMBER_FIELDS = Object.freeze(['pr_number', 'pull_number', 'pullNumber', 'pull_request_number', 'number']);
@@ -669,10 +669,10 @@ function executableCommands(text, depth = 0, context = {}) {
   return [...result, ...nested.flatMap(script => executableCommands(typeof script === 'string' ? script : script.text, depth + 1, { ...context, hidden: context.hidden || script.hidden, movesTarget }).map(command => ({ ...command, nested: true })))];
 }
 
-function closureCommands(input) {
-  const text = ShellCall.from(input).text; const context = scriptContext(input);
+function closureCommands(input, { host } = {}) {
+  const text = ShellCall.from(input).text; const context = scriptContext(input, { host });
   const commands = executableCommands(text, 0, context);
-  if (context.uncertainShell && /\\"/.test(text)) {
+  if ((context.uncertainShell || context.codexBash) && /\\"/.test(text)) {
     const alternate = executableCommands(text, 0, { ...context, powershell: true });
     const count = list => list.filter(command => command.unreadableGh || guardedGh(ghCommand(command.words))).length;
     if (count(alternate) > count(commands)) throw new Error('Toolkit cannot resolve the shell quoting around a guarded GitHub write. Run it as its own command with an explicit shell.');
@@ -692,10 +692,10 @@ function ghCommand(words) {
   const loose = word => /^@|\$/.test(word || '');
   return { inherited, noun, verb, rest: words.slice(i), start: i, variable: loose(noun) || (noun === 'pr' || noun === 'issue') && loose(verb) };
 }
-function closureWriteCandidate(input) {
+function closureWriteCandidate(input, options = {}) {
   const tool = input?.tool_name || '';
   if (!ShellCall.isShellTool(tool)) return /(?:create|update|edit)_pull_request$|close_issue$/.test(tool) || /(?:issue_write|update_issue)$/.test(tool) && String(input?.tool_input?.state).toLowerCase() === 'closed' || GRAPHQL_OPERATION.test(tool);
-  return closureCommands(input).some(({ words, unreadableGh }) => {
+  return closureCommands(input, options).some(({ words, unreadableGh }) => {
     if (unreadableGh) return true;
     const gh = ghCommand(words); if (!gh) return false;
     if (['--help','-h'].includes(gh.rest.at(-1)) && gh.rest.length === 1) return false;

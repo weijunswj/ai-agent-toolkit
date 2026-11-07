@@ -194,7 +194,7 @@ function apiOperation(flags, positional, call, command, commands, index, expansi
   return { kind: target[3] ? 'edit' : 'create', repository, number, title: payload.title, body: payload.body };
 }
 function shellOperations(input, options = {}) {
-  const call = ShellCall.from(input); const operations = []; const commands = closureCommands(input);
+  const call = ShellCall.from(input); const operations = []; const commands = closureCommands(input, options);
   for (const [index, command] of commands.entries()) {
     if (command.unreadableGh) throw new Error('Start-Process gh arguments cannot be inspected. Use one literal argument string and supported options, or run gh as its own command.');
     const gh = ghCommand(command.words); if (!gh) continue;
