@@ -1,6 +1,6 @@
 ---
 name: controller-bootstrap
-description: Use only when explicitly asked to bootstrap or recover the assigned controller for one Toolkit-managed repository after context loss, handover, or an agreed bootstrap event. Do not use for ordinary coding, generic repository setup, or keeping a programme's parent and child issues in step (github-program-reconciler does that).
+description: Use only when explicitly asked to take over as controller (including "you are taking over as controller for <repo>"), bootstrap or recover the assigned controller after context loss or an agreed bootstrap event. Do not use for ordinary coding, generic repository setup, questions about controllers, or programme reconciliation (github-program-reconciler does that).
 ---
 
 # Controller Bootstrap
@@ -31,7 +31,7 @@ If any source or trusted-reader result is unavailable or differs, keep the curre
 
 ## Takeover record
 
-Before acting, verify custody and stop the previous writer, then post one takeover record on the parent's CURRENT: the new controller identity, the bound commit and `CONTROLLER.md` blob, evidence that the previous writer stopped, and the next action. Read it back. Then continue the same approved assignment.
+Run the [takeover playbook](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/docs/agent-playbooks/controller-takeover.md) in order, including its [capability routes](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/docs/agent-playbooks/controller-takeover.md#capability-routes), generic journey and applicable harness extras. It covers custody, stopping the previous writer and the record: post one takeover record on the parent's CURRENT only with fresh ENABLED governance, otherwise in the verified evidence store. Read it back before acting. A newly taking-over governed controller claims immediately on the same account; all routes, relay proof and connector guards apply. Keep the exact dependency proof above and the conditional record-update mechanics below. Then continue the same approved assignment.
 
 ## Re-entry and bounded work
 

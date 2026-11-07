@@ -87,3 +87,12 @@ test('controller bootstrap is explicit-only and depends on accepted live governa
   assert.match(readme, /Copy the entire `skills\/controller-bootstrap\/` folder/);
   assert.match(readme, /the skill does not choose a controller/i);
 });
+
+test('T9 explicit takeover routes to the shared journey without replacing dependency proof', () => {
+  const skill = readSkill('SKILL.md');
+  for (const phrase of ['you are taking over as controller for <repo>',
+    'repo/docs/agent-playbooks/controller-takeover.md)',
+    'repo/docs/agent-playbooks/controller-takeover.md#capability-routes)',
+    'Git blob SHA-1 and content SHA-256', 'exactly one binding per source',
+    'conditional-write mechanism', 'fresh ENABLED governance', 'same account']) assert.ok(skill.includes(phrase), phrase);
+});

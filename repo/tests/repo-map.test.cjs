@@ -29,3 +29,10 @@ test('the map locates the coordinator release reconciliation command', () => {
   assert.ok(MAP.includes('repo/scripts/toolkit-rebump-prs.cjs'));
   assert.ok(MAP.includes('report by default'));
 });
+
+test('T11 the repository map locates the shared takeover and guidebook consumer', () => {
+  const rel = 'repo/docs/agent-playbooks/controller-takeover.md';
+  assert.ok(MAP.includes(rel));
+  assert.ok(fs.existsSync(path.join(ROOT, rel)));
+  assert.ok(MAP.includes('copies and checks the canonical takeover'));
+});

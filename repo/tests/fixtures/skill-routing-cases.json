@@ -1027,6 +1027,26 @@
       "excluded": []
     }
   ],
+  "controller_takeover_cases": [
+    {
+      "id": "controller-takeover-positive",
+      "kind": "positive",
+      "prompt": "You are taking over as controller for example-org/example-repo.",
+      "expected": [
+        "controller-bootstrap"
+      ],
+      "excluded": []
+    },
+    {
+      "id": "controller-question-negative",
+      "kind": "adversarial",
+      "prompt": "What does a Toolkit controller do?",
+      "expected": [],
+      "excluded": [
+        "controller-bootstrap"
+      ]
+    }
+  ],
   "shipping_law_cases": [
     {
       "id": "cosmetic-spacing",
