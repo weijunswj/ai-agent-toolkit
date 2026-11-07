@@ -143,6 +143,382 @@
         ]
       },
       "status": "pass"
+    },
+    {
+      "id": "TasksIndependentApply",
+      "source": "Footer standing approval was refused while governance was unanswered",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksIndependentRemove",
+      "source": "Footer standing approval was refused while governance was unanswered",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" remove --repo-root \"{work}\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksIndependentPlan",
+      "source": "Footer standing approval was refused while governance was unanswered",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" plan --repo-root \"{work}\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksIndependentList",
+      "source": "Footer standing approval was refused while governance was unanswered",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" list --repo-root \"{work}\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksIndependentRefusesForeignPath",
+      "source": "Exact command and independent task scope controls",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/other/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksIndependentRefusesGovernedJob",
+      "source": "Exact command and independent task scope controls",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\" --task programme-sweep"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksIndependentRefusesFolderOverride",
+      "source": "Exact command and independent task scope controls",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\" --folder OTHER"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksIndependentRefusesCompound",
+      "source": "Exact command and independent task scope controls",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\"; echo extra"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksIndependentRefusesGovernedEnrolment",
+      "source": "Footer exception must not retire a governed task",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\""
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true,
+        "windows_tasks": [
+          "programme-sweep"
+        ]
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksRegistryIndependentList",
+      "source": "Shared task policy includes the managed registry list command",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-tasks.cjs\" list --json"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksRegistryIndependentDefaultList",
+      "source": "Shared task policy includes the managed registry list command",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-tasks.cjs\" --json"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksPlannerPrintedApplyBash",
+      "source": "Planner command must pass the governance hold",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "{planner_apply}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksPlannerPrintedApplyPowerShell",
+      "source": "Planner command must pass the governance hold",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "{planner_apply}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksPlannerPrintedRemoveBash",
+      "source": "Planner command must pass the governance hold",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "{planner_remove}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksPlannerPrintedRemovePowerShell",
+      "source": "Planner command must pass the governance hold",
+      "kind": "benign",
+      "hosts": [
+        "claude"
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": "{planner_remove}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
     }
   ]
 }

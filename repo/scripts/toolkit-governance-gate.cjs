@@ -1534,6 +1534,26 @@ class ToolGate {
       if (answerCommand(text)) {
         return { deny: `Toolkit: only the user answers the governance question. Ask them in chat instead: "${ASK}" Toolkit records their own reply. ${NEVER_OWNER}` };
       }
+      // The exception is one exact managed task command, after the owner-answer guard.
+      // The CLI independently rechecks origin, ownership, stops and native permissions.
+      let independentTask = () => false;
+      // This module grants only an exception. A damaged module grants none and must
+      // never turn ordinary shell calls into hook process failures.
+      try {
+        const reader = require('./toolkit-task-policy.cjs').independentTaskCommand;
+        if (typeof reader === 'function') independentTask = reader;
+      } catch { /* no exception */ }
+      if (tool !== 'Monitor' && independentTask(text, {
+        home: this.#registryOptions.userHome || os.homedir(), cwd: ShellCall.from(input).folder,
+        certainIndependent: (target, command, independent) => {
+          const state = this.#gate.evaluate(target, { sessionId }).state;
+          if (!['DISABLED', 'UNDECIDED'].includes(state?.state) || state.merged?.fresh !== true
+            || !['none', 'disabled'].includes(state.merged.status)) return false;
+          const registry = require('./toolkit-tasks.cjs').readRegistry(this.#registryOptions.userHome || os.homedir());
+          return registry.status === 'ok' && registry.tasks.every(entry => entry.host !== 'windows'
+            || String(entry.repository).toLowerCase() !== String(state.repository).toLowerCase() || independent.includes(entry.job));
+        },
+      })) return null;
     }
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => USER_STATE_PATH.test(resolveTarget(input, target)))) {
       return { deny: `Toolkit: its user-state files (cached observations, pending proposals and held messages) are changed only by Toolkit itself. ${NEVER_OWNER}` };

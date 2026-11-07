@@ -37,6 +37,8 @@ Each file in `corpus/` is one family (the effect it guards: push, attribution, g
 
 Placeholders in a payload, fixture file or transcript: `{work}` (the working folder), `{trees}` (the extra working trees), `{home}` (the fixture's home), `{transcript}` (the session transcript), `{now}` (the current UTC time for a fresh Projects delivery) and `{credential}` (a fake credential built at run time, so none sits in the repository).
 
+`{planner_apply}` and `{planner_remove}` expand through the tested plugin's real task planner, including in `--against` runs. These rows need `fixture.managed_tasks: true`; their managed checkout is the fixture working folder under its isolated home. They prove that the actual printed command passes the hold without running that command.
+
 Task merge fixtures use `fixture.repo.task_auto_merge`: `after-gates`, `off`, `after-gates-stale` (stale governance binding), `codex-only`, `claude-code-only`, or `unreadable`. These create app-local preference files in the temporary home, separate from a fresh enabled binding. The host-only cases prove one app never inherits the other app's answer.
 
 Each row gets its own fixture and home, so no row reads the real user's state or another row's; the home is put back as built before the second host runs. Fixture timestamps use the system clock, matching the hook processes after the caller's test clock injection is removed. Session-start binding refresh is disabled, so the pack does not contact remotes.

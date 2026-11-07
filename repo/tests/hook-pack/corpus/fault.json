@@ -115,6 +115,93 @@
       "known_bad_on": ["claude"],
       "lane": "Stop hooks failing open after update",
       "added": "2026-10-30"
+    },
+    {
+      "id": "TasksPolicyMissingEnabled",
+      "source": "A task exception cannot refuse unrelated shell calls when its policy breaks",
+      "kind": "fault",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "managed_tasks": true
+      },
+      "fault": {
+        "type": "remove-file",
+        "file": "repo/scripts/toolkit-task-policy.cjs"
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksPolicyThrowsDisabled",
+      "source": "A task exception cannot refuse unrelated shell calls when its policy breaks",
+      "kind": "fault",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git status"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        },
+        "managed_tasks": true
+      },
+      "fault": {
+        "type": "throw-module",
+        "file": "repo/scripts/toolkit-task-policy.cjs"
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "TasksPolicyMissingUnanswered",
+      "source": "A task exception cannot refuse unrelated shell calls when its policy breaks",
+      "kind": "fault",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "{planner_apply}"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "fault": {
+        "type": "remove-file",
+        "file": "repo/scripts/toolkit-task-policy.cjs"
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
     }
   ]
 }

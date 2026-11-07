@@ -58,7 +58,7 @@ function earlierBoot(lock, boot) {
 }
 
 // held, free or stale, with what was seen so a replacement can check it moved the same lock.
-function lockState(file, nowMs, alive = pidAlive, boot = thisBoot()) {
+function lockState(file, nowMs, alive = pidAlive, boot = thisBoot(), staleMs = LOCK_STALE_MS) {
   const seen = readLock(file);
   if (seen.missing) return { free: true };
   if (seen.broken) return { stale: true, seen };
@@ -68,7 +68,7 @@ function lockState(file, nowMs, alive = pidAlive, boot = thisBoot()) {
   // restart counts as a new boot; the abandon limit covers the rest.
   const gone = seen.lock.host === os.hostname()
     ? !alive(seen.lock.pid) || silent > LOCK_ABANDONED_MS || earlierBoot(seen.lock, boot)
-    : silent > LOCK_STALE_MS || silent < -LOCK_STALE_MS;
+    : silent > staleMs || silent < -staleMs;
   return gone ? { stale: true, seen } : { held: true, seen };
 }
 
@@ -79,6 +79,7 @@ function takeLock(file, deps = {}) {
   const now = () => (deps.nowMs === undefined ? Date.now() : deps.nowMs);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const token = crypto.randomBytes(16).toString('hex');
+  let recovered = false;
   const owns = () => readLock(file).lock?.token === token;
   const handle = {
     token,
@@ -93,13 +94,14 @@ function takeLock(file, deps = {}) {
     fs.writeFileSync(draft, JSON.stringify({ schema: LOCK_SCHEMA, token, pid: process.pid, host: os.hostname(), boot_id: (deps.boot || thisBoot()).bootId, uptime: (deps.boot || thisBoot()).uptime, at: new Date(now()).toISOString() }), { mode: 0o600 });
     try {
       fs.linkSync(draft, file);
+      if (recovered && deps.onStale) deps.onStale();
       return handle;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
     } finally {
       try { fs.unlinkSync(draft); } catch { /* gone */ }
     }
-    const seen = lockState(file, now(), deps.pidAlive, deps.boot || thisBoot());
+    const seen = lockState(file, now(), deps.pidAlive, deps.boot || thisBoot(), deps.staleMs);
     if (seen.free) continue;
     if (seen.held) return null;
     // Stale: move it aside, then make sure what moved is what was judged stale.
@@ -114,6 +116,7 @@ function takeLock(file, deps = {}) {
       return null;
     }
     try { fs.rmSync(aside, { recursive: true, force: true }); } catch { /* left beside the lock */ }
+    recovered = true;
   }
   return null;
 }

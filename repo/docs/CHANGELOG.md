@@ -1,5 +1,32 @@
 # Toolkit Changelog
 
+## 3.52.0
+
+### Added
+
+- Stable repository minutes for Windows scheduled jobs, with a warning when more than nine repositories share the available minutes.
+- Recorded job-owner computers and a local programme lock to serialise scheduled store and programme writes, with logged stale-lock recovery.
+
+### Changed
+
+- Hourly cleaners start at their repository minute and run for 24 hours. Governed shard timing runs on Monday mornings at the same minute after 08:00.
+- Exact earlier Toolkit task definitions migrate in place while owner stops and hand edits remain protected.
+
+### Fixed
+
+- Killed, failed or unreadable shard status reads remain visibly deferred for retry. Each status attempt has a complete busy-computer budget, a killed retry keeps the first failure, and checkout waiters allow the holder to finish within the shared task deadline.
+- Lock release failures retain their summary, deferred shards retain skip history until work resumes, and failed catch-up notes name the repository and task.
+- Printed task commands preserve native Linux paths, including removal recovery hints; Windows command paths retain their existing form.
+- Scheduled jobs serialise checkout status refreshes with a short bounded wait and one bounded retry, and failed shard refreshes remain deferred for catch-up.
+- Releasing a store lock starts eligible deferred jobs from other local repositories sharing that store. Deferrals retain their first time and count, show their age without hiding sweep failures or sign-out, and still raise the two-hour warning. Catch-up saves failed-start notes and matches repository names without case sensitivity.
+- The governance hold allows the managed checkout's exact default-folder commands for independent footer tasks while retaining holds on governed tasks and unrelated commands.
+- A first programme sweep without parent state skips with plain instructions for the appointed controller to initialise it in the private evidence store.
+- Jobs that find another job holding the programme lock record a visible deferred result and retry, and a deferred weekly shard run is started by the next hourly sweep.
+- The apply and remove commands the planner prints use the literal managed path, so the governance hold allows them.
+- Scheduled jobs refresh the governance binding before choosing the lock and effects, so a stale cache no longer skips a sweep.
+- Computer ownership uses a stable saved id instead of the host name, so renaming the computer keeps its jobs, and any other-owner state shows on the session line with a recovery step that exists.
+- The setup reason shows once, a broken task policy module no longer refuses every shell call, and a lock file error records a failed result.
+
 ## 3.51.0
 
 ### Safety

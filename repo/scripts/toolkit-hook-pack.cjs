@@ -148,7 +148,8 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'managed_tasks'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.managed_tasks !== undefined && (fixture.managed_tasks !== true || !fixture.repo)) errors.push('fixture.managed_tasks needs a repository and true');
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
@@ -376,10 +377,11 @@ class Fixture {
   constructor(dir, spec = {}) {
     this.dir = dir;
     this.home = path.join(dir, 'home');
-    this.work = path.join(dir, 'work');
+    this.work = path.join(spec.managed_tasks ? this.home : dir, 'work');
     this.trees = path.join(dir, 'trees');
     this.transcript = path.join(this.home, '.claude', 'projects', 'hook-pack', '11111111-1111-4111-8111-111111111111.jsonl');
     for (const folder of [this.home, this.work, path.dirname(this.transcript)]) fs.mkdirSync(folder, { recursive: true });
+    fs.mkdirSync(path.join(this.home, '.powershell-cache'), { recursive: true });
     fs.writeFileSync(path.join(this.home, '.gitconfig'), '[user]\n\tname = Fixture Author\n\temail = fixture@example.test\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n[core]\n\tfsmonitor = false\n');
     this.env = hookEnvironment(this.home);
     if (spec.closure_cloud) this.env.CLAUDE_CODE_REMOTE = 'true';
@@ -388,6 +390,16 @@ class Fixture {
     // A session a Toolkit launcher started for a gate carries its role.
     if (spec.gate_role) this.env.TOOLKIT_GATE_ROLE = spec.gate_role;
     if (spec.repo) this.#repo(spec.repo);
+    if (spec.managed_tasks) {
+      const stateFile = path.join(this.home, '.ai-agent-toolkit', 'current', 'state.json');
+      fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+      fs.writeFileSync(stateFile, JSON.stringify({ repo_path: this.work }));
+      for (const name of ['toolkit-windows-tasks.cjs', 'toolkit-tasks.cjs']) {
+        const file = path.join(this.work, 'repo', 'scripts', name);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, '// Isolated managed task command fixture. Never executed.\n');
+      }
+    }
     if (spec.repo?.legacy_answer) {
       const file = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -618,14 +630,21 @@ cp.spawnSync = function(file, args, options) {
   }
 
   // Writes the fixture's paths into a payload or transcript value.
-  expand(value) {
+  expand(value, pluginRoot) {
     if (typeof value === 'string') {
+      if (value.includes('{planner_apply}') || value.includes('{planner_remove}')) {
+        // Use the tested plugin's real output, including in --against runs. A literal
+        // hand-written command cannot detect a planner/hold disagreement.
+        const command = require(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-windows-tasks.cjs'))
+          .applyCommand({ root: this.work }, { toolkitRoot: this.work });
+        value = value.replaceAll('{planner_apply}', command).replaceAll('{planner_remove}', command.replace(' apply ', ' remove '));
+      }
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)
         .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential())
         .replaceAll('{head7}', (this.head || '').slice(0,7)).replaceAll('{headUpper}', (this.head || '').toUpperCase()).replaceAll('{head}', this.head || '').replaceAll('{now}', this.#now().toISOString());
     }
-    if (Array.isArray(value)) return value.map(item => this.expand(item));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.expand(item)]));
+    if (Array.isArray(value)) return value.map(item => this.expand(item, pluginRoot));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.expand(item, pluginRoot)]));
     return value;
   }
 
@@ -653,12 +672,15 @@ cp.spawnSync = function(file, args, options) {
 function hookEnvironment(home) {
   const env = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (/^(?:TOOLKIT_|CLAUDE|CODEX|ANTHROPIC|OPENAI|GIT_|GH_|GITHUB_|CI$|RUNNER_|NODE_OPTIONS$)/i.test(key)) continue;
+    if (/^(?:TOOLKIT_|CLAUDE|CODEX|ANTHROPIC|OPENAI|GIT_|GH_|GITHUB_|CI$|RUNNER_|NODE_OPTIONS$|PSModuleAnalysisCachePath$)/i.test(key)) continue;
     env[key] = value;
   }
   return {
     ...env, TOOLKIT_GOVERNANCE_OFFLINE: '1', HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
     CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex'),
+    // Keep PowerShell's own module cache out of work/Microsoft on Windows.
+    // The fixture-write guard still checks every file in the working tree.
+    PSModuleAnalysisCachePath: path.join(home, '.powershell-cache', 'ModuleAnalysisCache'),
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(home, '.gitconfig'), GIT_TERMINAL_PROMPT: '0',
   };
 }
@@ -718,7 +740,7 @@ async function runOnHost(row, host, fixture, roots) {
   }
   const pluginRoot = roots.forFault(row.fault);
   const event = row.event || 'PreToolUse';
-  const payload = { session_id: 'hook-pack', transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload) };
+  const payload = { session_id: 'hook-pack', transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload, roots.base) };
   const input = row.fault?.type === 'bad-json' ? '{broken' : row.fault?.type === 'empty-input' ? '{}' : JSON.stringify(payload);
   const hooks = selectHooks(hostHooks(host, roots.base), event, event === 'SessionStart' ? payload.source : payload.tool_name);
   const shell = shellFor(host);
@@ -739,7 +761,9 @@ async function runOnHost(row, host, fixture, roots) {
   }
   const problems = [];
   if (row.postcondition === 'no-local-decision-write' && (fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, 'utf8') : null) !== oldDecision) problems.push('a local governance decision was written');
-  if (JSON.stringify(fixture.snapshot()) !== JSON.stringify(before)) problems.push('a fixture file changed');
+  const after = fixture.snapshot();
+  const changedFiles = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(file => before[file] !== after[file]);
+  if (changedFiles.length) problems.push(`a fixture file changed: ${changedFiles.join(', ')}`);
   if (!hooks.length) problems.push(`no ${host} hook matches this call`);
   const deny = decisions.find(entry => entry.decision === 'deny');
   return { decision: deny ? 'deny' : 'allow', reason: deny?.reason, text: deny ? deny.text : decisions.find(entry => entry.failed)?.text, context: contexts.join('\n'), failed: decisions.filter(entry => entry.failed).map(entry => entry.failed), problems };
