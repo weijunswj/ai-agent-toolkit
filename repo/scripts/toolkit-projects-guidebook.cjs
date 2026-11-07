@@ -20,6 +20,8 @@ const path = require('node:path');
 const { ProjectsInstructions } = require('./toolkit-projects-instructions.cjs');
 
 const SKILL_DIR = 'repo/contracts/claude-projects/web-controller-projects';
+const TAKEOVER_SOURCE = 'repo/docs/agent-playbooks/controller-takeover.md';
+const TAKEOVER_FILE = 'takeover.md';
 const BLOCK_FILE = 'instructions-block.md';
 const VERSION_FILE = 'VERSION';
 const SKILL_VERSION = /^Version: (\d{4}-\d{2}-\d{2}\.\d+)$/m;
@@ -65,7 +67,8 @@ class Guidebook {
     const dir = path.join(this.root, SKILL_DIR);
     const files = new Map(listFiles(dir).map(rel => [rel, fs.readFileSync(path.join(dir, rel))]));
     const match = SKILL_VERSION.exec((files.get('SKILL.md') || '').toString('utf8'));
-    if (!match || files.has(BLOCK_FILE) || files.has(VERSION_FILE)) throw new GuidebookError('GUIDEBOOK_SOURCE');
+    if (!match || files.has(BLOCK_FILE) || files.has(VERSION_FILE) || files.has(TAKEOVER_FILE)) throw new GuidebookError('GUIDEBOOK_SOURCE');
+    files.set(TAKEOVER_FILE, fs.readFileSync(path.join(this.root, TAKEOVER_SOURCE)));
     const instructions = new ProjectsInstructions({ root: this.root });
     const block = `${instructions.render()}\n`;
     return { files, block, version: match[1], toolkit: instructions.expectedBlock().version };
