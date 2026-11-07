@@ -297,16 +297,18 @@ function hookGapText({ off, notReviewed, changed = [], unverified = [], total })
 // Pure comparison of the installed hook set with Codex's current trust answer. Other plugins and
 // project hooks do not affect Toolkit's launch; malformed or duplicate Toolkit entries cannot pass.
 function codexHookListGaps(result, hooks) {
-  if (!Array.isArray(result?.data) || result.data.length !== 1 || !Array.isArray(result.data[0]?.hooks)) return { unreadable: true };
+  if (!Array.isArray(result?.data) || result.data.length !== 1) return { unreadable: true, field: 'data' };
+  if (!Array.isArray(result.data[0]?.hooks)) return { unreadable: true, field: 'hooks' };
   const expected = new Map(hooks.entries.map(hook => [hook.key, hook]));
   const seen = new Set(); const untrusted = []; let extra = 0;
   for (const entry of result.data[0].hooks) {
-    if (!entry || typeof entry.key !== 'string') return { unreadable: true };
+    if (!entry || typeof entry.key !== 'string') return { unreadable: true, field: 'key' };
     if (!entry.key.startsWith(plugin.pluginId() + ':') && entry.pluginId !== plugin.pluginId()) continue;
-    if (seen.has(entry.key)) return { unreadable: true };
+    if (seen.has(entry.key)) return { unreadable: true, field: 'key (duplicate)' };
     seen.add(entry.key);
     const hash = typeof entry.currentHash === 'string' && /^(sha256:[a-f0-9]{64})\/(sha256:[a-f0-9]{64})$/.exec(entry.currentHash);
-    if (!['trusted', 'untrusted', 'modified', 'managed'].includes(entry.trustStatus) || !hash) return { unreadable: true };
+    if (!['trusted', 'untrusted', 'modified', 'managed'].includes(entry.trustStatus)) return { unreadable: true, field: 'trustStatus' };
+    if (!hash) return { unreadable: true, field: 'currentHash' };
     const hook = expected.get(entry.key);
     if (!hook) { extra += 1; continue; }
     if (entry.enabled !== true || entry.trustStatus !== 'trusted' || hash[1] !== hook.trustedHash ||
@@ -315,21 +317,25 @@ function codexHookListGaps(result, hooks) {
   return { unreadable: false, missing: hooks.entries.filter(hook => !seen.has(hook.key)).map(hook => hook.name), untrusted, extra };
 }
 
-async function readCodexHookList(codexHome, { explicit = '', timeoutMs = CHECK_TIMEOUT_MS } = {}) {
-  const { appServerCandidates, runAppServerRequest } = require('./codex-app-server.cjs');
-  for (const command of appServerCandidates(explicit, codexHome)) {
-    try {
-      return await runAppServerRequest(command, codexHome, { method: 'hooks/list', params: { cwds: [codexHome] } },
-        { cwd: codexHome, timeoutMs, closeTimeoutMs: 1000, forceExitTimeoutMs: 1000 });
-    } catch (error) {
-      if (error.code === 'ENOENT') continue;
-      throw error;
-    }
-  }
-  throw new Error('Codex app-server is not available');
+// Support-safe: fixed words, a Node error code or an exit number; never Codex's own output.
+function holdReason(error) {
+  if (error?.code === 'ENOENT') return 'not found';
+  if (typeof error?.code === 'string' && /^E[A-Z]+$/.test(error.code)) return `start or pipe error ${error.code}`;
+  if (error?.reason === 'timeout') return 'timeout';
+  if (error?.reason === 'exit') return `exit code ${Number.isInteger(error.exitCode) ? error.exitCode : 'none'}`;
+  if (error?.reason === 'error-reply') return `error reply to ${error.step === 'initialize' ? 'initialize' : 'hooks/list'}`;
+  if (error?.reason === 'no-result') return 'field result';
+  return 'unexpected error';
+}
+const unreadableHold = reason => `Codex gate launch held. Codex did not give a readable answer about its Toolkit hooks (${reason}), so their state is unverified. Check that the named Codex is installed and not updating, then rerun the check; if it still holds, run \`setup toolkit\`.`;
+
+async function readCodexHookList(codexHome, codex, timeoutMs) {
+  const { runAppServerRequest } = require('./codex-app-server.cjs');
+  return runAppServerRequest(codex, codexHome, { method: 'hooks/list', params: { cwds: [codexHome] } },
+    { cwd: codexHome, timeoutMs, closeTimeoutMs: 1000, forceExitTimeoutMs: 1000, direct: true, settleWithoutExit: true });
 }
 
-async function launchCheck({ codexHome = plugin.defaultCodexHome(), explicit = '', timeoutMs = CHECK_TIMEOUT_MS } = {}) {
+async function launchCheck({ codexHome = plugin.defaultCodexHome(), codex = '', timeoutMs = CHECK_TIMEOUT_MS } = {}) {
   const state = new CodexToolkitInstall({ codexHome }).read();
   const summary = describeHookStates(state.hooks || { status: 'unreadable', entries: [] });
   const on = state.config === 'read' && state.plugin === 'on' && state.versions?.length === 1 && summary.status === 'on';
@@ -339,10 +345,16 @@ async function launchCheck({ codexHome = plugin.defaultCodexHome(), explicit = '
       summary.status !== 'on' ? summary.message : ''].filter(Boolean).join(' ');
     return { code: 1, line: `Codex gate launch held. ${recovery}` };
   }
+  if (!codex) return { code: 1, line: 'Codex gate launch held. No Codex was named, so Toolkit cannot ask the Codex that will run the gate. Rerun the check with --codex and the full path of the Codex program the gate will run, or set CODEX_TOOLKIT_CODEX_CLI to that path.' };
+  let file = false;
+  try { file = fs.statSync(codex).isFile(); } catch { file = false; }
+  const naming = !path.isAbsolute(codex) ? 'not a full path' : file ? '' : 'not found';
+  const nameHold = reason => ({ code: 1, line: `Codex gate launch held. Toolkit cannot ask the named Codex (${reason}). Name the full path of the codex program the gate will run, or on Windows its npm codex.cmd, with --codex or CODEX_TOOLKIT_CODEX_CLI, then rerun the check.` });
+  if (naming) return nameHold(naming);
   let gaps;
-  try { gaps = codexHookListGaps(await readCodexHookList(codexHome, { explicit, timeoutMs }), state.hooks); }
-  catch { gaps = { unreadable: true }; }
-  if (gaps.unreadable) return { code: 1, line: 'Codex gate launch held. Codex did not give a readable answer about its Toolkit hooks, so their state is unverified. Check that Codex is installed and not updating, then rerun the check; if it still holds, run `setup toolkit`.' };
+  try { gaps = codexHookListGaps(await readCodexHookList(codexHome, codex, timeoutMs), state.hooks); }
+  catch (error) { return error?.reason === 'start' ? nameHold('cannot be started directly') : { code: 1, line: unreadableHold(holdReason(error)) }; }
+  if (gaps.unreadable) return { code: 1, line: unreadableHold(`field ${gaps.field}`) };
   if (gaps.missing.length) return { code: 1, line: `Codex gate launch held. Codex does not list these Toolkit hooks: ${joinNames(gaps.missing)}. Run \`setup toolkit\`, then review \`/hooks\` in Codex and rerun the check.` };
   if (gaps.untrusted.length) return { code: 1, line: `Codex gate launch held. Codex does not trust these Toolkit hooks at the installed version: ${joinNames(gaps.untrusted)}. Open \`/hooks\` in Codex, review and approve the Toolkit hooks, and rerun the check. If it still holds, quit and reopen Codex, approve them again and rerun the check.` };
   if (gaps.extra) return { code: 1, line: `Codex gate launch held. Codex lists ${gaps.extra} Toolkit hook(s) the installed hooks file does not name. Run \`setup toolkit\` to repair the installed plugin, then review \`/hooks\` and rerun the check.` };
@@ -365,11 +377,14 @@ module.exports = Object.freeze({
 
 // Named failure: a gate launched after a plugin update with Codex's guards silently skipped.
 if (require.main === module) {
-  if (process.argv.length !== 3 || process.argv[2] !== '--check') {
-    console.error('Usage: node toolkit-codex-install-state.cjs --check');
+  const args = process.argv.slice(2);
+  const named = args.length === 1 && args[0] === '--check' ? process.env.CODEX_TOOLKIT_CODEX_CLI || ''
+    : args.length === 3 && args[0] === '--check' && args[1] === '--codex' && args[2] ? args[2] : null;
+  if (named === null) {
+    console.error('Usage: node toolkit-codex-install-state.cjs --check [--codex <full path of the Codex program the gate runs>]');
     process.exitCode = 2;
   } else {
-    launchCheck().then(({ code, line }) => { console.log(line); process.exitCode = code; }, () => {
+    launchCheck({ codex: named }).then(({ code, line }) => { console.log(line); process.exitCode = code; }, () => {
       console.log('Codex gate launch held. The hook check failed unexpectedly, so the Toolkit hook state is unverified. Run `setup toolkit`, then rerun the check.');
       process.exitCode = 1;
     });

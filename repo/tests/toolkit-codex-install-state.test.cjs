@@ -419,6 +419,7 @@ test('AT6: --check holds Codex gate launches unless the files and Codex agree ev
   assert.ok(fs.readFileSync(path.join(repoRoot, 'repo/CONTROLLER.md'), 'utf8').includes('[Codex hold](docs/HOST-CONTRACT.md)'));
   const contract = fs.readFileSync(path.join(repoRoot, 'repo/docs/HOST-CONTRACT.md'), 'utf8');
   assert.match(contract, /toolkit-codex-install-state\.cjs[\s\S]*?--check/);
+  assert.ok(contract.includes('--check --codex "<codex>"'));
   assert.match(contract, /holds the launch/);
   assert.ok(contract.includes('**Codex hold.**'));
   for (const [label, options, changed, expected] of [
@@ -462,15 +463,17 @@ test('AT15: a launch check passes only on exit 0 with exactly the line All N Too
 
 test('AT16: --check holds unless Codex reports every Toolkit hook trusted at the recorded hashes', async t => {
   const cases = [
-    ['H1 agreed', null], ['H2 unavailable', null, 'unavailable'],
-    ...['exit', 'error-reply', 'no-result'].map(mode => [`H4 ${mode}`, null, mode]),
-    ['H5 data not a list', r => { r.data = {}; }], ['H5 two entries', r => { r.data.push({ hooks: [] }); }],
-    ['H5 hooks not a list', r => { r.data[0].hooks = {}; }], ['H5 no key', (r, h) => { delete h[0].key; }],
-    ['H5 duplicate Toolkit key', (r, h) => { h.push({ ...h[0] }); }],
-    ['H5 unknown trust', (r, h) => { h[0].trustStatus = 'weird'; }],
-    ['H5 bad current hash', (r, h) => { h[0].currentHash = 'abc'; }],
-    ['H5 non-string hash', (r, h) => { h[0].currentHash = [h[0].currentHash]; }],
-    ['H5 upper-case hash', (r, h) => { h[0].currentHash = h[0].currentHash.toUpperCase(); }],
+    ['H1 agreed', null], ['H2 unavailable', null, 'unavailable', '(not found)'],
+    ['H4 exit', null, 'exit', '(exit code 3)'],
+    ['H4 error-reply', null, 'error-reply', '(error reply to hooks/list)'],
+    ['H4 no-result', null, 'no-result', '(field result)'],
+    ['H5 data not a list', r => { r.data = {}; }, null, '(field data)'], ['H5 two entries', r => { r.data.push({ hooks: [] }); }, null, '(field data)'],
+    ['H5 hooks not a list', r => { r.data[0].hooks = {}; }, null, '(field hooks)'], ['H5 no key', (r, h) => { delete h[0].key; }, null, '(field key)'],
+    ['H5 duplicate Toolkit key', (r, h) => { h.push({ ...h[0] }); }, null, '(field key (duplicate))'],
+    ['H5 unknown trust', (r, h) => { h[0].trustStatus = 'weird'; }, null, '(field trustStatus)'],
+    ['H5 bad current hash', (r, h) => { h[0].currentHash = 'abc'; }, null, '(field currentHash)'],
+    ['H5 non-string hash', (r, h) => { h[0].currentHash = [h[0].currentHash]; }, null, '(field currentHash)'],
+    ['H5 upper-case hash', (r, h) => { h[0].currentHash = h[0].currentHash.toUpperCase(); }, null, '(field currentHash)'],
     ['H6 missing', (r, h) => { h.pop(); }, null, /does not list.*Checkpoint at stop/],
     ...['untrusted', 'trusted'].map(trustStatus => [`H7 extra ${trustStatus}`, (r, h) => {
       h.push({ ...h[0], key: `${ID}:.codex-plugin/hooks/hooks.json:pre_tool_use:2:0`, trustStatus });
@@ -491,10 +494,12 @@ test('AT16: --check holds unless Codex reports every Toolkit hook trusted at the
     assert.equal(r.status, on ? 0 : 1, `${label}: ${r.stdout} ${r.stderr}`);
     assert.equal(passed(r), on, label);
     assert.equal(r.stdout.trim().split(/\r?\n/).length, 1);
+    assert.doesNotMatch(r.stdout, /hooks\/list failed/);
     if (!on) {
       assert.match(r.stdout, /^Codex gate launch held\./);
       assert.doesNotMatch(r.stdout, /Toolkit hooks are on in Codex\./);
-      if (message) assert.match(r.stdout, message);
+      if (typeof message === 'string') assert.ok(r.stdout.includes(message), r.stdout);
+      else if (message) assert.match(r.stdout, message);
     }
     assert.ok(fs.readFileSync(config).equals(before), label);
   });
@@ -506,17 +511,18 @@ test('AT16b: an answer that never comes or cannot be read holds within the time 
     const f = fixture(t);
     write(path.join(f.codexHome, 'fake-hooks-list.json'), JSON.stringify({ mode }));
     const started = Date.now();
-    const r = await launchCheck({ codexHome: f.codexHome, explicit: FAKE, timeoutMs: 500 });
-    assert.equal(r.code, 1);
-    assert.match(r.line, /unverified/);
-    assert.ok(Date.now() - started < 10000, mode);
-    const pid = Number(calls(f).find(line => line.startsWith('pid ')).slice(4));
     try {
+      const r = await launchCheck({ codexHome: f.codexHome, codex: FAKE, timeoutMs: 500 });
+      assert.equal(r.code, 1);
+      assert.match(r.line, /unverified/);
+      assert.match(r.line, /\(timeout\)/);
+      assert.ok(Date.now() - started < 10000, mode);
+      const pid = Number(calls(f).find(line => line.startsWith('pid ')).slice(4));
       assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `${mode}: fake app-server pid ${pid} must be gone`);
     } finally {
-      // A failed production shutdown must still fail this assertion, while the test cleans up its
-      // own fixture process (which has no children) before removing that process's working folder.
-      try { process.kill(pid); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      // Also clean up when a new reason assertion fails on the old client in the revert proof.
+      const pid = Number(calls(f).find(line => line.startsWith('pid '))?.slice(4));
+      if (pid) try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
   });
 });
