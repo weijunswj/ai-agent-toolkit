@@ -7,6 +7,10 @@
 - Report Codex hooks changed since approval or unverified instead of saying they are on, and provide a read-only hook check that holds gate launches until approval is current.
 - Refuse unreadable issue-close calls and PowerShell quoting that hides a GitHub write under Codex Bash, while preserving ordinary reads and quoted examples.
 - Correct code-mode hook guidance and require smoke tests to prove a guard refusal without editing the installed plugin folder.
+- The Codex hook check now also asks Codex which Toolkit hooks it trusts, and holds a gate launch unless Codex reports every hook trusted at the hashes Toolkit recorded.
+- A gate launch check passes only on exit 0 with the line saying all Toolkit hooks are on; no output, as from an older installed copy, holds the launch.
+- The fallback checks used when the Toolkit hook cannot start or cannot read a call now catch issue close and pull request writes in any gh spelling.
+- Clearer refusal and recovery wording for ambiguous shell quoting, a plugin folder Toolkit cannot fingerprint, and a missing hooks file.
 
 ## 3.52.0
 
