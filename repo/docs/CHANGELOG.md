@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.54.0
+## Unreleased
 
 ### Added
 
@@ -25,6 +25,13 @@
 - Uncertain GitHub authentication reads defer weekly work visibly instead of treating a failed read as confirmed sign-out.
 - Refresh lock takeovers log a plain line, and retry notes survive an exhausted task budget.
 - The refresh-wait changelog wording now states the actual bounded wait.
+
+## 3.53.1
+
+### Fixed
+
+- Keep Toolkit's plain-text settings in `.github/plain-text.json` so direct runs and the required validation check use the same rules and existing empty baseline.
+- Recognise Toolkit's source wrapper during governance checks and tell rules refreshes to leave the plain-text installer unused in a Toolkit source checkout.
 
 ## 3.53.0
 
