@@ -30,7 +30,7 @@ function saveApproval(home, answer, version, now = new Date()) {
 }
 const approvalQuestion = () => ({ id: 'scheduled-task-approval', kind: 'approval', question_ui: 'host',
   title: 'May Toolkit update your scheduled tasks on this computer?',
-  detail: 'Create, update and remove the listed fixed laptop tasks across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.',
+  detail: 'Create, update and remove the listed fixed scheduled tasks on this computer across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.',
   options: ['standing', 'no'], kinds: [...KINDS] });
 function discoverCheckouts(folder) {
   if (!fs.existsSync(folder)) return [];

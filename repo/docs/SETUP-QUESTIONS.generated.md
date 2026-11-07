@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 11 questions across 5 sections
 
-Bank reference: DFVP-VH1B-CN8B-1QRD
+Bank reference: Z0DW-200Z-WX78-BAWF
 
 Quick index
 
@@ -307,7 +307,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ### 5.1 May Toolkit update scheduled tasks on this computer?
 
-**What this controls:** Create, update and remove the listed fixed laptop tasks across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.
+**What this controls:** Create, update and remove the listed fixed scheduled tasks on this computer across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.
 
 **Current:** No answer saved
 
@@ -343,7 +343,7 @@ Setup run with `--host claude-code` shows this bank instead, for the same repres
 
 Toolkit setup choices - 12 questions across 5 sections
 
-Bank reference: RPGD-XZQA-0KHH-ES1J
+Bank reference: SMF9-D88F-6FAK-HGT4
 
 Quick index
 
@@ -655,7 +655,7 @@ Quick index
 
 ### 5.1 May Toolkit update scheduled tasks on this computer?
 
-**What this controls:** Create, update and remove the listed fixed laptop tasks across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.
+**What this controls:** Create, update and remove the listed fixed scheduled tasks on this computer across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.
 
 **Current:** No answer saved
 

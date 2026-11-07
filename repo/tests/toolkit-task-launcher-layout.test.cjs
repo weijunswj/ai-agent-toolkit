@@ -11,7 +11,9 @@ function definition(t) {
 }
 test('missing-checkout bug: the registered executable payload survives removal of the managed checkout', t => {
   const task = definition(t), quotes = [...task.arguments.matchAll(/"([^"]+)"/g)].map(match => match[1]), payload = quotes[1];
-  assert.ok(path.win32.relative(s.TOOLKIT_ROOT, payload).startsWith('..'), 'the bootstrap payload must live outside the removable Toolkit checkout');
+  // A relative path that climbs out, or an absolute one (another drive or root), is outside the checkout.
+  const relative = path.win32.relative(s.TOOLKIT_ROOT, payload);
+  assert.ok(relative.startsWith('..') || path.win32.isAbsolute(relative), 'the bootstrap payload must live outside the removable Toolkit checkout');
 });
 test('missing-checkout bug: Task Scheduler working directory survives removal of the managed checkout', t => {
   const task = definition(t);

@@ -268,8 +268,9 @@ function createGitBackedRealSetupRepo(root) {
       fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8')
     );
   }
-  // Setup's shared task permission resolver loads the binding validator and its local helpers.
-  for (const name of ['programme-state.cjs', 'decision-trace-audit.cjs', 'decision-tags.cjs', 'resolve-executable.cjs']) {
+  // Setup's shared task permission resolver loads the binding validator and its local helpers;
+  // the scheduled-task approval it reads also loads the programme lock.
+  for (const name of ['programme-state.cjs', 'programme-lock.cjs', 'decision-trace-audit.cjs', 'decision-tags.cjs', 'resolve-executable.cjs']) {
     const rel = path.join('skills', 'github-program-reconciler', 'scripts', name);
     writeFile(path.join(result.setupRepo, rel), fs.readFileSync(path.join(repoRoot, rel), 'utf8'));
   }

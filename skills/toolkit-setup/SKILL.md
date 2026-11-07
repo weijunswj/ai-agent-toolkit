@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit update scheduled task` for fixed laptop tasks. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
+description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit update scheduled task` for fixed scheduled tasks on this computer. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
 ---
 
 
