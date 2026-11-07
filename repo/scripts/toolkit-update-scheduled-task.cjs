@@ -91,10 +91,15 @@ class TaskUpdater {
     const computer_task = first ? this.healthPlan(first.desired) : null;
     // Read the same validated ownership record as apply, without questions or writes.
     let ownership = { remove: [] };
-    try {
-      const target = this.health.store();
-      if (target) ownership = this.ownership(target, { plans }, { readOnly: true });
-    } catch (error) { for (const row of plans) { row.held = true; row.reason = `Computer ownership could not be verified (${tasks.safeText(error.message)}); inspect the evidence store, then retry.`; } }
+    const hold = (rows, error) => { for (const row of rows) { row.held = true; row.reason = `Computer ownership could not be verified (${tasks.safeText(error.message)}); inspect the evidence store, then retry.`; } };
+    let targets = [];
+    try { targets = this.health.stores(); } catch (error) { hold(plans, error); }
+    for (const target of targets) {
+      // Each store answers only for the repositories whose own binding names it.
+      const rows = plans.filter(row => row.desired && target.repositories.includes(row.desired.repository.toLowerCase()));
+      if (!rows.length) continue;
+      try { ownership.remove.push(...this.ownership(target, { plans: rows }, { readOnly: true }).remove); } catch (error) { hold(rows, error); }
+    }
     for (const row of plans) if (row.desired && ownership.remove.includes(row.desired.repository.toLowerCase())) {
       row.plan = { ...row.plan, items: entries.filter(e => e.host === 'windows' && e.job !== 'task-health' && !e.adopted && !e.stopped_by_owner && e.repository?.toLowerCase() === row.desired.repository.toLowerCase()).map(entry => ({ definition: { ...entry }, action: 'remove' })) };
     }
@@ -264,14 +269,26 @@ class TaskUpdater {
     const approval = this.approval(); if (!approval.allowed) return { ...local, ...(approval.pending ? { questions: [approval.pending] } : { declined: true }) };
     tasks.computerIdentity(this.home, { create: true });
     local.computer = health.computerLabel(this.home);
-    let ownership = { remove: [] };
+    const ownership = { remove: [], questions: [], held: [] };
     const results = [];
-    try { const target = this.health.store(); if (target) ownership = this.ownership(target, local); }
-    catch (error) {
-      ownership = { remove: [], held: local.plans.filter(row => row.desired).map(row => row.desired.repository.toLowerCase()) };
-      for (const repository of ownership.held) results.push({ repository, refused: true, reason: tasks.safeText(error.message) });
+    const holdAll = (rows, error) => {
+      for (const repository of rows.filter(row => row.desired).map(row => row.desired.repository.toLowerCase())) {
+        if (ownership.held.includes(repository)) continue;
+        ownership.held.push(repository); results.push({ repository, refused: true, reason: tasks.safeText(error.message) });
+      }
+    };
+    let targets = [];
+    try { targets = this.health.stores(); } catch (error) { holdAll(local.plans, error); }
+    for (const target of targets) {
+      // Ownership for a repository is read and written only in that repository's own store.
+      const rows = local.plans.filter(row => row.desired && target.repositories.includes(row.desired.repository.toLowerCase()));
+      if (!rows.length) continue;
+      try {
+        const read = this.ownership(target, { plans: rows });
+        ownership.remove.push(...read.remove); ownership.questions.push(...read.questions); ownership.held.push(...read.held);
+      } catch (error) { holdAll(rows, error); }
     }
-    const questions = [...(ownership.questions || [])];
+    const questions = [...ownership.questions];
     // A native write failure (for example a denied registration) stops every later write in this run,
     // including TASK HEALTH; refusals, held rows and pending questions still let later repositories continue.
     const writeFailed = result => Array.isArray(result?.items) && result.items.some(item => item.done === false);

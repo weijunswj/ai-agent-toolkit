@@ -85,7 +85,7 @@ test('M8: read-only plan lists stored losing-owner removals without writing', t 
   const w = world(t), store = memoryStore(); approve(w);
   const other = 'computer-0123456789ab';
   store.put('task-health/owners.json', { schema: 'toolkit.task-owners.v1', repos: { 'example/widget': { computer: other, answer_ref: 'host/choice' } } }, null);
-  w.owner.store = () => ({ store, key: 'example/evidence' });
+  w.owner.stores = () => [{ store, key: 'example/evidence', repositories: ['example/widget'] }];
   const before = store.writes.length, result = w.updater().run();
   assert.ok(result.changes.some(r => r.repository === 'example/widget' && r.action === 'remove'));
   assert.equal(store.writes.length, before);
@@ -131,7 +131,7 @@ test('M4: concurrent third misses persist both independent disabled snapshots', 
 });
 test('M7: health waits within its deadline for the store and serialises status under the refresh lock', t => {
   const w = world(t), store = memoryStore(); let held = false, called = false;
-  w.owner.store = () => ({ store, key: 'example/evidence' });
+  w.owner.stores = () => [{ store, key: 'example/evidence', repositories: ['example/widget'] }];
   w.owner.takeLock = (key, options) => { assert.equal(key, 'example/evidence'); assert.ok(options.waitMs > 1000 && options.waitMs <= 29 * 60000); return { release() {} }; };
   assert.equal(w.owner.run().shared, true);
   assert.equal(typeof health.freshCheckout, 'function');
@@ -151,7 +151,7 @@ test('Low 14: unreadable discovery folder is reported without hiding readable ne
 test('M2: a losing computer asks before repairing an edited transfer, then removes only that repository', t => {
   const w = world(t), store = memoryStore(); approve(w);
   store.put('task-health/owners.json', { schema: 'toolkit.task-owners.v1', repos: { 'example/widget': { computer: 'computer-0123456789ab', answer_ref: 'host/other-computer' } } }, null);
-  w.owner.store = () => ({ store, key: 'example/evidence' });
+  w.owner.stores = () => [{ store, key: 'example/evidence', repositories: ['example/widget'] }];
   const live = w.scheduler.folders.get(w.entry.folder)[0]; live.arguments += ' hand-edit'; live.actions[0].arguments += ' hand-edit';
   let asked = 0;
   const result = w.updater({ question: q => { asked++; assert.equal(q.kind, 'task-choice'); return { outcome: 'replace', observation: q.observation, answer_ref: 'host/replace-transfer' }; } }).run({ apply: true });

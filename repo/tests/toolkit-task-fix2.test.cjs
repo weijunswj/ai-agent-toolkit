@@ -72,7 +72,7 @@ test('Smoke: a computer without a saved identity is not held by the store owners
   fs.rmSync(path.join(tasks.userStateDir(w.home), 'task-computer.json'), { force: true });
   tasks.updateRegistry(w.home, rows => rows.map(({ job_owner, job_owner_label, ...row }) => row));
   assert.equal(tasks.computerIdentity(w.home), null);
-  w.owner.store = () => ({ store, key: 'example/evidence' });
+  w.owner.stores = () => [{ store, key: 'example/evidence', repositories: ['example/widget'] }];
   const plan = w.updater().run();
   assert.ok(plan.plans.every(row => !row.held), JSON.stringify(plan.plans.map(row => row.reason)));
   const applied = w.updater().run({ apply: true });
@@ -84,7 +84,7 @@ test('Smoke: a computer without a saved identity is not held by the store owners
 test('Smoke: an ownership read failure keeps its own reason in the held plan', t => {
   const w = world(t), store = memoryStore(); approve(w);
   store.read = () => { throw new Error('Health store read failed'); };
-  w.owner.store = () => ({ store, key: 'example/evidence' });
+  w.owner.stores = () => [{ store, key: 'example/evidence', repositories: ['example/widget'] }];
   const plan = w.updater().run();
   assert.ok(plan.plans.some(row => row.held && /Health store read failed/.test(row.reason)), JSON.stringify(plan.plans.map(row => row.reason)));
 });
