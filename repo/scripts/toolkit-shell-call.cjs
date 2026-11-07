@@ -28,9 +28,9 @@ const path = require('node:path');
 const SHELL_TOOL_NAMES = Object.freeze(['Bash', 'PowerShell', 'Monitor', 'exec_command', 'shell', 'local_shell']);
 const SHELL_TOOLS = new RegExp(`^(?:${SHELL_TOOL_NAMES.join('|')})$`);
 const UNREADABLE = 'Toolkit could not read this shell command, so it was refused. Retry it; if this repeats, run `setup toolkit`.';
-// The same broad screen the hooks use when a check cannot run: git ... commit or push, gh pr
-// create, edit or merge, gh issue close, and gh ... merge, sync, alias or api.
-const GUARDED = [/\bgit\b[\s\S]*\b(?:commit|push)\b/i, /\bgh\s+pr\s+(?:create|edit|merge)\b/i, /\bgh\s+issue\s+close\b/i, /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i];
+// The same broad screen the launcher uses when a check cannot run (toolkit-codex-helper-hook.ps1):
+// git ... commit or push, gh ... pr ... create, new, edit or merge, gh ... issue ... close, and gh ... merge, sync, alias or api.
+const GUARDED = [/\bgit\b[\s\S]*\b(?:commit|push)\b/i, /\bgh\b[\s\S]*\bpr\b[\s\S]*\b(?:create|new|edit|merge)\b/i, /\bgh\b[\s\S]*\bissue\b[\s\S]*\bclose\b/i, /\bgh\b[\s\S]*\b(?:merge|sync|alias|api)\b/i];
 
 // A shell program at the start of an argument list, and the option that hands it a script.
 const POSIX_SHELL = /^(?:bash|sh|zsh|dash|ksh)$/;
@@ -675,7 +675,7 @@ function closureCommands(input, { host } = {}) {
   if ((context.uncertainShell || context.codexBash) && /\\"/.test(text)) {
     const alternate = executableCommands(text, 0, { ...context, powershell: true });
     const count = list => list.filter(command => command.unreadableGh || guardedGh(ghCommand(command.words))).length;
-    if (count(alternate) > count(commands)) throw new Error('Toolkit cannot resolve the shell quoting around a guarded GitHub write. Run it as its own command with an explicit shell.');
+    if (count(alternate) > count(commands)) throw Object.assign(new Error('The shell quoting around this GitHub write can be read two ways, so it was refused. Run the GitHub write as its own command, without backslash-escaped quotes around it.'), { complete: true });
   }
   return commands;
 }
@@ -703,4 +703,4 @@ function closureWriteCandidate(input, options = {}) {
   });
 }
 
-module.exports = Object.freeze({ SHELLS, SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, MOVES_TARGET, GRAPHQL_OPERATION, connectorTarget, closureCommands, executableCommands, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, closureWriteCandidate, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, quoteWords, shellCommands, shellOf, shellPath, shellReadings });
+module.exports = Object.freeze({ GUARDED_SCREEN: GUARDED, SHELLS, SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, MOVES_TARGET, GRAPHQL_OPERATION, connectorTarget, closureCommands, executableCommands, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, closureWriteCandidate, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, quoteWords, shellCommands, shellOf, shellPath, shellReadings });

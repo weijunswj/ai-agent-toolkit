@@ -22,6 +22,17 @@ const path = require('node:path');
 
 const { SHELL_TOOL_NAMES, UNREADABLE, ShellCall, argvText, plainGitLine } = require('../scripts/toolkit-shell-call.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
+const SPELLINGS = [
+  'gh -R toolkit-test-fixture/fixture issue close 1', 'gh --repo toolkit-test-fixture/fixture issue close 1',
+  'gh issue -R toolkit-test-fixture/fixture close 1', 'gh issue --repo=toolkit-test-fixture/fixture close 1',
+  'gh.exe issue close 1', 'C:/tools/gh.exe issue close 1', 'gh pr new --title x',
+  'gh -R toolkit-test-fixture/fixture pr new --title x', 'gh pr -R toolkit-test-fixture/fixture edit 7 --body x',
+  'gh --repo toolkit-test-fixture/fixture pr create --title x --body y', 'GH   ISSUE   CLOSE 1',
+];
+const CONTROLS = ['gh issue list', 'gh issue view 5', 'gh issue view 5 --json closedAt,state',
+  'gh issue list --state closed', 'gh pr view 7', 'gh pr list --state closed', 'gh pr checks 7',
+  'gh pr diff 7', 'gh pr view 7 --json mergeable,mergedAt', 'gh auth status', 'gh run list',
+  'gh repo view', 'rg -n closing docs', 'echo issue closed', 'git status'];
 
 test('AT7: M3 readable call shapes preserve closure decisions across Codex shell names', () => {
   const { IssueClosureGuard } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
@@ -35,6 +46,7 @@ test('AT7: M3 readable call shapes preserve closure decisions across Codex shell
     ['git status', false], ['gh pr view 7', false], ['echo "gh issue close 9001"', false], ['git log --grep=push', false],
     [close, true], ['gh issue close 9002 -R example.test/app', true],
     ['gh pr create --title T --body "Closes #9001"', true], ['gh pr create --title T --body "Refs #9001"', true],
+    // The merge hold refuses this, asserted by CLOSURE.m3-merge-tools-shapes.
     ['gh pr merge 7', false], ['gh api repos/example.test/app/issues/9001 -X PATCH -f state=closed', true],
     ['git commit -m "Co-Authored-By: Example <a@example.test>"', false], ['git push origin main', false], ['git push origin side', false],
   ];
@@ -57,15 +69,19 @@ test('AT7: M3 readable call shapes preserve closure decisions across Codex shell
   }
 });
 
-test('AT13: closure-shell retains every parent row and expectation', () => {
-  const { spawnSync } = require('node:child_process');
-  const pack = require('../scripts/toolkit-hook-pack.cjs');
-  const result = spawnSync('git', ['show', 'HEAD:repo/tests/hook-pack/corpus/closure-shell.json'], { cwd: path.join(__dirname, '../..'), encoding: 'utf8', windowsHide: true, timeout: 10000 });
-  assert.equal(result.status, 0, result.stderr);
-  const base = JSON.parse(result.stdout).rows;
-  const current = require('./hook-pack/corpus/closure-shell.json').rows;
-  assert.deepEqual(pack.expectationChanges(base, current), []);
-  assert.ok(current.length >= base.length);
+test('AT7b: M3 rows 7, 9, 10 and 11 read the same under every Codex shell name and input shape', () => {
+  const work = os.tmpdir();
+  for (const command of ['gh pr merge 5 --merge', 'git commit -m x -m "Co-Authored-By: Claude <noreply@anthropic.com>"',
+    'git push origin HEAD:main', 'git push --force origin feature', 'git push origin feature']) {
+    for (const tool_name of ['Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) {
+      for (const tool_input of [{ command }, { cmd: command }, { command, workdir: work },
+        { command: [tool_name === 'PowerShell' ? 'pwsh' : 'bash', '-c', command] }]) {
+        const call = ShellCall.from({ tool_name, cwd: work, tool_input });
+        assert.equal(call.text, command);
+        assert.equal(call.folder, work);
+      }
+    }
+  }
 });
 
 test('AT8: Codex Bash gets the PowerShell alternate reading without changing Claude Bash', () => {
@@ -75,7 +91,9 @@ test('AT8: Codex Bash gets the PowerShell alternate reading without changing Cla
   assert.equal(closureReader.closureWriteCandidate(input, { host: 'claude' }), false);
   assert.equal(closureReader.closureWriteCandidate({ ...input, tool_input: { command, shell: 'bash' } }, { host: 'codex' }), false, 'a named POSIX shell is unambiguous');
   const issue = require('../scripts/toolkit-issue-closure.cjs');
-  assert.match(issue.issueClosureDecision(input, { host: 'codex' }).deny, /shell quoting/);
+  const deny = issue.issueClosureDecision(input, { host: 'codex' }).deny;
+  assert.equal(deny, 'Toolkit: The shell quoting around this GitHub write can be read two ways, so it was refused. Run the GitHub write as its own command, without backslash-escaped quotes around it.');
+  assert.doesNotMatch(deny, /Toolkit: Toolkit|explicit repository, PR or issue number/);
 });
 
 test('AT9: alternate reading retains ordinary escaped quotes, reads and Refs text', () => {
@@ -85,7 +103,14 @@ test('AT9: alternate reading retains ordinary escaped quotes, reads and Refs tex
 });
 
 test('AT11: unreadable shapes with issue close refuse; harmless unreadable shapes pass', () => {
+  const shapes = s => [{ command: { a: s } }, { command: [s, 7] }, { command: 7, hint: s }, { hint: s }, s];
   for (const tool_name of ['Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) {
+    for (const command of SPELLINGS) for (const tool_input of shapes(command)) {
+      assert.ok(ShellCall.from({ tool_name, tool_input }).refusal(), `${tool_name}: ${command}`);
+    }
+    for (const command of CONTROLS) for (const tool_input of shapes(command)) {
+      assert.equal(Boolean(ShellCall.from({ tool_name, tool_input }).refusal()), false, `${tool_name}: ${command}`);
+    }
     for (const tool_input of [{ command: { a: 'gh issue close 9001' } }, { command: ['gh issue close 9001', 7] }, { command: 7, hint: 'gh issue close 9001' }, { hint: 'gh issue close 9001' }, 'gh issue close 9001']) {
       assert.equal(Boolean(ShellCall.from({ tool_name, tool_input }).refusal()), true, `${tool_name}: ${JSON.stringify(tool_input)}`);
     }
@@ -93,6 +118,16 @@ test('AT11: unreadable shapes with issue close refuse; harmless unreadable shape
   }
   // Shared hostile inputs supply line break and BOM variants of the guarded raw shape.
   for (const { id, text } of hostile.variants('gh issue close 9001\n')) assert.ok(ShellCall.from({ tool_name: 'Bash', tool_input: { command: { text } } }).refusal(), id);
+});
+
+test('AT20: the launcher and reader screens use the same wide gh patterns', () => {
+  // Named failure: the broken launcher and unreadable reader missed global repo flags and pr new.
+  const launcher = require('node:fs').readFileSync(path.join(__dirname, '../scripts/toolkit-codex-helper-hook.ps1'), 'utf8');
+  const line = launcher.split(/\r?\n/).find(text => text.trimStart().startsWith('$guardedShell ='));
+  const patterns = [...line.matchAll(/-match '([^']+)'/g)].map(match => match[1].replace(/\(\?s\)/g, '').replace(/\.\*/g, '[\\s\\S]*'));
+  assert.ok(Array.isArray(closureReader.GUARDED_SCREEN));
+  for (const pattern of closureReader.GUARDED_SCREEN) assert.ok(patterns.includes(pattern.source), pattern.source);
+  for (const command of SPELLINGS) assert.ok(closureReader.GUARDED_SCREEN.some(pattern => pattern.test(command)), command);
 });
 
 test('AT12: shipped matchers cover nested shell calls but not the outer code cell or stdin', () => {

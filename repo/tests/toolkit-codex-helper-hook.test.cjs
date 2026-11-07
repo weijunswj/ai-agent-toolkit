@@ -381,12 +381,28 @@ function runBrokenWindowsLauncher(t, input, { runtime } = {}) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, pluginRoot };
 }
 
-test('AT10: broken Windows launcher refuses gh issue close with recovery', { skip: process.platform !== 'win32' }, t => {
+test('AT10: broken Windows launcher refuses issue close and pr create, new, edit or merge in any gh spelling, with recovery', { skip: process.platform !== 'win32' }, t => {
   for (const tool_name of ['Bash', 'exec_command', 'shell', 'local_shell', 'PowerShell']) {
     const r = runBrokenWindowsLauncher(t, { tool_name, tool_input: { command: 'gh issue close 9001 -R example.test/app' } });
     assert.equal(r.status, 2, `${tool_name}: ${r.stderr}`);
     assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
     assert.match(r.stderr, /setup toolkit.*repair/);
+  }
+  const spellings = ['gh -R toolkit-test-fixture/fixture issue close 1', 'gh --repo toolkit-test-fixture/fixture issue close 1',
+    'gh issue -R toolkit-test-fixture/fixture close 1', 'gh issue --repo=toolkit-test-fixture/fixture close 1',
+    'gh.exe issue close 1', 'gh pr new --title x', 'gh -R toolkit-test-fixture/fixture pr new --title x',
+    'gh pr -R toolkit-test-fixture/fixture edit 7 --body x'];
+  for (const command of spellings) for (const shape of [command, command.split(' ')]) {
+    const r = runBrokenWindowsLauncher(t, { tool_name: 'Bash', tool_input: { command: shape } });
+    assert.equal(r.status, 2, `${command}: ${r.stderr}`);
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(r.stderr, /setup toolkit.*repair/);
+  }
+  for (const command of ['gh issue list', 'gh issue view 5 --json closedAt,state', 'gh issue list --state closed',
+    'gh pr view 7', 'gh pr list --state closed', 'gh pr checks 7', 'gh pr diff 7', 'gh auth status']) {
+    const r = runBrokenWindowsLauncher(t, { tool_name: 'Bash', tool_input: { command } });
+    assert.equal(r.status, 1, `${command}: ${r.stderr}`);
+    assert.equal(r.stdout, '', command);
   }
 });
 
