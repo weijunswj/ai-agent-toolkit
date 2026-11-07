@@ -11,6 +11,8 @@
 - A gate launch check passes only on exit 0 with the line saying all Toolkit hooks are on; no output, as from an older installed copy, holds the launch.
 - The fallback checks used when the Toolkit hook cannot start or cannot read a call now catch issue close and pull request writes in any gh spelling.
 - Clearer refusal and recovery wording for ambiguous shell quoting, a plugin folder Toolkit cannot fingerprint, and a missing hooks file.
+- The Codex hook check keeps an answer Codex already gave when Codex then does not stop, always ends within about 35 seconds, and names the reason for each hold without repeating Codex's own output.
+- The Codex hook check asks only the Codex program the gate will run, named with `--codex` or `CODEX_TOOLKIT_CODEX_CLI`, starts an npm `codex.cmd` without a shell, and holds when no Codex is named.
 
 ## 3.52.0
 
