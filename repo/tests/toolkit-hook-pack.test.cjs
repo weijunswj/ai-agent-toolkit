@@ -71,7 +71,17 @@ test('closure fixtures are bounded native-state cases and cover both hosts', () 
   const rows = pack.loadCorpus().rows.filter(row => row.id.startsWith('CLOSURE.'));
   assert.ok(rows.length > 75);
   for (const id of ['unreadable-unrelated-parent','missing-guard-write','missing-guard-read','incident-resolved','incident-closed','title','explicit-close','closed-intermediary','rest-close','connector-close','body-file','unavailable','refs-control','closed-tree-control','read-control']) assert.ok(rows.some(row => row.id === `CLOSURE.${id}`));
-  assert.ok(rows.filter(row => !row.fixture?.closure_cloud && !['CLOSURE.codex-shell-broken-helper', 'CLOSURE.slow-read'].includes(row.id) && row.payload.tool_name !== 'Monitor').every(row => row.hosts.includes('claude') && row.hosts.includes('codex')));
+  // Codex-only rows: they pin one guard across Codex's own shell names (exec_command, shell, local_shell)
+  // and Codex call shapes (cmd, workdir, an argv list), which Claude Code never sends; pack steps run
+  // on every listed host, so these cannot list Claude. Claude's Bash forms of the same commands are
+  // both-host rows (merge.json, ATTR.co-author-trailer, ATTR.force-push, PUSH.clean-feature-branch,
+  // PUSH.committed-credential, push.json's default-branch rows, CLOSURE.unreadable-spellings-both-hosts).
+  const CODEX_ONLY = ['CLOSURE.m3-merge-tools-shapes', 'CLOSURE.m3-trailer-tools-shapes', 'CLOSURE.m3-default-push-tools-shapes',
+    'CLOSURE.m3-force-push-tools-shapes', 'CLOSURE.m3-credential-push-tools-shapes', 'CLOSURE.m3-feature-push-tools-shapes',
+    'CLOSURE.unreadable-spellings-codex-tools'];
+  // A stale name must not linger to cover a future row.
+  for (const id of CODEX_ONLY) assert.ok(rows.some(row => row.id === id && row.hosts.join() === 'codex'), id);
+  assert.ok(rows.filter(row => !row.fixture?.closure_cloud && !['CLOSURE.codex-shell-broken-helper', 'CLOSURE.slow-read', ...CODEX_ONLY].includes(row.id) && row.payload.tool_name !== 'Monitor').every(row => row.hosts.includes('claude') && row.hosts.includes('codex')));
 });
 
 test('end to end: verified evidence merges pass both host entry points without real GitHub or user state', async () => {
