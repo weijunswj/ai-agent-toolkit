@@ -47,3 +47,9 @@ Only supplied edit text is checked before an edit. Merge and CI checks retain re
 The supported wrappers are time, nohup, builtin, call, winpty, sudo, doas, nice, timeout, env, xargs, command and exec. Script arguments of POSIX shells, cmd and PowerShell are read, as are Start-Process, saps and start calls with one literal argument string and known options. Other gh argument forms are refused. A command lookup with command -v or -V remains data. These are bounded readers, not shell execution.
 
 Wrapper option forms follow the reader's tables. PowerShell command options concatenate the remaining argument strings; quotation marks needed by that script must be present in those strings. Nested scripts retain outer expansion information, and an unreported shell uses conservative escape handling. Generated files and literal stdin follow one shared reader for PR and merge-message text.
+
+## Real-host smoke and hook approval
+
+A smoke never renames, swaps or edits files inside the installed plugin root. Codex fingerprints the whole bundle, so such edits revoke approval and make an apparent allow result meaningless. Install a candidate through the supported setup path, then let the owner approve its hooks in `/hooks`. Require a positive control refusal in the same fresh chat before counting any ALLOWED result. Record config hashes before and after without recording private config values.
+
+The fixture pack exercises hook processes, not Codex approval or delivery. Nested code-mode shell calls reach the hooks as Bash, including PowerShell commands. The outer JavaScript cell, write_stdin into an already allowed shell and opaque Desktop REPL code remain accepted delivery gaps. Before a Codex gate launches, the installed hook-state `--check` must pass; a changed or unverified bundle holds the launch until the owner reviews it.

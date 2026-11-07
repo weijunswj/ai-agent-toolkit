@@ -2,6 +2,8 @@
 
 One list of tool calls that every hook change must keep deciding the same way: calls that must pass (no false blocks) and calls that must stop (no leaks), including what happens when a hook itself breaks. `repo/scripts/toolkit-hook-pack.cjs` runs them through the hooks exactly as Claude Code and Codex start them: it reads both `hooks.json` files from a temporary copy of the plugin, matches each call against the real matchers, writes the plugin folder into the command and starts every matching hook as its own process with the call on stdin. On Windows the Codex hooks run through the PowerShell launcher setup installs. It then reads the decision the host would act on and checks that no fixture file changed.
 
+The pack starts hooks directly in fixtures. It cannot prove that the installed host trusts the plugin or delivers a real call. Codex bundle changes can revoke hook approval even when this pack is green. Real-host smoke requires a positive control refusal in the same chat, without editing the plugin root.
+
 ## Running it
 
 - `node repo/scripts/toolkit-hook-pack.cjs run`: every row on this computer's system. Add `--suite <kind>`, `--family <file name>`, `--rows <id,id>`, `--host claude|codex` or `--verbose` (prints each refusal's text).
