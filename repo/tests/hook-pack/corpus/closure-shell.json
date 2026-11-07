@@ -4822,6 +4822,445 @@
         "decision": "deny"
       },
       "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-bash-backslash-close",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo \"a\\\" ; gh issue close 1 -R toolkit-test-fixture/fixture ; echo \\\"b\""
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "expect_by_host": {
+        "claude": {
+          "decision": "allow"
+        }
+      },
+      "note": "Claude Bash treats the backslash quotes as data. Codex also reads PowerShell quoting because its Bash name can run PowerShell."
+    },
+    {
+      "id": "CLOSURE.unreadable-issue-close-Bash",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": {
+            "a": "gh issue close 1"
+          }
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.unreadable-issue-close-exec_command",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "exec_command",
+        "tool_input": {
+          "command": {
+            "a": "gh issue close 1"
+          }
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "expect_by_host": {
+        "claude": {
+          "decision": "allow"
+        }
+      },
+      "note": "Claude does not report this Codex shell tool name, so its matchers do not deliver this input. Codex must refuse the unreadable issue close."
+    },
+    {
+      "id": "CLOSURE.unreadable-issue-close-shell",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "shell",
+        "tool_input": {
+          "command": {
+            "a": "gh issue close 1"
+          }
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "expect_by_host": {
+        "claude": {
+          "decision": "allow"
+        }
+      },
+      "note": "Claude does not report this Codex shell tool name, so its matchers do not deliver this input. Codex must refuse the unreadable issue close."
+    },
+    {
+      "id": "CLOSURE.unreadable-issue-close-local_shell",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": {
+            "a": "gh issue close 1"
+          }
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass",
+      "expect_by_host": {
+        "claude": {
+          "decision": "allow"
+        }
+      },
+      "note": "Claude does not report this Codex shell tool name, so its matchers do not deliver this input. Codex must refuse the unreadable issue close."
+    },
+    {
+      "id": "CLOSURE.unreadable-issue-close-PowerShell",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": {
+            "a": "gh issue close 1"
+          }
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-escaped-data-enabled",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo \"a\\\"b\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-read-enabled",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-refs-quoted-enabled",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "remote_main": true
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr create --repo toolkit-test-fixture/fixture --title T --body \"Refs #1 \\\"quoted\\\"\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-escaped-data-disabled",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo \"a\\\"b\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-read-disabled",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-refs-quoted-disabled",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "disabled",
+          "remote_main": true
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr create --repo toolkit-test-fixture/fixture --title T --body \"Refs #1 \\\"quoted\\\"\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-escaped-data-none",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "echo \"a\\\"b\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-read-none",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr view 7"
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.codex-refs-quoted-none",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none",
+          "remote_main": true
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "gh pr create --repo toolkit-test-fixture/fixture --title T --body \"Refs #1 \\\"quoted\\\"\""
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.unreadable-harmless",
+      "source": "Codex bundle trust investigation and shell reader acceptance matrix",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        },
+        "issue_closure": "open-child"
+      },
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": {
+            "a": "git status"
+          }
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
     }
   ]
 }

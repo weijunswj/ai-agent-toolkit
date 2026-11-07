@@ -25,9 +25,10 @@ try {
   # Codex blocks a PreToolUse call on exit 2 with the reason on stderr; any other failure lets the call run
   # (hooks page, https://learn.chatgpt.com/docs/hooks.md, read 2026-10-23). A helper launch, or input that
   # cannot be read, is blocked: the governance check cannot run. A shell command is blocked only when it
-  # could commit, push, open, edit or merge a pull request, call the GitHub API, start a host session or
+  # could commit, push, close an issue, open, edit or merge a pull request in any gh spelling, call the GitHub API, start a host session or
   # touch Toolkit's merge approvals: the commands the attribution check and the merge hold look at. This
-  # is a wider match than theirs, written to let none of theirs through. Other shell commands run, and the
+  # is a wider match than theirs, written to let none of theirs through. GUARDED in toolkit-shell-call.cjs
+  # holds the same list. Other shell commands run, and the
   # non-zero exit shows Codex's hook failure notice.
   $toolName = $null; $command = ''
   try {
@@ -35,7 +36,7 @@ try {
     $toolName = [string]$request.tool_name
     if ($null -ne $request.tool_input) { $command = [string]$request.tool_input.command + ' ' + [string]$request.tool_input.cmd }
   } catch { $toolName = $null }
-  $guardedShell = $command -match '(?s)\bgit\b.*\b(?:commit|push)\b' -or $command -match '\bgh\s+pr\s+(?:create|edit|merge)\b' -or $command -match '(?s)\bgh\b.*\b(?:merge|sync|alias|api)\b' -or $command -match 'merge-approvals|user-state|TOOLKIT_HOST_SESSION|toolkit-(?:merge-hold|governance-hook|codex-helper-hook)' -or $command -match '\b(?:claude|codex)\b'
+  $guardedShell = $command -match '(?s)\bgit\b.*\b(?:commit|push)\b' -or $command -match '(?s)\bgh\b.*\bpr\b.*\b(?:create|new|edit|merge)\b' -or $command -match '(?s)\bgh\b.*\bissue\b.*\bclose\b' -or $command -match '(?s)\bgh\b.*\b(?:merge|sync|alias|api)\b' -or $command -match 'merge-approvals|user-state|TOOLKIT_HOST_SESSION|toolkit-(?:merge-hold|governance-hook|codex-helper-hook)' -or $command -match '\b(?:claude|codex)\b'
   # The shell tool names Codex may report (toolkit-shell-call.cjs holds the same list).
   $shellTool = $toolName -cmatch '^(?:Bash|PowerShell|Monitor|exec_command|shell|local_shell)$'
   if ($shellTool -and -not $guardedShell) {

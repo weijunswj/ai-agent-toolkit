@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.53.0
+## Unreleased
 
 ### Added
 
@@ -24,6 +24,20 @@
 - Uncertain GitHub authentication reads defer weekly work visibly instead of treating a failed read as confirmed sign-out.
 - Refresh lock takeovers log a plain line, and retry notes survive an exhausted task budget.
 - The refresh-wait changelog wording now states the actual bounded wait.
+
+## 3.53.0
+
+### Fixed
+
+- Report Codex hooks changed since approval or unverified instead of saying they are on, and provide a read-only hook check that holds gate launches until approval is current.
+- Refuse unreadable issue-close calls and PowerShell quoting that hides a GitHub write under Codex Bash, while preserving ordinary reads and quoted examples.
+- Correct code-mode hook guidance and require smoke tests to prove a guard refusal without editing the installed plugin folder.
+- The Codex hook check now also asks Codex which Toolkit hooks it trusts, and holds a gate launch unless Codex reports every hook trusted at the hashes Toolkit recorded.
+- A gate launch check passes only on exit 0 with the line saying all Toolkit hooks are on; no output, as from an older installed copy, holds the launch.
+- The fallback checks used when the Toolkit hook cannot start or cannot read a call now catch issue close and pull request writes in any gh spelling.
+- Clearer refusal and recovery wording for ambiguous shell quoting, a plugin folder Toolkit cannot fingerprint, and a missing hooks file.
+- The Codex hook check keeps an answer Codex already gave when Codex then does not stop, always ends within about 35 seconds, and names the reason for each hold without repeating Codex's own output.
+- The Codex hook check asks only the Codex program the gate will run, named with `--codex` or `CODEX_TOOLKIT_CODEX_CLI`, starts an npm `codex.cmd` without a shell, and holds when no Codex is named.
 
 ## 3.52.0
 

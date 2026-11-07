@@ -20,7 +20,7 @@ const { AntigravityGlobalSkills, globalCopySummary } = require('./toolkit-antigr
 const { CodexHelperDefinitions, describeSetupResult: describeCodexHelpers } = require('./toolkit-codex-helper-agents.cjs');
 const { STATUS: INSTALL_CHECK_STATUS, claudeAccountToolkitVersion } = require('./toolkit-install-health.cjs');
 const { claudeAccountPluginFolders, claudeAppCopyLine } = require('./toolkit-claude-account-copy.cjs');
-const { CodexToolkitInstall, hookGaps } = require('./toolkit-codex-install-state.cjs');
+const { CodexToolkitInstall, hookGaps, describeHookStates } = require('./toolkit-codex-install-state.cjs');
 const { GlobalRules } = require('./toolkit-global-rules.cjs');
 const { HOST_LABELS, detectAgentHost } = require('./agent-host-markers.cjs');
 const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferences.cjs');
@@ -1917,8 +1917,12 @@ function codexHookCells(current, args) {
   if (!install.versions?.length) return { ...keep, short: 'Not installed', full: 'Codex has no Toolkit plugin installed, so no Toolkit hook runs.' };
   if (install.plugin === 'off') return { ...keep, short: 'Plugin off', full: 'The Toolkit plugin is turned off in Codex, so no Toolkit hook runs.' };
   if (install.hooks?.status !== 'read' || !install.hooks.entries.length) return { ...keep, short: 'No hooks file', full: 'The installed Toolkit plugin has no readable hooks file.' };
-  const { off, notReviewed, total } = hookGaps(install.hooks);
+  const { off, notReviewed, changed, unverified, total } = hookGaps(install.hooks);
   const full = `Toolkit hooks in Codex: ${install.hooks.entries.map((entry) => `${entry.name} ${entry.state === 'not-reviewed' ? 'not reviewed' : entry.state}`).join('; ')}.`;
+  if (changed.length || unverified.length) {
+    const summary = describeHookStates(install.hooks);
+    return { short: changed.length ? 'Changed since approval' : 'Unverified', full, recommended: summary.message };
+  }
   if (!off.length && !notReviewed.length) return { ...keep, short: `All ${total} on`, full };
   const short = off.length === total ? `All ${total} off`
     : notReviewed.length === total ? `All ${total} not reviewed`
@@ -2226,7 +2230,7 @@ function setupQuestionSpecs(args, current) {
         key: 'codexHooks',
         section: 'Toolkit in your coding apps',
         title: 'Toolkit hooks in Codex',
-        whatThisControls: "Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off or not reviewed does not run, so its check is skipped.",
+        whatThisControls: "Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off, not reviewed or changed since approval does not run. A missing bundle fingerprint is unverified. Hold Codex gate launches until the hook check passes.",
         current: hooks.full,
         currentShort: hooks.short,
         recommendedText: hooks.recommended,

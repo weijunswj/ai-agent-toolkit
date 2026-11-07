@@ -11,7 +11,8 @@ const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { CodexToolkitInstall, codexReminderLine, docLimitState, describeHookStates, readToolkitHookStates } = require('../scripts/toolkit-codex-install-state.cjs');
+const { CodexToolkitInstall, codexReminderLine, docLimitState, describeHookStates, readToolkitHookStates, pluginBundleFingerprint,
+  expectedToolkitHooks, launchCheck, CHECK_TIMEOUT_MS } = require('../scripts/toolkit-codex-install-state.cjs');
 const { ToolkitInstallHealthCheck, STATUS } = require('../scripts/toolkit-install-health.cjs');
 const core = require('../scripts/setup-toolkit-core.cjs');
 
@@ -20,6 +21,54 @@ const HOOKS = fs.readFileSync(path.join(repoRoot, '.codex-plugin', 'hooks', 'hoo
 const ID = 'ai-agent-toolkit@ai-agent-toolkit-local';
 const KEYS = ['session_start:0:0', 'user_prompt_submit:0:0', 'pre_tool_use:0:0', 'pre_tool_use:1:0', 'post_tool_use:0:0', 'stop:0:0'];
 const ALL_NAMES = 'Session start updates, Prompt check, Shell and agent check, File edit check, Checkpoint after tool use, Checkpoint at stop';
+const FAKE = path.join(__dirname, 'support/fake-codex-hooks-list.cjs');
+const SCRIPT = path.join(repoRoot, 'repo/scripts/toolkit-codex-install-state.cjs');
+const cacheRoot = f => path.join(f.codexHome, 'plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit', f.read().version);
+const calls = f => {
+  const log = path.join(f.codexHome, 'fake-hooks-list.log');
+  return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\r?\n/) : [];
+};
+// Stop every logged fake before removing its home, including after a failed assertion.
+async function stopFakes(f) {
+  const pids = [...new Set(calls(f).filter(line => /^(pid|keeper) \d+$/.test(line)).map(line => Number(line.split(' ')[1])))];
+  // Attempt every PID even if another kill fails, and finish all waits before removing the home.
+  const results = await Promise.allSettled(pids.map(async pid => {
+    let killError;
+    try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') killError = error; }
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      let queryError;
+      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; queryError = error; }
+      if (Date.now() >= deadline) assert.fail(`Fake Codex process ${pid} did not exit within 10 s` +
+        (queryError ? `; exit could not be verified (${queryError.code})` : '; pid is still alive') +
+        (killError ? `; kill failed (${killError.code})` : ''));
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  }));
+  const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
+  if (errors.length) throw new AggregateError(errors, `Could not stop all fake Codex processes: ${errors.map(error => error.message).join('; ')}`);
+}
+function trustedReply(f, edit = () => {}) {
+  const fingerprint = pluginBundleFingerprint(cacheRoot(f));
+  const result = { data: [{ hooks: expectedToolkitHooks(cacheRoot(f)).map(hook => ({
+    key: hook.key, pluginId: ID, enabled: true, trustStatus: 'trusted',
+    currentHash: `sha256:${'b'.repeat(64)}/${fingerprint}`,
+  })) }] };
+  edit(result, result.data[0].hooks);
+  return result;
+}
+function runCheck(f, spec = { result: trustedReply(f) }, { unavailable = false } = {}) {
+  write(path.join(f.codexHome, 'fake-hooks-list.json'), JSON.stringify(spec));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(path|codex_home|codex_cli_path|codex_toolkit_codex_cli)$/i.test(key)));
+  const emptyPath = path.join(f.root, 'empty-path');
+  fs.mkdirSync(emptyPath, { recursive: true });
+  Object.assign(env, { PATH: emptyPath, CODEX_HOME: f.codexHome,
+    CODEX_TOOLKIT_CODEX_CLI: unavailable ? path.join(emptyPath, 'no-codex.exe') : FAKE });
+  const result = childProcess.spawnSync(process.execPath, [SCRIPT, '--check'], { env, encoding: 'utf8', timeout: 30000, windowsHide: true });
+  assert.ifError(result.error);
+  return { ...result, calls: calls(f) };
+}
+const passed = r => r.status === 0 && r.stdout.replace(/\r?\n$/, '') === `All ${KEYS.length} Toolkit hooks are on in Codex.`;
 
 function write(file, text) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -27,20 +76,23 @@ function write(file, text) {
 }
 
 // hooks: one of 'on' | 'off' | 'none' | 'trusted' per hook key, or one value for all six.
-function hookTables(hooks) {
+function hookTables(hooks, contentHash = '') {
   return KEYS.map((key, index) => {
     const state = Array.isArray(hooks) ? hooks[index] : hooks;
     if (state === 'none') return '';
     const header = `[hooks.state."${ID}:.codex-plugin/hooks/hooks.json:${key}"]`;
     if (state === 'trusted') return `${header}\ntrusted_hash = "sha256:${'a'.repeat(64)}"\n`;
     return `${header}\ntrusted_hash = "sha256:${'b'.repeat(64)}"\nenabled = ${state === 'on'}\n`;
-  }).join('\n');
+  }).join('\n').replace(/trusted_hash = ([^\n]+)\n/g, match => match + (contentHash ? `trusted_content_hash = "${contentHash}"\n` : ''));
 }
 
 function fixture(t, { versions = ['3.19.3'], source = '3.19.3', plugin = 'true', hooks = 'on', docLimit = 'raised', config = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-state-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const codexHome = path.join(root, '.codex');
+  t.after(async () => {
+    await stopFakes({ codexHome });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
   const managed = path.join(root, 'managed');
   write(path.join(managed, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: source }));
   for (const version of versions) {
@@ -54,7 +106,7 @@ function fixture(t, { versions = ['3.19.3'], source = '3.19.3', plugin = 'true',
     limit,
     '[marketplaces.ai-agent-toolkit-local]', 'source_type = "local"', `source = '\\\\?\\${managed}'`, '',
     ...(plugin === null ? [] : [`[plugins."${ID}"]`, `enabled = ${plugin}`, '']),
-    '[hooks.state]', '', hookTables(hooks),
+    '[hooks.state]', '', hookTables(hooks, pluginBundleFingerprint?.(path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', versions.at(-1))) || 'sha256:' + 'c'.repeat(64)),
   ].join('\n');
   if (config === true) write(path.join(codexHome, 'config.toml'), text);
   else if (config === 'unreadable') fs.mkdirSync(path.join(codexHome, 'config.toml'), { recursive: true });
@@ -136,7 +188,7 @@ function spyPreload(root, { codexOnly = false } = {}) {
   return { file, log };
 }
 
-test('the reader and the session-start line start no process and write nothing', (t) => {
+test('AT17: the reader, session start and setup plan never load the app-server client', (t) => {
   const { root, codexHome, managed } = fixture(t, { versions: ['3.19.0'], hooks: 'off' });
   const config = path.join(codexHome, 'config.toml');
   const before = fs.readFileSync(config);
@@ -145,12 +197,13 @@ test('the reader and the session-start line start no process and write nothing',
   write(probe, [
     `const { CodexToolkitInstall, codexReminderLine } = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'toolkit-codex-install-state.cjs'))});`,
     `const state = new CodexToolkitInstall({ codexHome: ${JSON.stringify(codexHome)}, managedRoot: ${JSON.stringify(managed)} }).read();`,
-    'process.stdout.write(codexReminderLine(state));',
+    'process.stdout.write(codexReminderLine(state) + "\\n" + Object.keys(require.cache).some(k => k.endsWith("codex-app-server.cjs")));',
     '',
   ].join('\n'));
   const result = childProcess.spawnSync(process.execPath, ['--require', spy.file, probe], { encoding: 'utf8', windowsHide: true });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^Codex runs Toolkit 3\.19\.0; this PC has 3\.19\.3, and all 6 Toolkit hooks are off\./);
+  assert.match(result.stdout, /\nfalse$/);
   assert.equal(fs.existsSync(spy.log), false, fs.existsSync(spy.log) ? fs.readFileSync(spy.log, 'utf8') : '');
   assert.ok(fs.readFileSync(config).equals(before), 'config.toml is never written');
 });
@@ -165,6 +218,8 @@ test('the read-only Codex setup plan launches no Codex command', (t) => {
   const cache = path.join(root, '.codex', 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '3.19.0');
   write(path.join(cache, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: '3.19.0' }));
   write(path.join(cache, '.codex-plugin', 'hooks', 'hooks.json'), HOOKS);
+  const configFile = path.join(root, '.codex', 'config.toml');
+  write(configFile, fs.readFileSync(configFile, 'utf8').replace(/trusted_hash = ([^\n]+)\n/g, match => match + `trusted_content_hash = "${pluginBundleFingerprint?.(cache)}"\n`));
   const spy = spyPreload(root, { codexOnly: true });
   const preload = spy.file.replace(/[\\"]/g, (char) => `\\${char}`);
   const result = support.run(['--plan', '--host', 'codex'], { env: { ...env, NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require "${preload}"`].filter(Boolean).join(' ') } });
@@ -232,7 +287,7 @@ test('hook states come from the cache hooks file and say unknown when it or conf
   const unknown = describeHookStates({ status: 'unreadable', entries: [] });
   assert.equal(unknown.status, 'unreadable');
   assert.match(unknown.message, /Open `\/hooks` in Codex/);
-  const off = describeHookStates(readToolkitHookStates(hookTables(['on', 'on', 'off', 'none', 'on', 'on']), path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '3.19.3')));
+  const off = describeHookStates(readToolkitHookStates(hookTables(['on', 'on', 'off', 'none', 'on', 'on'], pluginBundleFingerprint?.(path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '3.19.3'))), path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '3.19.3')));
   assert.equal(off.status, 'off');
   assert.equal(off.message, 'Open `/hooks` in Codex and turn on: Shell and agent check, File edit check. Codex skips a Toolkit hook that is off or not reviewed.');
 });
@@ -309,6 +364,211 @@ function codexRows(install, audit = {}) {
   const rows = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'codex']), current);
   return Object.fromEntries(rows.map((row) => [row.id, row]));
 }
+
+test('AT1: changed plugin contents never report approved hooks as on', t => {
+  const f = fixture(t);
+  const cache = path.join(f.codexHome, 'plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.19.3');
+  write(path.join(cache, 'changed.txt'), 'updated plugin');
+  const state = f.read();
+  assert.deepEqual(state.hooks.entries.map(entry => entry.state), KEYS.map(() => 'changed'));
+  const summary = describeHookStates(state.hooks);
+  assert.equal(summary.status, 'changed');
+  assert.match(summary.message, /\/hooks.*review and approve/);
+  assert.doesNotMatch(summary.message, /All 6 Toolkit hooks are on/);
+});
+
+test('AT2 and M2: approval states are independent of bundle verification', t => {
+  for (const [hooks, expected] of [['on', 'on'], ['trusted', 'on'], ['off', 'off'], ['none', 'not-reviewed']]) {
+    const state = fixture(t, { hooks }).read();
+    assert.deepEqual(state.hooks.entries.map(entry => entry.state), KEYS.map(() => expected));
+    assert.equal(describeHookStates(state.hooks).status, expected);
+  }
+});
+
+test('AT3: fingerprint matches the independent bundle encoding vector including exclusions and git', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bundle-vector-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const unicode = String.fromCodePoint(0xe9) + '.txt';
+  for (const [name, value] of [['.git/config', 'git'], ['nested/a', 'a'], [unicode, 'non-ascii'], ['__pycache__/x', 'ignored'], ['.venv/x', 'ignored'], ['x.pyc', 'ignored'], ['x.egg-info/a', 'ignored']]) write(path.join(root, name), value);
+  // Independent fixed preorder vector from Codex's published algorithm, not the tree walker.
+  const vector = [['', null], ['.git', null], [path.join('.git', 'config'), 'git'], ['nested', null], [path.join('nested', 'a'), 'a'], [unicode, 'non-ascii']];
+  const hash = require('node:crypto').createHash('sha256').update('codex-plugin-bundle-v1');
+  const integer = value => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(value)); return b; };
+  for (const [name, value] of vector) {
+    const bytes = Buffer.from(name); hash.update(integer(bytes.length)).update(bytes).update(value === null ? 'directory' : 'file');
+    if (value !== null) { const content = Buffer.from(value); hash.update(integer(content.length)).update(content); }
+  }
+  assert.equal(pluginBundleFingerprint(root), `sha256:${hash.digest('hex')}`);
+  const before = pluginBundleFingerprint(root);
+  write(path.join(root, '.venv/x'), 'excluded change');
+  assert.equal(pluginBundleFingerprint(root), before);
+  write(path.join(root, '.git/config'), 'included change');
+  assert.notEqual(pluginBundleFingerprint(root), before);
+});
+
+test('AT4: absent content approval or fingerprint read failures are unverified without throwing', t => {
+  const f = fixture(t);
+  const config = path.join(f.codexHome, 'config.toml');
+  const original = fs.readFileSync(config, 'utf8');
+  write(config, original.replace(/^trusted_content_hash.*\n/gm, ''));
+  assert.ok(f.read().hooks.entries.every(entry => entry.state === 'unverified'));
+  write(config, original);
+  const lstat = fs.lstatSync;
+  t.mock.method(fs, 'lstatSync', (...args) => { if (String(args[0]).endsWith('hooks.json')) throw new Error('fixture read failure'); return lstat(...args); });
+  assert.ok(f.read().hooks.entries.every(entry => entry.state === 'unverified'));
+  t.mock.restoreAll();
+  const cache = path.join(f.codexHome, 'plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.19.3');
+  // Directory junctions need no Windows symlink privilege and are lstat symlinks too.
+  fs.symlinkSync(f.managed, path.join(cache, 'unsupported-link'), process.platform === 'win32' ? 'junction' : 'dir');
+  assert.ok(f.read().hooks.entries.every(entry => entry.state === 'unverified'));
+  assert.equal(describeHookStates(f.read().hooks).execution, 'unknown');
+});
+
+test('AT5: session reminder and setup status explain changed and unverified approval', t => {
+  const f = fixture(t);
+  write(path.join(f.codexHome, 'plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.19.3/update.txt'), 'update');
+  const state = f.read();
+  const summary = describeHookStates(state.hooks);
+  assert.equal(codexReminderLine(state), `Codex: ${summary.message}`);
+  const rows = codexRows(state);
+  assert.equal(rows['codex-toolkit-plugin'].presentation.question_ref, '3.1');
+  assert.equal(rows['codex-toolkit-hooks'].current_short, 'Changed since approval');
+  assert.equal(rows['codex-toolkit-hooks'].recommended_text, summary.message);
+  const unknown = codexRows({ hooks: { status: 'read', entries: [{ name: 'Shell check', state: 'unverified' }] } });
+  assert.equal(unknown['codex-toolkit-hooks'].current_short, 'Unverified');
+});
+
+test('AT6: --check holds Codex gate launches unless the files and Codex agree every hook is on', t => {
+  assert.ok(fs.readFileSync(path.join(repoRoot, 'repo/CONTROLLER.md'), 'utf8').includes('[Codex hold](docs/HOST-CONTRACT.md)'));
+  const contract = fs.readFileSync(path.join(repoRoot, 'repo/docs/HOST-CONTRACT.md'), 'utf8');
+  assert.match(contract, /toolkit-codex-install-state\.cjs[\s\S]*?--check/);
+  assert.ok(contract.includes('--check --codex "<codex>"'));
+  assert.match(contract, /holds the launch/);
+  assert.ok(contract.includes('**Codex hold.**'));
+  for (const [label, options, changed, expected] of [
+    ['approved', {}, false, 0], ['changed', {}, true, 1], ['off', { hooks: 'off' }, false, 1],
+    ['not reviewed', { hooks: 'none' }, false, 1], ['plugin off', { plugin: 'false' }, false, 1],
+    ['unverified', {}, false, 1],
+    ['no config', { config: false }, false, 1], ['unreadable', { config: 'unreadable' }, false, 1],
+    ['multiple caches', { versions: ['3.19.2', '3.19.3'] }, false, 1],
+  ]) {
+    const f = fixture(t, options);
+    if (label === 'unverified') {
+      const config = path.join(f.codexHome, 'config.toml');
+      write(config, fs.readFileSync(config, 'utf8').replace(/^trusted_content_hash.*\n/gm, ''));
+    }
+    if (changed) write(path.join(f.codexHome, 'plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.19.3/update.txt'), 'update');
+    const config = path.join(f.codexHome, 'config.toml');
+    const before = fs.statSync(config, { throwIfNoEntry: false })?.isFile() ? fs.readFileSync(config) : null;
+    const r = runCheck(f);
+    assert.equal(r.status, expected, `${label}: ${r.stdout} ${r.stderr}`);
+    assert.match(r.stdout, expected ? /gate launch held/ : /All 6 Toolkit hooks are on/);
+    assert.equal(passed(r), expected === 0, label);
+    assert.deepEqual(r.calls.filter(line => !line.startsWith('pid ')), expected ? [] :
+      ['argv app-server --listen stdio://', 'method initialize', 'method initialized', 'method hooks/list']);
+    if (before) assert.ok(fs.readFileSync(config).equals(before), 'config.toml is unchanged');
+  }
+});
+
+test('AT15: a launch check passes only on exit 0 with exactly the line All N Toolkit hooks are on in Codex.', t => {
+  const contract = fs.readFileSync(path.join(repoRoot, 'repo/docs/HOST-CONTRACT.md'), 'utf8');
+  assert.ok(contract.includes('The check passes only when it exits 0 and prints exactly one line, `All N Toolkit hooks are on in Codex.`, where N is the number of hooks in the installed Toolkit hooks file.'));
+  assert.ok(contract.includes('or no output at all'));
+  const f = fixture(t);
+  const stub = path.join(f.root, 'toolkit-codex-install-state.cjs');
+  write(stub, "'use strict';\nmodule.exports = {};\n");
+  const old = childProcess.spawnSync(process.execPath, [stub, '--check'], { encoding: 'utf8', windowsHide: true });
+  assert.deepEqual([old.status, old.stdout], [0, '']);
+  for (const r of [old, { status: 1, stdout: 'All 6 Toolkit hooks are on in Codex.\n' },
+    { status: 0, stdout: 'All 6 Toolkit hooks are on in Codex.\n\n' }, { status: 0, stdout: 'All 5 Toolkit hooks are on in Codex.\n' }]) assert.equal(passed(r), false);
+  assert.equal(passed(runCheck(f)), true);
+});
+
+test('AT16: --check holds unless Codex reports every Toolkit hook trusted at the recorded hashes', async t => {
+  const cases = [
+    ['H1 agreed', null], ['H2 unavailable', null, 'unavailable', '(not found)'],
+    ['H4 exit', null, 'exit', '(exit code 3)'],
+    ['H4 error-reply', null, 'error-reply', '(error reply to hooks/list)'],
+    ['H4 no-result', null, 'no-result', '(field result)'],
+    ['H5 data not a list', r => { r.data = {}; }, null, '(field data)'], ['H5 two entries', r => { r.data.push({ hooks: [] }); }, null, '(field data)'],
+    ['H5 hooks not a list', r => { r.data[0].hooks = {}; }, null, '(field hooks)'], ['H5 no key', (r, h) => { delete h[0].key; }, null, '(field key)'],
+    ['H5 duplicate Toolkit key', (r, h) => { h.push({ ...h[0] }); }, null, '(field key (duplicate))'],
+    ['H5 unknown trust', (r, h) => { h[0].trustStatus = 'weird'; }, null, '(field trustStatus)'],
+    ['H5 bad current hash', (r, h) => { h[0].currentHash = 'abc'; }, null, '(field currentHash)'],
+    ['H5 non-string hash', (r, h) => { h[0].currentHash = [h[0].currentHash]; }, null, '(field currentHash)'],
+    ['H5 upper-case hash', (r, h) => { h[0].currentHash = h[0].currentHash.toUpperCase(); }, null, '(field currentHash)'],
+    ['H6 missing', (r, h) => { h.pop(); }, null, /does not list.*Checkpoint at stop/],
+    ...['untrusted', 'trusted'].map(trustStatus => [`H7 extra ${trustStatus}`, (r, h) => {
+      h.push({ ...h[0], key: `${ID}:.codex-plugin/hooks/hooks.json:pre_tool_use:2:0`, trustStatus });
+    }, null, /lists 1 Toolkit hook/]),
+    ['H7 extra by plugin id', (r, h) => { h.push({ ...h[0], key: 'other:key' }); }],
+    ['H8 modified', (r, h) => { h.forEach(hook => { hook.trustStatus = 'modified'; }); }],
+    ['H8 hook hash drift', (r, h) => { h[0].currentHash = `sha256:${'f'.repeat(64)}/${h[0].currentHash.split('/')[1]}`; }],
+    ['H9 bundle drift', (r, h) => { h[0].currentHash = `${h[0].currentHash.split('/')[0]}/sha256:${'f'.repeat(64)}`; }],
+    ['H10 disabled', (r, h) => { h[0].enabled = false; }],
+    ['H11 managed', (r, h) => { h[0].trustStatus = 'managed'; }],
+    ['H13 unrelated', (r, h) => { h.push({ key: 'other-plugin:hook', pluginId: 'other', enabled: false, trustStatus: 'untrusted' }); }],
+  ];
+  for (const [label, edit, mode, message] of cases) await t.test(label, t => {
+    const f = fixture(t);
+    const config = path.join(f.codexHome, 'config.toml'); const before = fs.readFileSync(config);
+    const r = runCheck(f, { mode: mode === 'unavailable' ? undefined : mode, result: trustedReply(f, edit || undefined) }, { unavailable: mode === 'unavailable' });
+    const on = label === 'H1 agreed' || label === 'H13 unrelated';
+    assert.equal(r.status, on ? 0 : 1, `${label}: ${r.stdout} ${r.stderr}`);
+    assert.equal(passed(r), on, label);
+    assert.equal(r.stdout.trim().split(/\r?\n/).length, 1);
+    assert.doesNotMatch(r.stdout, /hooks\/list failed/);
+    if (!on) {
+      assert.match(r.stdout, /^Codex gate launch held\./);
+      assert.doesNotMatch(r.stdout, /Toolkit hooks are on in Codex\./);
+      if (typeof message === 'string') assert.ok(r.stdout.includes(message), r.stdout);
+      else if (message) assert.match(r.stdout, message);
+    }
+    assert.ok(fs.readFileSync(config).equals(before), label);
+  });
+});
+
+test('AT16b: an answer that never comes or cannot be read holds within the time limit and leaves no process', async t => {
+  assert.equal(CHECK_TIMEOUT_MS, 20000);
+  for (const mode of ['hang', 'garbled']) await t.test(mode, async t => {
+    const f = fixture(t);
+    write(path.join(f.codexHome, 'fake-hooks-list.json'), JSON.stringify({ mode }));
+    const started = Date.now();
+    const r = await launchCheck({ codexHome: f.codexHome, codex: FAKE, timeoutMs: 500 });
+    assert.equal(r.code, 1);
+    assert.match(r.line, /unverified/);
+    assert.match(r.line, /\(timeout\)/);
+    assert.ok(Date.now() - started < 10000, mode);
+    const pid = Number(calls(f).find(line => line.startsWith('pid ')).slice(4));
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, `${mode}: fake app-server pid ${pid} must be gone`);
+  });
+});
+
+test('AT18: a trusted_hash that is not sha256 plus 64 hex characters is unverified everywhere', t => {
+  for (const hash of ['not-a-hash', `sha256:${'B'.repeat(64)}`, `sha256:${'b'.repeat(63)}`]) {
+    const f = fixture(t); const config = path.join(f.codexHome, 'config.toml');
+    write(config, fs.readFileSync(config, 'utf8').replace(/trusted_hash = "[^"]+"/g, `trusted_hash = "${hash}"`));
+    const state = f.read();
+    assert.ok(state.hooks.entries.every(entry => entry.state === 'unverified'), hash);
+    assert.equal(codexRows(state)['codex-toolkit-hooks'].current_short, 'Unverified');
+    assert.match(codexReminderLine(state), /unverified/);
+    const r = runCheck(f);
+    assert.equal(r.status, 1); assert.deepEqual(r.calls, []);
+  }
+});
+
+test('AT19: hold messages name the recovery that can work', t => {
+  const f = fixture(t); const config = path.join(f.codexHome, 'config.toml');
+  const original = fs.readFileSync(config, 'utf8');
+  write(config, original.replace(/^trusted_content_hash.*\n/gm, ''));
+  assert.match(describeHookStates(f.read().hooks).message, /unverified.*quit and reopen Codex/);
+  write(config, original);
+  write(path.join(cacheRoot(f), 'update.txt'), 'update');
+  assert.match(describeHookStates(f.read().hooks).message, /changed since approval.*quit and reopen Codex/);
+  fs.symlinkSync(f.managed, path.join(cacheRoot(f), 'unsupported-link'), process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(describeHookStates(f.read().hooks).message, 'Toolkit cannot fingerprint the installed plugin folder, so the hook state is unverified. Run `setup toolkit` to reinstall the plugin, then review `/hooks` in Codex. Hold Codex gate launches until the check passes.');
+  assert.equal(describeHookStates({ status: 'no-hooks-file', entries: [] }).message, 'The installed Toolkit plugin has no readable hooks file, so the hook state is unknown. Run `setup toolkit` to repair the installed plugin, then review `/hooks` in Codex.');
+});
 
 test('setup row 3.1 and the Codex hooks status line match the session-start line', () => {
   const same = codexRows({});

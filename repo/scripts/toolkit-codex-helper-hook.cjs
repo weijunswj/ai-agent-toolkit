@@ -51,7 +51,7 @@ function promptEvent(input) {
 const CODEX_DEADLINE_MS = 50000;
 async function decide(input, environment = process.env, { notes, transport } = {}) {
   const deadline = require('node:perf_hooks').performance.now() + CODEX_DEADLINE_MS;
-  const shared = { deadline, transport, evidenceResponses: new Map() };
+  const shared = { deadline, transport, evidenceResponses: new Map(), host: 'codex' };
   let governanceDenial;
   try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;
@@ -70,7 +70,7 @@ async function decide(input, environment = process.env, { notes, transport } = {
   let closure;
   try { closure = require('./toolkit-issue-closure.cjs').issueClosureDecision(input, shared); }
   catch {
-    try { if (require('./toolkit-shell-call.cjs').closureWriteCandidate(input)) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
+    try { if (require('./toolkit-shell-call.cjs').closureWriteCandidate(input, shared)) closure = { deny: 'Toolkit: the issue closure check is unavailable, so this GitHub write is refused. Run setup toolkit to repair the plugin, then retry.' }; }
     catch { closure = { deny: 'Toolkit: executable command reader is unavailable. Run setup toolkit to repair the plugin.' }; }
   }
   if (closure) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: closure.deny } };
