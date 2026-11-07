@@ -741,7 +741,7 @@ class WindowsTaskOwner {
         this.registry.updateRegistry(this.home, list => {
           const entry = list.find(e => e.id === definition.id);
           if (!sameDefinition(entry, item.recorded)) throw new Error('registry changed before current-task receipt');
-          return list.map(e => e.id === definition.id ? { ...e, toolkit_version: require('../contracts/toolkit-local-bridge/version.json').version } : e);
+          return list.map(e => e.id === definition.id ? { ...e, toolkit_version: JSON.parse(fs.readFileSync(path.join(__dirname, '../contracts/toolkit-local-bridge/version.json'), 'utf8')).version } : e);
         });
         results.push({ ...item, done: true }); continue;
       }
