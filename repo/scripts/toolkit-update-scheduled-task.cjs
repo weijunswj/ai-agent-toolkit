@@ -93,7 +93,12 @@ class TaskUpdater {
     let ownership = { remove: [] };
     const hold = (rows, error) => { for (const row of rows) { row.held = true; row.reason = `Computer ownership could not be verified (${tasks.safeText(error.message)}); inspect the evidence store, then retry.`; } };
     let targets = [];
-    try { targets = this.health.stores(); } catch (error) { hold(plans, error); }
+    // Found checkouts that are not enrolled yet are looked up in their own store too, so a
+    // recorded owner elsewhere is honoured before any job is created here.
+    const enrolled = new Set(entries.filter(e => e.host === 'windows' && !e.adopted && e.job !== 'task-health').map(e => e.repository?.toLowerCase()));
+    const found = plans.filter(row => row.desired && row.root && !enrolled.has(row.desired.repository.toLowerCase())).map(row => ({ checkout: row.root, repository: row.desired.repository }));
+    try { targets = this.health.stores(found); } catch (error) { hold(plans, error); }
+    this.targets = targets;
     for (const target of targets) {
       // Each store answers only for the repositories whose own binding names it.
       const rows = plans.filter(row => row.desired && target.repositories.includes(row.desired.repository.toLowerCase()));
@@ -277,8 +282,8 @@ class TaskUpdater {
         ownership.held.push(repository); results.push({ repository, refused: true, reason: tasks.safeText(error.message) });
       }
     };
-    let targets = [];
-    try { targets = this.health.stores(); } catch (error) { holdAll(local.plans, error); }
+    // The plan just looked up and verified the stores; apply reuses them instead of reading every checkout again.
+    const targets = this.targets || [];
     for (const target of targets) {
       // Ownership for a repository is read and written only in that repository's own store.
       const rows = local.plans.filter(row => row.desired && target.repositories.includes(row.desired.repository.toLowerCase()));

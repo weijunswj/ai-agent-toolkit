@@ -122,17 +122,18 @@ class TaskHealth {
   budget(ms) { const remaining = Math.floor(this.deadline - performance.now()); if (remaining <= 0) throw new Error('Task health time budget exhausted'); return Math.min(ms, remaining); }
   registry() { const registry = tasks.readRegistry(this.home); if (registry.status !== 'ok') throw new Error('Task registry unreadable; health held'); return registry.tasks; }
   entries() { return this.registry().filter(entry => entry.host === 'windows' && !entry.adopted && entry.job !== 'task-health'); }
-  stores() {
+  stores(found = []) {
     // Each verified evidence store receives only the repositories whose own fresh ENABLED
     // binding names it; one repository's results never land in another repository's store.
+    // Found checkouts not yet enrolled are looked up too, so their ownership is checked first.
     const targets = new Map(), checked = new Set();
-    for (const entry of this.entries()) {
+    for (const entry of [...this.entries(), ...found]) {
       const repository = entry.repository?.toLowerCase();
       if (!entry.checkout || entry.stopped_by_owner || !repository || checked.has(repository)) continue;
+      checked.add(repository); // One read per repository, verified or not.
       try {
         const read = this.checkout(entry.checkout, this.home, this.budget(95000));
         if (!read?.certain || read.governanceState !== 'ENABLED' || !read.binding?.store || read.repository?.toLowerCase() !== repository) continue;
-        checked.add(repository);
         const id = `${read.binding.store.repository}#${read.binding.store.branch || ''}`.toLowerCase();
         if (!targets.has(id)) {
           const store = this.storeFactory ? this.storeFactory(read.binding.store) : new HealthStore({ store: read.binding.store, transport: new GitHubTransport({ ghPath: require('../../skills/github-program-reconciler/scripts/resolve-executable.cjs').resolveExecutable('gh'), timeoutMs: 15000, run: (file, args, opts) => spawnSync(file, args, { ...opts, timeout: this.budget(opts.timeout) }) }) });
@@ -185,7 +186,7 @@ class TaskHealth {
       let doc = this.collect(), shared = false, note = LOCAL_ONLY, others = [];
       // Local evidence survives store contention, failed writes and readback failures.
       writeLocal(localFile(this.home), { document: doc, shared, note });
-      const sharedRepos = [], failures = [];
+      const sharedRepos = [], failedRepos = [], failures = [];
       for (const target of this.stores()) {
         const part = { ...doc, repos: doc.repos.filter(repo => target.repositories.includes(repo.repository.toLowerCase())) };
         if (!part.repos.length) continue;
@@ -195,18 +196,18 @@ class TaskHealth {
           if (!lock) throw new Error('Task health store busy; retry next run');
           try {
             const peers = target.store.list(); others.push(...peers); duplicateFlags(part, peers);
-            writeLocal(localFile(this.home), { document: doc, shared, note });
+            writeLocal(localFile(this.home), { document: doc, shared, shared_repos: sharedRepos, note });
             const file = `task-health/${doc.computer}.json`, previous = target.store.read(file);
             target.store.put(file, assertHealth(part), previous.sha);
             sharedRepos.push(...part.repos.map(repo => repo.repository.toLowerCase()));
           } finally { lock.release(); }
-        } catch (error) { failures.push(error); }
+        } catch (error) { failures.push(error); failedRepos.push(...part.repos.map(repo => repo.repository.toLowerCase())); }
       }
       // Every store is attempted; any failure still fails the run loudly afterwards.
       shared = doc.repos.length > 0 && doc.repos.every(repo => sharedRepos.includes(repo.repository.toLowerCase()));
       note = failures.length ? 'health file not shared: store update failed' : shared ? 'health file shared' : sharedRepos.length ? 'health file shared for some repositories' : LOCAL_ONLY;
-      if (failures.length) { writeLocal(localFile(this.home), { document: doc, shared, shared_repos: sharedRepos, note }); throw failures[0]; }
-      writeLocal(localFile(this.home), { document: doc, shared, shared_repos: sharedRepos, note });
+      writeLocal(localFile(this.home), { document: doc, shared, shared_repos: sharedRepos, failed_repos: failedRepos, note });
+      if (failures.length) throw failures[0];
       return { document: doc, shared, shared_repos: sharedRepos, note, others };
     } finally { localLock.release(); }
   }
@@ -223,8 +224,10 @@ function sessionHealth(repository, home, registry) {
     const repo = doc.repos.find(row => row.repository.toLowerCase() === repository.toLowerCase());
     const flags = (repo?.flags || []).join('; ');
     if (flags) parts.push(`Task health: ${flags}`);
-    const repoShared = saved.shared === true || (Array.isArray(saved.shared_repos) && saved.shared_repos.includes(repository.toLowerCase()));
-    if (!repoShared) parts.push(saved.note === 'health file not shared: store update failed' ? saved.note : LOCAL_ONLY);
+    const key = repository.toLowerCase(), perRepo = Array.isArray(saved.shared_repos) && Array.isArray(saved.failed_repos);
+    const repoShared = saved.shared === true || (Array.isArray(saved.shared_repos) && saved.shared_repos.includes(key));
+    const storeFailed = perRepo ? saved.failed_repos.includes(key) : saved.note === 'health file not shared: store update failed';
+    if (!repoShared) parts.push(storeFailed ? 'health file not shared: store update failed' : LOCAL_ONLY);
     if (Date.now() - Date.parse(doc.time) > 26 * 3600000) parts.push('Task health file is over 26 hours old');
   } catch { /* A failed health job still has its own recorded failure above. */ }
   return parts.join('; ') || null;
