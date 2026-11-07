@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## Unreleased
+## 3.54.0
 
 ### Added
 
