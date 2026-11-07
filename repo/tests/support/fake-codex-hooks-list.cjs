@@ -4,21 +4,29 @@
 // method it receives to <CODEX_HOME>/fake-hooks-list.log (overridable with FAKE_HOOKS_LIST_SPEC and
 // FAKE_HOOKS_LIST_LOG). It never calls a model or writes config.toml.
 // Modes: answer (default) | exit | error-reply | no-result | garbled | hang | answer-stay |
-// answer-orphan | hang-orphan.
+// answer-orphan | hang-orphan. The fake and detached keeper use Node's folder as cwd so they
+// cannot keep a fixture busy on Windows. Lingering fakes self-exit after 15 s; keepers after 10 s.
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
 const { spawn } = require('node:child_process');
-const home = process.env.CODEX_HOME;
-const spec = JSON.parse(fs.readFileSync(process.env.FAKE_HOOKS_LIST_SPEC || path.join(home, 'fake-hooks-list.json'), 'utf8'));
-const log = line => fs.appendFileSync(process.env.FAKE_HOOKS_LIST_LOG || path.join(home, 'fake-hooks-list.log'), `${line}\n`);
+const home = path.resolve(process.env.CODEX_HOME);
+const specFile = path.resolve(process.env.FAKE_HOOKS_LIST_SPEC || path.join(home, 'fake-hooks-list.json'));
+const logFile = path.resolve(process.env.FAKE_HOOKS_LIST_LOG || path.join(home, 'fake-hooks-list.log'));
+const outside = path.dirname(process.execPath);
+process.chdir(outside);
+const spec = JSON.parse(fs.readFileSync(specFile, 'utf8'));
+const log = line => fs.appendFileSync(logFile, `${line}\n`);
 log(`pid ${process.pid}`);
 log(`argv ${process.argv.slice(2).join(' ')}`);
+if (['hang', 'answer-stay', 'garbled', 'answer-orphan', 'hang-orphan'].includes(spec.mode)) {
+  setTimeout(() => process.exit(0), 15000).unref();
+}
 if (spec.mode === 'hang' || spec.mode === 'garbled') setInterval(() => {}, 1000);
 if (spec.mode === 'answer-stay') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
 function orphan() {
-  const keeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
-    detached: true, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true,
+  const keeper = spawn(process.execPath, ['-e', 'setTimeout(() => process.exit(0), 10000)'], {
+    cwd: outside, detached: true, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true,
   });
   log(`keeper ${keeper.pid}`);
   keeper.unref();

@@ -33,16 +33,20 @@ async function stopFakes(f) {
   const pids = [...new Set(calls(f).filter(line => /^(pid|keeper) \d+$/.test(line)).map(line => Number(line.split(' ')[1])))];
   // Attempt every PID even if another kill fails, and finish all waits before removing the home.
   const results = await Promise.allSettled(pids.map(async pid => {
-    try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-    const deadline = Date.now() + 5000;
+    let killError;
+    try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') killError = error; }
+    const deadline = Date.now() + 10000;
     for (;;) {
-      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; }
-      if (Date.now() >= deadline) throw new Error(`Fake Codex process ${pid} did not exit within 5 s`);
+      let queryError;
+      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; queryError = error; }
+      if (Date.now() >= deadline) assert.fail(`Fake Codex process ${pid} did not exit within 10 s` +
+        (queryError ? `; exit could not be verified (${queryError.code})` : '; pid is still alive') +
+        (killError ? `; kill failed (${killError.code})` : ''));
       await new Promise(resolve => setTimeout(resolve, 25));
     }
   }));
   const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
-  if (errors.length) throw new AggregateError(errors, 'Could not stop all fake Codex processes');
+  if (errors.length) throw new AggregateError(errors, `Could not stop all fake Codex processes: ${errors.map(error => error.message).join('; ')}`);
 }
 function trustedReply(f, edit = () => {}) {
   const fingerprint = pluginBundleFingerprint(cacheRoot(f));
@@ -87,7 +91,7 @@ function fixture(t, { versions = ['3.19.3'], source = '3.19.3', plugin = 'true',
   const codexHome = path.join(root, '.codex');
   t.after(async () => {
     await stopFakes({ codexHome });
-    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
   const managed = path.join(root, 'managed');
   write(path.join(managed, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: source }));

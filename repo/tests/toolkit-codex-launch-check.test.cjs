@@ -19,9 +19,10 @@ const FAKE = path.join(__dirname, 'support/fake-codex-hooks-list.cjs');
 const SCRIPT = path.join(repoRoot, 'repo/scripts/toolkit-codex-install-state.cjs');
 const cacheRoot = f => path.join(f.codexHome, 'plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit', f.read().version);
 const calls = f => {
-  const log = path.join(f.codexHome, 'fake-hooks-list.log');
-  return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\r?\n/) : [];
+  const logs = f.logs || [path.join(f.codexHome, 'fake-hooks-list.log')];
+  return logs.flatMap(log => fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\r?\n/) : []);
 };
+const loggedPids = f => calls(f).filter(line => /^(pid|keeper) \d+$/.test(line)).map(line => Number(line.split(' ')[1]));
 function trustedReply(f, edit = () => {}) {
   const fingerprint = pluginBundleFingerprint(cacheRoot(f));
   const result = { data: [{ hooks: expectedToolkitHooks(cacheRoot(f)).map(hook => ({
@@ -53,9 +54,11 @@ function write(file, text) {
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-launch-'));
   const codexHome = path.join(root, '.codex');
+  const f = { root, codexHome, logs: [path.join(codexHome, 'fake-hooks-list.log')], savedPids: [],
+    read: () => new CodexToolkitInstall({ codexHome }).read() };
   t.after(async () => {
-    await stopFakes({ codexHome });
-    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await stopFakes(f);
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
   const cache = path.join(codexHome, 'plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.19.3');
   write(path.join(cache, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'ai-agent-toolkit', version: '3.19.3' }));
@@ -63,25 +66,29 @@ function fixture(t) {
   const fingerprint = pluginBundleFingerprint(cache);
   const hooks = KEYS.map(key => `[hooks.state."${ID}:.codex-plugin/hooks/hooks.json:${key}"]\ntrusted_hash = "sha256:${'b'.repeat(64)}"\ntrusted_content_hash = "${fingerprint}"\n`).join('\n');
   write(path.join(codexHome, 'config.toml'), `[plugins."${ID}"]\nenabled = true\n\n[hooks.state]\n\n${hooks}`);
-  return { root, codexHome, read: () => new CodexToolkitInstall({ codexHome }).read() };
+  return f;
 }
 
 // Each fake owns its pids. Always stop keepers before the fixture's working folder is removed,
 // including on a failed assertion or a deliberately simulated failed production shutdown.
 async function stopFakes(f) {
-  const pids = [...new Set(calls(f).filter(line => /^(pid|keeper) \d+$/.test(line)).map(line => Number(line.split(' ')[1])))];
+  const pids = [...new Set([...f.savedPids, ...loggedPids(f)])];
   // Attempt every PID even if another kill fails, and finish all waits before removing the home.
   const results = await Promise.allSettled(pids.map(async pid => {
-    try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-    const deadline = Date.now() + 5000;
+    let killError;
+    try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') killError = error; }
+    const deadline = Date.now() + 10000;
     for (;;) {
-      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; }
-      if (Date.now() >= deadline) throw new Error(`Fake Codex process ${pid} did not exit within 5 s`);
+      let queryError;
+      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; queryError = error; }
+      if (Date.now() >= deadline) assert.fail(`Fake Codex process ${pid} did not exit within 10 s` +
+        (queryError ? `; exit could not be verified (${queryError.code})` : '; pid is still alive') +
+        (killError ? `; kill failed (${killError.code})` : ''));
       await new Promise(resolve => setTimeout(resolve, 25));
     }
   }));
   const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
-  if (errors.length) throw new AggregateError(errors, 'Could not stop all fake Codex processes');
+  if (errors.length) throw new AggregateError(errors, `Could not stop all fake Codex processes: ${errors.map(error => error.message).join('; ')}`);
 }
 const keeperPid = f => Number(calls(f).find(line => line.startsWith('keeper '))?.split(' ')[1]);
 
@@ -137,6 +144,7 @@ test('AT21: --check asks only the named Codex (--codex, else CODEX_TOOLKIT_CODEX
   // Two builds share one home but disagree on trust. The chosen build alone decides the hold.
   const builds = ['a', 'b'].map(name => {
     const spec = path.join(f.root, `${name}.json`); const log = path.join(f.root, `${name}.log`); const script = path.join(f.root, `${name}.cjs`);
+    f.logs.push(log);
     write(spec, JSON.stringify({ result: trustedReply(f, (r, hooks) => { if (name === 'b') hooks.forEach(hook => { hook.trustStatus = 'modified'; }); }) }));
     write(script, `process.env.FAKE_HOOKS_LIST_SPEC=${JSON.stringify(spec)};\nprocess.env.FAKE_HOOKS_LIST_LOG=${JSON.stringify(log)};\nrequire(${JSON.stringify(FAKE)});\n`);
     return { script, log };
@@ -144,6 +152,7 @@ test('AT21: --check asks only the named Codex (--codex, else CODEX_TOOLKIT_CODEX
   assert.equal(passed(runCheck(f, undefined, { args: ['--check', '--codex', builds[0].script] })), true);
   r = runCheck(f, undefined, { args: ['--check', '--codex', builds[1].script] });
   assert.equal(r.status, 1); assert.match(r.stdout, /does not trust/);
+  f.savedPids.push(...loggedPids(f));
   write(builds[0].log, ''); write(builds[1].log, '');
   r = runCheck(f, undefined, { args: ['--check', '--codex', builds[1].script], env: { CODEX_TOOLKIT_CODEX_CLI: builds[0].script } });
   assert.equal(r.status, 1); assert.match(r.stdout, /does not trust/);
