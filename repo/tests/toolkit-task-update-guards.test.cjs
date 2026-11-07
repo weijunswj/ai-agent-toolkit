@@ -105,7 +105,9 @@ test('health registration rolls back its own unchanged native write if enrolment
   t.mock.method(tasks, 'updateRegistry', (home, change) => real(home, rows => {
     const next = change(rows); if (next.some(row => row.job === 'task-health')) throw new Error('Fixture disk failure'); return next;
   }));
-  assert.throws(() => w.updater().run({ apply: true }), /New registration removed and read back/);
+  // The health failure is reported beside the repository results, with the same restoration proof.
+  const result = w.updater().run({ apply: true });
+  assert.ok(result.results.some(row => row.task === 'task-health' && row.refused && /New registration removed and read back/.test(row.reason)), JSON.stringify(result.results));
   assert.equal(w.scheduler.list('TOOLKIT-HEALTH').length, 0);
   assert.ok(!tasks.readRegistry(w.home).tasks.some(row => row.job === 'task-health'));
 });

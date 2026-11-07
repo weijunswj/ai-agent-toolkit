@@ -58,12 +58,13 @@ class TaskLauncher {
     }
     (deps.stderr || (text => process.stderr.write(text)))(MISSING_LINE + '\n');
     let previous;
-    try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* A damaged count restarts; the next write repairs it. */ }
     const misses = (Number.isSafeInteger(previous?.misses) && previous.misses > 0 ? previous.misses : 0) + 1;
     write({ misses });
     const at = new Date().toISOString(), lastFile = path.join(state, 'tasks', id, 'last-run.json');
     let history = {};
-    try { history = JSON.parse(fs.readFileSync(lastFile, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    // Unreadable or damaged history must never stop the missing-Toolkit receipt or the self-disable count.
+    try { const read = JSON.parse(fs.readFileSync(lastFile, 'utf8')); if (read && typeof read === 'object' && !Array.isArray(read)) history = read; } catch { /* Start from empty history. */ }
     const receipt = { ...history, schema: 'toolkit.task-last-run.v1', id, job: args[0], started: at, finished: at, status: 'failed', exit: MISSING_EXIT, summary: [MISSING_LINE] };
     delete receipt.reason;
     const lastTemp = `${lastFile}.${process.pid}.tmp`; fs.writeFileSync(lastTemp, JSON.stringify(receipt) + '\n', { mode: 0o600 }); fs.renameSync(lastTemp, lastFile);

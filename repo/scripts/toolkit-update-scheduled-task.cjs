@@ -269,7 +269,15 @@ class TaskUpdater {
       for (const repository of ownership.held) results.push({ repository, refused: true, reason: tasks.safeText(error.message) });
     }
     const questions = [...(ownership.questions || [])];
+    // A native write failure (for example a denied registration) stops every later write in this run,
+    // including TASK HEALTH; refusals, held rows and pending questions still let later repositories continue.
+    const writeFailed = result => Array.isArray(result?.items) && result.items.some(item => item.done === false);
+    let stopped = null;
     for (const row of local.plans) {
+      if (stopped) {
+        if (row.desired && !row.plan.stopped && !row.held) results.push({ repository: row.desired.repository, refused: true, reason: 'Held: an earlier native task write failed in this run.' });
+        continue;
+      }
       if (!row.desired || row.plan.stopped || row.held || ownership.held?.includes(row.desired.repository.toLowerCase())) continue;
       try {
         if (ownership.remove.includes(row.desired.repository.toLowerCase())) {
@@ -289,6 +297,7 @@ class TaskUpdater {
               if (pending) results.push({ repository: row.desired.repository, refused: true, reason: 'Ownership transfer awaits the exact task choice.' });
               else {
                 const repaired = this.owner(answers).apply(row.desired); results.push(repaired);
+                if (writeFailed(repaired)) { stopped = row.desired.repository; continue; }
                 if (!repaired.refused && repaired.items.every(item => item.done)) results.push(...this.relinquish(row.desired.repository.toLowerCase()));
               }
               continue;
@@ -302,6 +311,7 @@ class TaskUpdater {
               if (answer.answer.observation !== question.observation || !['keep', 'replace'].includes(answer.answer.outcome)) throw new Error('Transfer answer is stale or invalid');
               if (answer.answer.outcome === 'replace') {
                 const repaired = this.owner().apply(row.desired); results.push(repaired);
+                if (writeFailed(repaired)) { stopped = row.desired.repository; continue; }
                 if (!repaired.refused && repaired.items.every(item => item.done)) { results.push(...this.relinquish(row.desired.repository.toLowerCase())); continue; }
               }
             }
@@ -319,13 +329,18 @@ class TaskUpdater {
         if (pending) { results.push({ repository: row.desired.repository, refused: true, reason: 'Awaiting the owner keep-or-replace answer.' }); continue; }
         owner = this.owner(answers);
         const applied = owner.apply(row.desired); results.push(applied);
+        if (writeFailed(applied)) stopped = row.desired.repository;
       } catch (error) { results.push({ repository: row.desired.repository, refused: true, reason: tasks.safeText(error.message) }); }
     }
     const first = local.plans.find(row => row.desired);
-    if (first) {
-      const installed = this.installHealth(first.desired);
-      if (installed.pending) questions.push(installed.pending);
-      else results.push(installed);
+    if (first && stopped) results.push({ task: 'task-health', refused: true, reason: `Held: the native task write for ${stopped} failed in this run.` });
+    else if (first) {
+      // A health failure is reported with the repository results, never in place of them.
+      try {
+        const installed = this.installHealth(first.desired);
+        if (installed.pending) questions.push(installed.pending);
+        else results.push(installed);
+      } catch (error) { results.push({ task: 'task-health', refused: true, reason: tasks.safeText(error.message) }); }
     }
     return { ...local, results, ...(questions.length ? { questions } : {}) };
   }
