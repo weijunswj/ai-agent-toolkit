@@ -71,6 +71,8 @@ On an install, offer the personal-data guard once; never install it without the 
 
 ### Plain-text check
 
+A Toolkit source checkout (one with `repo/scripts/check-plain-references.cjs`) runs the plain-text check from source, so never run the plain-text installer there.
+
 In a repository whose Toolkit GitHub governance is ENABLED, install the plain-text check on any install or refresh where `.github/plain-text.json` is missing: the user's yes to governance covers it. In other repositories it is optional: offer it in the same question as the personal-data guard and install it only on a yes (it writes CI files, not instruction files). Run `node <toolkit>/skills/secure-ci-cd/scripts/install-plain-text-check.cjs --repo <repo> --workflow` and report its output: it writes `.github/plain-text.json` (issue and pull request reference rules on, no banned terms), a starting baseline of what is already there, the check copy under `.github/scripts/` and the CI workflow. Ask whether the repository has its own shorthand codes to add as banned terms; add only ones the user names, each with a reason and the plain wording to use. On a refresh where `.github/plain-text.json` exists, run it with `--check` and, on drift, rerun the install (it keeps the settings and baseline). A governed repository switches it off only with a reason the user gives, recorded as `off_reason` in its settings.
 
 ## After a refresh
