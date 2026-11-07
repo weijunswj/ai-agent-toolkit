@@ -2,6 +2,8 @@
 
 One list of tool calls that every hook change must keep deciding the same way: calls that must pass (no false blocks) and calls that must stop (no leaks), including what happens when a hook itself breaks. `repo/scripts/toolkit-hook-pack.cjs` runs them through the hooks exactly as Claude Code and Codex start them: it reads both `hooks.json` files from a temporary copy of the plugin, matches each call against the real matchers, writes the plugin folder into the command and starts every matching hook as its own process with the call on stdin. On Windows the Codex hooks run through the PowerShell launcher setup installs. It then reads the decision the host would act on and checks that no fixture file changed.
 
+The pack starts hooks directly in fixtures. It cannot prove that the installed host trusts the plugin or delivers a real call. Codex bundle changes can revoke hook approval even when this pack is green. Real-host smoke requires a positive control refusal in the same chat, without editing the plugin root.
+
 ## Running it
 
 - `node repo/scripts/toolkit-hook-pack.cjs run`: every row on this computer's system. Add `--suite <kind>`, `--family <file name>`, `--rows <id,id>`, `--host claude|codex` or `--verbose` (prints each refusal's text).
@@ -13,7 +15,7 @@ CI runs the full pack on Linux in `hook-pack` and each Windows family separately
 
 The closure shell family covers hidden writes, strict Start-Process arguments and shell syntax, with retained read and data controls. It keeps new cases out of the issue-closure and merge families.
 
-The closure matrix includes ordinary command data across folders and tool names, clean identity and body-file controls, and API, connector and approval-ordering cases. Keeping those rows together leaves headroom in the executable issue-closure family without changing any row, host or expectation.
+The closure matrix includes ordinary command data across folders and tool names, clean identity and body-file controls, and API, connector and approval-ordering cases. Keeping those rows together leaves headroom in the executable issue-closure family without changing any row, host or expectation. Step rows share one fixture to check merge, attribution and push decisions across Codex shell names and input shapes.
 
 ## Rows
 

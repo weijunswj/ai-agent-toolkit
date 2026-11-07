@@ -2,7 +2,7 @@
 
 A compact, pointer-only map of this repository. Rules live in [CONTROLLER.md](CONTROLLER.md), the root `AGENTS.md` and the sources named below; this file only says where things are. Update it in the change that moves what it describes; `repo/tests/repo-map.test.cjs` checks that every path listed here exists.
 
-Last reviewed against `main` `9831220`.
+Last reviewed against `main` `be5af04`.
 
 ## Parts
 
@@ -29,7 +29,7 @@ Last reviewed against `main` `9831220`.
 | Setup (`setup toolkit`) | `repo/scripts/setup-toolkit.cjs`, `repo/scripts/setup-toolkit-core.cjs` (shared core), `repo/scripts/setup-core-claude.cjs`, `repo/scripts/setup-core-codex.cjs` |
 | Native plugin install | `repo/scripts/setup-claude-toolkit-plugin.cjs`, `repo/scripts/setup-codex-toolkit-plugin.cjs` |
 | Session-start hooks and bridge | `repo/scripts/toolkit-local-bridge.cjs`, `repo/scripts/toolkit-codex-session-start.cjs` |
-| Install check | `repo/scripts/toolkit-install-health.cjs`, `repo/scripts/toolkit-claude-account-copy.cjs` (the Claude app copy steps, shared with the session-start reminder and the daily check-in); Codex's Toolkit state, read from the Codex files only, in `repo/scripts/toolkit-codex-install-state.cjs` |
+| Install check | `repo/scripts/toolkit-install-health.cjs`, `repo/scripts/toolkit-claude-account-copy.cjs` (the Claude app copy steps, shared with the session-start reminder and the daily check-in); Codex's Toolkit state and bundle fingerprint, read from the Codex files only, in `repo/scripts/toolkit-codex-install-state.cjs` (`--check` also asks the Codex the gate will run, named with `--codex`, once through its app-server, and holds gate launches until the files and that Codex agree every hook is on) |
 | Keys and tokens (`toolkit env`) | `repo/scripts/toolkit-env.cjs`, `repo/scripts/toolkit-env-store.cjs`, `repo/scripts/toolkit-env-feeders.cjs`, `repo/scripts/toolkit-env-editor.cjs` |
 | Global rules installer | `repo/scripts/toolkit-global-rules.cjs` |
 | Managed marker format | `repo/scripts/toolkit-managed-block.cjs` |

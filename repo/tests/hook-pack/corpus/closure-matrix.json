@@ -3,6 +3,2378 @@
   "family": "closure-matrix",
   "rows": [
     {
+      "id": "CLOSURE.m3-merge-tools-shapes",
+      "source": "closure matrix: merge, attribution and push across Codex tools and call shapes",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "steps": [
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "cmd": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "gh pr merge 5 --merge"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "cmd": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "gh pr merge 5 --merge"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "cmd": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "gh pr merge 5 --merge"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "cmd": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "gh pr merge 5 --merge"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "cmd": "gh pr merge 5 --merge"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "gh pr merge 5 --merge",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": [
+            "pwsh",
+            "-c",
+            "gh pr merge 5 --merge"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-codex-helper-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.m3-trailer-tools-shapes",
+      "source": "closure matrix: merge, attribution and push across Codex tools and call shapes",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "steps": [
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "cmd": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\"",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "cmd": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\"",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "cmd": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\"",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "cmd": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\"",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "cmd": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\"",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": [
+            "pwsh",
+            "-c",
+            "git commit -m x -m \"Co-Authored-By: Claude <noreply@anthropic.com>\""
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-codex-helper-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.m3-default-push-tools-shapes",
+      "source": "closure matrix: merge, attribution and push across Codex tools and call shapes",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        },
+        "files": {
+          ".git/refs/remotes/origin/HEAD": "ref: refs/remotes/origin/main\n"
+        }
+      },
+      "steps": [
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "cmd": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git push origin HEAD:main",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin HEAD:main"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "cmd": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git push origin HEAD:main",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin HEAD:main"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "cmd": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git push origin HEAD:main",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin HEAD:main"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "cmd": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git push origin HEAD:main",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin HEAD:main"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "cmd": "git push origin HEAD:main"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git push origin HEAD:main",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": [
+            "pwsh",
+            "-c",
+            "git push origin HEAD:main"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-codex-helper-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.m3-force-push-tools-shapes",
+      "source": "closure matrix: merge, attribution and push across Codex tools and call shapes",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "steps": [
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "cmd": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git push --force origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push --force origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "cmd": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git push --force origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push --force origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "cmd": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git push --force origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push --force origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "cmd": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git push --force origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push --force origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "cmd": "git push --force origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git push --force origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": [
+            "pwsh",
+            "-c",
+            "git push --force origin feature"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-codex-helper-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.m3-credential-push-tools-shapes",
+      "source": "closure matrix: merge, attribution and push across Codex tools and call shapes",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature",
+          "commits": [
+            {
+              "files": {
+                "uat-config.txt": "token = \"{credential}\"\n"
+              },
+              "message": "fixture"
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "deny",
+            "reason": "toolkit-codex-helper-hook"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": [
+            "pwsh",
+            "-c",
+            "git push origin feature"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-codex-helper-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.m3-feature-push-tools-shapes",
+      "source": "closure matrix: merge, attribution and push across Codex tools and call shapes",
+      "kind": "benign",
+      "hosts": [
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "branch": "feature"
+        }
+      },
+      "steps": [
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": [
+                "bash",
+                "-c",
+                "git push origin feature"
+              ]
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "cmd": "git push origin feature"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": "git push origin feature",
+              "workdir": "{work}"
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": [
+            "pwsh",
+            "-c",
+            "git push origin feature"
+          ]
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.unreadable-spellings-both-hosts",
+      "source": "unreadable shell input with repo flags, executable suffix and pr new",
+      "kind": "hostile",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        }
+      },
+      "steps": [
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh -R toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh --repo toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh issue -R toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh issue --repo=toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh.exe issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh pr new --title x"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": {
+                "a": "gh -R toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": {
+                "a": "gh --repo toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": {
+                "a": "gh issue -R toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": {
+                "a": "gh issue --repo=toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "PowerShell",
+            "tool_input": {
+              "command": {
+                "a": "gh.exe issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "PowerShell",
+        "tool_input": {
+          "command": {
+            "a": "gh pr new --title x"
+          }
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.unreadable-spellings-codex-tools",
+      "source": "unreadable shell input under Codex-only tool names",
+      "kind": "hostile",
+      "hosts": [
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        }
+      },
+      "steps": [
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": {
+                "a": "gh -R toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": {
+                "a": "gh --repo toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": {
+                "a": "gh issue -R toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": {
+                "a": "gh issue --repo=toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": {
+                "a": "gh.exe issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "exec_command",
+            "tool_input": {
+              "command": {
+                "a": "gh pr new --title x"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": {
+                "a": "gh -R toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": {
+                "a": "gh --repo toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": {
+                "a": "gh issue -R toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": {
+                "a": "gh issue --repo=toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": {
+                "a": "gh.exe issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "shell",
+            "tool_input": {
+              "command": {
+                "a": "gh pr new --title x"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": {
+                "a": "gh -R toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": {
+                "a": "gh --repo toolkit-test-fixture/fixture issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": {
+                "a": "gh issue -R toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": {
+                "a": "gh issue --repo=toolkit-test-fixture/fixture close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "local_shell",
+            "tool_input": {
+              "command": {
+                "a": "gh.exe issue close 1"
+              }
+            }
+          },
+          "expect": {
+            "decision": "deny"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "local_shell",
+        "tool_input": {
+          "command": {
+            "a": "gh pr new --title x"
+          }
+        }
+      },
+      "expect": {
+        "decision": "deny"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "CLOSURE.unreadable-near-miss-controls",
+      "source": "ordinary gh reads and git status stay allowed under the wide unreadable-input screen",
+      "kind": "benign",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "fixture": {
+        "repo": {
+          "governance": "none"
+        }
+      },
+      "steps": [
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh issue list"
+              }
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh issue view 5 --json closedAt,state"
+              }
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh issue list --state closed"
+              }
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh pr view 7"
+              }
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh pr list --state closed"
+              }
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh pr checks 7"
+              }
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh pr diff 7"
+              }
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        },
+        {
+          "event": "PreToolUse",
+          "payload": {
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": {
+                "a": "gh auth status"
+              }
+            }
+          },
+          "expect": {
+            "decision": "allow"
+          }
+        }
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": {
+            "a": "git status"
+          }
+        }
+      },
+      "expect": {
+        "decision": "allow"
+      },
+      "status": "pass"
+    },
+    {
       "id": "CLOSURE.matrix-grep-enabled-Bash",
       "source": "ordinary command data across folders and tools",
       "kind": "benign",
