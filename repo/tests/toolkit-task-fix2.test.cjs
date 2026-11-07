@@ -7,7 +7,7 @@ const tasks = require('../scripts/toolkit-tasks.cjs');
 const windows = require('../scripts/toolkit-windows-tasks.cjs');
 const update = require('../scripts/toolkit-update-scheduled-task.cjs');
 const launcher = require('../scripts/toolkit-task-launcher.cjs');
-const { world } = require('./support/task-health-world.cjs');
+const { world, memoryStore } = require('./support/task-health-world.cjs');
 const s = require('./support/windows-task-switch-world.cjs');
 const approve = w => update.saveApproval(w.home, { decision: 'standing', answer_ref: 'host/standing' }, '3.52.0');
 
@@ -64,4 +64,27 @@ test('G2 recheck Low 2: damaged miss count or receipt history never stops the sa
   for (let miss = 1; miss <= 3; miss++) assert.equal(launcher.launch(args, deps), launcher.MISSING_EXIT);
   assert.equal(disabled, 1);
   assert.equal(tasks.readLastRun(w.entry.id, w.home).exit, launcher.MISSING_EXIT);
+});
+
+test('Smoke: a computer without a saved identity is not held by the store ownership check', t => {
+  const w = world(t), store = memoryStore(); approve(w);
+  // Tasks enrolled by an older Toolkit have no computer identity file yet.
+  fs.rmSync(path.join(tasks.userStateDir(w.home), 'task-computer.json'), { force: true });
+  tasks.updateRegistry(w.home, rows => rows.map(({ job_owner, job_owner_label, ...row }) => row));
+  assert.equal(tasks.computerIdentity(w.home), null);
+  w.owner.store = () => ({ store, key: 'example/evidence' });
+  const plan = w.updater().run();
+  assert.ok(plan.plans.every(row => !row.held), JSON.stringify(plan.plans.map(row => row.reason)));
+  const applied = w.updater().run({ apply: true });
+  assert.ok(applied.plans.every(row => !row.held), JSON.stringify(applied.plans.map(row => row.reason)));
+  assert.ok(!applied.results.some(row => row.refused), JSON.stringify(applied.results));
+  assert.equal(w.scheduler.list('TOOLKIT-HEALTH').length, 1);
+});
+
+test('Smoke: an ownership read failure keeps its own reason in the held plan', t => {
+  const w = world(t), store = memoryStore(); approve(w);
+  store.read = () => { throw new Error('Health store read failed'); };
+  w.owner.store = () => ({ store, key: 'example/evidence' });
+  const plan = w.updater().run();
+  assert.ok(plan.plans.some(row => row.held && /Health store read failed/.test(row.reason)), JSON.stringify(plan.plans.map(row => row.reason)));
 });

@@ -18,6 +18,7 @@
 - Computer-wide task health no longer borrows repository ownership or minutes, and repository removal leaves it alone. Existing mixed records are migrated during an approved update.
 - Task updates preserve hand-edit questions for older enrolments and continue with other repositories when one is held. Setup still refreshes global rules and helper definitions when task work is held.
 - A failed native task write stops the rest of the update run, including the computer-wide health task, and the update report always prints, including any health task failure. A damaged missing-checkout count or receipt no longer stops the launcher's self-disable.
+- A computer whose tasks were enrolled before computer identities existed is no longer held by the evidence-store ownership check, and a held ownership check now names its cause.
 - Concurrent missing-checkout launchers retain both disabled records and preserve footer scan, skip and deferral history. Current task updates restore missing launchers and refresh their code version.
 - Health waits for busy stores, serialises checkout status reads, keeps a local report when sharing fails and records a safe failure reason. Expected quiet skips and stopped health checks no longer raise alerts.
 - Explicit setup flags resolve the scheduled-task question without waiting for input. Setup regression suites are split without changing their coverage or time budget.

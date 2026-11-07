@@ -94,7 +94,7 @@ class TaskUpdater {
     try {
       const target = this.health.store();
       if (target) ownership = this.ownership(target, { plans }, { readOnly: true });
-    } catch { for (const row of plans) { row.held = true; row.reason = 'Computer ownership could not be verified; inspect the evidence store, then retry.'; } }
+    } catch (error) { for (const row of plans) { row.held = true; row.reason = `Computer ownership could not be verified (${tasks.safeText(error.message)}); inspect the evidence store, then retry.`; } }
     for (const row of plans) if (row.desired && ownership.remove.includes(row.desired.repository.toLowerCase())) {
       row.plan = { ...row.plan, items: entries.filter(e => e.host === 'windows' && e.job !== 'task-health' && !e.adopted && !e.stopped_by_owner && e.repository?.toLowerCase() === row.desired.repository.toLowerCase()).map(entry => ({ definition: { ...entry }, action: 'remove' })) };
     }
@@ -122,7 +122,10 @@ class TaskUpdater {
     try { return this.readOwnership(target, local, false); } finally { lock.release(); }
   }
   readOwnership(target, local, readOnly) {
-    const others = target.store.list(), label = health.computerLabel(this.home);
+    // A computer without a saved identity (tasks enrolled by an older Toolkit) has never been
+    // chosen as an owner; apply creates the identity before any question or write.
+    const others = target.store.list(), label = tasks.computerIdentity(this.home) ? health.computerLabel(this.home) : null;
+    if (!label && !readOnly) throw new Error('Computer identity missing; update held');
     const previous = target.store.read('task-health/owners.json'), owners = previous.doc || { schema: 'toolkit.task-owners.v1', repos: {} };
     if (owners.schema !== 'toolkit.task-owners.v1' || !owners.repos || typeof owners.repos !== 'object' || Array.isArray(owners.repos) || tasks.looksSecret(JSON.stringify(owners))) throw new Error('Ownership record invalid; update held');
     for (const [repo, value] of Object.entries(owners.repos)) if (!tasks.REPOSITORY.test(repo) || !/^computer-[a-f0-9]{12}$/.test(value.computer || '') || !validRef(value.answer_ref)) throw new Error('Ownership record invalid; update held');
