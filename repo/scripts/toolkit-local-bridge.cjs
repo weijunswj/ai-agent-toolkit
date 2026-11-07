@@ -2958,7 +2958,7 @@ function nativePluginCacheStatus(args, state) {
   return { status: '' };
 }
 
-// The install check's Codex notice (Codex runs an older Toolkit, or Toolkit hooks are off there),
+// The install check's Codex notice (Codex runs an older Toolkit, or Toolkit hooks are off, not reviewed, changed since approval or unverified there),
 // printed once per run. Session-start stdout reaches only the session, so the line asks it to tell
 // the owner.
 let codexReminderPrinted = false;

@@ -187,7 +187,7 @@ class ToolkitInstallHealthCheck {
   }
 
   // Shown only when Codex has the Toolkit plugin on and runs an older Toolkit than this PC, or some
-  // Toolkit hooks are off or not reviewed. Read from the Codex files only: Toolkit never starts
+  // Toolkit hooks are off, not reviewed, changed since approval or unverified. Read from the Codex files only: Toolkit never starts
   // Codex, edits hooks.state or writes the Codex cache here, and it blocks nothing.
   #codexCheck() {
     if (!this.#codexInstall) return null;
