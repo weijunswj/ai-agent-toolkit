@@ -36,6 +36,10 @@ const LANE_PREFIX = 'CDX-TK469-';
 
 test('T10b a split connector record and shell claim preserve account and parent freshness guards', () => {
   const playbook = fs.readFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/controller-takeover.md'), 'utf8');
+  assert.ok(playbook.includes('**Custody pack:**'), 'the named relay group still preserves evidence');
+  assert.ok(playbook.includes('**Record pack:**'), 'the named relay group still owns the split record and claim');
+  assert.deepEqual([...playbook.matchAll(/^Pack: (.+)\r?$/gm)].map(match => match[1].trim()).filter(id => !id.startsWith('<')),
+    Array(3).fill('read-example-repo-20261108T0000Z-abcd'));
   const sample = playbook.match(/^EXAMPLE-001 TAKEOVER:.*$/m)?.[0];
   assert.ok(sample, 'use the actual published relay record');
   for (const scenario of ['matching account', 'different account', 'parent write between record and claim']) {

@@ -18,8 +18,13 @@ const clauses = [
   'No gate or merge from a paste alone', 'Record and claim back-to-back on one account',
   'Hold with a reminder', 'same GitHub account that posted the record',
   'controller identity and surface, bound commit and Controller blob, old writer stopped with proof, next action',
+  "post one takeover record, one line, on the parent's CURRENT when ENABLED, else in the evidence store",
 ];
-function contract(text) { for (const clause of clauses) assert.ok(text.includes(clause), clause); }
+function contract(text) {
+  for (const clause of clauses) assert.ok(text.includes(clause), clause);
+  const step7 = text.split('### 7. Record and governed claim')[1].split('### 8. Orientation')[0];
+  assert.ok(step7.includes("post one takeover record, one line, on the parent's CURRENT when ENABLED, else in the evidence store"));
+}
 
 test('T1 generic journey is ordered, with governance-only checks guarded', () => {
   const text = read(PLAYBOOK);
@@ -88,6 +93,30 @@ const resultFields = ['=== TOOLKIT RELAY RESULT v1 ===', 'Pack:', 'Harness:', 'G
   'Toolkit and hooks:', 'Step 1:', 'Output:', 'Proof:', 'Read-back:', 'Not checked:', '=== END TOOLKIT RELAY RESULT ==='];
 const fieldsContract = (text, fields) => { for (const field of fields) assert.ok(text.includes(field), field); };
 
+const packGroups = ['Read pack', 'Custody pack', 'Record pack', 'Task pack', 'Gate pack'];
+const packIdWords = 'Pack ids use the lower-case group word: `read`, `custody`, `record`, `task` or `gate`, in the order above.';
+function packNamesContract(text) {
+  const groups = text.split('### Step groups\n')[1].split('\n### Pack template')[0];
+  assert.deepEqual([...groups.matchAll(/^- \*\*([^*]+):\*\*/gm)].map(match => match[1]), packGroups);
+  assert.ok(groups.includes(packIdWords));
+  assert.ok(text.includes('Pack: <group>-<repo>-<UTC yyyymmddThhmmZ>-<4 hex>'));
+  assert.doesNotMatch(text, /\bR\d+\b/);
+}
+
+test('relay group names and lower-case id words are required, with no shorthand codes', () => {
+  const text = read(PLAYBOOK);
+  packNamesContract(text);
+  for (const [index, name] of packGroups.entries()) {
+    assert.throws(() => packNamesContract(text.replace(`**${name}:**`, '**:**')), { code: 'ERR_ASSERTION' }, `removed ${name}`);
+    const oldName = `R${index + 1}`;
+    assert.throws(() => packNamesContract(text.replace(`**${name}:**`, `**${oldName}:**`)), { code: 'ERR_ASSERTION' }, `renamed ${name}`);
+    assert.throws(() => packNamesContract(`${text}\n${oldName}`), { code: 'ERR_ASSERTION' }, `returned ${oldName}`);
+    const word = name.split(' ')[0].toLowerCase();
+    assert.throws(() => packNamesContract(text.replace(`\`${word}\``, `\`${oldName}\``)), { code: 'ERR_ASSERTION' }, `id word ${word}`);
+  }
+  assert.throws(() => packNamesContract(text.replace('<UTC yyyymmddThhmmZ>', '<date>')), { code: 'ERR_ASSERTION' });
+});
+
 test('T13 route order, formats, statuses and waiting rules reject mutations', () => {
   const text = read(PLAYBOOK);
   contract(text);
@@ -120,6 +149,9 @@ test('T14 non-binding samples are complete, reserved and secret-free', () => {
   fieldsContract(fences[0], packFields);
   fieldsContract(fences[1], resultFields);
   for (const sample of fences) assert.ok(sample.includes('example-org/example-repo'));
+  const ids = [...samples.matchAll(/^Pack: (.+)$/gm)].map(match => match[1]);
+  assert.deepEqual(ids, Array(3).fill('read-example-repo-20261108T0000Z-abcd'));
+  for (const id of ids) assert.match(id, /^(read|custody|record|task|gate)-[a-z0-9-]+-\d{8}T\d{4}Z-[0-9a-f]{4}$/);
   // Use the validator's actual secret-pattern definitions, so this cannot drift to a weaker scan.
   const source = read('repo/scripts/validate-toolkit.cjs');
   const declaration = source.match(/const secretPatterns = (\[[\s\S]*?\n\]);/)[1];
@@ -144,7 +176,7 @@ test('state and governance closure matrices preserve each permitted action and h
   const rows = [
     ['Read state', 'yes', 'yes', 'yes', 'yes', 'yes'],
     ['Ask the owner', 'yes', 'missing ability only', 'yes', 'yes', 'report only'],
-    ['Issue relay pack', 'read, custody, record', 'no', 'read or tasks', 'per Controller', 'no; stale open packs'],
+    ['Issue relay pack', 'Read pack, Custody pack, Record pack', 'no', 'Read pack or Task pack', 'per Controller', 'no; stale open packs'],
     ['Accept paste-back', 'open and current', 'none open', 'open and current', 'open and current', 'read effects for successor'],
     ['Refresh Toolkit or guidebook', 'step 3 approvals', 'no', 'no', 'existing rules', 'no'],
     ['Post record', 'step 7 after complete 1-6', 'no', 'no duplicate', 'new journey only', 'no'],

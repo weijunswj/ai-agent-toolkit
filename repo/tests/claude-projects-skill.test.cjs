@@ -29,6 +29,9 @@ test('T5 Projects runs the shared journey first, then extras, with relay as last
   }
   assert.doesNotMatch(setup + read(SKILL_REL), /weekly audit/i);
   assert.match(read(SKILL_REL), /otherwise follow the takeover playbook's owner relay, last after own tools and executors/);
+  const takeover = read('repo/docs/agent-playbooks/controller-takeover.md');
+  for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Task pack', 'Gate pack']) assert.ok(takeover.includes(`**${name}:**`), name);
+  assert.doesNotMatch(takeover, /\bR\d+\b/);
   for (const phrase of ['Text first, card last', 'put every host question card below its explanation']) assert.ok(read(SKILL_REL).includes(phrase));
 });
 
