@@ -101,6 +101,9 @@ function createFakeCodexAppServer(root) {
 // Setup tests written before the Codex instruction limit question answer it with keep (nothing
 // recorded, so config.toml is left alone); tests of that question pass codexDocLimitQuestion: true.
 function withDocLimitAnswer(args, options) {
+  // Older journeys resolve the independent Windows task permission explicitly.
+  // Its own question/approval tests opt in to the unresolved row.
+  if (!options.scheduledTaskQuestion && !options.codexDocLimitQuestion && args.some(arg => arg === '--execute' || arg === '--plan') && !args.includes('--scheduled-task-update')) args = [...args, '--scheduled-task-update', 'no'];
   // Existing journeys keep the unrelated new setting; its own tests exercise the question.
   if (!options.taskAutoMergeQuestion && !options.codexDocLimitQuestion && args.some(arg => arg === '--execute' || arg === '--plan')
       && !args.some(arg => arg === '--task-auto-merge' || arg.startsWith('--task-auto-merge='))) args = [...args, '--task-auto-merge', 'keep'];
@@ -249,13 +252,13 @@ function createGitBackedSetupRepo(root, options = {}) {
 // The Codex plugin helper stays the fake one, which hands a require on to the real helpers.
 function realSetupScriptClosure() {
   const names = new Set();
-  const pending = ['setup-toolkit.cjs', 'setup-toolkit-core.cjs', 'setup-claude-toolkit-plugin.cjs'];
+  const pending = ['repo/scripts/setup-toolkit.cjs', 'repo/scripts/setup-toolkit-core.cjs', 'repo/scripts/setup-claude-toolkit-plugin.cjs'];
   while (pending.length) {
     const name = pending.pop();
-    if (names.has(name) || name === 'setup-codex-toolkit-plugin.cjs') continue;
+    if (names.has(name) || name === 'repo/scripts/setup-codex-toolkit-plugin.cjs') continue;
     names.add(name);
-    const text = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8');
-    for (const match of text.matchAll(/require\('\.\/([\w./-]+\.cjs)'\)/g)) pending.push(match[1]);
+    const text = fs.readFileSync(path.join(repoRoot, name), 'utf8');
+    for (const match of text.matchAll(/require\(['"](\.\.?\/[\w./-]+\.cjs)['"]\)/g)) pending.push(path.posix.normalize(path.posix.join(path.posix.dirname(name), match[1])));
   }
   return [...names];
 }
@@ -264,15 +267,9 @@ function createGitBackedRealSetupRepo(root) {
   const result = createGitBackedSetupRepo(root);
   for (const name of realSetupScriptClosure()) {
     writeFile(
-      path.join(result.setupRepo, 'repo', 'scripts', name),
-      fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', name), 'utf8')
+      path.join(result.setupRepo, name),
+      fs.readFileSync(path.join(repoRoot, name), 'utf8')
     );
-  }
-  // Setup's shared task permission resolver loads the binding validator and its local helpers;
-  // the scheduled-task approval it reads also loads the programme lock.
-  for (const name of ['programme-state.cjs', 'programme-lock.cjs', 'decision-trace-audit.cjs', 'decision-tags.cjs', 'resolve-executable.cjs']) {
-    const rel = path.join('skills', 'github-program-reconciler', 'scripts', name);
-    writeFile(path.join(result.setupRepo, rel), fs.readFileSync(path.join(repoRoot, rel), 'utf8'));
   }
   runTestGit(result.setupRepo, ['add', 'repo/scripts', 'skills']);
   runTestGit(result.setupRepo, ['commit', '-m', 'real setup scripts']);

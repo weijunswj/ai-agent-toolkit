@@ -1,17 +1,14 @@
 'use strict';
-
-// Separate the physical-rename matrix so neither file exceeds the unchanged test budget.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
 const tasks = require('../scripts/toolkit-tasks.cjs');
 const { switchWorld, assertShape, printedRecovery } = require('./support/windows-task-switch-world.cjs');
-
-// G0 moved-location table. Each fixture uses physical renames, the production location reader,
-// real status/cache reads and the real task CLI. No registry path is rewritten to simulate a move.
 const movedRows = ['live intact', 'live edited', 'stopped live', 'stopped absent', 'absent modern', 'absent legacy'];
-for (const move of ['checkout','runner','both'])
+
+// Split by complete test declarations to keep the per-file time budget.
+for (const move of ["checkout"])
 test(`moved recovery table: ${move}`, async t => {
   const w = switchWorld(t, { realLocations: true }), snapshots = [];
   // Build each genuine interruption at the enrolled address, then rename once and replay

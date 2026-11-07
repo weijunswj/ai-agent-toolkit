@@ -487,7 +487,7 @@ class WindowsTaskOwner {
     const registry = this.registry.readRegistry(this.home);
     const entries = registry.status === 'ok' ? registry.tasks : [];
     const assignment = scheduleOwner.assignment(entries, desired.repository, this.computerId, { recoverStopped: this.repairOwned });
-    const ours = entries.filter(e => e.host === 'windows' && String(e.repository).toLowerCase() === desired.repository.toLowerCase());
+    const ours = entries.filter(e => e.host === 'windows' && e.job !== 'task-health' && String(e.repository).toLowerCase() === desired.repository.toLowerCase());
     const cleaners = ours.filter(e => isCleaner(e.job));
     const selected = cleaners[0];
     const folder = selected && !desired.folderOverride ? selected.folder : desired.folder;
@@ -582,12 +582,16 @@ class WindowsTaskOwner {
         && !sameDefinition({ ...observed, enabled: recorded.enrolled.enabled }, recorded.enrolled)) return refuse('disabled participant also has an edited definition; approved scoped remove followed by repair is required');
       if (existing && switching && (!samePath(existing.working_directory, recorded.enrolled?.working_directory || recorded.toolkit_root)
         || !samePath(/--repo-root "([^"\r\n]+)"/.exec(existing.arguments || '')?.[1], definition.checkout))) return refuse('live checkout or Toolkit runner location differs; explicit owner recovery is required');
-      if (existing && recorded.enrolled && !sameDefinition(observed, recorded.enrolled) && existing.state !== 'Disabled' && !(this.repairOwned && !switching && !this.allowIndependentChoice)) {
-        if (definition.job === 'footer-sweep' && !this.allowIndependentChoice) reason = 'stopped by owner: hand-edited task definition';
+      // The standing updater cannot infer an unedited baseline from a semantic
+      // shape match (for example, time-of-day equality ignores a changed date).
+      // Explicit direct repair retains its existing current-shape migration.
+      const unprovenLegacy = existing && !recorded.enrolled && (this.allowIndependentChoice || !recognisedEarlier(existing, recorded, definition) && !verifiedDefinition(existing, definition));
+      if (existing && (unprovenLegacy || recorded.enrolled && !sameDefinition(observed, recorded.enrolled)) && existing.state !== 'Disabled' && (unprovenLegacy || !(this.repairOwned && !switching && !this.allowIndependentChoice))) {
+        if (definition.job === 'footer-sweep' && !this.allowIndependentChoice && !unprovenLegacy) reason = 'stopped by owner: hand-edited task definition';
         else if (!fresh) return refuse('modified governance task needs fresh status and the owner keep-or-replace answer');
         else {
           const fingerprint = digest({ repository: desired.repository, checkout: definition.checkout, folder, task: definition.id, revision: read.revision, binding: read.binding, observed });
-          const changed = Object.keys(observed).filter(key => !sameDefinition(observed[key], recorded.enrolled[key]));
+          const changed = Object.keys(observed).filter(key => !recorded.enrolled || !sameDefinition(observed[key], recorded.enrolled[key]));
           choice = { task: definition.id, repository: desired.repository, folder, operation: retiring ? 'retire' : 'restore Toolkit definition', fingerprint, changed, last_choice: recorded.task_choices?.at(-1) || null,
             question: "Keep your changes or replace with Toolkit's original?" };
           const answer = this.answers.find(a => a.task === definition.id);
@@ -730,7 +734,17 @@ class WindowsTaskOwner {
     const results = [];
     for (const item of plan.items) {
       const { definition } = item;
-      if (item.action === 'current') { results.push({ ...item, done: true }); continue; }
+      if (item.action === 'current') {
+        // The launcher is content-addressed but may have been deleted. Current
+        // native XML still needs a present launcher and current code receipt.
+        installLauncher(this.home);
+        this.registry.updateRegistry(this.home, list => {
+          const entry = list.find(e => e.id === definition.id);
+          if (!sameDefinition(entry, item.recorded)) throw new Error('registry changed before current-task receipt');
+          return list.map(e => e.id === definition.id ? { ...e, toolkit_version: require('../contracts/toolkit-local-bridge/version.json').version } : e);
+        });
+        results.push({ ...item, done: true }); continue;
+      }
       let backup = null;
       let previous = null;
       let written = null;
@@ -829,7 +843,7 @@ class WindowsTaskOwner {
     // Removal is explicitly approved and repository-scoped. The current primary checkout's
     // verified GitHub origin and the non-adopted registry repository prove the scope, even
     // before checkout was recorded or after it moved. Live marker + exact XML still guard deletion.
-    const ours = registry.tasks.filter(entry => entry.host === 'windows' && !entry.adopted && String(entry.repository).toLowerCase() === scope.repository.toLowerCase() && (!folder || entry.folder === folder));
+    const ours = registry.tasks.filter(entry => entry.host === 'windows' && entry.job !== 'task-health' && !entry.adopted && String(entry.repository).toLowerCase() === scope.repository.toLowerCase() && (!folder || entry.folder === folder));
     const results = [];
     for (const entry of ours) {
       const live = this.scheduler.list(entry.folder).find(task => sameTaskName(task.name, entry.name));

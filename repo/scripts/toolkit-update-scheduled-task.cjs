@@ -32,18 +32,22 @@ const approvalQuestion = () => ({ id: 'scheduled-task-approval', kind: 'approval
   title: 'May Toolkit update your scheduled tasks on this computer?',
   detail: 'Create, update and remove the listed fixed scheduled tasks on this computer across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.',
   options: ['standing', 'no'], kinds: [...KINDS] });
-function discoverCheckouts(folder) {
+function discoverCheckouts(folder, { readDir = dir => fs.readdirSync(dir, { withFileTypes: true }) } = {}) {
   if (!fs.existsSync(folder)) return [];
   if (!fs.lstatSync(folder).isDirectory() || fs.lstatSync(folder).isSymbolicLink()) throw new Error('GitHub checkout folder is not a directory');
   const found = [];
-  for (const item of fs.readdirSync(folder, { withFileTypes: true })) {
+  for (const item of readDir(folder)) {
     if (!item.isDirectory() || item.isSymbolicLink() || item.name.startsWith('.')) continue;
     const root = path.join(folder, item.name);
     if (fs.existsSync(path.join(root, '.git'))) found.push(root);
-    else for (const child of fs.readdirSync(root, { withFileTypes: true })) {
+    else {
+      let children;
+      try { children = readDir(root); } catch { found.push({ root, held: true, reason: 'Checkout folder could not be read; check local folder access, then retry.' }); continue; }
+      for (const child of children) {
       if (!child.isDirectory() || child.isSymbolicLink() || child.name.startsWith('.')) continue;
       const candidate = path.join(root, child.name);
       if (fs.existsSync(path.join(candidate, '.git'))) found.push(candidate);
+      }
     }
   }
   return found;
@@ -64,15 +68,20 @@ class TaskUpdater {
   desiredAt(root) { return this.desired({ checkout: root, toolkitRoot: this.toolkitRoot, nodePath: this.nodePath, home: this.home, deps: this.checkoutDeps }); }
   owner(answers = []) { return new windows.WindowsTaskOwner({ home: this.home, scheduler: this.scheduler, now: this.now, repairOwned: true, preserveOwnerStops: true, allowIndependentChoice: true, taskChoice: answers }); }
   plan() {
-    const entries = this.registry(), roots = [...new Set([...entries.filter(e => e.host === 'windows' && !e.adopted && e.checkout).map(e => e.checkout), ...this.discover(this.githubFolder)])];
+    const entries = this.registry();
+    let discovered;
+    try { discovered = this.discover(this.githubFolder); }
+    catch { discovered = [{ root: this.githubFolder, held: true, reason: 'GitHub checkout folder could not be read; check local folder access, then retry.' }]; }
+    const roots = [...new Set([...entries.filter(e => e.host === 'windows' && e.job !== 'task-health' && !e.adopted && e.checkout).map(e => e.checkout), ...discovered.filter(row => typeof row === 'string')])];
     const plans = [], seen = new Set();
+    plans.push(...discovered.filter(row => typeof row !== 'string'));
     for (const root of roots) {
       try {
         const desired = this.desiredAt(root), key = desired.repository.toLowerCase();
         if (seen.has(key)) continue;
         seen.add(key);
         for (let index = plans.length - 1; index >= 0; index--) if (plans[index].held && plans[index].repository?.toLowerCase() === key) plans.splice(index, 1);
-        const stopped = entries.some(e => e.host === 'windows' && e.repository?.toLowerCase() === key && e.stopped_by_owner);
+        const stopped = entries.some(e => e.host === 'windows' && e.job !== 'task-health' && e.repository?.toLowerCase() === key && e.stopped_by_owner);
         const plan = stopped ? { repository: desired.repository, items: [], stopped: true, next_step: 'Stopped by owner; left alone.' } : this.owner().plan(desired);
         plans.push({ root, desired, plan });
       } catch { plans.push({ root, repository: entries.find(entry => entry.host === 'windows' && entry.checkout === root)?.repository || null, held: true, reason: 'Checkout or fresh ownership could not be verified; left alone.' }); }
@@ -80,6 +89,15 @@ class TaskUpdater {
     const cloud = entries.filter(e => e.host !== 'windows').map(e => ({ name: e.name, repository: e.repository, host: e.host, schedule: e.schedule, source: 'from record, not checked live', change: e.toolkit_version && e.toolkit_version !== this.version ? 'Coordinator: check this recorded task against current Toolkit instructions.' : 'Coordinator: verify the recorded schedule and definition; never applied here.' }));
     const first = plans.find(row => row.desired);
     const computer_task = first ? this.healthPlan(first.desired) : null;
+    // Read the same validated ownership record as apply, without questions or writes.
+    let ownership = { remove: [] };
+    try {
+      const target = this.health.store();
+      if (target) ownership = this.ownership(target, { plans }, { readOnly: true });
+    } catch { for (const row of plans) { row.held = true; row.reason = 'Computer ownership could not be verified; inspect the evidence store, then retry.'; } }
+    for (const row of plans) if (row.desired && ownership.remove.includes(row.desired.repository.toLowerCase())) {
+      row.plan = { ...row.plan, items: entries.filter(e => e.host === 'windows' && e.job !== 'task-health' && !e.adopted && !e.stopped_by_owner && e.repository?.toLowerCase() === row.desired.repository.toLowerCase()).map(entry => ({ definition: { ...entry }, action: 'remove' })) };
+    }
     const changes = plans.flatMap(row => (row.plan?.items || []).map(item => ({ repository: row.plan.repository, task: item.definition.name, action: item.action === 'retire' ? 'remove' : item.action })));
     if (computer_task) changes.push({ repository: null, task: 'TASK HEALTH', action: computer_task.action });
     return { plans, cloud, computer_task, changes, computer: tasks.computerIdentity(this.home) ? health.computerLabel(this.home) : 'This computer has not been initialised' };
@@ -97,31 +115,33 @@ class TaskUpdater {
     const saved = saveApproval(this.home, answer.answer, this.version, this.now());
     return { allowed: saved.decision === 'standing' };
   }
-  ownership(target, local) {
+  ownership(target, local, { readOnly = false } = {}) {
+    if (readOnly) return this.readOwnership(target, local, true);
     const lock = new ProgrammeJobLock({ home: this.home, key: target.key }).take();
     if (!lock) throw new Error('Ownership store busy; update held');
-    try {
-      const others = target.store.list(), label = health.computerLabel(this.home);
-      const previous = target.store.read('task-health/owners.json'), owners = previous.doc || { schema: 'toolkit.task-owners.v1', repos: {} };
-      if (owners.schema !== 'toolkit.task-owners.v1' || !owners.repos || typeof owners.repos !== 'object' || Array.isArray(owners.repos) || tasks.looksSecret(JSON.stringify(owners))) throw new Error('Ownership record invalid; update held');
-      for (const [repo, value] of Object.entries(owners.repos)) if (!tasks.REPOSITORY.test(repo) || !/^computer-[a-f0-9]{12}$/.test(value.computer || '') || !validRef(value.answer_ref)) throw new Error('Ownership record invalid; update held');
-      let changed = false;
-      const remove = [];
-      for (const row of local.plans.filter(row => row.desired && !row.plan.stopped)) {
-        const repository = row.desired.repository.toLowerCase();
-        const labels = [...new Set([label, ...others.filter(doc => doc.repos.some(repo => repo.repository.toLowerCase() === repository && repo.jobs.some(job => job.result !== 'stopped'))).map(doc => doc.computer)])].sort();
-        let owner = owners.repos[repository];
-        if (!owner && labels.length > 1) {
-          const question = { id: `job-owner-${digest(repository).slice(0, 12)}`, kind: 'ownership', question_ui: 'host', repository, title: `Which computer keeps the jobs for ${row.desired.repository}?`, detail: `This computer is ${label}.`, options: labels, observation: digest(labels) };
-          const result = this.ask(question); if (result.pending) return result;
-          if (!labels.includes(result.answer.computer) || result.answer.observation !== question.observation) throw new Error('Computer choice is stale or invalid');
-          owner = owners.repos[repository] = { computer: result.answer.computer, answer_ref: result.answer.answer_ref, date: this.now().toISOString() }; changed = true;
-        }
-        if (owner && owner.computer !== label) remove.push(repository);
+    try { return this.readOwnership(target, local, false); } finally { lock.release(); }
+  }
+  readOwnership(target, local, readOnly) {
+    const others = target.store.list(), label = health.computerLabel(this.home);
+    const previous = target.store.read('task-health/owners.json'), owners = previous.doc || { schema: 'toolkit.task-owners.v1', repos: {} };
+    if (owners.schema !== 'toolkit.task-owners.v1' || !owners.repos || typeof owners.repos !== 'object' || Array.isArray(owners.repos) || tasks.looksSecret(JSON.stringify(owners))) throw new Error('Ownership record invalid; update held');
+    for (const [repo, value] of Object.entries(owners.repos)) if (!tasks.REPOSITORY.test(repo) || !/^computer-[a-f0-9]{12}$/.test(value.computer || '') || !validRef(value.answer_ref)) throw new Error('Ownership record invalid; update held');
+    let changed = false;
+    const remove = [], questions = [], held = [];
+    for (const row of local.plans.filter(row => row.desired && !row.plan.stopped)) {
+      const repository = row.desired.repository.toLowerCase();
+      const labels = [...new Set([label, ...others.filter(doc => doc.repos.some(repo => repo.repository.toLowerCase() === repository && repo.jobs.some(job => job.result !== 'stopped'))).map(doc => doc.computer)])].sort();
+      let owner = owners.repos[repository];
+      if (!owner && labels.length > 1 && !readOnly) {
+        const question = { id: `job-owner-${digest(repository).slice(0, 12)}`, kind: 'ownership', question_ui: 'host', repository, title: `Which computer keeps the jobs for ${row.desired.repository}?`, detail: `This computer is ${label}.`, options: labels, observation: digest(labels) };
+        const result = this.ask(question); if (result.pending) { questions.push(result.pending); held.push(repository); continue; }
+        if (!labels.includes(result.answer.computer) || result.answer.observation !== question.observation) throw new Error('Computer choice is stale or invalid');
+        owner = owners.repos[repository] = { computer: result.answer.computer, answer_ref: result.answer.answer_ref, date: this.now().toISOString() }; changed = true;
       }
-      if (changed) target.store.put('task-health/owners.json', owners, previous.sha);
-      return { remove };
-    } finally { lock.release(); }
+      if (owner && owner.computer !== label) remove.push(repository);
+    }
+    if (changed) target.store.put('task-health/owners.json', owners, previous.sha);
+    return { remove, questions, held };
   }
   relinquish(repository) {
     // This is ownership transfer, not moved-checkout repair. Scope is the exact
@@ -147,12 +167,15 @@ class TaskUpdater {
       return entries.map(entry => ({ task: entry.id, action: 'remove', done: true }));
     } finally { lock.release(); }
   }
-  healthDefinition(desired, entries) {
+  healthDefinition(desired) {
     const source = desired.definitions.find(row => row.job === 'task-health');
     if (!source) throw new Error('Health task definition missing');
-    const folder = 'TOOLKIT-HEALTH', id = windows.taskId(folder, 'task-health'), minute = entries.find(row => row.repo_minute)?.repo_minute || 1;
+    const folder = 'TOOLKIT-HEALTH', id = windows.taskId(folder, 'task-health');
+    // Computer slot is independent of repository assignments, including old poisoned rows.
+    const minute = tasks.computerIdentity(this.home) ? parseInt(digest(tasks.computerIdentity(this.home).id).slice(0, 8), 16) % 9 + 1 : 1;
     const schedule = require('./toolkit-task-schedule.cjs').scheduleFor('task-health', minute);
-    const definition = { ...source, folder, id, repo_minute: minute, name: windows.taskName(folder, 'task-health'), schedule, schedule_text: windows.describeSchedule(schedule), arguments: source.arguments.replace(/--task-id [a-z0-9-]+$/, `--task-id ${id}`) };
+    const definition = { ...source, folder, id, repository: null, name: windows.taskName(folder, 'task-health'), schedule, schedule_text: windows.describeSchedule(schedule), arguments: source.arguments.replace(/--task-id [a-z0-9-]+$/, `--task-id ${id}`) };
+    delete definition.repo_minute;
     definition.def = windows.definitionDigest(definition);
     definition.description = `${folder}: TASK HEALTH. ${definition.purpose} [toolkit-task v1 id=${id} def=${definition.def}]`;
     return definition;
@@ -160,7 +183,7 @@ class TaskUpdater {
   healthPlan(desired) {
     try {
       const entries = this.registry(), records = entries.filter(row => row.host === 'windows' && row.job === 'task-health' && !row.adopted);
-      const definition = this.healthDefinition(desired, entries), entry = records[0];
+      const definition = this.healthDefinition(desired), entry = records[0];
       if (records.length > 1) return { action: 'refused', reason: 'Multiple health tasks; owner reconciliation required' };
       if (entry?.stopped_by_owner) return { action: 'stopped by owner' };
       const problem = healthEntryProblem(entry, definition, tasks.computerIdentity(this.home)?.id);
@@ -178,9 +201,9 @@ class TaskUpdater {
     try {
       const entries = this.registry(), records = entries.filter(e => e.host === 'windows' && e.job === 'task-health' && !e.adopted);
       if (records.length > 1) throw new Error('Multiple health tasks; owner reconciliation required');
-      const entry = records[0], definition = this.healthDefinition(desired, entries);
+      const entry = records[0], definition = this.healthDefinition(desired);
       if (entry?.stopped_by_owner) return { action: 'stopped by owner' };
-      const { folder, id, repo_minute: minute } = definition;
+      const { folder, id } = definition;
       const problem = healthEntryProblem(entry, definition, tasks.computerIdentity(this.home)?.id);
       if (problem) throw new Error(problem);
       const live = this.scheduler.list(folder).find(row => row.name === definition.name);
@@ -194,7 +217,14 @@ class TaskUpdater {
         if (result.answer.outcome === 'keep') return { refused: true, task: id, action: 'owner kept changes' };
       }
       if (live?.state === 'Disabled' && !entry?.toolkit_missing) return { refused: true, task: id, action: 'disabled by owner; left alone' };
-      if (live && windows.verifiedDefinition(live, definition)) return { action: 'current', task: id };
+      if (live && windows.verifiedDefinition(live, definition)) {
+        windows.installLauncher(this.home);
+        tasks.updateRegistry(this.home, rows => {
+          if (JSON.stringify(rows.find(row => row.id === id)) !== JSON.stringify(entry)) throw new Error('Health enrolment changed before write');
+          return rows.map(row => { if (row.id !== id) return row; const { repo_minute, ...rest } = row; return { ...rest, repository: null, toolkit_version: this.version }; });
+        });
+        return { action: 'current', task: id };
+      }
       // The standing approval includes recreation of this independently enrolled fixed task.
       if (live) tasks.writeTaskBackup(this.home, id, { task: live, registry: entry });
       let written = null;
@@ -205,7 +235,7 @@ class TaskUpdater {
         written = saved;
         tasks.updateRegistry(this.home, rows => {
           if (JSON.stringify(rows.find(row => row.id === id)) !== JSON.stringify(entry)) throw new Error('Health enrolment changed before write');
-          return [...rows.filter(row => row.id !== id), { id, host: 'windows', folder, name: definition.name, repository: definition.repository, schedule: definition.schedule_text, purpose: definition.purpose, created: entry?.created || this.now().toISOString(), created_by: 'toolkit update scheduled task', model: null, effort: null, job: 'task-health', definition: definition.def, enrolled: windows.enrolledDefinition(saved), checkout: definition.checkout, toolkit_root: definition.toolkit_root, job_owner: tasks.computerIdentity(this.home).id, repo_minute: minute, toolkit_version: this.version }];
+          return [...rows.filter(row => row.id !== id), { id, host: 'windows', folder, name: definition.name, repository: null, schedule: definition.schedule_text, purpose: definition.purpose, created: entry?.created || this.now().toISOString(), created_by: 'toolkit update scheduled task', model: null, effort: null, job: 'task-health', definition: definition.def, enrolled: windows.enrolledDefinition(saved), checkout: definition.checkout, toolkit_root: definition.toolkit_root, job_owner: tasks.computerIdentity(this.home).id, toolkit_version: this.version }];
         });
       } catch {
         let restoration = 'No verified replacement to restore; inspect the local task.';
@@ -231,29 +261,73 @@ class TaskUpdater {
     const approval = this.approval(); if (!approval.allowed) return { ...local, ...(approval.pending ? { questions: [approval.pending] } : { declined: true }) };
     tasks.computerIdentity(this.home, { create: true });
     local.computer = health.computerLabel(this.home);
-    const target = this.health.store(), ownership = target ? this.ownership(target, local) : { remove: [] };
-    if (ownership.pending) return { ...local, questions: [ownership.pending] };
+    let ownership = { remove: [] };
     const results = [];
-    for (const row of local.plans) {
-      if (!row.desired || row.plan.stopped) continue;
-      if (ownership.remove.includes(row.desired.repository.toLowerCase())) { results.push(...this.relinquish(row.desired.repository.toLowerCase())); continue; }
-      let owner = this.owner(), plan = owner.plan(row.desired), answers = [];
-      for (const item of plan.items.filter(item => item.action === 'owner-choice-required')) {
-        const result = this.ask({ id: item.choice.task, kind: 'task-choice', question_ui: 'host', title: item.choice.question, options: ['keep', 'replace'], observation: item.choice.fingerprint });
-        if (result.pending) return { ...local, results, questions: [result.pending] };
-        answers.push({ task: item.choice.task, outcome: result.answer.outcome, observed: result.answer.observation, answer_ref: result.answer.answer_ref });
-      }
-      owner = this.owner(answers);
-      const applied = owner.apply(row.desired); results.push(applied);
-      if (applied.refused || applied.items.some(item => item.done === false)) return { ...local, results };
+    try { const target = this.health.store(); if (target) ownership = this.ownership(target, local); }
+    catch (error) {
+      ownership = { remove: [], held: local.plans.filter(row => row.desired).map(row => row.desired.repository.toLowerCase()) };
+      for (const repository of ownership.held) results.push({ repository, refused: true, reason: tasks.safeText(error.message) });
     }
-    const first = local.plans.find(row => row.desired && !ownership.remove.includes(row.desired.repository.toLowerCase()));
+    const questions = [...(ownership.questions || [])];
+    for (const row of local.plans) {
+      if (!row.desired || row.plan.stopped || row.held || ownership.held?.includes(row.desired.repository.toLowerCase())) continue;
+      try {
+        if (ownership.remove.includes(row.desired.repository.toLowerCase())) {
+          try { results.push(...this.relinquish(row.desired.repository.toLowerCase())); }
+          catch (error) {
+            let choices = [];
+            try { choices = this.owner().plan(row.desired).items.filter(item => item.action === 'owner-choice-required'); }
+            catch { /* Still present the transfer recovery question; never skip later repositories. */ }
+            const answers = [];
+            let pending = false;
+            for (const item of choices) {
+              const answer = this.ask({ id: item.choice.task, kind: 'task-choice', question_ui: 'host', title: item.choice.question, options: ['keep', 'replace'], observation: item.choice.fingerprint });
+              if (answer.pending) { questions.push(answer.pending); pending = true; }
+              else answers.push({ task: item.choice.task, outcome: answer.answer.outcome, observed: answer.answer.observation, answer_ref: answer.answer.answer_ref });
+            }
+            if (choices.length) {
+              if (pending) results.push({ repository: row.desired.repository, refused: true, reason: 'Ownership transfer awaits the exact task choice.' });
+              else {
+                const repaired = this.owner(answers).apply(row.desired); results.push(repaired);
+                if (!repaired.refused && repaired.items.every(item => item.done)) results.push(...this.relinquish(row.desired.repository.toLowerCase()));
+              }
+              continue;
+            }
+            const question = { id: `relinquish-${digest(row.desired.repository).slice(0, 12)}`, kind: 'task-choice', question_ui: 'host', title: `Keep this computer's changed tasks for ${row.desired.repository}, or replace them before transferring?`, detail: tasks.safeText(error.message), options: ['keep', 'replace'], observation: digest(this.registry().filter(e => e.job !== 'task-health' && e.repository?.toLowerCase() === row.desired.repository.toLowerCase())) };
+            const answer = this.ask(question);
+            // A changed or absent participant needs the ordinary guarded repair first;
+            // this transfer never turns an answer into unconditional removal authority.
+            if (answer.pending) questions.push(question);
+            else {
+              if (answer.answer.observation !== question.observation || !['keep', 'replace'].includes(answer.answer.outcome)) throw new Error('Transfer answer is stale or invalid');
+              if (answer.answer.outcome === 'replace') {
+                const repaired = this.owner().apply(row.desired); results.push(repaired);
+                if (!repaired.refused && repaired.items.every(item => item.done)) { results.push(...this.relinquish(row.desired.repository.toLowerCase())); continue; }
+              }
+            }
+            results.push({ repository: row.desired.repository, refused: true, reason: question.detail, next_step: 'Preserve the tasks; resolve their direct keep-or-replace plan before retrying transfer.' });
+          }
+          continue;
+        }
+        let owner = this.owner(), plan = owner.plan(row.desired), answers = [];
+        let pending = false;
+        for (const item of plan.items.filter(item => item.action === 'owner-choice-required')) {
+          const result = this.ask({ id: item.choice.task, kind: 'task-choice', question_ui: 'host', title: item.choice.question, options: ['keep', 'replace'], observation: item.choice.fingerprint });
+          if (result.pending) { questions.push(result.pending); pending = true; continue; }
+          answers.push({ task: item.choice.task, outcome: result.answer.outcome, observed: result.answer.observation, answer_ref: result.answer.answer_ref });
+        }
+        if (pending) { results.push({ repository: row.desired.repository, refused: true, reason: 'Awaiting the owner keep-or-replace answer.' }); continue; }
+        owner = this.owner(answers);
+        const applied = owner.apply(row.desired); results.push(applied);
+      } catch (error) { results.push({ repository: row.desired.repository, refused: true, reason: tasks.safeText(error.message) }); }
+    }
+    const first = local.plans.find(row => row.desired);
     if (first) {
       const installed = this.installHealth(first.desired);
-      if (installed.pending) return { ...local, results, questions: [installed.pending] };
-      results.push(installed);
+      if (installed.pending) questions.push(installed.pending);
+      else results.push(installed);
     }
-    return { ...local, results };
+    return { ...local, results, ...(questions.length ? { questions } : {}) };
   }
 }
 function main(argv = process.argv.slice(2), deps = {}) {

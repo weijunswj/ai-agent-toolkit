@@ -157,7 +157,8 @@ function fixtureErrors(fixture) {
   if (fixture.windows_tasks !== undefined && (!fixture.repo || !['enabled', 'disabled', 'undecided'].includes(fixture.repo.governance)
     || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep', 'task-health'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
   if (fixture.windows_deferred_auth !== undefined && (fixture.windows_deferred_auth !== true || !fixture.windows_tasks?.includes('shard-timings'))) errors.push('windows_deferred_auth needs a recorded shard and true');
-  if (fixture.task_health !== undefined && (!fixture.windows_tasks || !['local-only', 'failed', 'stopped'].includes(fixture.task_health))) errors.push('task_health needs isolated Windows tasks and a supported state');
+  if (fixture.task_health !== undefined && (!fixture.windows_tasks || !['local-only', 'failed', 'stopped', 'health-stopped'].includes(fixture.task_health))) errors.push('task_health needs isolated Windows tasks and a supported state');
+  if (fixture.task_health === 'health-stopped' && !fixture.windows_tasks?.includes('task-health')) errors.push('health-stopped needs the computer health enrolment it stops');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -423,10 +424,12 @@ class Fixture {
           reason: 'GitHub authentication status could not be read', started: at, deferred_since: at, deferred_count: 1 }, this.home);
       }
       if (spec.task_health) {
+        const healthStopped = spec.task_health === 'health-stopped';
+        if (healthStopped) tasks.updateRegistry(this.home, rows => rows.map(row => row.job === 'task-health' ? { ...row, repository: null, stopped_by_owner: true, stopped_at: this.#now().toISOString() } : row));
         const flags = spec.task_health === 'failed' ? ['footer-sweep: last run failed'] : [];
-        const doc = { schema: 'toolkit.task-health.v1', computer: 'computer-aaaaaaaaaaaa', time: this.#now().toISOString(), toolkit_version: '3.52.0',
+        const doc = { schema: 'toolkit.task-health.v1', computer: 'computer-aaaaaaaaaaaa', time: new Date(this.#now().getTime() - (healthStopped ? 48 * 3600000 : 0)).toISOString(), toolkit_version: '3.52.0',
           repos: [{ repository, jobs: [{ job: 'footer-sweep', result: spec.task_health === 'stopped' ? 'stopped' : spec.task_health === 'failed' ? 'failed' : 'ok', streak: 0 }], last_result: spec.task_health === 'failed' ? 'failed' : 'ok', streak: 0, flags }] };
-        fs.writeFileSync(path.join(tasks.userStateDir(this.home), 'task-health.json'), JSON.stringify({ document: doc, shared: spec.task_health !== 'local-only', note: '' }));
+        fs.writeFileSync(path.join(tasks.userStateDir(this.home), 'task-health.json'), JSON.stringify({ document: doc, shared: !healthStopped && spec.task_health !== 'local-only', note: '' }));
       }
       // Test-only injection into this one reader, including Linux positive rows. Production
       // platform and offline checks remain intact; no environment switch enters the runtime.

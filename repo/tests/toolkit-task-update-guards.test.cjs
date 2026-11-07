@@ -14,6 +14,7 @@ const s = require('./support/windows-task-switch-world.cjs');
 for (const state of ['owner stop', 'disabled', 'permission denied', 'unreadable registry']) test(`update authority matrix: ${state} stops effects`, t => {
   const w = world(t);
   update.saveApproval(w.home, { decision: 'standing', answer_ref: 'host/standing' }, '3.52.0');
+  w.updater().installHealth(w.desired); // Independent computer task is already current.
   const before = w.scheduler.calls.length;
   if (state === 'owner stop') tasks.updateRegistry(w.home, rows => rows.map(row => ({ ...row, stopped_by_owner: true, stopped_at: w.at.toISOString() })));
   if (state === 'disabled') w.scheduler.folders.get(w.entry.folder)[0].state = 'Disabled';

@@ -597,6 +597,8 @@ function printHelp() {
     '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
+    '  --scheduled-task-update keep|standing|no',
+    '                               resolve the Windows task update approval without reading stdin',
     '  --codex-helper-capacity one-helper|root-only|keep|custom',
     '                               Codex only; choose one helper, no helpers, keep current, or a custom count',
     '  --codex-delegation-control limit',
@@ -4181,10 +4183,9 @@ class ToolkitSetupExecution {
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const scheduledTaskUpdate = applyScheduledTasks(args);
     printWindowsTasks(args);
-    if (scheduledTaskUpdate?.held) return SETUP_ACTION_REQUIRED;
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
-    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
+    return scheduledTaskUpdate?.held || installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
   }
 }
 

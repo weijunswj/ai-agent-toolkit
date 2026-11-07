@@ -700,6 +700,38 @@
         ]
       },
       "status": "pass"
+    },
+    {
+      "id": "TasksStoppedHealthDoesNotNag",
+      "source": "Stopped computer health must suppress old-file and sharing reminders",
+      "kind": "state",
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "fixture": {
+        "repo": {
+          "governance": "disabled"
+        },
+        "windows_tasks": [
+          "footer-sweep",
+          "task-health"
+        ],
+        "task_health": "health-stopped"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_excludes": [
+          "Task health:",
+          "Task health file is over 26 hours old",
+          "health file not shared: no verified evidence store"
+        ]
+      },
+      "status": "pass"
     }
   ]
 }

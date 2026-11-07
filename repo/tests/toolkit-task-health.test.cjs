@@ -91,7 +91,7 @@ test('first update asks once; later updates do not; new task kinds ask again; cl
   updater.run({ apply: true }); assert.equal(asks, 2);
   assert.ok(!w.scheduler.calls.some(call => call[0] === 'register' && call[2] === 'Daily check-in'), 'cloud trigger is never registered locally');
   assert.equal(tasks.readRegistry(w.home).tasks.filter(row => row.job === 'task-health').length, 1);
-  assert.equal(tasks.readRegistry(w.home).tasks.find(row => row.job === 'task-health').schedule, 'daily, 07:51');
+  assert.match(tasks.readRegistry(w.home).tasks.find(row => row.job === 'task-health').schedule, /^daily, 07:5[1-9]$/);
 });
 
 test('GitHub checkout without a cleaner is flagged; health rejects paths and secret-shaped labels', t => {

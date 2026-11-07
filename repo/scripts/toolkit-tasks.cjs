@@ -264,9 +264,10 @@ function legacySweepLine(repository, { home = os.homedir(), now = new Date(), re
 
 // One task line, extended by the cached health result without live hook reads.
 function sweepLine(repository, options = {}) {
+  options = { ...options, registry: options.registry || readRegistry(options.home || os.homedir()) };
   const sweep = legacySweepLine(repository, options);
   let health = null;
-  try { health = require('./toolkit-task-health.cjs').sessionHealth(repository, options.home || os.homedir()); } catch { /* Advisory enrichment cannot erase the existing task line. */ }
+  try { health = require('./toolkit-task-health.cjs').sessionHealth(repository, options.home || os.homedir(), options.registry); } catch { /* Advisory enrichment cannot erase the existing task line. */ }
   return [sweep, health].filter(Boolean).join('; ') || null;
 }
 
@@ -319,7 +320,7 @@ function taskGovernanceLine(state, options = {}) {
   // advisory slot. Never perform scheduler, process or network reads in a hook.
   let health = null;
   try {
-    if ((options.platform || process.platform) === 'win32' && state?.repository && state.state !== 'ENABLED') health = require('./toolkit-task-health.cjs').sessionHealth(state.repository, options.home || os.homedir());
+    if ((options.platform || process.platform) === 'win32' && state?.repository && state.state !== 'ENABLED') health = require('./toolkit-task-health.cjs').sessionHealth(state.repository, options.home || os.homedir(), options.registry);
   } catch { /* Keep the original task advisory when optional cached health is unreadable. */ }
   return [advisory, health].filter(Boolean).join('; ') || null;
 }

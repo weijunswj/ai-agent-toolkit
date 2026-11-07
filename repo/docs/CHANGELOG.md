@@ -15,6 +15,11 @@
 
 ### Fixed
 
+- Computer-wide task health no longer borrows repository ownership or minutes, and repository removal leaves it alone. Existing mixed records are migrated during an approved update.
+- Task updates preserve hand-edit questions for older enrolments and continue with other repositories when one is held. Setup still refreshes global rules and helper definitions when task work is held.
+- Concurrent missing-checkout launchers retain both disabled records and preserve footer scan, skip and deferral history. Current task updates restore missing launchers and refresh their code version.
+- Health waits for busy stores, serialises checkout status reads, keeps a local report when sharing fails and records a safe failure reason. Expected quiet skips and stopped health checks no longer raise alerts.
+- Explicit setup flags resolve the scheduled-task question without waiting for input. Setup regression suites are split without changing their coverage or time budget.
 - Uncertain GitHub authentication reads defer weekly work visibly instead of treating a failed read as confirmed sign-out.
 - Refresh lock takeovers log a plain line, and retry notes survive an exhausted task budget.
 - The refresh-wait changelog wording now states the actual bounded wait.
