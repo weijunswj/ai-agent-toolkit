@@ -1025,6 +1025,17 @@
       "status": "pass"
     },
     {
+      "id": "MERGE.machine-on-controller-takeover",
+      "source": "G2 finding: the controller takeover playbook requires typed merge with machine On",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n", "repo/docs/agent-playbooks/controller-takeover.md": "journey\n"}, "message": "base"}, {"files": {"repo/docs/agent-playbooks/controller-takeover.md": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass",
+      "note": "A playbook-only change waits for the owner's typed merge even with task auto-merge On."
+    },
+    {
       "id": "MERGE.date-name-lines",
       "source": "owner approval delivery regression",
       "kind": "state",

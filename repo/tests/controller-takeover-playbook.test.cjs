@@ -10,7 +10,7 @@ const ROOT = path.resolve(__dirname, '../..');
 const PLAYBOOK = 'repo/docs/agent-playbooks/controller-takeover.md';
 const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 const clauses = [
-  'Run steps 1-10 in order; a later step starts only when the earlier step is done or skipped with a reason.',
+  "Run steps 1-10 in order. Each step's own checks wait for the step before it; independent reads and other lanes keep going.",
   'capability check', "never from the model's own claim", 'unreachable by all three routes: no record',
   'Evidence before done', 'No controller actions until the journey and harness extras are verified done',
   'Only with a fresh merged ENABLED binding', 'governance off: no programme, sharding or task checks',
