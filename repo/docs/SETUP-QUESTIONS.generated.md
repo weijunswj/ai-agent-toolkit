@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 10 questions across 4 sections
 
-Bank reference: NDFT-9Y6E-6GQ6-W00N
+Bank reference: NPBM-E293-K831-C4K4
 
 Quick index
 
@@ -261,7 +261,7 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 
 ### Status (nothing to answer): Toolkit hooks in Codex
 
-**What this controls:** Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off or not reviewed does not run, so its check is skipped.
+**What this controls:** Whether Codex runs each Toolkit hook. Codex keeps this in ~/.codex/config.toml ([hooks.state]) and you change it in Codex's /hooks; setup only reports it and never edits it. A hook that is off, not reviewed or changed since approval does not run. A missing bundle fingerprint is unverified. Hold Codex gate launches until the hook check passes.
 
 **Current:** Toolkit hooks in Codex: Session start updates on; Prompt check on; Shell and agent check on; File edit check on; Checkpoint after tool use on; Checkpoint at stop on.
 
