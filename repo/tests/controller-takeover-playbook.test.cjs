@@ -73,7 +73,7 @@ function surfaceClaimContract(text) {
   const products = "(?:ChatGPT(?: web)?|claude\\.ai|Claude Code|Claude Desktop|Claude Projects|Codex(?: CLI)?|OpenCode|Antigravity|Cursor|Gemini|Projects (?:coordinator|thread|worker)s?|web chat)";
   const abilities = "(?:has|have|lacks|can|cannot|can't|can only|could|supports|gets|uses|provides|offers|includes|allows|is able|are able|is unable|are unable|there is no|does not|doesn't|won't|will not)";
   const gap = '(?:[^.,;:|"()\\n]|\\n(?![|#*\\n-]|\\d+\\.\\s)){0,40}';
-  assert.doesNotMatch(text, new RegExp(`\\b${products}\\b${gap}\\b${abilities}\\b`, 'i'));
+  assert.doesNotMatch(text, new RegExp(`(?<![A-Za-z0-9])${products}(?![A-Za-z0-9])${gap}\\b${abilities}\\b`, 'i'));
   assert.doesNotMatch(text, new RegExp(`^\\s*\\|\\s*[*\`_]*${products}[*\`_]*(?:\\s*\\([^\\n|]*\\))?\\s*\\|`, 'im'));
   assert.doesNotMatch(text, /\|\s*(?:Surface|Harness|Host|Product|App|Platform|Client)(?:\s+names?)?\s*\||Expected per surface/i);
 }
@@ -103,7 +103,9 @@ const capabilityControls = ['ChatGPT web cannot write GitHub.', 'Codex has a she
   'On ChatGPT web there is no shell.', 'Gemini can run gh.',
   '| Host | Abilities |', '| Surface name | Own tools |', '| OpenCode | shell |',
   'Antigravity has no hooks.', 'Claude Projects lacks a shell.', 'A Projects thread cannot run gh.',
-  '| **Codex** | shell |', '| `ChatGPT web` | connector only |', 'Codex\nhas a shell.'];
+  '| **Codex** | shell |', '| `ChatGPT web` | connector only |', 'Codex\nhas a shell.',
+  'Cursor has hooks.', 'Claude Desktop has a shell.', 'A web chat cannot run a shell.', 'A Projects worker can run gh.',
+  '| _Codex_ | shell |', '_Codex has a shell._'];
 
 test('T12 capabilities come from probes and host evidence, never a surface lookup', () => {
   const text = read(PLAYBOOK);
@@ -119,6 +121,7 @@ test('T12 capabilities come from probes and host evidence, never a surface looku
     assert.throws(() => capabilityContract(text.replace('## Connector walk-through\n', `## Connector walk-through\n${claim}\n`)),
       { code: 'ERR_ASSERTION' }, `walk-through: ${claim}`);
   }
+  assert.doesNotThrow(() => surfaceClaimContract('OpenCodex has a shell.'));
   assert.ok(text.includes('Non-binding illustration'));
 });
 
