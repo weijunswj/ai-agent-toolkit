@@ -1,16 +1,13 @@
 'use strict';
-
 const test = require('node:test');
 const core = require('../scripts/setup-toolkit-core.cjs');
 const {
   assert, fs, path, script, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit,
   createFakeManagedSetupScript, createGitBackedRealSetupRepo, runWithUnclosedStdin, codexConfig,
 } = require('./toolkit-setup-test-support.cjs');
-
 function markerCount(text, marker) {
   return String(text || '').split(marker).length - 1;
 }
-
 function snapshotOwned(root) {
   if (!fs.existsSync(root)) return [];
   return fs.readdirSync(root, { recursive: true })
@@ -19,7 +16,6 @@ function snapshotOwned(root) {
     .sort()
     .map((entry) => [path.relative(root, entry).replaceAll('\\', '/'), fs.readFileSync(entry).toString('hex')]);
 }
-
 function seedOwnedMutationSentinels(root) {
   const paths = [
     '.ai-agent-toolkit/current/manifest.json',
@@ -76,14 +72,32 @@ function createSequencedProtocolFake(root, options = {}) {
   ].join('\n'));
   return { ...fake, bank };
 }
-
 function runFake(options = {}, argv = ['--execute', '--profile', 'auto-main', '--host', 'claude-code']) {
   const root = tmpRoot();
   const fake = createFakeManagedSetupScript(root, options);
   const result = run(argv, { env: isolatedHomeEnv(root), timeout: 30000 });
   return { root, fake, result };
 }
+function realManagedFixture() {
+  const root = tmpRoot();
+  const { origin } = createGitBackedRealSetupRepo(root);
+  const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
+  return { root, origin, managedPath };
+}
+function assertCompletedWithoutClaudePlugin(status, result) {
+  assert.equal(status, core.SETUP_ACTION_REQUIRED, result.stderr || result.stdout);
+  assert.match(result.stdout, /## Install check\nInstall check: action required\nClaude Code plugin: Toolkit \S+ is not installed, enabled and current in Claude Code, so its hooks are not enforced\./);
+  assert.doesNotMatch(result.stderr, /Managed setup failed/);
+}
+function runRealManaged(fixture, extraArgs = [], input, options = {}) {
+  return run([
+    '--execute', '--profile', 'auto-main', '--host', 'claude-code',
+    '--repo-remote', fixture.origin, ...extraArgs,
+  ], { env: { ...(options.baseEnv || isolatedHomeEnv(fixture.root)), ...(options.env || {}) }, input, timeout: 300000 });
+}
 
+// Split by complete test declarations to keep the per-file time budget.
 test('managed child bank is forwarded exactly once before intentional status 23 pause', () => {
   const { result } = runFake();
   assert.equal(result.status, 23, result.stderr || result.stdout);
@@ -122,328 +136,4 @@ test('genuine child failure is not classified as question-bank pause and raw log
   assert.match(result.stderr, /failed before completing the question-bank protocol/);
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /PRIVATE RAW LOG/);
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
-});
-
-test('managed script identity mismatch fails before execution and reveals no private path', () => {
-  const { root, result } = runFake({ identityMismatch: true });
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /identity does not support the required question-bank protocol/);
-  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
-});
-
-test('host and user arguments survive delegation exactly once and recursion depth is explicit', () => {
-  const root = tmpRoot();
-  const argsLogPath = path.join(root, 'managed-args.json');
-  createFakeManagedSetupScript(root, { argsLogPath });
-  const result = run([
-    '--execute', '--profile', 'auto-main', '--host', 'claude-code',
-    '--claude-plugin-behavior', 'instructions', '--keep-update-reports',
-  ], { env: isolatedHomeEnv(root), timeout: 30000 });
-  assert.equal(result.status, 23, result.stderr || result.stdout);
-  const logged = JSON.parse(fs.readFileSync(argsLogPath, 'utf8'));
-  assert.equal(logged.argv.filter((arg) => arg === '--host').length, 1);
-  assert.equal(logged.argv.filter((arg) => arg === 'claude-code').length, 1);
-  assert.equal(logged.argv.filter((arg) => arg === '--claude-plugin-behavior').length, 1);
-  assert.equal(logged.argv.filter((arg) => arg === 'instructions').length, 1);
-  assert.equal(logged.argv.filter((arg) => arg === '--keep-update-reports').length, 1);
-  assert.equal(logged.depth, '1');
-  assert.equal(logged.workingFolder, path.resolve(__dirname, '..', '..'));
-});
-
-test('receipt may arrive before a delayed fragmented bank and acknowledgement follows exact forwarding', () => {
-  const root = tmpRoot();
-  const ackLogPath = path.join(root, 'ack.txt');
-  createSequencedProtocolFake(root, { receiptFirst: true, delayMs: 75, ackLogPath });
-  const result = run(['--execute', '--profile', 'auto-main', '--host', 'claude-code'], {
-    env: isolatedHomeEnv(root), timeout: 30000,
-  });
-  assert.equal(result.status, 23, result.stderr || result.stdout);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.equal(fs.readFileSync(ackLogPath, 'utf8'), 'question-bank-visible');
-});
-
-test('truncated bank, receipt length mismatch, and receipt digest mismatch fail closed', async () => {
-  const truncatedRoot = tmpRoot();
-  const fullBank = Buffer.from(`${core.QUESTION_BANK_BEGIN}\n# choices\n${core.QUESTION_BANK_COMPLETE}\n`);
-  const truncated = createSequencedProtocolFake(truncatedRoot, {
-    bank: fullBank, chunks: [fullBank.subarray(0, fullBank.length - 9)], awaitAcknowledgement: false,
-  });
-  await assert.rejects(
-    core.runManagedQuestionBankChild(truncated.scriptPath, truncated.managedPath, ['--execute'], { timeoutMs: 5000 }),
-    /length did not match/,
-  );
-
-  const lengthRoot = tmpRoot();
-  const length = createSequencedProtocolFake(lengthRoot, { bankByteLength: 9999, awaitAcknowledgement: false });
-  await assert.rejects(
-    core.runManagedQuestionBankChild(length.scriptPath, length.managedPath, ['--execute'], { timeoutMs: 5000 }),
-    /length did not match/,
-  );
-
-  const digestRoot = tmpRoot();
-  const digest = createSequencedProtocolFake(digestRoot, { bankSha256: '0'.repeat(64) });
-  await assert.rejects(
-    core.runManagedQuestionBankChild(digest.scriptPath, digest.managedPath, ['--execute'], { timeoutMs: 5000 }),
-    /digest did not match/,
-  );
-});
-
-test('oversized receipt, payload, and delegated stdin fail with bounded privacy-safe diagnostics', async () => {
-  const controlRoot = tmpRoot();
-  const control = createSequencedProtocolFake(controlRoot, { control: `${'x'.repeat(5000)}\n`, awaitAcknowledgement: false });
-  await assert.rejects(
-    core.runManagedQuestionBankChild(control.scriptPath, control.managedPath, ['--execute'], { timeoutMs: 5000 }),
-    /oversized question-bank control receipt/,
-  );
-
-  const payloadRoot = tmpRoot();
-  const oversizedBank = `${core.QUESTION_BANK_BEGIN}\n${'x'.repeat((1024 * 1024) + 1)}\n${core.QUESTION_BANK_COMPLETE}\n`;
-  const payload = createSequencedProtocolFake(payloadRoot, { bank: oversizedBank, awaitAcknowledgement: false });
-  await assert.rejects(
-    core.runManagedQuestionBankChild(payload.scriptPath, payload.managedPath, ['--execute'], { timeoutMs: 5000 }),
-    /oversized question-bank payload/,
-  );
-
-  const inputRoot = tmpRoot();
-  const input = createSequencedProtocolFake(inputRoot);
-  await assert.rejects(
-    core.runManagedQuestionBankChild(input.scriptPath, input.managedPath, ['--execute'], { stdinInput: Buffer.alloc((64 * 1024) + 1), timeoutMs: 5000 }),
-    /input exceeded the bounded transport limit/,
-  );
-});
-
-test('timeout and signal termination have distinct privacy-safe diagnoses', async () => {
-  const timeoutRoot = tmpRoot();
-  const timeoutFake = createFakeManagedSetupScript(timeoutRoot, { hang: true, emitQuestionBank: false });
-  await assert.rejects(
-    core.runManagedQuestionBankChild(timeoutFake.scriptPath, timeoutFake.managedPath, ['--execute'], { timeoutMs: 100 }),
-    /timed out before the question-bank protocol completed/,
-  );
-
-  const signalRoot = tmpRoot();
-  const signalFake = createFakeManagedSetupScript(signalRoot, { hang: true, emitQuestionBank: false });
-  await assert.rejects(
-    core.runManagedQuestionBankChild(signalFake.scriptPath, signalFake.managedPath, ['--execute'], { timeoutMs: 5000, terminateAfterMs: 100 }),
-    /terminated by a signal before the question-bank protocol completed/,
-  );
-});
-
-test('Windows CRLF bank markers are accepted by the documented stdout protocol', () => {
-  const { result } = runFake();
-  assert.equal(result.status, 23, result.stderr || result.stdout);
-  assert.match(result.stdout, /question-bank:begin -->\r?\n/);
-  assert.match(result.stdout, /question-bank:complete -->/);
-});
-
-function realManagedFixture() {
-  const root = tmpRoot();
-  const { origin } = createGitBackedRealSetupRepo(root);
-  const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
-  runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
-  return { root, origin, managedPath };
-}
-
-// These synthetic homes never install the Claude Code plugin ("instructions"), so the managed setup
-// finishes every step and its install check truthfully asks for the plugin (exit 24); the
-// delegating parent passes that result through instead of calling it a protocol failure.
-function assertCompletedWithoutClaudePlugin(status, result) {
-  assert.equal(status, core.SETUP_ACTION_REQUIRED, result.stderr || result.stdout);
-  assert.match(result.stdout, /## Install check\nInstall check: action required\nClaude Code plugin: Toolkit \S+ is not installed, enabled and current in Claude Code, so its hooks are not enforced\./);
-  assert.doesNotMatch(result.stderr, /Managed setup failed/);
-}
-
-function runRealManaged(fixture, extraArgs = [], input, options = {}) {
-  return run([
-    '--execute', '--profile', 'auto-main', '--host', 'claude-code',
-    '--repo-remote', fixture.origin, ...extraArgs,
-  ], { env: { ...(options.baseEnv || isolatedHomeEnv(fixture.root)), ...(options.env || {}) }, input, timeout: 300000 });
-}
-
-test('real active-to-managed Claude route shows one complete bank then pauses on empty input with zero writes', () => {
-  const fixture = realManagedFixture();
-  const result = runRealManaged(fixture, [], '');
-  assert.equal(result.status, 23, result.stderr || result.stdout);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
-  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'CLAUDE_PLUGIN_SETUP.log')), false);
-  assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
-});
-
-test('stale SessionStart and owned-state sentinels remain untouched through the entire pre-approval lifecycle', () => {
-  for (const input of ['', 'default\n']) {
-    const fixture = realManagedFixture();
-    seedOwnedMutationSentinels(fixture.root);
-    const staleSessionStart = path.join(fixture.root, 'stale-session-start-sentinel.txt');
-    const printProbe = path.join(fixture.root, 'print-probe-sentinel.txt');
-    const fakeClaude = path.join(fixture.root, 'Claude CLI With Spaces', 'stale-claude.cjs');
-    writeFile(fakeClaude, [
-      "'use strict';", "const fs = require('node:fs');", "const args = process.argv.slice(2);",
-      `fs.writeFileSync(${JSON.stringify(staleSessionStart)}, 'stale SessionStart ran');`,
-      `if (args.includes('--print')) fs.writeFileSync(${JSON.stringify(printProbe)}, 'session');`,
-      "if (args.includes('--version')) console.log('2.3.25 stale'); else console.log('{}');",
-    ].join('\n'));
-    const baseEnv = isolatedHomeEnv(fixture.root);
-    const before = snapshotOwned(fixture.root);
-    const result = runRealManaged(fixture, ['--claude-cli', fakeClaude], input, { baseEnv });
-    assert.equal(result.status, 23, result.stderr || result.stdout);
-    assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-    assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-    assert.deepEqual(snapshotOwned(fixture.root), before);
-    assert.equal(fs.existsSync(staleSessionStart), false);
-    assert.equal(fs.existsSync(printProbe), false);
-  }
-});
-
-test('Claude plan, JSON and explain are observational and launch no Claude session', () => {
-  for (const mode of [['--plan'], ['--plan', '--json'], ['--explain', '1.1']]) {
-    const fixture = realManagedFixture();
-    seedOwnedMutationSentinels(fixture.root);
-    writeFile(path.join(fixture.root, '.ai-agent-toolkit', 'user-state', 'task-auto-merge.claude-code.v1.json'), JSON.stringify({ schema: 'toolkit.task-auto-merge-preferences.v1', host: 'claude-code', value: 'off' }));
-    writeFile(path.join(fixture.root, '.ai-agent-toolkit', 'agent-control', 'profiles', 'claude-code.json'), '{ legacy profile');
-    const staleSessionStart = path.join(fixture.root, 'plan-session.txt');
-    const fakeClaude = path.join(fixture.root, 'Claude Plan CLI', 'stale-claude.cjs');
-    writeFile(fakeClaude, `require('node:fs').writeFileSync(${JSON.stringify(staleSessionStart)}, 'session');\n`);
-    const env = isolatedHomeEnv(fixture.root);
-    const before = snapshotOwned(fixture.root);
-    const result = run([
-      ...mode, '--host', 'claude-code', '--repo-root', fixture.managedPath,
-      '--repo-remote', fixture.origin, '--claude-cli', fakeClaude,
-      '--yes-recommended', '--task-auto-merge', 'after-gates', '--claude-settings', 'enable',
-    ], { env, timeout: 300000 });
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, mode.includes('--explain') ? /Update source/i : /root-only|root agent/i);
-    assert.deepEqual(snapshotOwned(fixture.root), before);
-    assert.equal(fs.existsSync(staleSessionStart), false);
-  }
-});
-test('managed explicit flags without yes-recommended complete with non-TTY stdin still open', async () => {
-  const fixture = realManagedFixture();
-  const result = await runWithUnclosedStdin(script, [
-    '--execute', '--profile', 'auto-main', '--host', 'claude-code', '--repo-remote', fixture.origin,
-    '--use-default-managed-checkout', '--enable-repo-auto-update', '--enable-update-reports',
-    '--default-update-report-retention-days', '--claude-topology', 'root-only',
-    '--claude-plugin-behavior', 'instructions', '--claude-settings', 'enable',
-  ], { env: isolatedHomeEnv(fixture.root), deadlineMs: 300000 });
-  assertCompletedWithoutClaudePlugin(result.code, result);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.equal((result.stdout.match(/^Bank reference: [0-9A-Z]{4}(?:-[0-9A-Z]{4}){3}$/gm) || []).length, 1);
-  assert.match(result.stdout, /All visible setup questions are already resolved by explicit inputs/);
-  assert.doesNotMatch(result.stdout, /Reply with either:|Reply with one line for each unresolved question/);
-});
-
-test('managed partial explicit flags preserve one bank and truthful child guidance', async () => {
-  const fixture = realManagedFixture();
-  const result = await runWithUnclosedStdin(script, [
-    '--execute', '--profile', 'auto-main', '--host', 'claude-code', '--repo-remote', fixture.origin,
-    '--enable-repo-auto-update',
-  ], {
-    env: isolatedHomeEnv(fixture.root),
-    closeStdinAfterOutput: core.QUESTION_BANK_COMPLETE,
-    deadlineMs: 300000,
-  });
-  assert.equal(result.code, 23, result.stderr || result.stdout);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.equal((result.stdout.match(/^Bank reference: [0-9A-Z]{4}(?:-[0-9A-Z]{4}){3}$/gm) || []).length, 1);
-  assert.match(result.stdout, /Some visible questions are already resolved by explicit setup flags/);
-  assert.match(result.stdout, /Reply with one line for each unresolved question in this exact order/);
-  assert.equal((result.stdout.match(/After those question-answer lines, append detail lines in this exact canonical order/g) || []).length, 1);
-  assert.match(result.stdout, /1\. 1\.1 Update source: custom managed-checkout path[\s\S]*2\. 1\.4 Report retention: positive report-retention duration/);
-  assert.doesNotMatch(result.stdout, /Reply with either:/);
-  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
-});
-
-test('managed unresolved unclosed input displays the bank before EOF and then pauses when input closes', async () => {
-  const fixture = realManagedFixture();
-  const result = await runWithUnclosedStdin(script, [
-    '--execute', '--profile', 'auto-main', '--host', 'claude-code', '--repo-remote', fixture.origin,
-  ], {
-    env: isolatedHomeEnv(fixture.root),
-    closeStdinAfterOutput: core.QUESTION_BANK_COMPLETE,
-    deadlineMs: 300000,
-  });
-  assert.equal(result.code, 23, result.stderr || result.stdout);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
-});
-
-test('delegated stdin transport preserves bounded input bytes exactly', () => {
-  const root = tmpRoot();
-  const stdinHexLogPath = path.join(root, 'stdin.hex');
-  createFakeManagedSetupScript(root, { stdinHexLogPath });
-  const input = Buffer.from([0x00, 0x0a, 0x7f, 0x80, 0xff, 0x0d, 0x0a]);
-  const result = run(['--execute', '--profile', 'auto-main', '--host', 'claude-code'], {
-    env: isolatedHomeEnv(root), input, timeout: 30000,
-  });
-  assert.equal(result.status, 23, result.stderr || result.stdout);
-  assert.equal(fs.readFileSync(stdinHexLogPath, 'utf8'), input.toString('hex'));
-});
-
-test('real partial piped answers still show one complete effective bank before pausing', () => {
-  const fixture = realManagedFixture();
-  // One flag-resolved visible question puts the bank in line-by-line mode with a Selected row.
-  const result = runRealManaged(fixture, ['--enable-update-reports'], 'default\n');
-  assert.equal(result.status, 23, result.stderr || result.stdout);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.match(result.stdout, /Update source[\s\S]*Selected:/);
-  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
-});
-
-test('real complete piped answers show one bank before synthetic-home setup mutation', () => {
-  const fixture = realManagedFixture();
-  const input = ['default', 'enable', 'enable', 'default', 'root-only', 'instructions', 'keep', 'keep', 'keep', 'keep', ''].join('\n');
-  const result = runRealManaged(fixture, [], input);
-  assertCompletedWithoutClaudePlugin(result.status, result);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'CLAUDE_PLUGIN_SETUP.log')), false);
-  assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
-});
-
-test('real explicit yes-recommended still shows one bank before synthetic-home setup mutation', () => {
-  const fixture = realManagedFixture();
-  const result = runRealManaged(fixture, [
-    '--yes-recommended', '--claude-plugin-behavior', 'instructions',
-    '--claude-topology', 'root-only',
-  ]);
-  assertCompletedWithoutClaudePlugin(result.status, result);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  assert.match(result.stdout, /--yes-recommended selected/);
-  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'CLAUDE_PLUGIN_SETUP.log')), false);
-  assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
-});
-
-test('Claude probe timeout cannot silently suppress the real managed bank', () => {
-  const fixture = realManagedFixture();
-  const fakeClaude = path.join(fixture.root, 'Claude CLI With Spaces', 'fake-claude.cjs');
-  writeFile(fakeClaude, [
-    "'use strict';",
-    "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);",
-    '',
-  ].join('\n'));
-  const result = run([
-    '--execute', '--profile', 'auto-main', '--host', 'claude-code',
-    '--repo-remote', fixture.origin, '--claude-cli', fakeClaude,
-  ], {
-    env: {
-      ...isolatedHomeEnv(fixture.root),
-      CLAUDE_TOOLKIT_CLAUDE_CLI_TIMEOUT_MS: '50',
-      CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS: '50',
-    },
-    input: '',
-    timeout: 300000,
-  });
-  assert.equal(result.status, 23, result.stderr || result.stdout);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
-  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
-  // The bank's Current column shows the plugin's short state.
-  assert.match(result.stdout, /could not be verified|checked after you answer|unavailable/i);
-  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
-  assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
 });

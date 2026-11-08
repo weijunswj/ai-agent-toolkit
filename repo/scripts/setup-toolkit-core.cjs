@@ -122,6 +122,7 @@ function parseNonNegativeInteger(value, flagName) {
 function emptySetupChoices() {
   return {
     taskAutoMerge: '',
+    scheduledTaskUpdate: '',
     managedCheckout: '',
     repoAutoUpdate: '',
     updateReports: '',
@@ -222,6 +223,11 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--hub') args.hub = next();
     else if (arg.startsWith('--hub=')) args.hub = arg.slice('--hub='.length);
     else if (arg === '--verify-claude-plugin') args.verifyClaudePlugin = true;
+    else if (arg === '--scheduled-task-update') {
+      const choice = next().toLowerCase();
+      if (!['keep', 'standing', 'no'].includes(choice)) throw new Error('Unsupported scheduled-task update choice');
+      args.setupChoices.scheduledTaskUpdate = choice;
+    }
     else if (arg === '--task-auto-merge' || arg.startsWith('--task-auto-merge=')) {
       const choice = (arg.includes('=') ? arg.slice('--task-auto-merge='.length) : next()).toLowerCase();
       if (!['keep', 'off', 'after-gates'].includes(choice)) throw new Error(`Unsupported --task-auto-merge choice: ${choice}`);
@@ -591,6 +597,8 @@ function printHelp() {
     '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
+    '  --scheduled-task-update keep|standing|no',
+    '                               resolve the Windows task update approval without reading stdin',
     '  --codex-helper-capacity one-helper|root-only|keep|custom',
     '                               Codex only; choose one helper, no helpers, keep current, or a custom count',
     '  --codex-delegation-control limit',
@@ -1229,6 +1237,8 @@ function collectCurrentState(args) {
     delegationMigrationPreview,
     agentProfile,
     taskAutoMerge: taskAutoMerge(null, { host: args.host }).preference,
+    scheduledTaskApproval: require('./toolkit-update-scheduled-task.cjs').readApproval(os.homedir()),
+    scheduledTasksSupported: process.platform === 'win32',
     ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect() } : {}),
     antigravity: antigravityState(args),
     nativePlugin: args.host === 'claude-code'
@@ -1271,6 +1281,7 @@ function recommendedChoice(key, current, args) {
   if (key === 'managedCheckout') {
     return canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'keep' : 'default';
   }
+  if (key === 'scheduledTaskUpdate') return current.scheduledTaskApproval ? 'keep' : 'no';
   if (key === 'taskAutoMerge') return 'after-gates';
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
@@ -2279,6 +2290,23 @@ function setupQuestionSpecs(args, current) {
   }
   if (args.host === 'codex' && (current.antigravity?.installed || current.antigravity?.copies)) specs.push(antigravitySkillsQuestion(args, current));
   specs.push(taskAutoMergeQuestion(args, current));
+  if (current.scheduledTasksSupported) specs.push(resolvedQuestion({
+    id: 'scheduled-task-update', key: 'scheduledTaskUpdate', section: 'Windows scheduled tasks',
+    title: 'May Toolkit update scheduled tasks on this computer?', prompt: 'Scheduled task update approval',
+    whatThisControls: require('./toolkit-update-scheduled-task.cjs').approvalQuestion().detail,
+    choices: [
+      ...(current.scheduledTaskApproval ? [wizardChoice('keep', 'Keep current', 'Keep the saved scheduled-task approval.')] : []),
+      wizardChoice('no', 'No standing approval', 'Leave existing tasks alone; the update command waits for your approval.'),
+      wizardChoice('standing', 'Allow these fixed task kinds', 'Allow future updates of the listed fixed task kinds, after fresh ownership checks. Hand edits and new task kinds ask again.'),
+    ],
+    currentChoice: current.scheduledTaskApproval ? 'keep' : '',
+    recommendation: { value: current.scheduledTaskApproval ? 'keep' : 'no', outcome: 'Preserve your current task authority.', reason: 'A standing approval is always your own choice.' },
+    selected: args.setupChoices.scheduledTaskUpdate,
+    current: current.scheduledTaskApproval?.decision || 'No answer saved', currentShort: current.scheduledTaskApproval?.decision || 'No answer saved',
+    currentVerification: 'verified', recordDigest: JSON.stringify(current.scheduledTaskApproval),
+    availability: { status: 'available', condition: 'Windows scheduled tasks only.' },
+    afterApplying: 'The dated answer and task kinds are saved locally. This grants no native permission and never changes cloud triggers.',
+  }));
   foldTwinSelections(args, answerable(specs));
 
   return withPresentationMetadata(specs.filter((spec) => args.host === 'codex' || spec.key !== 'codexDocLimit').map((spec) => ({
@@ -2677,6 +2705,7 @@ function documentationFixtureState() {
       codex_doc_limit_enabled: true,
       codex_plugin_auto_refresh_enabled: true,
     },
+    scheduledTasksSupported: true, scheduledTaskApproval: null,
     runtime: { runtime: RUNTIMES.V2, detector: 'documentation fixture' },
     antigravity: { installed: true, copies: false },
     delegation: { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 0, detail: 'documentation fixture' },
@@ -2758,7 +2787,8 @@ function emitCompleteQuestionBank(specs, options = {}) {
 }
 
 function assignChoice(args, key, choice) {
-  if (key === 'taskAutoMerge') args.setupChoices.taskAutoMerge = choice;
+  if (key === 'scheduledTaskUpdate') args.setupChoices.scheduledTaskUpdate = choice;
+  else if (key === 'taskAutoMerge') args.setupChoices.taskAutoMerge = choice;
   else if (key === 'managedCheckout') args.setupChoices.managedCheckout = choice;
   else if (key === 'repoAutoUpdate') args.setupChoices.repoAutoUpdate = choice;
   else if (key === 'updateReports') args.setupChoices.updateReports = choice;
@@ -2774,6 +2804,7 @@ function assignChoice(args, key, choice) {
 }
 
 function choiceForKey(args, key) {
+  if (key === 'scheduledTaskUpdate') return args.setupChoices.scheduledTaskUpdate;
   if (key === 'taskAutoMerge') return args.setupChoices.taskAutoMerge;
   if (key === 'managedCheckout') return args.setupChoices.managedCheckout;
   if (key === 'repoAutoUpdate') return args.setupChoices.repoAutoUpdate;
@@ -4083,6 +4114,7 @@ class ToolkitSetupExecution {
     if (args.host === 'codex') this.#current = await detectCodexRuntimeAfterApproval(args, this.#current);
     await confirmSelectedDelegationProposal(args, this.#current, this.#questionBank);
     new TaskAutoMergePreferences({ host: args.host }).verify(this.#current.taskAutoMerge);
+    if (this.#current.scheduledTasksSupported && JSON.stringify(require('./toolkit-update-scheduled-task.cjs').readApproval(os.homedir())) !== JSON.stringify(this.#current.scheduledTaskApproval)) throw new Error('Scheduled-task approval changed; show a fresh question bank.');
   }
 
   #announcePlan() {
@@ -4123,6 +4155,10 @@ class ToolkitSetupExecution {
     if (early?.managed.update_action === 'fast-forwarded' && managed.update_action === 'already up to date') {
       managed = { ...managed, commit_before: early.managed.commit_before, update_action: 'fast-forwarded' };
     }
+    const taskChoice = args.setupChoices.scheduledTaskUpdate;
+    if (this.#current.scheduledTasksSupported && ['standing', 'no'].includes(taskChoice)) {
+      require('./toolkit-update-scheduled-task.cjs').saveApproval(os.homedir(), { decision: taskChoice, answer_ref: `setup-bank/${require('node:crypto').createHash('sha256').update(JSON.stringify(this.#questionBank)).digest('hex')}` }, JSON.parse(fs.readFileSync(path.join(args.repoRoot, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version);
+    }
     const taskMerge = new TaskAutoMergePreferences({ host: args.host }).apply(args.setupChoices.taskAutoMerge, this.#current.taskAutoMerge);
     console.log(`${HOST_LABELS[args.host] || args.host} task auto-merge: ${taskMerge.value === 'after-gates' ? 'On' : 'Off'} (${taskMerge.changed ? 'saved and read back' : 'kept'}).`);
     const localClone = fastForwardLocalClone(args);
@@ -4149,14 +4185,32 @@ class ToolkitSetupExecution {
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
+    const scheduledTaskUpdate = applyScheduledTasks(args);
     printWindowsTasks(args);
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
-    return installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
+    return scheduledTaskUpdate?.held || installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
   }
 }
 
 async function execute(args){return new ToolkitSetupExecution(args).execute();}
+
+// Setup uses the same standing approval and updater as the direct command. It
+// does not answer pending hand-edit or computer-ownership questions on behalf of
+// the owner; those return to the host question UI before any dependent effect.
+function applyScheduledTasks(args, { home = os.homedir(), updater, platform = process.platform, log = console.log } = {}) {
+  if (platform !== 'win32') return null;
+  const api = require('./toolkit-update-scheduled-task.cjs');
+  const approval = api.readApproval(home);
+  if (approval?.decision !== 'standing') return null;
+  try {
+    const result = (updater || new api.TaskUpdater({ home, toolkitRoot: args.repoRoot })).run({ apply: true });
+    if (result.questions) log(JSON.stringify({ question_ui: 'host', questions: result.questions }));
+    const held = Boolean(result.questions || result.plans.some(row => row.held) || result.results?.some(row => row.refused || row.items?.some(item => item.done === false)));
+    log(held ? 'Scheduled task update needs an owner answer or a local repair; inspect the direct update plan.' : 'Scheduled tasks updated and read back.');
+    return { held };
+  } catch { log('Scheduled task update held; inspect the direct update plan. Native permission blocks remain stops.'); return { held: true }; }
+}
 
 // Read-only task reporting for the managed repository and the original project. Cache only
 // this report's reads (including failures); plan/apply elsewhere always gets fresh dependencies.
@@ -4329,7 +4383,7 @@ const {
 
 module.exports = {
   assertSupportedComputer,
-  printWindowsTasks,
+  applyScheduledTasks, printWindowsTasks,
   gitFailureHint,
   nativePluginRebindFailure,
   installOfficialN8nSkills,
