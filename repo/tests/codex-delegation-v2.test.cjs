@@ -20,6 +20,9 @@ function tempFolder(prefix) {
 
 const V2 = config.RUNTIMES.V2;
 
+// The config load check must ask a fixture, never a real Codex on this machine's PATH.
+require('./support/fake-codex-config-reader.cjs').useFakeConfigReader();
+
 function tempRoot() {
   return tempFolder('toolkit-codex-v2-');
 }

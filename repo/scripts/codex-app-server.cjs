@@ -7,8 +7,9 @@ const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 
 const TOOLKIT_CLIENT_VERSION = TOOLKIT_VERSION;
 const APP_SERVER_ARGS = Object.freeze(['app-server', '--listen', 'stdio://']);
-// Fixed fields for support-safe hold reasons; the messages stay as they were for existing callers.
-const failure = (message, fields) => Object.assign(new Error(message), fields);
+// Fixed reason fields and raw host text; callers screen hostText before display.
+// Messages stay as they were for existing callers.
+const failure = (message, fields) => Object.assign(new Error(message), { hostText: '' }, fields);
 
 function codexCommandParts(command, args) {
   if (/\.(?:cjs|mjs|js)$/i.test(command)) return { command: process.execPath, args: [command, ...args] };
@@ -77,7 +78,7 @@ class AppServerRequest {
       this.#child.on('close',code=>{
         if(this.#pendingError)this.#settle(this.#pendingError);
         else if(this.#response!==undefined)this.#settle();
-        else this.#settle(failure(`${this.#command} app-server exited ${code}: ${this.#stderr.trim()}`,this.#answered?{reason:'no-result'}:{reason:'exit',exitCode:code}));
+        else this.#settle(failure(`${this.#command} app-server exited ${code}: ${this.#stderr.trim()}`,this.#answered?{reason:'no-result'}:{reason:'exit',exitCode:code,hostText:this.#stderr.trim()}));
       });
       this.#reader.on('line',line=>this.#receive(line));
       this.#child.stdin.write(JSON.stringify({method:'initialize',id:1,params:{
@@ -108,18 +109,22 @@ class AppServerRequest {
   #receive(line) {
     let message;try{message=JSON.parse(line);}catch{return;}
     if(message.id===1){
-      if(message.error){this.#shutdown(failure(`app-server initialize failed: ${message.error.message||JSON.stringify(message.error)}`,{reason:'error-reply',step:'initialize'}));return;}
+      if(message.error){this.#shutdown(failure(`app-server initialize failed: ${message.error.message||JSON.stringify(message.error)}`,{reason:'error-reply',step:'initialize',hostText:String(message.error.message||JSON.stringify(message.error))}));return;}
       this.#child.stdin.write(JSON.stringify({method:'initialized',params:{}})+'\n');
       this.#child.stdin.write(JSON.stringify({...this.#request,id:2})+'\n');
     }else if(message.id===2){
       this.#answered=true;
-      if(message.error){this.#shutdown(failure(`${this.#request.method} failed: ${message.error.message||JSON.stringify(message.error)}`,{reason:'error-reply',step:'request'}));return;}
+      if(message.error){this.#shutdown(failure(`${this.#request.method} failed: ${message.error.message||JSON.stringify(message.error)}`,{reason:'error-reply',step:'request',hostText:String(message.error.message||JSON.stringify(message.error))}));return;}
       this.#response=message.result;this.#shutdown();
     }
   }
 }
 function runAppServerRequest(command,codexHome,request,options={}) {
-  return new AppServerRequest(command,codexHome,request,options).run();
+  return new AppServerRequest(command,codexHome,request,options).run().catch(error => {
+    // Native spawn/pipe errors and synchronous start errors have no Codex diagnosis.
+    if (typeof error.hostText !== 'string') error.hostText = '';
+    throw error;
+  });
 }
 
 module.exports = { appServerCandidates, runAppServerRequest };

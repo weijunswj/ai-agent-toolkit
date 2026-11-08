@@ -72,6 +72,12 @@ class CodexConfigLoadCheck {
 }
 
 function probeErrorVerdict(error) {
+  if (error?.reason) {
+    const hostText = typeof error.hostText === 'string' ? error.hostText : '';
+    const rejected = error.reason === 'error-reply' ? error.step === 'request'
+      : error.reason === 'exit' && CONFIG_REFUSAL.test(hostText);
+    return rejected ? { status: 'rejected', detail: screenedHostError(hostText) } : { status: 'unverified', detail: UNVERIFIED };
+  }
   const message = String(error?.message || error || '');
   if (/^app-server initialize failed/.test(message)) return { status: 'unverified', detail: UNVERIFIED };
   return CONFIG_REFUSAL.test(message) ? { status: 'rejected', detail: screenedHostError(error) } : { status: 'unverified', detail: UNVERIFIED };
@@ -83,14 +89,14 @@ async function probeAppServer(codexHome, explicit) {
     try {
       const result = await runAppServerRequest(command, codexHome, {
         method: 'config/read', params: { includeLayers: false },
-      }, { cwd: codexHome, timeoutMs: 20000, closeTimeoutMs: 1000, forceExitTimeoutMs: 1000 });
+      }, { cwd: codexHome, timeoutMs: 20000, closeTimeoutMs: 1000, forceExitTimeoutMs: 1000, direct: true, settleWithoutExit: true });
       if (!result || typeof result.config !== 'object' || result.config === null) {
         return { status: 'unverified', detail: UNVERIFIED };
       }
       return { status: 'verified', detail: 'Codex config check: Codex loaded config.toml.' };
     } catch (error) {
-      // Try another resolved command only when this executable does not exist.
-      if (error.code === 'ENOENT') continue;
+      // Try the next candidate when this command is unavailable or cannot be started directly.
+      if (error.code === 'ENOENT' || error.reason === 'start') continue;
       if (['EACCES', 'EPERM', 'ENOEXEC'].includes(error.code)) return { status: 'unverified', detail: UNVERIFIED };
       // Only Codex refusing the file is a rejection; a slow start or stuck shutdown proves nothing.
       // Rejected means Codex refused the file: a config/read error reply, or a start-up error that

@@ -266,3 +266,129 @@ test('a git exit 128 tells the user to run setup outside the Codex sandbox; othe
   const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
   assert.match(skill, /Run the setup command with escalated permissions \(outside the sandbox\) from the first call/);
 });
+
+// Structured failures must never classify the executable path as Codex's diagnosis.
+for (const [label, fields, expected] of [
+  ['timeout under a toml path', { reason: 'timeout' }, 'unverified'],
+  ['unrelated exit under a toml path', { reason: 'exit', hostText: 'unrelated stderr' }, 'unverified'],
+  ['failed shutdown under a toml path', { reason: 'stuck' }, 'unverified'],
+  ['missing result under a toml path', { reason: 'no-result' }, 'unverified'],
+  ['start failure under a toml path', { reason: 'start' }, 'unverified'],
+  ['exit with Codex TOML refusal', { reason: 'exit', hostText: 'TOML parse error at line 3' }, 'rejected'],
+  ['request error reply without a keyword', { reason: 'error-reply', step: 'request', hostText: 'unsupported value', message: 'request failed: unsupported value' }, 'rejected'],
+  ['config/read failed reply', { reason: 'error-reply', step: 'request', hostText: 'config/read failed' }, 'rejected'],
+  ['initialize error reply with a config keyword', { reason: 'error-reply', step: 'initialize', hostText: 'TOML parse error' }, 'unverified'],
+]) test('slice2 verdict: ' + label, () => {
+  const { probeErrorVerdict } = require('../scripts/codex-config-load-check.cjs');
+  const error = Object.assign(new Error('C:/toml-tools/codex app-server failed'), fields);
+  const verdict = probeErrorVerdict(error);
+  assert.equal(verdict.status, expected, label);
+  assert.doesNotMatch(verdict.detail, /toml-tools/);
+});
+
+const CONFIG_FAKE = path.join(__dirname, 'support/fake-codex-config.cjs');
+const { npmShim, isolatedEnv } = require('./support/fake-codex-config.cjs');
+const { stopFakes } = require('./support/stop-fakes.cjs');
+function configFake(t, spec = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toml-config-fake-'));
+  const codexHome = path.join(root, '.codex');
+  fs.mkdirSync(codexHome);
+  const f = { root, codexHome };
+  const log = path.join(f.codexHome, 'fake-config.log');
+  fs.writeFileSync(path.join(f.codexHome, 'fake-config.json'), JSON.stringify(spec));
+  t.after(async () => {
+    await stopFakes({ logs: [log] });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+  return { ...f, log };
+}
+const quickProbe = { timeoutMs: 500, closeTimeoutMs: 100, forceExitTimeoutMs: 100 };
+
+for (const [label, spec, reason, hostText, step] of [
+  ['exit', { mode: 'exit', stderr: 'TOML parse error at line 3' }, 'exit', 'TOML parse error at line 3'],
+  ['request', { requestError: 'private host words' }, 'error-reply', 'private host words', 'request'],
+  ['initialize', { initializeError: 'initialize host words' }, 'error-reply', 'initialize host words', 'initialize'],
+  ['timeout', { mode: 'timeout' }, 'timeout', ''],
+  ['no-result', { mode: 'no-result' }, 'no-result', ''],
+  ['stuck', { mode: 'answer-orphan' }, 'stuck', ''],
+]) test('slice2 hostText: ' + label, async t => {
+  const f = configFake(t, spec);
+  const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
+  await assert.rejects(runAppServerRequest(CONFIG_FAKE, f.codexHome, { method: 'config/read', params: {} },
+    { ...quickProbe, direct: true, settleWithoutExit: reason !== 'stuck' }), error => {
+    assert.equal(error.reason, reason);
+    assert.equal(error.hostText, hostText);
+    if (step) assert.equal(error.step, step);
+    if (reason === 'exit') assert.equal(error.message, CONFIG_FAKE + ' app-server exited 3: ' + hostText);
+    if (step) assert.equal(error.message, (step === 'initialize' ? 'app-server initialize' : 'config/read') + ' failed: ' + hostText);
+    return true;
+  });
+});
+
+test('slice2 hostText: unavailable direct command and native start error have an empty field', async t => {
+  const f = configFake(t);
+  const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
+  for (const direct of [true, false]) await assert.rejects(runAppServerRequest(path.join(f.root, 'absent.exe'), f.codexHome,
+    { method: 'config/read', params: {} }, { ...quickProbe, direct, settleWithoutExit: true }), error => {
+    assert.equal(error.hostText, '');
+    assert.equal(direct ? error.reason : error.code, direct ? 'start' : 'ENOENT');
+    return true;
+  });
+});
+
+test('slice2 runtime: an answer survives failed shutdown; repair probes still require exit', async t => {
+  const f = configFake(t, { mode: 'answer-orphan' });
+  const options = { ...quickProbe, codexHome: f.codexHome, codexCommand: CONFIG_FAKE };
+  const saved = { ...process.env };
+  const env = isolatedEnv(f.codexHome, f.root);
+  for (const key of Object.keys(process.env)) delete process.env[key];
+  Object.assign(process.env, env);
+  t.after(() => { for (const key of Object.keys(process.env)) delete process.env[key]; Object.assign(process.env, saved); });
+  const result = await delegation.inspectCodexMultiAgentRuntime(options);
+  assert.equal(result.runtime, 'MultiAgentV1', result.detail);
+  const repaired = await delegation.inspectCodexMultiAgentRuntime({ ...options, repairProbe: true });
+  assert.equal(repaired.runtime, 'unknown', repaired.detail);
+  assert.match(repaired.detail, /did not exit after bounded process-tree termination/);
+});
+
+for (const action of ['runtime', 'config/read', 'batchWrite', 'setup']) test('slice2 npm-only PATH: ' + action,
+  { skip: process.platform !== 'win32' && 'Windows npm command lookup only' }, t => {
+  const f = configFake(t);
+  const shim = npmShim(f.root, CONFIG_FAKE);
+  const env = isolatedEnv(f.codexHome, path.dirname(shim));
+  const harness = action === 'runtime'
+    ? `require(${JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs'))}).inspectCodexMultiAgentRuntime({codexHome:process.env.CODEX_HOME,codexCommand:'codex',timeoutMs:1000}).then(r=>console.log(JSON.stringify(r)))`
+    : action === 'batchWrite'
+    ? `require(${JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs'))}).editWithCodexAppServer(Buffer.from('# original\\n'),{codexHome:process.env.CODEX_HOME,codexCommand:'codex',runtime:'MultiAgentV1',helperCount:1,timeoutMs:1000}).then(r=>console.log(JSON.stringify({text:r.bytes.toString(),cleanup:r.temporary_cleanup})))`
+    : action === 'setup'
+    ? `console.log(JSON.stringify(require(${JSON.stringify(require.resolve('../scripts/setup-codex-toolkit-plugin.cjs'))}).inspectCodexPluginList()))`
+    : `console.log(JSON.stringify(new (require(${JSON.stringify(require.resolve('../scripts/codex-config-load-check.cjs'))}).CodexConfigLoadCheck)({codexCommand:require('node:path').join(process.env.CODEX_HOME,'absent.exe')}).probe(require('node:path').join(process.env.CODEX_HOME,'config.toml'))))`;
+  // batchWrite uses a fresh home; its fake still needs its spec and log in this fixture home.
+  env.FAKE_CONFIG_HOME = f.codexHome;
+  const r = require('node:child_process').spawnSync(process.execPath, ['-e', harness], { env, cwd: f.root, encoding: 'utf8', timeout: 12000, windowsHide: true });
+  assert.ifError(r.error);
+  assert.equal(r.status, 0, r.stderr);
+  const result = JSON.parse(r.stdout);
+  if (action === 'runtime') assert.equal(result.runtime, 'MultiAgentV1', result.detail);
+  if (action === 'config/read') assert.equal(result.status, 'verified', result.detail);
+  if (action === 'batchWrite') { assert.match(result.text, /max_threads = 1/); assert.equal(result.cleanup, 'removed after child exit'); }
+  if (action === 'setup') { assert.equal(result.ok, true, JSON.stringify(result)); assert.deepEqual(result.pluginList, { marketplaces: [], plugins: [] }); }
+  assert.match(fs.readFileSync(f.log, 'utf8'), action === 'setup' ? /argv plugin --help/ : /method initialize/);
+});
+
+test('slice2 hostText: synchronous native start errors also have an empty field', async t => {
+  const f = configFake(t);
+  const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
+  await assert.rejects(runAppServerRequest('invalid\0command', f.codexHome, { method: 'config/read' }), error => {
+    assert.equal(error.code, 'ERR_INVALID_ARG_VALUE');
+    assert.equal(error.hostText, '');
+    return true;
+  });
+});
+
+test('slice2 config/read: an answer survives failed shutdown in the synchronous load probe', t => {
+  const f = configFake(t, { mode: 'answer-orphan' });
+  const result = new CodexConfigLoadCheck({ codexCommand: CONFIG_FAKE }).probe(path.join(f.codexHome, 'config.toml'));
+  assert.equal(result.status, 'verified', result.detail);
+  assert.match(fs.readFileSync(f.log, 'utf8'), /method config\/read/);
+});

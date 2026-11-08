@@ -404,6 +404,8 @@ async function inspectCodexMultiAgentRuntime(options = {}) {
         timeoutMs: options.timeoutMs,
         closeTimeoutMs: options.closeTimeoutMs,
         forceExitTimeoutMs: options.forceExitTimeoutMs,
+        direct: true,
+        settleWithoutExit: !options.repairProbe,
       });
       if (!Array.isArray(result?.data)) throw new Error('experimentalFeature/list did not return a feature-row array');
       const relevant = result.data.filter((feature) => feature?.name === 'multi_agent_v2' || feature?.name === 'multi_agent');
@@ -512,12 +514,13 @@ async function editWithCodexAppServer(originalBytes, options = {}) {
           method: 'config/batchWrite',
           params: { edits: options.edits || configEdits(options.runtime, options.helperCount) },
         }, {
-          // A fresh empty folder: on Windows a bare `codex` is otherwise looked up in the caller's
-          // working folder first.
+          // Resolve on PATH and unwrap npm shims without a shell; the isolated editor must exit
+          // before its temporary home can be read or removed.
           cwd: root,
           timeoutMs: options.timeoutMs,
           closeTimeoutMs: options.closeTimeoutMs,
           forceExitTimeoutMs: options.forceExitTimeoutMs,
+          direct: true,
         });
         if (!fs.existsSync(isolatedConfig)) throw new Error('config/batchWrite did not create config.toml');
         return { bytes: fs.readFileSync(isolatedConfig), editor: `${command} app-server config/batchWrite`, temporary_cleanup: 'removed after child exit' };
