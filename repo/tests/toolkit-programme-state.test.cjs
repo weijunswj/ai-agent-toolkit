@@ -25,7 +25,7 @@ function child(overrides = {}) {
 
 test('the JSON schemas and the runtime validator agree on valid and invalid documents', () => {
   const ajv = new Ajv2020({ strict: false, allErrors: true });
-  const validateChild = ajv.compile(schema('child-state-v1.schema.json'));
+  const validateChild = ajv.compile(schema('child-state-v2.schema.json'));
   const validateParent = ajv.compile(schema('parent-state-v1.schema.json'));
   const validateBindingV1 = ajv.compile(schema('binding-v1.schema.json'));
   const validateBinding = ajv.compile(schema('binding-v2.schema.json'));
@@ -47,7 +47,7 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   const backfilled = child({ lifecycle: 'DONE', pr: { number: 800, state: 'MERGED', head: SHA_A,
     checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: SHA_A } } });
   assert.equal(validateChild(backfilled), true, JSON.stringify(validateChild.errors));
-  assert.deepEqual(state.validateChild(backfilled), [], 'merged observations need no schema change');
+  assert.deepEqual(state.validateChild(backfilled), [], 'merged observations remain valid');
   const missing = { ...parent, attention: state.foldAttention([], { source: 'reconcile', complete: true,
     seen: ['COMPLETED_PR_MISSING', 'PR_DISCOVERY_INCOMPLETE'].map(code => ({ code, issue: 423 })), now: '2026-11-01T00:00:00Z' }) };
   assert.equal(validateParent(missing), true, JSON.stringify(validateParent.errors));
@@ -272,7 +272,7 @@ test('the Programme Graph has seven columns, works out NOW, LATER and OPTIONAL, 
   assert.equal(lines[1], '## Programme Graph');
   assert.ok(lines.includes('| Task | Task Description | Child # | PR # | Class | Status | Last updated (SGT) |'));
   assert.equal(/CORE|HARDENING/.test(body), false, 'the old classes never show');
-  const rows = lines.filter(line => /^\| [^|]+ \| [^|]+ \| #\d+ \|/.test(line)).map(line => line.split(' | ').map(cell => cell.replace(/^\| | \|$/g, '')));
+  const rows = lines.filter(line => /^\|[^|]+\|[^|]+\|#\d+\|/.test(line)).map(line => line.slice(1, -1).split('|'));
   assert.deepEqual(rows.map(row => Number(row[2].slice(1))), [11, 8, 17, 10, 21, 14, 15, 13, 18, 19, 12, 16, 9], 'NOW, LATER, OPTIONAL by priority order and child number; finished oldest first');
   assert.equal(/\bNEXT\b/.test(body), false, 'there is no Next group');
   const classOf = Object.fromEntries(rows.map(row => [row[2], row[4]]));
@@ -335,8 +335,8 @@ test('the Programme Graph renders deterministic Singapore update times from task
   const body = render();
   assert.equal(render(), body, 'the same input renders the same block twice');
   for (const [index, outcome] of outcomes.entries()) {
-    const row = body.split('\n').find(line => line.startsWith(`| #${outcome.issue} |`));
-    assert.equal(row.split(' | ')[6], `${cases[index].expected} |`, `task #${outcome.issue}`);
+    const row = body.split('\n').find(line => line.startsWith(`|#${outcome.issue}|`));
+    assert.equal(row.split('|')[7], cases[index].expected, `task #${outcome.issue}`);
   }
 });
 
@@ -365,7 +365,7 @@ test('older class names are read as COMMITTED and anything else is refused', () 
     const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: cls, parent: 7, order: 0 }] });
     assert.deepEqual(state.validateParent(parent), [], `${cls} still reads`);
     const body = state.renderParentBlockBody(parent, new Map(), new Map());
-    assert.match(body, /^\| #8 \| - \| #8 \| - \| LATER \| QUEUED \| - \|$/m, `${cls} shows as LATER with no release`);
+    assert.match(body, /^\|#8\|-\|#8\|-\|LATER\|QUEUED\|-\|$/m, `${cls} shows as LATER with no release`);
   }
   const bad = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: 'NOW', parent: 7, order: 0 }] });
   assert.match(state.validateParent(bad).join('\n'), /class must be one of COMMITTED, OPTIONAL, COMPLETED, RETIRED/, 'the bucket is never stored');

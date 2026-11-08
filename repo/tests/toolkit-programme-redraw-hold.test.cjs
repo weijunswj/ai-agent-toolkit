@@ -192,7 +192,7 @@ test('closure matrix: partial, incomplete, newer-version and failed readback pas
     if (mode === 'readback') fx.github.intercept(call => call.method === 'PATCH' && /issues\/12$/.test(call.path) ? { status: 500, json: {} } : undefined);
     const report = fx.reconciler.run({ apply: true, ...options });
     assert.equal(fx.entry().state, mode === 'success' ? 'resolved' : 'new', mode);
-    assert.equal(report.attention, state.attentionLine(fx.parent().attention), 'the report follows the applied state');
+    assert.equal(report.attention, state.attentionLine(fx.parent().attention, fx.reconciler.now()), 'the report follows the applied state');
     assert.equal(fx.entry().id, id);
     if (mode === 'success') {
       assert.ok(fx.github.calls.some(call => call.method === 'PATCH' && /issues\/12$/.test(call.path)));

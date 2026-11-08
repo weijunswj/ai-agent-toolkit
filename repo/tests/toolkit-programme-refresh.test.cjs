@@ -86,6 +86,7 @@ test('refresh automatically backfills a completed task and the next sweep makes 
   const fx = fixture();
   fx.store.mutate('parent', 421, { writer: controller, change: doc => { doc.outcomes[0].class = 'COMPLETED'; return doc; } });
   fx.github.issues.get(423).state = 'closed';
+  fx.github.issues.get(423).state_reason = 'completed';
   fx.github.addPr(800, { head: 'a'.repeat(40), merged: true, body: 'Implements the task' });
   fx.github.issuePrLinks.set(423, { timeline: [800] });
   const first = fx.run(['refresh']);
@@ -96,12 +97,14 @@ test('refresh automatically backfills a completed task and the next sweep makes 
   assert.equal(saved.lifecycle, 'DONE');
   assert.equal(saved.gate.role, null, 'refresh records observations without gate acceptance');
   assert.equal(fx.store.read('parent', 421).doc.fence.holder_session, controller.session);
-  assert.match(fx.github.issues.get(421).body, /\| #423 \| #800 \| - \| COMPLETED/);
+  assert.match(fx.github.issues.get(421).body, /\|#423\|#800\|-\|COMPLETED/);
+  assert.match(fx.github.issues.get(423).body, /#800 MERGED .*aaaaaaa/);
   const before = { commits: fx.github.commits, mutations: fx.github.mutations(), calls: fx.github.calls.length };
   assert.equal(fx.run(['refresh']).result.summary, 'No changes');
   assert.equal(fx.github.commits, before.commits);
   assert.equal(fx.github.mutations(), before.mutations);
-  assert.equal(fx.github.calls.slice(before.calls).some(call => /pulls\?state=closed/.test(call.path) || call.body?.query?.includes('closedByPullRequestsReferences')), false);
+  const discovery = fx.github.calls.slice(before.calls).filter(call => /pulls\?state=(?:open|closed)/.test(call.path) || call.body?.query?.includes('closedByPullRequestsReferences'));
+  assert.ok(discovery.length > 0 && discovery.length <= 60, 'history and unrelated PRs are re-read within the discovery budget without writes');
 });
 
 test('refresh also runs for a session a Toolkit launcher started', () => {
@@ -538,7 +541,9 @@ test('no refresh for unmarked sessions, other repositories, ungoverned folders o
   const start = folder => base.started.push(folder);
   const cases = [
     [post('mcp__github__issue_write', { owner: 'other', repo: 'thing' }, { cwd: root }), GOVERNED, 'NOT_GOVERNED'],
-    [post('Bash', { command: 'gh pr create' }, { cwd: tmp() }), GOVERNED, 'NOT_GOVERNED'],
+    // Scratch may live inside the real governed checkout. The fake governance reader recognises
+    // only the fixture, so walking above its plain folder cannot bind to the developer's checkout.
+    [post('Bash', { command: 'gh pr create' }, { cwd: tmp() }), folder => folder === root ? GOVERNED() : {state:'DISABLED'}, 'NOT_GOVERNED'],
     [post('Bash', { command: 'gh pr create' }, { cwd: root }), () => ({ state: 'DISABLED' }), 'NOT_GOVERNED'],
   ];
   for (const [input, governanceState, outcome] of cases) {
