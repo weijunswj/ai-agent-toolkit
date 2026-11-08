@@ -330,7 +330,7 @@ test('hostText: unavailable command and native spawn errors keep precise start d
   const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
   const missing = path.join(f.root, 'absent.exe');
   await assert.rejects(runAppServerRequest(missing, f.codexHome, { method: 'config/read', params: {} },
-    { ...quickProbe, direct: true, settleWithoutExit: true }), error => {
+    { ...quickProbe, settleWithoutExit: true }), error => {
     assert.equal(error.reason, 'start');
     assert.equal(error.hostText, '');
     assert.match(error.message, /executable is not available/);
@@ -344,7 +344,7 @@ test('hostText: unavailable command and native spawn errors keep precise start d
   try {
     launch.directSpawnParts = () => ({ command: missing, args: [] });
     await assert.rejects(runAppServerRequest(missing, f.codexHome, { method: 'config/read', params: {} },
-      { ...quickProbe, direct: true, settleWithoutExit: true }), error => {
+      { ...quickProbe, settleWithoutExit: true }), error => {
       assert.equal(error.code, 'ENOENT');
       assert.equal(error.hostText, '');
       assert.match(error.message, /spawn .* ENOENT/);
@@ -437,7 +437,7 @@ test('batchWrite refuses an answer whose orphan keeps the editor pipes open', as
   const harness = 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ')' +
     '.editWithCodexAppServer(Buffer.from("# original\\n"),{codexHome:process.env.CODEX_HOME,codexCommand:' +
     JSON.stringify(CONFIG_FAKE) + ',runtime:"MultiAgentV1",helperCount:1,timeoutMs:1000,closeTimeoutMs:100,forceExitTimeoutMs:100})' +
-    '.then(()=>console.log(JSON.stringify({succeeded:true})),e=>console.log(JSON.stringify({error:e.message})))';
+    '.then(()=>({succeeded:true}),e=>({error:e.message})).then(answer=>process.stdout.write(JSON.stringify(answer),()=>process.exit(0)))';
   const env = isolatedEnv(f.codexHome, f.root);
   env.FAKE_CONFIG_HOME = f.codexHome;
   const result = require('node:child_process').spawnSync(process.execPath, ['-e', harness], {
@@ -451,7 +451,7 @@ test('batchWrite refuses an answer whose orphan keeps the editor pipes open', as
   assert.match(fs.readFileSync(f.log, 'utf8'), /method config\/batchWrite/);
 });
 
-for (const action of ['setup', 'config/read', 'runtime', 'batchWrite']) test('PATH lookup skips a refused wrapper before a working executable: ' + action,
+for (const action of ['setup', 'setup spawn', 'config/read', 'runtime', 'batchWrite']) test('PATH lookup skips a refused wrapper before a working executable: ' + action,
   { skip: process.platform !== 'win32' }, t => {
   const f = configFake(t);
   const wrapperBin = path.join(f.root, 'wrapper');
@@ -466,10 +466,20 @@ for (const action of ['setup', 'config/read', 'runtime', 'batchWrite']) test('PA
   // Both files are in scratch working folders; the launcher must select the later .exe.
   fs.writeFileSync(path.join(f.root, 'plugin'), "process.argv.splice(2, 0, 'plugin');\n" + fs.readFileSync(CONFIG_FAKE, 'utf8'));
   fs.copyFileSync(CONFIG_FAKE, path.join(f.codexHome, 'app-server'));
+  // Logging Node copies pin both the current folder and relative PATH refusal on Windows.
+  const relativeBin = path.join(f.root, 'relative-bin');
+  fs.mkdirSync(relativeBin);
+  const shadowExecutables = [path.join(f.root, 'codex.exe'), path.join(relativeBin, 'codex.exe')];
+  for (const shadow of shadowExecutables) fs.copyFileSync(process.execPath, shadow);
+  const shadowLog = path.join(f.root, 'shadow-started');
   const nativeLog = path.join(f.root, 'native-started');
   const preload = path.join(f.root, 'native-preload.cjs');
   // batchWrite chooses a new temporary cwd. Give the copied Node its app-server script there.
   fs.writeFileSync(preload, `
+if (${JSON.stringify(shadowExecutables.map(file => file.toLowerCase()))}.includes(process.execPath.toLowerCase())) {
+  require('node:fs').appendFileSync(${JSON.stringify(shadowLog)}, process.execPath + '\\n');
+  process.exit(9);
+}
 if (require('node:path').basename(process.execPath).toLowerCase() === 'codex.exe') {
   require('node:fs').appendFileSync(${JSON.stringify(nativeLog)}, process.execPath + '\\n');
   if (require('node:path').basename(process.argv[1] || '') === 'app-server') {
@@ -483,6 +493,8 @@ if (require('node:path').basename(process.execPath).toLowerCase() === 'codex.exe
   env.NODE_OPTIONS = [env.NODE_OPTIONS, '--require=' + JSON.stringify(preload.replace(/\\/g, '/'))].filter(Boolean).join(' ');
   const harness = action === 'setup'
     ? 'console.log(JSON.stringify(require(' + JSON.stringify(require.resolve('../scripts/setup-codex-toolkit-plugin.cjs')) + ').inspectCodexPluginList()))'
+    : action === 'setup spawn'
+    ? 'console.log(JSON.stringify(require(' + JSON.stringify(require.resolve('../scripts/setup-codex-toolkit-plugin.cjs')) + ').runCodexJson("codex",["plugin","list","--json"])))'
     : action === 'runtime'
     ? 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ').inspectCodexMultiAgentRuntime({codexHome:process.env.CODEX_HOME,cwd:process.env.CODEX_HOME,timeoutMs:1000}).then(r=>console.log(JSON.stringify(r)))'
     : action === 'batchWrite'
@@ -495,7 +507,9 @@ if (require('node:path').basename(process.execPath).toLowerCase() === 'codex.exe
   assert.equal(result.status, 0, result.stderr);
   const answer = JSON.parse(result.stdout);
   assert.equal(fs.existsSync(marker), false, 'a refused wrapper must never start');
+  assert.equal(fs.existsSync(shadowLog), false, 'current-folder and relative PATH executables must never run');
   if (action === 'setup') assert.equal(answer.ok, true, JSON.stringify(answer));
+  else if (action === 'setup spawn') assert.deepEqual(answer, { marketplaces: [], plugins: [] });
   else if (action === 'runtime') assert.equal(answer.runtime, 'MultiAgentV1', answer.detail);
   else if (action === 'batchWrite') {
     assert.match(answer.text, /max_threads = 1/);
@@ -504,7 +518,7 @@ if (require('node:path').basename(process.execPath).toLowerCase() === 'codex.exe
   else assert.equal(answer.status, 'verified', answer.detail);
   assert.deepEqual([...new Set(fs.readFileSync(nativeLog, 'utf8').trim().split(/\r?\n/).map(file => file.toLowerCase()))], [executable.toLowerCase()], 'the later PATH executable must actually run');
   const expectedMethod = action === 'runtime' ? /method experimentalFeature\/list/ : action === 'batchWrite' ? /method config\/batchWrite/ : /method config\/read/;
-  assert.match(fs.readFileSync(f.log, 'utf8'), action === 'setup' ? /argv plugin --help/ : expectedMethod);
+  assert.match(fs.readFileSync(f.log, 'utf8'), action.startsWith('setup') ? /argv plugin/ : expectedMethod);
 });
 
 test('app-server requests always validate direct launches without a non-direct route', async t => {
@@ -534,4 +548,11 @@ test('runtime and batchWrite explain a missing program without suggesting a shim
     assert.doesNotMatch(error.message, /cannot be started directly/);
     return true;
   });
+});
+
+test('Codex app-server callers do not advertise an ignored launch option', () => {
+  for (const name of ['codex-config-load-check', 'codex-delegation-config', 'toolkit-codex-install-state']) {
+    const source = fs.readFileSync(path.join(__dirname, '../scripts', name + '.cjs'), 'utf8');
+    assert.doesNotMatch(source, /\bdirect:\s*true\b/, name + ' must use the always-direct app-server route');
+  }
 });

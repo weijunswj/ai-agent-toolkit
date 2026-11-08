@@ -339,7 +339,7 @@ const unreadableHold = reason => `Codex gate launch held. Codex did not give a r
 async function readCodexHookList(codexHome, codex, timeoutMs) {
   const { runAppServerRequest } = require('./codex-app-server.cjs');
   return runAppServerRequest(codex, codexHome, { method: 'hooks/list', params: { cwds: [codexHome] } },
-    { cwd: codexHome, timeoutMs, closeTimeoutMs: 1000, forceExitTimeoutMs: 1000, direct: true, settleWithoutExit: true });
+    { cwd: codexHome, timeoutMs, closeTimeoutMs: 1000, forceExitTimeoutMs: 1000, settleWithoutExit: true });
 }
 
 async function launchCheck({ codexHome = plugin.defaultCodexHome(), codex = '', timeoutMs = CHECK_TIMEOUT_MS } = {}) {

@@ -404,7 +404,6 @@ async function inspectCodexMultiAgentRuntime(options = {}) {
         timeoutMs: options.timeoutMs,
         closeTimeoutMs: options.closeTimeoutMs,
         forceExitTimeoutMs: options.forceExitTimeoutMs,
-        direct: true,
         settleWithoutExit: !options.repairProbe,
       });
       if (!Array.isArray(result?.data)) throw new Error('experimentalFeature/list did not return a feature-row array');
@@ -520,7 +519,6 @@ async function editWithCodexAppServer(originalBytes, options = {}) {
           timeoutMs: options.timeoutMs,
           closeTimeoutMs: options.closeTimeoutMs,
           forceExitTimeoutMs: options.forceExitTimeoutMs,
-          direct: true,
         });
         if (!fs.existsSync(isolatedConfig)) throw new Error('config/batchWrite did not create config.toml');
         return { bytes: fs.readFileSync(isolatedConfig), editor: `${command} app-server config/batchWrite`, temporary_cleanup: 'removed after child exit' };

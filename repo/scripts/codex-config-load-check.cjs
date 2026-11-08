@@ -89,7 +89,7 @@ async function probeAppServer(codexHome, explicit) {
     try {
       const result = await runAppServerRequest(command, codexHome, {
         method: 'config/read', params: { includeLayers: false },
-      }, { cwd: codexHome, timeoutMs: 20000, closeTimeoutMs: 1000, forceExitTimeoutMs: 1000, direct: true, settleWithoutExit: true });
+      }, { cwd: codexHome, timeoutMs: 20000, closeTimeoutMs: 1000, forceExitTimeoutMs: 1000, settleWithoutExit: true });
       if (!result || typeof result.config !== 'object' || result.config === null) {
         return { status: 'unverified', detail: UNVERIFIED };
       }

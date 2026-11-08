@@ -79,7 +79,7 @@ test('AT16c: an answer already received is kept when Codex cannot be stopped; no
     if (mode === 'write-caller') {
       const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
       await assert.rejects(runAppServerRequest(FAKE, f.codexHome, { method: 'hooks/list', params: {} },
-        { cwd: f.codexHome, timeoutMs: 5000, closeTimeoutMs: 200, forceExitTimeoutMs: 200, direct: true }),
+        { cwd: f.codexHome, timeoutMs: 5000, closeTimeoutMs: 200, forceExitTimeoutMs: 200 }),
       error => error.reason === 'stuck' && /did not exit after bounded process-tree termination/.test(error.message));
     } else {
       const r = await launchCheck({ codexHome: f.codexHome, codex: FAKE, timeoutMs: 500 });
@@ -261,6 +261,6 @@ test('AT27: the fake header names exactly the modes that self-exit', () => {
   assert.match(source, /longer than about 10 s.*exit \(code 0\) rather than a timeout/);
 });
 
-test('slice2 contract: hold reasons have no OS-specific non-program example', () => {
+test('hold reasons have no OS-specific non-program example', () => {
   assert.doesNotMatch(holdReasonSentence(), /for example a named file that is not a program/);
 });
