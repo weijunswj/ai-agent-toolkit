@@ -906,7 +906,7 @@ function runPasses(args, deps, out) {
         if (passes > 0 && !args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
         code = Math.max(code, finish(passArgs, deps, out, context));
         passes += 1;
-        if (!pass.aborted) progress.finish();
+        progress.finish();
       } while (flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
     } catch (error) {
       if (held.owns()) progress?.write(pass.snapshot());

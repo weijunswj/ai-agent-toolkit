@@ -121,11 +121,11 @@ test('A-T4: transport failure and a dead lock leave interrupted progress, then r
       if (mode === 'transport') {
         let moves = 0;
         f.github.intercept(call => {
-          if (call.method === 'PATCH' && call.path.includes('/sub_issues/priority') && ++moves === 5) throw new Error('transport interrupted');
+          if (call.method === 'PATCH' && call.path.includes('/sub_issues/priority') && ++moves === 5) throw Object.assign(new Error('transport interrupted'), { code: 'PASS_LOCK_LOST' });
         });
-        assert.equal(cliRun(f, lockFile).code, 1);
+        assert.throws(() => cliRun(f, lockFile), { code: 'PASS_LOCK_LOST' });
         f.github.hooks = [];
-        assert.equal(f.store.read('parent', 421).doc.pending_effects.filter(entry => entry.kind === 'reorder').length, 13);
+        assert.equal(f.store.read('parent', 421).doc.pending_effects.filter(entry => entry.kind === 'reorder').length, 17, 'a pass-stopping error leaves the entire uncommitted group recoverable');
       } else {
         fs.writeFileSync(lockFile, JSON.stringify({ schema: 'toolkit.programme-pass-lock.v1', token: 'dead', pid: 987654, host: os.hostname(), at: NOW }));
         fs.writeFileSync(`${lockFile}.progress`, JSON.stringify({ token: 'dead', started_at: NOW, phase: 'order', done: 4, total: 17, unreported: true }));
@@ -189,31 +189,174 @@ test('A-T6: stopped passes retain size findings, parent lifecycle and watermark'
 
 test('A-T7: a crashed batch recovers each intent; UNKNOWN holds only its scope', () => {
   const f = fixture({ count: 2, added: 2 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-crash-'));
+  const lockFile = path.join(dir, 'pass.lock');
+  try {
+    let failed = false;
+    f.github.intercept(call => { if (!failed && call.method === 'PATCH' && call.path.includes('/sub_issues/priority')) { failed = true; throw Object.assign(new Error('batch interrupted before mutation'), { code: 'PASS_LOCK_LOST' }); } });
+    assert.throws(() => cliRun(f, lockFile), { code: 'PASS_LOCK_LOST' });
+    const saved = f.store.read('parent', 421).doc;
+    assert.equal(saved.pending_effects.filter(entry => entry.kind === 'reorder').length, 2);
+    f.github.hooks = [];
+    f.github.issues.get(421).subs.reverse(); // Neither saved relative move is now present.
+    const plan = f.make().plan();
+    assert.equal(plan.resolutions.filter(entry => entry.outcome === 'NOT_DONE').length, 2, JSON.stringify({ intents: saved.pending_effects, resolutions: plan.resolutions }));
+    assert.ok(plan.resolutions.every(entry => entry.kind === 'parent'));
+    assert.equal(cliRun(f, lockFile).code, 0);
+    assert.deepEqual(openStop(f).diagnostics, { cause: 'interrupted', phase: 'order', done: 0, total: 2, started_at: NOW });
+    assert.equal(openStop(f).state, 'new');
+    assert.equal(f.store.read('parent', 421).doc.pending_effects.length, 0);
+    assert.equal(cliRun(f, lockFile).code, 0);
+    assert.equal(openStop(f).state, 'resolved');
+    // A lost task body readback is a body hold, while its native parent link remains independent.
+    const doc = f.store.read('child', 800).doc;
+    f.store.mutate('child', 800, { writer, parentDoc: saved, change: d => { d.pending_effects.push({ intent_id: 'old-child', kind: 'replace_block', target: { issue: 800, digest: 'missing' }, state: 'UNKNOWN' }); return d; } });
+    const observed = { issues: new Map([[800, null]]), subIssues: new Map(), comments: new Map() };
+    const holds = [];
+    assert.equal(f.make().recover([{ kind: 'child', number: 800, doc: f.store.read('child', 800).doc }], observed, holds)[0].outcome, 'UNKNOWN');
+    assert.deepEqual(holds.map(entry => entry.scope), ['body']);
+    assert.ok(doc);
+    f.github.issues.get(800).parent = null;
+    f.github.issues.get(800).body = '';
+    f.github.issues.get(801).body = '';
+    f.github.issues.get(421).subs = f.github.issues.get(421).subs.filter(number => number !== 800);
+    const run = f.make(); const heldPlan = run.plan(); heldPlan.holds.push(...holds);
+    const applied = run.apply(heldPlan);
+    assert.ok(applied.results.some(entry => entry.kind === 'attach' && entry.target.issue === 800 && entry.outcome === 'DONE'), 'body UNKNOWN leaves its native links usable');
+    assert.ok(applied.results.some(entry => entry.kind === 'replace_block' && entry.target.issue === 800 && entry.outcome === 'SKIPPED'));
+    assert.ok(applied.results.some(entry => entry.kind === 'replace_block' && entry.target.issue === 801 && entry.outcome === 'DONE'), 'unrelated task pages still run');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Closure rows: issue-scoped apply x attention unchanged/changed must keep an unreported
+// predecessor; a subsequent full refresh owns reporting and only a later full pass resolves it.
+for (const attentionChange of [false, true]) test(`H1: issue-scoped apply preserves interrupted progress, attention change ${attentionChange}`, () => {
+  const f = fixture({ count: 1, added: 0 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-scoped-'));
+  const lockFile = path.join(dir, 'pass.lock');
+  const interrupted = { cause: 'interrupted', phase: 'order', done: 4, total: 17, started_at: NOW };
+  try {
+    const { cause, ...note } = interrupted;
+    fs.writeFileSync(`${lockFile}.progress`, JSON.stringify({ ...note, token: 'dead', unreported: true }));
+    if (attentionChange) f.github.issues.get(500).body += 'x'.repeat(60000);
+    const scoped = cliRun(f, lockFile, {}, ['reconcile', '--apply', '--controller', '--session', writer.session, '--issue', '500', '--json']);
+    assert.equal(scoped.report.results.some(entry => entry.kind === 'update_attention'), attentionChange);
+    assert.equal(fs.existsSync(`${lockFile}.progress`), true, 'an unrelated attention write is not a report of the predecessor');
+    if (attentionChange) f.github.issues.get(500).body = '';
+    assert.equal(cliRun(f, lockFile).code, 0);
+    assert.deepEqual(openStop(f).diagnostics, interrupted);
+    assert.equal(openStop(f).state, 'new');
+    assert.equal(fs.existsSync(`${lockFile}.progress`), false);
+    assert.equal(cliRun(f, lockFile).code, 0);
+    assert.equal(openStop(f).state, 'resolved');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('M1: one task read-back 502 holds only that task and writes the other pages', () => {
+  const f = fixture({ count: 4, added: 0 });
+  for (let number = 500; number < 504; number++) f.github.issues.get(number).body = '';
+  let written = false; let failed = false;
+  f.github.intercept(call => {
+    if (call.method === 'PATCH' && call.path.endsWith('/issues/500')) written = true;
+    if (written && !failed && call.method === 'GET' && call.path.endsWith('/issues/500')) {
+      failed = true; return { status: 502, json: { message: 'fixture read-back failure' } };
+    }
+  });
+  const report = f.make().run({ apply: true });
+  assert.equal(failed, true);
+  assert.deepEqual(report.holds.map(entry => [entry.code, entry.target, entry.scope]), [['EFFECT_UNKNOWN', '#500', 'body']]);
+  assert.equal(report.results.find(entry => entry.kind === 'replace_block' && entry.target.issue === 500).outcome, 'UNKNOWN');
+  for (const number of [501, 502, 503]) assert.equal(report.results.find(entry => entry.kind === 'replace_block' && entry.target.issue === number)?.outcome, 'DONE', `#${number} still written`);
+  assert.deepEqual(f.store.read('parent', 421).doc.pending_effects.map(entry => [entry.kind, entry.target.issue, entry.state]), [['replace_block', 500, 'UNKNOWN']]);
+});
+
+for (const variant of ['unrelated_hold', 'time_stop']) test(`M2: a repair notice survives ${variant} until a later pass posts it`, () => {
+  const f = fixture({ count: 1, added: 0 });
+  Object.assign(f.binding, { schema: state.SCHEMA.bindingV2, governance: 'enabled', parents: [{ issue: 421, record_prefix: 'TEST-' }] });
+  f.binding.parent_lifecycle = { reopen_incomplete: true };
+  Object.assign(f.github.issues.get(421), { state: 'closed', events: [{ id: 10, event: 'closed', created_at: NOW, actor: { login: 'fixture-owner' }, commit_id: null }] });
   let failed = false;
-  f.github.intercept(call => { if (!failed && call.method === 'PATCH' && call.path.includes('/sub_issues/priority')) { failed = true; throw new Error('batch interrupted before mutation'); } });
-  assert.ok(f.make().run({ apply: true }).holds.some(entry => entry.code === 'EFFECT_UNKNOWN'));
-  const saved = f.store.read('parent', 421).doc;
-  assert.equal(saved.pending_effects.filter(entry => entry.kind === 'reorder').length, 2);
+  f.github.intercept(call => {
+    if (!failed && call.method === 'POST' && call.path.endsWith('/issues/421/comments') && call.body.body.includes('toolkit-parent-repair:')) {
+      failed = true; return { status: 502, json: { message: 'fixture notice failure' } };
+    }
+  });
+  assert.ok(f.make().run({ apply: true }).holds.length);
+  assert.equal(f.github.issues.get(421).state, 'open');
+  const owed = () => f.store.read('parent', 421).doc.pending_effects.filter(entry => entry.kind === 'post_parent_repair');
+  const notices = () => f.github.commentsOf(421).filter(entry => entry.body.includes('toolkit-parent-repair:'));
+  assert.equal(owed().length, 1);
   f.github.hooks = [];
-  f.github.issues.get(421).subs.reverse(); // Neither saved relative move is now present.
-  const plan = f.make().plan();
-  assert.equal(plan.resolutions.filter(entry => entry.outcome === 'NOT_DONE').length, 2, JSON.stringify({ intents: saved.pending_effects, resolutions: plan.resolutions }));
-  assert.ok(plan.resolutions.every(entry => entry.kind === 'parent'));
-  // A lost task body readback is a body hold, while its native parent link remains independent.
-  const doc = f.store.read('child', 800).doc;
-  f.store.mutate('child', 800, { writer, parentDoc: saved, change: d => { d.pending_effects.push({ intent_id: 'old-child', kind: 'replace_block', target: { issue: 800, digest: 'missing' }, state: 'UNKNOWN' }); return d; } });
-  const observed = { issues: new Map([[800, null]]), subIssues: new Map(), comments: new Map() };
-  const holds = [];
-  assert.equal(f.make().recover([{ kind: 'child', number: 800, doc: f.store.read('child', 800).doc }], observed, holds)[0].outcome, 'UNKNOWN');
-  assert.deepEqual(holds.map(entry => entry.scope), ['body']);
-  assert.ok(doc);
-  f.github.issues.get(800).parent = null;
-  f.github.issues.get(421).subs = f.github.issues.get(421).subs.filter(number => number !== 800);
-  const run = f.make(); const heldPlan = run.plan(); heldPlan.holds.push(...holds);
-  const applied = run.apply(heldPlan);
-  assert.ok(applied.results.some(entry => entry.kind === 'attach' && entry.target.issue === 800 && entry.outcome === 'DONE'), 'body UNKNOWN leaves its native links usable');
-  assert.ok(applied.results.some(entry => entry.kind === 'replace_block' && entry.target.issue === 800 && entry.outcome === 'SKIPPED'));
-  assert.ok(applied.results.some(entry => entry.kind === 'replace_block' && entry.target.issue === 801 && entry.outcome === 'DONE'), 'unrelated task pages still run');
+  let elapsed = 0;
+  const pass = budget(() => Date.parse(NOW) + elapsed);
+  const run = f.make(pass); const plan = run.plan();
+  assert.ok(plan.resolutions.some(entry => entry.intent_id === owed()[0].intent_id && entry.outcome === 'NOT_DONE'));
+  if (variant === 'unrelated_hold') plan.holds.push({ code: 'EFFECT_UNKNOWN', target: '#500', scope: 'pr', detail: 'fixture unrelated hold' });
+  else elapsed = 550001;
+  run.apply(plan);
+  assert.equal(notices().length, 0);
+  assert.equal(owed().length, 1, 'NOT_DONE is still owed when lifecycle was skipped');
+  if (variant === 'time_stop') assert.notEqual(openStop(f).state, 'resolved');
+  // Even another complete inventory cannot resolve a stop while a lifecycle hold keeps the notice owed.
+  const heldRun = f.make(); const heldPlan = heldRun.plan();
+  heldPlan.holds.push({ code: 'EFFECT_UNKNOWN', target: '#421', scope: 'lifecycle', detail: 'fixture lifecycle hold' });
+  heldRun.apply(heldPlan);
+  assert.equal(owed().length, 1);
+  if (variant === 'time_stop') assert.notEqual(openStop(f).state, 'resolved');
+  if (variant === 'time_stop') {
+    const permission = f.binding.parent_lifecycle;
+    delete f.binding.parent_lifecycle;
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(owed().length, 1, 'a missing repair permission keeps the debt without posting');
+    assert.notEqual(openStop(f).state, 'resolved', 'an otherwise complete pass cannot resolve a stop while a notice is owed');
+    f.binding.parent_lifecycle = permission;
+  }
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.equal(notices().length, 1);
+  assert.equal(owed().length, 0);
+  if (variant === 'time_stop') assert.equal(openStop(f).state, 'resolved');
+  f.make().run({ apply: true });
+  assert.equal(notices().length, 1, 'read-back prevents duplicate notices');
+});
+
+// The stop clock is phase/count driven, independent of request latency or real elapsed time.
+for (const row of [
+  { phase: 'links', done: 1, total: 2 }, { phase: 'order', done: 1, total: 2 },
+  { phase: 'pr_links', done: 1, total: 2 }, { phase: 'task_pages', done: 1, total: 2 },
+  { phase: 'lifecycle', done: 0, total: 2 },
+]) test(`M3: a queue stop at ${row.phase} redraws CURRENT in the same pass`, () => {
+  const f = fixture({ count: 2, added: 2 });
+  if (row.phase === 'links') for (const number of [500, 501]) {
+    f.github.issues.get(number).parent = null;
+    f.github.issues.get(421).subs = f.github.issues.get(421).subs.filter(n => n !== number);
+  }
+  let stopped = false; let pass;
+  pass = budget(() => {
+    if (pass?.phase === row.phase && pass.done >= row.done) stopped = true;
+    return Date.parse(NOW) + (stopped ? 480001 : 0);
+  });
+  const run = f.make(pass); const plan = run.plan();
+  if (row.phase === 'pr_links') for (const [number, pr] of [[500, 900], [501, 901]]) {
+    f.github.addIssue(pr);
+    plan.effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr, digest: 'fixture' }, body: 'Fixture PR navigation' });
+  }
+  const size = { code: 'BODY_TOO_LARGE', issue: 421, diagnostics: state.bodySizeDiagnostics('x'.repeat(60000), 60000) };
+  f.store.mutate('parent', 421, { writer, change: doc => {
+    doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [size], now: NOW }); return doc;
+  } });
+  plan.effects.push({ kind: 'set_parent_state', target: { issue: 421, state: 'closed', expected: 'open' } },
+    { kind: 'post_parent_repair', target: { issue: 421, marker: '<!-- fixture-notice -->', body: 'Fixture notice' } },
+    { kind: 'advance_pr_watermark', target: { issue: 421 }, watermark: '2026-11-09T00:00:00Z' });
+  const watermark = f.store.read('parent', 421).doc.private.graph_pr_watermark;
+  const result = run.apply(plan);
+  assert.equal(stopped, true);
+  assert.ok(result.holds.some(entry => entry.code === 'PASS_STOPPED'));
+  assert.deepEqual(openStop(f).diagnostics, { cause: 'time_limit', phase: row.phase, done: row.done, total: row.total, started_at: NOW });
+  assert.match(f.github.issues.get(421).body, new RegExp(`stopped at ${row.phase.replace('_', ' ')} \\(${row.done} of ${row.total} done\\)`));
+  assert.equal(f.github.issues.get(421).state, 'open', 'lifecycle skipped');
+  assert.equal(f.github.commentsOf(421).some(entry => entry.body === 'Fixture notice'), false);
+  assert.equal(f.store.read('parent', 421).doc.private.graph_pr_watermark, watermark);
+  assert.notEqual(f.store.read('parent', 421).doc.attention.find(entry => entry.code === 'BODY_TOO_LARGE').state, 'resolved');
 });
 
 test('A-T8: stopped-pass diagnostics are closed and validated in the reader and schema', () => {

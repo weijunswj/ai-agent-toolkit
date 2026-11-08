@@ -348,9 +348,8 @@ for (const row of [
   const report = reconciler().run({ apply: true });
   assert.equal(report.holds.filter(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === `#${parentIssue}`).length, 1);
   assert.ok(report.results.some(result => result.kind === 'replace_block' && result.target.issue === parentIssue && result.outcome === 'SKIPPED'));
-  const taskWrites = row.attentionChange ? 0 : 1;
-  assert.equal(report.writes.github, taskWrites, 'the task page follows the earlier parent hold');
-  assert.equal(github.mutations(), writes + taskWrites, 'an unverified parent intent is not replayed');
+  assert.equal(report.writes.github, 0, 'the uncertain intent is not replayed');
+  assert.equal(github.mutations(), writes, 'the held parent and already written task need no writes');
   assert.equal(report.results.some(entry => ['replace_block', 'post_index_comment'].includes(entry.kind) && entry.target.issue === parentIssue && entry.outcome === 'DONE'), false);
   assert.equal(github.issues.get(parentIssue).body, before);
   assert.ok(store.read('parent', parentIssue).doc.pending_effects.some(effect => effect.kind === 'post_index_comment' && effect.state === 'UNKNOWN'));

@@ -332,6 +332,10 @@ const BODY_SECTION_LIMIT = 5;
 const REFRESH_BUDGET_MS = 10 * 60 * 1000;
 const PAGE_RESERVE_MS = 3 * 60 * 1000;
 const END_RESERVE_MS = 60 * 1000;
+// Stop the queue at minute 8 of the ten-minute budget: one minute to settle intents and
+// record the stop, then one for CURRENT. The scheduled twelve-minute kill still has two
+// minutes of slack for requests already in flight; checks cannot cancel such a request.
+const QUEUE_RESERVE_MS = 2 * END_RESERVE_MS;
 const AGAIN_RESERVE_MS = 6 * 60 * 1000;
 const PASS_PHASES = ['planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'unknown'];
 
@@ -371,8 +375,7 @@ class RefreshBudget {
   snapshot(cause = 'interrupted') {
     return { cause, phase: this.phase, done: this.done, total: this.total, started_at: this.started_at };
   }
-  stop(reserve = END_RESERVE_MS) {
-    if (this.aborted) return true;
+  stop(reserve = QUEUE_RESERVE_MS) {
     if (!this.stopped && this.left() < reserve) this.stopped = this.snapshot('time_limit');
     return Boolean(this.stopped);
   }
@@ -4112,7 +4115,11 @@ class Reconciler {
 
     // Resolve recovered effects once per document. Readback still decides each intent separately.
     const recoveredDocs = new Map();
-    for (const resolution of plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN')) {
+    for (const resolution of plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN'
+      // A missing repair comment is still owed. Keep its intent until the re-planned
+      // effect runs, even if an unrelated hold or the budget skips lifecycle this pass.
+      && !(entry.outcome === 'NOT_DONE' && plan.parent.pending_effects.some(effect =>
+        effect.intent_id === entry.intent_id && effect.kind === 'post_parent_repair')))) {
       const key = `${resolution.kind}:${resolution.number}`;
       if (!recoveredDocs.has(key)) recoveredDocs.set(key, []);
       recoveredDocs.get(key).push(resolution);
@@ -4147,8 +4154,6 @@ class Reconciler {
         catch (error) {
           if (STOPS_PASS.has(error.code)) throw error;
           outcome = 'UNKNOWN'; detail = error.message;
-          this.pass.aborted = true;
-          this.pass.progress?.write(this.pass.snapshot());
         }
         settled.set(intents[index].intent_id, outcome);
         if (outcome === 'UNKNOWN') hold(effect, 'EFFECT_UNKNOWN', detail || 'the readback did not settle the outcome');
@@ -4164,7 +4169,6 @@ class Reconciler {
         });
         return doc;
       } });
-      if (this.pass.aborted) this.pass.progress?.write(this.pass.snapshot());
     };
     let group = [];
     const withIntent = (effect, run) => { group.push({ effect, run }); };
@@ -4247,7 +4251,9 @@ class Reconciler {
           return doc;
         } });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
-        this.pass.progress?.reported();
+        const interrupted = this.pass.progress?.interrupted;
+        if (interrupted && parentDoc.attention?.some(entry => entry.code === 'PASS_STOPPED' && OPEN_FINDING_STATES.includes(entry.state)
+          && JSON.stringify(canonical(entry.diagnostics)) === JSON.stringify(canonical(interrupted)))) this.pass.progress.reported();
       } catch (error) {
         if (STOPS_PASS.has(error.code)) throw error;
         record(effect, 'HELD', error.message);
@@ -4394,7 +4400,7 @@ class Reconciler {
               if (indexReadback(existing, intent, post.target.parts) === null) return { outcome: 'UNKNOWN', detail: 'the index pages differ from their intent' };
               for (const text of bodies) {
                 if (existing.some(comment => comment.body === text)) continue;
-                if (this.pass.left() < END_RESERVE_MS) { this.pass.stop(); return { outcome: 'UNKNOWN', detail: 'The time budget stopped index paging.' }; }
+                if (redrawing ? this.pass.left() < END_RESERVE_MS : this.pass.stop()) { this.pass.stop(); return { outcome: 'UNKNOWN', detail: 'The time budget stopped index paging.' }; }
                 guard();
                 this.mutator.postComment(number, text);
                 // Stop on the first uncertain response, including a lost successful response.
@@ -4599,7 +4605,8 @@ class Reconciler {
       redrawing = true;
       renderPages(true);
       redrawing = false;
-    } else if (plan.complete && !holds.length && !this.pass.stopped) {
+    } else if (plan.complete && !holds.length && !this.pass.stopped
+      && !parentDoc.pending_effects.some(entry => entry.kind === 'post_parent_repair')) {
       // Only a complete, unheld pass may resolve an earlier stopped-pass finding. Use the existing
       // fold rule and keep every unrelated finding unchanged.
       const next = foldAttention(parentDoc.attention, { source: 'reconcile', complete: true, now: this.now(),
