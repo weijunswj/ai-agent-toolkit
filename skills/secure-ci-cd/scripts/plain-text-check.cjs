@@ -17,6 +17,7 @@
 // a reason) and a line marker `plain-text: allow <reason>` for a `#number` on one line that is not a
 // reference (in Markdown, inside an HTML comment: `<!-- plain-text: allow a colour value -->`). The
 // marker hides nothing else: links, "PR 12" labels and banned terms are still reported on that line.
+// A kept term that no file in its scope still uses fails a full run.
 //
 // Usage: node plain-text-check.cjs [--repo <dir>] [--config <file>] [--files <path>...]
 //          [--init-baseline | --prune-baseline | --migrate-baseline] [--explain]
@@ -196,15 +197,20 @@ function explainedIn(text, config) {
   return explained;
 }
 
-function keptFor(rel, config) {
-  return new Set(config.kept_terms.filter((entry) => matchesPrefix(rel, entry.file)).map((entry) => entry.text));
+function keptFor(rel, config, used) {
+  const entries = config.kept_terms.filter((entry) => matchesPrefix(rel, entry.file));
+  return (text) => {
+    const matches = entries.filter((entry) => entry.text === text);
+    for (const entry of matches) used?.add(entry);
+    return matches.length > 0;
+  };
 }
 
-function findInText(text, file, config, scope = 'text') {
+function findInText(text, file, config, scope = 'text', used) {
   const findings = [];
   const body = normalise(text);
   const explained = explainedIn(body, config);
-  const kept = keptFor(file, config);
+  const kept = keptFor(file, config, used);
   const rules = REFERENCE_RULES.filter((rule) => config.rules[rule.id]);
   const terms = config.banned_terms.map((entry) => ({ entry, pattern: termPattern(entry.term, entry.case_sensitive !== false, entry.letter_suffix === true) }));
   body.split('\n').forEach((line, index) => {
@@ -213,13 +219,13 @@ function findInText(text, file, config, scope = 'text') {
     for (const rule of rules) {
       if (allowed && rule.id === 'number-reference') continue;
       for (const match of line.matchAll(rule.pattern)) {
-        if (kept.has(match[0])) continue;
+        if (kept(match[0])) continue;
         findings.push({ file, line: index + 1, rule: rule.id, text: match[0] });
       }
     }
     for (const { entry, pattern } of terms) {
       for (const match of line.matchAll(pattern)) {
-        if (explained.has(match[0]) || kept.has(match[0])) continue;
+        if (explained.has(match[0]) || kept(match[0])) continue;
         findings.push({ file, line: index + 1, rule: 'banned-term', text: match[0], term: entry.term });
       }
     }
@@ -227,7 +233,7 @@ function findInText(text, file, config, scope = 'text') {
   return findings;
 }
 
-function scanFiles(root, files, config) {
+function scanFiles(root, files, config, used) {
   const findings = [];
   for (const rel of files) {
     const scope = scopeOf(rel, config);
@@ -238,7 +244,7 @@ function scanFiles(root, files, config) {
       if (error.code === 'ENOENT') continue;
       throw new CheckError(`${rel} could not be read (${error.code || 'error'})`);
     }
-    findings.push(...findInText(text, rel, config, scope));
+    findings.push(...findInText(text, rel, config, scope, used));
   }
   return findings;
 }
@@ -293,7 +299,8 @@ function check(root, config, { files = null, spawn } = {}) {
   const baseline = readBaseline(root, config);
   const allowed = new Map(baseline.allowed.map((entry) => [keyOf(entry), entry.count]));
   const scoped = files ? files.map((rel) => slash(rel)).filter((rel) => scopeOf(rel, config)) : listScopedFiles(root, config, { spawn });
-  const findings = scanFiles(root, scoped, config);
+  const used = new Set();
+  const findings = scanFiles(root, scoped, config, used);
   const groups = new Map();
   for (const finding of findings) {
     const key = keyOf(finding);
@@ -304,7 +311,8 @@ function check(root, config, { files = null, spawn } = {}) {
   for (const [key, group] of groups) if (group.length > (allowed.get(key) || 0)) failures.push(...group);
   const stale = files ? [] : baseline.allowed.filter((entry) => (groups.get(keyOf(entry)) || []).length < entry.count)
     .map((entry) => ({ ...entry, found: (groups.get(keyOf(entry)) || []).length }));
-  return { failures, stale, findings, baseline, scoped: Boolean(files) };
+  const unusedKept = files ? [] : config.kept_terms.filter((entry) => !used.has(entry));
+  return { failures, stale, unusedKept, findings, baseline, scoped: Boolean(files) };
 }
 
 // One failure. A reference is described without its matched text, because a matched link can carry
@@ -411,15 +419,17 @@ function parseArgs(argv) {
   return args;
 }
 
-function report({ failures, stale, baseline, scoped }, config, out, err) {
+function report({ failures, stale, unusedKept, baseline, scoped }, config, out, err) {
   const notice = scoped ? null : baselineMigrationNotice(baseline, config);
   if (notice) out.write(`NOTE: ${notice}\n`);
   for (const entry of stale) out.write(`NOTE: ${entry.file}: ${entry.rule} is in the baseline ${entry.count} time(s) but occurs ${entry.found}; run with --prune-baseline.\n`);
+  for (const entry of unusedKept) err.write(`FAIL: kept term "${entry.text}" for ${entry.file} is no longer used; remove it from kept_terms\n`);
   if (failures.length) {
     for (const finding of failures) err.write(`FAIL: ${describeFailure(finding, config)}\n`);
     err.write(`\n${failures.length} item(s) to rewrite in plain English. Repository file links are fine.\n`);
     return 1;
   }
+  if (unusedKept.length) return 1;
   out.write('Plain-text check passed.\n');
   return 0;
 }

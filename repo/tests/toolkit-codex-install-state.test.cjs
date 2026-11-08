@@ -11,6 +11,7 @@ const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { stopFakes } = require('./support/stop-fakes.cjs');
 const { CodexToolkitInstall, codexReminderLine, docLimitState, describeHookStates, readToolkitHookStates, pluginBundleFingerprint,
   expectedToolkitHooks, launchCheck, CHECK_TIMEOUT_MS } = require('../scripts/toolkit-codex-install-state.cjs');
 const { ToolkitInstallHealthCheck, STATUS } = require('../scripts/toolkit-install-health.cjs');
@@ -28,26 +29,6 @@ const calls = f => {
   const log = path.join(f.codexHome, 'fake-hooks-list.log');
   return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\r?\n/) : [];
 };
-// Stop every logged fake before removing its home, including after a failed assertion.
-async function stopFakes(f) {
-  const pids = [...new Set(calls(f).filter(line => /^(pid|keeper) \d+$/.test(line)).map(line => Number(line.split(' ')[1])))];
-  // Attempt every PID even if another kill fails, and finish all waits before removing the home.
-  const results = await Promise.allSettled(pids.map(async pid => {
-    let killError;
-    try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') killError = error; }
-    const deadline = Date.now() + 10000;
-    for (;;) {
-      let queryError;
-      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; queryError = error; }
-      if (Date.now() >= deadline) assert.fail(`Fake Codex process ${pid} did not exit within 10 s` +
-        (queryError ? `; exit could not be verified (${queryError.code})` : '; pid is still alive') +
-        (killError ? `; kill failed (${killError.code})` : ''));
-      await new Promise(resolve => setTimeout(resolve, 25));
-    }
-  }));
-  const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
-  if (errors.length) throw new AggregateError(errors, `Could not stop all fake Codex processes: ${errors.map(error => error.message).join('; ')}`);
-}
 function trustedReply(f, edit = () => {}) {
   const fingerprint = pluginBundleFingerprint(cacheRoot(f));
   const result = { data: [{ hooks: expectedToolkitHooks(cacheRoot(f)).map(hook => ({
@@ -90,7 +71,7 @@ function fixture(t, { versions = ['3.19.3'], source = '3.19.3', plugin = 'true',
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-state-'));
   const codexHome = path.join(root, '.codex');
   t.after(async () => {
-    await stopFakes({ codexHome });
+    await stopFakes({ logs: [path.join(codexHome, 'fake-hooks-list.log')] });
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
   const managed = path.join(root, 'managed');
@@ -464,8 +445,10 @@ test('AT6: --check holds Codex gate launches unless the files and Codex agree ev
     assert.equal(r.status, expected, `${label}: ${r.stdout} ${r.stderr}`);
     assert.match(r.stdout, expected ? /gate launch held/ : /All 6 Toolkit hooks are on/);
     assert.equal(passed(r), expected === 0, label);
-    assert.deepEqual(r.calls.filter(line => !line.startsWith('pid ')), expected ? [] :
+    assert.deepEqual(r.calls.filter(line => !/^(pid|exit) \d+$/.test(line)), expected ? [] :
       ['argv app-server --listen stdio://', 'method initialize', 'method initialized', 'method hooks/list']);
+    assert.deepEqual(r.calls.filter(line => line.startsWith('exit ')), expected ? [] :
+      [`exit ${r.calls.find(line => line.startsWith('pid ')).split(' ')[1]}`]);
     if (before) assert.ok(fs.readFileSync(config).equals(before), 'config.toml is unchanged');
   }
 });

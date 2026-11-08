@@ -25,6 +25,11 @@ function fixture(t, files, allowed = []) {
   }
   fs.mkdirSync(path.dirname(path.join(root, plain.BASELINE_REL)), { recursive: true });
   fs.writeFileSync(path.join(root, plain.BASELINE_REL), JSON.stringify({ schema: BASELINE, allowed }));
+  // The wrapper always uses Toolkit's settings, so full-run fixtures must use its kept terms too.
+  for (const { file, text } of plain.CONFIG.kept_terms) {
+    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    fs.appendFileSync(path.join(root, file), `${text}\n`);
+  }
   return root;
 }
 
@@ -201,4 +206,5 @@ test('flags Toolkit shorthand codes in docs and in the readable fields of struct
 test('this repository passes against its own baseline', () => {
   const result = plain.check(ROOT);
   assert.deepEqual(result.failures.map(plain.describeFailure), []);
+  assert.deepEqual(result.unusedKept, []);
 });

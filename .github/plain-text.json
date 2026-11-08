@@ -110,16 +110,6 @@
   ],
   "kept_terms": [
     {
-      "file": "repo/docs/SETUP-QUESTIONS.generated.md",
-      "text": "E293",
-      "reason": "Part of the generated setup bank fingerprint NPBM-E293-K831-C4K4, an opaque machine identity rather than a work-item code; remove when the bank fingerprint changes"
-    },
-    {
-      "file": "repo/docs/SETUP-QUESTIONS.generated.md",
-      "text": "K831",
-      "reason": "Part of the generated setup bank fingerprint NPBM-E293-K831-C4K4, an opaque machine identity rather than a work-item code; remove when the bank fingerprint changes"
-    },
-    {
       "file": "repo/contracts/agent-rules/n8n-safety-rules.md",
       "text": "H1",
       "reason": "Markdown's top heading level"
