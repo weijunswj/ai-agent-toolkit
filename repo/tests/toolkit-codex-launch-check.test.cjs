@@ -9,6 +9,7 @@ const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { stopFakes, lingeringPids } = require('./support/stop-fakes.cjs');
 const { CodexToolkitInstall, pluginBundleFingerprint, expectedToolkitHooks, launchCheck } = require('../scripts/toolkit-codex-install-state.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -22,7 +23,6 @@ const calls = f => {
   const logs = f.logs || [path.join(f.codexHome, 'fake-hooks-list.log')];
   return logs.flatMap(log => fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split(/\r?\n/) : []);
 };
-const loggedPids = f => calls(f).filter(line => /^(pid|keeper) \d+$/.test(line)).map(line => Number(line.split(' ')[1]));
 function trustedReply(f, edit = () => {}) {
   const fingerprint = pluginBundleFingerprint(cacheRoot(f));
   const result = { data: [{ hooks: expectedToolkitHooks(cacheRoot(f)).map(hook => ({
@@ -69,27 +69,6 @@ function fixture(t) {
   return f;
 }
 
-// Each fake owns its pids. Always stop keepers before the fixture's working folder is removed,
-// including on a failed assertion or a deliberately simulated failed production shutdown.
-async function stopFakes(f) {
-  const pids = [...new Set([...f.savedPids, ...loggedPids(f)])];
-  // Attempt every PID even if another kill fails, and finish all waits before removing the home.
-  const results = await Promise.allSettled(pids.map(async pid => {
-    let killError;
-    try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') killError = error; }
-    const deadline = Date.now() + 10000;
-    for (;;) {
-      let queryError;
-      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; queryError = error; }
-      if (Date.now() >= deadline) assert.fail(`Fake Codex process ${pid} did not exit within 10 s` +
-        (queryError ? `; exit could not be verified (${queryError.code})` : '; pid is still alive') +
-        (killError ? `; kill failed (${killError.code})` : ''));
-      await new Promise(resolve => setTimeout(resolve, 25));
-    }
-  }));
-  const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
-  if (errors.length) throw new AggregateError(errors, `Could not stop all fake Codex processes: ${errors.map(error => error.message).join('; ')}`);
-}
 const keeperPid = f => Number(calls(f).find(line => line.startsWith('keeper '))?.split(' ')[1]);
 
 test('AT16c: an answer already received is kept when Codex cannot be stopped; no answer still holds', async t => {
@@ -152,7 +131,7 @@ test('AT21: --check asks only the named Codex (--codex, else CODEX_TOOLKIT_CODEX
   assert.equal(passed(runCheck(f, undefined, { args: ['--check', '--codex', builds[0].script] })), true);
   r = runCheck(f, undefined, { args: ['--check', '--codex', builds[1].script] });
   assert.equal(r.status, 1); assert.match(r.stdout, /does not trust/);
-  f.savedPids.push(...loggedPids(f));
+  f.savedPids.push(...lingeringPids(calls(f)));
   write(builds[0].log, ''); write(builds[1].log, '');
   r = runCheck(f, undefined, { args: ['--check', '--codex', builds[1].script], env: { CODEX_TOOLKIT_CODEX_CLI: builds[0].script } });
   assert.equal(r.status, 1); assert.match(r.stdout, /does not trust/);
@@ -205,4 +184,72 @@ test('AT24: a named npm codex.cmd runs the script it wraps with no shell, even i
   const r = runCheck(f, undefined, { args: ['--check', '--codex', shim] });
   assert.equal(passed(r), true, r.stdout + r.stderr);
   assert.equal(r.calls.filter(line => !line.startsWith('pid '))[0], 'argv app-server --listen stdio://');
+});
+
+const holdReasonSentence = () => fs.readFileSync(path.join(repoRoot, 'repo/docs/HOST-CONTRACT.md'), 'utf8')
+  .match(/the held line names the reason \((.*?)\) and never repeats/)[1];
+
+test('AT25: the Host Contract lists every fixed hold reason', () => {
+  const sentence = holdReasonSentence();
+  for (const reason of ['not found', 'not a full path', 'cannot be started directly', 'start or pipe error',
+    'timeout', 'exit code', 'error reply', 'unexpected error']) assert.ok(sentence.includes(reason), `missing hold reason: ${reason}`);
+});
+
+test('AT25: a named file that is not a Windows program holds with a documented reason', { skip: process.platform !== 'win32' && 'Windows only' }, t => {
+  const f = fixture(t);
+  const program = path.join(f.root, 'not-a-program.exe');
+  write(program, 'This is a text file, not a program.\n');
+  const r = runCheck(f, undefined, { args: ['--check', '--codex', program] });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  const reason = r.stdout.match(/\(([^()]*)\)/)?.[1];
+  assert.ok(reason, r.stdout);
+  assert.ok(holdReasonSentence().includes(reason), `undocumented hold reason: ${reason}`);
+});
+
+test('AT26: teardown leaves exited fake pids alone and stops keepers and unexited fakes through one helper', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-stop-fakes-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const start = async () => {
+    const child = childProcess.spawn(process.execPath, ['-e', 'setTimeout(() => process.exit(0), 30000)'], {
+      windowsHide: true, stdio: 'ignore',
+    });
+    const closed = new Promise(resolve => child.once('close', resolve));
+    t.after(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await closed;
+    });
+    await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+    return child;
+  };
+  const bystander = await start();
+  const keeper = await start();
+  const control = await start();
+  const saved = await start();
+  const log = path.join(root, 'fake.log');
+  const lines = [`pid ${bystander.pid}`, `exit ${bystander.pid}`, `keeper ${keeper.pid}`, `pid ${control.pid}`];
+  write(log, lines.join('\n') + '\n');
+  assert.deepEqual(lingeringPids(lines), [keeper.pid, control.pid]);
+  await stopFakes({ logs: [log], savedPids: [saved.pid] });
+  assert.doesNotThrow(() => process.kill(bystander.pid, 0), 'an exited fake pid must not kill a bystander');
+  for (const child of [keeper, control, saved]) assert.throws(() => process.kill(child.pid, 0), { code: 'ESRCH' });
+  for (const name of ['toolkit-codex-launch-check', 'toolkit-codex-install-state']) {
+    const source = fs.readFileSync(path.join(__dirname, `${name}.test.cjs`), 'utf8');
+    assert.doesNotMatch(source, /(?:async\s+)?function\s+stopFakes\s*\(/, name);
+    assert.match(source, /require\('\.\/support\/stop-fakes\.cjs'\)/, name);
+  }
+});
+
+test('AT27: the fake header names exactly the modes that self-exit', () => {
+  const source = fs.readFileSync(FAKE, 'utf8');
+  const array = source.match(/const SELF_EXIT_MODES = (\[[^;]+\]);/);
+  assert.ok(array, 'SELF_EXIT_MODES must name the timed modes');
+  const modes = JSON.parse(array[1].replace(/'/g, '"'));
+  const header = source.match(/^\/\/ Self-exit modes \(after 15 s\): (.+)\.$/m);
+  assert.ok(header, 'the header must list the timed modes');
+  assert.deepEqual(header[1].split(', '), modes);
+  assert.deepEqual(modes, ['hang', 'answer-stay', 'garbled', 'answer-orphan', 'hang-orphan']);
+  assert.match(source, /if \(SELF_EXIT_MODES\.includes\(spec\.mode\)\)/);
+  assert.match(source, /The keeper exits after 10 s\./);
+  assert.match(source, /exit <pid> log line/);
+  assert.match(source, /longer than about 10 s.*exit \(code 0\) rather than a timeout/);
 });

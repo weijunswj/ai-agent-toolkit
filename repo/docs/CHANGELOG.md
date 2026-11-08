@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.56.0
+## Unreleased
 
 ### Added
 
@@ -21,6 +21,13 @@
 - Controller-set terminal lifecycles are kept; disagreement with the issue close reason raises a state conflict.
 - Ordinary reconciliation keeps refresh-owned findings and their acknowledgements until refresh checks them again. Untracked-task findings use open pull requests only.
 - Native children of another registered programme parent are skipped during adoption planning, and an added-child notice is recorded only with a successful catalogue addition.
+
+## 3.55.2
+
+### Fixed
+
+- The plain-text check now fails a full run when a kept term is no longer used, so stale exemptions are removed in the change that ends their use. Toolkit's two stale setup-bank entries are removed.
+- The Host Contract lists "unexpected error" among the Codex hook check's hold reasons.
 
 ## 3.55.1
 

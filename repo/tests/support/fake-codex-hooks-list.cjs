@@ -5,7 +5,10 @@
 // FAKE_HOOKS_LIST_LOG). It never calls a model or writes config.toml.
 // Modes: answer (default) | exit | error-reply | no-result | garbled | hang | answer-stay |
 // answer-orphan | hang-orphan. The fake and detached keeper use Node's folder as cwd so they
-// cannot keep a fixture busy on Windows. Lingering fakes self-exit after 15 s; keepers after 10 s.
+// cannot keep a fixture busy on Windows.
+// Self-exit modes (after 15 s): hang, answer-stay, garbled, answer-orphan, hang-orphan.
+// The keeper exits after 10 s. An exit <pid> log line records a fake that ends on its own.
+// A test waiting longer than about 10 s in these modes sees an exit (code 0) rather than a timeout.
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
@@ -17,9 +20,11 @@ const outside = path.dirname(process.execPath);
 process.chdir(outside);
 const spec = JSON.parse(fs.readFileSync(specFile, 'utf8'));
 const log = line => fs.appendFileSync(logFile, `${line}\n`);
+process.on('exit', () => { try { log(`exit ${process.pid}`); } catch {} });
 log(`pid ${process.pid}`);
 log(`argv ${process.argv.slice(2).join(' ')}`);
-if (['hang', 'answer-stay', 'garbled', 'answer-orphan', 'hang-orphan'].includes(spec.mode)) {
+const SELF_EXIT_MODES = ['hang', 'answer-stay', 'garbled', 'answer-orphan', 'hang-orphan'];
+if (SELF_EXIT_MODES.includes(spec.mode)) {
   setTimeout(() => process.exit(0), 15000).unref();
 }
 if (spec.mode === 'hang' || spec.mode === 'garbled') setInterval(() => {}, 1000);
