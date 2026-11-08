@@ -489,9 +489,13 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
       // a journal that still shows an old error is not a new one, whether the entry was answered or
       // has resolved since.
       const fresh = !since || Number.isNaN(Date.parse(since)) || Date.parse(since) > Date.parse(existing.changed_at);
-      const reopens = fresh && (existing.state === 'resolved' || (ONE_TIME_CODES.has(code) && ['acknowledged', 'disposed'].includes(existing.state)));
+      const diagnosticsChanged = diagnostics && JSON.stringify(canonical(existing.diagnostics)) !== JSON.stringify(canonical(diagnostics));
+      // Stop diagnostics identify the event. A different stop needs its own answer, while
+      // re-reporting the same stop must not reopen an acknowledged or disposed entry.
+      const newEvent = ONE_TIME_CODES.has(code) || (code === 'PASS_STOPPED' && diagnosticsChanged);
+      const reopens = fresh && (existing.state === 'resolved' || (newEvent && ['acknowledged', 'disposed'].includes(existing.state)));
       if (reopens) { existing.state = 'new'; existing.changed_at = now; changed = true; }
-      if (diagnostics && JSON.stringify(canonical(existing.diagnostics)) !== JSON.stringify(canonical(diagnostics))) {
+      if (diagnosticsChanged) {
         existing.diagnostics = clone(diagnostics);
         changed = true;
       }

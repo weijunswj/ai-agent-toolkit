@@ -4,7 +4,7 @@
 
 ### Added
 
-- Programme refresh has a ten-minute budget, reserving its last two minutes to record unfinished progress and redraw CURRENT. Issue-scoped applies preserve unreported interruptions for the next full refresh, ordinary effect failures hold only their scope, and unposted parent repair notices remain recoverable.
+- Programme refresh has a ten-minute budget, reserving its last two minutes to record unfinished progress and redraw CURRENT. Issue-scoped applies preserve unreported interruptions for the next full refresh, different stopped-pass diagnostics reopen answered findings, ordinary effect failures hold only their scope, and unposted parent repair notices remain recoverable.
 
 ### Changed
 

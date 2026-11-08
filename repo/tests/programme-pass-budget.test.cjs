@@ -8,6 +8,7 @@ const test = require('node:test');
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const state = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-state.cjs'));
 const cli = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme.cjs'));
+const attentionCache = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-attention-cache.cjs'));
 const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
 
 const writer = { session: 'fixture-controller', prefix: 'TEST-' };
@@ -249,6 +250,80 @@ for (const attentionChange of [false, true]) test(`H1: issue-scoped apply preser
     assert.equal(fs.existsSync(`${lockFile}.progress`), false);
     assert.equal(cliRun(f, lockFile).code, 0);
     assert.equal(openStop(f).state, 'resolved');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// I8 closure: an answered stop cannot hide a later event. Resolved stops retain their
+// existing reopen rule; identical open reports do not change the entry or its timestamps.
+for (const row of [
+  { prior: 'disposed', cause: 'interrupted' },
+  { prior: 'disposed', cause: 'time_limit' },
+  { prior: 'acknowledged', cause: 'time_limit' },
+  { prior: 'resolved', cause: 'interrupted' },
+]) test(`N1: ${row.prior}, then ${row.cause}, reports a new stop`, () => {
+  const f = fixture({ count: 2, added: 0 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-reopen-'));
+  const lockFile = path.join(dir, 'pass.lock');
+  const attentionDir = path.join(dir, 'attention');
+  const oldTime = '2026-11-07T23:00:00.000Z';
+  const oldDiagnostics = { cause: 'time_limit', phase: 'planning', done: 0, total: 0, started_at: oldTime };
+  try {
+    f.store.mutate('parent', 421, { writer, change: doc => {
+      doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: false, now: oldTime,
+        seen: [{ code: 'PASS_STOPPED', issue: 421, diagnostics: oldDiagnostics }] });
+      if (row.prior === 'resolved') doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: true, now: oldTime });
+      else doc = state.answerFinding(doc, { id: doc.attention.find(entry => entry.code === 'PASS_STOPPED').id,
+        state: row.prior, reason: 'Fixture previous stop answered', now: oldTime });
+      return doc;
+    } });
+    assert.equal(openStop(f).state, row.prior);
+    let elapsed = 0;
+    const expected = row.cause === 'interrupted'
+      ? { cause: 'interrupted', phase: 'task_pages', done: 7, total: 30, started_at: NOW }
+      : { cause: 'time_limit', phase: 'task_pages', done: 1, total: 2, started_at: NOW };
+    if (row.cause === 'interrupted') {
+      fs.writeFileSync(lockFile, JSON.stringify({ schema: 'toolkit.programme-pass-lock.v1', token: 'dead', pid: 987654, host: os.hostname(), at: NOW }));
+      const { cause, ...note } = expected;
+      fs.writeFileSync(`${lockFile}.progress`, JSON.stringify({ ...note, token: 'dead', unreported: true }));
+    } else {
+      for (const number of [500, 501]) f.github.issues.get(number).body = '';
+      f.github.intercept(call => {
+        if (call.method === 'PATCH' && call.path.endsWith('/issues/500')) elapsed = 480001;
+      });
+    }
+    const report = cliRun(f, lockFile, { pidAlive: () => false, passClock: () => Date.parse(NOW) + elapsed, attentionDir });
+    assert.equal(report.code, row.cause === 'interrupted' ? 0 : 1);
+    const entry = openStop(f);
+    assert.equal(entry.state, 'new', 'each different stop needs a new controller answer');
+    assert.deepEqual(entry.diagnostics, expected);
+    assert.equal(entry.changed_at, NOW);
+    assert.equal(fs.existsSync(`${lockFile}.progress`), false, 'the reported progress note is removed');
+    const listed = cliRun(f, lockFile, { attentionDir }, ['attention', '--json']).report;
+    assert.equal(listed.findings.find(item => item.id === entry.id).state, 'new');
+    assert.deepEqual(listed.counts, { new: 1, acknowledged: 0 });
+    assert.match(listed.line, /^Attention: 1 new, 0 acknowledged/);
+    const current = f.github.issues.get(421).body;
+    assert.match(current, /\*\*Attention: 1 new, 0 acknowledged\*\*/);
+    assert.ok(current.includes(`- ${state.findingText(entry)}`), 'CURRENT shows the reopened stop without an acknowledged label');
+    const cacheDeps = { attentionDir, now: () => NOW };
+    assert.deepEqual(attentionCache.readCache(f.binding.repository, cacheDeps).counts, listed.counts);
+    assert.match(attentionCache.sessionAttention(f.binding.repository, cacheDeps).line, /^Attention: 1 new, 0 acknowledged\. Run programme\.cjs attention/);
+    const parent = f.store.read('parent', 421).doc;
+    assert.deepEqual(state.validateParent(parent), []);
+    const Ajv = require('ajv/dist/2020');
+    const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'repo/contracts/programme-state/parent-state-v1.schema.json'), 'utf8'));
+    const validate = new Ajv({ strict: false }).compile(schema);
+    assert.equal(validate(parent), true, JSON.stringify(validate.errors));
+    const repeat = { source: 'reconcile', complete: false, now: '2026-11-08T01:00:00.000Z',
+      seen: [{ code: 'PASS_STOPPED', issue: 421, diagnostics: { ...expected } }] };
+    assert.equal(state.foldAttention(parent.attention, repeat), parent.attention, 'an identical open report causes no churn');
+    if (row.prior !== 'resolved') {
+      const answered = state.answerFinding(parent, { id: entry.id, state: row.prior, reason: 'Fixture repeated report answered', now: NOW });
+      assert.equal(state.foldAttention(answered.attention, repeat), answered.attention, 'an identical report does not reopen an answered event');
+    } else {
+      const resolved = state.foldAttention(parent.attention, { source: 'reconcile', complete: true, now: NOW });
+      assert.equal(state.foldAttention(resolved, repeat).find(item => item.id === entry.id).state, 'new', 'resolved-then-seen still reopens, even with identical diagnostics');
+    }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
