@@ -355,7 +355,7 @@ test('E3: the session-start line shows open findings every time, clear once afte
   let now = '2026-10-28T10:00:00.000Z';
   const deps = { attentionDir: dir, now: () => now };
   assert.deepEqual(cache.sessionAttention('acme/app', deps), { line: 'Attention: not checked on this computer yet', refresh: true, age: null });
-  const write = list => cache.writeCache('acme/app', { line: state.attentionLine(list), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
+  const write = list => cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
   const finding = (issue, findingState = 'new') => ({ id: state.findingId('inventory', 'NEEDS_PLACEMENT', issue, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue, head: null, state: findingState, first_seen: now, changed_at: now });
   write([finding(470)]);
   assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 1 new, 0 acknowledged\. Run programme\.cjs attention/);
