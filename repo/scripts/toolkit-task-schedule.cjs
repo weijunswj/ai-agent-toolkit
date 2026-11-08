@@ -3,7 +3,7 @@
 // The registry owns stable per-computer minutes and records the known job owner.
 // This is local ownership only; it neither discovers nor transfers remote jobs.
 function assignment(entries, repository, computerId, { recoverStopped = false } = {}) {
-  const windows = entries.filter(e => e.host === 'windows' && !e.adopted);
+  const windows = entries.filter(e => e.host === 'windows' && !e.adopted && e.job !== 'task-health');
   const ours = windows.filter(e => String(e.repository).toLowerCase() === repository.toLowerCase());
   const owners = [...new Set(ours.map(e => e.job_owner).filter(Boolean))];
   const minutes = [...new Set(ours.map(e => e.repo_minute).filter(m => Number.isInteger(m) && m >= 1 && m <= 9))];
@@ -21,6 +21,7 @@ function assignment(entries, repository, computerId, { recoverStopped = false } 
 
 function scheduleFor(job, minute) {
   const m = String(minute).padStart(2, '0');
+  if (job === 'task-health') return { kind: 'daily', at: `07:5${minute}` };
   return job === 'shard-timings' ? { kind: 'weekly', day: 'Monday', at: `08:${m}` } : { kind: 'hourly', at: `00:${m}`, hours: 24 };
 }
 
