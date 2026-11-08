@@ -60,6 +60,11 @@ test('the owner\'s RISKY categories are RISKY in this repository', () => {
   }
 });
 
+test('the controller takeover playbook is RISKY while other playbooks stay NORMAL', () => {
+  assert.equal(tierOf('repo/docs/agent-playbooks/controller-takeover.md'), 'RISKY');
+  assert.equal(tierOf('repo/docs/agent-playbooks/INDEX.md'), 'NORMAL');
+});
+
 test('tests and other scripts are NORMAL, docs are LIGHT, skills are NORMAL', () => {
   assert.equal(tierOf('repo/tests/toolkit-risk-tier.test.cjs'), 'NORMAL');
   assert.equal(tierOf('repo/tests/qualification/claude-helper-matrix.live.cjs'), 'NORMAL');

@@ -656,17 +656,18 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
   });
 });
 
-test('every setup step that creates something has an inventory row, and every row is checked by the daily check-in, a registered launch hook or a written rule', () => {
+test('T7 every setup step that creates something has an inventory row, and every row is checked by the daily check-in, a registered launch hook or a written rule', () => {
   const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
   const setup = fs.readFileSync(SETUP, 'utf8').replace(/\r\n/g, '\n');
   assert.match(fs.readFileSync(SKILL, 'utf8'), /reference\/setup\.md/, 'the skill routes setup to its reference file');
-  const steps = [...setup.matchAll(/^(\d+)\. \*\*/gm)].map(match => Number(match[1]));
-  assert.deepEqual(steps, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  const steps = [...setup.matchAll(/^(P[1-6])\. \*\*/gm)].map(match => match[1]);
+  assert.deepEqual(steps, ['P1', 'P2', 'P3', 'P4', 'P5', 'P6']);
+  assert.ok(setup.indexOf('`takeover.md` first') < setup.indexOf('P1. **'));
   const covered = new Set(inventory.rows.flatMap(row => row.setup_steps));
   for (const step of steps) {
     assert.ok(covered.has(step) || Object.prototype.hasOwnProperty.call(inventory.steps_without_artefacts, String(step)), `setup step ${step}`);
   }
-  for (const step of Object.keys(inventory.steps_without_artefacts)) assert.ok(!covered.has(Number(step)), `step ${step} listed twice`);
+  for (const step of Object.keys(inventory.steps_without_artefacts)) assert.ok(!covered.has(step), `step ${step} listed twice`);
   const template = fs.readFileSync(path.join(TASKS, 'daily-check-in.md'), 'utf8');
   for (const row of inventory.rows) {
     assert.match(row.resync, /^(auto|owner|report)\b/, row.id);

@@ -120,7 +120,7 @@ Every Core includes the security, privacy, integrity and recovery its effects ne
 
 ## 16. Switching controllers and executors
 
-Switching needs no handover step. A new controller binds current main and its CONTROLLER.md blob, posts its one-line takeover record and reads the durable state; a new executor starts from the same state. Reconcile uncertain effects and active writers first.
+Every explicitly appointed controller runs the [takeover journey](agent-playbooks/controller-takeover.md): probe capabilities, follow the generic steps, then applicable harness extras. It covers binding, custody, the record and governance-gated checks. A new executor continues from durable state and its brief. Reconcile uncertain effects and active writers first.
 
 ## 17. Canonical implementation surfaces
 

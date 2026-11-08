@@ -2,7 +2,7 @@
 
 A compact, pointer-only map of this repository. Rules live in [CONTROLLER.md](CONTROLLER.md), the root `AGENTS.md` and the sources named below; this file only says where things are. Update it in the change that moves what it describes; `repo/tests/repo-map.test.cjs` checks that every path listed here exists.
 
-Last reviewed against `main` `91574a6`.
+Last reviewed against `main` `abbf27f`.
 
 ## Parts
 
@@ -64,11 +64,13 @@ Last reviewed against `main` `91574a6`.
 
 Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scripts/codex-config-load-check.cjs` (Codex effective-load check and rollback) and `repo/scripts/host-json-config-write.cjs` (Claude JSON read-back and rollback); see [host config writes](docs/agent-playbooks/host-config-writes.md).
 
+The Projects guidebook writer also copies and checks the canonical takeover as `takeover.md` in the project library.
+
 ## Sources of truth
 
 | Subject | Source |
 |---|---|
-| Controller procedure | `repo/CONTROLLER.md` |
+| Controller procedure | `repo/CONTROLLER.md`; generic takeover, capability routes and relay formats: `repo/docs/agent-playbooks/controller-takeover.md` |
 | Programme direction | `repo/docs/TOOLKIT-DELIVERY.md` |
 | Global rules (every harness session) | `repo/contracts/agent-rules/global-rules.md` |
 | Gate rules (gate sessions and their controllers) | `repo/contracts/agent-rules/gate-rules.md` |

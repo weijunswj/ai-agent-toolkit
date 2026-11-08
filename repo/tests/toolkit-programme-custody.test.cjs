@@ -33,6 +33,42 @@ const CATALOGUE = [
   { issue: 467, label: 'Shared H', class: 'COMMITTED', parent: 421, order: 2 },
 ];
 const LANE_PREFIX = 'CDX-TK469-';
+
+test('T10b a split connector record and shell claim preserve account and parent freshness guards', () => {
+  const playbook = fs.readFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/controller-takeover.md'), 'utf8');
+  assert.ok(playbook.includes('**Custody pack:**'), 'the named relay group still preserves evidence');
+  assert.ok(playbook.includes('**Record pack:**'), 'the named relay group still owns the split record and claim');
+  assert.deepEqual([...playbook.matchAll(/^Pack: (.+)\r?$/gm)].map(match => match[1].trim()).filter(id => !id.startsWith('<')),
+    Array(3).fill('read-example-repo-20261108T0000Z-abcd'));
+  const sample = playbook.match(/^EXAMPLE-001 TAKEOVER:.*$/m)?.[0];
+  assert.ok(sample, 'use the actual published relay record');
+  for (const scenario of ['matching account', 'different account', 'parent write between record and claim']) {
+    const fx = fixture();
+    const body = sample.replace('EXAMPLE-001', 'INT-TK421-091');
+    const id = fx.github.addComment(421, { body });
+    if (scenario === 'different account') fx.github.login = 'other-owner';
+    if (scenario === 'parent write between record and claim') {
+      fx.store.mutate('parent', 421, { writer: controller, change: doc => { doc.private.note = 'intervening parent write'; return doc; } });
+    }
+    const commits = fx.github.commits;
+    const { result, error } = fx.run(['claim', '--parent', '--takeover', '--takeover-record', String(id),
+      '--session', 'example-controller', '--controller']);
+    if (scenario === 'matching account') {
+      assert.equal(error, null, error?.message);
+      assert.equal(result.epoch, 2);
+      assert.equal(result.acting.session, 'example-controller');
+      assert.equal(fx.parentDoc().fence.holder_session, 'example-controller');
+      const observed = fx.run(['show', '--parent', '--include-private']);
+      assert.equal(observed.error, null);
+      assert.equal(observed.result.document.fence.holder_session, 'example-controller');
+      assert.equal(observed.result.document.fence.epoch, 2);
+    } else {
+      assert.equal(error?.code, 'TAKEOVER_UNVERIFIED', scenario);
+      assert.equal(fx.github.commits, commits, `${scenario}: no claim write`);
+      assert.equal(fx.parentDoc().fence.epoch, 1);
+    }
+  }
+});
 const temps = [];
 const tmp = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-custody-')); temps.push(dir); return dir; };
 test.after(() => { for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true }); });

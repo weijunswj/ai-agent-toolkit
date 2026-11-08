@@ -1,5 +1,19 @@
 # Toolkit Changelog
 
+## 3.54.0
+
+### Added
+
+- One shared controller takeover journey on every harness, using capability probes, own tools before executors and owner relays, structured proof and visible user-supplied evidence.
+- Connector account, read-back, hook and approval guards. Programme, scheduled-task and shard checks require fresh enabled governance.
+
+### Changed
+
+- Projects runs the shared journey before its own setup extras; its guidebook includes the canonical takeover playbook.
+- Relay groups use Read pack, Custody pack, Record pack, Task pack and Gate pack, with lower-case words in pack ids.
+- Question cards follow their explanation, and the compact Controller points to the full journey and capability routes.
+- Controller takeover playbook edits are in the highest risk tier and held from auto-merge until the owner's typed merge approval.
+
 ## 3.53.1
 
 ### Fixed
