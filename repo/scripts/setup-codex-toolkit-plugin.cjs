@@ -930,7 +930,7 @@ function pluginAddPollMs() {
 }
 
 function codexSpawnParts(command, args) {
-  return directSpawnParts(command, args, { label: 'Codex CLI' });
+  return directSpawnParts(command, args, { label: 'Codex CLI', searchPastRefused: true });
 }
 
 function spawnCodex(command, args, options = {}) {
@@ -956,7 +956,7 @@ function commandCandidates(explicitCommand) {
   if (process.env.CODEX_TOOLKIT_CODEX_CLI) candidates.push(process.env.CODEX_TOOLKIT_CODEX_CLI);
   if (process.env.CODEX_CLI_PATH) candidates.push(process.env.CODEX_CLI_PATH);
   candidates.push(windowsAliasCliCandidate());
-  try { candidates.push(process.platform === 'win32' ? assertExecutableAvailable('codex', { label: 'Codex CLI', direct: true }) : 'codex'); } catch {}
+  try { candidates.push(process.platform === 'win32' ? assertExecutableAvailable('codex', { label: 'Codex CLI', searchPastRefused: true }) : 'codex'); } catch {}
   return [...new Set(candidates.filter(Boolean))];
 }
 

@@ -56,7 +56,7 @@ class AppServerRequest {
       this.#resolve=resolve;this.#reject=reject;
       let parts;
       try {
-        parts=require('./claude-process-launch.cjs').directSpawnParts(this.#command,[...APP_SERVER_ARGS],{label:'Codex'});
+        parts=require('./claude-process-launch.cjs').directSpawnParts(this.#command,[...APP_SERVER_ARGS],{label:'Codex',searchPastRefused:true});
       } catch (error) { reject(failure(error.message,{reason:'start'}));return; }
       this.#child=spawn(parts.command,parts.args,{
         env:{...process.env,CODEX_HOME:this.#codexHome},cwd:this.#options.cwd,

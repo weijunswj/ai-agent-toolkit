@@ -68,9 +68,9 @@ function assertExecutableAvailable(value, options = {}) {
       if (platform !== 'win32' && !['.js', '.cjs', '.mjs'].includes(path.extname(candidate).toLowerCase())) {
         fs.accessSync(resolved, fs.constants.X_OK);
       }
-      // Direct callers must search past wrappers they cannot start without a shell.
+      // Only opted-in Codex lookups search past wrappers they cannot start without a shell.
       // Explicit paths stay explicit; only absolute PATH candidates are considered above.
-      if (options.direct && !/[\\/]/.test(command)) {
+      if (options.searchPastRefused === true && !/[\\/]/.test(command)) {
         try { directSpawnParts(candidate, [], options); }
         catch (error) { directRefusal ||= error; continue; }
       }
@@ -150,7 +150,7 @@ function npmShimTarget(shim) {
 function directSpawnParts(executable, args = [], options = {}) {
   const platform = options.platform || process.platform;
   const label = options.label || 'Program';
-  const command = assertExecutableAvailable(validateExecutable(executable, platform, label), { ...options, label, direct: true });
+  const command = assertExecutableAvailable(validateExecutable(executable, platform, label), { ...options, label });
   const extension = path.extname(command).toLowerCase();
   if (['.js', '.cjs', '.mjs'].includes(extension)) return { command: process.execPath, args: [command, ...args] };
   if (platform !== 'win32' || extension === '.exe' || extension === '.com') return { command, args: [...args] };

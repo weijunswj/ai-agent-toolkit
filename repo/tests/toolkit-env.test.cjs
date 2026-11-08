@@ -1908,3 +1908,42 @@ test('the save lock is taken over only when its holder has ended, or after two m
     assert.ok(!Number.isNaN(Date.parse(holder.started_at)));
   });
 });
+
+for (const route of ['env run', 'Claude feeder']) test('toolkit-env refusal keeps the first PATH wrapper: ' + route,
+  { skip: process.platform !== 'win32' }, async t => {
+  const home = tempHome(t);
+  const first = path.join(home, 'first');
+  const later = path.join(home, 'later');
+  fs.mkdirSync(first);
+  fs.mkdirSync(later);
+  const name = route === 'env run' ? 'other' : 'claude';
+  const marker = path.join(home, 'later-ran');
+  const wrapperMarker = path.join(home, 'wrapper-ran');
+  fs.writeFileSync(path.join(first, name + '.cmd'), '@echo off\r\necho started>"' + wrapperMarker + '"\r\n');
+  fs.copyFileSync(process.execPath, path.join(later, name + '.exe'));
+  const logger = path.join(home, 'logger.cjs');
+  fs.writeFileSync(logger, 'require("node:fs").writeFileSync(process.argv[2], "started");');
+  const savedEnv = process.env;
+  process.env = { ...process.env, PATH: [first, later].join(path.delimiter), PATHEXT: '.CMD;.EXE' };
+  t.after(() => { process.env = savedEnv; });
+  if (route === 'env run') {
+    const h = harness(t, { values: { X1_TEST_OTHER_KEY: sentinel() } });
+    const result = await h.run('run', '--names', 'X1_TEST_OTHER_KEY', '--', 'other', logger, marker);
+    assert.equal(fs.existsSync(marker), false, 'env run must not start the later executable');
+    assert.equal(result.code, 1, 'env run must refuse the first wrapper');
+    assert.match(result.stderr, /not a standard npm shim/);
+  } else {
+    const claudeJson = path.join(home, 'claude.json');
+    fs.writeFileSync(claudeJson, JSON.stringify({ mcpServers: { test: { type: 'http', url: 'https://example.test/mcp' } } }));
+    let starts = 0;
+    const feeder = new ClaudeCodeFeeder({ claudeJson, claudeCommand: 'claude', commandFor,
+      spawn: () => { starts++; fs.writeFileSync(marker, 'started'); return { status: 0 }; } });
+    const backupDir = path.join(home, 'backups');
+    fs.mkdirSync(backupDir);
+    assert.throws(() => feeder.project({ server: 'test', name: 'X1_TEST_OTHER_KEY' }, { backupDir }), /not a standard npm shim/,
+      'Claude feeder must refuse the first wrapper');
+    assert.equal(starts, 0, 'the feeder must not invoke its spawn dependency');
+    assert.equal(fs.existsSync(marker), false, 'the feeder must not select the later executable');
+  }
+  assert.equal(fs.existsSync(wrapperMarker), false, 'the refused wrapper must never run');
+});
