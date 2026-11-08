@@ -134,7 +134,7 @@ test('T13 route order, formats, statuses and waiting rules reject mutations', ()
     for (const field of fields) assert.throws(() => fieldsContract(section.split(field).join(''), fields), { code: 'ERR_ASSERTION' }, `removed ${field}`);
   }
   for (const phrase of ['**verified:**', '**supplied by user:**', '**incomplete:**', 'Waiting on you',
-    'Toolkit main changes', 'parent epoch changes', 'harness choice changes', 'dependent head changes',
+    'outside changes affect Toolkit main, a dependent head or the parent epoch', 'harness choice changes',
     'late stale result', 'never replay', 'cancelled by you', 'first failure', 'same pack']) assert.ok(text.includes(phrase), phrase);
   assert.match(text, /toolkit-governance\.cjs status --json` with the working directory set to the target checkout/);
   assert.doesNotMatch(text, /toolkit-governance\.cjs status --repo-root/);
@@ -200,10 +200,10 @@ test('state and governance closure matrices preserve each permitted action and h
 // Each closure row pins the clause in the section where the operator needs it.
 const headComparison = 'Compare Heads at finish with Depends on, entry by entry and in full.';
 const staleHead = 'Any difference, or a NOT RUN or missing entry you cannot read yourself, means a dependent head changed: refuse the late stale result.';
-const ownHeadRead = 'A match from the relay alone stays supplied by user; read the heads yourself wherever possible, and your own read wins.';
+const ownHeadRead = 'A match from the relay alone stays supplied by user; read the heads yourself wherever possible, and your own read wins when your read is current.';
 const staleEffects = 'Refuse a late stale result; read back any reported effects first and never replay them.';
-const storeFallback = "If a Toolkit hook still refuses the push to the store's default branch, push the same commit to the store's `records/takeover` branch instead, as its message says (on top of that branch when it exists, never forced), and read it back the same way; that commit is the stored copy.";
-const storeMerge = "Merge it only under a fresh binding that names the store or on the owner's typed merge; otherwise name the branch, and any pull request, in the done line.";
+const storeFallback = "If a Toolkit hook still refuses the push to the store's default branch, build the record commit on top of the store's `records/takeover` branch when it exists, otherwise use the same commit, then push to that branch instead, as its message says (never forced), and read it back the same way; that commit is the stored copy.";
+const storeMerge = "Merge it only after the done line, and only under a fresh binding that names the store or on the owner's typed merge; otherwise name the branch, and any pull request, in the done line.";
 const plainReadRetry = 'Before recording a probe as unreachable on a route, retry it once as the simplest single plain read (no chaining, pipes, redirection or variables).';
 const hookHold = 'A hook refusal is a hold, never a reason to change routes.';
 const closureRows = [
@@ -221,11 +221,14 @@ const closureRows = [
   ['S2', '### 6. Outgoing writer and custody', storeFallback],
   ['S2', '### 7. Record and governed claim', "With DISABLED or Later, record in the verified evidence store (with step 6's branch fallback when needed), no claim."],
   ['S3', '### 6. Outgoing writer and custody', storeFallback],
-  ['S4', '### 6. Outgoing writer and custody', 'On a GitHub store, open or reuse one pull request from that branch.'],
+  ['S3', '### 6. Outgoing writer and custody', 'If the push is rejected as non-fast-forward, fetch, rebuild the record commit on top of the fetched `records/takeover`, and push again; never force.'],
+  ['S4', '### 6. Outgoing writer and custody', 'On a GitHub store, open or reuse one pull request from that branch; it stays open through step 6.'],
   ['S4', '### 6. Outgoing writer and custody', storeMerge],
   ['S5', '## Capability routes', hookHold],
   ['S6', '### 6. Outgoing writer and custody', storeMerge],
   ['S6', '### 6. Outgoing writer and custody', 'Never reshape, rename or retry the refused push.'],
+  ['S-successor', '### 6. Outgoing writer and custody', 'the evidence store (including its `records/takeover` branch when present)'],
+  ['S-successor', '### 8. Orientation', "Read the repository map and its recorded commit, open pull requests and checks, and the latest evidence, including the store's `records/takeover` branch when present."],
   ['T1', '### Step groups', "Take the pack id time, in UTC, from host evidence or a tool read of the clock, else from the newest timestamp you read (a comment's created_at or a commit date)."],
   ['T2', '### Step groups', "Take the pack id time, in UTC, from host evidence or a tool read of the clock, else from the newest timestamp you read (a comment's created_at or a commit date)."],
   ['T3', '### Step groups', 'A date alone is not enough.'],
@@ -233,10 +236,24 @@ const closureRows = [
   ['N1', '## Capability routes', 'One denied command does not prove a missing ability.'],
   ['N1', '## Capability routes', plainReadRetry],
   ['N2', '## Capability routes', plainReadRetry],
-  ['N3', '## Capability routes', 'A native permission or sandbox denial of a write leaves that effect incomplete on this route: keep what was written, report the denial and offer the owner the same prepared effect through the next route with its own permission for it.'],
+  ['N3', '## Capability routes', 'A native permission or sandbox denial of a write stops that effect on this route: keep what was written and report the denial.'],
+  ['N3', '## Capability routes', 'Offer the owner the same prepared effect through the next route only if its permission was granted outside this session.'],
+  ['N3', '## Capability routes', 'Steps that say native denials stop, stop.'],
+  ['N3', '### 9. Governance checks', 'Native denials stop.'],
   ['N4', '## Capability routes', 'A helper under the same denied session or sandbox is not a new route; never widen your own permissions to retry.'],
+  ['N4', '## Capability routes', 'Never launch an executor or helper with wider permission flags, a bypass mode or a changed sandbox after a denial.'],
   ['N5', '## Capability routes', hookHold],
   ['A1-A8', '### Proof and acceptance', headComparison],
+  ['A-own-changes', '### Proof and acceptance', "A pack's Depends on lists only heads the pack does not change itself; the claim's epoch change (N to N+1) and the pack's own store or branch pushes are proven by their step Proof and Read-back (step 7), and the stale rule covers outside changes only."],
+  ['A-outside-changes', '### Waiting and stale packs', "A pack becomes stale when outside changes affect Toolkit main, a dependent head or the parent epoch, or the owner's harness choice changes."],
+  ['A-template-depends', '### Pack template', 'Depends on: <where> <ref>=<commit40>, one per head the steps rely on but do not change (Toolkit main, repo and store branches; parent epoch <N> when governed)', 'but do not change'],
+  ['D1-template-command', '### Pack template', '  Command: <one exact read command per Depends on entry>'],
+  ['D1-sample-toolkit-read', '### Non-binding illustration', '  Command: git ls-remote https://github.com/weijunswj/ai-agent-toolkit.git refs/heads/main'],
+  ['D1-sample-repo-read', '### Non-binding illustration', '  Command: git ls-remote https://github.com/example-org/example-repo.git refs/heads/main'],
+  ['D1-template-failure', '### Pack template', '- Do only these steps. Stop at the first failure and report it, then run only the Finish reads; never retry with other commands.', 'then run only the Finish reads'],
+  ['D1-sample-failure', '### Non-binding illustration', '- Stop at the first failure, then run only the Finish reads; never retry with other commands or bypass hooks or permission prompts.', 'then run only the Finish reads'],
+  ['D1-template-checklist', '### Pack template', '[ ] Heads at finish holds the raw Finish reads output.'],
+  ['D1-sample-checklist', '### Non-binding illustration', '[ ] Heads at finish holds the raw Finish reads output.'],
 ];
 function sectionAt(text, heading) {
   const start = text.indexOf(heading + '\n');
@@ -251,9 +268,9 @@ test('T15 closure table pins every clause to its own section and rejects removal
   const text = read(PLAYBOOK);
   for (const row of closureRows) {
     closureContract(text, row);
-    const [, heading, clause] = row;
+    const [, heading, clause, removal = clause] = row;
     const section = sectionAt(text, heading);
-    const changed = text.replace(section, section.split(clause).join(''));
+    const changed = text.replace(section, section.split(removal).join(''));
     assert.notEqual(changed, text, row[0]);
     assert.throws(() => closureContract(changed, row), { code: 'ERR_ASSERTION' }, row[0]);
   }
