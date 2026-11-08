@@ -32,7 +32,7 @@ test('T10 the playbook governed record passes the real takeover verifier', () =>
   const playbook = fs.readFileSync(path.join(__dirname, '../docs/agent-playbooks/controller-takeover.md'), 'utf8');
   assert.ok(playbook.includes('**Record pack:**'), 'the named relay group still owns record and claim');
   assert.deepEqual([...playbook.matchAll(/^Pack: (.+)\r?$/gm)].map(match => match[1].trim()).filter(id => !id.startsWith('<')),
-    Array(3).fill('read-example-repo-20261108T0000Z-abcd'));
+    Array(3).fill('read-example-repo-20261108T0930Z-abcd'));
   const sample = playbook.match(/^EXAMPLE-001 TAKEOVER:.*$/m)?.[0];
   assert.ok(sample, 'the published example is the fixture, not a separately invented record');
   const body = sample.replace('EXAMPLE-001', `${binding.writer_prefix}001`);
