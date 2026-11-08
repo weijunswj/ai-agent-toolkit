@@ -81,6 +81,29 @@ test('a kept text also exempts reference rules in its file, and letter_suffix ca
   assert.throws(() => check.resolveConfig({ banned_terms: [{ term: 'Q#', reason: 'r', fix: 'f', letter_suffix: 'yes' }] }), /letter_suffix/);
 });
 
+test('unused kept terms fail only full runs, while a folder exemption stays used', t => {
+  const root = tempRepo(t, { 'docs/keep/a.md': 'The V9 job.\n', 'docs/a.md': 'Clean.\n' });
+  const config = settings(root, {
+    banned_terms: [{ term: 'V#', reason: 'a version code', fix: 'name it' }],
+    kept_terms: [
+      { file: 'docs/keep/', text: 'V9', reason: 'stored name' },
+      { file: 'docs/a.md', text: 'V7', reason: 'stored name' },
+    ],
+  });
+  const failed = run([SCRIPT, '--repo', root], root);
+  assert.equal(failed.status, 1, 'a full run must fail on the unused V7 exemption');
+  assert.equal(failed.stderr, 'FAIL: kept term "V7" for docs/a.md is no longer used; remove it from kept_terms\n');
+  assert.doesNotMatch(failed.stdout + failed.stderr, /V9/);
+  assert.deepEqual(check.check(root, config).unusedKept, [config.kept_terms[1]]);
+  const scoped = run([SCRIPT, '--repo', root, '--files', 'docs/a.md'], root);
+  assert.equal(scoped.status, 0, scoped.stderr);
+  assert.deepEqual(check.check(root, config, { files: ['docs/a.md'] }).unusedKept, []);
+  fs.writeFileSync(path.join(root, 'docs/a.md'), 'The V7 job.\n');
+  const fixed = run([SCRIPT, '--repo', root], root);
+  assert.equal(fixed.status, 0, fixed.stderr);
+  assert.deepEqual(check.check(root, config).unusedKept, []);
+});
+
 test('structured files are checked on their readable fields only', () => {
   const config = check.resolveConfig(banned({ field_extensions: ['.json', '.yml'] }));
   assert.equal(check.scopeOf('x/a.json', config), 'fields');
