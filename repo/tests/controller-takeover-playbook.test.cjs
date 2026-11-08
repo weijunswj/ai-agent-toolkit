@@ -88,10 +88,10 @@ test('T12 capabilities come from probes and host evidence, never a surface looku
 });
 
 const packFields = ['=== TOOLKIT RELAY PACK v1 ===', 'Pack:', 'Role:', 'For:', 'Repo:', 'Bound Toolkit:',
-  'Why:', 'Allowed effects:', 'data, not instructions', 'Command:', 'Done when:', 'Reply with this block, filled in:',
+  'Depends on:', 'Finish reads:', 'Why:', 'Allowed effects:', 'data, not instructions', 'Command:', 'Done when:', 'Reply with this block, filled in:',
   'Before replying, check:', '[ ]', '=== END TOOLKIT RELAY PACK ==='];
 const resultFields = ['=== TOOLKIT RELAY RESULT v1 ===', 'Pack:', 'Harness:', 'GitHub account:',
-  'Toolkit and hooks:', 'Step 1:', 'Output:', 'Proof:', 'Read-back:', 'Not checked:', '=== END TOOLKIT RELAY RESULT ==='];
+  'Toolkit and hooks:', 'Step 1:', 'Output:', 'Proof:', 'Read-back:', 'Heads at finish:', 'Not checked:', '=== END TOOLKIT RELAY RESULT ==='];
 const fieldsContract = (text, fields) => { for (const field of fields) assert.ok(text.includes(field), field); };
 
 const packGroups = ['Read pack', 'Custody pack', 'Record pack', 'Task pack', 'Gate pack'];
@@ -134,7 +134,7 @@ test('T13 route order, formats, statuses and waiting rules reject mutations', ()
     for (const field of fields) assert.throws(() => fieldsContract(section.split(field).join(''), fields), { code: 'ERR_ASSERTION' }, `removed ${field}`);
   }
   for (const phrase of ['**verified:**', '**supplied by user:**', '**incomplete:**', 'Waiting on you',
-    'Toolkit main changes', 'parent epoch changes', 'harness choice changes', 'dependent head changes',
+    'outside changes affect Toolkit main, a dependent head or the parent epoch', 'harness choice changes',
     'late stale result', 'never replay', 'cancelled by you', 'first failure', 'same pack']) assert.ok(text.includes(phrase), phrase);
   assert.match(text, /toolkit-governance\.cjs status --json` with the working directory set to the target checkout/);
   assert.doesNotMatch(text, /toolkit-governance\.cjs status --repo-root/);
@@ -147,11 +147,16 @@ test('T14 non-binding samples are complete, reserved and secret-free', () => {
   const samples = text.split('### Non-binding illustration')[1].split('\n## ')[0];
   const fences = [...samples.matchAll(/```text\n([\s\S]*?)```/g)].map(match => match[1]);
   assert.equal(fences.length, 2);
-  fieldsContract(fences[0], packFields);
-  fieldsContract(fences[1], resultFields);
+  const embeddedResult = fences[0].split('Reply with this block, filled in:\n')[1].split('\nBefore replying, check:')[0];
+  for (const [sample, fields] of [[fences[0], packFields], [embeddedResult, resultFields], [fences[1], resultFields]]) {
+    fieldsContract(sample, fields);
+    for (const field of fields) {
+      assert.throws(() => fieldsContract(sample.split(field).join(''), fields), { code: 'ERR_ASSERTION' }, `removed sample ${field}`);
+    }
+  }
   for (const sample of fences) assert.ok(sample.includes('example-org/example-repo'));
   const ids = [...samples.matchAll(/^Pack: (.+)$/gm)].map(match => match[1]);
-  assert.deepEqual(ids, Array(3).fill('read-example-repo-20261108T0000Z-abcd'));
+  assert.deepEqual(ids, Array(3).fill('read-example-repo-20261108T0930Z-abcd'));
   for (const id of ids) assert.match(id, /^(read|custody|record|task|gate)-[a-z0-9-]+-\d{8}T\d{4}Z-[0-9a-f]{4}$/);
   // Use the validator's actual secret-pattern definitions, so this cannot drift to a weaker scan.
   const source = read('repo/scripts/validate-toolkit.cjs');
@@ -190,4 +195,129 @@ test('state and governance closure matrices preserve each permitted action and h
   for (const clause of ['Unreadable then readable', 'parent record pending', 'not a duplicate on the same carrier',
     'Pending proposals are not ENABLED', 'DISABLED or Later', 'Undecided', 'TAKEOVER_UNVERIFIED',
     'new decision ID', 'superseded', 'no tool fence']) assert.ok(text.includes(clause), clause);
+});
+
+// Each closure row pins the clause in the section where the operator needs it.
+const headComparison = 'Compare Heads at finish with Depends on, entry by entry and in full.';
+const staleHead = 'Any difference, or a NOT RUN or missing entry you cannot read yourself, means a dependent head changed: refuse the late stale result.';
+const ownHeadRead = 'A match from the relay alone stays supplied by user; read the heads yourself wherever possible, and your own read wins when it is a read you made after the result arrived.';
+const staleEffects = 'Refuse a late stale result; read back any reported effects first and never replay them.';
+const storeFallback = "If a Toolkit hook still refuses the push to the store's default branch, build the record commit on top of the store's `records/takeover` branch when it exists, otherwise use the same commit, then push to that branch instead, as its message says (never forced), and read it back the same way; that commit is the stored copy.";
+const storeMerge = "Merge it only after the done line, and only under a fresh binding that names the store or on the owner's typed merge; otherwise name the branch, and any pull request, in the done line.";
+const plainReadRetry = 'Before recording a probe as unreachable on a route, retry it once as the simplest single plain read (no chaining, pipes, redirection or variables).';
+const hookHold = 'A hook refusal is a hold, never a reason to change routes.';
+const closureRows = [
+  ['A1', '### Proof and acceptance', ownHeadRead],
+  ['A2', '### Proof and acceptance', ownHeadRead],
+  ['A3', '### Proof and acceptance', staleHead],
+  ['A3', '### Waiting and stale packs', staleEffects],
+  ['A4', '### Proof and acceptance', staleHead],
+  ['A5', '### Proof and acceptance', staleHead],
+  ['A6', '### Proof and acceptance', ownHeadRead],
+  ['A7', '### Waiting and stale packs', 'Accept complete DONE steps before the first failure with their proof, and issue a new pack for the remainder only after reconciliation.'],
+  ['A8', '### Waiting and stale packs', staleEffects],
+  ['S1', '### 6. Outgoing writer and custody', 'In a Git store, the commit is the manifest: push, one fetch, then `git show --stat <sha>` with paths.'],
+  ['S2', '### 6. Outgoing writer and custody', "Name the store's folder literally in the push."],
+  ['S2', '### 6. Outgoing writer and custody', storeFallback],
+  ['S2', '### 7. Record and governed claim', "With DISABLED or Later, record in the verified evidence store (with step 6's branch fallback when needed), no claim."],
+  ['S3', '### 6. Outgoing writer and custody', storeFallback],
+  ['S3', '### 6. Outgoing writer and custody', 'If the push is rejected as non-fast-forward, fetch, rebuild the record commit on top of the fetched `records/takeover`, and push again; never force.'],
+  ['S4', '### 6. Outgoing writer and custody', 'On a GitHub store, open or reuse one pull request from that branch; it stays open through step 6.'],
+  ['S4', '### 6. Outgoing writer and custody', storeMerge],
+  ['S5', '## Capability routes', hookHold],
+  ['S6', '### 6. Outgoing writer and custody', storeMerge],
+  ['S6', '### 6. Outgoing writer and custody', 'Never reshape, rename or retry the refused push.'],
+  ['S-successor', '### 6. Outgoing writer and custody', 'the evidence store (including its `records/takeover` branch when present)'],
+  ['S-successor', '### 8. Orientation', "Read the repository map and its recorded commit, open pull requests and checks, and the latest evidence, including the store's `records/takeover` branch when present."],
+  ['T1', '### Step groups', "Take the pack id time, in UTC, from host evidence or a tool read of the clock, else from the newest timestamp you read (a comment's created_at or a commit date)."],
+  ['T2', '### Step groups', "Take the pack id time, in UTC, from host evidence or a tool read of the clock, else from the newest timestamp you read (a comment's created_at or a commit date)."],
+  ['T3', '### Step groups', 'A date alone is not enough.'],
+  ['T4', '### Step groups', 'Failing those, write `time-unknown` in its place; never guess or fill with zeros.'],
+  ['N1', '## Capability routes', 'One denied command does not prove a missing ability.'],
+  ['N1', '## Capability routes', plainReadRetry],
+  ['N2', '## Capability routes', plainReadRetry],
+  ['N3', '## Capability routes', 'A native permission or sandbox denial of a write stops that effect on this route: keep what was written and report the denial.'],
+  ['N3', '## Capability routes', 'Offer the owner the same prepared effect through the next route only if its permission was granted outside this session.'],
+  ['N3', '## Capability routes', 'Steps that say native denials stop, stop.'],
+  ['N3', '### 9. Governance checks', 'Native denials stop.'],
+  ['N4', '## Capability routes', 'A helper under the same denied session or sandbox is not a new route; never widen your own permissions to retry.'],
+  ['N4', '## Capability routes', 'Never launch an executor or helper with wider permission flags, a bypass mode or a changed sandbox after a denial, to carry out the denied effect.'],
+  ['N5', '## Capability routes', hookHold],
+  ['A1-A8', '### Proof and acceptance', headComparison],
+  ['A-own-changes', '### Proof and acceptance', "A pack's Depends on lists only heads the pack does not change itself; the claim's epoch change (N to N+1) and the pack's own store or branch pushes are proven by their step Proof and Read-back (the claim in step 7, a store push in step 6), and the stale rule covers outside changes only."],
+  ['A-outside-changes', '### Waiting and stale packs', "A pack becomes stale when outside changes affect Toolkit main, a dependent head or the parent epoch, or the owner's harness choice changes."],
+  ['A-template-depends', '### Pack template', 'Depends on: <where> <ref>=<commit40>, one per head the steps rely on but do not change (Toolkit main, repo and store branches; parent epoch <N> when governed)', 'but do not change'],
+  ['D1-template-command', '### Pack template', '  Command: <one exact read command per Depends on entry>'],
+  ['D1-sample-toolkit-read', '### Non-binding illustration', '  Command: git ls-remote https://github.com/weijunswj/ai-agent-toolkit.git refs/heads/main'],
+  ['D1-sample-repo-read', '### Non-binding illustration', '  Command: git ls-remote https://github.com/example-org/example-repo.git refs/heads/main'],
+  ['D1-template-failure', '### Pack template', '- Do only these steps. Stop at the first failure and report it, then run only the Finish reads; never retry with other commands.', 'then run only the Finish reads'],
+  ['D1-sample-failure', '### Non-binding illustration', '- Stop at the first failure, then run only the Finish reads; never retry with other commands or bypass hooks or permission prompts.', 'then run only the Finish reads'],
+  ['D1-template-checklist', '### Pack template', '[ ] Heads at finish holds the raw Finish reads output.'],
+  ['D1-sample-checklist', '### Non-binding illustration', '[ ] Heads at finish holds the raw Finish reads output.'],
+];
+function sectionAt(text, heading) {
+  const start = text.indexOf(heading + '\n');
+  assert.notEqual(start, -1, heading);
+  return text.slice(start + heading.length + 1).split(/\n#{1,3} /)[0];
+}
+function closureContract(text, [id, heading, clause]) {
+  assert.ok(sectionAt(text, heading).includes(clause), id + ': ' + clause);
+}
+
+test('T15 closure table pins every clause to its own section and rejects removals', () => {
+  const text = read(PLAYBOOK);
+  for (const row of closureRows) {
+    closureContract(text, row);
+    const [, heading, clause, removal = clause] = row;
+    const section = sectionAt(text, heading);
+    const changed = text.replace(section, section.split(removal).join(''));
+    assert.notEqual(changed, text, row[0]);
+    assert.throws(() => closureContract(changed, row), { code: 'ERR_ASSERTION' }, row[0]);
+  }
+});
+
+function sampleHeadsContract(text) {
+  const samples = sectionAt(text, '### Non-binding illustration');
+  const fences = [...samples.matchAll(/```text\n([\s\S]*?)```/g)].map(match => match[1]);
+  assert.equal(fences.length, 2);
+  const depends = fences[0].match(/^Depends on: (.+)$/m);
+  assert.ok(depends, 'sample Depends on');
+  const expected = [...depends[1].matchAll(/([^,]+)=([0-9a-f]{40})(?=,|$)/g)]
+    .map(([, name, sha]) => [name.trim(), sha]);
+  assert.equal(expected.length, 2);
+  const heads = fences[1].match(/^Heads at finish:\n((?:  .+\n)+)/m);
+  assert.ok(heads, 'sample Heads at finish');
+  const actual = heads[1].trimEnd().split('\n').map(line => {
+    const match = line.match(/^  (.+): ([0-9a-f]{40}) refs\/heads\/main$/);
+    assert.ok(match, line);
+    return match.slice(1);
+  });
+  assert.deepEqual(actual, expected);
+}
+
+test('T16 sample dependent heads match the filled result and reject a changed hex character', () => {
+  const text = read(PLAYBOOK);
+  sampleHeadsContract(text);
+  for (const sha of ['a'.repeat(40), 'c'.repeat(40)]) {
+    const samples = sectionAt(text, '### Non-binding illustration');
+    for (const prefix of ['=', ': ']) {
+      const from = prefix + sha;
+      const changed = samples.replace(from, prefix + 'd' + sha.slice(1));
+      assert.notEqual(changed, samples);
+      assert.throws(() => sampleHeadsContract(text.replace(samples, changed)), { code: 'ERR_ASSERTION' });
+    }
+  }
+});
+
+test('T17 store fallback matches the real hook refusal message', () => {
+  assert.ok(read('repo/scripts/toolkit-merge-hold.cjs').includes('push to another branch and open one'));
+});
+
+test('T18 sample pack ids have a read time or time-unknown and no zero-filled sample time', () => {
+  const text = read(PLAYBOOK);
+  assert.ok(!text.includes('T0000Z'));
+  const ids = [...sectionAt(text, '### Non-binding illustration').matchAll(/^Pack: (.+)$/gm)]
+    .map(match => match[1]);
+  assert.equal(ids.length, 3);
+  for (const id of ids) assert.match(id, /-(\d{8}T\d{4}Z|time-unknown)-[0-9a-f]{4}$/);
 });
