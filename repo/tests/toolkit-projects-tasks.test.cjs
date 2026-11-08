@@ -656,8 +656,33 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
   });
 });
 
+function inventoryStepContract(inventory, playbook) {
+  for (const row of inventory.rows) {
+    for (const step of row.setup_steps) {
+      assert.match(step, /^(?:P[1-6]|generic-[1-9]\d*)$/, `${row.id}: ${step}`);
+      if (step.startsWith('generic-')) assert.ok(playbook.includes(`### ${step.slice(8)}. `), `${row.id}: ${step} heading`);
+    }
+    for (const [, step] of row.source.matchAll(/generic step (\d+)\b/g)) {
+      assert.ok(playbook.includes(`### ${step}. `), `${row.id}: generic step ${step} source heading`);
+    }
+  }
+}
+
 test('T7 every setup step that creates something has an inventory row, and every row is checked by the daily check-in, a registered launch hook or a written rule', () => {
   const inventory = JSON.parse(fs.readFileSync(INVENTORY, 'utf8'));
+  const playbook = fs.readFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/controller-takeover.md'), 'utf8').replace(/\r\n/g, '\n');
+  inventoryStepContract(inventory, playbook);
+  const invalid = structuredClone(inventory);
+  invalid.rows[0].setup_steps.push('generic-11');
+  assert.throws(() => inventoryStepContract(invalid, playbook), { code: 'ERR_ASSERTION' }, 'generic-11 has no heading');
+  assert.throws(() => inventoryStepContract(inventory, playbook.replace('### 5. ', '### Missing. ')),
+    { code: 'ERR_ASSERTION' }, 'generic-5 has no heading');
+  const sourceOnly = structuredClone(inventory);
+  sourceOnly.rows[0].source += '; generic step 11';
+  assert.throws(() => inventoryStepContract(sourceOnly, playbook), { code: 'ERR_ASSERTION' }, 'source step has no heading');
+  const invalidId = structuredClone(inventory);
+  invalidId.rows[0].setup_steps.push('P7');
+  assert.throws(() => inventoryStepContract(invalidId, playbook), { code: 'ERR_ASSERTION' }, 'P7 is not a setup step');
   const setup = fs.readFileSync(SETUP, 'utf8').replace(/\r\n/g, '\n');
   assert.match(fs.readFileSync(SKILL, 'utf8'), /reference\/setup\.md/, 'the skill routes setup to its reference file');
   const steps = [...setup.matchAll(/^(P[1-6])\. \*\*/gm)].map(match => match[1]);

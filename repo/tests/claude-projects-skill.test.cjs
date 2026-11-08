@@ -35,6 +35,24 @@ test('T5 Projects runs the shared journey first, then extras, with relay as last
   for (const phrase of ['Text first, card last', 'put every host question card below its explanation']) assert.ok(read(SKILL_REL).includes(phrase));
 });
 
+test('Projects P2 fills the gate route and runs the deferred device task check', () => {
+  const setup = read(`${REFERENCE_DIR}/setup.md`);
+  const note = 'Before a device is named, step 9b reports "not checked here" and P2 runs it.';
+  const folder = 'When gates run on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named.';
+  const tasks = 'If generic step 9b reported "not checked here" for want of a device, run it on this device now, under its own fresh ENABLED guard and standing approval.';
+  const check = text => {
+    assert.ok(text.split('## Projects notes on the generic steps')[1].split('## Projects extras')[0].includes(note), note);
+    const p2 = text.split('P2. **')[1].split('P3. **')[0];
+    for (const clause of [folder, tasks]) assert.ok(p2.includes(clause), clause);
+  };
+  check(setup);
+  for (const clause of [note, folder, tasks]) {
+    assert.throws(() => check(setup.replace(clause, '')), { code: 'ERR_ASSERTION' }, clause);
+  }
+  const inventory = JSON.parse(read('repo/contracts/claude-projects/web-controller-projects/setup-inventory.json'));
+  assert.deepEqual(inventory.rows.find(row => row.id === 'gate-route').setup_steps, ['generic-5', 'P2']);
+});
+
 // Source contracts, not a role classifier: copied instructions and paths must never supply
 // coordinator authority. The Controller pointer now routes to the canonical Projects entry;
 // all of the old identity/relay mutation sets run against that relocated text.
@@ -164,13 +182,13 @@ const projectsEntryMatrix = [
   ['absent, conflicting or ambiguous host evidence: skip, retain role', ['controller identity', 'controller exclusions', 'skill exclusions', 'guide exclusions']],
   ['qualified coordinator, refresh fails twice: hold, no generic fallback', ['failure hold']],
   ['outside appointment, missing or failed copy: continue from last usable copy or block and report', ['outside appointment']],
-  ['bare read/report brief: CONTROLLER.md itself requires the relay and supplies bootstrap without a library copy',
+  ['the playbook\'s Projects entry requires the relay and supplies bootstrap without a library copy',
     ['controller bare read', 'controller setup relay', 'controller bootstrap relay']],
   ['thread or coordinator worker on appointment, takeover or setup: relay, stop and wait; setup remains coordinator-only',
     ['skill setup relay', 'guide setup relay', 'relay wording']],
   ['ordinary G1/G2 brief reading the Controller: the limited relay does not stop continuing on its brief',
     ['controller setup relay', 'skill setup relay', 'guide setup relay', 'ordinary gate continuation']],
-  ['mode b setup step 6: coordinator may brief its takeover record while later setup steps remain incomplete',
+  ['takeover mode, generic step 7: coordinator may brief its takeover record while later setup steps remain incomplete',
     ['controller setup relay', 'skill setup relay', 'guide setup relay', 'setup action exception', 'guided action exception']],
   ['relayed text reaches a fresh coordinator: qualify only from own host role and tools',
     ['controller identity', 'skill identity', 'guide identity', 'copied identity',
@@ -318,7 +336,7 @@ test('Projects delta correction: the skill keeps its precedence over Controller 
   assert.throws(() => check(replacement), { code: 'ERR_ASSERTION' });
 });
 
-test('Projects correction: setup step 6 is an explicit exception on every route, without transferring identity', () => {
+test('Projects correction: generic step 7 is an explicit exception on every route, without transferring identity', () => {
   const surfaces = projectsEntry();
   assertProjectsEntry(surfaces);
   const journey = read('repo/docs/agent-playbooks/controller-takeover.md');

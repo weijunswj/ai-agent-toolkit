@@ -14,7 +14,7 @@ No controller actions (records, gates or GitHub writes) until its last step exce
 - Toolkit current: check guidebook VERSION against a fresh Toolkit main copy using the guidebook reference; refresh under its safeguards. Check the actual device Toolkit before effects there. A failed refresh preserves the last usable copy, progress and every `stopped by owner` entry.
 - Binding: save BINDING and GATE ROUTE from the exact bound Controller/stack and the owner's rule on where gates run. Keep folder and placement in step with it. No gate launch until that line and launch-route proof are present.
 - Custody and orientation: use the first proven route for read-only state checks. Compare the outgoing writer's branch heads and latest comment ids twice, or obtain the owner's own direct confirmation. Never run two controllers that both write. Preserve every named file in the verified evidence store before sessions are archived; push and one fetch is Git custody read-back. Generic step 7, not a second Projects record, carries the takeover.
-- Governance and tasks: use the first proven route on the actual device. All graph, sharding and scheduled-task checks require fresh merged ENABLED. With governance off, all other generic steps run. No pending proposal or memory line grants effects.
+- Governance and tasks: use the first proven route on the actual device. All graph, sharding and scheduled-task checks require fresh merged ENABLED. With governance off, all other generic steps run. No pending proposal or memory line grants effects. Before a device is named, step 9b reports "not checked here" and P2 runs it.
 
 ## Projects extras
 
@@ -22,6 +22,7 @@ P1. **Project memory on.** Have the owner turn it on only if the coordinator can
 
 P2. **Device folder and keep-awake** (only when work runs locally).
 - Use the named device and repo folder, else ask once. Have a read-only local Remote Control thread verify the checkout and default branch.
+- When gates run on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named. If generic step 9b reported "not checked here" for want of a device, run it on this device now, under its own fresh ENABLED guard and standing approval.
 - Verify Toolkit is installed and current there through the supported read-only check. Installation or refresh remains subject to existing approvals and native permissions; preserve every `stopped by owner` entry.
 - Have the owner enable the desktop app's keep-awake for Remote Control if that setting is unreachable (Settings > Claude Code). Closing the lid still sleeps it. Save device and folder to memory.
 

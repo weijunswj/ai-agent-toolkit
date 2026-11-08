@@ -144,12 +144,53 @@ test('the guidebook refuses a second takeover source inside the skill tree', t =
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'SKILL.md'), `Version: ${skillVersion()}\n`);
   fs.writeFileSync(path.join(dir, 'takeover.md'), 'a second owner\n');
+  const canonical = path.join(root, 'repo/docs/agent-playbooks/controller-takeover.md');
+  fs.mkdirSync(path.dirname(canonical), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/controller-takeover.md'), canonical);
   // Isolate ownership from unrelated rendering: without the duplicate guard this fixture
   // would be accepted and silently copied as another source for the same library path.
   t.mock.method(ProjectsInstructions.prototype, 'render', () => 'block');
   t.mock.method(ProjectsInstructions.prototype, 'expectedBlock', () => ({ version: '3.53.1' }));
   assert.throws(() => guidebook({ root }).expected(), { code: 'GUIDEBOOK_SOURCE' });
 });
+
+for (const [rel, contents] of [
+  ['reference/controller-takeover.md', 'renamed'],
+  ['tasks/Takeover-Notes.MD', 'renamed'],
+  ['reference/notes.md', 'canonical'],
+  ['reference/notes.md', 'crlf'],
+]) {
+  test(`the guidebook refuses a second takeover source: ${rel} (${contents}) on every route`, t => {
+    const root = tmp(t);
+    const dir = path.join(root, 'repo/contracts/claude-projects/web-controller-projects');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), `Version: ${skillVersion()}\n`);
+    const canonical = path.join(root, 'repo/docs/agent-playbooks/controller-takeover.md');
+    fs.mkdirSync(path.dirname(canonical), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/controller-takeover.md'), canonical);
+    const playbook = fs.readFileSync(canonical, 'utf8').replace(/\r\n/g, '\n');
+    const target = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    // Ordinary notes are permitted; only the duplicate content or basename is refused.
+    const control = path.join(dir, 'reference/notes.md');
+    fs.mkdirSync(path.dirname(control), { recursive: true });
+    fs.writeFileSync(control, 'other text\n');
+    t.mock.method(ProjectsInstructions.prototype, 'render', () => 'block');
+    t.mock.method(ProjectsInstructions.prototype, 'expectedBlock', () => ({ version: '3.53.1' }));
+    const book = guidebook({ root });
+    const out = path.join(root, 'out');
+    assert.ok(book.expected().files.has('reference/notes.md'));
+    book.refresh(out);
+    assert.equal(book.check(out).state, 'current');
+    const before = new Map(filesIn(out).map(file => [file, fs.readFileSync(path.join(out, file))]));
+    fs.writeFileSync(target, contents === 'renamed' ? 'a second owner\n' : contents === 'crlf' ? playbook.replace(/\n/g, '\r\n') : playbook);
+    for (const operation of [() => book.expected(), () => book.check(out), () => book.refresh(out)]) {
+      assert.throws(operation, { code: 'GUIDEBOOK_SOURCE' }, `${rel} (${contents})`);
+      assert.deepEqual(filesIn(out), [...before.keys()]);
+      for (const [file, bytes] of before) assert.deepEqual(fs.readFileSync(path.join(out, file)), bytes, file);
+    }
+  });
+}
 
 test('a refresh never takes over a folder it did not write and fails without a usable commit', t => {
   const dir = tmp(t);
