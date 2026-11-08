@@ -805,7 +805,9 @@ function validateTrackedLocalRuntimeFiles(errors) {
 // User-facing docs, skills and instructions say what a reference means instead of linking GitHub issues or pull requests.
 function validatePlainReferences(errors) {
   try {
-    for (const finding of plainReferences.check(root).failures) fail(errors, plainReferences.describeFailure(finding));
+    const result = plainReferences.check(root);
+    for (const finding of result.failures) fail(errors, plainReferences.describeFailure(finding));
+    for (const entry of result.unusedKept) fail(errors, `kept term "${entry.text}" for ${entry.file} is no longer needed (it exempts nothing); remove it from kept_terms`);
   } catch (error) { fail(errors, `Plain-references check could not run: ${error.message}`); }
 }
 

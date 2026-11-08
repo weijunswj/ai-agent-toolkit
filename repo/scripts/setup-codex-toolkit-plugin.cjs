@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
-const { resolvePathExecutable } = require('./claude-process-launch.cjs');
+const { assertExecutableAvailable, directSpawnParts } = require('./claude-process-launch.cjs');
 const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 const { CodexConfigLoadCheck } = require('./codex-config-load-check.cjs');
 const { captureCodexConfigSnapshot } = require('./codex-delegation-backup.cjs');
@@ -930,11 +930,7 @@ function pluginAddPollMs() {
 }
 
 function codexSpawnParts(command, args) {
-  const isNodeScript = /\.(?:cjs|mjs|js)$/i.test(command);
-  return {
-    command: isNodeScript ? process.execPath : command,
-    args: isNodeScript ? [command, ...args] : args
-  };
+  return directSpawnParts(command, args, { label: 'Codex CLI', searchPastRefused: true });
 }
 
 function spawnCodex(command, args, options = {}) {
@@ -960,17 +956,21 @@ function commandCandidates(explicitCommand) {
   if (process.env.CODEX_TOOLKIT_CODEX_CLI) candidates.push(process.env.CODEX_TOOLKIT_CODEX_CLI);
   if (process.env.CODEX_CLI_PATH) candidates.push(process.env.CODEX_CLI_PATH);
   candidates.push(windowsAliasCliCandidate());
-  try { candidates.push(resolvePathExecutable('codex', { label: 'Codex CLI' })); } catch {}
+  try { candidates.push(process.platform === 'win32' ? assertExecutableAvailable('codex', { label: 'Codex CLI', searchPastRefused: true }) : 'codex'); } catch {}
   return [...new Set(candidates.filter(Boolean))];
 }
 
 function resolveCodexCommand(explicitCommand) {
   const failures = [];
   for (const command of commandCandidates(explicitCommand)) {
-    const result = spawnCodex(command, ['plugin', '--help'], {
-      encoding: 'utf8',
-      timeout: 10000
-    });
+    let parts;
+    try {
+      parts = codexSpawnParts(command, ['plugin', '--help']);
+    } catch (error) {
+      failures.push(formatWindowsAliasFailure(command, error.message));
+      continue;
+    }
+    const result = spawnSync(parts.command, parts.args, { encoding: 'utf8', timeout: 10000, windowsHide: true });
     if (result.status === 0 && /Manage Codex plugins/.test(`${result.stdout}${result.stderr}`)) {
       return { command, failures };
     }

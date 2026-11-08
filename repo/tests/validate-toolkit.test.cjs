@@ -836,3 +836,15 @@ test('managed source-of-truth and instruction checks pass from an explicit works
     assert.equal(result.status, 0, `${script}\n${result.stderr}`);
   }
 });
+
+test('validator rejects a scratch root with an unused kept term', () => {
+  const cwd = copyRepo();
+  const file = path.join(cwd, '.github/plain-text.json');
+  const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+  config.kept_terms.push({ file: 'docs/absent.md', text: 'V987654', reason: 'unused scratch exemption' });
+  fs.writeFileSync(file, JSON.stringify(config));
+  const result = spawnSync(process.execPath, [path.join(cwd, 'repo/scripts/validate-toolkit.cjs'), '--workspace', cwd], { cwd, encoding: 'utf8', timeout: 30000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /kept term "V987654" for docs\/absent.md is no longer needed \(it exempts nothing\)/);
+});

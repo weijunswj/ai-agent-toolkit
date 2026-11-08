@@ -1,11 +1,14 @@
 'use strict';
 
 require('./toolkit-test-temp-guard.cjs');
+// The config load check must ask a fixture, never a real Codex on this machine's PATH.
+require('./support/fake-codex-config-reader.cjs').useFakeConfigReader();
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+require('./support/fake-codex-isolation-guard.cjs').configReaderIsolationGuards(test);
 const block = require('../scripts/toolkit-managed-block.cjs');
 const { GlobalRules, globalRulesBlock, harnessFile, describeResult, BLOCK_NAME } = require('../scripts/toolkit-global-rules.cjs');
 

@@ -17,7 +17,7 @@
 // a reason) and a line marker `plain-text: allow <reason>` for a `#number` on one line that is not a
 // reference (in Markdown, inside an HTML comment: `<!-- plain-text: allow a colour value -->`). The
 // marker hides nothing else: links, "PR 12" labels and banned terms are still reported on that line.
-// A kept term that no file in its scope still uses fails a full run.
+// A kept term that exempts nothing fails a full run, whether unused or already exempted elsewhere.
 //
 // Usage: node plain-text-check.cjs [--repo <dir>] [--config <file>] [--files <path>...]
 //          [--init-baseline | --prune-baseline | --migrate-baseline] [--explain]
@@ -423,7 +423,7 @@ function report({ failures, stale, unusedKept, baseline, scoped }, config, out, 
   const notice = scoped ? null : baselineMigrationNotice(baseline, config);
   if (notice) out.write(`NOTE: ${notice}\n`);
   for (const entry of stale) out.write(`NOTE: ${entry.file}: ${entry.rule} is in the baseline ${entry.count} time(s) but occurs ${entry.found}; run with --prune-baseline.\n`);
-  for (const entry of unusedKept) err.write(`FAIL: kept term "${entry.text}" for ${entry.file} is no longer used; remove it from kept_terms\n`);
+  for (const entry of unusedKept) err.write(`FAIL: kept term "${entry.text}" for ${entry.file} is no longer needed (it exempts nothing); remove it from kept_terms\n`);
   if (failures.length) {
     for (const finding of failures) err.write(`FAIL: ${describeFailure(finding, config)}\n`);
     err.write(`\n${failures.length} item(s) to rewrite in plain English. Repository file links are fine.\n`);

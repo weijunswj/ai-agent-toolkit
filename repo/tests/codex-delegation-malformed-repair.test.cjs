@@ -7,6 +7,10 @@ const path = require('node:path');
 const test = require('node:test');
 const config = require('../scripts/codex-delegation-config.cjs');
 
+// The config load check must ask a fixture, never a real Codex on this machine's PATH.
+require('./support/fake-codex-config-reader.cjs').useFakeConfigReader();
+require('./support/fake-codex-isolation-guard.cjs').configReaderIsolationGuards(test);
+
 // Every temp folder a test makes is removed after the file's tests, also when they fail.
 const tempFolders = [];
 test.after(() => { for (const dir of tempFolders) fs.rmSync(dir, { recursive: true, force: true }); });

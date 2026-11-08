@@ -79,5 +79,6 @@ test('the fixed sites no longer start git or codex by a bare name', () => {
   assert.match(core, /spawnSync\(command === 'git' \? processLaunch\.resolvePathExecutable\('git'\) : command,/);
   const codex = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'setup-codex-toolkit-plugin.cjs'), 'utf8');
   assert.doesNotMatch(codex, /candidates\.push\('codex'\)/);
-  assert.match(codex, /resolvePathExecutable\('codex'/);
+  assert.match(codex, /assertExecutableAvailable\('codex'/);
+  assert.match(codex, /directSpawnParts\(command, args, \{ label: 'Codex CLI', searchPastRefused: true \}\)/);
 });

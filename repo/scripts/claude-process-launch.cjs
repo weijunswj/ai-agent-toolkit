@@ -59,6 +59,7 @@ function assertExecutableAvailable(value, options = {}) {
   const label = options.label || 'Claude CLI';
   const command = validateExecutable(value, platform, label);
   const candidates = executableCandidates(command, options);
+  let directRefusal;
   for (const candidate of candidates) {
     try {
       const resolved = fs.realpathSync(candidate);
@@ -67,10 +68,16 @@ function assertExecutableAvailable(value, options = {}) {
       if (platform !== 'win32' && !['.js', '.cjs', '.mjs'].includes(path.extname(candidate).toLowerCase())) {
         fs.accessSync(resolved, fs.constants.X_OK);
       }
+      // Only opted-in Codex lookups search past wrappers they cannot start without a shell.
+      // Explicit paths stay explicit; only absolute PATH candidates are considered above.
+      if (options.searchPastRefused === true && !/[\\/]/.test(command)) {
+        try { directSpawnParts(candidate, [], options); }
+        catch (error) { directRefusal ||= error; continue; }
+      }
       return !/[\\/]/.test(command) ? candidate : command;
     } catch {}
   }
-  throw new Error(`${label} executable is not available.`);
+  throw directRefusal || new Error(`${label} executable is not available.`);
 }
 
 // A bare program name such as `git`: on Windows, Node searches the current folder before PATH, so a
