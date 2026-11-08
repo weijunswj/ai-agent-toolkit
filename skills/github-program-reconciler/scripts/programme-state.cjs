@@ -1518,7 +1518,7 @@ function attentionBlockLines(attention, now) {
     `**${attentionLine(attention, now)}**`,
     ...open.slice(0, ATTENTION_SHOWN).map(entry => `- ${entry.state === 'acknowledged' ? '(acknowledged) ' : ''}${findingText(entry)}`),
     ...(open.length > ATTENTION_SHOWN ? [`- and ${open.length - ATTENTION_SHOWN} more: run programme.cjs attention`] : []),
-    ...(waiting.length ? ['', '**Waiting on you**', ...waiting.slice(0, WAITING_SHOWN).map(entry => `- ${entry.code} #${entry.issue}`),
+    ...(waiting.length ? ['', '**Waiting on you**', ...waiting.slice(0, WAITING_SHOWN).map(entry => `- ${entry.code}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}`),
       ...(waiting.length > WAITING_SHOWN ? [`- and ${waiting.length - WAITING_SHOWN} more: run programme.cjs attention`] : [])] : []),
   ];
 }

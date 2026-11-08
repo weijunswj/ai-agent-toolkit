@@ -72,6 +72,25 @@ test('waiting preview lists at most five short items and keeps the full count', 
   assert.doesNotMatch(state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now), /Waiting on you|waiting on you/);
 });
 
+test('waiting preview omits absent issue numbers and distinguishes findings at different heads', () => {
+  const parent = state.newParent({ repository: 'example.test/app', parentIssue: 421 });
+  parent.attention = state.foldAttention([], { source: 'reconcile', complete: true, now: '2026-11-06T00:00:00Z', seen: [
+    { code: 'CHECKS_RED', issue: 7, head: 'a'.repeat(40) },
+    { code: 'CHECKS_RED', issue: 7, head: 'b'.repeat(40) },
+  ] });
+  parent.attention = state.foldAttention(parent.attention, { source: 'inventory', complete: false, now: '2026-11-06T00:00:00Z',
+    seen: [{ code: 'INVENTORY_INCOMPLETE', issue: null }] });
+  const body = state.renderCurrentBlockBody(parent, new Map(), new Map(), '2026-11-08T00:00:00Z');
+  assert.match(body, /3 waiting on you/);
+  const waiting = body.split('**Waiting on you**')[1];
+  assert.ok(waiting);
+  assert.deepEqual(waiting.split('\n').filter(line => line.startsWith('- ')).sort(), [
+    '- INVENTORY_INCOMPLETE',
+    '- CHECKS_RED #7 at aaaaaaa',
+    '- CHECKS_RED #7 at bbbbbbb',
+  ].sort());
+});
+
 test('deliberately oversized programme still holds with BODY_TOO_LARGE and preserves the parent page', () => {
   const f = renderScaleFixture(state, { count: 300 });
   const before = f.github.issues.get(421).body;

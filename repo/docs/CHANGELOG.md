@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- Waiting previews omit missing issue numbers and distinguish findings by their short commit hash.
 - A copied completed close without accepted completion now raises a specific finding without inventing review or user acceptance.
 - Reopened sweep-closed tasks regain their previous lifecycle once; an unchanged second refresh writes nothing.
 - Controller-set terminal lifecycles are kept; disagreement with the issue close reason raises a state conflict.
