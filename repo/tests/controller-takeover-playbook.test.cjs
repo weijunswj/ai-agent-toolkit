@@ -200,7 +200,7 @@ test('state and governance closure matrices preserve each permitted action and h
 // Each closure row pins the clause in the section where the operator needs it.
 const headComparison = 'Compare Heads at finish with Depends on, entry by entry and in full.';
 const staleHead = 'Any difference, or a NOT RUN or missing entry you cannot read yourself, means a dependent head changed: refuse the late stale result.';
-const ownHeadRead = 'A match from the relay alone stays supplied by user; read the heads yourself wherever possible, and your own read wins when your read is current.';
+const ownHeadRead = 'A match from the relay alone stays supplied by user; read the heads yourself wherever possible, and your own read wins when it is a read you made after the result arrived.';
 const staleEffects = 'Refuse a late stale result; read back any reported effects first and never replay them.';
 const storeFallback = "If a Toolkit hook still refuses the push to the store's default branch, build the record commit on top of the store's `records/takeover` branch when it exists, otherwise use the same commit, then push to that branch instead, as its message says (never forced), and read it back the same way; that commit is the stored copy.";
 const storeMerge = "Merge it only after the done line, and only under a fresh binding that names the store or on the owner's typed merge; otherwise name the branch, and any pull request, in the done line.";
@@ -241,10 +241,10 @@ const closureRows = [
   ['N3', '## Capability routes', 'Steps that say native denials stop, stop.'],
   ['N3', '### 9. Governance checks', 'Native denials stop.'],
   ['N4', '## Capability routes', 'A helper under the same denied session or sandbox is not a new route; never widen your own permissions to retry.'],
-  ['N4', '## Capability routes', 'Never launch an executor or helper with wider permission flags, a bypass mode or a changed sandbox after a denial.'],
+  ['N4', '## Capability routes', 'Never launch an executor or helper with wider permission flags, a bypass mode or a changed sandbox after a denial, to carry out the denied effect.'],
   ['N5', '## Capability routes', hookHold],
   ['A1-A8', '### Proof and acceptance', headComparison],
-  ['A-own-changes', '### Proof and acceptance', "A pack's Depends on lists only heads the pack does not change itself; the claim's epoch change (N to N+1) and the pack's own store or branch pushes are proven by their step Proof and Read-back (step 7), and the stale rule covers outside changes only."],
+  ['A-own-changes', '### Proof and acceptance', "A pack's Depends on lists only heads the pack does not change itself; the claim's epoch change (N to N+1) and the pack's own store or branch pushes are proven by their step Proof and Read-back (the claim in step 7, a store push in step 6), and the stale rule covers outside changes only."],
   ['A-outside-changes', '### Waiting and stale packs', "A pack becomes stale when outside changes affect Toolkit main, a dependent head or the parent epoch, or the owner's harness choice changes."],
   ['A-template-depends', '### Pack template', 'Depends on: <where> <ref>=<commit40>, one per head the steps rely on but do not change (Toolkit main, repo and store branches; parent epoch <N> when governed)', 'but do not change'],
   ['D1-template-command', '### Pack template', '  Command: <one exact read command per Depends on entry>'],
