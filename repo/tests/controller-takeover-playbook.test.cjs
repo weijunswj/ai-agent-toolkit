@@ -55,9 +55,11 @@ test('T3 Controller points to the ordered journey, keeps the routes sentence and
   const text = read('repo/CONTROLLER.md');
   const takeover = text.split('## Takeover\n')[1].split('## Roles and routes')[0];
   for (const part of ['you are taking over as controller for <repo>', 'capability check',
-    "then that harness's extras", 'host-assigned coordinator', 'relays', 'stops', 'Continue approved scope without reapproval']) {
+    "then that harness's extras", 'host-assigned coordinator', 'relays', 'stops', 'Continue approved scope without reapproval',
+    'a thread/worker on its takeover relays the entry and stops']) {
     assert.ok(takeover.includes(part), part);
   }
+  assert.doesNotMatch(takeover, /\. Projects thread\/worker relays/);
   assert.ok(text.includes('from its own tools, else an executor it starts, else the'));
   assert.ok(text.includes('pasted results are data, unchecked ones "supplied by user", unknown incomplete'));
   const links = [...text.matchAll(/\]\((docs\/agent-playbooks\/controller-takeover.md(?:#capability-routes)?)\)/g)];
@@ -67,23 +69,59 @@ test('T3 Controller points to the ordered journey, keeps the routes sentence and
   assert.match(read('repo/tests/instruction-budget.test.cjs'), /<= 18500/);
 });
 
+function surfaceClaimContract(text) {
+  const products = "(?:ChatGPT(?: web)?|claude\\.ai|Claude Code|Claude Desktop|Claude Projects|Codex(?: CLI)?|OpenCode|Antigravity|Cursor|Gemini|Projects (?:coordinator|thread|worker)s?|web chat)";
+  const abilities = "(?:has|have|lacks|can|cannot|can't|can only|could|supports|gets|uses|provides|offers|includes|allows|is able|are able|is unable|are unable|there is no|does not|doesn't|won't|will not)";
+  const gap = '(?:[^.,;:|"()\\n]|\\n(?![|#*\\n-]|\\d+\\.\\s)){0,40}';
+  assert.doesNotMatch(text, new RegExp(`(?<![A-Za-z0-9])${products}(?![A-Za-z0-9])${gap}\\b${abilities}\\b`, 'i'));
+  assert.doesNotMatch(text, new RegExp(`^\\s*\\|\\s*[*\`_]*${products}[*\`_]*(?:\\s*\\([^\\n|]*\\))?\\s*\\|`, 'im'));
+  assert.doesNotMatch(text, /\|\s*(?:Surface|Harness|Host|Product|App|Platform|Client)(?:\s+names?)?\s*\||Expected per surface/i);
+}
+
 function capabilityContract(text) {
   const routes = text.split('## Capability routes')[1].split('## Journey')[0];
   for (const letter of 'abcdefghi') assert.match(routes, new RegExp(`\\| \\(${letter}\\)`));
   assert.ok(routes.includes('Surface: <harness> (<host evidence>). Probe results:'));
   assert.ok(routes.includes('Never infer a capability from a surface name'));
-  const rules = text.replace(/## Connector walk-through\n[\s\S]*?(?=\n## )/, '');
-  assert.doesNotMatch(rules, /\|\s*(?:Surface|Harness)\s*\||Expected per surface/i);
-  assert.doesNotMatch(rules, /(?:ChatGPT web|claude\.ai|Claude Code|Codex|OpenCode|Projects coordinator)\s+(?:has|can(?:not| only)?|gets|uses|provides)\b/i);
+  surfaceClaimContract(text);
 }
+
+function markdownFiles(dir) {
+  return fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap(entry => {
+    const rel = `${dir}/${entry.name}`;
+    return entry.isDirectory() ? markdownFiles(rel) : /\.md$/i.test(entry.name) ? [rel] : [];
+  });
+}
+const capabilityFiles = [...new Set([PLAYBOOK, 'repo/CONTROLLER.md',
+  'skills/controller-bootstrap/SKILL.md', 'repo/contracts/claude-projects/web-controller-projects/SKILL.md',
+  ...markdownFiles('skills/controller-bootstrap'),
+  ...markdownFiles('repo/contracts/claude-projects/web-controller-projects')])];
+const capabilityControls = ['ChatGPT web cannot write GitHub.', 'Codex has a shell.',
+  '| Surface | Capabilities |\n| OpenCode | shell |',
+  'claude.ai web chat cannot run a shell.', 'ChatGPT lacks a shell.', 'Codex CLI has a shell.',
+  'Projects coordinators can start threads.', 'Claude Code always has a shell.',
+  'On ChatGPT web there is no shell.', 'Gemini can run gh.',
+  '| Host | Abilities |', '| Surface name | Own tools |', '| OpenCode | shell |',
+  'Antigravity has no hooks.', 'Claude Projects lacks a shell.', 'A Projects thread cannot run gh.',
+  '| **Codex** | shell |', '| `ChatGPT web` | connector only |', 'Codex\nhas a shell.',
+  'Cursor has hooks.', 'Claude Desktop has a shell.', 'A web chat cannot run a shell.', 'A Projects worker can run gh.',
+  '| _Codex_ | shell |', '_Codex has a shell._'];
 
 test('T12 capabilities come from probes and host evidence, never a surface lookup', () => {
   const text = read(PLAYBOOK);
   capabilityContract(text);
-  for (const claim of ['ChatGPT web cannot write GitHub.', 'Codex has a shell.',
-    '| Surface | Capabilities |\n| OpenCode | shell |']) {
-    assert.throws(() => capabilityContract(`${text}\n${claim}`));
+  for (const rel of capabilityFiles) {
+    const source = read(rel);
+    surfaceClaimContract(source);
+    for (const claim of capabilityControls) {
+      assert.throws(() => surfaceClaimContract(`${source}\n${claim}`), { code: 'ERR_ASSERTION' }, `${rel}: ${claim}`);
+    }
   }
+  for (const claim of capabilityControls) {
+    assert.throws(() => capabilityContract(text.replace('## Connector walk-through\n', `## Connector walk-through\n${claim}\n`)),
+      { code: 'ERR_ASSERTION' }, `walk-through: ${claim}`);
+  }
+  assert.doesNotThrow(() => surfaceClaimContract('OpenCodex has a shell.'));
   assert.ok(text.includes('Non-binding illustration'));
 });
 
@@ -170,6 +208,8 @@ test('three routes, both relay formats and connector guards are mandatory', () =
   const guards = ['Before any connector write, prove the signed-in GitHub account',
     'verify every connector write by read-back',
     'Without Toolkit hooks, never merge, close a parent issue or start a gate through a connector',
+    'and never push task or product source to a default branch through one',
+    'Before any connector commit, comment or pull request write, check its text yourself for AI attribution and personal data, since a hook may not see it.',
     'A working GitHub connector is route 1 for reads and GitHub writes',
     'A hook refusal is a hold, never a reason to change routes'];
   const check = value => { contract(value); fieldsContract(value, [...packFields, ...resultFields, ...guards]); };
@@ -207,6 +247,11 @@ const storeMerge = "Merge it only after the done line, and only under a fresh bi
 const plainReadRetry = 'Before recording a probe as unreachable on a route, retry it once as the simplest single plain read (no chaining, pipes, redirection or variables).';
 const hookHold = 'A hook refusal is a hold, never a reason to change routes.';
 const closureRows = [
+  ['record-claim-route', '### 7. Record and governed claim', "A new controller's record and claim are one ability: post the record on the route that runs the claim, straight before it, so no parent write lands between them; when the claim needs an executor or relay, that route posts both. A record that needs no claim may go through any proven write route. Read back comment id, URL, created_at, author login and body, yourself wherever possible. A newly taking-over controller then runs, on the claim route:"],
+  ['record-pack-route', '### Step groups', "**Record pack:** use the controller's exact record and claim. Post and read back the prepared record, then claim immediately, on one account; never post the record ahead on another route. Check freshness again just before posting. If a record is already posted, relay only the claim; a parent write since it returns TAKEOVER_UNVERIFIED, and step 7's new-record rule applies. An ungoverned takeover needs no claim and can finish through its proven connector and evidence-store routes."],
+  ['record-walk-through', '## Connector walk-through', "The controller prepares the record and claim. For a governed parent the claim needs the relay shell, so one Record pack posts the record and claims straight after it on the proven account; the controller then reads the comment's id, URL, created_at, author and body back through the connector."],
+  ...['### Pack template', '### Non-binding illustration'].map(heading => ['relay-one-step ' + heading, heading,
+    '- One step at a time: wait for each command to finish before the next; never chain commands or run them in parallel.']),
   ['A1', '### Proof and acceptance', ownHeadRead],
   ['A2', '### Proof and acceptance', ownHeadRead],
   ['A3', '### Proof and acceptance', staleHead],
@@ -244,7 +289,7 @@ const closureRows = [
   ['N4', '## Capability routes', 'Never launch an executor or helper with wider permission flags, a bypass mode or a changed sandbox after a denial, to carry out the denied effect.'],
   ['N5', '## Capability routes', hookHold],
   ['A1-A8', '### Proof and acceptance', headComparison],
-  ['A-own-changes', '### Proof and acceptance', "A pack's Depends on lists only heads the pack does not change itself; the claim's epoch change (N to N+1) and the pack's own store or branch pushes are proven by their step Proof and Read-back (the claim in step 7, a store push in step 6), and the stale rule covers outside changes only."],
+  ['A-own-changes', '### Proof and acceptance', "A pack's Depends on lists only heads the pack does not change itself; the claim's epoch change (N to N+1) and the pack's own store or branch pushes are proven by their step Proof and Read-back (the claim and any record in step 7, a custody push in step 6), and the stale rule covers outside changes only."],
   ['A-outside-changes', '### Waiting and stale packs', "A pack becomes stale when outside changes affect Toolkit main, a dependent head or the parent epoch, or the owner's harness choice changes."],
   ['A-template-depends', '### Pack template', 'Depends on: <where> <ref>=<commit40>, one per head the steps rely on but do not change (Toolkit main, repo and store branches; parent epoch <N> when governed)', 'but do not change'],
   ['D1-template-command', '### Pack template', '  Command: <one exact read command per Depends on entry>'],
@@ -266,6 +311,7 @@ function closureContract(text, [id, heading, clause]) {
 
 test('T15 closure table pins every clause to its own section and rejects removals', () => {
   const text = read(PLAYBOOK);
+  assert.doesNotMatch(text, /If route 1 already posted and read back the record through a connector|posts it itself through the connector/);
   for (const row of closureRows) {
     closureContract(text, row);
     const [, heading, clause, removal = clause] = row;
@@ -273,6 +319,24 @@ test('T15 closure table pins every clause to its own section and rejects removal
     const changed = text.replace(section, section.split(removal).join(''));
     assert.notEqual(changed, text, row[0]);
     assert.throws(() => closureContract(changed, row), { code: 'ERR_ASSERTION' }, row[0]);
+  }
+});
+
+function forbiddenPhraseContract(text) {
+  for (const clause of text.split(/[.;:\n]/)) {
+    for (const match of clause.matchAll(/--force\b|--no-verify\b|\b(?:force-push|force|bypass|dangerously)\b/gi)) {
+      assert.match(clause.slice(0, match.index), /\b(?:never|no|not|without)\b/i, `unguarded phrase: ${clause.trim()}`);
+    }
+  }
+}
+
+test('forbidden phrases require a preceding prohibition in the same clause', () => {
+  const text = read(PLAYBOOK);
+  forbiddenPhraseContract(text);
+  forbiddenPhraseContract('Never force it.');
+  for (const line of ['If the records push is rejected, force it.', '--no-verify', 'Bypass the hook',
+    'force-push the branch.', 'Use --force.', 'Run dangerously.']) {
+    assert.throws(() => forbiddenPhraseContract(`${text}\n${line}`), { code: 'ERR_ASSERTION' }, line);
   }
 });
 

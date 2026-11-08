@@ -11,6 +11,7 @@
 //   --check <folder>   `current <Version>`, `stale <reason>` or `missing <reason>`; exit 0 only
 //                      when current. Read-only.
 //
+// Both refresh and check refuse takeover-named or identical playbook copies anywhere in the skill tree.
 // VERSION is one line: `Version: <skill Version> toolkit <x.y.z> main <commit7> copied <UTC>`.
 // It is removed first and written last, so a copy cut short never looks current. Files a newer
 // skill dropped, and folders left empty, are removed from the folder, which only this script writes.
@@ -55,6 +56,11 @@ function gitCommit(root) {
   } catch { throw new GuidebookError('GUIDEBOOK_COMMIT'); }
 }
 
+function isTakeoverCopy(rel, bytes, canonical) {
+  return /takeover.*\.md$/i.test(path.basename(rel))
+    || bytes.toString('utf8').replace(/\r\n/g, '\n') === canonical.toString('utf8').replace(/\r\n/g, '\n');
+}
+
 class Guidebook {
   constructor({ root = path.resolve(__dirname, '../..'), commit = () => gitCommit(root), now = () => new Date() } = {}) {
     this.root = root;
@@ -64,11 +70,12 @@ class Guidebook {
 
   // What main's copy holds: every skill file, the rendered block and the expected Version fields.
   expected() {
+    const takeover = fs.readFileSync(path.join(this.root, TAKEOVER_SOURCE));
     const dir = path.join(this.root, SKILL_DIR);
     const files = new Map(listFiles(dir).map(rel => [rel, fs.readFileSync(path.join(dir, rel))]));
     const match = SKILL_VERSION.exec((files.get('SKILL.md') || '').toString('utf8'));
-    if (!match || files.has(BLOCK_FILE) || files.has(VERSION_FILE) || files.has(TAKEOVER_FILE)) throw new GuidebookError('GUIDEBOOK_SOURCE');
-    files.set(TAKEOVER_FILE, fs.readFileSync(path.join(this.root, TAKEOVER_SOURCE)));
+    if (!match || files.has(BLOCK_FILE) || files.has(VERSION_FILE) || [...files].some(([rel, bytes]) => isTakeoverCopy(rel, bytes, takeover))) throw new GuidebookError('GUIDEBOOK_SOURCE');
+    files.set(TAKEOVER_FILE, takeover);
     const instructions = new ProjectsInstructions({ root: this.root });
     const block = `${instructions.render()}\n`;
     return { files, block, version: match[1], toolkit: instructions.expectedBlock().version };

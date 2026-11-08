@@ -47,7 +47,7 @@ Last reviewed against `main` `abbf27f`.
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
 | Plain-text check | Portable check `skills/secure-ci-cd/scripts/plain-text-check.cjs` and installer `skills/secure-ci-cd/scripts/install-plain-text-check.cjs`; Toolkit runs it through `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`) with settings `.github/plain-text.json` and baseline `repo/contracts/plain-references/baseline.json` |
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
-| Projects guidebook (library copy of the skill the coordinator reads) | `repo/scripts/toolkit-projects-guidebook.cjs`, copied from `repo/contracts/claude-projects/web-controller-projects/` |
+| Projects guidebook (library copy of the skill the coordinator reads) | `repo/scripts/toolkit-projects-guidebook.cjs`, copied from `repo/contracts/claude-projects/web-controller-projects/`; it also copies and checks the canonical takeover `repo/docs/agent-playbooks/controller-takeover.md` as `takeover.md` |
 | Projects scheduled task prompts | `repo/scripts/toolkit-projects-tasks.cjs`, templates `repo/contracts/claude-projects/web-controller-projects/tasks/`, setup inventory `repo/contracts/claude-projects/web-controller-projects/setup-inventory.json` |
 | Shared programme lock (built-ins only, unchanged record format; shared by programme and cleaner/apply owners) | `skills/github-program-reconciler/scripts/programme-lock.cjs`; scheduled jobs serialise store writes through `repo/scripts/toolkit-programme-lock.cjs` |
 | Shared executable resolution | `skills/github-program-reconciler/scripts/resolve-executable.cjs` |
@@ -63,8 +63,6 @@ Last reviewed against `main` `abbf27f`.
 | Executor checkpoint journals, after-write programme refresh, and the turn-end and after-tool hook | `skills/github-program-reconciler/scripts/programme-checkpoint.cjs`, `skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.cjs`, `repo/scripts/toolkit-programme-checkpoint-hook.ps1` |
 
 Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scripts/codex-config-load-check.cjs` (Codex effective-load check and rollback) and `repo/scripts/host-json-config-write.cjs` (Claude JSON read-back and rollback); see [host config writes](docs/agent-playbooks/host-config-writes.md).
-
-The Projects guidebook writer also copies and checks the canonical takeover as `takeover.md` in the project library.
 
 ## Sources of truth
 

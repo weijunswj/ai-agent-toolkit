@@ -34,5 +34,8 @@ test('T11 the repository map locates the shared takeover and guidebook consumer'
   const rel = 'repo/docs/agent-playbooks/controller-takeover.md';
   assert.ok(MAP.includes(rel));
   assert.ok(fs.existsSync(path.join(ROOT, rel)));
-  assert.ok(MAP.includes('copies and checks the canonical takeover'));
+  const row = MAP.split('\n').find(line => line.startsWith('| Projects guidebook'));
+  assert.ok(row.includes('copies and checks the canonical takeover'));
+  assert.ok(row.includes(rel));
+  assert.doesNotMatch(MAP, /^The Projects guidebook writer/m);
 });
