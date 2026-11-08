@@ -4,7 +4,7 @@
 
 ### Added
 
-- Programme refresh has a ten-minute budget, reserving its last two minutes to record unfinished progress and redraw CURRENT. Issue-scoped applies preserve unreported interruptions for the next full refresh, different stopped-pass diagnostics reopen answered findings, ordinary effect failures hold only their scope, and unposted parent repair notices remain recoverable.
+- Programme refresh has a ten-minute budget, reserving its last two minutes to record unfinished progress and redraw CURRENT. Applying passes clear interrupted notes only from exact verified stored diagnostics in any finding state, including when no changes are planned; issue-scoped applies preserve interruptions not yet stored. Different stopped-pass diagnostics reopen answered findings, waiting counts age from when a finding last became new, ordinary effect failures hold only their scope, and unposted parent repair notices remain recoverable.
 
 ### Changed
 

@@ -327,6 +327,175 @@ for (const row of [
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// I8 persistence closure: the commit, its reply and the controller's answer are separate events.
+for (const scoped of [false, true]) for (const row of [
+  { failure: 'lost_reply', answer: 'disposed' },
+  { failure: 'lost_reply', answer: 'acknowledged' },
+  { failure: 'crash_after_commit', answer: 'disposed' },
+]) test(`N2: ${row.failure}, ${row.answer}, ${scoped ? 'issue-scoped' : 'full'} recovery frees the next kill`, () => {
+  const f = fixture({ count: 1, added: 0 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-saved-stop-'));
+  const lockFile = path.join(dir, 'pass.lock');
+  const oldTime = '2026-11-04T00:00:00.123Z';
+  const interrupted = { cause: 'interrupted', phase: 'task_pages', done: 7, total: 30, started_at: oldTime };
+  const { cause, ...note } = interrupted;
+  let landed = false; let injected = false;
+  try {
+    fs.writeFileSync(`${lockFile}.progress`, JSON.stringify({ ...note, token: 'dead', unreported: true }));
+    f.github.intercept(call => {
+      // The lost-reply outage ends this pass before any later fresh read could confirm the commit.
+      if (landed && injected && row.failure === 'lost_reply' && call.method === 'GET'
+        && call.path.startsWith(`${f.store.contentsPath('parent', 421)}?ref=`)) {
+        return { status: 502, json: { message: 'fixture transport still unavailable' } };
+      }
+      if (!landed && call.method === 'PUT' && call.body?.content) {
+        const doc = JSON.parse(Buffer.from(call.body.content, 'base64').toString('utf8'));
+        if (doc.attention?.some(entry => entry.code === 'PASS_STOPPED' && entry.diagnostics.started_at === oldTime)) {
+          const response = f.github.route(call.method, call.path, call.body);
+          assert.equal(response.status, 200);
+          landed = true;
+          if (row.failure === 'lost_reply') { injected = true; return { status: 502, json: { message: 'fixture lost commit reply' } }; }
+          return response;
+        }
+      }
+      if (landed && !injected && row.failure === 'crash_after_commit' && call.method === 'GET'
+        && call.path.startsWith(`${f.store.contentsPath('parent', 421)}?ref=`) && !call.path.endsWith('ref=main')) {
+        assert.equal(f.github.route(call.method, call.path, call.body).status, 200);
+        injected = true;
+        throw Object.assign(new Error('fixture crash after committed readback, before reported'), { code: 'PASS_LOCK_LOST' });
+      }
+    });
+    const earlier = { now: () => oldTime, passClock: () => Date.parse(oldTime) };
+    if (row.failure === 'lost_reply') assert.throws(() => cliRun(f, lockFile, earlier), { code: 'GH_FAILED' });
+    else assert.throws(() => cliRun(f, lockFile, earlier), { code: 'PASS_LOCK_LOST' });
+    assert.equal(landed, true);
+    assert.equal(injected, true);
+    f.github.hooks = [];
+    assert.equal(openStop(f).state, 'new');
+    assert.deepEqual(openStop(f).diagnostics, interrupted);
+    assert.equal(fs.existsSync(`${lockFile}.progress`), true, 'landed commit alone cannot acknowledge a lost reply or crash');
+    f.store.mutate('parent', 421, { writer, change: doc => state.answerFinding(doc, {
+      id: doc.attention.find(entry => entry.code === 'PASS_STOPPED').id, state: row.answer, reason: 'Fixture saved stop answered', now: oldTime,
+    }) });
+    // An independent redraw after disposal leaves no page work to accidentally trigger recovery.
+    // It has no local progress object, so it cannot report this lock owner's note.
+    if (row.answer === 'disposed') assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    const recovered = cliRun(f, lockFile, {}, scoped
+      ? ['reconcile', '--apply', '--controller', '--session', writer.session, '--issue', '500', '--json']
+      : ['refresh', '--json']);
+    assert.equal(recovered.code, 0);
+    if (row.answer === 'disposed') {
+      assert.equal(recovered.report.effects.length, 0, `exercise the no-effects route: ${JSON.stringify(recovered.report.effects)}`);
+      assert.equal(recovered.report.summary, 'No changes');
+      assert.deepEqual(recovered.report.writes, { state: 0, github: 0 });
+    }
+    assert.equal(fs.existsSync(`${lockFile}.progress`), false, 'the stored exact match clears regardless of finding state or planned effects');
+    assert.equal(cliRun(f, lockFile).code, 0);
+    assert.equal(fs.existsSync(`${lockFile}.progress`), false, 'the next full refresh has no predecessor debt');
+
+    // A later real pass dies in its own task-page phase. Its note must replace the predecessor.
+    f.github.issues.get(500).body = '';
+    const killedAt = '2026-11-08T01:00:00.456Z';
+    let killed = false;
+    f.github.intercept(call => {
+      if (!killed && call.method === 'PATCH' && call.path.endsWith('/issues/500')) {
+        killed = true;
+        throw Object.assign(new Error('fixture later kill'), { code: 'PASS_LOCK_LOST' });
+      }
+    });
+    assert.throws(() => cliRun(f, lockFile, { now: () => killedAt, passClock: () => Date.parse(killedAt) }), { code: 'PASS_LOCK_LOST' });
+    assert.equal(killed, true);
+    const laterNote = JSON.parse(fs.readFileSync(`${lockFile}.progress`, 'utf8'));
+    const later = { cause: 'interrupted', phase: 'task_pages', done: 0, total: 1, started_at: killedAt };
+    assert.deepEqual({ cause: 'interrupted', phase: laterNote.phase, done: laterNote.done, total: laterNote.total, started_at: laterNote.started_at }, later);
+    f.github.hooks = [];
+    const refreshedAt = '2026-11-08T02:00:00.000Z';
+    assert.equal(cliRun(f, lockFile, { now: () => refreshedAt, passClock: () => Date.parse(refreshedAt) }).code, 0);
+    assert.equal(openStop(f).state, 'new');
+    assert.deepEqual(openStop(f).diagnostics, later);
+    assert.equal(openStop(f).changed_at, refreshedAt);
+    assert.equal(fs.existsSync(`${lockFile}.progress`), false);
+    assert.ok(f.github.issues.get(421).body.includes(`- ${state.findingText(openStop(f))}`), 'CURRENT shows the later kill with its own full details');
+    assert.deepEqual(cliRun(f, lockFile, {}, ['attention', '--json']).report.counts, { new: 1, acknowledged: 0 });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+for (const savedState of ['new', 'acknowledged', 'disposed', 'resolved'])
+  test(`N2: scoped ${savedState} evidence must match even the start-time milliseconds`, () => {
+    const f = fixture({ count: 1, added: 0 });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-exact-stop-'));
+    const lockFile = path.join(dir, 'pass.lock');
+    const saved = { cause: 'interrupted', phase: 'links', done: 2, total: 5, started_at: '2026-11-08T00:00:00.123Z' };
+    const interrupted = { ...saved, started_at: '2026-11-08T00:00:00.124Z' };
+    const scoped = ['reconcile', '--apply', '--controller', '--session', writer.session, '--issue', '500', '--json'];
+    try {
+      f.store.mutate('parent', 421, { writer, change: doc => {
+        doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: false, now: NOW,
+          seen: [{ code: 'PASS_STOPPED', issue: 421, diagnostics: saved }] });
+        doc.attention.find(entry => entry.code === 'PASS_STOPPED').state = savedState;
+        return doc;
+      } });
+      const { cause, ...note } = interrupted;
+      fs.writeFileSync(`${lockFile}.progress`, JSON.stringify({ ...note, token: 'dead', unreported: true }));
+      assert.equal(cliRun(f, lockFile, {}, scoped).code, 0);
+      assert.equal(fs.existsSync(`${lockFile}.progress`), true, 'a one-millisecond mismatch is not persistence evidence');
+      assert.deepEqual(openStop(f).diagnostics, saved, 'scoped apply does not fold an unreported parent stop');
+      // The controller saves the exact event between passes; the next scoped read must see it.
+      f.store.mutate('parent', 421, { writer, change: doc => {
+        doc.attention.find(entry => entry.code === 'PASS_STOPPED').diagnostics = interrupted;
+        return doc;
+      } });
+      assert.equal(cliRun(f, lockFile, {}, ['reconcile', '--issue', '500', '--json']).code, 0);
+      assert.equal(fs.existsSync(`${lockFile}.progress`), true, 'a dry run cannot clear the note');
+      const report = cliRun(f, lockFile, {}, scoped).report;
+      assert.equal(report.results.some(entry => entry.kind === 'update_attention'), false);
+      assert.equal(fs.existsSync(`${lockFile}.progress`), false, 'fresh exact stored evidence clears without an attention job');
+      assert.equal(openStop(f).state, savedState);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+for (const prior of ['acknowledged', 'disposed', 'resolved']) test(`N3: a days-old ${prior} stop reopens with full CURRENT details`, () => {
+  const f = fixture({ count: 1, added: 0 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-new-stop-'));
+  const lockFile = path.join(dir, 'pass.lock');
+  const oldTime = '2026-11-04T00:00:00.000Z';
+  try {
+    f.store.mutate('parent', 421, { writer, change: doc => {
+      doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: false, now: oldTime,
+        seen: [{ code: 'PASS_STOPPED', issue: 421, diagnostics: { cause: 'time_limit', phase: 'planning', done: 0, total: 0, started_at: oldTime } }] });
+      if (prior === 'resolved') doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: true, now: oldTime });
+      else doc = state.answerFinding(doc, { id: doc.attention[0].id, state: prior, reason: 'Fixture old stop answered', now: oldTime });
+      return doc;
+    } });
+    const expected = { cause: 'interrupted', phase: 'task_pages', done: 7, total: 30, started_at: NOW };
+    const { cause, ...note } = expected;
+    fs.writeFileSync(`${lockFile}.progress`, JSON.stringify({ ...note, token: 'dead', unreported: true }));
+    assert.equal(cliRun(f, lockFile).code, 0);
+    const entry = openStop(f);
+    assert.equal(entry.state, 'new');
+    assert.equal(entry.first_seen, oldTime);
+    assert.equal(entry.changed_at, NOW);
+    assert.deepEqual(entry.diagnostics, expected);
+    assert.ok(f.github.issues.get(421).body.includes(`- ${state.findingText(entry)}`), 'a reopened stop retains the phase and counts in CURRENT');
+    assert.doesNotMatch(f.github.issues.get(421).body, /waiting on you/i);
+    assert.equal(fs.existsSync(`${lockFile}.progress`), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// All finding codes share the same new-state clock. An unchanged observation never resets it.
+for (const [code, source] of [['CHECKS_RED', 'reconcile'], ['CHILD_ADDED', 'reconcile'], ['NEEDS_PLACEMENT', 'inventory']])
+  test(`N3: ${code} waits 24 hours from becoming new, unchanged reports keep that age`, () => {
+    const seen = [{ code, issue: 500 }];
+    const first = state.foldAttention([], { source, seen, complete: false, now: '2026-11-04T00:00:00.000Z' });
+    const resolved = state.foldAttention(first, { source, complete: true, now: '2026-11-05T00:00:00.000Z' });
+    const reopened = state.foldAttention(resolved, { source, seen, complete: false, now: NOW });
+    assert.doesNotMatch(state.attentionLine(reopened, NOW), /waiting on you/);
+    const unchanged = state.foldAttention(reopened, { source, seen, complete: false, now: '2026-11-08T23:59:59.999Z' });
+    assert.equal(unchanged, reopened);
+    assert.doesNotMatch(state.attentionLine(unchanged, '2026-11-08T23:59:59.999Z'), /waiting on you/);
+    assert.match(state.attentionLine(unchanged, '2026-11-09T00:00:00.000Z'), /1 waiting on you/);
+  });
+
 test('M1: one task read-back 502 holds only that task and writes the other pages', () => {
   const f = fixture({ count: 4, added: 0 });
   for (let number = 500; number < 504; number++) f.github.issues.get(number).body = '';

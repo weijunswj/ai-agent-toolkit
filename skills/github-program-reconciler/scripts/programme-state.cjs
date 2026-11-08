@@ -567,7 +567,7 @@ function attentionCounts(attention) {
 // `Attention: <n> new, <m> acknowledged` or `Attention: clear`.
 function waitingFindings(attention, now) {
   const time = Date.parse(now);
-  return openFindings(attention).filter(entry => entry.state === 'new' && time - Date.parse(entry.first_seen) >= 24 * 60 * 60 * 1000);
+  return openFindings(attention).filter(entry => entry.state === 'new' && time - Date.parse(entry.changed_at) >= 24 * 60 * 60 * 1000);
 }
 
 function attentionLine(attention, now = new Date().toISOString()) {
@@ -4043,6 +4043,14 @@ class Reconciler {
         && !findings.some(entry => entry.code === 'MANAGED_BLOCK_BROKEN') };
   }
 
+  // Only verified stored state proves the predecessor was reported. Its controller answer and
+  // whether this pass planned an attention write do not change that persistence fact.
+  reportStoredProgress(parent) {
+    const interrupted = this.pass.progress?.interrupted;
+    if (interrupted && parent.attention?.some(entry => entry.code === 'PASS_STOPPED'
+      && JSON.stringify(canonical(entry.diagnostics)) === JSON.stringify(canonical(interrupted)))) this.pass.progress.reported();
+  }
+
   // Saved states, parent page, queue, then completion. Every group shares the process deadline.
   apply(plan) {
     if (plan.override) throw new ProgrammeError('USAGE', 'A parent document read from a file can only be used for a dry run.');
@@ -4066,13 +4074,16 @@ class Reconciler {
       const fresh = this.store.read('parent', parentNumber).doc;
       authoriseWrite('parent', fresh, null, writer);
       parentDoc = fresh;
+      this.reportStoredProgress(parentDoc);
     };
     guard();
     const mutateDoc = (kind, number, options) => {
       guard();
       const result = this.store.mutate(kind, number, { writer, parentDoc, ...options });
-      if (kind === 'parent') parentDoc = result.doc;
-      else {
+      if (kind === 'parent') {
+        parentDoc = result.doc;
+        this.reportStoredProgress(parentDoc);
+      } else {
         if (result.outcome === 'WRITTEN') writtenChildren.add(number);
         if (result.doc) settledChildren.set(number,result.doc);
         if (docs && result.doc) docs.set(number, result.doc);
@@ -4256,9 +4267,6 @@ class Reconciler {
           return doc;
         } });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
-        const interrupted = this.pass.progress?.interrupted;
-        if (interrupted && parentDoc.attention?.some(entry => entry.code === 'PASS_STOPPED' && OPEN_FINDING_STATES.includes(entry.state)
-          && JSON.stringify(canonical(entry.diagnostics)) === JSON.stringify(canonical(interrupted)))) this.pass.progress.reported();
       } catch (error) {
         if (STOPS_PASS.has(error.code)) throw error;
         record(effect, 'HELD', error.message);
@@ -4662,7 +4670,7 @@ class Reconciler {
       } });
       report.writes.state = this.store.writes - writes;
       this.pass.progress?.reported();
-    } else if (apply && plan.parent && (plan.effects.length || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
+    } else if (apply && plan.parent && (this.pass.progress?.interrupted || plan.effects.length || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;
       const githubWrites = this.mutator.mutations;
       const { results, holds, attention } = this.apply(plan);
