@@ -41,6 +41,178 @@ const openCodes = f => (f.parent().attention || []).filter(e => ['new','acknowle
 const writes = f => f.github.calls.filter(c => c.method !== 'GET' && c.path !== 'graphql').length;
 const pr = (f,n,options={}) => f.github.addPr(n, {head:SHA, ...options});
 
+test('fix1 H1: 226 parent cross-references never gate task history or finding resolution',()=>{
+  const f=fixture([2,3]); pr(f,20,{body:'Refs #3'}); f.run();
+  f.github.issuePrLinks.set(1,{timeline:Array.from({length:226},(_,i)=>100+i),timelineTruncated:true});
+  f.github.prs.get(20).body='Refs #1'; pr(f,21,{body:'Refs #2'});
+  const pass=f.pass(); const plan=pass.plan(); assert.equal(plan.observed.prGraph.complete,true);
+  assert.equal(plan.complete,true); pass.apply(plan);
+  assert.deepEqual(f.child(2).prs,[{number:21,state:'OPEN',merge_sha:null}]);
+  assert.equal(f.parent().attention.find(e=>e.code==='PR_UNTRACKED' && e.issue===3).state,'resolved');
+  assert.ok(!openCodes(f).includes('PR_DISCOVERY_INCOMPLETE'));
+  assert.ok(!f.parent().attention.some(e=>e.code==='PR_WITHOUT_TASK' && e.issue===20));
+});
+
+test('fix1 H1: a task reference gap holds only its discovery findings',()=>{
+  const f=fixture([2,3]); pr(f,20,{body:'Refs #3'}); f.run();
+  f.github.issuePrLinks.set(2,{timelineTruncated:true}); f.github.prs.get(20).body='';
+  const report=f.run();
+  assert.deepEqual(report.findings.filter(e=>e.code==='PR_DISCOVERY_INCOMPLETE').map(e=>e.issue),[2]);
+  assert.equal(f.parent().attention.find(e=>e.code==='PR_UNTRACKED' && e.issue===3).state,'resolved');
+  assert.deepEqual(f.child(3).prs,[]);
+});
+
+test('fix1 H1: a closed-list failure still settles findings proved by the complete open list',()=>{
+  const f=fixture(); pr(f,20,{body:'Refs #2'}); f.run(); f.github.prs.get(20).body='Refs #1';
+  f.github.intercept(call=>call.method==='GET' && /pulls\?state=closed/.test(call.path) ? {status:503,json:{}} : null);
+  f.run(); assert.ok(openCodes(f).includes('PR_DISCOVERY_INCOMPLETE'));
+  assert.equal(f.parent().attention.find(e=>e.code==='PR_UNTRACKED' && e.issue===2).state,'resolved');
+});
+
+test('fix1 H2: 520 historic unlinked merges seed without findings; a later merge raises one',()=>{
+  const f=fixture();
+  for(let n=100;n<620;n++) pr(f,n,{merged:true,mergedAt:'2026-11-01T00:00:00Z'});
+  assert.deepEqual(f.run().holds,[]); assert.ok(f.parent().private.graph_pr_watermark);
+  assert.deepEqual(openCodes(f),[]);
+  pr(f,700,{merged:true,mergedAt:'2026-11-08T01:00:00Z'}); f.time(epoch+2*3600000);
+  assert.deepEqual(f.run().holds,[]);
+  assert.deepEqual(f.parent().attention.filter(e=>e.code==='PR_WITHOUT_TASK').map(e=>e.issue),[700]);
+});
+
+test('fix1 M1: reconcile apply holds all three acknowledged refresh-owned findings',()=>{
+  const f=fixture([2,3]); f.run(); f.close(2);
+  f.store.mutate('child',3,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:'RETIRED'})});
+  pr(f,20); f.run();
+  const codes=['CLOSED_WITHOUT_ACCEPTANCE','CHILD_STATE_CONFLICT','PR_WITHOUT_TASK'];
+  assert.deepEqual(openCodes(f),codes.slice().sort());
+  for(const entry of f.parent().attention.filter(e=>codes.includes(e.code))) {
+    f.store.mutate('parent',1,{writer:holder,change:doc=>state.answerFinding(doc,{id:entry.id,state:'acknowledged',now:new Date(epoch).toISOString()})});
+  }
+  const before=f.parent().attention.filter(e=>codes.includes(e.code));
+  f.time(epoch+25*3600000); f.pass(false).run({apply:true});
+  assert.deepEqual(f.parent().attention.filter(e=>codes.includes(e.code)),before);
+  f.run(); assert.deepEqual(f.parent().attention.filter(e=>codes.includes(e.code)),before);
+  assert.doesNotMatch(state.attentionLine(f.parent().attention,new Date(epoch+25*3600000).toISOString()),/waiting on you/);
+});
+
+test('fix1 M1 M2: a controller-close conflict stays acknowledged through ordinary reconciliation',()=>{
+  const f=fixture(); f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:'RETIRED'})});
+  f.close(2); f.run();
+  const entry=(f.parent().attention || []).find(e=>e.code==='CHILD_STATE_CONFLICT'); assert.ok(entry);
+  f.store.mutate('parent',1,{writer:holder,change:doc=>state.answerFinding(doc,{id:entry.id,state:'acknowledged',now:new Date(epoch).toISOString()})});
+  f.pass(false).run({apply:true});
+  assert.equal(f.parent().attention.find(e=>e.id===entry.id).state,'acknowledged');
+  f.run(); assert.equal(f.parent().attention.find(e=>e.id===entry.id).state,'acknowledged');
+});
+
+test('fix1 M3: a seeded scan stops at its overlap before 1000 old closed PRs',()=>{
+  const f=fixture(); f.run();
+  for(let n=100;n<1100;n++) pr(f,n,{merged:true,mergedAt:'2026-11-01T00:00:00Z'});
+  pr(f,20,{merged:true,mergedAt:'2026-11-08T01:00:00Z'}); // Old PR number, new update.
+  f.time(epoch+2*3600000); f.github.calls=[];
+  const pass=f.pass(); const plan=pass.plan(); assert.equal(plan.complete,true); pass.apply(plan);
+  assert.equal(f.github.calls.filter(c=>/pulls\?state=closed/.test(c.path)).length,1);
+  assert.deepEqual(f.parent().attention.filter(e=>e.code==='PR_WITHOUT_TASK').map(e=>e.issue),[20]);
+});
+
+test('fix1 M3: the overlap reads the next page for updates within five minutes of the watermark',()=>{
+  const f=fixture(); f.run();
+  for(let n=100;n<200;n++) { pr(f,n,{merged:true,mergedAt:'2026-11-07T23:58:00Z'}); }
+  pr(f,20,{merged:true,mergedAt:'2026-11-01T00:00:00Z'});
+  f.github.calls=[]; const plan=f.pass().plan(); assert.equal(plan.complete,true);
+  assert.equal(f.github.calls.filter(c=>/pulls\?state=closed/.test(c.path)).length,2);
+});
+
+test('fix1 M3 control: incremental scans retain historical PR order and observe reopens',()=>{
+  const f=fixture();
+  pr(f,20,{merged:true,mergedAt:'2026-11-07T00:00:00Z',body:'Refs #2'});
+  pr(f,21,{merged:true,mergedAt:'2026-11-06T00:00:00Z',body:'Refs #2'});
+  pr(f,22,{state:'CLOSED',body:'Refs #2'}); f.run();
+  assert.deepEqual(f.child(2).prs.map(p=>p.number),[20,21,22]);
+  f.time(epoch+3600000); f.run();
+  assert.deepEqual(f.child(2).prs.map(p=>p.number),[20,21,22]);
+  Object.assign(f.github.prs.get(22),{state:'OPEN',updated_at:'2026-11-08T02:00:00Z'});
+  f.time(epoch+3*3600000); f.run();
+  assert.deepEqual(f.child(2).prs.map(p=>[p.number,p.state]),[[22,'OPEN'],[20,'MERGED'],[21,'MERGED']]);
+});
+
+test('fix1 M4: untracked findings use open PRs only, while history keeps closed PRs',()=>{
+  const f=fixture([2,3,4]); pr(f,20,{merged:true,body:'Refs #2'});
+  pr(f,21,{state:'CLOSED',body:'Refs #3'}); pr(f,22,{body:'Refs #4'});
+  const report=f.run();
+  assert.deepEqual(report.findings.filter(e=>e.code==='PR_UNTRACKED').map(e=>e.issue),[4]);
+  assert.equal(f.child(2).prs[0].state,'MERGED'); assert.equal(f.child(3).prs[0].state,'CLOSED');
+});
+
+test('fix1 L1: recovery names the parent error as an update-Toolkit case',()=>{
+  const skill=fs.readFileSync(path.join(ROOT,'skills/github-program-reconciler/SKILL.md'),'utf8');
+  const changelog=fs.readFileSync(path.join(ROOT,'repo/docs/CHANGELOG.md'),'utf8').split('## 3.55.1')[0];
+  for(const text of [skill,changelog]) assert.match(text,/attention\[n\]\.code is not a known finding code/);
+});
+
+test('fix1 L5: documentation puts native sub-issue observations outside the PR budget',()=>{
+  const skill=fs.readFileSync(path.join(ROOT,'skills/github-program-reconciler/SKILL.md'),'utf8');
+  assert.match(skill,/sub-issue.*outside.*(?:sixty|60)/i);
+});
+
+test('fix1 L2: skip children of a catalogued registered parent and still adopt unrelated tasks',()=>{
+  const f=fixture([2,10]);
+  Object.assign(f.binding,{schema:state.SCHEMA.bindingV2,governance:'enabled',parents:[{issue:1,record_prefix:'TEST-'},{issue:10,record_prefix:'OTHER-'}]});
+  f.github.addIssue(11,{parent:10}); f.github.addIssue(12,{parent:1});
+  const pass=f.pass(); const plan=pass.plan();
+  assert.deepEqual(plan.observed.additions.map(o=>o.issue),[12]);
+  assert.ok(!plan.findings.some(e=>e.code==='CHILD_ADDED'));
+  assert.deepEqual(pass.apply(plan).holds,[]);
+  assert.ok(!f.parent().outcomes.some(o=>o.issue===11)); assert.ok(f.parent().outcomes.some(o=>o.issue===12));
+  assert.deepEqual(f.parent().attention.filter(e=>e.code==='CHILD_ADDED').map(e=>e.issue),[12]);
+});
+
+test('fix1 L2: failed adoption never records CHILD_ADDED',()=>{
+  const f=fixture(); f.github.addIssue(3,{parent:1}); const pass=f.pass(); const plan=pass.plan();
+  f.github.issues.get(3).parent=null;
+  assert.ok(pass.apply(plan).holds.some(e=>e.code==='GRAPH_FACT_STALE'));
+  assert.ok(!f.parent().outcomes.some(o=>o.issue===3));
+  assert.ok(!(f.parent().attention || []).some(e=>e.code==='CHILD_ADDED'));
+  assert.ok(!plan.findings.some(e=>e.code==='CHILD_ADDED'));
+});
+
+test('fix1 L3: watermark uses scan start, so a close during the scan is seen next pass',()=>{
+  const f=fixture(); const pass=f.pass(); const scan=pass.reader.graphPullRequests.bind(pass.reader);
+  pass.reader.graphPullRequests=(...args)=>{const rows=scan(...args); f.time(epoch+3600000); return rows;};
+  const plan=pass.plan(); pass.apply(plan);
+  assert.equal(f.parent().private.graph_pr_watermark,new Date(epoch).toISOString());
+  pr(f,20,{merged:true,mergedAt:'2026-11-08T00:30:00Z'}); f.time(epoch+2*3600000); f.run();
+  assert.ok(openCodes(f).includes('PR_WITHOUT_TASK'));
+});
+
+test('fix1 L4: a failed watermark write is held, with other effects retained and retried',()=>{
+  const f=fixture(); const pass=f.pass(); const plan=pass.plan(); const mutate=f.store.mutate.bind(f.store);
+  // Detect the watermark change before the mutating callback edits its argument.
+  f.store.mutate=(kind,number,options)=>mutate(kind,number,{...options,change:(doc,context)=>{
+    const before=doc.private?.graph_pr_watermark; const next=options.change(doc,context);
+    if(next?.private?.graph_pr_watermark && !before) throw new Error('fixture watermark write failure');
+    return next;
+  }});
+  const result=pass.apply(plan);
+  assert.ok(result.holds.some(e=>e.code==='STATE_WRITE_FAILED'));
+  assert.ok(result.results.some(e=>e.kind==='advance_pr_watermark' && e.outcome==='HELD'));
+  assert.ok(f.github.issues.get(2).body.includes('STATE')); assert.ok(!f.parent().private?.graph_pr_watermark);
+  f.store.mutate=mutate; assert.deepEqual(f.run().holds,[]); assert.ok(f.parent().private.graph_pr_watermark);
+});
+
+test('fix1 L7: owner-authored shard timing branches are excluded with a narrow prefix',()=>{
+  const f=fixture(); pr(f,20,{branch:'toolkit/shard-timings-abcdef0'});
+  pr(f,21,{branch:'toolkit/shard-timing-abcdef0'}); pr(f,22,{branch:'feature/toolkit/shard-timings-abcdef0'});
+  f.run(); assert.deepEqual(f.parent().attention.filter(e=>e.code==='PR_WITHOUT_TASK').map(e=>e.issue).sort((a,b)=>a-b),[21,22]);
+});
+
+test('fix1 H1: parent and task title references count without reading the parent timeline',()=>{
+  const f=fixture(); pr(f,20); f.github.prs.get(20).title='Fixes #1';
+  pr(f,21); f.github.prs.get(21).title='Refs #2';
+  f.run(); assert.ok(!openCodes(f).includes('PR_WITHOUT_TASK'));
+  assert.deepEqual(f.child(2).prs,[{number:21,state:'OPEN',merge_sha:null}]);
+});
+
 test('A2-1: one refresh copies closes, adopts native children and lists merged PRs', () => {
   const f = fixture([2,3,4]); f.close(2); f.close(3,'not_planned');
   f.github.addIssue(5,{title:'New outcome',parent:1});
@@ -75,10 +247,12 @@ test('A2-4: PR history includes closing refs, text refs and timeline; unrelated 
   const f = fixture();
   pr(f,20,{merged:true,mergedAt:'2026-11-06T00:00:00Z',body:'Refs #2'});
   pr(f,21,{merged:true,mergedAt:'2026-11-07T00:00:00Z'});
-  pr(f,22,{state:'CLOSED'}); pr(f,23,{merged:true}); pr(f,24,{merged:true});
+  pr(f,22,{state:'CLOSED'}); pr(f,24,{merged:true});
   pr(f,25); pr(f,26,{body:'Refs #1'}); pr(f,27); pr(f,28);
   f.github.prs.get(24).author='dependabot[bot]'; f.github.prs.get(27).author='github-actions[bot]'; f.github.prs.get(28).author='app/github-actions';
   f.github.issuePrLinks.set(2,{closing:[21],timeline:[22]});
+  f.run(); // Seed historic closes while discovering the original task history.
+  pr(f,23,{merged:true,mergedAt:'2026-11-08T01:00:00Z'});
   assert.deepEqual(f.run().holds,[]);
   assert.deepEqual(f.child(2).prs.map(p => p.number),[21,20,22]);
   assert.deepEqual(f.parent().attention.filter(e => e.code === 'PR_WITHOUT_TASK').map(e => e.issue).sort((a,b)=>a-b),[23,25]);
@@ -258,15 +432,18 @@ test('the locked CLI refresh copies facts and refuses terminal update patches fr
 });
 
 test('linking an orphan PR resolves its finding while an unanswered closed orphan remains visible',()=>{
-  const f=fixture(); pr(f,20); pr(f,21,{state:'CLOSED'}); f.run();
+  const f=fixture(); f.run(); pr(f,20); pr(f,21,{state:'CLOSED'}); f.github.prs.get(21).closedAt='2026-11-08T00:30:00Z'; f.run();
   f.github.prs.get(20).body='Refs #2'; f.time(epoch+3600000); f.run();
   assert.equal(f.parent().attention.find(e=>e.code==='PR_WITHOUT_TASK' && e.issue===20).state,'resolved');
   assert.equal(f.parent().attention.find(e=>e.code==='PR_WITHOUT_TASK' && e.issue===21).state,'new');
 });
 
-for(const [start,reason,want] of [['DONE','not_planned','RETIRED'],['RETIRED','completed','DONE']]) test(`close matrix: ${start} disagrees with GitHub ${reason}`,()=>{
+for(const [start,reason] of [['DONE','not_planned'],['RETIRED','completed']]) test(`close matrix: ${start} disagrees with GitHub ${reason}`,()=>{
   const f=fixture(); f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:start})});
-  f.close(2,reason); f.run(); assert.equal(f.child(2).lifecycle,want); assert.equal(f.child(2).before_close,start);
+  f.close(2,reason); const report=f.run(); assert.equal(f.child(2).lifecycle,start);
+  assert.ok(!f.child(2).before_close); assert.ok(!f.child(2).closed_by_sweep);
+  assert.ok(report.findings.some(e=>e.code==='CHILD_STATE_CONFLICT' && e.issue===2));
+  assert.ok(!openCodes(f).includes('CLOSED_WITHOUT_ACCEPTANCE'));
 });
 
 test('v1 documents upgrade only on changed writes; public v2 validates and rejects malformed history',()=>{

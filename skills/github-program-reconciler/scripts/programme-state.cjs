@@ -2613,7 +2613,7 @@ const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
     pullRequest(number: $number) {
-      number state isDraft merged headRefOid baseRefName mergeable
+      number state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
       commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) {
         pageInfo { hasNextPage }
         nodes {
@@ -2710,6 +2710,7 @@ class ProgrammeGraphReader {
     return {
       number: pr.number,
       state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
+      merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
       rollupOid: commit?.oid || null,
       complete: !rollup?.contexts?.pageInfo?.hasNextPage,
@@ -2753,8 +2754,9 @@ class ProgrammeGraphReader {
 
   // The refresh graph shares the discovery budget across lists, reference batches and detail reads.
   // Closed PRs are sorted by update time so a newly closed old PR cannot fall behind a watermark.
-  graphPullRequests(status, spend) {
+  graphPullRequests(status, spend, watermark = null) {
     const all = [];
+    const cutoff = status === 'closed' && watermark ? Date.parse(watermark) - 5 * 60000 : null;
     for (let page = 1; page <= 10; page += 1) {
       spend();
       const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=${status}&per_page=100&sort=updated&direction=desc&page=${page}`);
@@ -2763,7 +2765,11 @@ class ProgrammeGraphReader {
       for (const pr of response.json) {
         const item = graphPr(pr, this.repository);
         if (!item) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A PR history entry was incomplete.');
-        all.push({...item, body:pr.body || '', author:pr.user?.login || '', closed_at:pr.closed_at || pr.merged_at || null});
+        if (cutoff !== null && !Number.isFinite(Date.parse(pr.updated_at))) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The closed PR update time was not readable.');
+        // Keep a five-minute overlap for boundary updates and timestamp precision. The REST list
+        // is descending by updated_at, so nothing after this row can be newer than the cutoff.
+        if (cutoff !== null && Date.parse(pr.updated_at) < cutoff) return all;
+        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', closed_at:pr.closed_at || pr.merged_at || null});
       }
       if (response.json.length < 100) return all;
     }
@@ -3095,6 +3101,9 @@ const FOLD_FIELDS = ['gate', 'journals_seen', 'next_action'];
 const CLOSE_FIELDS = ['lifecycle', 'completed_at', 'before_close', 'closed_by_sweep'];
 // Source-watch uses the workflow token: plan-source-watch-pr-lifecycle.cjs records both spellings.
 const GRAPH_BOTS = new Set(['dependabot[bot]', 'github-actions[bot]', 'app/github-actions']);
+// The weekly timing refresh may use the owner's gh sign-in rather than an Actions token.
+const GRAPH_GENERATED_BRANCH_PREFIX = 'toolkit/shard-timings-';
+const excludedGraphPr = pr => Boolean(pr && (GRAPH_BOTS.has(pr.author) || pr.branch?.startsWith(GRAPH_GENERATED_BRANCH_PREFIX)));
 
 function graphPr(pr, repository) {
   const repo = pr.repository?.nameWithOwner || pr.base?.repo?.full_name;
@@ -3121,7 +3130,7 @@ function prHistory(entries) {
 function copyIssueLifecycle(doc, issue) {
   const next = clone(doc);
   const closedLifecycle = String(issue.state_reason || '').toUpperCase() === 'COMPLETED' ? 'DONE' : 'RETIRED';
-  if (issue.state === 'closed' && (doc.closed_by_sweep || doc.lifecycle !== closedLifecycle)) {
+  if (issue.state === 'closed' && (doc.closed_by_sweep || !TERMINAL_LIFECYCLES.includes(doc.lifecycle))) {
     if (!doc.closed_by_sweep) next.before_close = doc.lifecycle;
     next.lifecycle = closedLifecycle;
     next.completed_at = issue.closed_at;
@@ -3250,6 +3259,7 @@ class Reconciler {
       const known = new Set([parent.parent_issue,...parent.outcomes.map(outcome => outcome.issue)]);
       let order = Math.max(0,...parent.outcomes.map(outcome => outcome.order));
       for (const [nativeParent, subs] of subIssues) for (const sub of subs) {
+        if (nativeParent !== parent.parent_issue && registeredParents(this.binding).includes(nativeParent)) continue;
         if (known.has(sub.number) || registeredParents(this.binding).includes(sub.number)) continue;
         if (nativeParent !== parent.parent_issue && !parent.outcomes.some(outcome => outcome.issue === nativeParent)) continue;
         const issue = read(sub.number);
@@ -3285,7 +3295,7 @@ class Reconciler {
       const doc = children.get(outcome.issue)?.doc;
       return !isFinished(outcome, doc) && !doc?.pr?.number && !doc?.candidate?.branch;
     });
-    const references = prGraph ? prGraph.references : untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
+    const references = prGraph ? prGraph.openReferences : untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
     const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number, this.reader.comments(number)]));
     // Even an issue-scoped pass renders the whole parent, including every NOW task's comment time.
     for (const outcome of parent.outcomes) {
@@ -3299,53 +3309,85 @@ class Reconciler {
   discoverGraph(parent, outcomes, children, prs, prCache, readPr) {
     const discovery = new Map(); const histories = new Map();
     const selectedPrs = new Map();
-    let requests = 0; let complete = true; let listed = [];
+    // Take the boundary before any PR list read, never at planning completion: a close during
+    // this scan must remain eligible on the next one.
+    const scanStarted = this.now();
+    let requests = 0; let listsComplete = true; let listed = [];
     const watermark = parent.private?.graph_pr_watermark || null;
     const spend = () => { if (requests >= 60) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','PR discovery reached its sixty-request budget.'); requests++; };
-    const fail = error => { if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; complete = false; };
-    try { listed = [...this.reader.graphPullRequests('open',spend), ...this.reader.graphPullRequests('closed',spend)]; }
-    catch(error) { fail(error); }
+    const incomplete = (numbers, error) => {
+      if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error;
+      for (const number of numbers) discovery.set(number,{complete:false,detail:'PR discovery was incomplete; existing PR history is retained.'});
+    };
+    let openListed = []; let openComplete = true;
+    try { openListed = this.reader.graphPullRequests('open',spend); listed.push(...openListed); }
+    catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; openComplete=false; }
+    try { listed.push(...this.reader.graphPullRequests('closed',spend,watermark)); }
+    catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; }
     const references = referencedIssues(listed);
+    const openReferences = referencedIssues(openListed);
     const linked = new Set();
-    const all = [...outcomes.map(outcome=>outcome.issue),parent.parent_issue];
+    // The parent's timeline can be arbitrarily long and is not task-discovery evidence.
+    // Parent and task links in a PR's own title/body already identify it from the list reads.
+    for (const number of [parent.parent_issue,...outcomes.map(outcome=>outcome.issue)]) {
+      for (const pr of references.get(number) || []) linked.add(pr);
+    }
+    const all = outcomes.map(outcome=>outcome.issue);
     for (let start=0; start<all.length; start+=20) {
       const batch=all.slice(start,start+20);
       try {
         const links=this.reader.issuePullRequestLinks(batch,spend);
         for (const number of batch) {
           const link=links.get(number);
-          if (!link?.complete) { complete=false; continue; }
+          if (!link?.complete || !listsComplete) { incomplete([number],{}); continue; }
+          const prior = children.get(number)?.doc?.prs || [];
           const history=[...link.history,...listed.filter(pr=>(references.get(number)||[]).includes(pr.number))];
           const current=prs.get(number);
           if(current) {
             const listedCurrent=listed.find(pr=>pr.number===current.number);
             if(listedCurrent) history.push(listedCurrent);
           }
+          // Incremental list reads omit old closes. Reconfirm a saved terminal PR not covered by
+          // task links or the list, including its merge time so the saved order stays meaningful.
+          try {
+            for (const previous of prior.filter(pr=>pr.state !== 'OPEN')) {
+              if (history.some(pr=>pr.number===previous.number)) continue;
+              let item=listed.find(pr=>pr.number===previous.number);
+              if (!item) {
+                if (!prCache.has(previous.number)) spend();
+                const pr=readPr(previous.number);
+                item=pr && graphPr({...pr,merged:pr.state==='MERGED',mergedAt:pr.merged_at,mergeCommit:{oid:pr.merge_sha},repository:{nameWithOwner:this.binding.repository}},this.binding.repository);
+              }
+              if (!item) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','A saved PR history entry could not be confirmed.');
+              history.push(item);
+            }
+          } catch(error) { incomplete([number],error); continue; }
           history.forEach(pr=>linked.add(pr.number));
           histories.set(number,prHistory(history));
-          if (number === parent.parent_issue) continue;
           const candidates=mergedSelection(history.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at})));
           const result={complete:true,candidates}; discovery.set(number,result);
           const outcome=outcomes.find(outcome=>outcome.issue===number);
           if(backfillEligible(outcome,children.get(number)?.doc) && !children.get(number)?.doc?.closed_by_sweep && candidates.length) {
             const selected=candidates[0].number;
-            if(!prCache.has(selected)) spend();
-            const pr=readPr(selected);
-            if(pr?.state !== 'MERGED') throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','Selected merged PR was not confirmed.');
-            selectedPrs.set(number,pr);
-            result.backfill={expected_pr:null,expected_completed:true,expected_retired:false,selected,candidates,reason:'Greatest merge time, then higher PR number on an exact timestamp tie.'};
+            try {
+              if(!prCache.has(selected)) spend();
+              const pr=readPr(selected);
+              if(pr?.state !== 'MERGED') throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','Selected merged PR was not confirmed.');
+              selectedPrs.set(number,pr);
+              result.backfill={expected_pr:null,expected_completed:true,expected_retired:false,selected,candidates,reason:'Greatest merge time, then higher PR number on an exact timestamp tie.'};
+            } catch(error) { incomplete([number],error); }
           }
         }
-      } catch(error) { fail(error); }
+      } catch(error) { incomplete(batch,error); }
     }
-    if(!complete) for(const outcome of outcomes) discovery.set(outcome.issue,{complete:false,detail:'PR discovery was incomplete; existing PR history is retained.'});
-    else for(const [number,pr] of selectedPrs) prs.set(number,pr);
-    const withoutTask = complete ? listed.filter(pr=> !GRAPH_BOTS.has(pr.author) && !linked.has(pr.number)
-      && (pr.state==='OPEN' || !watermark || Date.parse(pr.closed_at) >= Date.parse(watermark))) : [];
+    const complete = listsComplete && [...discovery.values()].every(entry=>entry.complete);
+    for(const [number,pr] of selectedPrs) if(discovery.get(number)?.complete) prs.set(number,pr);
+    const withoutTask = complete ? listed.filter(pr=> !excludedGraphPr(pr) && !linked.has(pr.number)
+      && (pr.state==='OPEN' || watermark && Date.parse(pr.closed_at) > Date.parse(watermark))) : [];
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
-      && !GRAPH_BOTS.has(listed.find(pr=>pr.number===entry.issue)?.author)).map(entry=>entry.id);
+      && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
-    return {discovery,histories,references,withoutTask,holdWithoutTask,complete,advance,requests,watermark};
+    return {discovery,histories,openReferences,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -3425,7 +3467,7 @@ class Reconciler {
     const issue = observed.issues.get(outcome.issue);
     if (this.refreshFacts && issue && !issue.is_pull_request) child = copyIssueLifecycle(child, issue);
     if (observed.additions?.some(entry=>entry.issue === outcome.issue)) child.added_by_sweep = true;
-    if (observed.prGraph?.complete && observed.prGraph.histories.has(outcome.issue)) child.prs = observed.prGraph.histories.get(outcome.issue);
+    if (observed.prGraph?.discovery.get(outcome.issue)?.complete && observed.prGraph.histories.has(outcome.issue)) child.prs = observed.prGraph.histories.get(outcome.issue);
     // A finished outcome with no completion time takes the issue's close time, once.
     const closedAt = observed.issues.get(outcome.issue)?.closed_at;
     if (!child.completed_at && closedAt && (TERMINAL_LIFECYCLES.includes(child.lifecycle) || ['COMPLETED', 'RETIRED'].includes(outcome.class))) child.completed_at = closedAt;
@@ -3512,6 +3554,10 @@ class Reconciler {
       }
     }
     // Document versus issue.
+    if (this.refreshFacts && !desired.closed_by_sweep && TERMINAL_LIFECYCLES.includes(desired.lifecycle) && issue.state === 'closed'
+      && desired.lifecycle !== (String(issue.state_reason || '').toUpperCase() === 'COMPLETED' ? 'DONE' : 'RETIRED')) {
+      findings.push({code:'CHILD_STATE_CONFLICT',issue:issueNumber,detail:`controller state ${desired.lifecycle} disagrees with the issue close reason; the controller lifecycle is kept`});
+    }
     if ((desired.lifecycle === 'DONE' || this.refreshFacts && desired.lifecycle === 'RETIRED') && issue.state === 'open') findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: `the state document says ${desired.lifecycle} but the issue is open` });
     if (!['DONE', 'RETIRED'].includes(desired.lifecycle) && issue.state === 'closed') findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: `the issue is closed but the state document says ${desired.lifecycle}` });
     if (pr?.state === 'MERGED' && !TERMINAL_LIFECYCLES.includes(desired.lifecycle) && !completionAccepted(desired)) {
@@ -3793,9 +3839,19 @@ class Reconciler {
     const incompletePrHolds = [...observed.discovery].filter(([, discovery]) => discovery.complete === false)
       .map(([issue]) => findingId(FINDING_CODES.COMPLETED_PR_MISSING.source, 'COMPLETED_PR_MISSING', issue));
     const seen = () => findings.filter(finding => ATTENTION.has(finding.code) && (!only || finding.code === 'BODY_TOO_LARGE'));
-    if (!override) folds.push({ source: 'reconcile', complete: !only && (!observed.prGraph || observed.prGraph.complete), seen: seen(),
+    const refreshHolds = !this.refreshFacts ? (parent.attention || []).filter(entry => {
+      if (['CLOSED_WITHOUT_ACCEPTANCE','PR_WITHOUT_TASK'].includes(entry.code)) return true;
+      if (entry.code !== 'CHILD_STATE_CONFLICT') return false;
+      const doc=projected.get(entry.issue); const issue=observed.issues.get(entry.issue);
+      return doc?.lifecycle === 'RETIRED' && issue?.state === 'open'
+        || !doc?.closed_by_sweep && TERMINAL_LIFECYCLES.includes(doc?.lifecycle) && issue?.state === 'closed'
+        && doc.lifecycle !== (String(issue.state_reason || '').toUpperCase() === 'COMPLETED' ? 'DONE' : 'RETIRED');
+    }).map(entry=>entry.id) : [];
+    const unreadOpenPrHolds = observed.prGraph?.openComplete === false ? (parent.attention || []).filter(entry=>entry.code==='PR_UNTRACKED').map(entry=>entry.id) : [];
+    const adoptionHolds = (observed.additions || []).map(outcome=>findingId('reconcile','CHILD_ADDED',outcome.issue));
+    if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds,
-        ...(observed.prGraph?.holdWithoutTask || [])] });
+        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...(observed.prGraph?.holdWithoutTask || [])] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
@@ -3850,10 +3906,9 @@ class Reconciler {
     const effects = [];
     if (observed.additions.length) {
       effects.push({kind:'add_native_children',target:{issue:parent.parent_issue},outcomes:observed.additions});
-      findings.push(...observed.additions.map(outcome=>({code:'CHILD_ADDED',issue:outcome.issue})));
       parent = {...parent,outcomes:[...parent.outcomes,...observed.additions]};
     }
-    if (observed.prGraph?.advance) effects.push({kind:'advance_pr_watermark',target:{issue:parent.parent_issue},watermark:this.now()});
+    if (observed.prGraph?.advance) effects.push({kind:'advance_pr_watermark',target:{issue:parent.parent_issue},watermark:observed.prGraph.scanStarted});
     findings.push(...(observed.prGraph?.withoutTask || []).map(pr=>({code:'PR_WITHOUT_TASK',issue:pr.number})));
     this.diffParentLifecycle(parent, observed, effects, findings, holds);
     const desiredDocs = new Map();
@@ -4007,8 +4062,10 @@ class Reconciler {
     for (const effect of plan.effects.filter(entry=>entry.kind === 'add_native_children')) {
       requireRefresh();
       try {
+        let added=[];
         const result=mutateDoc('parent',parentNumber,{change:doc=>{
           const next=clone(doc);
+          added=[];
           for (const outcome of effect.outcomes) {
             if (doc.outcomes.some(entry=>entry.issue===outcome.issue)) continue;
             const observed=plan.observed.issues.get(outcome.issue);
@@ -4020,9 +4077,14 @@ class Reconciler {
               throw new ProgrammeError('GRAPH_FACT_STALE','Native membership changed after observation; refresh again.');
             }
             next.outcomes.push({...outcome,label:fresh.title,order:Math.max(0,...next.outcomes.map(entry=>entry.order))+1});
+            added.push({code:'CHILD_ADDED',issue:outcome.issue});
           }
+          // The catalogue entry and its notice commit together. A stale or failed add can never
+          // leave a notice for a task the refresh did not add.
+          next.attention=foldAttention(next.attention,{source:'reconcile',complete:false,seen:added,now:this.now()});
           return next;
         }});
+        if(result.outcome !== 'NOOP') plan.findings.push(...added);
         record(effect,result.outcome==='NOOP'?'NOOP':'DONE');
       } catch(error) {
         if(STOPS_PASS.has(error.code)) throw error;
@@ -4371,11 +4433,16 @@ class Reconciler {
     for(const effect of plan.effects.filter(entry=>entry.kind==='advance_pr_watermark')) {
       requireRefresh();
       if(!plan.complete || holds.length) {record(effect,'SKIPPED','incomplete pass keeps the prior watermark');continue;}
-      const result=mutateDoc('parent',parentNumber,{change:doc=>{
-        if(doc.private?.graph_pr_watermark && Date.parse(doc.private.graph_pr_watermark)>=Date.parse(effect.watermark)) return null;
-        doc.private={...doc.private,graph_pr_watermark:effect.watermark}; return doc;
-      }});
-      record(effect,result.outcome==='NOOP'?'NOOP':'DONE');
+      try {
+        const result=mutateDoc('parent',parentNumber,{change:doc=>{
+          if(doc.private?.graph_pr_watermark && Date.parse(doc.private.graph_pr_watermark)>=Date.parse(effect.watermark)) return null;
+          doc.private={...doc.private,graph_pr_watermark:effect.watermark}; return doc;
+        }});
+        record(effect,result.outcome==='NOOP'?'NOOP':'DONE');
+      } catch(error) {
+        if(STOPS_PASS.has(error.code)) throw error;
+        hold(effect,error.code || 'STATE_WRITE_FAILED',error.message); record(effect,'HELD',error.message);
+      }
     }
     return { results, holds, attention: attentionLine(parentDoc.attention, this.now()) };
   }

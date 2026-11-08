@@ -207,9 +207,12 @@ class FakeGitHub {
       const page = Number(params.get('page') || 1);
       const closed = params.get('state') === 'closed';
       const listed = [...this.prs.values()].filter(pr => closed ? pr.merged || pr.state === 'CLOSED' : !pr.merged && (pr.state === 'OPEN' || pr.state === 'DRAFT'));
-      if (closed) listed.sort((a, b) => b.number - a.number);
-      return ok(200, listed.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, body: pr.body, draft: pr.isDraft,
+      const updated = pr => pr.updated_at || pr.mergedAt || pr.closedAt || '2026-11-08T00:00:00Z';
+      if (params.get('sort') === 'updated') listed.sort((a,b) => Date.parse(updated(b))-Date.parse(updated(a)) || b.number-a.number);
+      else if (closed) listed.sort((a, b) => b.number - a.number);
+      return ok(200, listed.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, title: pr.title || '', body: pr.body, draft: pr.isDraft,
         state: pr.merged || pr.state === 'CLOSED' ? 'closed' : 'open', closed_at: pr.mergedAt || pr.closedAt || '2026-11-08T00:00:00Z',
+        updated_at: updated(pr), head: {ref: pr.branch || ''},
         user: { login: pr.author || 'fixture-owner' }, merge_commit_sha: pr.merged ? pr.head : null,
         merged_at: pr.mergedAt, base: { repo: { full_name: this.repository } } })));
     }
@@ -298,7 +301,7 @@ class FakeGitHub {
         const links = this.issuePrLinks.get(Number(number)) || {};
         repository[alias] = this.issues.has(Number(number)) ? {
           closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node) },
-          timelineItems: { pageInfo: { hasNextPage: links.timelineTruncated || false }, nodes: (links.timeline || []).map(value => ({ source: node(value) })) },
+          timelineItems: { pageInfo: { hasNextPage: links.timelineTruncated || (links.timeline || []).length > 100 }, nodes: (links.timeline || []).slice(0,100).map(value => ({ source: node(value) })) },
         } : null;
       }
       return ok(200, { data: { repository } });
@@ -307,6 +310,7 @@ class FakeGitHub {
     if (!pr) return ok(200, { data: { repository: { pullRequest: null } } });
     return ok(200, { data: { repository: { defaultBranchRef: { name: 'main' }, pullRequest: {
       number: pr.number, state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: pr.base || 'main', mergeable: 'MERGEABLE',
+      mergedAt: pr.mergedAt, mergeCommit: pr.merged ? {oid:pr.head} : null,
       commits: { nodes: [{ commit: { oid: pr.rollupOid, statusCheckRollup: { state: 'SUCCESS', contexts: { pageInfo: { hasNextPage: pr.hasNextPage }, nodes: pr.contexts } } } }] },
     } } } });
   }

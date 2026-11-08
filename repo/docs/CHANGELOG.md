@@ -5,18 +5,22 @@
 ### Added
 
 - Refresh copies GitHub closes and reopens into programme child state and adopts newly observed native tasks at the end of Later.
-- Task pages and the programme graph show all discovered pull requests, including merged commit links. Unlinked pull requests raise an attention finding, excluding known bots.
+- Task pages and the programme graph show all discovered pull requests, including merged commit links. Unlinked open pull requests and those closed after the first complete scan raise an attention finding, excluding known bots and generated test-timing branches starting with `toolkit/shard-timings-`.
 - Findings left new for 24 hours appear in a waiting list for the owner.
 
 ### Changed
 
-- Child state uses a versioned schema; existing child documents remain readable and upgrade on their next changed write. Older readers hold rather than misread the new documents.
-- Refresh shares a bounded PR discovery budget and retains its history and private close watermark when discovery is incomplete.
+- Child state uses a versioned schema; existing child documents remain readable and upgrade on their next changed write. Older readers hold rather than misread the new documents. Update Toolkit on a computer reporting unknown sweep fields, the old child schema requirement, or the parent error `attention[n].code is not a known finding code`.
+- Refresh shares a bounded PR discovery budget; native sub-issue observations are outside it. Task discovery gaps retain the affected history while unrelated findings can resolve, and the parent timeline does not gate PR discovery.
+- The first complete PR scan seeds a watermark without reporting historic closes. Later closed scans stop at that boundary with a five-minute overlap, retain discovered task history and use the scan start time for the next watermark. Failed watermark writes hold for retry.
 
 ### Fixed
 
 - A copied completed close without accepted completion now raises a specific finding without inventing review or user acceptance.
 - Reopened sweep-closed tasks regain their previous lifecycle once; an unchanged second refresh writes nothing.
+- Controller-set terminal lifecycles are kept; disagreement with the issue close reason raises a state conflict.
+- Ordinary reconciliation keeps refresh-owned findings and their acknowledgements until refresh checks them again. Untracked-task findings use open pull requests only.
+- Native children of another registered programme parent are skipped during adoption planning, and an added-child notice is recorded only with a successful catalogue addition.
 
 ## 3.55.1
 
