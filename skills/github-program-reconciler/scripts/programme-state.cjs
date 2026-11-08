@@ -3293,7 +3293,8 @@ class Reconciler {
     this.now = now || (() => new Date().toISOString());
     this.pass = pass || new RefreshBudget();
     this.planning = false;
-    this.reader = new Proxy(reader, { get: (target, key) => {
+    // A reconciler built only for its settings has no reader to wrap.
+    this.reader = reader === null || typeof reader !== 'object' ? reader : new Proxy(reader, { get: (target, key) => {
       const member = target[key];
       return typeof member !== 'function' ? member : (...args) => {
         if (this.planning) this.pass.planning();
