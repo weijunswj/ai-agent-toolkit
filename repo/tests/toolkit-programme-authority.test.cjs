@@ -440,7 +440,7 @@ test('secret-shaped values are refused anywhere in a state document or binding, 
 test('runtime validation matches the schemas on unknown and missing nested fields', () => {
   const ajv = new Ajv2020({ strict: false, allErrors: true });
   const schema = name => JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'contracts', 'programme-state', name), 'utf8'));
-  const validateChild = ajv.compile(schema('child-state-v1.schema.json'));
+  const validateChild = ajv.compile(schema('child-state-v2.schema.json'));
   const validateParent = ajv.compile(schema('parent-state-v1.schema.json'));
   const base = () => state.newChild({ repository: 'acme/app', outcome: CATALOGUE[0] });
   const mutations = [

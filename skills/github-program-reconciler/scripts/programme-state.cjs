@@ -31,6 +31,7 @@ const SCHEMA = Object.freeze({
   bindingV2: 'toolkit.programme-binding.v2',
   parent: 'toolkit.programme-state.parent.v1',
   child: 'toolkit.programme-state.child.v1',
+  childV2: 'toolkit.programme-state.child.v2',
   journal: 'toolkit.programme-journal.v1',
 });
 const BINDING_FILE = path.join('.github', 'toolkit-programme.json');
@@ -113,6 +114,9 @@ function canonicalText(doc) {
 
 function contentDigest(doc) {
   const copy = { ...doc };
+  if (isObject(copy.private) && Object.hasOwn(copy.private,'graph_pr_watermark')) {
+    copy.private = {...copy.private}; delete copy.private.graph_pr_watermark;
+  }
   for (const key of UNHASHED) delete copy[key];
   return sha256(JSON.stringify(canonical(copy)));
 }
@@ -123,14 +127,15 @@ function sameState(previous, next) {
   return contentDigest(previous) === contentDigest(next)
     && JSON.stringify(canonical(previous.pending_effects || [])) === JSON.stringify(canonical(next.pending_effects || []))
     && JSON.stringify(canonical(previous.journals_seen || {})) === JSON.stringify(canonical(next.journals_seen || {}))
-    && JSON.stringify(canonical(previous.attention || [])) === JSON.stringify(canonical(next.attention || []));
+    && JSON.stringify(canonical(previous.attention || [])) === JSON.stringify(canonical(next.attention || []))
+    && previous.private?.graph_pr_watermark === next.private?.graph_pr_watermark;
 }
 
 function check(errors, condition, message) { if (!condition) errors.push(message); }
 
 // Fields each object may and must hold, as the schemas' additionalProperties: false and required.
 const SHAPES = {
-  child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile'], optional: ['volatile', 'journals_seen', 'completed_at'] },
+  child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'], optional: ['volatile', 'journals_seen', 'completed_at', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'] },
   parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'private', 'volatile'], optional: ['volatile', 'attention'] },
   finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics'], optional: ['diagnostics'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
@@ -213,7 +218,7 @@ function validateCommon(errors, doc, schema) {
   if (!isObject(doc)) return false;
   checkShape(errors, doc, schema === SCHEMA.parent ? 'parent' : 'child', 'document');
   screenSecrets(errors, doc, 'document');
-  check(errors, doc.schema === schema, `schema must be ${schema}`);
+  check(errors, doc.schema === schema || (schema === SCHEMA.child && doc.schema === SCHEMA.childV2), `schema must be ${schema}${schema === SCHEMA.child ? ` or ${SCHEMA.childV2}; update Toolkit before reading a newer child schema` : ''}`);
   check(errors, REPO.test(String(doc.repository || '')), 'repository must be owner/name');
   check(errors, isInt(doc.revision), 'revision must be a whole number');
   validateFence(errors, doc.fence);
@@ -294,6 +299,10 @@ const FINDING_CODES = Object.freeze({
   CHECKS_RED: { source: 'reconcile', next_action: 'Controller: have the builder fix the failing checks' },
   READY_TO_CLOSE: { source: 'reconcile', next_action: 'Controller: close the issue as completed if every criterion is met' },
   CHILD_STATE_CONFLICT: { source: 'reconcile', next_action: 'Controller: bring the state document and the issue in line' },
+  CLOSED_WITHOUT_ACCEPTANCE: { source: 'reconcile', next_action: 'Controller: record G2 and UAT, or confirm the close' },
+  CHILD_REOPENED: { source: 'reconcile', next_action: 'Controller: confirm the restored task lifecycle' },
+  CHILD_ADDED: { source: 'reconcile', next_action: 'Controller: confirm the new task or move it in the catalogue' },
+  PR_WITHOUT_TASK: { source: 'reconcile', next_action: 'Controller: link the PR to a task or dispose with a reason' },
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
@@ -400,7 +409,7 @@ function validateAttention(errors, attention) {
 // Codes the reconciler reports once, on the pass that first reads a journal; the next pass no longer
 // sees them although nobody acted. The reconcile pass keeps such a finding open (`hold`) until it is
 // answered or its condition is really gone (see Reconciler.oneTimeHolds).
-const ONE_TIME_CODES = new Set(['RETURN_CAPTURED', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'STALE_ASSIGNMENT']);
+const ONE_TIME_CODES = new Set(['RETURN_CAPTURED', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'STALE_ASSIGNMENT', 'CHILD_REOPENED', 'CHILD_ADDED']);
 
 // What a run saw, as findings: [{ code, issue, head? }]. Returns the next attention list, or the same
 // list (===) when nothing changes, so an unchanged run writes nothing. A run that was not complete
@@ -495,9 +504,15 @@ function attentionCounts(attention) {
 }
 
 // `Attention: <n> new, <m> acknowledged` or `Attention: clear`.
-function attentionLine(attention) {
+function waitingFindings(attention, now) {
+  const time = Date.parse(now);
+  return openFindings(attention).filter(entry => entry.state === 'new' && time - Date.parse(entry.first_seen) >= 24 * 60 * 60 * 1000);
+}
+
+function attentionLine(attention, now = new Date().toISOString()) {
   const counts = attentionCounts(attention);
-  return counts.new || counts.acknowledged ? `Attention: ${counts.new} new, ${counts.acknowledged} acknowledged` : 'Attention: clear';
+  const waiting = waitingFindings(attention, now).length;
+  return counts.new || counts.acknowledged ? `Attention: ${counts.new} new, ${counts.acknowledged} acknowledged${waiting ? `, ${waiting} waiting on you` : ''}` : 'Attention: clear';
 }
 
 // Open findings, newest first.
@@ -518,6 +533,20 @@ function attentionDigest(attention) {
 function validateChild(doc) {
   const errors = [];
   if (validateCommon(errors, doc, SCHEMA.child)) {
+    const v2Fields = ['prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'];
+    if (doc.schema === SCHEMA.child) check(errors, v2Fields.every(key => !Object.hasOwn(doc, key)), 'sweep fields require the v2 child schema; update Toolkit');
+    if (doc.prs !== undefined) {
+      check(errors, Array.isArray(doc.prs), 'prs must be a list');
+      const numbers = new Set();
+      for (const pr of Array.isArray(doc.prs) ? doc.prs : []) {
+        checkShape(errors, pr, {all:['number','state','merge_sha']}, 'prs entry');
+        check(errors, isObject(pr) && isInt(pr.number, 1) && !numbers.has(pr.number) && ['OPEN','MERGED','CLOSED'].includes(pr.state)
+          && optional(pr.merge_sha, isSha) && (pr.state === 'MERGED' || pr.merge_sha === null), 'prs entries must have unique numbers, fixed states and a merge SHA or null');
+        numbers.add(pr?.number);
+      }
+    }
+    check(errors, doc.before_close === undefined || LIFECYCLES.includes(doc.before_close), 'before_close must be a lifecycle');
+    for (const key of ['closed_by_sweep','added_by_sweep']) check(errors, doc[key] === undefined || typeof doc[key] === 'boolean', `${key} must be boolean`);
     check(errors, isInt(doc.issue, 1), 'issue must be an issue number');
     check(errors, LIFECYCLES.includes(doc.lifecycle), `lifecycle must be one of ${LIFECYCLES.join(', ')}`);
     check(errors, optional(doc.release, isText), 'release must be text or null');
@@ -769,12 +798,13 @@ function lifecycleForClass(cls) {
 function newChild({ repository, outcome }) {
   const lifecycle = lifecycleForClass(outcome.class);
   return {
-    schema: SCHEMA.child, repository, issue: outcome.issue, revision: 0,
+    schema: SCHEMA.childV2, repository, issue: outcome.issue, revision: 0,
     fence: { epoch: 0, holder_prefix: null, holder_session: null },
     lifecycle, release: null,
     gate: { role: null, state: null, session_id: null, route: null, returns: [] },
     candidate: { branch: null, head: null, tree: null, base: null },
     pr: { number: null, state: null, head: null, checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: null } },
+    prs: [],
     uat: { state: null, at_head: null },
     review: { state: null, verdicts: [] },
     blockers: [],
@@ -1250,6 +1280,7 @@ function reviewText(child) {
 }
 
 function prText(child) {
+  if (child.prs?.length) return child.prs.map(pr => `#${pr.number} ${pr.state}${pr.state === 'MERGED' ? ` ${shaLink(child.repository, pr.merge_sha)}` : ''}`).join(', ');
   if (!child.pr.number) return '-';
   return `#${child.pr.number} ${child.pr.state || ''}`.trim();
 }
@@ -1362,7 +1393,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const cls = graphClass(outcome, child);
-    const pr = !isRetired(outcome, child) && child?.pr.number ? `#${child.pr.number}` : '-';
+    const pr = child?.prs?.length ? prText(child) : !isRetired(outcome, child) && child?.pr.number ? `#${child.pr.number}` : '-';
     const issue = issues.get(outcome.issue);
     return `| ${taskName(outcome, issue)} | ${descriptionText(outcome)} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} | ${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])} |`;
   });
@@ -1449,7 +1480,7 @@ function ownerWait(child) {
 // The generated CURRENT summary: the tasks in progress, in Programme Graph order, each with its gate,
 // PR, next step and anything waiting on the owner, then the top LATER task to start next. Queued
 // work shows in the graph below it.
-function renderCurrentBlockBody(parent, children, issues = new Map()) {
+function renderCurrentBlockBody(parent, children, issues = new Map(), now = new Date().toISOString()) {
   const rows = graphOrder(parent, children, issues).map(outcome => ({ outcome, child: children.get(outcome.issue) }));
   const working = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS').map(row => {
     const parts = [row.child.gate.role, row.child.pr.number ? `PR #${row.child.pr.number}` : null].filter(Boolean).join(', ');
@@ -1467,19 +1498,22 @@ function renderCurrentBlockBody(parent, children, issues = new Map()) {
     '',
     `**Start next:** ${next ? `${taskName(next.outcome, issues.get(next.outcome.issue))} (#${next.outcome.issue})` : 'None.'}`,
     '',
-    ...attentionBlockLines(parent.attention),
+    ...attentionBlockLines(parent.attention, now),
   ].join('\n');
 }
 
 // The attention summary on the parent page, so a surface without `gh` can read it: the line, then up
 // to ATTENTION_SHOWN open findings, newest first.
 const ATTENTION_SHOWN = 10;
-function attentionBlockLines(attention) {
+function attentionBlockLines(attention, now) {
   const open = openFindings(attention);
+  const waiting = waitingFindings(attention, now);
   return [
-    `**${attentionLine(attention)}**`,
+    `**${attentionLine(attention, now)}**`,
     ...open.slice(0, ATTENTION_SHOWN).map(entry => `- ${entry.state === 'acknowledged' ? '(acknowledged) ' : ''}${findingText(entry)}`),
     ...(open.length > ATTENTION_SHOWN ? [`- and ${open.length - ATTENTION_SHOWN} more: run programme.cjs attention`] : []),
+    ...(waiting.length ? ['', '**Waiting on you**', ...waiting.slice(0, ATTENTION_SHOWN).map(entry => `- ${findingText(entry)}`),
+      ...(waiting.length > ATTENTION_SHOWN ? [`- and ${waiting.length - ATTENTION_SHOWN} more: run programme.cjs attention`] : [])] : []),
   ];
 }
 
@@ -1986,6 +2020,7 @@ class StateStore {
   write(kind, number, next, { sha, previous }) {
     if (previous && sameState(previous, next)) return { outcome: 'NOOP', doc: previous, sha };
     const doc = clone(next);
+    if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -2501,6 +2536,7 @@ class BranchStateStore extends StateStore {
       throw new ProgrammeError('STATE_BRANCH_MISSING', `The state branch ${STATE_BRANCH} was never created, so nothing was written. Only programme.cjs migrate-state --apply creates it.`);
     }
     const doc = clone(next);
+    if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -2618,7 +2654,14 @@ class ProgrammeGraphReader {
     if (response.status === 404 || response.status === 410) return null;
     if (response.status !== 200) throw ghFailure(response, `Reading issue ${number}`);
     const issue = response.json;
+    const complete = isObject(issue) && issue.number === number && isInt(issue.id, 1) && ['open','closed'].includes(issue.state)
+      && (typeof issue.title === 'string') && (typeof issue.body === 'string' || issue.body === null)
+      && (issue.state !== 'closed' || Boolean(issue.closed_at && !Number.isNaN(Date.parse(issue.closed_at))));
+    /* A partial response remains displayable to the existing read-only reconciler. Refresh alone
+       requires complete lifecycle evidence, before it plans any copying effects. */
+    if (!isObject(issue)) throw new ProgrammeError('GH_FAILED',`Issue ${number} was unreadable.`);
     return {
+      complete,
       number: issue.number, id: issue.id, state: issue.state, state_reason: issue.state_reason || null,
       title: issue.title, body: issue.body || '', updated_at: issue.updated_at, closed_at: issue.closed_at || null,
       is_pull_request: Boolean(issue.pull_request),
@@ -2708,16 +2751,35 @@ class ProgrammeGraphReader {
     throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The closed PR scan reached ten full pages.');
   }
 
+  // The refresh graph shares the discovery budget across lists, reference batches and detail reads.
+  // Closed PRs are sorted by update time so a newly closed old PR cannot fall behind a watermark.
+  graphPullRequests(status, spend) {
+    const all = [];
+    for (let page = 1; page <= 10; page += 1) {
+      spend();
+      const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=${status}&per_page=100&sort=updated&direction=desc&page=${page}`);
+      if (response.status !== 200) throw ghFailure(response, 'Reading programme PR history');
+      if (!Array.isArray(response.json)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The PR list was not readable.');
+      for (const pr of response.json) {
+        const item = graphPr(pr, this.repository);
+        if (!item) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A PR history entry was incomplete.');
+        all.push({...item, body:pr.body || '', author:pr.user?.login || '', closed_at:pr.closed_at || pr.merged_at || null});
+      }
+      if (response.json.length < 100) return all;
+    }
+    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The programme PR scan reached ten full pages.');
+  }
+
   // At most twenty aliases, each with two bounded issue connections. No partial GraphQL data is used.
   issuePullRequestLinks(numbers, spend) {
     const [owner, name] = this.repository.split('/');
     const fields = numbers.map(number => `i${number}: issue(number: ${number}) {
       closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
-        pageInfo { hasNextPage } nodes { number merged mergedAt repository { nameWithOwner } }
+        pageInfo { hasNextPage } nodes { number state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
       }
       timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
         pageInfo { hasNextPage } nodes { ... on CrossReferencedEvent {
-          source { __typename ... on PullRequest { number merged mergedAt repository { nameWithOwner } } }
+          source { __typename ... on PullRequest { number state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
         } }
       }
     }`).join('\n');
@@ -2735,7 +2797,9 @@ class ProgrammeGraphReader {
       const timeline = issue?.timelineItems;
       const complete = [closing, timeline].every(connection => connection?.pageInfo?.hasNextPage === false && Array.isArray(connection.nodes));
       const nodes = complete ? [...closing.nodes, ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest')] : [];
-      return [number, { complete, candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(Boolean) }];
+      const history = nodes.map(node => graphPr(node, this.repository)).filter(Boolean);
+      return [number, { complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
+        candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(Boolean), history }];
     }));
   }
 
@@ -3028,12 +3092,58 @@ function registeredParents(binding) {
 }
 // Child fields the journal fold owns; apply re-folds them on the document it reads, never copies them.
 const FOLD_FIELDS = ['gate', 'journals_seen', 'next_action'];
+const CLOSE_FIELDS = ['lifecycle', 'completed_at', 'before_close', 'closed_by_sweep'];
+// Source-watch uses the workflow token: plan-source-watch-pr-lifecycle.cjs records both spellings.
+const GRAPH_BOTS = new Set(['dependabot[bot]', 'github-actions[bot]', 'app/github-actions']);
+
+function graphPr(pr, repository) {
+  const repo = pr.repository?.nameWithOwner || pr.base?.repo?.full_name;
+  if (!isInt(pr.number,1) || repo?.toLowerCase() !== repository.toLowerCase()) return null;
+  const merged = pr.merged === true || Boolean(pr.merged_at);
+  const state = merged ? 'MERGED' : String(pr.state || '').toUpperCase();
+  if (!['OPEN','CLOSED','DRAFT'].includes(state) && !merged) return null;
+  const mergeSha = pr.mergeCommit?.oid || pr.merge_commit_sha || null;
+  if (mergeSha !== null && !isSha(mergeSha)) return null;
+  if (merged && !Number.isFinite(Date.parse(pr.mergedAt || pr.merged_at))) return null;
+  return {number:pr.number, state:state === 'DRAFT' ? 'OPEN' : state, merge_sha:merged ? mergeSha : null,
+    merged_at:pr.mergedAt || pr.merged_at || null};
+}
+
+function prHistory(entries) {
+  const unique = new Map(entries.map(pr => [pr.number,pr]));
+  const rank = {OPEN:0,MERGED:1,CLOSED:2};
+  return [...unique.values()].sort((a,b) => rank[a.state]-rank[b.state]
+    || (a.state === 'MERGED' ? Date.parse(b.merged_at)-Date.parse(a.merged_at) : 0) || b.number-a.number)
+    .map(({number,state,merge_sha}) => ({number,state,merge_sha}));
+}
+
+// Only refresh uses this transformation, from a complete issue observation in its own pass.
+function copyIssueLifecycle(doc, issue) {
+  const next = clone(doc);
+  const closedLifecycle = String(issue.state_reason || '').toUpperCase() === 'COMPLETED' ? 'DONE' : 'RETIRED';
+  if (issue.state === 'closed' && (doc.closed_by_sweep || doc.lifecycle !== closedLifecycle)) {
+    if (!doc.closed_by_sweep) next.before_close = doc.lifecycle;
+    next.lifecycle = closedLifecycle;
+    next.completed_at = issue.closed_at;
+    next.closed_by_sweep = true;
+  } else if (issue.state === 'open' && doc.closed_by_sweep === true) {
+    next.lifecycle = doc.before_close || 'ACTIVE';
+    delete next.before_close;
+    delete next.closed_by_sweep;
+    delete next.completed_at;
+  }
+  if (!next.completed_at && issue.state === 'closed' && TERMINAL_LIFECYCLES.includes(next.lifecycle)) next.completed_at = issue.closed_at;
+  return next;
+}
 
 const EFFECT_TEXT = {
   set_parent_state: effect => `${effect.target.state === 'open' ? 'Reopen' : 'Complete'} the programme parent #${effect.target.issue} from every native descendant's state`,
   post_parent_repair: effect => `Report the repaired parent closure on #${effect.target.issue}`,
   create_state: effect => `Create the state document for #${effect.target.issue}`,
   update_state: effect => `Update the state document for #${effect.target.issue} (${effect.fields.join(', ')})`,
+  copy_child_lifecycle: effect => `Copy the observed issue lifecycle for #${effect.target.issue}`,
+  add_native_children: effect => `Add ${effect.outcomes.length} observed native task(s) to #${effect.target.issue}'s catalogue`,
+  advance_pr_watermark: effect => `Record the complete PR scan on #${effect.target.issue}`,
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
@@ -3103,7 +3213,7 @@ class Reconciler {
     }
   }
 
-  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null }) {
+  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null, refreshFacts = false }) {
     this.store = store;
     // The clock attention findings are dated by (the store's clock dates only its own commits).
     this.now = now || (() => new Date().toISOString());
@@ -3113,6 +3223,7 @@ class Reconciler {
     this.writer = writer;
     this.toolkitVersion = toolkitVersion;
     this.threshold = threshold;
+    this.refreshFacts = refreshFacts;
   }
 
   loadParent(parentOverride) {
@@ -3123,12 +3234,31 @@ class Reconciler {
   observe(parent, children, only) {
     const outcomes = parent.outcomes.filter(outcome => !only || outcome.issue === only);
     const issues = new Map();
-    const read = number => { if (!issues.has(number)) issues.set(number, this.reader.issue(number)); return issues.get(number); };
+    const read = number => {
+      if (!issues.has(number)) issues.set(number, this.reader.issue(number));
+      const issue=issues.get(number);
+      if (this.refreshFacts && issue && issue.complete !== true) throw new ProgrammeError('GH_FAILED',`Issue ${number} was not read completely; no lifecycle observation is usable.`);
+      return issue;
+    };
     read(parent.parent_issue);
     for (const outcome of outcomes) read(outcome.issue);
-    const parents = new Set([parent.parent_issue, ...outcomes.map(outcome => outcome.parent).filter(Boolean)]);
+    const parents = new Set([parent.parent_issue, ...outcomes.map(outcome => outcome.parent).filter(Boolean), ...(this.refreshFacts && !only ? outcomes.map(outcome => outcome.issue) : [])]);
     for (const number of parents) read(number);
     const subIssues = new Map([...parents].filter(number => issues.get(number)).map(number => [number, this.reader.subIssues(number)]));
+    const additions = [];
+    if (this.refreshFacts && !only) {
+      const known = new Set([parent.parent_issue,...parent.outcomes.map(outcome => outcome.issue)]);
+      let order = Math.max(0,...parent.outcomes.map(outcome => outcome.order));
+      for (const [nativeParent, subs] of subIssues) for (const sub of subs) {
+        if (known.has(sub.number) || registeredParents(this.binding).includes(sub.number)) continue;
+        if (nativeParent !== parent.parent_issue && !parent.outcomes.some(outcome => outcome.issue === nativeParent)) continue;
+        const issue = read(sub.number);
+        if (!issue || issue.is_pull_request || issue.parent !== nativeParent) continue;
+        known.add(sub.number);
+        const outcome = {issue:sub.number,label:issue.title,class:'COMMITTED',parent:nativeParent,order:++order};
+        additions.push(outcome); outcomes.push(outcome);
+      }
+    }
     const blockedBy = new Map();
     const prs = new Map();
     const prCache = new Map();
@@ -3143,7 +3273,8 @@ class Reconciler {
       const number = doc?.pr?.number || (!isFinished(outcome, doc) && doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
       if (number) prs.set(outcome.issue, readPr(number));
     }
-    const discovery = this.discoverMerged(outcomes.filter(outcome => backfillEligible(outcome, children.get(outcome.issue)?.doc)), prs, prCache, readPr);
+    const prGraph = this.refreshFacts ? this.discoverGraph(parent, outcomes, children, prs, prCache, readPr) : null;
+    const discovery = prGraph ? prGraph.discovery : this.discoverMerged(outcomes.filter(outcome => backfillEligible(outcome, children.get(outcome.issue)?.doc)), prs, prCache, readPr);
     const journals = new Map();
     for (const outcome of outcomes) {
       const doc = children.get(outcome.issue)?.doc;
@@ -3154,7 +3285,7 @@ class Reconciler {
       const doc = children.get(outcome.issue)?.doc;
       return !isFinished(outcome, doc) && !doc?.pr?.number && !doc?.candidate?.branch;
     });
-    const references = untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
+    const references = prGraph ? prGraph.references : untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
     const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number, this.reader.comments(number)]));
     // Even an issue-scoped pass renders the whole parent, including every NOW task's comment time.
     for (const outcome of parent.outcomes) {
@@ -3162,7 +3293,59 @@ class Reconciler {
     }
     const prPages = new Map();
     for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
-    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery };
+    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery, additions, prGraph };
+  }
+
+  discoverGraph(parent, outcomes, children, prs, prCache, readPr) {
+    const discovery = new Map(); const histories = new Map();
+    const selectedPrs = new Map();
+    let requests = 0; let complete = true; let listed = [];
+    const watermark = parent.private?.graph_pr_watermark || null;
+    const spend = () => { if (requests >= 60) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','PR discovery reached its sixty-request budget.'); requests++; };
+    const fail = error => { if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; complete = false; };
+    try { listed = [...this.reader.graphPullRequests('open',spend), ...this.reader.graphPullRequests('closed',spend)]; }
+    catch(error) { fail(error); }
+    const references = referencedIssues(listed);
+    const linked = new Set();
+    const all = [...outcomes.map(outcome=>outcome.issue),parent.parent_issue];
+    for (let start=0; start<all.length; start+=20) {
+      const batch=all.slice(start,start+20);
+      try {
+        const links=this.reader.issuePullRequestLinks(batch,spend);
+        for (const number of batch) {
+          const link=links.get(number);
+          if (!link?.complete) { complete=false; continue; }
+          const history=[...link.history,...listed.filter(pr=>(references.get(number)||[]).includes(pr.number))];
+          const current=prs.get(number);
+          if(current) {
+            const listedCurrent=listed.find(pr=>pr.number===current.number);
+            if(listedCurrent) history.push(listedCurrent);
+          }
+          history.forEach(pr=>linked.add(pr.number));
+          histories.set(number,prHistory(history));
+          if (number === parent.parent_issue) continue;
+          const candidates=mergedSelection(history.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at})));
+          const result={complete:true,candidates}; discovery.set(number,result);
+          const outcome=outcomes.find(outcome=>outcome.issue===number);
+          if(backfillEligible(outcome,children.get(number)?.doc) && !children.get(number)?.doc?.closed_by_sweep && candidates.length) {
+            const selected=candidates[0].number;
+            if(!prCache.has(selected)) spend();
+            const pr=readPr(selected);
+            if(pr?.state !== 'MERGED') throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','Selected merged PR was not confirmed.');
+            selectedPrs.set(number,pr);
+            result.backfill={expected_pr:null,expected_completed:true,expected_retired:false,selected,candidates,reason:'Greatest merge time, then higher PR number on an exact timestamp tie.'};
+          }
+        }
+      } catch(error) { fail(error); }
+    }
+    if(!complete) for(const outcome of outcomes) discovery.set(outcome.issue,{complete:false,detail:'PR discovery was incomplete; existing PR history is retained.'});
+    else for(const [number,pr] of selectedPrs) prs.set(number,pr);
+    const withoutTask = complete ? listed.filter(pr=> !GRAPH_BOTS.has(pr.author) && !linked.has(pr.number)
+      && (pr.state==='OPEN' || !watermark || Date.parse(pr.closed_at) >= Date.parse(watermark))) : [];
+    const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
+      && !GRAPH_BOTS.has(listed.find(pr=>pr.number===entry.issue)?.author)).map(entry=>entry.id);
+    const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
+    return {discovery,histories,references,withoutTask,holdWithoutTask,complete,advance,requests,watermark};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -3239,6 +3422,10 @@ class Reconciler {
   desiredChild(outcome, existing, observed) {
     let child = existing ? clone(existing) : newChild({ repository: this.binding.repository, outcome });
     let checks = null;
+    const issue = observed.issues.get(outcome.issue);
+    if (this.refreshFacts && issue && !issue.is_pull_request) child = copyIssueLifecycle(child, issue);
+    if (observed.additions?.some(entry=>entry.issue === outcome.issue)) child.added_by_sweep = true;
+    if (observed.prGraph?.complete && observed.prGraph.histories.has(outcome.issue)) child.prs = observed.prGraph.histories.get(outcome.issue);
     // A finished outcome with no completion time takes the issue's close time, once.
     const closedAt = observed.issues.get(outcome.issue)?.closed_at;
     if (!child.completed_at && closedAt && (TERMINAL_LIFECYCLES.includes(child.lifecycle) || ['COMPLETED', 'RETIRED'].includes(outcome.class))) child.completed_at = closedAt;
@@ -3260,17 +3447,23 @@ class Reconciler {
     const discovery = observed.discovery.get(issueNumber);
     const backfill = discovery?.backfill;
     if (discovery && !discovery.complete) findings.push({ code: 'PR_DISCOVERY_INCOMPLETE', issue: issueNumber, detail: discovery.detail });
-    else if (discovery && !backfill) findings.push({ code: 'COMPLETED_PR_MISSING', issue: issueNumber, detail: 'Complete discovery found no matching merged PR. Controller: check the completed task references.' });
+    else if (discovery && !backfill && backfillEligible(outcome,existing) && !existing?.closed_by_sweep && !discovery.candidates?.length) findings.push({ code: 'COMPLETED_PR_MISSING', issue: issueNumber, detail: 'Complete discovery found no matching merged PR. Controller: check the completed task references.' });
     if (!issue || issue.is_pull_request) {
       findings.push({ code: 'ISSUE_MISSING', issue: issueNumber, detail: issue ? 'the number is a pull request' : 'the issue could not be read' });
       return;
     }
     if (!existing) effects.push({ kind: 'create_state', target: { issue: issueNumber }, doc: desired, ...(backfill ? { backfill } : {}) });
     else {
-      const fields = Object.keys({ ...existing, ...desired }).filter(key => !['revision', 'volatile', 'pending_effects'].includes(key)
+      const fields = Object.keys({ ...existing, ...desired }).filter(key => !['revision', 'volatile', 'pending_effects', ...(this.refreshFacts ? CLOSE_FIELDS : [])].includes(key)
         && JSON.stringify(canonical(existing[key])) !== JSON.stringify(canonical(desired[key])));
       if (fields.length) effects.push({ kind: 'update_state', target: { issue: issueNumber }, fields, doc: desired, ...(journals ? { journals } : {}), ...(backfill ? { backfill } : {}) });
     }
+    const start = existing || newChild({repository:this.binding.repository,outcome});
+    if (this.refreshFacts && CLOSE_FIELDS.some(key=>JSON.stringify(start[key]) !== JSON.stringify(desired[key]))) {
+      effects.push({kind:'copy_child_lifecycle',target:{issue:issueNumber}});
+      if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
+    }
+    if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
     // Native parent.
     if (outcome.parent) {
       if (issue.parent === null) {
@@ -3319,9 +3512,9 @@ class Reconciler {
       }
     }
     // Document versus issue.
-    if (desired.lifecycle === 'DONE' && issue.state === 'open') findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: 'the state document says DONE but the issue is open' });
+    if ((desired.lifecycle === 'DONE' || this.refreshFacts && desired.lifecycle === 'RETIRED') && issue.state === 'open') findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: `the state document says ${desired.lifecycle} but the issue is open` });
     if (!['DONE', 'RETIRED'].includes(desired.lifecycle) && issue.state === 'closed') findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: `the issue is closed but the state document says ${desired.lifecycle}` });
-    if (pr?.state === 'MERGED' && desired.lifecycle !== 'DONE' && !completionAccepted(desired)) {
+    if (pr?.state === 'MERGED' && !TERMINAL_LIFECYCLES.includes(desired.lifecycle) && !completionAccepted(desired)) {
       findings.push({ code: 'CHILD_STATE_CONFLICT', issue: issueNumber, detail: `PR #${pr.number} is merged but no accepted completion is recorded` });
     }
   }
@@ -3479,7 +3672,7 @@ class Reconciler {
       const nav = findStateBlock(issue.body, NAV_BLOCK_NAME);
       if (error || traced.error || nav.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: error || traced.error || nav.error }); continue; }
       const navBody = this.navFor(parent, number, children);
-      const currentBody = number === parent.parent_issue ? renderCurrentBlockBody(parent, children, observed.issues) : null;
+      const currentBody = number === parent.parent_issue ? renderCurrentBlockBody(parent, children, observed.issues, this.now()) : null;
       const summary = currentBody ? findStateBlock(issue.body, CURRENT_BLOCK_NAME) : { block: null, error: null };
       if (summary.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: summary.error }); continue; }
       // A page written by a newer Toolkit is left alone, so computers on different versions never
@@ -3585,6 +3778,7 @@ class Reconciler {
         return Boolean(live && gate.returns?.some(item => !item.consumed && item.assignment === live));
       }
       if (entry.state !== 'new') return false;
+      if (['CHILD_REOPENED','CHILD_ADDED'].includes(entry.code)) return true;
       return entry.code === 'STALE_ASSIGNMENT' || LIVE_GATE_STATES.includes(gate?.state);
     }).map(entry => entry.id);
   }
@@ -3599,8 +3793,9 @@ class Reconciler {
     const incompletePrHolds = [...observed.discovery].filter(([, discovery]) => discovery.complete === false)
       .map(([issue]) => findingId(FINDING_CODES.COMPLETED_PR_MISSING.source, 'COMPLETED_PR_MISSING', issue));
     const seen = () => findings.filter(finding => ATTENTION.has(finding.code) && (!only || finding.code === 'BODY_TOO_LARGE'));
-    if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
-      hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds] });
+    if (!override) folds.push({ source: 'reconcile', complete: !only && (!observed.prGraph || observed.prGraph.complete), seen: seen(),
+      hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds,
+        ...(observed.prGraph?.holdWithoutTask || [])] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
@@ -3608,7 +3803,7 @@ class Reconciler {
     let next = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
     const settlingSize = !only && openFindings(stored).some(entry => entry.code === 'BODY_TOO_LARGE');
     if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored)) && !settlingSize) return;
-    const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next) };
+    const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next, now) };
     effects.push(effect);
     const number = parent.parent_issue;
     const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN', 'BODY_TOO_LARGE']);
@@ -3629,8 +3824,8 @@ class Reconciler {
       const final = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
       // Adding attention can itself overflow CURRENT. Include that finding once before measuring
       // again; the numeric diagnostics are not rendered in CURRENT, so no size feedback loop.
-      if (attentionLine(final) !== attentionLine(next)) { next = final; redraw(next); reconcile.seen = seen(); }
-      effect.line = attentionLine(next);
+      if (attentionLine(final, now) !== attentionLine(next, now)) { next = final; redraw(next); reconcile.seen = seen(); }
+      effect.line = attentionLine(next, now);
     }
   }
 
@@ -3640,7 +3835,7 @@ class Reconciler {
     if (!parentRead.doc) {
       return { parent: null, findings: [], effects: [], holds: [{ code: 'PARENT_STATE_MISSING', target: `#${this.binding.parent_issue}`, detail: `No parent state document for #${this.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply --controller; other sessions report this to the controller.` }], resolutions: [] };
     }
-    const parent = parentRead.doc;
+    let parent = parentRead.doc;
     if (parent.repository.toLowerCase() !== this.binding.repository.toLowerCase() || parent.parent_issue !== this.binding.parent_issue) {
       throw new ProgrammeError('STATE_INVALID', 'The parent state document belongs to a different repository or parent issue.');
     }
@@ -3653,6 +3848,13 @@ class Reconciler {
     ], observed, holds);
     const findings = [];
     const effects = [];
+    if (observed.additions.length) {
+      effects.push({kind:'add_native_children',target:{issue:parent.parent_issue},outcomes:observed.additions});
+      findings.push(...observed.additions.map(outcome=>({code:'CHILD_ADDED',issue:outcome.issue})));
+      parent = {...parent,outcomes:[...parent.outcomes,...observed.additions]};
+    }
+    if (observed.prGraph?.advance) effects.push({kind:'advance_pr_watermark',target:{issue:parent.parent_issue},watermark:this.now()});
+    findings.push(...(observed.prGraph?.withoutTask || []).map(pr=>({code:'PR_WITHOUT_TASK',issue:pr.number})));
     this.diffParentLifecycle(parent, observed, effects, findings, holds);
     const desiredDocs = new Map();
     for (const outcome of parent.outcomes) {
@@ -3685,7 +3887,7 @@ class Reconciler {
     this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions, blockHolds);
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions,
-      complete: !only && !parentOverride && (!inventory || inventory.complete) && [...observed.discovery.values()].every(entry => entry.complete !== false)
+      complete: !only && !parentOverride && (!inventory || inventory.complete) && (!observed.prGraph || observed.prGraph.complete) && [...observed.discovery.values()].every(entry => entry.complete !== false)
         && [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)].every(number => Boolean(observed.issues.get(number)))
         && !findings.some(entry => entry.code === 'MANAGED_BLOCK_BROKEN') };
   }
@@ -3699,6 +3901,7 @@ class Reconciler {
     const parentNumber = plan.parent.parent_issue;
     let parentDoc = null;
     let docs = null;
+    const settledChildren = new Map([...plan.children].filter(([,entry])=>entry.doc).map(([number,entry])=>[number,entry.doc]));
     const writtenChildren = new Set();
     const verifiedBodies = new Set();
     const sizeIds = new Set([...(plan.parent.attention || []), ...plan.findings]
@@ -3720,6 +3923,7 @@ class Reconciler {
       if (kind === 'parent') parentDoc = result.doc;
       else {
         if (result.outcome === 'WRITTEN') writtenChildren.add(number);
+        if (result.doc) settledChildren.set(number,result.doc);
         if (docs && result.doc) docs.set(number, result.doc);
       }
       return result;
@@ -3795,6 +3999,39 @@ class Reconciler {
       record(effect, outcome, detail);
     };
 
+    // These effects have no caller-supplied patch. Only the refresh observation owner may use them;
+    // the lock and parent fence stay in force, and each source issue is checked again before CAS.
+    const requireRefresh = () => {
+      if (!this.refreshFacts || writer?.by_hash !== true) throw new ProgrammeError('ROLE_REFUSED','Only the locked refresh may copy observed graph facts.');
+    };
+    for (const effect of plan.effects.filter(entry=>entry.kind === 'add_native_children')) {
+      requireRefresh();
+      try {
+        const result=mutateDoc('parent',parentNumber,{change:doc=>{
+          const next=clone(doc);
+          for (const outcome of effect.outcomes) {
+            if (doc.outcomes.some(entry=>entry.issue===outcome.issue)) continue;
+            const observed=plan.observed.issues.get(outcome.issue);
+            const fresh=this.reader.issue(outcome.issue);
+            const parentAllowed=outcome.parent===parentNumber || doc.outcomes.some(entry=>entry.issue===outcome.parent);
+            if(!parentAllowed || observed?.complete !== true || fresh?.complete !== true || fresh.is_pull_request || observed.parent !== outcome.parent || fresh.parent !== outcome.parent
+              || registeredParents(this.binding).includes(outcome.issue)
+              || outcome.parent !== parentNumber && registeredParents(this.binding).includes(outcome.parent)) {
+              throw new ProgrammeError('GRAPH_FACT_STALE','Native membership changed after observation; refresh again.');
+            }
+            next.outcomes.push({...outcome,label:fresh.title,order:Math.max(0,...next.outcomes.map(entry=>entry.order))+1});
+          }
+          return next;
+        }});
+        record(effect,result.outcome==='NOOP'?'NOOP':'DONE');
+      } catch(error) {
+        if(STOPS_PASS.has(error.code)) throw error;
+        hold(effect,error.code || 'STATE_WRITE_FAILED',error.message); record(effect,'HELD',error.message);
+        // No child document may be created without its successfully recorded catalogue owner.
+        for(const outcome of effect.outcomes) markHeld(`#${outcome.issue}`,'all');
+      }
+    }
+
     // 1. State documents: the parent's attention findings first, re-folded on the document read now so
     // an acknowledgement made since planning is kept.
     for (const effect of plan.effects.filter(entry => entry.kind === 'update_attention')) {
@@ -3822,6 +4059,7 @@ class Reconciler {
       }
     }
     for (const effect of plan.effects.filter(entry => entry.kind === 'create_state' || entry.kind === 'update_state')) {
+      if(isHeld(`#${effect.target.issue}`,'all')) { record(effect,'SKIPPED','catalogue adoption held'); continue; }
       const checkFreshState = (doc, { created }) => {
         guard();
         const outcome = parentDoc.outcomes.find(entry => entry.issue === effect.target.issue);
@@ -3843,7 +4081,7 @@ class Reconciler {
         // completion time taken from the issue and the journals read in this pass belong to it: the
         // gate is re-folded from those journals on the document read at apply time, so an
         // assignment issued since planning is never overwritten.
-        const fields = effect.kind === 'create_state' ? ['pr', ...(desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
+        const fields = effect.kind === 'create_state' ? ['pr', ...(desired.prs ? ['prs'] : []), ...(desired.added_by_sweep ? ['added_by_sweep'] : []), ...(!this.refreshFacts && desired.completed_at ? ['completed_at'] : [])] : effect.fields.filter(key => !effect.journals || !FOLD_FIELDS.includes(key));
         const result = mutateDoc('child', effect.target.issue, {
           create: () => newChild({ repository: this.binding.repository, outcome: outcomes.get(effect.target.issue) }),
           onConflict: checkFreshState,
@@ -3865,6 +4103,27 @@ class Reconciler {
       }
     }
 
+    for (const effect of plan.effects.filter(entry=>entry.kind==='copy_child_lifecycle')) {
+      requireRefresh();
+      if(isHeld(`#${effect.target.issue}`,'all')) {record(effect,'SKIPPED','child state held');continue;}
+      try {
+        const result=mutateDoc('child',effect.target.issue,{change:doc=>{
+          const observed=plan.observed.issues.get(effect.target.issue);
+          const fresh=this.reader.issue(effect.target.issue);
+          if(observed?.complete !== true || fresh?.complete !== true || fresh.is_pull_request || observed.state !== fresh.state || observed.closed_at !== fresh.closed_at || observed.state_reason !== fresh.state_reason) {
+            throw new ProgrammeError('GRAPH_FACT_STALE','Issue lifecycle changed after observation; refresh again.');
+          }
+          const expected=plan.children.get(effect.target.issue)?.doc;
+          if(expected && CLOSE_FIELDS.some(key=>JSON.stringify(doc[key])!==JSON.stringify(expected[key]))) throw new ProgrammeError('GRAPH_FACT_STALE','Controller lifecycle changed after observation; refresh again.');
+          return copyIssueLifecycle(doc,fresh);
+        }});
+        record(effect,result.outcome==='NOOP'?'NOOP':'DONE');
+      } catch(error) {
+        if(STOPS_PASS.has(error.code)) throw error;
+        hold(effect,error.code || 'STATE_WRITE_FAILED',error.message); record(effect,'HELD',error.message);
+      }
+    }
+
     // 2. Native parent links, read back on both sides.
     for (const effect of plan.effects.filter(entry => entry.kind === 'attach' || entry.kind === 'reparent')) {
       if (isHeld(`#${effect.target.issue}`, 'links')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
@@ -3881,7 +4140,7 @@ class Reconciler {
 
     // 3. Order, recomputed from a fresh list for each parent just before moving.
     const reorderParents = [...new Set(plan.effects.filter(entry => entry.kind === 'reorder').map(entry => entry.target.parent))];
-    const graph = graphOrder(plan.parent, new Map([...plan.children].filter(([, entry]) => entry.doc).map(([number, entry]) => [number, entry.doc])), plan.observed.issues);
+    const graph = graphOrder(parentDoc, settledChildren, plan.observed.issues);
     for (const parentIssue of reorderParents) {
       const desired = graph.filter(outcome => outcome.parent === parentIssue).map(outcome => outcome.issue);
       const fresh = this.reader.subIssues(parentIssue);
@@ -3966,7 +4225,7 @@ class Reconciler {
         // after this exact body also reads back. A refused or uncertain parent leaves findings open.
         const displayParent = number === parentNumber && plan.complete && !holds.length
           ? { ...parentDoc, attention: (parentDoc.attention || []).map(entry => canResolveSize(entry, true) ? { ...entry, state: 'resolved' } : entry) } : parentDoc;
-        const currentBody = number === parentNumber ? renderCurrentBlockBody(displayParent, docs, plan.observed.issues) : null;
+        const currentBody = number === parentNumber ? renderCurrentBlockBody(displayParent, docs, plan.observed.issues, this.now()) : null;
         const topic = this.topicFor(parentDoc, number, plan.observed.issues);
         // Recheck minimum size and version before posting any pages as well as before the body
         // write. A newly oversized hand-written section must not produce orphan index comments.
@@ -4109,7 +4368,16 @@ class Reconciler {
         return changed ? doc : null;
       } });
     }
-    return { results, holds, attention: attentionLine(parentDoc.attention) };
+    for(const effect of plan.effects.filter(entry=>entry.kind==='advance_pr_watermark')) {
+      requireRefresh();
+      if(!plan.complete || holds.length) {record(effect,'SKIPPED','incomplete pass keeps the prior watermark');continue;}
+      const result=mutateDoc('parent',parentNumber,{change:doc=>{
+        if(doc.private?.graph_pr_watermark && Date.parse(doc.private.graph_pr_watermark)>=Date.parse(effect.watermark)) return null;
+        doc.private={...doc.private,graph_pr_watermark:effect.watermark}; return doc;
+      }});
+      record(effect,result.outcome==='NOOP'?'NOOP':'DONE');
+    }
+    return { results, holds, attention: attentionLine(parentDoc.attention, this.now()) };
   }
 
   run({ apply = false, issue = null, parentOverride = null, inventory = null } = {}) {

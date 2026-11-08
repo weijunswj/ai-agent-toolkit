@@ -83,6 +83,7 @@ class FakeGitHub {
   mutations() { return this.calls.filter(call => call.method !== 'GET' && call.path !== 'graphql' && !call.path.includes('/contents/')).length; }
 
   issueJson(issue) {
+    if (issue.state === 'closed' && !issue.closed_at) issue.closed_at = issue.updated_at;
     return {
       number: issue.number, id: issue.id, url: `https://api.github.com/repos/${this.repository}/issues/${issue.number}`, title: issue.title, body: issue.body, state: issue.state, state_reason: issue.state_reason || null, closed_at: issue.closed_at || null,
       updated_at: issue.updated_at,
@@ -208,6 +209,8 @@ class FakeGitHub {
       const listed = [...this.prs.values()].filter(pr => closed ? pr.merged || pr.state === 'CLOSED' : !pr.merged && (pr.state === 'OPEN' || pr.state === 'DRAFT'));
       if (closed) listed.sort((a, b) => b.number - a.number);
       return ok(200, listed.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, body: pr.body, draft: pr.isDraft,
+        state: pr.merged || pr.state === 'CLOSED' ? 'closed' : 'open', closed_at: pr.mergedAt || pr.closedAt || '2026-11-08T00:00:00Z',
+        user: { login: pr.author || 'fixture-owner' }, merge_commit_sha: pr.merged ? pr.head : null,
         merged_at: pr.mergedAt, base: { repo: { full_name: this.repository } } })));
     }
     if (rest === 'pulls') {
@@ -288,7 +291,8 @@ class FakeGitHub {
       const repository = {};
       const node = value => typeof value === 'object' ? value : (() => {
         const pr = this.prs.get(value);
-        return { __typename: 'PullRequest', number: value, merged: pr?.merged || false, mergedAt: pr?.mergedAt || null, repository: { nameWithOwner: this.repository } };
+        return { __typename: 'PullRequest', number: value, state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
+          mergeCommit: pr?.merged ? {oid:pr.head} : null, repository: { nameWithOwner: this.repository } };
       })();
       for (const [, alias, number] of body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)) {
         const links = this.issuePrLinks.get(Number(number)) || {};

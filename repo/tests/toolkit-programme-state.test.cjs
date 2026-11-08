@@ -25,7 +25,7 @@ function child(overrides = {}) {
 
 test('the JSON schemas and the runtime validator agree on valid and invalid documents', () => {
   const ajv = new Ajv2020({ strict: false, allErrors: true });
-  const validateChild = ajv.compile(schema('child-state-v1.schema.json'));
+  const validateChild = ajv.compile(schema('child-state-v2.schema.json'));
   const validateParent = ajv.compile(schema('parent-state-v1.schema.json'));
   const validateBindingV1 = ajv.compile(schema('binding-v1.schema.json'));
   const validateBinding = ajv.compile(schema('binding-v2.schema.json'));
@@ -47,7 +47,7 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   const backfilled = child({ lifecycle: 'DONE', pr: { number: 800, state: 'MERGED', head: SHA_A,
     checks: { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: SHA_A } } });
   assert.equal(validateChild(backfilled), true, JSON.stringify(validateChild.errors));
-  assert.deepEqual(state.validateChild(backfilled), [], 'merged observations need no schema change');
+  assert.deepEqual(state.validateChild(backfilled), [], 'merged observations remain valid');
   const missing = { ...parent, attention: state.foldAttention([], { source: 'reconcile', complete: true,
     seen: ['COMPLETED_PR_MISSING', 'PR_DISCOVERY_INCOMPLETE'].map(code => ({ code, issue: 423 })), now: '2026-11-01T00:00:00Z' }) };
   assert.equal(validateParent(missing), true, JSON.stringify(validateParent.errors));

@@ -219,7 +219,7 @@ function openContext(args, deps = {}) {
   store.verify();
   // The session comes from --session only; an inherited environment never makes a session a writer.
   const writer = args.session ? { session: args.session, prefix: args.prefix || binding.writer_prefix } : null;
-  return { binding, transport, repository, store, writer, version, repoRoot };
+  return { binding, transport, repository, store, writer, version, repoRoot, now: deps.now };
 }
 
 function requireWriter(context) {
@@ -304,8 +304,8 @@ const nowText = deps => (deps.now || (() => new Date().toISOString()))();
 function storedAttention(parentDoc, deps = {}) {
   const written = parentDoc.volatile?.written_at || null;
   const age = written ? Date.parse(nowText(deps)) - Date.parse(written) : NaN;
-  return { line: state.attentionLine(parentDoc.attention), counts: state.attentionCounts(parentDoc.attention), as_of: written,
-    text: `${state.attentionLine(parentDoc.attention)} (stored on #${parentDoc.parent_issue}${Number.isFinite(age) ? `, written ${attentionCache.ageText(age)} ago` : ''})` };
+  return { line: state.attentionLine(parentDoc.attention, nowText(deps)), counts: state.attentionCounts(parentDoc.attention), as_of: written,
+    text: `${state.attentionLine(parentDoc.attention, nowText(deps))} (stored on #${parentDoc.parent_issue}${Number.isFinite(age) ? `, written ${attentionCache.ageText(age)} ago` : ''})` };
 }
 
 // Gate and finality commands show the stored line before they act, from the parent they already
@@ -320,7 +320,7 @@ function showAttention(parentDoc, args, deps) {
 // (an origin URL) write it only to a folder they name.
 function cacheAttention(context, parentDoc, complete, deps = {}) {
   if (!parentDoc || (deps.originUrl && !deps.attentionDir)) return;
-  attentionCache.writeCache(context.repository, { line: state.attentionLine(parentDoc.attention), counts: state.attentionCounts(parentDoc.attention),
+  attentionCache.writeCache(context.repository, { line: state.attentionLine(parentDoc.attention, nowText(deps)), counts: state.attentionCounts(parentDoc.attention),
     digest: state.attentionDigest(parentDoc.attention), complete }, deps);
 }
 
@@ -462,6 +462,7 @@ const commands = {
       reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository }),
       mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
       binding: context.binding, writer: context.writer, toolkitVersion: context.version,
+      refreshFacts: context.writer?.by_hash === true, now: context.now,
     });
     const parentOverride = args['parent-file'] ? readJsonFile(args['parent-file'], 'parent') : null;
     return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride, inventory: args.inventory || null });
