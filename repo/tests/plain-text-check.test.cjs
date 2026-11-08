@@ -522,7 +522,7 @@ test('the CI template reads only, pins its actions to the guard template\'s SHAs
   assert.match(template, /run: node \.github\/scripts\/plain-text-check\.cjs$/m);
 });
 
-test('slice2 unused kept wording also applies when the text is explained elsewhere', t => {
+test('unused kept wording also applies when the text is explained elsewhere', t => {
   const root = tempRepo(t, { 'docs/a.md': 'Mode V3 (example mode).\n' });
   settings(root, { banned_terms: [{ term: 'V#', reason: 'version', fix: 'name it' }],
     explained_terms: [{ term: 'V3', reason: 'mode name' }],
@@ -530,4 +530,11 @@ test('slice2 unused kept wording also applies when the text is explained elsewhe
   const result = run([SCRIPT, '--repo', root], root);
   assert.equal(result.status, 1);
   assert.equal(result.stderr, 'FAIL: kept term "V3" for docs/a.md is no longer needed (it exempts nothing); remove it from kept_terms\n');
+});
+
+test('kept-term guidance describes exemptions that suppress no finding', () => {
+  const script = fs.readFileSync(SCRIPT, 'utf8');
+  const playbook = fs.readFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/docs-governance.md'), 'utf8');
+  assert.match(script, /A kept term that exempts nothing fails a full run/);
+  assert.match(playbook, /an entry that exempts nothing fails the full check/);
 });

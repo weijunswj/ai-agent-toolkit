@@ -17,7 +17,7 @@
 // a reason) and a line marker `plain-text: allow <reason>` for a `#number` on one line that is not a
 // reference (in Markdown, inside an HTML comment: `<!-- plain-text: allow a colour value -->`). The
 // marker hides nothing else: links, "PR 12" labels and banned terms are still reported on that line.
-// A kept term that no file in its scope still uses fails a full run.
+// A kept term that exempts nothing fails a full run, whether unused or already exempted elsewhere.
 //
 // Usage: node plain-text-check.cjs [--repo <dir>] [--config <file>] [--files <path>...]
 //          [--init-baseline | --prune-baseline | --migrate-baseline] [--explain]

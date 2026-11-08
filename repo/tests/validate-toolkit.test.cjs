@@ -837,7 +837,7 @@ test('managed source-of-truth and instruction checks pass from an explicit works
   }
 });
 
-test('slice2 validator rejects a scratch root with an unused kept term', () => {
+test('validator rejects a scratch root with an unused kept term', () => {
   const cwd = copyRepo();
   const file = path.join(cwd, '.github/plain-text.json');
   const config = JSON.parse(fs.readFileSync(file, 'utf8'));
