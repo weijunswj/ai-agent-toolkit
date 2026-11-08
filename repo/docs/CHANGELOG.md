@@ -5,8 +5,8 @@
 ### Added
 
 - Refresh copies GitHub closes and reopens into programme child state and adopts newly observed native tasks at the end of Later.
-- Task pages and the programme graph show all discovered pull requests, including merged commit links. Unlinked open pull requests and those closed after the first complete scan raise an attention finding, excluding known bots and generated test-timing branches starting with `toolkit/shard-timings-`.
-- Findings left new for 24 hours appear in a waiting list for the owner.
+- Task pages show all discovered pull requests, including merged commit links. The programme graph shows the current PR and a short count of other PRs, with compact table cells to keep its per-task size bounded. Unlinked open pull requests and those closed after the first complete scan raise an attention finding, excluding known bots and generated test-timing branches starting with `toolkit/shard-timings-`.
+- Findings left new for 24 hours appear in the owner's waiting count, with at most five short entries and a count of the rest on the parent page. The attention command keeps the full list.
 
 ### Changed
 

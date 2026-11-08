@@ -97,7 +97,8 @@ test('refresh automatically backfills a completed task and the next sweep makes 
   assert.equal(saved.lifecycle, 'DONE');
   assert.equal(saved.gate.role, null, 'refresh records observations without gate acceptance');
   assert.equal(fx.store.read('parent', 421).doc.fence.holder_session, controller.session);
-  assert.match(fx.github.issues.get(421).body, /\| #423 \| #800 MERGED .*aaaaaaa.* \| COMPLETED/);
+  assert.match(fx.github.issues.get(421).body, /\|#423\|#800\|-\|COMPLETED/);
+  assert.match(fx.github.issues.get(423).body, /#800 MERGED .*aaaaaaa/);
   const before = { commits: fx.github.commits, mutations: fx.github.mutations(), calls: fx.github.calls.length };
   assert.equal(fx.run(['refresh']).result.summary, 'No changes');
   assert.equal(fx.github.commits, before.commits);

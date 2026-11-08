@@ -1393,15 +1393,19 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const cls = graphClass(outcome, child);
-    const pr = child?.prs?.length ? prText(child) : !isRetired(outcome, child) && child?.pr.number ? `#${child.pr.number}` : '-';
+    // History belongs on the child page. The graph grows by a count, never by PRs or SHAs.
+    const current = !isRetired(outcome, child) ? child?.pr.number : null;
+    const more = child?.prs?.filter(pr => pr.number !== current).length || 0;
+    const pr = `${current ? `#${current}` : '-'}${more ? ` +${more}` : ''}`;
     const issue = issues.get(outcome.issue);
-    return `| ${taskName(outcome, issue)} | ${descriptionText(outcome)} | #${outcome.issue} | ${pr} | ${cls} | ${statusText(outcome, child)} | ${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])} |`;
+    // Optional cell padding would cost fourteen characters per row, more than the PR count.
+    return `|${taskName(outcome, issue)}|${descriptionText(outcome)}|#${outcome.issue}|${pr}|${cls}|${statusText(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
   });
   return [
     revisionLine(parent, children),
     '## Programme Graph',
     '',
-    `Generated from the programme state documents (state revision ${parent.revision}) and task comments, so edit those rather than this table. Sorted NOW (in progress), then LATER in priority order (the top one starts next), then OPTIONAL, then COMPLETED with the most recent last. Last updated shows the completion time for finished tasks, or the latest state write or task comment for work in progress, excluding generated index comments; queued tasks show a dash.`,
+    `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: current, +N others; history on child page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -1502,18 +1506,20 @@ function renderCurrentBlockBody(parent, children, issues = new Map(), now = new 
   ].join('\n');
 }
 
-// The attention summary on the parent page, so a surface without `gh` can read it: the line, then up
-// to ATTENTION_SHOWN open findings, newest first.
+// The parent preview shows recent/acknowledged findings and a separate short waiting list.
+// Waiting findings appear only once; the command keeps every finding and its full next action.
 const ATTENTION_SHOWN = 10;
+const WAITING_SHOWN = 5;
 function attentionBlockLines(attention, now) {
-  const open = openFindings(attention);
   const waiting = waitingFindings(attention, now);
+  const waitingIds = new Set(waiting.map(entry => entry.id));
+  const open = openFindings(attention).filter(entry => !waitingIds.has(entry.id));
   return [
     `**${attentionLine(attention, now)}**`,
     ...open.slice(0, ATTENTION_SHOWN).map(entry => `- ${entry.state === 'acknowledged' ? '(acknowledged) ' : ''}${findingText(entry)}`),
     ...(open.length > ATTENTION_SHOWN ? [`- and ${open.length - ATTENTION_SHOWN} more: run programme.cjs attention`] : []),
-    ...(waiting.length ? ['', '**Waiting on you**', ...waiting.slice(0, ATTENTION_SHOWN).map(entry => `- ${findingText(entry)}`),
-      ...(waiting.length > ATTENTION_SHOWN ? [`- and ${waiting.length - ATTENTION_SHOWN} more: run programme.cjs attention`] : [])] : []),
+    ...(waiting.length ? ['', '**Waiting on you**', ...waiting.slice(0, WAITING_SHOWN).map(entry => `- ${entry.code} #${entry.issue}`),
+      ...(waiting.length > WAITING_SHOWN ? [`- and ${waiting.length - WAITING_SHOWN} more: run programme.cjs attention`] : [])] : []),
   ];
 }
 
