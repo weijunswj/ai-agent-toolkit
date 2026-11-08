@@ -317,15 +317,22 @@ function codexHookListGaps(result, hooks) {
   return { unreadable: false, missing: hooks.entries.filter(hook => !seen.has(hook.key)).map(hook => hook.name), untrusted, extra };
 }
 
+// All fixed reason labels used below; the Host Contract test derives its list from this owner.
+const FIXED_HOLD_REASONS = Object.freeze({
+  notFound: 'not found', notFullPath: 'not a full path', cannotStart: 'cannot be started directly',
+  pipe: 'start or pipe error', timeout: 'timeout', exit: 'exit code', reply: 'error reply',
+  field: 'field', unexpected: 'unexpected error',
+});
+
 // Support-safe: fixed words, a Node error code or an exit number; never Codex's own output.
 function holdReason(error) {
-  if (error?.code === 'ENOENT') return 'not found';
-  if (typeof error?.code === 'string' && /^E[A-Z]+$/.test(error.code)) return `start or pipe error ${error.code}`;
-  if (error?.reason === 'timeout') return 'timeout';
-  if (error?.reason === 'exit') return `exit code ${Number.isInteger(error.exitCode) ? error.exitCode : 'none'}`;
-  if (error?.reason === 'error-reply') return `error reply to ${error.step === 'initialize' ? 'initialize' : 'hooks/list'}`;
-  if (error?.reason === 'no-result') return 'field result';
-  return 'unexpected error';
+  if (error?.code === 'ENOENT') return FIXED_HOLD_REASONS.notFound;
+  if (typeof error?.code === 'string' && /^E[A-Z]+$/.test(error.code)) return `${FIXED_HOLD_REASONS.pipe} ${error.code}`;
+  if (error?.reason === 'timeout') return FIXED_HOLD_REASONS.timeout;
+  if (error?.reason === 'exit') return `${FIXED_HOLD_REASONS.exit} ${Number.isInteger(error.exitCode) ? error.exitCode : 'none'}`;
+  if (error?.reason === 'error-reply') return `${FIXED_HOLD_REASONS.reply} to ${error.step === 'initialize' ? 'initialize' : 'hooks/list'}`;
+  if (error?.reason === 'no-result') return `${FIXED_HOLD_REASONS.field} result`;
+  return FIXED_HOLD_REASONS.unexpected;
 }
 const unreadableHold = reason => `Codex gate launch held. Codex did not give a readable answer about its Toolkit hooks (${reason}), so their state is unverified. Check that the named Codex is installed and not updating, then rerun the check; if it still holds, run \`setup toolkit\`.`;
 
@@ -348,13 +355,13 @@ async function launchCheck({ codexHome = plugin.defaultCodexHome(), codex = '', 
   if (!codex) return { code: 1, line: 'Codex gate launch held. No Codex was named, so Toolkit cannot ask the Codex that will run the gate. Rerun the check with --codex and the full path of the Codex program the gate will run, or set CODEX_TOOLKIT_CODEX_CLI to that path.' };
   let file = false;
   try { file = fs.statSync(codex).isFile(); } catch { file = false; }
-  const naming = !path.isAbsolute(codex) ? 'not a full path' : file ? '' : 'not found';
+  const naming = !path.isAbsolute(codex) ? FIXED_HOLD_REASONS.notFullPath : file ? '' : FIXED_HOLD_REASONS.notFound;
   const nameHold = reason => ({ code: 1, line: `Codex gate launch held. Toolkit cannot ask the named Codex (${reason}). Name the full path of the codex program the gate will run, or on Windows its npm codex.cmd, with --codex or CODEX_TOOLKIT_CODEX_CLI, then rerun the check.` });
   if (naming) return nameHold(naming);
   let gaps;
   try { gaps = codexHookListGaps(await readCodexHookList(codexHome, codex, timeoutMs), state.hooks); }
-  catch (error) { return error?.reason === 'start' ? nameHold('cannot be started directly') : { code: 1, line: unreadableHold(holdReason(error)) }; }
-  if (gaps.unreadable) return { code: 1, line: unreadableHold(`field ${gaps.field}`) };
+  catch (error) { return error?.reason === 'start' ? nameHold(FIXED_HOLD_REASONS.cannotStart) : { code: 1, line: unreadableHold(holdReason(error)) }; }
+  if (gaps.unreadable) return { code: 1, line: unreadableHold(`${FIXED_HOLD_REASONS.field} ${gaps.field}`) };
   if (gaps.missing.length) return { code: 1, line: `Codex gate launch held. Codex does not list these Toolkit hooks: ${joinNames(gaps.missing)}. Run \`setup toolkit\`, then review \`/hooks\` in Codex and rerun the check.` };
   if (gaps.untrusted.length) return { code: 1, line: `Codex gate launch held. Codex does not trust these Toolkit hooks at the installed version: ${joinNames(gaps.untrusted)}. Open \`/hooks\` in Codex, review and approve the Toolkit hooks, and rerun the check. If it still holds, quit and reopen Codex, approve them again and rerun the check.` };
   if (gaps.extra) return { code: 1, line: `Codex gate launch held. Codex lists ${gaps.extra} Toolkit hook(s) the installed hooks file does not name. Run \`setup toolkit\` to repair the installed plugin, then review \`/hooks\` and rerun the check.` };
@@ -363,6 +370,7 @@ async function launchCheck({ codexHome = plugin.defaultCodexHome(), codex = '', 
 
 module.exports = Object.freeze({
   CHECK_TIMEOUT_MS,
+  FIXED_HOLD_REASONS,
   codexHookListGaps,
   launchCheck,
   CodexToolkitInstall,

@@ -191,8 +191,15 @@ const holdReasonSentence = () => fs.readFileSync(path.join(repoRoot, 'repo/docs/
 
 test('AT25: the Host Contract lists every fixed hold reason', () => {
   const sentence = holdReasonSentence();
-  for (const reason of ['not found', 'not a full path', 'cannot be started directly', 'start or pipe error',
-    'timeout', 'exit code', 'error reply', 'unexpected error']) assert.ok(sentence.includes(reason), `missing hold reason: ${reason}`);
+  const { FIXED_HOLD_REASONS } = require('../scripts/toolkit-codex-install-state.cjs');
+  assert.ok(Object.isFrozen(FIXED_HOLD_REASONS));
+  const source = fs.readFileSync(require.resolve('../scripts/toolkit-codex-install-state.cjs'), 'utf8');
+  const body = source.match(/function holdReason\(error\) \{([\s\S]*?)\n\}/)[1];
+  // A new literal return must not bypass the exported list and leave this contract check green.
+  for (const [, expression] of body.matchAll(/\breturn\s+([^;]+);/g)) {
+    assert.match(expression, /^(?:FIXED_HOLD_REASONS\.\w+|`\$\{FIXED_HOLD_REASONS\.\w+\})/, 'hold reason bypasses the documented owner: ' + expression);
+  }
+  for (const reason of Object.values(FIXED_HOLD_REASONS)) assert.ok(sentence.includes(reason), `missing hold reason: ${reason}`);
 });
 
 test('AT25: a named file that is not a Windows program holds with a documented reason', { skip: process.platform !== 'win32' && 'Windows only' }, t => {
@@ -252,4 +259,8 @@ test('AT27: the fake header names exactly the modes that self-exit', () => {
   assert.match(source, /The keeper exits after 10 s\./);
   assert.match(source, /exit <pid> log line/);
   assert.match(source, /longer than about 10 s.*exit \(code 0\) rather than a timeout/);
+});
+
+test('slice2 contract: hold reasons have no OS-specific non-program example', () => {
+  assert.doesNotMatch(holdReasonSentence(), /for example a named file that is not a program/);
 });
