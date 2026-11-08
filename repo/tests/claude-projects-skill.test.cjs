@@ -18,10 +18,29 @@ const referenceFiles = () => fs.readdirSync(path.join(repoRoot, REFERENCE_DIR)).
   .map(name => `${REFERENCE_DIR}/${name}`);
 const bundle = () => [SKILL_REL, ...referenceFiles()].map(read).join('\n');
 
+test('T5 Projects runs the shared journey first, then extras, with relay as last route', () => {
+  const setup = read(`${REFERENCE_DIR}/setup.md`);
+  assert.ok(setup.indexOf('`takeover.md` first') < setup.indexOf('P1. **'));
+  assert.deepEqual([...setup.matchAll(/^(P[1-6])\. \*\*/gm)].map(match => match[1]), ['P1', 'P2', 'P3', 'P4', 'P5', 'P6']);
+  assert.doesNotMatch(setup, /^\d+\. \*\*/m, 'generic checklist is not duplicated');
+  const extras = setup.split('## Projects extras')[1].split('## Repository governance')[0];
+  for (const [index, part] of extras.split(/^P[1-6]\. /m).entries()) {
+    if (index !== 4 && index !== 5 && index !== 6) assert.doesNotMatch(part, /Daily check-in|Hourly nudge/);
+  }
+  assert.doesNotMatch(setup + read(SKILL_REL), /weekly audit/i);
+  assert.match(read(SKILL_REL), /otherwise follow the takeover playbook's owner relay, last after own tools and executors/);
+  const takeover = read('repo/docs/agent-playbooks/controller-takeover.md');
+  for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Task pack', 'Gate pack']) assert.ok(takeover.includes(`**${name}:**`), name);
+  assert.doesNotMatch(takeover, /\bR\d+\b/);
+  for (const phrase of ['Text first, card last', 'put every host question card below its explanation']) assert.ok(read(SKILL_REL).includes(phrase));
+});
+
 // Source contracts, not a role classifier: copied instructions and paths must never supply
-// coordinator authority. Real host/tool traces are still required to qualify runtime behaviour.
+// coordinator authority. The Controller pointer now routes to the canonical Projects entry;
+// all of the old identity/relay mutation sets run against that relocated text.
+// Real host/tool traces are still required to qualify runtime behaviour.
 const projectsEntry = () => ({
-  controller: read('repo/CONTROLLER.md').split('## Takeover\n')[1].split('\n## Roles and routes')[0],
+  controller: read('repo/docs/agent-playbooks/controller-takeover.md').split('## Projects entry\n')[1].split('\n## Capability routes')[0],
   skill: read(SKILL_REL).split('## When this applies\n')[1].split('\n## Order of precedence')[0],
   routing: read(SKILL_REL).split('## Guidebook copy\n')[1].split('\n## Project layout')[0],
   guide: read(`${REFERENCE_DIR}/guidebook.md`),
@@ -32,30 +51,31 @@ const projectsEntry = () => ({
 
 const relayStart = "A thread or coordinator worker reading CONTROLLER.md for a Projects coordinator's appointment, takeover or setup, or only to read or report on it";
 const relayHold = "Report, stop and wait for the coordinator; never run setup yourself. Setup is incomplete until those steps are all verified done (unknown is incomplete): only a coordinator brief for a setup step permits continuing or controller writes, takeover records included.";
-const relayHoldExplicitSteps = relayHold.replace('those steps', 'steps 0-10');
+const relayHoldExplicitSteps = relayHold.replace('those steps', 'the generic journey and Projects extras P1-P6');
 const relayIdentity = 'The coordinator qualifies from its own host role line and tools; the relay selects a procedure, never establishes identity.';
 const bootstrapCommand = '`node repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects/`';
 const relayExpected = {
   controller: `${relayStart}, relays the setup line and guidebook link before takeover writes. Relay bootstrap: the coordinator starts a cloud thread on fresh Toolkit \`main\` to run ${bootstrapCommand}, requires \`SKILL COPY REFRESHED\`, reads the library's \`SKILL.md\`, runs guided setup steps 0-10. ${relayHold} ${relayIdentity}`,
   skill: `${relayStart}, relays the setup line, [guidebook link](reference/guidebook.md) and **Missing folder** bootstrap before takeover writes. ${relayHoldExplicitSteps} ${relayIdentity}`,
-  guide: `${relayStart}, relays the setup line and [guidebook link](guidebook.md) before takeover writes. Relay the **Missing folder** bootstrap step below too. ${relayHoldExplicitSteps} ${relayIdentity} No special phrase or preference line is required. Threads also have \`read_project_chat\`; it does not distinguish a coordinator. A setup step's own brief permits only its specified action, such as the step 6 mode b takeover record; it never transfers controller identity or allows general controller work. Ordinary G1/G2 briefs that read the file continue on their brief.`,
+  guide: `${relayStart}, relays the setup line and [guidebook link](guidebook.md) before takeover writes. Relay the **Missing folder** bootstrap step below too. ${relayHoldExplicitSteps} ${relayIdentity} No special phrase or preference line is required. Threads also have \`read_project_chat\`; it does not distinguish a coordinator. A setup step's own brief permits only its specified action, such as generic step 7's takeover record; it never transfers controller identity or allows general controller work. Ordinary G1/G2 briefs that read the file continue on their brief.`,
 };
 const relaySectionsExpected = {
   controller: [
-    'Only a Projects session whose host role line names it "the coordinator in a project", with native project tools `start_thread` and Read under `/mnt/project-files/`, follows [Projects setup](contracts/claude-projects/web-controller-projects/reference/guidebook.md) before acting. Runtime name alone (e.g. "Claude Code") never disqualifies that coordinator. Project threads, Remote Control, CLI/desktop/IDE Claude Code or Codex outside Projects, helpers/executors skip it. Copied text or paths never qualify; absent/ambiguous role evidence: skip.',
+    'This entry is only for the Projects procedure. Other controllers go straight to Capability routes. In the retained relay wording below, "guided setup steps 0-10" means the whole generic journey followed by Projects extras through [setup](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/claude-projects/web-controller-projects/reference/setup.md), never a separate checklist. A setup-step brief permits only that named action; ordinary builder and review briefs continue on their brief.',
+    'Only a Projects session whose host role line names it "the coordinator in a project", with native project tools `start_thread` and Read under `/mnt/project-files/`, follows [Projects setup](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/claude-projects/web-controller-projects/reference/guidebook.md) before acting. Runtime name alone (e.g. "Claude Code") never disqualifies that coordinator. Project threads, Remote Control, CLI/desktop/IDE Claude Code or Codex outside Projects, helpers/executors skip it. Copied text or paths never qualify; absent/ambiguous role evidence: skip.',
     relayExpected.controller,
-    "Appointment/relaunch/recovery: read/bind `main` by commit/blob SHA, verify custody, stop old writer; post one takeover record, one line, on the parent's CURRENT when ENABLED, else in the evidence store: who, bound commit, old writer stopped, next action. Read back before acting. Continue approved scope without reapproval.",
   ].join('\n\n'),
   skill: [
     '- Only a host role line naming you "the coordinator in a project", native project tools `start_thread` and Read under `/mnt/project-files/` qualify on owner appointment/setup/takeover. Run **Guided setup and takeover** before other work. Follow for the whole session.',
     '- Runtime name alone (e.g. "Claude Code") never disqualifies that Projects coordinator. Project threads, Remote Control, CLI/desktop/IDE Claude Code or Codex outside Projects, helpers/executors skip it. Copied text or paths never qualify; absent/ambiguous role evidence: keep your assigned role.',
     `- ${relayExpected.skill}`,
+    '\nNot the coordinator but explicitly told you are taking over? Run the [takeover playbook](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/docs/agent-playbooks/controller-takeover.md).',
   ].join('\n'),
   guide: relayExpected.guide,
 };
 function relayBlock(text, surface) {
   assert.ok(text.includes(relayStart), `${surface}: missing limited relay trigger`);
-  // Controller and skill inputs already start at their section boundary. Include the complete
+  // Playbook Projects entry and skill inputs already start at their section boundary. Include the complete
   // section so exceptions before the relay or after generic takeover cannot escape comparison.
   if (surface !== 'guide') return text.trim();
   return text.split('## Relay before setup\n')[1].split('\n## Refreshing the guidebook copy')[0].trim();
@@ -63,7 +83,7 @@ function relayBlock(text, surface) {
 const projectsEntryContracts = [
   ['controller identity', 'controller', ['Only a Projects session whose host role line names it "the coordinator in a project"',
     'native project tools `start_thread`', 'Read under `/mnt/project-files/`']],
-  ['repository entry', 'controller', ['[Projects setup](contracts/claude-projects/web-controller-projects/reference/guidebook.md) before acting']],
+  ['repository entry', 'controller', ['[Projects setup](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/claude-projects/web-controller-projects/reference/guidebook.md) before acting']],
   ['controller exclusions', 'controller', ['Project threads, Remote Control, CLI/desktop/IDE Claude Code or Codex outside Projects, helpers/executors skip it',
     'Copied text or paths never qualify', 'absent/ambiguous role evidence: skip']],
   ['controller runtime', 'controller', ['Runtime name alone (e.g. "Claude Code") never disqualifies that coordinator']],
@@ -89,9 +109,9 @@ const projectsEntryContracts = [
   ['copy sequence', 'guide', ['Start a cloud thread with a fresh clone of public `weijunswj/ai-agent-toolkit` `main`',
     '`node repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects/`',
     'Read its full result and require `SKILL COPY REFRESHED`',
-    "then read the library's `SKILL.md` and run Guided setup and takeover steps 0-10 before other controller actions"]],
+    "then read the library's `SKILL.md` and run Guided setup and takeover: the generic journey and Projects extras P1-P6 before other controller actions"]],
   ['copy executor', 'guide', ['The thread only performs its copy brief and remains an executor']],
-  ['existing copy', 'guide', ['With an existing copy, read the skill and enter or resume the same setup; step 0 checks freshness']],
+  ['existing copy', 'guide', ['With an existing copy, read the skill and enter or resume the same setup; generic step 3 checks freshness']],
   ['resume', 'guide', ['Resume verified progress after interruption', 'Do not post the generic takeover record ahead of setup or post it twice']],
   ['failure hold', 'guide', ['`SKILL COPY FAILED`: start one fresh refresh thread; when that fails too, tell the owner once what failed',
     'With no usable copy, hold takeover', 'Preserve any last usable copy and setup progress',
@@ -107,15 +127,18 @@ const projectsEntryContracts = [
     bootstrapCommand, 'requires `SKILL COPY REFRESHED`', "reads the library's `SKILL.md`, runs guided setup steps 0-10"]],
   ['relay wording', 'guide', ['or only to read or report on it',
     'No special phrase or preference line is required', 'Threads also have `read_project_chat`; it does not distinguish a coordinator',
-    "A setup step's own brief permits only its specified action, such as the step 6 mode b takeover record",
+    "A setup step's own brief permits only its specified action, such as generic step 7's takeover record",
     'it never transfers controller identity or allows general controller work']],
   ['ordinary gate continuation', 'executor', ['Every thread is an executor (G0, G1, G2, reviewer or helper): follow its brief',
     "a thread that finds `main`'s blob different says so to the coordinator in its first reply, then continues on its brief"]],
-  ['setup action exception', 'setup', ["no records, gates or GitHub writes except a setup step's own brief",
-    "Step 6's mode b takeover record is such a brief; it does not allow general controller work"]],
+  ['setup action exception', 'setup', ["No controller actions (records, gates or GitHub writes) until its last step except a setup step's own brief",
+    "generic step 7's record and claim", 'These exceptions never allow general controller work or transfer identity to a thread']],
   ['guided action exception', 'guided', ["No controller actions (records, gates or GitHub writes) until its last step except a setup step's own brief"]],
 ];
 function assertProjectsEntry(surfaces, ids = projectsEntryContracts.map(([id]) => id)) {
+  if (ids.includes('setup action exception')) {
+    assert.equal(surfaces.setup.split("a setup step's own brief").length - 1, 1, 'the setup action restriction is stated once');
+  }
   for (const [id, surface, clauses] of projectsEntryContracts) {
     if (!ids.includes(id)) continue;
     for (const clause of clauses) assert.ok(surfaces[surface].includes(clause), `${id}: ${clause}`);
@@ -206,7 +229,7 @@ test('Projects setup relay rejects narrowed triggers, premature writes and relay
     ['never establishes identity', 'establishes identity'],
   ];
   for (const surface of ['controller', 'skill', 'guide']) {
-    const steps = surface === 'controller' ? 'those steps' : 'steps 0-10';
+    const steps = surface === 'controller' ? 'those steps' : 'the generic journey and Projects extras P1-P6';
     for (const [before, after] of [...mutations, [`${steps} are all verified done`, 'guided setup step 0 is verified done']]) {
       assert.ok(surfaces[surface].includes(before), `${surface}: mutation must change source`);
       assert.throws(() => assertProjectsEntry({ ...surfaces, [surface]: surfaces[surface].replace(before, after) }),
@@ -221,7 +244,8 @@ test('Projects setup relay rejects narrowed triggers, premature writes and relay
     assert.throws(() => assertProjectsEntry({ ...surfaces, [surface]: mutated }), { code: 'ERR_ASSERTION' }, surface);
   }
   // Keep the delegation rule ahead of the generic instruction a reader might otherwise execute.
-  assert.ok(surfaces.controller.indexOf('before takeover writes') < surfaces.controller.indexOf('Appointment/relaunch/recovery:'));
+  const playbook = read('repo/docs/agent-playbooks/controller-takeover.md');
+  assert.ok(playbook.indexOf('before takeover writes') < playbook.indexOf('## Journey'));
   const skill = read(SKILL_REL);
   assert.ok(skill.includes('Follow for the whole session'));
   assert.ok(read('repo/CONTROLLER.md').includes('Routines/executors ask the owner only when the owner must act'));
@@ -231,8 +255,8 @@ test('Projects setup relay rejects narrowed triggers, premature writes and relay
 
 test('Projects correction: a missing copy relay includes the complete bootstrap procedure before waiting', () => {
   const surfaces = projectsEntry();
-  // The coordinator cannot open a repository link itself. The Controller read alone must deliver
-  // the command, success check, library skill read and setup sequence, in that order.
+  // Follow the Controller pointer and require the complete bootstrap: command, success check,
+  // library skill read and setup sequence, in that order. No product-name capability assumption.
   const block = relayBlock(surfaces.controller, 'controller');
   const sequence = ['starts a cloud thread', 'fresh Toolkit `main`', bootstrapCommand,
     'requires `SKILL COPY REFRESHED`', "reads the library's `SKILL.md`", 'runs guided setup steps 0-10',
@@ -297,12 +321,14 @@ test('Projects delta correction: the skill keeps its precedence over Controller 
 test('Projects correction: setup step 6 is an explicit exception on every route, without transferring identity', () => {
   const surfaces = projectsEntry();
   assertProjectsEntry(surfaces);
-  const step6 = surfaces.setup.split('6. **Takeover** (mode b only).')[1].split('\n7. **Orientation**')[0];
-  assert.ok(step6.includes('Post the one-line takeover record (`CONTROLLER.md` Takeover)'));
-  assert.ok(surfaces.setup.includes('Verify 1-5 before reading the outgoing controller'));
-  assert.ok(step6.includes('Never run two controllers that both write'));
+  const journey = read('repo/docs/agent-playbooks/controller-takeover.md');
+  const record = journey.split('### 7. Record and governed claim')[1].split('### 8.')[0];
+  assert.ok(record.includes('After steps 1-6 are complete'));
+  assert.ok(record.includes('Read it back before continuing'));
+  assert.ok(journey.includes('Never run two controllers that both write'));
+  assert.ok(surfaces.setup.includes("generic step 7's record and claim"));
   for (const surface of ['setup', 'guided']) {
-    const changed = surfaces[surface].replace("except a setup step's own brief", 'without exceptions');
+    const changed = surfaces[surface].split("except a setup step's own brief").join('without exceptions');
     assert.notEqual(changed, surfaces[surface]);
     assert.throws(() => assertProjectsEntry({ ...surfaces, [surface]: changed }), { code: 'ERR_ASSERTION' }, surface);
   }
@@ -332,16 +358,17 @@ test('Projects uses the host-assigned role even when the runtime calls itself Cl
 test('Projects bootstrap loads the verified skill before setup and preserves generic binding duties', () => {
   const { controller, guide } = projectsEntry();
   const sequence = ['Start a cloud thread', 'node repo/scripts/toolkit-projects-guidebook.cjs --out',
-    'Read its full result and require `SKILL COPY REFRESHED`', "then read the library's `SKILL.md`", 'steps 0-10 before other controller actions'];
+    'Read its full result and require `SKILL COPY REFRESHED`', "then read the library's `SKILL.md`", 'the generic journey and Projects extras P1-P6 before other controller actions'];
   const bootstrap = guide.split('- **Missing folder:**')[1].split('\n- `SKILL COPY FAILED`')[0];
   const positions = sequence.map(clause => bootstrap.indexOf(clause));
   assert.ok(positions.every((position, index) => position >= 0 && (!index || position > positions[index - 1])));
-  assert.ok(controller.indexOf('[Projects setup]') < controller.indexOf('Appointment/relaunch/recovery:'));
-  for (const clause of ['read/bind `main` by commit/blob SHA', 'verify custody, stop old writer',
-    "post one takeover record, one line, on the parent's CURRENT when ENABLED, else in the evidence store",
-    'who, bound commit, old writer stopped, next action', 'Read back before acting', 'Continue approved scope without reapproval']) {
-    assert.ok(controller.includes(clause), clause);
-  }
+  const journey = read('repo/docs/agent-playbooks/controller-takeover.md');
+  assert.ok(journey.indexOf('[Projects setup]') < journey.indexOf('## Journey'));
+  for (const clause of ['by commit and blob', 'Before sessions are archived',
+    'old writer stopped with proof', 'Read it back before continuing',
+    'With DISABLED or Later, record in the verified evidence store',
+    'same GitHub account that posted the record']) assert.ok(journey.includes(clause), clause);
+  assert.ok(read('repo/CONTROLLER.md').includes('Continue approved scope without reapproval'));
   assert.doesNotMatch(bootstrap, /work from the managed block until|once the block that carries the guidebook line arrives/);
   assertProjectsEntry(projectsEntry(), ['failure hold', 'outside appointment']);
 });
@@ -409,7 +436,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   // Gate launches name their gate and route; setup writes the GATE ROUTE line the launch hook reads.
   assert.ok(text.includes('`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`'));
   assert.match(text, /\*\*Gate launches carry a Gate line and their route\.\*\* Every thread brief that names a gate carries one line `Gate: <value>`/);
-  assert.match(text, /Write the `GATE ROUTE:` line \(\*\*Binding\*\* in the skill\)/);
+  assert.match(text, /save BINDING and GATE ROUTE from the exact bound Controller\/stack and the owner's rule on where gates run/);
   // The coordinator loads no account skills: it reads the skill from the library copy, which three routes keep current.
   assert.match(text, /## Guidebook copy\n- The coordinator's runtime loads no account skills, so this skill reaches you as a copy in the project library: `\/mnt\/project-files\/toolkit\/web-controller-projects\/`/);
   assert.match(text, /`VERSION` \(`Version: <skill Version> toolkit <x\.y\.z> main <commit7> copied <UTC>`, written last, so a copy cut short never looks current\)/);
@@ -436,8 +463,8 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.match(text, /each fresh scheduled run resolves its own thread after report delivery\. Stop the nudge/);
   assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/);
   // Setup reads the guidebook first, refreshing it when missing or not current.
-  assert.match(text, /Read the guidebook's `VERSION` \(\*\*Guidebook copy\*\* in the skill\)\./);
-  assert.match(text, /the guidebook's `VERSION` line, and the next work item\./);
+  assert.match(text, /check guidebook VERSION against a fresh Toolkit main copy using the guidebook reference/);
+  assert.match(text, /guidebook VERSION, check-in time, nudge state, programme sweep when armed, recurring-task home and next work item/);
   // Genuine lag is measured against the check-in session baseline, with an explicit today fallback.
   assert.match(text, /`PLUGIN BEHIND`: this check-in's observed Toolkit plugin copy is strictly more than 24 hours behind main as it was when this check-in's own session started/);
   assert.match(text, /main today only when the report explicitly says "session start unavailable; comparing with main today"/);
@@ -459,8 +486,8 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.doesNotMatch(text, /Thread effort follows the role|fires into that same thread|firing runs in the dedicated check-in thread/);
   assert.match(text, /toolkit-projects-instructions\.cjs --render/);
   assert.match(text, /toolkit-projects-instructions\.cjs --check <file>/);
-  assert.match(text, /Read the saved instructions back/);
-  assert.match(text, /record the block's toolkit version in project memory/);
+  assert.match(text, /final saved instructions read back/);
+  assert.match(text, /Record the block's Toolkit version/);
   assert.match(text, /declined project-instructions <version>/);
   assert.match(text, /Never apply that version again; apply the next newer version as usual/);
   assert.match(text, /Threads cannot read project settings\. Read the current project instructions yourself/);
@@ -517,7 +544,7 @@ test('Projects re-checks the bound CONTROLLER.md blob before launches and on eve
   // Coordinator on a report: same-turn rebind, running gates checked, launches held; runs never write.
   assert.match(text, /re-reads and rebinds in the same turn, checks whether running gates need the changed instructions, and holds new launches until rebound/);
   assert.match(text, /Periodic runs and threads only report; only the coordinator writes the binding line/);
-  assert.match(text, /^   - Write the binding line \(\*\*Binding\*\* in the skill\)\.$/m);
+  assert.match(text, /Binding: save BINDING and GATE ROUTE from the exact bound Controller\/stack/);
   assert.doesNotMatch(text, /Record the commit SHA and the skill Version in memory|Re-check its revision before each launch/);
   // Both periodic runs carry the check.
   assert.match(text, /^  - `BINDING STALE` or `BINDING UNKNOWN`: rebind \(\*\*Binding\*\*\)\. When current, the report says `\*\*Binding:\*\* current` with the short blob, adding the newer short commit when only the commit moved\.$/m);
@@ -759,10 +786,10 @@ test('Projects lists every owner-hands step when it reports what waits on the ow
 test('the device programme sweep needs both GitHub governance ENABLED and a named device', () => {
   // Cloud-only projects have no device to run it on, so neither half alone may set it up or suggest it.
   const at = rel => read(`repo/contracts/claude-projects/web-controller-projects/${rel}`);
-  assert.match(at('reference/setup.md'), /confirms a fresh merged enabled binding and step 3 named a device: also set up the \*\*Programme sweep on a device\*\*/);
+  assert.match(at('reference/setup.md'), /confirms a fresh merged enabled binding and P2 named a device: also set up the \*\*Programme sweep on a device\*\*/);
   assert.match(at('reference/setup.md'), /A pending yes, open proposal, stale read or failed read grants no governance effects/);
   assert.match(at('reference/setup.md'), /With governance in any other state, or no device, do not create it or suggest it/);
-  assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(guided setup step 3\); in any other case, never create or suggest it\./);
+  assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(Projects extra P2\); in any other case, never create or suggest it\./);
   assert.match(at('SKILL.md'), /only when ENABLED and a device is named\)/);
   const nudge = at('tasks/hourly-nudge.md');
   assert.match(nudge, /Check the `SCHEDULED TASKS:` line before claiming device-task coverage or absence/);

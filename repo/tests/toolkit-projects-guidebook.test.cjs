@@ -34,7 +34,7 @@ test('a refresh copies every skill file byte for byte, writes main\'s rendered b
   const out = path.join(tmp(t), 'web-controller-projects');
   const result = guidebook().refresh(out);
   const source = filesIn(SKILL_DIR);
-  assert.deepEqual(filesIn(out), [...source, 'VERSION', 'instructions-block.md'].sort());
+  assert.deepEqual(filesIn(out), [...source, 'VERSION', 'instructions-block.md', 'takeover.md'].sort());
   for (const rel of source) assert.ok(fs.readFileSync(path.join(out, rel)).equals(fs.readFileSync(path.join(SKILL_DIR, rel))), rel);
   // The block file is exactly what the instructions renderer prints for main, real marker included.
   const rendered = new ProjectsInstructions({ root: ROOT }).render();
@@ -102,6 +102,8 @@ test('the check names each way a copy is out of date, and never writes', t => {
     ['a today-only check-in', () => fs.writeFileSync(path.join(out, 'tasks', 'daily-check-in.md'), '10. PLUGIN BEHIND: compare with main today.\n'), /^differs tasks\/daily-check-in\.md$/],
     ['an old plugin-card rule', () => fs.writeFileSync(path.join(out, 'reference', 'periodic-runs.md'), 'Keep it pending until current.\n'), /^differs reference\/periodic-runs\.md$/],
     ['an older block', () => fs.writeFileSync(path.join(out, 'instructions-block.md'), 'old\n'), /^differs instructions-block\.md$/],
+    ['an edited takeover', () => fs.writeFileSync(path.join(out, 'takeover.md'), 'old\n'), /^differs takeover\.md$/],
+    ['a missing takeover', () => fs.rmSync(path.join(out, 'takeover.md')), /^differs takeover\.md$/],
   ];
   for (const [label, damage, reason] of cases) {
     guidebook().refresh(out);
@@ -115,6 +117,38 @@ test('the check names each way a copy is out of date, and never writes', t => {
       assert.equal(fs.readFileSync(path.join(out, rel), 'utf8'), fs.readFileSync(path.join(SKILL_DIR, rel), 'utf8'), rel);
     }
   }
+});
+
+test('T6 the guidebook writes the canonical takeover byte for byte and checks without writing', t => {
+  const out = path.join(tmp(t), 'copy');
+  guidebook().refresh(out);
+  const canonical = fs.readFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/controller-takeover.md'));
+  assert.ok(fs.readFileSync(path.join(out, 'takeover.md')).equals(canonical));
+  const published = fs.readFileSync(path.join(out, 'takeover.md'), 'utf8');
+  for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Task pack', 'Gate pack']) assert.ok(published.includes(`**${name}:**`), name);
+  assert.doesNotMatch(published, /\bR\d+\b/);
+  assert.deepEqual([...published.matchAll(/^Pack: (read-example-repo-20261108T0000Z-abcd)\r?$/gm)].map(match => match[1]),
+    Array(3).fill('read-example-repo-20261108T0000Z-abcd'));
+  fs.writeFileSync(path.join(out, 'takeover.md'), 'damaged\n');
+  assert.deepEqual(guidebook().check(out), { state: 'stale', reason: 'differs takeover.md' });
+  assert.equal(fs.readFileSync(path.join(out, 'takeover.md'), 'utf8'), 'damaged\n');
+  fs.rmSync(path.join(out, 'takeover.md'));
+  assert.deepEqual(guidebook().check(out), { state: 'stale', reason: 'differs takeover.md' });
+  guidebook().refresh(out);
+  assert.ok(fs.readFileSync(path.join(out, 'takeover.md')).equals(canonical));
+});
+
+test('the guidebook refuses a second takeover source inside the skill tree', t => {
+  const root = tmp(t);
+  const dir = path.join(root, 'repo/contracts/claude-projects/web-controller-projects');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), `Version: ${skillVersion()}\n`);
+  fs.writeFileSync(path.join(dir, 'takeover.md'), 'a second owner\n');
+  // Isolate ownership from unrelated rendering: without the duplicate guard this fixture
+  // would be accepted and silently copied as another source for the same library path.
+  t.mock.method(ProjectsInstructions.prototype, 'render', () => 'block');
+  t.mock.method(ProjectsInstructions.prototype, 'expectedBlock', () => ({ version: '3.53.1' }));
+  assert.throws(() => guidebook({ root }).expected(), { code: 'GUIDEBOOK_SOURCE' });
 });
 
 test('a refresh never takes over a folder it did not write and fails without a usable commit', t => {

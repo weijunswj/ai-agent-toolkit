@@ -13,6 +13,12 @@ Classify toolkit repo tasks before planning or editing. Read only the playbooks 
 5. If no special match applies, proceed baseline-only with `AGENTS.md` and this index.
 6. If a required playbook is missing, inaccessible, or conflicts with `AGENTS.md`, stop and report the issue.
 
+## Match: Controller Takeover
+
+Triggers: explicit controller appointment, "you are taking over as controller for <repo>", relaunch or recovery. Executors keep their assigned brief.
+
+Read: [controller takeover](controller-takeover.md), including capability routes, relay proof and the connector guards. Run the generic journey before applicable harness extras.
+
 ## Match: Host Configuration Writes
 
 Triggers: any Toolkit code that writes host configuration, including Codex, Claude Code or future OpenCode support.

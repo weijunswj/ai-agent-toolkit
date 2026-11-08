@@ -26,6 +26,21 @@ const routingPartial = path.join(
 );
 const routingCasesPath = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'skill-routing-cases.json');
 
+test('T8 takeover appointment routes explicitly and a controller question remains excluded', () => {
+  const corpus = JSON.parse(fs.readFileSync(routingCasesPath, 'utf8'));
+  assert.deepEqual(corpus.controller_takeover_cases, [
+    { id: 'controller-takeover-positive', kind: 'positive', prompt: 'You are taking over as controller for example-org/example-repo.', expected: ['controller-bootstrap'], excluded: [] },
+    { id: 'controller-question-negative', kind: 'adversarial', prompt: 'What does a Toolkit controller do?', expected: [], excluded: ['controller-bootstrap'] },
+  ]);
+  const routing = fs.readFileSync(routingPartial, 'utf8');
+  const row = routing.split('\n').find(line => line.startsWith('| `controller-bootstrap` |'));
+  assert.ok(row.includes('you are taking over as controller for <repo>'));
+  assert.ok(row.includes('questions about controllers'));
+  assert.ok(row.includes('stack-registry-v3.json'));
+  assert.doesNotMatch(row, /ARCHITECTURE|v2 registry/);
+  assert.equal(corpus.invocation_modes['controller-bootstrap'], 'explicit');
+});
+
 function readText(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 }

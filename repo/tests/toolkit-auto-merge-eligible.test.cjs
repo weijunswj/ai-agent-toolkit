@@ -66,6 +66,18 @@ test('merge-authority paths and a major bump wait for the owner; everything else
   assert.notEqual(eligible.withoutStamps("const BRIDGE_VERSION = '3.21.0';\nhook();\n"), eligible.withoutStamps("const BRIDGE_VERSION = '3.22.0';\nother();\n"));
 });
 
+test('a controller takeover playbook-only change waits for typed merge as controller rules', () => {
+  const file = 'repo/docs/agent-playbooks/controller-takeover.md';
+  for (const sectionChanged of [[], [file]]) {
+    assert.deepEqual(eligible.eligibility({ files: [file], toolkit: true, sectionChanged }), {
+      eligible: false, reasons: [{ path: file, why: 'the controller rules' }],
+    });
+  }
+  assert.deepEqual(eligible.eligibility({ files: ['repo/docs/agent-playbooks/INDEX.md'], toolkit: true }), {
+    eligible: true, reasons: [],
+  });
+});
+
 test('every script run by a host hook manifest, including Windows launchers, waits for typed merge', () => {
   const root = path.join(__dirname, '..', '..');
   const { renderInstalledWindowsHooks } = require('../scripts/setup-codex-toolkit-plugin.cjs');
