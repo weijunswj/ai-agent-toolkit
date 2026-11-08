@@ -37,7 +37,7 @@ test('T5 Projects runs the shared journey first, then extras, with relay as last
 
 test('Projects P2 fills the gate route and runs the deferred device task check', () => {
   const setup = read(`${REFERENCE_DIR}/setup.md`);
-  const note = 'Before a device is named, step 9b reports "not checked here" and P2 runs it.';
+  const note = 'Before a device is named, step 9b reports "not checked here" and P2 runs it when work runs on this device.';
   const folder = 'When gates run on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named.';
   const tasks = 'If generic step 9b reported "not checked here" for want of a device, run it on this device now, under its own fresh ENABLED guard and standing approval.';
   const check = text => {
@@ -49,6 +49,7 @@ test('Projects P2 fills the gate route and runs the deferred device task check',
   for (const clause of [note, folder, tasks]) {
     assert.throws(() => check(setup.replace(clause, '')), { code: 'ERR_ASSERTION' }, clause);
   }
+  assert.throws(() => check(setup.replace(' when work runs on this device', '')), { code: 'ERR_ASSERTION' }, 'P2 condition');
   const inventory = JSON.parse(read('repo/contracts/claude-projects/web-controller-projects/setup-inventory.json'));
   assert.deepEqual(inventory.rows.find(row => row.id === 'gate-route').setup_steps, ['generic-5', 'P2']);
 });

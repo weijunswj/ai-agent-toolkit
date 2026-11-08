@@ -14,7 +14,7 @@ No controller actions (records, gates or GitHub writes) until its last step exce
 - Toolkit current: check guidebook VERSION against a fresh Toolkit main copy using the guidebook reference; refresh under its safeguards. Check the actual device Toolkit before effects there. A failed refresh preserves the last usable copy, progress and every `stopped by owner` entry.
 - Binding: save BINDING and GATE ROUTE from the exact bound Controller/stack and the owner's rule on where gates run. Keep folder and placement in step with it. No gate launch until that line and launch-route proof are present.
 - Custody and orientation: use the first proven route for read-only state checks. Compare the outgoing writer's branch heads and latest comment ids twice, or obtain the owner's own direct confirmation. Never run two controllers that both write. Preserve every named file in the verified evidence store before sessions are archived; push and one fetch is Git custody read-back. Generic step 7, not a second Projects record, carries the takeover.
-- Governance and tasks: use the first proven route on the actual device. All graph, sharding and scheduled-task checks require fresh merged ENABLED. With governance off, all other generic steps run. No pending proposal or memory line grants effects. Before a device is named, step 9b reports "not checked here" and P2 runs it.
+- Governance and tasks: use the first proven route on the actual device. All graph, sharding and scheduled-task checks require fresh merged ENABLED. With governance off, all other generic steps run. No pending proposal or memory line grants effects. Before a device is named, step 9b reports "not checked here" and P2 runs it when work runs on this device.
 
 ## Projects extras
 

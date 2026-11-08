@@ -70,10 +70,11 @@ test('T3 Controller points to the ordered journey, keeps the routes sentence and
 });
 
 function surfaceClaimContract(text) {
-  const products = "(?:ChatGPT(?: web)?|claude\\.ai|Claude Code|Codex(?: CLI)?|OpenCode|Projects coordinator(?:s)?|Gemini)";
+  const products = "(?:ChatGPT(?: web)?|claude\\.ai|Claude Code|Claude Desktop|Claude Projects|Codex(?: CLI)?|OpenCode|Antigravity|Cursor|Gemini|Projects (?:coordinator|thread|worker)s?|web chat)";
   const abilities = "(?:has|have|lacks|can|cannot|can't|can only|could|supports|gets|uses|provides|offers|includes|allows|is able|are able|is unable|are unable|there is no|does not|doesn't|won't|will not)";
-  assert.doesNotMatch(text, new RegExp(`\\b${products}\\b[^.,;:|"()\\n]{0,40}\\b${abilities}\\b`, 'i'));
-  assert.doesNotMatch(text, new RegExp(`^\\s*\\|\\s*${products}(?:\\s*\\([^\\n|]*\\))?\\s*\\|`, 'im'));
+  const gap = '(?:[^.,;:|"()\\n]|\\n(?![|#*\\n-]|\\d+\\.\\s)){0,40}';
+  assert.doesNotMatch(text, new RegExp(`\\b${products}\\b${gap}\\b${abilities}\\b`, 'i'));
+  assert.doesNotMatch(text, new RegExp(`^\\s*\\|\\s*[*\`_]*${products}[*\`_]*(?:\\s*\\([^\\n|]*\\))?\\s*\\|`, 'im'));
   assert.doesNotMatch(text, /\|\s*(?:Surface|Harness|Host|Product|App|Platform|Client)(?:\s+names?)?\s*\||Expected per surface/i);
 }
 
@@ -100,7 +101,9 @@ const capabilityControls = ['ChatGPT web cannot write GitHub.', 'Codex has a she
   'claude.ai web chat cannot run a shell.', 'ChatGPT lacks a shell.', 'Codex CLI has a shell.',
   'Projects coordinators can start threads.', 'Claude Code always has a shell.',
   'On ChatGPT web there is no shell.', 'Gemini can run gh.',
-  '| Host | Abilities |', '| Surface name | Own tools |', '| OpenCode | shell |'];
+  '| Host | Abilities |', '| Surface name | Own tools |', '| OpenCode | shell |',
+  'Antigravity has no hooks.', 'Claude Projects lacks a shell.', 'A Projects thread cannot run gh.',
+  '| **Codex** | shell |', '| `ChatGPT web` | connector only |', 'Codex\nhas a shell.'];
 
 test('T12 capabilities come from probes and host evidence, never a surface lookup', () => {
   const text = read(PLAYBOOK);
