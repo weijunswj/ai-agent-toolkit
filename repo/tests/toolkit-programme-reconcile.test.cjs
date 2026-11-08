@@ -348,8 +348,10 @@ for (const row of [
   const report = reconciler().run({ apply: true });
   assert.equal(report.holds.filter(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === `#${parentIssue}`).length, 1);
   assert.ok(report.results.some(result => result.kind === 'replace_block' && result.target.issue === parentIssue && result.outcome === 'SKIPPED'));
-  assert.equal(report.writes.github, 0);
-  assert.equal(github.mutations(), writes, 'an unverified intent is not replayed');
+  const taskWrites = row.attentionChange ? 0 : 1;
+  assert.equal(report.writes.github, taskWrites, 'the task page follows the earlier parent hold');
+  assert.equal(github.mutations(), writes + taskWrites, 'an unverified parent intent is not replayed');
+  assert.equal(report.results.some(entry => ['replace_block', 'post_index_comment'].includes(entry.kind) && entry.target.issue === parentIssue && entry.outcome === 'DONE'), false);
   assert.equal(github.issues.get(parentIssue).body, before);
   assert.ok(store.read('parent', parentIssue).doc.pending_effects.some(effect => effect.kind === 'post_index_comment' && effect.state === 'UNKNOWN'));
 });
@@ -991,7 +993,7 @@ test('apply shows state writes from the same pass on the parent without a second
   assert.equal(reconciler().run().summary, 'No changes', 'a PR link repair also updates the parent in the same pass');
 });
 
-test('a nested reorder updates the NOW task time on the parent once, even without a planned parent block', () => {
+test('a nested reorder keeps the NOW task time unchanged with parent-owned intents', () => {
   for (const plannedParent of [true, false]) {
     const outcomes = [
       { issue: 423, class: 'COMMITTED', parent: 421, order: 1 },
@@ -1014,15 +1016,16 @@ test('a nested reorder updates the NOW task time on the parent once, even withou
     const run = reconciler();
     const plan = run.plan();
     assert.ok(plan.effects.some(effect => effect.kind === 'reorder' && effect.target.parent === 423));
-    assert.ok(plan.effects.some(effect => effect.kind === 'replace_block' && effect.target.issue === 421), 'the dry run reports the intent owner time change');
+    assert.equal(plan.effects.some(effect => effect.kind === 'replace_block' && effect.target.issue === 421), false, 'parent-owned order intents do not change the task time');
+    if (plannedParent) plan.effects.push({ kind: 'replace_block', target: { issue: 421 }, state: true });
     if (!plannedParent) plan.effects = plan.effects.filter(effect => effect.kind !== 'replace_block' || effect.target.issue !== 421);
     const before = patchCount(github, 421);
     const report = run.apply(plan);
     assert.deepEqual(report.holds, []);
     assert.deepEqual(github.issues.get(423).subs, [424, 425]);
-    assert.equal(store.read('child', 423).doc.volatile.written_at, '2026-11-01T07:00:00Z');
-    assert.ok(github.issues.get(421).body.includes('|#423|-|NOW|IN PROGRESS|2026-11-01 15:00|'), 'the first pass shows the final intent owner time');
-    assert.equal(patchCount(github, 421) - before, 1, 'the parent is edited once');
+    assert.equal(store.read('child', 423).doc.volatile.written_at, '2026-11-01T06:00:00Z');
+    assert.ok(github.issues.get(421).body.includes('|#423|-|NOW|IN PROGRESS|2026-11-01 14:00|'), 'bookkeeping preserves the last task update time');
+    assert.equal(patchCount(github, 421) - before, 0, 'an unchanged parent needs no edit');
     const writes = { commits: github.commits, mutations: github.mutations() };
     const again = reconciler().run({ apply: true });
     assert.equal(again.summary, 'No changes');
@@ -1067,7 +1070,7 @@ test('an issue-scoped pass keeps every NOW task comment time and skips queued ta
   assert.equal(reconciler().run({ issue: 423, apply: true }).summary, 'No changes');
 });
 
-test('recovering a PR link intent updates the NOW task time on the parent in the same pass', () => {
+test('recovering a parent-owned PR link intent preserves the NOW task time', () => {
   const outcomes = [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }];
   const { github, store, reconciler } = setup({ outcomes, issues: github => github.addIssue(423, { parent: 421 }) });
   let minute = 0;
@@ -1091,11 +1094,12 @@ test('recovering a PR link intent updates the NOW task time on the parent in the
   });
   const interrupted = reconciler().run({ apply: true });
   assert.ok(interrupted.holds.some(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === '#423'));
-  assert.equal(store.read('child', 423).doc.pending_effects[0].kind, 'replace_pr_nav');
+  assert.equal(store.read('parent', 421).doc.pending_effects[0].kind, 'replace_pr_nav');
+  assert.deepEqual(store.read('child', 423).doc.pending_effects, []);
 
   const plan = reconciler().plan();
   assert.deepEqual(plan.resolutions.map(entry => entry.outcome), ['DONE']);
-  assert.deepEqual(plan.effects.map(effect => [effect.kind, effect.target.issue]), [['replace_block', 421]], 'recovery alone schedules the parent refresh');
+  assert.deepEqual(plan.effects, [], 'parent intent recovery does not change the task update time');
   const before = patchCount(github, 421);
   const recovered = reconciler().run({ apply: true });
   assert.deepEqual(recovered.holds, []);
@@ -1105,7 +1109,8 @@ test('recovering a PR link intent updates the NOW task time on the parent in the
   const expected = new Date(Date.parse(doc.volatile.written_at) + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
   const parent = github.issues.get(421).body;
   assert.ok(parent.includes(`|#423|#540|NOW|IN PROGRESS|${expected}|`));
-  assert.equal(patchCount(github, 421) - before, 1, 'recovery edits the parent once');
+  assert.equal(patchCount(github, 421) - before, 0, 'recovery needs no unchanged parent edit');
+  assert.deepEqual(store.read('parent', 421).doc.pending_effects, []);
   assert.equal(patchCount(github, 540), prPatches + 1, 'the landed PR link write is not replayed');
   const writes = { commits: github.commits, mutations: github.mutations() };
   assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
@@ -1406,7 +1411,7 @@ test('a body edited between read and write is held, then completed on the next p
   const { github, reconciler } = setup();
   let armed = true;
   github.intercept(call => {
-    if (armed && call.method === 'PUT' && call.path.includes('issue-423.json') && JSON.parse(Buffer.from(call.body.content, 'base64').toString()).pending_effects.some(effect => effect.kind === 'replace_block')) {
+    if (armed && call.method === 'PUT' && call.path.includes('parent-421.json') && JSON.parse(Buffer.from(call.body.content, 'base64').toString()).pending_effects.some(effect => effect.kind === 'replace_block' && effect.target.issue === 423)) {
       armed = false;
       github.issues.get(423).body += '\nA person added this line.';
       github.issues.get(423).updated_at = github.tick();

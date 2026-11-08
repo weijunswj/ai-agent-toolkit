@@ -165,6 +165,42 @@ const flagged = file => Boolean(file) && fs.existsSync(againFile(file));
 function setAgain(file) { fs.writeFileSync(againFile(file), `${new Date().toISOString()}\n`, { mode: 0o600 }); }
 function clearAgain(file) { try { fs.unlinkSync(againFile(file)); } catch { /* not set */ } }
 
+// Beside the lock, never inside it: a killed process leaves its last durable progress for the next
+// lock owner. Only that owner may replace or remove the note.
+class PassProgress {
+  constructor(file, lock) {
+    this.file = file ? `${file}.progress` : null;
+    this.lock = lock;
+    this.interrupted = null;
+    if (!this.file || !fs.existsSync(this.file)) return;
+    let note;
+    try { note = JSON.parse(fs.readFileSync(this.file, 'utf8')); }
+    catch { throw new ProgrammeError('PASS_PROGRESS_INVALID', 'The pass progress note is unreadable; preserve it for inspection before retrying.'); }
+    if (!note || typeof note !== 'object') throw new ProgrammeError('PASS_PROGRESS_INVALID', 'The pass progress note must be an object.');
+    const errors = [];
+    state.validatePassDiagnostics(errors, { cause: 'interrupted', phase: note.phase, done: note.done, total: note.total, started_at: note.started_at }, 'progress');
+    if (!note || Object.keys(note).some(key => !['token', 'started_at', 'phase', 'done', 'total', 'unreported'].includes(key))
+      || typeof note.token !== 'string' || !note.token || typeof note.unreported !== 'boolean' || errors.length) {
+      throw new ProgrammeError('PASS_PROGRESS_INVALID', 'The pass progress note is invalid; preserve it for inspection before retrying.');
+    }
+    if (note.unreported) this.interrupted = { cause: 'interrupted', phase: note.phase, done: note.done, total: note.total, started_at: note.started_at };
+  }
+  write(diagnostics) {
+    this.last = diagnostics;
+    if (!this.file) return;
+    if (!this.lock.owns()) throw new ProgrammeError('PASS_LOCK_LOST', 'The pass lost its lock before writing progress.');
+    // Preserve an interrupted predecessor until its finding has reached the attention document.
+    const d = this.interrupted || diagnostics;
+    const note = { token: this.lock.token, started_at: d.started_at, phase: d.phase, done: d.done, total: d.total, unreported: true };
+    const draft = `${this.file}.${this.lock.token}.draft`;
+    fs.writeFileSync(draft, `${JSON.stringify(note)}\n`, { mode: 0o600 });
+    fs.renameSync(draft, this.file);
+  }
+  reported() { this.interrupted = null; if (this.last) this.write(this.last); }
+  finish() {
+    if (this.file && this.lock.owns() && !this.interrupted) fs.rmSync(this.file, { force: true });
+  }
+}
 
 function readJsonFile(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); }
@@ -295,6 +331,7 @@ function runInventory(context, parentDoc, deps = {}, deadlineMs = undefined) {
     transport: context.transport, repository: context.repository,
     parents: state.registeredParents(context.binding), catalogue: (parentDoc?.outcomes || []).map(outcome => outcome.issue),
     ...(deadlineMs ? { deadlineMs } : {}), ...(deps.inventoryClock ? { nowMs: deps.inventoryClock } : {}),
+    ...(context.pass ? { nowMs: deps.inventoryClock || context.pass.nowMs, deadlineMs: Math.max(1, Math.min(deadlineMs || state.INVENTORY_DEADLINE_MS, context.pass.left())) } : {}),
   }).run();
 }
 
@@ -463,6 +500,7 @@ const commands = {
       mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
       binding: context.binding, writer: context.writer, toolkitVersion: context.version,
       refreshFacts: context.writer?.by_hash === true, now: context.now,
+      pass: context.pass,
     });
     const parentOverride = args['parent-file'] ? readJsonFile(args['parent-file'], 'parent') : null;
     return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride, inventory: args.inventory || null });
@@ -730,6 +768,7 @@ const localCommands = {
 
 function formatBodyDiagnostics(d) {
   if (!d) return [];
+  if (d.cause) return [`  ${d.cause}: stopped at ${d.phase.replace(/_/g, ' ')} (${d.done} of ${d.total} done); started ${d.started_at}. Run refresh again.`];
   const labels = { CURRENT: 'Generated CURRENT', STATE: 'Generated status or graph', TRACE: 'Generated comment trace', NAV: 'Generated navigation' };
   return [`  UTF-16 units: projected ${d.projected_total}; threshold ${d.threshold}; reduce by ${d.required_reduction}.`,
     ...d.largest_sections.map(part => `  ${part.kind === 'hand_written' ? `Hand-written section ${part.section}` : labels[part.kind]}: ${part.size}`),
@@ -825,9 +864,11 @@ function formatInventory(result) {
 // reconcile --apply and refresh hold the repository's pass lock. The owner runs one more refresh pass
 // for each change that came in while it ran, then lets go.
 function runPasses(args, deps, out) {
+  const pass = new state.RefreshBudget({ nowMs: deps.passClock || Date.now, ...(deps.refreshBudgetMs === undefined ? {} : { budgetMs: deps.refreshBudgetMs }) });
   const beat = { fn: () => {} };
   const passDeps = { ...deps, heartbeat: () => beat.fn() };
   const context = openContext(args, passDeps);
+  context.pass = pass;
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
   let lock = takeLock(file, deps);
   if (!lock && args.command !== 'refresh') {
@@ -847,11 +888,15 @@ function runPasses(args, deps, out) {
   let passes = 0;
   while (lock) {
     const held = lock;
+    let progress;
     beat.fn = () => {
       if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', `Another pass took over the lock for ${context.binding.repository} while this one ran, so this pass stopped before its next GitHub request. The next refresh or the hourly sweep finishes the work.`);
       held.beat();
     };
     try {
+      progress = new PassProgress(file, held);
+      pass.progress = progress;
+      progress.write(pass.snapshot());
       do {
         // A pass that lost its lock before its first request must not clear a flag left for the new owner.
         beat.fn();
@@ -861,12 +906,16 @@ function runPasses(args, deps, out) {
         if (passes > 0 && !args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
         code = Math.max(code, finish(passArgs, deps, out, context));
         passes += 1;
-      } while (flagged(file) && passes < MAX_PASSES);
+        if (!pass.aborted) progress.finish();
+      } while (flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
+    } catch (error) {
+      if (held.owns()) progress?.write(pass.snapshot());
+      throw error;
     } finally {
       lock.release();
     }
     // A change can be flagged between the last check and the release: take the lock back for it.
-    lock = flagged(file) && passes < MAX_PASSES ? takeLock(file, deps) : null;
+    lock = flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS ? takeLock(file, deps) : null;
   }
   return code;
 }
