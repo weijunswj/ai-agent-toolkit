@@ -9,6 +9,7 @@ const config = require('../scripts/codex-delegation-config.cjs');
 
 // The config load check must ask a fixture, never a real Codex on this machine's PATH.
 require('./support/fake-codex-config-reader.cjs').useFakeConfigReader();
+require('./support/fake-codex-isolation-guard.cjs').configReaderIsolationGuards(test);
 
 // Every temp folder a test makes is removed after the file's tests, also when they fail.
 const tempFolders = [];

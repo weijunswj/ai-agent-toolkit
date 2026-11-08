@@ -59,6 +59,7 @@ function assertExecutableAvailable(value, options = {}) {
   const label = options.label || 'Claude CLI';
   const command = validateExecutable(value, platform, label);
   const candidates = executableCandidates(command, options);
+  let directRefusal;
   for (const candidate of candidates) {
     try {
       const resolved = fs.realpathSync(candidate);
@@ -67,10 +68,16 @@ function assertExecutableAvailable(value, options = {}) {
       if (platform !== 'win32' && !['.js', '.cjs', '.mjs'].includes(path.extname(candidate).toLowerCase())) {
         fs.accessSync(resolved, fs.constants.X_OK);
       }
+      // Direct callers must search past wrappers they cannot start without a shell.
+      // Explicit paths stay explicit; only absolute PATH candidates are considered above.
+      if (options.direct && !/[\\/]/.test(command)) {
+        try { directSpawnParts(candidate, [], options); }
+        catch (error) { directRefusal ||= error; continue; }
+      }
       return !/[\\/]/.test(command) ? candidate : command;
     } catch {}
   }
-  throw new Error(`${label} executable is not available.`);
+  throw directRefusal || new Error(`${label} executable is not available.`);
 }
 
 // A bare program name such as `git`: on Windows, Node searches the current folder before PATH, so a
@@ -143,7 +150,7 @@ function npmShimTarget(shim) {
 function directSpawnParts(executable, args = [], options = {}) {
   const platform = options.platform || process.platform;
   const label = options.label || 'Program';
-  const command = assertExecutableAvailable(validateExecutable(executable, platform, label), { ...options, label });
+  const command = assertExecutableAvailable(validateExecutable(executable, platform, label), { ...options, label, direct: true });
   const extension = path.extname(command).toLowerCase();
   if (['.js', '.cjs', '.mjs'].includes(extension)) return { command: process.execPath, args: [command, ...args] };
   if (platform !== 'win32' || extension === '.exe' || extension === '.com') return { command, args: [...args] };

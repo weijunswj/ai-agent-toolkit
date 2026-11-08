@@ -278,7 +278,7 @@ for (const [label, fields, expected] of [
   ['request error reply without a keyword', { reason: 'error-reply', step: 'request', hostText: 'unsupported value', message: 'request failed: unsupported value' }, 'rejected'],
   ['config/read failed reply', { reason: 'error-reply', step: 'request', hostText: 'config/read failed' }, 'rejected'],
   ['initialize error reply with a config keyword', { reason: 'error-reply', step: 'initialize', hostText: 'TOML parse error' }, 'unverified'],
-]) test('slice2 verdict: ' + label, () => {
+]) test('verdict: ' + label, () => {
   const { probeErrorVerdict } = require('../scripts/codex-config-load-check.cjs');
   const error = Object.assign(new Error('C:/toml-tools/codex app-server failed'), fields);
   const verdict = probeErrorVerdict(error);
@@ -311,11 +311,11 @@ for (const [label, spec, reason, hostText, step] of [
   ['timeout', { mode: 'timeout' }, 'timeout', ''],
   ['no-result', { mode: 'no-result' }, 'no-result', ''],
   ['stuck', { mode: 'answer-orphan' }, 'stuck', ''],
-]) test('slice2 hostText: ' + label, async t => {
+]) test('hostText: ' + label, async t => {
   const f = configFake(t, spec);
   const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
   await assert.rejects(runAppServerRequest(CONFIG_FAKE, f.codexHome, { method: 'config/read', params: {} },
-    { ...quickProbe, direct: true, settleWithoutExit: reason !== 'stuck' }), error => {
+    { ...quickProbe, settleWithoutExit: reason !== 'stuck' }), error => {
     assert.equal(error.reason, reason);
     assert.equal(error.hostText, hostText);
     if (step) assert.equal(error.step, step);
@@ -325,18 +325,35 @@ for (const [label, spec, reason, hostText, step] of [
   });
 });
 
-test('slice2 hostText: unavailable direct command and native start error have an empty field', async t => {
+test('hostText: unavailable command and native spawn errors keep precise start diagnostics', async t => {
   const f = configFake(t);
   const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
-  for (const direct of [true, false]) await assert.rejects(runAppServerRequest(path.join(f.root, 'absent.exe'), f.codexHome,
-    { method: 'config/read', params: {} }, { ...quickProbe, direct, settleWithoutExit: true }), error => {
+  const missing = path.join(f.root, 'absent.exe');
+  await assert.rejects(runAppServerRequest(missing, f.codexHome, { method: 'config/read', params: {} },
+    { ...quickProbe, direct: true, settleWithoutExit: true }), error => {
+    assert.equal(error.reason, 'start');
     assert.equal(error.hostText, '');
-    assert.equal(direct ? error.reason : error.code, direct ? 'start' : 'ENOENT');
+    assert.match(error.message, /executable is not available/);
+    assert.doesNotMatch(error.message, /cannot be started directly/);
     return true;
   });
+  // Force the availability/spawn race: the launcher resolved a file that disappeared.
+  // The actual native spawn still runs, and must retain ENOENT and empty hostText.
+  const launch = require('../scripts/claude-process-launch.cjs');
+  const original = launch.directSpawnParts;
+  try {
+    launch.directSpawnParts = () => ({ command: missing, args: [] });
+    await assert.rejects(runAppServerRequest(missing, f.codexHome, { method: 'config/read', params: {} },
+      { ...quickProbe, direct: true, settleWithoutExit: true }), error => {
+      assert.equal(error.code, 'ENOENT');
+      assert.equal(error.hostText, '');
+      assert.match(error.message, /spawn .* ENOENT/);
+      return true;
+    });
+  } finally { launch.directSpawnParts = original; }
 });
 
-test('slice2 runtime: an answer survives failed shutdown; repair probes still require exit', async t => {
+test('runtime: an answer survives failed shutdown; repair probes still require exit', async t => {
   const f = configFake(t, { mode: 'answer-orphan' });
   const options = { ...quickProbe, codexHome: f.codexHome, codexCommand: CONFIG_FAKE };
   const saved = { ...process.env };
@@ -351,7 +368,7 @@ test('slice2 runtime: an answer survives failed shutdown; repair probes still re
   assert.match(repaired.detail, /did not exit after bounded process-tree termination/);
 });
 
-for (const action of ['runtime', 'config/read', 'batchWrite', 'setup']) test('slice2 npm-only PATH: ' + action,
+for (const action of ['runtime', 'config/read', 'batchWrite', 'setup']) test('npm-only PATH: ' + action,
   { skip: process.platform !== 'win32' && 'Windows npm command lookup only' }, t => {
   const f = configFake(t);
   const shim = npmShim(f.root, CONFIG_FAKE);
@@ -376,19 +393,145 @@ for (const action of ['runtime', 'config/read', 'batchWrite', 'setup']) test('sl
   assert.match(fs.readFileSync(f.log, 'utf8'), action === 'setup' ? /argv plugin --help/ : /method initialize/);
 });
 
-test('slice2 hostText: synchronous native start errors also have an empty field', async t => {
+test('hostText: invalid commands fail direct validation without host text', async t => {
   const f = configFake(t);
   const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
   await assert.rejects(runAppServerRequest('invalid\0command', f.codexHome, { method: 'config/read' }), error => {
-    assert.equal(error.code, 'ERR_INVALID_ARG_VALUE');
+    assert.equal(error.reason, 'start');
+    assert.match(error.message, /unsafe characters/);
     assert.equal(error.hostText, '');
     return true;
   });
 });
 
-test('slice2 config/read: an answer survives failed shutdown in the synchronous load probe', t => {
+test('config/read: an answer survives failed shutdown in the synchronous load probe', t => {
   const f = configFake(t, { mode: 'answer-orphan' });
   const result = new CodexConfigLoadCheck({ codexCommand: CONFIG_FAKE }).probe(path.join(f.codexHome, 'config.toml'));
   assert.equal(result.status, 'verified', result.detail);
   assert.match(fs.readFileSync(f.log, 'utf8'), /method config\/read/);
+});
+
+test('a probe module-load crash is not verified and keeps the written config bytes', t => {
+  const f = fixture(t);
+  const snapshot = captureCodexConfigSnapshot(f.configPath);
+  const replacementBytes = Buffer.from('# replacement kept after probe crash\n');
+  const backup = createCodexConfigBackup(f.configPath, { snapshot, replacementBytes });
+  writeRegularFileAtomically(f.configPath, replacementBytes, snapshot.mode);
+  const scripts = path.join(f.root, 'scripts');
+  fs.mkdirSync(scripts);
+  for (const file of ['codex-config-load-check.cjs', 'codex-delegation-backup.cjs', 'codex-delegation-common.cjs']) {
+    fs.copyFileSync(path.join(__dirname, '../scripts', file), path.join(scripts, file));
+  }
+  fs.writeFileSync(path.join(scripts, 'codex-app-server.cjs'), 'throw new Error("TOML module-load failure");\n');
+  const Check = require(path.join(scripts, 'codex-config-load-check.cjs')).CodexConfigLoadCheck;
+  const check = new Check({ environment: isolatedEnv(f.codexHome, f.root) });
+  assert.doesNotThrow(() => {
+    assert.equal(check.verify({ configPath: f.configPath, snapshot, backupPath: backup.backup_path, replacementBytes }).status, 'unverified');
+  }, 'a crashed probe must never roll back the write');
+  assert.deepEqual(fs.readFileSync(f.configPath), replacementBytes);
+  assert.equal(check.probe(f.configPath).status, 'unverified', 'a crashed probe cannot reject config.toml');
+});
+
+test('batchWrite refuses an answer whose orphan keeps the editor pipes open', async t => {
+  const f = configFake(t, { mode: 'answer-orphan' });
+  const harness = 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ')' +
+    '.editWithCodexAppServer(Buffer.from("# original\\n"),{codexHome:process.env.CODEX_HOME,codexCommand:' +
+    JSON.stringify(CONFIG_FAKE) + ',runtime:"MultiAgentV1",helperCount:1,timeoutMs:1000,closeTimeoutMs:100,forceExitTimeoutMs:100})' +
+    '.then(()=>console.log(JSON.stringify({succeeded:true})),e=>console.log(JSON.stringify({error:e.message})))';
+  const env = isolatedEnv(f.codexHome, f.root);
+  env.FAKE_CONFIG_HOME = f.codexHome;
+  const result = require('node:child_process').spawnSync(process.execPath, ['-e', harness], {
+    env, cwd: f.root, encoding: 'utf8', timeout: 12000, windowsHide: true,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  const answer = JSON.parse(result.stdout);
+  assert.equal(answer.succeeded, undefined, 'batchWrite must wait for editor exit before trusting its answer');
+  assert.match(answer.error, /did not exit after bounded process-tree termination/);
+  assert.match(fs.readFileSync(f.log, 'utf8'), /method config\/batchWrite/);
+});
+
+for (const action of ['setup', 'config/read', 'runtime', 'batchWrite']) test('PATH lookup skips a refused wrapper before a working executable: ' + action,
+  { skip: process.platform !== 'win32' }, t => {
+  const f = configFake(t);
+  const wrapperBin = path.join(f.root, 'wrapper');
+  const exeBin = path.join(f.root, 'native');
+  fs.mkdirSync(wrapperBin);
+  fs.mkdirSync(exeBin);
+  const marker = path.join(f.root, 'wrapper-started');
+  fs.writeFileSync(path.join(wrapperBin, 'codex.cmd'), '@echo off\r\necho started>"' + marker + '"\r\n');
+  const executable = path.join(exeBin, 'codex.exe');
+  fs.copyFileSync(process.execPath, executable);
+  // Node copied as codex.exe loads the fixture from the native command's first argument.
+  // Both files are in scratch working folders; the launcher must select the later .exe.
+  fs.writeFileSync(path.join(f.root, 'plugin'), "process.argv.splice(2, 0, 'plugin');\n" + fs.readFileSync(CONFIG_FAKE, 'utf8'));
+  fs.copyFileSync(CONFIG_FAKE, path.join(f.codexHome, 'app-server'));
+  const nativeLog = path.join(f.root, 'native-started');
+  const preload = path.join(f.root, 'native-preload.cjs');
+  // batchWrite chooses a new temporary cwd. Give the copied Node its app-server script there.
+  fs.writeFileSync(preload, `
+if (require('node:path').basename(process.execPath).toLowerCase() === 'codex.exe') {
+  require('node:fs').appendFileSync(${JSON.stringify(nativeLog)}, process.execPath + '\\n');
+  if (require('node:path').basename(process.argv[1] || '') === 'app-server') {
+    require('node:fs').copyFileSync(${JSON.stringify(CONFIG_FAKE)}, require('node:path').join(process.cwd(), 'app-server'));
+  }
+}
+`);
+  const env = isolatedEnv(f.codexHome, [wrapperBin, '', '.', 'relative-bin', exeBin].join(path.delimiter));
+  env.PATHEXT = '.CMD;.EXE';
+  env.FAKE_CONFIG_HOME = f.codexHome;
+  env.NODE_OPTIONS = [env.NODE_OPTIONS, '--require=' + JSON.stringify(preload.replace(/\\/g, '/'))].filter(Boolean).join(' ');
+  const harness = action === 'setup'
+    ? 'console.log(JSON.stringify(require(' + JSON.stringify(require.resolve('../scripts/setup-codex-toolkit-plugin.cjs')) + ').inspectCodexPluginList()))'
+    : action === 'runtime'
+    ? 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ').inspectCodexMultiAgentRuntime({codexHome:process.env.CODEX_HOME,cwd:process.env.CODEX_HOME,timeoutMs:1000}).then(r=>console.log(JSON.stringify(r)))'
+    : action === 'batchWrite'
+    ? 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ').editWithCodexAppServer(Buffer.from("# original\\n"),{codexHome:process.env.CODEX_HOME,runtime:"MultiAgentV1",helperCount:1,timeoutMs:1000}).then(r=>console.log(JSON.stringify({text:r.bytes.toString(),cleanup:r.temporary_cleanup})))'
+    : 'console.log(JSON.stringify(new (require(' + JSON.stringify(require.resolve('../scripts/codex-config-load-check.cjs')) + ').CodexConfigLoadCheck)().verify({configPath:' + JSON.stringify(path.join(f.codexHome, 'config.toml')) + '})))';
+  const result = require('node:child_process').spawnSync(process.execPath, ['-e', harness], {
+    env, cwd: f.root, encoding: 'utf8', timeout: 15000, windowsHide: true,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  const answer = JSON.parse(result.stdout);
+  assert.equal(fs.existsSync(marker), false, 'a refused wrapper must never start');
+  if (action === 'setup') assert.equal(answer.ok, true, JSON.stringify(answer));
+  else if (action === 'runtime') assert.equal(answer.runtime, 'MultiAgentV1', answer.detail);
+  else if (action === 'batchWrite') {
+    assert.match(answer.text, /max_threads = 1/);
+    assert.equal(answer.cleanup, 'removed after child exit');
+  }
+  else assert.equal(answer.status, 'verified', answer.detail);
+  assert.deepEqual([...new Set(fs.readFileSync(nativeLog, 'utf8').trim().split(/\r?\n/).map(file => file.toLowerCase()))], [executable.toLowerCase()], 'the later PATH executable must actually run');
+  const expectedMethod = action === 'runtime' ? /method experimentalFeature\/list/ : action === 'batchWrite' ? /method config\/batchWrite/ : /method config\/read/;
+  assert.match(fs.readFileSync(f.log, 'utf8'), action === 'setup' ? /argv plugin --help/ : expectedMethod);
+});
+
+test('app-server requests always validate direct launches without a non-direct route', async t => {
+  const f = configFake(t);
+  const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
+  await assert.rejects(runAppServerRequest(path.join(f.root, 'absent.exe'), f.codexHome, { method: 'config/read' }), error => {
+    assert.equal(error.reason, 'start', 'the default route must use the direct launcher');
+    return true;
+  });
+});
+
+test('runtime and batchWrite explain a missing program without suggesting a shim fault', async t => {
+  const f = configFake(t);
+  const saved = { ...process.env };
+  const env = isolatedEnv(f.codexHome, f.root);
+  for (const key of Object.keys(process.env)) delete process.env[key];
+  Object.assign(process.env, env);
+  t.after(() => { for (const key of Object.keys(process.env)) delete process.env[key]; Object.assign(process.env, saved); });
+  const result = await delegation.inspectCodexMultiAgentRuntime({ codexHome: f.codexHome });
+  assert.equal(result.runtime, 'unknown');
+  assert.match(result.detail, /executable is not available/);
+  assert.doesNotMatch(result.detail, /cannot be started directly/);
+  await assert.rejects(delegation.editWithCodexAppServer(Buffer.from('# original\n'), {
+    codexHome: f.codexHome, runtime: 'MultiAgentV1', helperCount: 1,
+  }), error => {
+    assert.match(error.message, /executable is not available/);
+    assert.doesNotMatch(error.message, /cannot be started directly/);
+    return true;
+  });
 });

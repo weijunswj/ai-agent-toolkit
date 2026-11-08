@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+require('./support/fake-codex-isolation-guard.cjs').configReaderIsolationGuards(test);
 const block = require('../scripts/toolkit-managed-block.cjs');
 const { GlobalRules, globalRulesBlock, harnessFile, describeResult, BLOCK_NAME } = require('../scripts/toolkit-global-rules.cjs');
 

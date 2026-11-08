@@ -22,6 +22,7 @@ const V2 = config.RUNTIMES.V2;
 
 // The config load check must ask a fixture, never a real Codex on this machine's PATH.
 require('./support/fake-codex-config-reader.cjs').useFakeConfigReader();
+require('./support/fake-codex-isolation-guard.cjs').configReaderIsolationGuards(test);
 
 function tempRoot() {
   return tempFolder('toolkit-codex-v2-');
@@ -796,4 +797,62 @@ test('unknown and disabled runtime states do not write config', async () => {
     assert.equal(result.changed, false);
     assert.equal(fs.readFileSync(filePath, 'utf8'), original);
   }
+});
+
+test('config reader fixture promptly refuses unsupported request methods', () => {
+  const command = require.resolve('./support/fake-codex-config-reader.cjs');
+  const result = spawnSync(process.execPath, [command], {
+    input: JSON.stringify({ id: 7, method: 'experimentalFeature/list' }) + '\n',
+    encoding: 'utf8', timeout: 3000, windowsHide: true,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /"error":/, 'unsupported methods must receive an error reply');
+  assert.equal(JSON.parse(result.stdout).id, 7);
+});
+
+test('config reader fixture replies to every unknown request and keeps notifications silent', () => {
+  const requests = [
+    { id: 0, method: 'experimentalFeature/list' },
+    { id: 'unknown-request', method: 'fixture/unknown' },
+    { id: null, method: 'another/unknown' },
+    { method: 'initialized' },
+    { method: 'fixture/notification' },
+  ];
+  const result = spawnSync(process.execPath, [require.resolve('./support/fake-codex-config-reader.cjs')], {
+    input: requests.map(request => JSON.stringify(request)).join('\n') + '\n',
+    encoding: 'utf8', timeout: 3000, windowsHide: true,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  const replies = result.stdout.trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  assert.deepEqual(replies.map(reply => reply.id), [0, 'unknown-request', null], 'every unknown request must receive an error reply; only notifications stay silent');
+  for (const reply of replies) {
+    assert.equal(reply.error?.code, -32601, 'unknown methods must return a method-not-found error');
+    assert.equal(Object.hasOwn(reply, 'result'), false, 'an unsupported method cannot claim success');
+  }
+});
+
+test('unknown runtime fixtures never start an npm Codex first on PATH', { skip: process.platform !== 'win32' }, () => {
+  const root = tempRoot();
+  const home = path.join(root, 'home');
+  fs.mkdirSync(home);
+  const marker = path.join(root, 'started');
+  const logger = path.join(root, 'logger.cjs');
+  fs.writeFileSync(logger, 'require("node:fs").writeFileSync(' + JSON.stringify(marker) + ', "started");\n' +
+    fs.readFileSync(require.resolve('./support/fake-codex-config-reader.cjs'), 'utf8'));
+  const { npmShim, isolatedEnv } = require('./support/fake-codex-config.cjs');
+  const shim = npmShim(root, logger);
+  const invalid = createRuntimeServer(root, [], { error: true });
+  const harness = 'require(' + JSON.stringify(require.resolve('./support/fake-codex-config-reader.cjs')) + ').useFakeConfigReader();' +
+    'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ')' +
+    '.inspectCodexMultiAgentRuntime({codexHome:process.env.CODEX_HOME,codexCommand:' + JSON.stringify(invalid) +
+    ',timeoutMs:500}).then(r=>console.log(JSON.stringify(r)))';
+  const result = spawnSync(process.execPath, ['-e', harness], {
+    env: isolatedEnv(home, path.dirname(shim)), cwd: root, encoding: 'utf8', timeout: 10000, windowsHide: true,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(marker), false, 'unknown runtime must not start PATH Codex');
+  assert.equal(JSON.parse(result.stdout).runtime, config.RUNTIMES.UNKNOWN);
 });

@@ -8,13 +8,7 @@ const { TOOLKIT_VERSION } = require('./toolkit-version.cjs');
 const TOOLKIT_CLIENT_VERSION = TOOLKIT_VERSION;
 const APP_SERVER_ARGS = Object.freeze(['app-server', '--listen', 'stdio://']);
 // Fixed reason fields and raw host text; callers screen hostText before display.
-// Messages stay as they were for existing callers.
 const failure = (message, fields) => Object.assign(new Error(message), { hostText: '' }, fields);
-
-function codexCommandParts(command, args) {
-  if (/\.(?:cjs|mjs|js)$/i.test(command)) return { command: process.execPath, args: [command, ...args] };
-  return { command, args };
-}
 
 function appServerCandidates(explicit = '', codexHome = '') {
   return [...new Set([
@@ -43,10 +37,9 @@ function terminateChildTree(child) {
 
 // One bounded process and its protocol/shutdown state belong to one request.
 // The constructor captures the existing command/config; it starts no process.
-// options: cwd, timeoutMs, closeTimeoutMs, forceExitTimeoutMs, plus two opt-ins for read-only one-shot
-// callers (the Codex hook check):
-// - direct: start the command with no shell (claude-process-launch.cjs directSpawnParts: an npm
-//   codex.cmd runs the script it wraps; any other command script is refused).
+// Commands always start directly without a shell through directSpawnParts: an npm codex.cmd
+// runs the program it wraps; other Windows command scripts are refused.
+// options: cwd, timeoutMs, closeTimeoutMs, forceExitTimeoutMs, and the read-only opt-in:
 // - settleWithoutExit: when Codex has answered but does not stop after the bounded process-tree stop,
 //   settle with that answer, and release this request's pipes when it settles so this process can exit.
 //   Write callers leave it off: they must see Codex exit before trusting or deleting its folder.
@@ -63,10 +56,8 @@ class AppServerRequest {
       this.#resolve=resolve;this.#reject=reject;
       let parts;
       try {
-        parts=this.#options.direct
-          ? require('./claude-process-launch.cjs').directSpawnParts(this.#command,[...APP_SERVER_ARGS],{label:'Codex'})
-          : codexCommandParts(this.#command,[...APP_SERVER_ARGS]);
-      } catch { reject(failure(`${this.#command} cannot be started directly`,{reason:'start'}));return; }
+        parts=require('./claude-process-launch.cjs').directSpawnParts(this.#command,[...APP_SERVER_ARGS],{label:'Codex'});
+      } catch (error) { reject(failure(error.message,{reason:'start'}));return; }
       this.#child=spawn(parts.command,parts.args,{
         env:{...process.env,CODEX_HOME:this.#codexHome},cwd:this.#options.cwd,
         stdio:['pipe','pipe','pipe'],windowsHide:true});
