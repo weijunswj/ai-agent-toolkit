@@ -92,7 +92,7 @@ test('unused kept terms fail only full runs, while a folder exemption stays used
   });
   const failed = run([SCRIPT, '--repo', root], root);
   assert.equal(failed.status, 1, 'a full run must fail on the unused V7 exemption');
-  assert.equal(failed.stderr, 'FAIL: kept term "V7" for docs/a.md is no longer used; remove it from kept_terms\n');
+  assert.equal(failed.stderr, 'FAIL: kept term "V7" for docs/a.md is no longer needed (it exempts nothing); remove it from kept_terms\n');
   assert.doesNotMatch(failed.stdout + failed.stderr, /V9/);
   assert.deepEqual(check.check(root, config).unusedKept, [config.kept_terms[1]]);
   const scoped = run([SCRIPT, '--repo', root, '--files', 'docs/a.md'], root);
@@ -520,4 +520,14 @@ test('the CI template reads only, pins its actions to the guard template\'s SHAs
     assert.equal(pin.exec(template)[1], pin.exec(guard)[1], action);
   }
   assert.match(template, /run: node \.github\/scripts\/plain-text-check\.cjs$/m);
+});
+
+test('slice2 unused kept wording also applies when the text is explained elsewhere', t => {
+  const root = tempRepo(t, { 'docs/a.md': 'Mode V3 (example mode).\n' });
+  settings(root, { banned_terms: [{ term: 'V#', reason: 'version', fix: 'name it' }],
+    explained_terms: [{ term: 'V3', reason: 'mode name' }],
+    kept_terms: [{ file: 'docs/a.md', text: 'V3', reason: 'obsolete exemption' }] });
+  const result = run([SCRIPT, '--repo', root], root);
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, 'FAIL: kept term "V3" for docs/a.md is no longer needed (it exempts nothing); remove it from kept_terms\n');
 });
