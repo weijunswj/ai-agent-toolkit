@@ -1160,9 +1160,10 @@ test('the graph replaces the hand-kept index once, sits right under the CURRENT 
   reconciler().run({ apply: true });
   const page = github.issues.get(421).body;
   assert.equal(page.includes('Programme index'), false, 'the hand-kept index is replaced');
-  assert.ok(page.startsWith('# Programme\n\n## CURRENT\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN CURRENT'), 'the generated summary opens the status section');
+  assert.match(page, /^# Programme\n+<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN CURRENT[^\n]*\n# CURRENT\n/, 'the renderer owns the CURRENT heading');
   assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END CURRENT -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE'), 'the graph follows the summary directly');
-  assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\nLive now.\n\n## Parent completion\n\nDone when.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE'), 'hand-written notes come after the graph, and the comment trace closes the page');
+  assert.match(page, /<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN CONTEXT/);
+  assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END CONTEXT -->\n\nLive now.\n\n## Parent completion\n\nDone when.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE'), 'hand-written notes come after agent context, and the comment trace closes the page');
   assert.ok(page.endsWith('<!-- AI-AGENT-TOOLKIT:programme-state:END TRACE -->\n'));
   assert.match(github.issues.get(423).body, /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN NAV [^\n]*\n<!-- programme-nav -->\n\*\*Path:\*\* #421 > #423\n<!-- AI-AGENT-TOOLKIT:programme-state:END NAV -->\n\n# C2 title\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE/, 'a task page opens with its links, then the title, then its status block');
   assert.equal(reconciler().run().summary, 'No changes');
@@ -1175,7 +1176,7 @@ test('the graph replaces the hand-kept index once, sits right under the CURRENT 
   assert.deepEqual(dry.effects.map(effect => effect.text), ["Move the state block in #421's body"]);
   assert.ok(dry.findings.some(finding => finding.detail === 'the block is not in its place on the page'));
   reconciler().run({ apply: true });
-  assert.equal(github.issues.get(421).body, page);
+  assert.equal(github.issues.get(421).body, `\n\n${page}`, 'moving the block keeps the two hand-written leading newlines in place');
 });
 
 test('every body lists every comment on its issue, with supersession marked and the latest comment winning', () => {

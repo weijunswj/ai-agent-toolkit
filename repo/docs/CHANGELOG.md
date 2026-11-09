@@ -1,5 +1,13 @@
 # Toolkit Changelog
 
+## 3.58.0
+
+### Added
+
+- Programme parents show managed CURRENT, PROGRAMME GRAPH, AGENT CONTEXT and COMMENT TRACE headings.
+- Large programme pages move only the needed graph rows into verified archive comments at the 55,000 safe limit, with linked Archived group counts and a shared five-comment budget per issue. Only the first exact CURRENT heading outside code fences and HTML comments migrates on first insertion (raw HTML blocks, a fence that starts on a list-marker line, a leading byte-order mark and a lone carriage return are not modelled yet); an exact adjacent CURRENT heading outside those examples and comments also migrates into an existing managed block. Recovery keeps unchanged graph parts verified read-only across logins, quietly excludes superseded parts within the bounded registry and detaches excluded, changed or missing comments without stopping redraws. Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand.
+- BODY_NEAR_LIMIT and BODY_TOO_LARGE remain visible as durable attention findings with exact section sizes, including refusals discovered while applying a redraw.
+
 ## 3.57.0
 
 ### Added

@@ -23,7 +23,7 @@
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const { resolveExecutable } = require('./resolve-executable.cjs');
-const { commentTag, commentTagLabel, splitTag } = require('./decision-tags.cjs');
+const { commentTag, commentTagLabel, splitTag, isArchiveComment } = require('./decision-tags.cjs');
 
 const DEFAULT_THRESHOLD = 60000;
 const INDEX_COMMENT_MARKER = '<!-- decision-trace-index -->';
@@ -43,7 +43,7 @@ function linkedIds(text) { return new Set([...String(text || '').matchAll(LINK)]
 function indexGraph({ body = '', comments, repository = '', issue = null, all = false }) {
   const people = comments.filter(comment => !isBot(comment));
   const byId = new Map(people.map(comment => [String(comment.id), comment]));
-  const indexes = people.filter(comment => String(comment.body || '').includes(INDEX_COMMENT_MARKER));
+  const indexes = people.filter(comment => !isArchiveComment(comment.body) && String(comment.body || '').includes(INDEX_COMMENT_MARKER));
   const indexIds = new Set(indexes.map(comment => String(comment.id)));
   const strictIds = new Set(indexes.filter(comment => String(comment.body).includes('programme-trace intent=')
     || String(comment.body).includes(DIRECTORY_COMMENT_MARKER)).map(comment => String(comment.id)));
@@ -138,7 +138,7 @@ function isBot(comment) {
 // prefix is matched as plain text, never compiled into a regular expression.
 const RECORD_PREFIX = /^[A-Za-z0-9._-]{1,40}$/;
 function recordId(text, prefix) {
-  if (!prefix) return null;
+  if (!prefix || isArchiveComment(text)) return null;
   const source = String(text || '');
   for (let at = source.indexOf(prefix); at !== -1; at = source.indexOf(prefix, at + 1)) {
     const digits = /^\d+/.exec(source.slice(at + prefix.length))?.[0];
@@ -157,6 +157,7 @@ function recordFacts(people, recordPrefix) {
   const supersedes = new Map();
   if (recordPrefix) {
     for (const comment of people) {
+      if (isArchiveComment(comment.body)) continue;
       for (const match of String(comment.body || '').matchAll(SUPERSEDES)) {
         const old = recordId(match[1], recordPrefix);
         if (!old || !commentOf.has(old)) continue;
@@ -255,7 +256,7 @@ function auditDecisionTraces({ body, comments, recordPrefix = null, threshold = 
   // Only a SUPERSEDES= value that starts with a record ID (the prefix plus digits) is a reference to
   // check, whatever follows it (a full stop, "-draft", "_x"); prose such as "SUPERSEDES=the
   // auto-refresh allowance" is left alone.
-  const unknownSupersedes = recordPrefix ? people.flatMap(comment => [...String(comment.body || '').matchAll(SUPERSEDES)]
+  const unknownSupersedes = recordPrefix ? people.filter(comment => !isArchiveComment(comment.body)).flatMap(comment => [...String(comment.body || '').matchAll(SUPERSEDES)]
     .filter(match => match[1].startsWith(recordPrefix)).map(match => recordId(match[1], recordPrefix))
     .filter(id => id && !knownIds.has(id))
     .map(id => ({ id: String(comment.id), supersedes: id }))) : [];

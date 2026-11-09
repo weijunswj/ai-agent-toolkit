@@ -25,6 +25,12 @@ const { spawnSync } = require('node:child_process');
 const { DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_COMMENTS, auditDecisionTraces, traceEntries, indexErrorText, indexRecoveryText, commentLink, issueUrl } = require('./decision-trace-audit.cjs');
 const { OTHER_COMMENTS } = require('./decision-tags.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
+const SAFE_LIMIT = 55000;
+
+// Graph archive formatting is needed only by page operations, never by hook binding reads.
+function archiveTools() {
+  return require('./programme-page-archive.cjs');
+}
 
 const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
@@ -66,13 +72,13 @@ const CHECK_STATES = ['GREEN', 'PENDING', 'RED', 'UNKNOWN'];
 const UAT_STATES = ['NOT_REQUIRED', 'PENDING', 'PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'];
 const REVIEW_STATES = ['NOT_STARTED', 'IN_REVIEW', 'PASSED', 'NOT_PASSED'];
 const REVIEW_VERDICTS = ['PASSED', 'NOT_PASSED'];
-const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'replace_pr_nav', 'set_parent_state', 'post_parent_repair'];
+const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment', 'replace_pr_nav', 'set_parent_state', 'post_parent_repair'];
 const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
 // observation timestamps, pending effects (an intent write must not make the rendered state stale),
 // the journal blobs the controller has read and the parent's attention findings. sameState still
 // compares the last two, so a real change is written without a revision bump.
-const UNHASHED = ['revision', 'volatile', 'pending_effects', 'journals_seen', 'attention'];
+const UNHASHED = ['revision', 'volatile', 'pending_effects', 'journals_seen', 'attention', 'page_archive'];
 // Child fields `update` may change. UAT, review and a terminal lifecycle (DONE, RETIRED) are
 // acceptance records: only the parent's holder (the controller) writes them.
 const PATCHABLE_CHILD_FIELDS = ['lifecycle', 'completed_at', 'release', 'candidate', 'uat', 'review', 'blockers', 'next_action', 'private'];
@@ -89,6 +95,7 @@ const BLOCK_NAME = 'STATE';
 const TRACE_BLOCK_NAME = 'TRACE';
 const NAV_BLOCK_NAME = 'NAV';
 const CURRENT_BLOCK_NAME = 'CURRENT';
+const CONTEXT_BLOCK_NAME = 'CONTEXT';
 // Index comments are cut below this size (GitHub's comment limit is 65,536 characters).
 const INDEX_COMMENT_LIMIT = 60000;
 // Cap notifying topic comments across the pass; larger traces use directory pages directly.
@@ -128,6 +135,7 @@ function sameState(previous, next) {
     && JSON.stringify(canonical(previous.pending_effects || [])) === JSON.stringify(canonical(next.pending_effects || []))
     && JSON.stringify(canonical(previous.journals_seen || {})) === JSON.stringify(canonical(next.journals_seen || {}))
     && JSON.stringify(canonical(previous.attention || [])) === JSON.stringify(canonical(next.attention || []))
+    && JSON.stringify(canonical(previous.page_archive || [])) === JSON.stringify(canonical(next.page_archive || []))
     && previous.private?.graph_pr_watermark === next.private?.graph_pr_watermark;
 }
 
@@ -136,7 +144,7 @@ function check(errors, condition, message) { if (!condition) errors.push(message
 // Fields each object may and must hold, as the schemas' additionalProperties: false and required.
 const SHAPES = {
   child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'], optional: ['volatile', 'journals_seen', 'completed_at', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'] },
-  parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'private', 'volatile'], optional: ['volatile', 'attention'] },
+  parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'page_archive', 'private', 'volatile'], optional: ['volatile', 'attention', 'page_archive'] },
   finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics'], optional: ['diagnostics'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
@@ -210,6 +218,35 @@ function validateEffects(errors, effects) {
     check(errors, EFFECT_KINDS.includes(effect?.kind), `pending_effects[${index}].kind is not a known effect`);
     check(errors, isObject(effect?.target), `pending_effects[${index}].target must be an object`);
     check(errors, EFFECT_STATES.includes(effect?.state), `pending_effects[${index}].state must be IN_FLIGHT, DONE or UNKNOWN`);
+    if (['post_archive_comment', 'edit_archive_comment'].includes(effect?.kind)) {
+      const target = effect.target;
+      checkShape(errors, target, { all: ['issue', 'key', 'comment_id', 'login', 'before', 'digest'] }, `pending_effects[${index}].target`);
+      check(errors, isObject(target) && isInt(target.issue, 1) && /^graph-(?:retired|completed|optional|later|now)-[1-9][0-9]*$/.test(target.key)
+        && isText(target.login) && /^[0-9a-f]{64}$/.test(target.digest)
+        && (effect.kind === 'post_archive_comment' ? target.comment_id === null && target.before === null
+          : isInt(target.comment_id, 1) && /^[0-9a-f]{64}$/.test(target.before)), `pending_effects[${index}].target must name a bounded archive intent`);
+    }
+  }
+}
+
+function validatePageArchive(errors, archive) {
+  if (archive === undefined) return;
+  check(errors, Array.isArray(archive), 'page_archive must be a list');
+  const keys = new Set(), ids = new Set();
+  for (const entry of Array.isArray(archive) ? archive : []) {
+    check(errors, isObject(entry), 'page_archive entry must be an object');
+    if (!isObject(entry)) continue;
+    checkShape(errors, entry, { all: ['key', 'kind', 'group', 'title', 'comment_id', 'login', 'digest', 'state', 'untrusted_ids', 'untrusted_before'], optional: ['untrusted_ids', 'untrusted_before'] }, 'page_archive entry');
+    check(errors, typeof entry.key === 'string' && /^graph-(?:retired|completed|optional|later|now)-[1-9][0-9]*$/.test(entry.key) && !keys.has(entry.key), 'page_archive key must be unique and fixed');
+    keys.add(entry.key);
+    check(errors, entry.kind === 'graph' && archiveTools().GROUPS.includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`), 'page_archive kind and group must match its key');
+    check(errors, isText(entry.title) && entry.title.length <= 200, 'page_archive title must be bounded text');
+    check(errors, ['pending', 'moved'].includes(entry.state), 'page_archive state must be pending or moved');
+    check(errors, entry.comment_id === null ? entry.login === null && entry.state === 'pending' : isInt(entry.comment_id, 1) && isText(entry.login) && !ids.has(entry.comment_id), 'page_archive id must be unique with verified login');
+    if (entry.comment_id !== null) ids.add(entry.comment_id);
+    if (entry.untrusted_before !== undefined) check(errors, isInt(entry.untrusted_before, 1), 'page_archive untrusted floor must be a positive integer');
+    if (entry.untrusted_ids !== undefined) check(errors, Array.isArray(entry.untrusted_ids) && entry.untrusted_ids.length > 0 && entry.untrusted_ids.every(id => isInt(id, 1)) && new Set(entry.untrusted_ids).size === entry.untrusted_ids.length, 'page_archive untrusted ids must be unique positive integers');
+    check(errors, typeof entry.digest === 'string' && /^[0-9a-f]{64}$/.test(entry.digest), 'page_archive digest must be SHA-256');
   }
 }
 
@@ -267,6 +304,7 @@ function validateParent(doc) {
       }
     }
     validateAttention(errors, doc.attention);
+    validatePageArchive(errors, doc.page_archive);
   }
   return errors;
 }
@@ -305,6 +343,8 @@ const FINDING_CODES = Object.freeze({
   PR_WITHOUT_TASK: { source: 'reconcile', next_action: 'Controller: link the PR to a task or dispose with a reason' },
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
+  BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
+  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the graph archive comments on the page this finding names; redraw can publish a fresh verified part, but the finding stays open until disposed' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
@@ -327,7 +367,9 @@ const FINDING_CODES = Object.freeze({
 // Findings with no issue of their own.
 const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
-const BODY_SECTION_KINDS = ['CURRENT', 'STATE', 'TRACE', 'NAV', 'hand_written'];
+const BODY_SECTION_KINDS = ['CURRENT', 'STATE', 'CONTEXT', 'TRACE', 'NAV', 'hand_written'];
+const SIZE_CODES = ['BODY_TOO_LARGE', 'BODY_NEAR_LIMIT'];
+const PAGE_CODES = SIZE_CODES;
 const BODY_SECTION_LIMIT = 5;
 const REFRESH_BUDGET_MS = 10 * 60 * 1000;
 const PAGE_RESERVE_MS = 3 * 60 * 1000;
@@ -449,9 +491,13 @@ function validateAttention(errors, attention) {
     checkShape(errors, entry, 'finding', at);
     const known = Object.hasOwn(FINDING_CODES, entry.code) ? FINDING_CODES[entry.code] : null;
     check(errors, Boolean(known), `${at}.code is not a known finding code`);
-    if (entry.code === 'BODY_TOO_LARGE') validateBodyDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
+    if (SIZE_CODES.includes(entry.code)) validateBodyDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
+    else if (entry.code === 'ARCHIVE_COMMENT_UNTRUSTED') {
+      checkShape(errors, entry.diagnostics, { all: ['reason'] }, `${at}.diagnostics`);
+      check(errors, isObject(entry.diagnostics) && ['changed', 'foreign', 'missing', 'duplicate'].includes(entry.diagnostics.reason), `${at}.diagnostics must name a fixed archive trust failure`);
+    }
     else if (entry.code === 'PASS_STOPPED') validatePassDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
-    else check(errors, entry.diagnostics === undefined, `${at}.diagnostics belongs only to BODY_TOO_LARGE or PASS_STOPPED`);
+    else check(errors, entry.diagnostics === undefined, `${at}.diagnostics belongs only to page findings or PASS_STOPPED`);
     check(errors, Boolean(known) && entry.source === known.source, `${at}.source must be the code's source`);
     check(errors, ISSUELESS_CODES.has(entry.code) ? entry.issue === null : isInt(entry.issue, 1), `${at}.issue must be an issue number${ISSUELESS_CODES.has(entry.code) ? ' or null' : ''}`);
     check(errors, HEAD_BOUND_CODES.has(entry.code) ? optional(entry.head, isSha) : entry.head === null, `${at}.head must be a full 40-character SHA for a head-bound code, otherwise null`);
@@ -466,7 +512,7 @@ function validateAttention(errors, attention) {
 // Codes the reconciler reports once, on the pass that first reads a journal; the next pass no longer
 // sees them although nobody acted. The reconcile pass keeps such a finding open (`hold`) until it is
 // answered or its condition is really gone (see Reconciler.oneTimeHolds).
-const ONE_TIME_CODES = new Set(['RETURN_CAPTURED', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'STALE_ASSIGNMENT', 'CHILD_REOPENED', 'CHILD_ADDED']);
+const ONE_TIME_CODES = new Set(['RETURN_CAPTURED', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'STALE_ASSIGNMENT', 'CHILD_REOPENED', 'CHILD_ADDED', 'ARCHIVE_COMMENT_UNTRUSTED']);
 
 // What a run saw, as findings: [{ code, issue, head? }]. Returns the next attention list, or the same
 // list (===) when nothing changes, so an unchanged run writes nothing. A run that was not complete
@@ -512,12 +558,12 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     const issue = ISSUELESS_CODES.has(finding.code) ? null : finding.issue;
     if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
     add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null,
-      ['BODY_TOO_LARGE', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null);
+      [...PAGE_CODES, 'ARCHIVE_COMMENT_UNTRUSTED', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null);
   }
   for (const entry of complete ? list : []) {
     // Only the reconciler's complete successful redraw/readback settles a size finding. This also
     // protects an affected page first reported by another writer after the planning snapshot.
-    if (entry.code === 'BODY_TOO_LARGE') continue;
+    if (PAGE_CODES.includes(entry.code) || entry.code === 'ARCHIVE_COMMENT_UNTRUSTED') continue;
     // ATTENTION_FULL resolves on any complete run back under the bound.
     const own = entry.source === source || entry.code === 'ATTENTION_FULL';
     if (!own || seenIds.has(entry.id) || hold.includes(entry.id) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
@@ -1468,7 +1514,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
   });
   return [
     revisionLine(parent, children),
-    '## Programme Graph',
+    '# PROGRAMME GRAPH',
     '',
     `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: current, +N others; history on child page.`,
     '',
@@ -1523,9 +1569,10 @@ function traceTokens(group, base) {
 // The comment trace an issue body carries: one line per topic, listing that topic's index comments
 // and then every comment none of them lists, each as a link that opens the comment. With
 // `repository`, every link is a full URL; `topic` is a task page's own task name, as written.
-function renderTraceBlockBody(number, trace, repository = '', topic = null) {
+function renderTraceBlockBody(number, trace, repository = '', topic = null, parentPage = false) {
   const base = issueUrl(repository, number);
   const lines = [
+    ...(parentPage ? ['# COMMENT TRACE'] : []),
     `<!-- programme-trace issue=${number} -->`,
     '**Comment trace** (generated from every comment on this issue). One line per topic; each number is a comment and opens it. Read the body first; within a topic, where comments disagree, the latest one wins. To put a comment under a topic, make its first line the topic (the task\'s name, or a short subject for a programme-wide comment) and its second line `---`.',
     '',
@@ -1559,8 +1606,9 @@ function renderCurrentBlockBody(parent, children, issues = new Map(), now = new 
   // A task whose PR merged or whose issue closed is not picked, even before its state catches up.
   const next = rows.find(row => graphClass(row.outcome, row.child) === 'LATER' && row.child?.pr.state !== 'MERGED' && !issues.get(row.outcome.issue)?.closed_at);
   return [
+    '# CURRENT',
     '<!-- programme-current -->',
-    `_Generated from the programme state (revision ${parent.revision}). The Programme Graph follows; hand-written notes come after it._`,
+    `_Generated from the programme state (revision ${parent.revision}). PROGRAMME GRAPH, AGENT CONTEXT and COMMENT TRACE follow._`,
     '',
     '**In progress**',
     ...(working.length ? working : ['- None.']),
@@ -1683,7 +1731,7 @@ function versionNewer(a, b) {
 // The newest Toolkit version among a body's managed blocks, or null when it has none.
 function newestBlockVersion(text) {
   let newest = null;
-  for (const name of [BLOCK_NAME, CURRENT_BLOCK_NAME, NAV_BLOCK_NAME, TRACE_BLOCK_NAME]) {
+  for (const name of [BLOCK_NAME, CURRENT_BLOCK_NAME, CONTEXT_BLOCK_NAME, NAV_BLOCK_NAME, TRACE_BLOCK_NAME]) {
     const version = findStateBlock(text, name).block?.version;
     if (version && (!newest || versionNewer(version, newest))) newest = version;
   }
@@ -1698,8 +1746,7 @@ function upsertTraceBlock(text, rendered) {
   const { block: found, error } = findStateBlock(source, TRACE_BLOCK_NAME);
   if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
   if (found) return source.slice(0, found.start) + block + source.slice(found.end);
-  const before = source.replace(/\s+$/, '');
-  return `${before ? `${before}${eol}${eol}` : ''}${block}${eol}`;
+  return `${source}${source ? source.endsWith(eol) ? eol : `${eol}${eol}` : ''}${block}${eol}`;
 }
 
 // The body with the CURRENT summary written: replaced in place, else added right under the heading
@@ -1710,13 +1757,76 @@ function upsertCurrentBlock(text, rendered, sectionName) {
   const block = rendered.split('\n').join(eol);
   const { block: found, error } = findStateBlock(source, CURRENT_BLOCK_NAME);
   if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
-  if (found) return source.slice(0, found.start) + block + source.slice(found.end);
   const all = headings(source);
+  if (found) {
+    // The only hand-written migration: one exact adjacent heading, with blank lines only.
+    let before = source.slice(0, found.start);
+    const adjacent = /^## CURRENT\r?\n(?=(?:[ \t]*\r?\n)*(?![\s\S]))/m.exec(before);
+    if (adjacent && all.some(heading => heading.start === adjacent.index)) before = before.slice(0, adjacent.index) + before.slice(adjacent.index + adjacent[0].length);
+    return before + block + source.slice(found.end);
+  }
   const heading = (sectionName && all.find(entry => entry.text.toLowerCase() === String(sectionName).trim().toLowerCase())) || all.find(entry => entry.level === 1);
+  const migrate = heading?.text === 'CURRENT' && heading.level === 2;
   const at = heading ? heading.end : 0;
-  const before = source.slice(0, at).replace(/\s+$/, '');
-  const after = source.slice(at).replace(/^\s+/, '');
-  return `${before ? `${before}${eol}${eol}` : ''}${block}${after ? `${eol}${eol}${after}` : eol}`;
+  const before = migrate && /^## CURRENT\r?\n?$/.test(source.slice(heading.start, at)) ? source.slice(0, heading.start) : source.slice(0, at);
+  return `${before}${eol}${block}${eol}${source.slice(at)}`;
+}
+
+// Bound rejection history without restoring adoption trust. Keep the registered id if
+// rejected, plus the newest other ids, at most 32. A monotonic floor excludes dropped
+// candidates. It cannot revoke an independently verified registered id, which was never
+// rejected; once rejected that id is pinned in the explicit list until unregistered.
+function rejectArchiveIds(entry, ids) {
+  const rejected = [...new Set([...(entry.untrusted_ids || []), ...ids])].sort((a, b) => a - b);
+  const kept = rejected.slice(-32);
+  if (rejected.includes(entry.comment_id) && !kept.includes(entry.comment_id)) kept[0] = entry.comment_id;
+  const dropped = rejected.filter(id => !kept.includes(id));
+  if (dropped.length) entry.untrusted_before = Math.max(entry.untrusted_before || 0, dropped.at(-1));
+  entry.untrusted_ids = kept.sort((a, b) => a - b);
+}
+
+function archiveUntrusted(entry, id) {
+  return Boolean(entry.untrusted_ids?.includes(id)) || id !== entry.comment_id && id <= (entry.untrusted_before || 0);
+}
+
+function detachArchive(entry) {
+  rejectArchiveIds(entry, [entry.comment_id]);
+  entry.comment_id = null; entry.login = null; entry.state = 'pending';
+}
+
+function renderContextBlockBody() {
+  return ['# AGENT CONTEXT', '<!-- programme-context -->',
+    'Background for agents that pick up a task.',
+    'Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand.'].join('\n');
+}
+
+function upsertContextBlock(source, rendered) {
+  const found = findStateBlock(source, CONTEXT_BLOCK_NAME);
+  if (found.error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', found.error);
+  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  const block = rendered.replace(/\n/g, eol);
+  const state = findStateBlock(source).block;
+  if (found.block && state && found.block.start >= state.end && !source.slice(state.end, found.block.start).trim()) return source.slice(0, found.block.start) + block + source.slice(found.block.end);
+  if (found.block) source = source.slice(0, found.block.start) + source.slice(found.block.end);
+  const at = findStateBlock(source).block?.end || 0;
+  return source.slice(0, at) + `${eol}${eol}${block}` + source.slice(at);
+}
+
+function upsertParentStateBlock(source, rendered, placement) {
+  // Preserve the binding's explicit old-index migration while that section still exists.
+  if (placement.replace_section && headings(source).some(entry => entry.text.toLowerCase() === placement.replace_section.toLowerCase())) return upsertStateBlock(source, rendered, placement);
+  const found = findStateBlock(source);
+  if (found.error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', found.error);
+  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  const block = rendered.replace(/\n/g, eol);
+  const current = findStateBlock(source, CURRENT_BLOCK_NAME).block;
+  if (found.block && current && found.block.start >= current.end && !source.slice(current.end, found.block.start).trim()) {
+    return { body: source.slice(0, found.block.start) + block + source.slice(found.block.end), moved: false };
+  }
+  const rest = found.block ? source.slice(0, found.block.start) + source.slice(found.block.end) : source;
+  const anchor = findStateBlock(rest, CURRENT_BLOCK_NAME).block;
+  const at = anchor?.end ?? blockTarget(rest, placement).start;
+  return { body: rest.slice(0, at) + `${eol}${eol}${block}` + (rest.slice(at).startsWith(eol) ? '' : eol) + rest.slice(at), moved: Boolean(found.block) };
 }
 
 // The body with the links block first: replaced in place, else added at the very top.
@@ -1803,16 +1913,34 @@ function indexEffect(number, part, after) {
   return { kind: 'post_index_comment', target, label: part.label, lines: part.lines };
 }
 
-// Headings outside fenced code, with their level, text and line offsets.
+// Headings outside fenced code and line-start HTML comments, with original line offsets.
 function headings(text) {
   const found = [];
-  let fenced = false;
+  let fence = null;
+  let comment = false;
   for (let offset = 0; offset < text.length;) {
     const next = text.indexOf('\n', offset);
     const stop = next === -1 ? text.length : next;
     const line = text.slice(offset, stop).replace(/\r$/, '');
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    const heading = !fenced && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    let hidden = false;
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (close && close[1][0] === fence.character && close[1].length >= fence.length) fence = null;
+      hidden = true;
+    } else if (comment) {
+      if (line.includes('-->')) comment = false;
+      hidden = true;
+    } else if (/^ {0,3}<!--/.test(line)) {
+      comment = !line.includes('-->', line.indexOf('<!--') + 4);
+      hidden = true;
+    } else {
+      const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (open && (open[1][0] !== '`' || !open[2].includes('`'))) {
+        fence = { character: open[1][0], length: open[1].length };
+        hidden = true;
+      }
+    }
+    const heading = !hidden && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
     if (heading) found.push({ level: heading[1].length, text: heading[2].trim(), start: offset, end: next === -1 ? stop : next + 1 });
     offset = next === -1 ? text.length : next + 1;
   }
@@ -2191,7 +2319,8 @@ function stateInvalid(what, errors) {
 function freeTextFields(kind, doc) {
   if (kind === 'parent') {
     return [['release_plan.record', doc.release_plan?.record],
-      ...(Array.isArray(doc.outcomes) ? doc.outcomes : []).flatMap((outcome, index) => ['label', 'name', 'description', 'lane'].map(field => [`outcomes[${index}].${field}`, outcome?.[field]]))];
+      ...(Array.isArray(doc.outcomes) ? doc.outcomes : []).flatMap((outcome, index) => ['label', 'name', 'description', 'lane'].map(field => [`outcomes[${index}].${field}`, outcome?.[field]])),
+      ...(Array.isArray(doc.page_archive) ? doc.page_archive : []).map((entry, index) => [`page_archive[${index}].title`, entry.title])];
   }
   return [['release', doc.release], ['next_action', doc.next_action],
     ...(Array.isArray(doc.blockers) ? doc.blockers : []).map((value, index) => [`blockers[${index}]`, value]),
@@ -2705,6 +2834,18 @@ function parentFromUrl(url, repository) {
 
 // Read-only view of the programme on GitHub.
 class ProgrammeGraphReader {
+  viewer() {
+    const response = this.transport.request('GET', 'user');
+    if (response.status !== 200 || !isText(response.json?.login)) throw ghFailure(response, 'Reading the authenticated login');
+    return response.json.login;
+  }
+
+  archiveComment(id) {
+    const response = this.transport.request('GET', `repos/${this.repository}/issues/comments/${id}`);
+    if (response.status === 404) return null;
+    if (response.status !== 200) throw ghFailure(response, 'Reading an archive comment');
+    return response.json;
+  }
   nativeChildState(number) {
     return new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.transport, repository: this.repository }).tree(this.repository, number);
   }
@@ -3105,6 +3246,11 @@ class GitHubMutator {
     return this.transport.request('POST', `repos/${this.repository}/issues/${number}/comments`, { body });
   }
 
+  editComment(id, body) {
+    this.mutations += 1;
+    return this.transport.request('PATCH', `repos/${this.repository}/issues/comments/${id}`, { body });
+  }
+
   writeBody(number, body) {
     this.mutations += 1;
     return this.transport.request('PATCH', `repos/${this.repository}/issues/${number}`, { body });
@@ -3232,6 +3378,8 @@ const EFFECT_TEXT = {
   replace_pr_nav: effect => `Add the parent and task links at the top of PR #${effect.target.pr}`,
   update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,
   post_index_comment: effect => effect.target.directory ? `Move #${effect.target.issue}'s comment topics into index pages` : `Move #${effect.target.issue}'s "${effect.label || effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} link(s)) into a new index comment`,
+  post_archive_comment: effect => `Archive programme content from #${effect.target.issue} in a verified comment`,
+  edit_archive_comment: effect => `Update a registered programme archive comment on #${effect.target.issue}`,
 };
 
 // The parts of a body a block effect rewrites when its state block is already current.
@@ -3249,7 +3397,7 @@ function describeEffect(effect) {
 // What a hold on an issue stops for the rest of a pass: its body, its links, or everything.
 function holdScope(kind) {
   if (kind === 'set_parent_state' || kind === 'post_parent_repair') return 'lifecycle';
-  if (kind === 'replace_block' || kind === 'post_index_comment') return 'body';
+  if (['replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment'].includes(kind)) return 'body';
   if (kind === 'replace_pr_nav') return 'pr';
   if (kind === 'attach' || kind === 'reparent' || kind === 'reorder') return 'links';
   return 'all';
@@ -3312,7 +3460,7 @@ class Reconciler {
     this.binding = binding;
     this.writer = writer;
     this.toolkitVersion = toolkitVersion;
-    this.threshold = threshold;
+    this.threshold = Math.min(threshold, DEFAULT_THRESHOLD);
     this.refreshFacts = refreshFacts;
   }
 
@@ -3718,17 +3866,105 @@ class Reconciler {
   // The body with the state block and the comment trace written. When it would reach the threshold,
   // the trace's own lines move to a new index comment: `overflow` lists them, and the body is
   // measured with a link to that comment in their place.
-  projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS) {
+  projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, page = null) {
+    if (number === this.binding.parent_issue) return this.projectParentPage(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget, page);
+    return this.projectTrace(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget);
+  }
+
+  projectParentPage(number, source, stateBody, comments, version, navBody, currentBody, topic, postBudget, page) {
+    const archive = page?.parent?.page_archive || [];
+    const rowLines = stateBody.split('\n').filter(line => /^\|[^\n]*\|#\d+\|/.test(line));
+    const rows = rowLines.map(text => { const cells = text.split('|'); return { text, issue: Number(cells[3].slice(1)), group: ['RETIRED', 'COMPLETED'].includes(cells[6]) ? cells[6] : cells[5] }; });
+    const candidates = archiveTools().GROUPS.flatMap(group => {
+      const list = rows.filter(row => row.group === group);
+      return ['RETIRED', 'COMPLETED'].includes(group) ? list : list.sort((a, b) => a.issue - b.issue);
+    });
+    const moved = [];
+    let tracePaging = false;
+    const safe = Math.min(SAFE_LIMIT, this.threshold);
+    const build = () => {
+      const selected = new Set(moved.map(row => row.issue));
+      const graphs = archiveTools().graphComments(rows.filter(row => selected.has(row.issue)));
+      // Empty parts remain registered and are updated in place, never deleted or linked as rows.
+      for (const entry of archive.filter(entry => entry.kind === 'graph' && !graphs.some(part => part.key === entry.key))) {
+        graphs.push({ key: entry.key, kind: 'graph', group: entry.group, title: entry.group,
+          body: `${archiveTools().marker(entry.key)}\n# Programme graph: ${entry.group}\n\nNo rows are archived in this part.\n`, count: 0 });
+      }
+      const posts = graphs.filter(part => !archive.some(entry => entry.key === part.key && entry.comment_id)).length;
+      const parts = graphs;
+      const entryFor = part => archive.find(entry => entry.key === part.key);
+      const commentId = part => entryFor(part)?.comment_id || '9'.repeat(19);
+      const link = part => commentLink(issueUrl(this.binding.repository, number), commentId(part));
+      const summary = archiveTools().GROUPS.map(group => {
+        const parts = graphs.filter(part => part.group === group && part.count);
+        const count = parts.reduce((sum, part) => sum + part.count, 0);
+        const label = ['RETIRED', 'COMPLETED'].includes(group) ? group.toLowerCase() : group;
+        return count ? `[${count} ${label}](${link(parts[0])})${parts.slice(1).map((part, i) => ` [part ${i + 2}](${link(part)})`).join('')}` : null;
+      }).filter(Boolean);
+      const hidden = new Set(moved.map(row => row.issue));
+      let graph = stateBody.split('\n').filter(line => !/^\|[^\n]*\|#\d+\|/.test(line) || !hidden.has(Number(line.split('|')[3].slice(1)))).join('\n');
+      if (summary.length) graph = graph.replace('\n| Task |', `\nArchived: ${summary.join(', ')}\n\n| Task |`);
+      const context = renderContextBlockBody();
+      const remainingBudget = Math.min(Math.max(0, postBudget - posts), page?.traceTopicBudget ?? MAX_TOPIC_COMMENTS_PER_PASS);
+      // Include future archive links in size selection, before spending their post slots. Otherwise
+      // their own trace growth could require another graph group after the budget was spent.
+      const future = parts.filter(part => !entryFor(part)?.comment_id).map((part, index) => ({ id: `${'9'.repeat(15)}${String(index).padStart(4, '0')}`, body: archiveTools().marker(part.key), user: { login: 'archive-preview' } }));
+      const projected = this.projectTrace(number, source, graph, [...comments, ...future], version, navBody, currentBody, topic, remainingBudget,
+        { context, threshold: tracePaging ? safe : Infinity });
+      const tracePosts = projected.overflow.reduce((sum, part) => sum + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0);
+      return { ...projected, archive: parts, graphRows: moved.map(row => row.issue), posts: posts + tracePosts,
+        budgetFits: posts + tracePosts <= postBudget };
+    };
+    let projected = build();
+    let feasible = projected.budgetFits ? projected : null;
+    const rememberFeasible = () => {
+      if (projected.budgetFits && (!feasible || projected.body.length < feasible.body.length)) feasible = projected;
+    };
+    // Single-issue passes may only use archives already recorded and verified by a full pass.
+    if (page?.only) {
+      for (const row of candidates) {
+        const registered = archive.filter(entry => entry.kind === 'graph' && entry.group === row.group && entry.state === 'moved');
+        if (registered.some(entry => comments.some(comment => comment.id === entry.comment_id && comment.user?.login === entry.login && archiveTools().digest(comment.body) === entry.digest && comment.body.split('\n').includes(row.text)))) moved.push(row);
+      }
+      projected = build();
+      return { ...projected, overflow: [], archive: [] };
+    }
+    let hard = projected.body.length < this.threshold && projected.budgetFits ? projected : null;
+    if (projected.body.length < safe && projected.budgetFits) return projected;
+    for (const group of archiveTools().GROUPS) {
+      if (group === 'OPTIONAL') {
+        tracePaging = true; projected = build();
+        rememberFeasible();
+        if (!hard && projected.body.length < this.threshold && projected.budgetFits) hard = projected;
+        if (projected.body.length < safe && projected.budgetFits) return projected;
+      }
+      for (const row of candidates.filter(row => row.group === group)) {
+        moved.push(row); projected = build();
+        rememberFeasible();
+        if (!hard && projected.body.length < this.threshold && projected.budgetFits) hard = projected;
+        if (projected.body.length < safe && projected.budgetFits) return projected;
+      }
+    }
+    if (hard) return { ...hard, nearLimit: hard.body.length >= safe };
+    // Diagnostics describe the smallest body that this pass could actually publish, rather than
+    // a hypothetical body requiring more than five new comments.
+    return { ...(feasible || projected), refused: true };
+  }
+
+  projectTrace(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, layout = {}) {
+    const threshold = layout.threshold ?? this.threshold;
     const trace = traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
     const build = entries => {
-      const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic);
+      const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic, number === this.binding.parent_issue);
       const withCurrent = currentBody ? upsertCurrentBlock(source, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : source;
-      const withState = upsertStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number));
+      const withState = layout.context ? upsertParentStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number))
+        : upsertStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number));
       const withNav = navBody ? upsertNavBlock(withState.body, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withState.body;
-      return { body: upsertTraceBlock(withNav, renderBlock(traceBody, version, TRACE_BLOCK_NAME)), traceBody, moved: withState.moved };
+      const withContext = layout.context ? upsertContextBlock(withNav, renderBlock(layout.context, version, CONTEXT_BLOCK_NAME)) : withNav;
+      return { body: upsertTraceBlock(withContext, renderBlock(traceBody, version, TRACE_BLOCK_NAME)), traceBody, moved: withState.moved };
     };
     const full = build(trace);
-    if (full.body.length < this.threshold) return { ...full, overflow: [] };
+    if (full.body.length < threshold) return { ...full, overflow: [] };
     // Try the largest topic lists first within the notification budget. If that cannot fit, discard
     // all speculative topic moves and page the original topic lines together, one line per topic.
     const base = issueUrl(this.binding.repository, number);
@@ -3752,9 +3988,9 @@ class Reconciler {
       };
       overflow.push(part);
       projected = build(current);
-      if (projected.body.length < this.threshold) break;
+      if (projected.body.length < threshold) break;
     }
-    if (projected.body.length >= this.threshold) {
+    if (projected.body.length >= threshold) {
       // Topic links can themselves fill the page. Page that directory, preserving every topic
       // line and leaving only root links. Existing directories are never nested in new ones.
       overflow.length = 0;
@@ -3763,13 +3999,16 @@ class Reconciler {
         const pages = indexCommentBodies(number, lines, '9'.repeat(16), null, null, true);
         projected = build({ directories: [...(trace.directories || []), ...pages.map(() => ({ id: '9'.repeat(19) }))], indexes: [], entries: [], marks: [] });
         const nested = trace.indexes.find(index => index.nested);
-        if (projected.body.length < this.threshold && nested) throw new ProgrammeError('TRACE_INDEX_INVALID', `Paging this comment directory would exceed two index hops (index ${nested.id}). ${indexRecoveryText(['INDEX_DEPTH'])}`);
+        if (projected.body.length < threshold && nested) throw new ProgrammeError('TRACE_INDEX_INVALID', `Paging this comment directory would exceed two index hops (index ${nested.id}). ${indexRecoveryText(['INDEX_DEPTH'])}`);
         overflow.push({ directory: true, tag: null, lines });
       }
     }
     const pageCount = trace.strict_count
       + overflow.reduce((count, part) => count + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0);
-    if (projected.body.length < this.threshold && pageCount > MAX_INDEX_COMMENTS) throw new ProgrammeError('TRACE_INDEX_INVALID', `The comment trace would exceed ${MAX_INDEX_COMMENTS} index pages. ${indexRecoveryText(['INDEX_LIMIT'])}`);
+    if (overflow.reduce((count, part) => count + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0) > MAX_TOPIC_COMMENTS_PER_PASS) {
+      return { ...full, overflow: [], refused: full.body.length >= this.threshold };
+    }
+    if (projected.body.length < threshold && pageCount > MAX_INDEX_COMMENTS) throw new ProgrammeError('TRACE_INDEX_INVALID', `The comment trace would exceed ${MAX_INDEX_COMMENTS} index pages. ${indexRecoveryText(['INDEX_LIMIT'])}`);
     return { ...projected, overflow };
   }
 
@@ -3818,23 +4057,26 @@ class Reconciler {
       const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
       const topic = this.topicFor(parent, number, observed.issues);
       let traceBody;
-      try { traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), this.binding.repository, topic); }
+      try { traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), this.binding.repository, topic, number === this.binding.parent_issue); }
       catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // Dry runs include the time change on the document that holds each effect's intent.
       const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
         && resolutions.some(entry => entry.kind === 'child' && entry.number === outcome.issue && entry.outcome !== 'UNKNOWN'));
       // A current body at or over the threshold still moves its largest tag lists out.
-      if (current && !move && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
+      if (number !== parent.parent_issue && current && !move && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
       if (!currentCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: summary.block ? 'the CURRENT summary differs from the state documents' : 'no CURRENT summary yet' });
       let projected;
       const topicBudget = Math.max(0, MAX_TOPIC_COMMENTS_PER_PASS - effects.filter(effect => effect.kind === 'post_index_comment' && !effect.target.directory).reduce((count, effect) => count + effect.target.parts.length, 0));
-      try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, topicBudget); }
-      catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
-      if (projected.body.length >= this.threshold) {
+      try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, number === parent.parent_issue ? MAX_TOPIC_COMMENTS_PER_PASS : topicBudget, { parent, only, traceTopicBudget: topicBudget }); }
+      catch (error) {
+        if (!error.code) throw error;
+        holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body', ...(error.diagnostics ? { diagnostics: error.diagnostics } : {}) }); continue;
+      }
+      if (projected.refused || projected.body.length >= this.threshold) {
         const diagnostics = bodySizeDiagnostics(projected.body, this.threshold);
         const finding = { code: 'BODY_TOO_LARGE', issue: number, diagnostics, detail: 'The projected page reaches the redraw threshold' };
         const previous = findings.find(entry => entry.code === finding.code && entry.issue === number);
@@ -3842,10 +4084,28 @@ class Reconciler {
         holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body', diagnostics });
         continue;
       }
+      if (projected.nearLimit) findings.push({ code: 'BODY_NEAR_LIMIT', issue: number, diagnostics: bodySizeDiagnostics(projected.body, Math.min(SAFE_LIMIT, this.threshold)), detail: 'The projected page fits the hard limit but has lost its safe headroom' });
+      const archiveEffects = (projected.archive || []).filter(part => !parent.page_archive?.some(entry => entry.key === part.key && entry.digest === archiveTools().digest(part.body) && entry.comment_id));
+      const activeArchives = number === parent.parent_issue ? (parent.page_archive || []).filter(entry => entry.comment_id) : [];
+      const archiveNeedsRecovery = activeArchives.some(entry => {
+        const comment = comments.find(comment => comment.id === entry.comment_id);
+        if (archiveUntrusted(entry, entry.comment_id)) return true;
+        return !comment || comment.user?.login !== entry.login || archiveTools().digest(comment.body) !== entry.digest;
+      });
+      if (number === parent.parent_issue && projected.body === issue.body && !archiveEffects.length && !timeWillChange && !archiveNeedsRecovery) continue;
+      for (const part of archiveEffects) effects.push({ kind: parent.page_archive?.some(entry => entry.key === part.key && entry.comment_id) ? 'edit_archive_comment' : 'post_archive_comment', target: { issue: number, key: part.key } });
       for (const part of projected.overflow) effects.push(indexEffect(number, part, String(comments.at(-1)?.id || '')));
       effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
         insert: !block, move: current && move, state: !current || move, stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent }, body, updated_at: issue.updated_at });
     }
+  }
+
+  archiveTrust(entry) {
+    const comment = this.reader.archiveComment(entry.comment_id);
+    if (!comment) return { reason: 'missing' };
+    if (comment.id !== entry.comment_id || comment.user?.login !== entry.login
+      || String(comment.issue_url).toLowerCase() !== `https://api.github.com/repos/${this.binding.repository}/issues/${this.binding.parent_issue}`.toLowerCase()) return { comment, reason: 'foreign' };
+    return { comment, reason: archiveTools().digest(comment.body) === entry.digest ? null : 'changed' };
   }
 
   // Resolve pending effects left by an earlier pass by reading their targets. Nothing is replayed
@@ -3855,6 +4115,7 @@ class Reconciler {
     for (const { kind, number, doc } of docs) {
       for (const effect of doc.pending_effects) {
         let done = null;
+        let recoveredId = null, untrusted = null, rejectedArchive = null;
         const target = effect.target;
         if (effect.kind === 'set_parent_state') {
           try { const issue = this.reader.issue(target.issue); done = issue ? issue.state === target.state : null; } catch { done = null; }
@@ -3872,7 +4133,9 @@ class Reconciler {
           const trace = issue && target.trace ? findStateBlock(issue.body, TRACE_BLOCK_NAME).block : undefined;
           const nav = issue && target.nav ? findStateBlock(issue.body, NAV_BLOCK_NAME).block : undefined;
           done = issue ? Boolean(found && blockDigest(found.body) === target.digest && !found.tampered && (!target.trace || (trace && blockDigest(trace.body) === target.trace))
+            && (!target.body_digest || sha256(issue.body) === target.body_digest)
             && (!target.nav || (nav && blockDigest(nav.body) === target.nav))
+            && (!target.context || Boolean(findStateBlock(issue.body, CONTEXT_BLOCK_NAME).block && blockDigest(findStateBlock(issue.body, CONTEXT_BLOCK_NAME).block.body) === target.context))
             && (!target.current || Boolean(findStateBlock(issue.body, CURRENT_BLOCK_NAME).block && blockDigest(findStateBlock(issue.body, CURRENT_BLOCK_NAME).block.body) === target.current))) : null;
         } else if (effect.kind === 'replace_pr_nav') {
           const page = this.reader.issue(target.pr);
@@ -3881,9 +4144,35 @@ class Reconciler {
         } else if (effect.kind === 'post_index_comment') {
           const comments = observed.comments.get(target.issue) || this.reader.comments(target.issue);
           done = indexReadback(comments, effect.intent_id, target.parts);
+        } else if (['post_archive_comment', 'edit_archive_comment'].includes(effect.kind)) {
+          try {
+            const registered = doc.page_archive?.find(entry => entry.key === target.key);
+            if (!registered || target.issue !== doc.parent_issue) done = null;
+            else if (effect.kind === 'post_archive_comment') {
+              const candidates = this.reader.comments(target.issue).filter(comment => comment.body.startsWith(`${archiveTools().marker(target.key)}\n`) && (comment.id !== registered.comment_id || registered.login === target.login) && !archiveUntrusted(registered, comment.id));
+              const matches = candidates.filter(comment => comment.user?.login === target.login && archiveTools().digest(comment.body) === target.digest).sort((a, b) => a.id - b.id);
+              done = matches.length ? true : false;
+              if (done) {
+                const verified = this.reader.archiveComment(matches[0].id);
+                done = Boolean(verified && verified.user?.login === target.login && verified.body === matches[0].body && String(verified.issue_url).toLowerCase() === `https://api.github.com/repos/${this.binding.repository}/issues/${target.issue}`.toLowerCase());
+                if (done) recoveredId = matches[0].id;
+              }
+              const rejected = candidates.filter(comment => comment.id !== recoveredId).map(comment => comment.id);
+              if (rejected.length) rejectedArchive = { key: target.key, ids: rejected, reason: candidates.length > 1 ? 'duplicate' : candidates[0].user?.login === target.login ? 'changed' : 'foreign' };
+            } else if (registered.comment_id !== target.comment_id || registered.login !== target.login) done = null;
+            else {
+              const result = this.archiveTrust(registered);
+              const digest = result.comment && archiveTools().digest(result.comment.body);
+              if (!result.reason || digest === target.digest && result.reason === 'changed') done = digest === target.digest;
+              else { done = false; untrusted = result.reason; }
+            }
+          } catch { done = null; }
         }
         if (done === null) holds.push({ code: 'EFFECT_UNKNOWN', target: `#${target.issue}`, detail: `${effect.kind} from an earlier pass could not be checked; held`, scope: holdScope(effect.kind) });
-        resolutions.push({ kind, number, intent_id: effect.intent_id, outcome: done === null ? 'UNKNOWN' : done ? 'DONE' : 'NOT_DONE' });
+        resolutions.push({ kind, number, intent_id: effect.intent_id, outcome: done === null ? 'UNKNOWN' : done ? 'DONE' : 'NOT_DONE',
+          ...(untrusted ? { untrusted: { key: target.key, reason: untrusted } } : {}),
+          ...(rejectedArchive ? { rejectedArchive } : {}),
+          ...(['post_archive_comment', 'edit_archive_comment'].includes(effect.kind) && done ? { archive: { key: target.key, comment_id: recoveredId || target.comment_id, login: target.login, digest: target.digest } } : {}) });
       }
     }
     return resolutions;
@@ -3918,7 +4207,7 @@ class Reconciler {
     // Hold by issue, even when another pass adds the finding after this snapshot was read.
     const incompletePrHolds = [...observed.discovery].filter(([, discovery]) => discovery.complete === false)
       .map(([issue]) => findingId(FINDING_CODES.COMPLETED_PR_MISSING.source, 'COMPLETED_PR_MISSING', issue));
-    const seen = () => findings.filter(finding => ATTENTION.has(finding.code) && (!only || finding.code === 'BODY_TOO_LARGE'));
+    const seen = () => findings.filter(finding => ATTENTION.has(finding.code) && (!only || PAGE_CODES.includes(finding.code)));
     const refreshHolds = !this.refreshFacts ? (parent.attention || []).filter(entry => {
       if (['CLOSED_WITHOUT_ACCEPTANCE','PR_WITHOUT_TASK'].includes(entry.code)) return true;
       if (entry.code !== 'CHILD_STATE_CONFLICT') return false;
@@ -3938,15 +4227,15 @@ class Reconciler {
     const now = this.now();
     const stored = parent.attention || [];
     let next = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
-    const settlingSize = !only && openFindings(stored).some(entry => entry.code === 'BODY_TOO_LARGE');
+    const settlingSize = !only && openFindings(stored).some(entry => PAGE_CODES.includes(entry.code));
     if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored)) && !settlingSize && !(stoppedHolds.length && !only)) return;
     const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next, now) };
     effects.push(effect);
     const number = parent.parent_issue;
-    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN', 'BODY_TOO_LARGE']);
+    const blockFindings = new Set(['PROJECTION_STALE', 'TRACE_STALE', 'MANAGED_BLOCK_BROKEN', ...PAGE_CODES]);
     const keep = (list, test) => { const kept = list.filter(item => !test(item)); list.splice(0, list.length, ...kept); };
     const redraw = attention => {
-      keep(effects, effect => ['replace_block', 'post_index_comment'].includes(effect.kind) && effect.target.issue === number);
+      keep(effects, effect => ['replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment'].includes(effect.kind) && effect.target.issue === number);
       keep(findings, finding => finding.issue === number && blockFindings.has(finding.code));
       // Replace only block diff holds, preserving recovery holds raised earlier.
       keep(holds, hold => blockHolds.has(hold) && hold.target === `#${number}` && hold.scope === 'body');
@@ -4037,7 +4326,7 @@ class Reconciler {
     this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions, blockHolds);
     this.pass.planning();
     for (const effect of effects) effect.text = describeEffect(effect);
-    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions,
+    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), issueScoped: Boolean(only), children, observed, findings, effects, holds, resolutions,
       complete: !only && !parentOverride && (!inventory || inventory.complete) && (!observed.prGraph || observed.prGraph.complete) && [...observed.discovery.values()].every(entry => entry.complete !== false)
         && [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)].every(number => Boolean(observed.issues.get(number)))
         && !findings.some(entry => entry.code === 'MANAGED_BLOCK_BROKEN') };
@@ -4064,8 +4353,9 @@ class Reconciler {
     const writtenChildren = new Set();
     const verifiedBodies = new Set();
     const sizeIds = new Set([...(plan.parent.attention || []), ...plan.findings]
-      .filter(entry => entry.code === 'BODY_TOO_LARGE').map(entry => findingId('reconcile', entry.code, entry.issue)));
-    const canResolveSize = (entry, includeParent = false) => entry.code === 'BODY_TOO_LARGE' && sizeIds.has(entry.id)
+      .filter(entry => PAGE_CODES.includes(entry.code)).map(entry => findingId('reconcile', entry.code, entry.issue)));
+    const canResolveSize = (entry, includeParent = false) => PAGE_CODES.includes(entry.code) && sizeIds.has(entry.id)
+      && !plan.findings.some(finding => finding.code === entry.code && finding.issue === entry.issue)
       && (verifiedBodies.has(entry.issue) || (includeParent && entry.issue === parentNumber)) && OPEN_FINDING_STATES.includes(entry.state);
     // The parent fence is read again immediately before every state write and every GitHub change,
     // so a takeover stops this pass at its next effect (STALE_WRITER). An intent it leaves IN_FLIGHT
@@ -4116,7 +4406,7 @@ class Reconciler {
       const scope = holdScope(effect.kind);
       holds.push({ code, target: `#${effect.target.issue}`, detail, scope, ...(diagnostics ? { diagnostics } : {}) });
       markHeld(`#${effect.target.issue}`, scope);
-      if (code === 'BODY_TOO_LARGE' && diagnostics) {
+      if (PAGE_CODES.includes(code) && diagnostics) {
         const finding = { code, issue: effect.target.issue, diagnostics, detail: 'The projected page reaches the redraw threshold' };
         const previous = plan.findings.find(entry => entry.code === code && entry.issue === finding.issue);
         if (previous) Object.assign(previous, finding); else plan.findings.push(finding);
@@ -4144,6 +4434,23 @@ class Reconciler {
       const { kind, number } = resolutions[0];
       mutateDoc(kind, number, {
         change: doc => {
+          for (const resolution of resolutions.filter(entry => entry.archive)) {
+            const registered = doc.page_archive?.find(entry => entry.key === resolution.archive.key);
+            if (registered) {
+              if (registered.comment_id && registered.comment_id !== resolution.archive.comment_id && registered.login !== resolution.archive.login) rejectArchiveIds(registered, [registered.comment_id]);
+              Object.assign(registered, resolution.archive);
+            }
+          }
+          for (const resolution of resolutions.filter(entry => entry.untrusted)) {
+            const entry = doc.page_archive?.find(entry => entry.key === resolution.untrusted.key);
+            if (entry) detachArchive(entry);
+            doc.attention = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [{ code: 'ARCHIVE_COMMENT_UNTRUSTED', issue: number, diagnostics: { reason: resolution.untrusted.reason } }], now: this.now() });
+          }
+          for (const resolution of resolutions.filter(entry => entry.rejectedArchive)) {
+            const entry = doc.page_archive?.find(entry => entry.key === resolution.rejectedArchive.key);
+            if (entry) rejectArchiveIds(entry, resolution.rejectedArchive.ids);
+            doc.attention = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [{ code: 'ARCHIVE_COMMENT_UNTRUSTED', issue: number, diagnostics: { reason: resolution.rejectedArchive.reason } }], now: this.now() });
+          }
           const kept = doc.pending_effects.filter(effect => !resolutions.some(entry => entry.intent_id === effect.intent_id));
           if (kept.length === doc.pending_effects.length) return null;
           doc.pending_effects = kept;
@@ -4181,7 +4488,7 @@ class Reconciler {
         doc.pending_effects = doc.pending_effects.filter(entry => {
           const outcome = settled.get(entry.intent_id);
           if (outcome === 'UNKNOWN') entry.state = 'UNKNOWN';
-          return !outcome || outcome === 'UNKNOWN';
+          return !outcome || outcome === 'UNKNOWN' || outcome === 'NOT_DONE' && entry.kind === 'post_parent_repair';
         });
         return doc;
       } });
@@ -4339,12 +4646,189 @@ class Reconciler {
     let finalRedraw = false;
     let finalAttention = null;
     let redrawing = false;
+    const postsByIssue = new Map();
+    const postsLeft = number => MAX_TOPIC_COMMENTS_PER_PASS - (postsByIssue.get(number) || 0);
+    const posted = number => postsByIssue.set(number, (postsByIssue.get(number) || 0) + 1);
+    const notePageFinding = (number, code, diagnostics) => {
+      const finding = { code, issue: number, diagnostics, detail: FINDING_CODES[code].next_action };
+      const previous = plan.findings.find(entry => entry.code === code && entry.issue === number);
+      if (previous) Object.assign(previous, finding); else plan.findings.push(finding);
+      mutateDoc('parent', parentNumber, { change: doc => {
+        const next = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [finding], now: this.now() });
+        if (next === doc.attention) return null;
+        doc.attention = next; return doc;
+      } });
+    };
+    const parentPage = (effect, body, version, currentBody) => {
+      let login = null;
+      const trust = entry => {
+        if (!entry.comment_id || archiveUntrusted(entry, entry.comment_id)) return null;
+        const result = this.archiveTrust(entry);
+        return result.reason ? null : result.comment;
+      };
+      const detach = (entry, reason) => {
+        if (reason) notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', { reason });
+        mutateDoc('parent', parentNumber, { change: doc => {
+          const target = doc.page_archive.find(part => part.key === entry.key);
+          detachArchive(target);
+          return doc;
+        } });
+      };
+      const preview = () => {
+        guard();
+        const before = this.reader.issue(parentNumber);
+        if (!before) throw new ProgrammeError('ISSUE_MISSING', 'The parent issue could not be read.');
+        const newest = newestBlockVersion(before.body);
+        if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', 'Update Toolkit before redrawing this newer page.');
+        const comments = this.reader.comments(parentNumber);
+        const next = this.projectBody(parentNumber, before.body, body, comments, version, null, currentBody, null, postsLeft(parentNumber), { parent: parentDoc, only: plan.issueScoped });
+        if (next.refused || next.body.length >= this.threshold) {
+          const error = new ProgrammeError('BODY_TOO_LARGE', 'The programme page cannot fit below the hard body limit; no archive comments were changed.');
+          error.diagnostics = bodySizeDiagnostics(next.body, this.threshold); throw error;
+        }
+        return { before, comments, next };
+      };
+      let snapshot = preview();
+      // Reconcile the registry even on issue-scoped redraws; these writes never edit comments.
+      let registryChanged = false;
+      for (const entry of parentDoc.page_archive || []) {
+        if (!entry.comment_id) continue;
+        if (archiveUntrusted(entry, entry.comment_id)) { detach(entry); registryChanged = true; continue; }
+        const result = this.archiveTrust(entry);
+        if (result.reason) { detach(entry, result.reason); registryChanged = true; }
+      }
+      if (registryChanged) snapshot = preview();
+      if (!plan.issueScoped) {
+        // Comment links can alter the shortest prefix. Re-plan after verified publication, bounded
+        // by the shared notification budget; never hide an unverified row.
+        for (let round = 0; round < 8; round++) {
+          const { next, comments } = snapshot;
+          const changes = (next.archive || []).filter(part => !parentDoc.page_archive?.some(entry => entry.key === part.key && entry.comment_id && entry.digest === archiveTools().digest(part.body)));
+          if (!changes.length) break;
+          login ||= this.reader.viewer();
+          for (const part of changes) {
+            if (redrawing ? this.pass.left() < END_RESERVE_MS : this.pass.stop()) return;
+            const digest = archiveTools().digest(part.body);
+            let entry = parentDoc.page_archive?.find(entry => entry.key === part.key);
+            // Other recorded authors remain verified read-only; changed content gets a new post.
+            const prior = entry?.comment_id && entry.login === login ? trust(entry) : null;
+            if (!entry) {
+              entry = { key: part.key, kind: part.kind, group: part.group, title: part.title.slice(0, 200), comment_id: null, login: null,
+                digest, state: 'pending' };
+              mutateDoc('parent', parentNumber, { change: doc => { (doc.page_archive ||= []).push(entry); return doc; } });
+            }
+            const kind = prior ? 'edit_archive_comment' : 'post_archive_comment';
+            const target = { issue: parentNumber, key: part.key, comment_id: prior?.id || null, login, before: prior ? archiveTools().digest(prior.body) : null, digest };
+            const archiveEffect = { kind, target }; archiveEffect.text = describeEffect(archiveEffect);
+            withIntent(archiveEffect, () => {
+              const registered = parentDoc.page_archive?.find(entry => entry.key === part.key);
+              if (!registered) return { outcome: 'UNKNOWN', detail: 'The archive registry entry disappeared.' };
+              const page = this.reader.issue(parentNumber);
+              if (!page || page.body !== snapshot.before.body || page.updated_at !== snapshot.before.updated_at) return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'The owner changed the page; the next pass updates the pending archive comment.' };
+              let id = prior?.id;
+              if (prior) {
+                const fresh = trust(registered);
+                if (!fresh || archiveTools().digest(fresh.body) !== target.before) return { outcome: 'UNKNOWN' };
+                guard(); this.mutator.editComment(id, part.body);
+              } else {
+                // A lost successful response is found under the pending key, never posted twice.
+                const candidates = this.reader.comments(parentNumber).filter(comment => comment.body.startsWith(`${archiveTools().marker(part.key)}\n`)
+                  && (comment.id !== registered.comment_id || registered.login === login) && !archiveUntrusted(registered, comment.id));
+                const existing = candidates.filter(comment => comment.user?.login === login && archiveTools().digest(comment.body) === digest).sort((a, b) => a.id - b.id);
+                const rejected = candidates.filter(comment => comment.id !== existing[0]?.id).map(comment => comment.id);
+                if (rejected.length) {
+                  notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', { reason: candidates.length > 1 ? 'duplicate' : candidates[0].user?.login === login ? 'changed' : 'foreign' });
+                  mutateDoc('parent', parentNumber, { change: doc => {
+                    const target = doc.page_archive.find(entry => entry.key === part.key);
+                    rejectArchiveIds(target, rejected); return doc;
+                  } });
+                }
+                if (existing.length) id = existing[0].id;
+                else {
+                  if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent.' };
+                  guard(); posted(parentNumber);
+                  const response = this.mutator.postComment(parentNumber, part.body); id = response.json?.id;
+                  if (!id) return { outcome: 'UNKNOWN' };
+                }
+              }
+              const readback = this.reader.archiveComment(id);
+              if (!readback || readback.id !== id || readback.user?.login !== login || readback.body !== part.body
+                || String(readback.issue_url).toLowerCase() !== `https://api.github.com/repos/${this.binding.repository}/issues/${parentNumber}`.toLowerCase()) return { outcome: 'UNKNOWN', detail: 'The archive did not read back exactly under the authenticated login.' };
+              mutateDoc('parent', parentNumber, { change: doc => {
+                const registered = doc.page_archive.find(entry => entry.key === part.key);
+                // Superseded parts from another login are expected history, not trust failures.
+                if (registered.comment_id && registered.comment_id !== id && registered.login !== login) rejectArchiveIds(registered, [registered.comment_id]);
+                Object.assign(registered, { comment_id: id, login, digest, title: part.title.slice(0, 200), state: 'pending' }); return doc;
+              } });
+              return { outcome: 'DONE' };
+            });
+            flush();
+            if (isHeld(`#${parentNumber}`, 'body')) return;
+          }
+          snapshot = preview();
+          if (round === 7 && snapshot.next.archive.some(part => !parentDoc.page_archive?.some(entry => entry.key === part.key && entry.digest === archiveTools().digest(part.body)))) throw new ProgrammeError('EFFECT_UNKNOWN', 'Archive layout did not settle; retry the refresh.');
+        }
+      }
+      // Trace publication uses the same budget, after graph archives.
+      const traceOverflow = snapshot.next.overflow;
+      for (const part of traceOverflow) {
+        const post = indexEffect(parentNumber, part, String(snapshot.comments.at(-1)?.id || ''));
+        post.text = describeEffect(post);
+        withIntent(post, () => {
+          const intent = intentId(post.kind, post.target);
+          for (const text of indexCommentBodies(parentNumber, post.lines, intent, post.target.tag, post.label, post.target.directory)) {
+            if (this.reader.comments(parentNumber).some(comment => comment.body === text)) continue;
+            if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE' };
+            const latest = this.reader.issue(parentNumber);
+            if (!latest || latest.body !== snapshot.before.body || latest.updated_at !== snapshot.before.updated_at) return { outcome: 'NOT_DONE', code: 'BODY_MOVED' };
+            guard(); posted(parentNumber); this.mutator.postComment(parentNumber, text);
+            if (!this.reader.comments(parentNumber).some(comment => comment.body === text)) return { outcome: 'UNKNOWN' };
+          }
+          return { outcome: indexReadback(this.reader.comments(parentNumber), intent, post.target.parts) === true ? 'DONE' : 'UNKNOWN' };
+        });
+        flush();
+        if (isHeld(`#${parentNumber}`, 'body')) return;
+      }
+      if (traceOverflow.length) snapshot = preview();
+      const { before, next } = snapshot;
+      if (next.overflow.length) throw new ProgrammeError('EFFECT_UNKNOWN', 'The comment trace changed while archiving; retry the refresh.');
+      if (!plan.issueScoped) for (const part of next.archive) {
+        const entry = parentDoc.page_archive?.find(entry => entry.key === part.key);
+        if (!entry || !trust(entry) || entry.digest !== archiveTools().digest(part.body)) throw new ProgrammeError('EFFECT_UNKNOWN', 'An archive is not verified; the body was kept.');
+      }
+      if (next.nearLimit) notePageFinding(parentNumber, 'BODY_NEAR_LIMIT', bodySizeDiagnostics(next.body, Math.min(SAFE_LIMIT, this.threshold)));
+      const finish = () => {
+        verifiedBodies.add(parentNumber);
+        if (!plan.issueScoped && parentDoc.page_archive?.some(entry => entry.state === 'pending' && next.archive.some(part => part.key === entry.key))) {
+          mutateDoc('parent', parentNumber, { change: doc => {
+            for (const entry of doc.page_archive) if (entry.comment_id && next.archive.some(part => part.key === entry.key)) entry.state = 'moved';
+            return doc;
+          } });
+        }
+      };
+      if (next.body === before.body) { finish(); record(effect, 'NOOP'); return; }
+      const state = findStateBlock(next.body).block, trace = findStateBlock(next.body, TRACE_BLOCK_NAME).block;
+      effect.target = { issue: parentNumber, digest: state.digest, trace: trace.digest, current: blockDigest(currentBody), context: findStateBlock(next.body, CONTEXT_BLOCK_NAME).block.digest, body_digest: sha256(next.body) };
+      withIntent(effect, () => {
+        // Recording the body intent can take time. Recheck custody after that write as well, so a
+        // comment edited during bookkeeping cannot authorise hiding its graph rows.
+        for (const entry of parentDoc.page_archive || []) {
+          if (entry.comment_id && !archiveUntrusted(entry, entry.comment_id) && !trust(entry)) return { outcome: 'UNKNOWN', detail: 'An archive disappeared before the body write.' };
+        }
+        const latest = this.reader.issue(parentNumber);
+        if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'The issue changed immediately before the write.' };
+        guard(); const response = this.mutator.writeBody(parentNumber, next.body);
+        const after = this.reader.issue(parentNumber);
+        if (after?.body === next.body) { finish(); return { outcome: 'DONE' }; }
+        return { outcome: !okStatus(response.status) && after?.body === before.body ? 'NOT_DONE' : 'UNKNOWN' };
+      });
+    };
     // Render only saved documents, never projected child revisions from an unfinished state loop.
     const renderPages = parentOnly => {
       const blockEffects = plan.effects.filter(entry => entry.kind === 'replace_block');
       // A previously refused page may already match after a partial pass. Recheck it on the complete
       // pass too, so lack of another planned write never counts as proof of a successful redraw.
-      if (plan.complete) for (const entry of openFindings(parentDoc.attention).filter(entry => entry.code === 'BODY_TOO_LARGE')) {
+      if (plan.complete) for (const entry of openFindings(parentDoc.attention).filter(entry => PAGE_CODES.includes(entry.code))) {
         if (!blockEffects.some(effect => effect.target.issue === entry.issue) && plan.observed.issues.has(entry.issue)) {
           blockEffects.push({ kind: 'replace_block', target: { issue: entry.issue }, state: true });
         }
@@ -4377,6 +4861,14 @@ class Reconciler {
             ? { ...parentDoc, attention: (parentDoc.attention || []).map(entry => canResolveSize(entry, true) ? { ...entry, state: 'resolved' } : entry) } : parentDoc;
           const currentBody = number === parentNumber ? renderCurrentBlockBody(displayParent, docs, plan.observed.issues, this.now()) : null;
           const topic = this.topicFor(parentDoc, number, plan.observed.issues);
+          if (number === parentNumber) {
+            try { parentPage(effect, body, version, currentBody); }
+            catch (error) {
+              if (!error.code || STOPS_PASS.has(error.code)) throw error;
+              record(effect, 'HELD', error.message); hold(effect, error.code, error.message, error.diagnostics);
+            }
+            continue;
+          }
           // Recheck minimum size and version before posting any pages as well as before the body
           // write. A newly oversized hand-written section must not produce orphan index comments.
           const plannedPosts = plan.effects.filter(entry => entry.kind === 'post_index_comment' && !entry.target.directory && entry.target.issue === number);
@@ -4390,7 +4882,7 @@ class Reconciler {
             if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`);
             comments.set(number, this.reader.comments(number));
             const next = this.projectBody(number, page.body, body, comments.get(number), version, navBody, currentBody, topic, budget);
-            if (next.body.length >= this.threshold) {
+            if (next.refused || next.body.length >= this.threshold) {
               const error = new ProgrammeError('BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
               error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
               throw error;
@@ -4414,7 +4906,9 @@ class Reconciler {
               for (const text of bodies) {
                 if (existing.some(comment => comment.body === text)) continue;
                 if (redrawing ? this.pass.left() < END_RESERVE_MS : this.pass.stop()) { this.pass.stop(); return { outcome: 'UNKNOWN', detail: 'The time budget stopped index paging.' }; }
+                if (postsLeft(number) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent.' };
                 guard();
+                posted(number);
                 this.mutator.postComment(number, text);
                 // Stop on the first uncertain response, including a lost successful response.
                 // The next pass reads it back before choosing the remaining pages.
@@ -4575,7 +5069,9 @@ class Reconciler {
         const before = this.reader.issue(parentNumber);
         if (before?.state !== 'open') return { outcome: 'NOT_DONE', detail: 'The repaired parent is not open.' };
         if (!this.reader.comments(parentNumber).some(comment => comment.body.includes(effect.target.marker))) {
+          if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent; the repair notice remains owed.' };
           guard();
+          posted(parentNumber);
           this.mutator.postComment(parentNumber, effect.target.body);
         }
         return { outcome: this.reader.comments(parentNumber).some(comment => comment.body.includes(effect.target.marker)) ? 'DONE' : 'UNKNOWN' };
@@ -4739,4 +5235,5 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
+  SAFE_LIMIT, renderContextBlockBody,
 });

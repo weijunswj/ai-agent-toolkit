@@ -17,6 +17,9 @@
 //
 // Pure functions only: no reads, no writes.
 
+// Archive contents are quotations, even when they contain old records or index markers.
+function isArchiveComment(body) { return /^<!-- programme-page-archive key=graph-(?:retired|completed|optional|later|now)-[1-9][0-9]* -->\r?\n# Programme graph: (?:RETIRED|COMPLETED|OPTIONAL|LATER|NOW)\r?\n/.test(String(body || '')); }
+
 const OTHER_COMMENTS = 'Other comments';
 const TAG = /^[A-Za-z0-9][A-Za-z0-9 ._,'&/()-]{0,79}$/;
 
@@ -70,4 +73,4 @@ function groupByTag(entries) {
   return { tags, other };
 }
 
-module.exports = Object.freeze({ OTHER_COMMENTS, commentTag, commentTagLabel, splitTag, byTime, groupByTag });
+module.exports = Object.freeze({ OTHER_COMMENTS, isArchiveComment, commentTag, commentTagLabel, splitTag, byTime, groupByTag });
