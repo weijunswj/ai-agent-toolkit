@@ -62,10 +62,10 @@ const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = r
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
-  'inventory', 'attention', 'ack', 'dispose', 'migrate-state'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run']);
+  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment'];
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another']);
 const VALUES = new Set(['--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -106,6 +106,12 @@ function parseArgs(argv) {
     throw usage('Only the appointed controller writes programme state. Other sessions run reconcile (a dry run) or show and report to the controller; an executor the controller assigned records its work only in its own checkpoint journal (bind, then its turn-end hook).');
   }
   const needs = (condition, message) => { if (!condition) throw usage(message); };
+  if (command === 'closing-comment') {
+    needs(Boolean(args.pr) !== (args.issue !== undefined), 'closing-comment needs exactly one of --pr N or --issue N.');
+    needs(args['body-file'], 'closing-comment needs --body-file F.');
+    needs(args.pr === undefined || /^[1-9][0-9]*$/.test(args.pr) && Number.isSafeInteger(Number(args.pr)), '--pr must be a positive PR number.');
+    needs(!Object.keys(args).some(key=>!['command','pr','issue','body-file','dry-run','force-another','json','repo-root'].includes(key)), 'Unsupported closing-comment option.');
+  } else needs(args.pr === undefined && args['body-file'] === undefined && !args['force-another'], 'Closing comment options belong only to closing-comment.');
   if (command === 'show') needs(!(args.parent && args.issue !== undefined), 'show takes --parent or --issue <n>, not both.');
   if (command === 'claim') {
     needs(Boolean(args.parent) !== (args.issue !== undefined), 'claim needs --issue <n> --lane or --parent.');
@@ -781,13 +787,14 @@ function formatReport(report) {
     `Repository ${report.repository}, parent #${report.parent_issue}; state store ${report.store.repository} ${report.store.branch} ${report.store.path} (parent revision ${report.parent_revision ?? 'none'})`,
     `${report.mode === 'apply' ? 'Apply' : 'Dry run'}: ${report.summary}`,
   ];
-  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code} #${finding.issue}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
+  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code}${finding.kind ? ` ${finding.kind === 'pr' ? 'PR' : 'issue'}` : ''} #${finding.issue}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
   if (report.close_list.length) lines.push('', 'Ready to close (the controller closes each closable one as completed unless a criterion is still open; the reconciler never closes)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}${entry.closable ? '; closable' : ''}`));
   if (report.mode === 'apply' && report.results.length) lines.push('', 'Effects', ...report.results.map(entry => `- ${entry.outcome}: ${entry.text}${entry.detail ? ` (${entry.detail})` : ''}`));
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));
   if (report.holds.length) lines.push('', 'Holds', ...report.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`));
   if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
+  if (report.closing && !report.closing.complete) lines.push('', `Closing scan: INCOMPLETE; ${report.closing.incomplete.length} item(s) remain unread for the next pass. ${report.closing.errors.join(' ')}`.trim());
   if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
   if (report.state_branch?.events.length) lines.push('', `State branch ${report.state_branch.branch}`, ...report.state_branch.events.map(event => `- ${event.code}: ${event.text}`));
   if (report.mode === 'apply') lines.push('', `Writes: ${report.writes.state} state, ${report.writes.github} GitHub`);
@@ -802,6 +809,20 @@ const EXECUTOR_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HEL
 function main(argv = process.argv.slice(2), deps = {}) {
   const out = deps.stdout || process.stdout;
   const args = parseArgs(argv);
+  if (args.command === 'closing-comment') {
+    const repoRoot=args['repo-root'] || deps.repoRoot || process.cwd();
+    const originUrl=deps.originUrl || runGit(state.resolveExecutable('git'),repoRoot,['remote','get-url','origin']);
+    const origin=state.originSlug(originUrl);
+    if (!origin) throw new ProgrammeError('REPO_IDENTITY_MISMATCH','The origin remote must name a github.com repository.');
+    const transport=deps.transport || new state.GitHubTransport({ghPath:state.resolveExecutable('gh')});
+    const repository=state.bindRepository({transport,originUrl,binding:{repository:origin}});
+    const auth=transport.request('GET','user');
+    if (auth.status!==200 || !auth.json?.login) throw new ProgrammeError('GH_AUTH','Sign in with gh before posting a closing story.');
+    const owner=new (require('./closing-comments.cjs').ClosingComments)({transport,repository,screenSecrets:state.screenSecrets});
+    const result=owner.story({kind:args.pr ? 'pr':'issue',number:Number(args.pr || args.issue),body:fs.readFileSync(args['body-file'],'utf8'),dryRun:Boolean(args['dry-run']),force:Boolean(args['force-another'])});
+    out.write(`${JSON.stringify(result,null,2)}\n`);
+    return 0;
+  }
   const environment = deps.environment || process.env;
   const marker = EXECUTOR_MARKERS.find(name => typeof environment[name] === 'string' && environment[name] !== '');
   if (marker && isWrite(args)) {
@@ -844,7 +865,7 @@ function formatAttention(result) {
   if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
   if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
   for (const entry of result.findings) {
-    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
+    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
     lines.push(...formatBodyDiagnostics(entry.diagnostics));
   }
   if (result.findings.length) lines.push('', 'The controller answers each new finding in this turn: fix it, or ack --finding <id>, or dispose --finding <id> --reason <text>.');

@@ -351,7 +351,7 @@ test('sessions come from --session only, every --issue is 1 or more, and a dry r
 });
 
 test('binding documentation scopes opt-in to the reconciler while governed issue records remain', () => {
-  const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
+  const read = file => fs.readFileSync(path.resolve(process.env.A2B_SOURCE_ROOT || path.resolve(__dirname, '..', '..'), file), 'utf8');
   const rules = read('repo/contracts/agent-rules/global-rules.md');
   if (!rules.includes('.github/toolkit-programme.json')) {
     for (const file of ['README.md', 'skills/github-program-reconciler/SKILL.md']) {
@@ -360,7 +360,8 @@ test('binding documentation scopes opt-in to the reconciler while governed issue
       assert.doesNotMatch(text, /Toolkit writes no issues, comments or records|without the binding it does nothing/i, file);
       assert.match(text, /binding does not change the Toolkit-governed rules[^\n]*or their issue records/, file);
       assert.match(text, /without that block get no governed issue writes/i, file);
-      assert.match(text, /every `programme\.cjs` command refuses without it/, file);
+      assert.match(text, /programme state commands refuse without it/i, file);
+      assert.match(text, /closing-comment.*(?:any GitHub repository|governance is off)/, file);
     }
   }
 });
