@@ -305,6 +305,7 @@ const FINDING_CODES = Object.freeze({
   PR_WITHOUT_TASK: { source: 'reconcile', next_action: 'Controller: link the PR to a task or dispose with a reason' },
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
+  PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
@@ -328,6 +329,61 @@ const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
 const BODY_SECTION_KINDS = ['CURRENT', 'STATE', 'TRACE', 'NAV', 'hand_written'];
 const BODY_SECTION_LIMIT = 5;
+const REFRESH_BUDGET_MS = 10 * 60 * 1000;
+const PAGE_RESERVE_MS = 3 * 60 * 1000;
+const END_RESERVE_MS = 60 * 1000;
+// Stop the queue at minute 8 of the ten-minute budget: one minute to settle intents and
+// record the stop, then one for CURRENT. The scheduled twelve-minute kill still has two
+// minutes of slack for requests already in flight; checks cannot cancel such a request.
+const QUEUE_RESERVE_MS = 2 * END_RESERVE_MS;
+const AGAIN_RESERVE_MS = 6 * 60 * 1000;
+const PASS_PHASES = ['planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'unknown'];
+
+function validatePassDiagnostics(errors, value, at) {
+  check(errors, isObject(value), `${at} must be an object`);
+  if (!isObject(value)) return;
+  checkShape(errors, value, { all: ['cause', 'phase', 'done', 'total', 'started_at'] }, at);
+  check(errors, ['time_limit', 'interrupted'].includes(value.cause), `${at}.cause must be time_limit or interrupted`);
+  check(errors, PASS_PHASES.includes(value.phase), `${at}.phase must be a known pass phase`);
+  check(errors, Number.isSafeInteger(value.done) && value.done >= 0, `${at}.done must be a bounded whole number`);
+  check(errors, Number.isSafeInteger(value.total) && value.total >= value.done, `${at}.total must be a bounded whole number at least done`);
+  check(errors, typeof value.started_at === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(value.started_at)
+    && Number.isFinite(Date.parse(value.started_at)), `${at}.started_at must be a UTC date and time`);
+}
+
+// One clock and deadline for all passes in a refresh process. Progress is supplied by the lock
+// owner; direct callers can inject the same clock without writing a local progress file.
+class RefreshBudget {
+  constructor({ nowMs = Date.now, budgetMs = REFRESH_BUDGET_MS, progress = null } = {}) {
+    this.nowMs = nowMs;
+    this.start = nowMs();
+    this.started_at = new Date(this.start).toISOString();
+    this.deadline = this.start + budgetMs;
+    this.progress = progress;
+    this.phase = 'planning'; this.done = 0; this.total = 0;
+    this.stopped = null;
+  }
+  left() { return this.deadline - this.nowMs(); }
+  phaseAt(phase, total = 0) {
+    this.phase = phase; this.done = 0; this.total = total;
+    this.progress?.write(this.snapshot());
+  }
+  tick() {
+    this.done++; this.total = Math.max(this.total, this.done);
+    if (this.done % 10 === 0) this.progress?.write(this.snapshot());
+  }
+  snapshot(cause = 'interrupted') {
+    return { cause, phase: this.phase, done: this.done, total: this.total, started_at: this.started_at };
+  }
+  stop(reserve = QUEUE_RESERVE_MS) {
+    if (!this.stopped && this.left() < reserve) this.stopped = this.snapshot('time_limit');
+    return Boolean(this.stopped);
+  }
+  planning() {
+    if (this.stop(0)) throw new ProgrammeError('PASS_STOPPED', 'The planning time budget was reached.');
+    this.tick();
+  }
+}
 
 // Disjoint UTF-16 spans, including managed markers and all formatting, in the same units as
 // projectBody's length check. Headings only delimit hand-written spans; no heading text is kept.
@@ -394,7 +450,8 @@ function validateAttention(errors, attention) {
     const known = Object.hasOwn(FINDING_CODES, entry.code) ? FINDING_CODES[entry.code] : null;
     check(errors, Boolean(known), `${at}.code is not a known finding code`);
     if (entry.code === 'BODY_TOO_LARGE') validateBodyDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
-    else check(errors, entry.diagnostics === undefined, `${at}.diagnostics belongs only to BODY_TOO_LARGE`);
+    else if (entry.code === 'PASS_STOPPED') validatePassDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
+    else check(errors, entry.diagnostics === undefined, `${at}.diagnostics belongs only to BODY_TOO_LARGE or PASS_STOPPED`);
     check(errors, Boolean(known) && entry.source === known.source, `${at}.source must be the code's source`);
     check(errors, ISSUELESS_CODES.has(entry.code) ? entry.issue === null : isInt(entry.issue, 1), `${at}.issue must be an issue number${ISSUELESS_CODES.has(entry.code) ? ' or null' : ''}`);
     check(errors, HEAD_BOUND_CODES.has(entry.code) ? optional(entry.head, isSha) : entry.head === null, `${at}.head must be a full 40-character SHA for a head-bound code, otherwise null`);
@@ -432,9 +489,13 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
       // a journal that still shows an old error is not a new one, whether the entry was answered or
       // has resolved since.
       const fresh = !since || Number.isNaN(Date.parse(since)) || Date.parse(since) > Date.parse(existing.changed_at);
-      const reopens = fresh && (existing.state === 'resolved' || (ONE_TIME_CODES.has(code) && ['acknowledged', 'disposed'].includes(existing.state)));
+      const diagnosticsChanged = diagnostics && JSON.stringify(canonical(existing.diagnostics)) !== JSON.stringify(canonical(diagnostics));
+      // Stop diagnostics identify the event. A different stop needs its own answer, while
+      // re-reporting the same stop must not reopen an acknowledged or disposed entry.
+      const newEvent = ONE_TIME_CODES.has(code) || (code === 'PASS_STOPPED' && diagnosticsChanged);
+      const reopens = fresh && (existing.state === 'resolved' || (newEvent && ['acknowledged', 'disposed'].includes(existing.state)));
       if (reopens) { existing.state = 'new'; existing.changed_at = now; changed = true; }
-      if (diagnostics && JSON.stringify(canonical(existing.diagnostics)) !== JSON.stringify(canonical(diagnostics))) {
+      if (diagnosticsChanged) {
         existing.diagnostics = clone(diagnostics);
         changed = true;
       }
@@ -451,7 +512,7 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     const issue = ISSUELESS_CODES.has(finding.code) ? null : finding.issue;
     if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
     add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null,
-      finding.code === 'BODY_TOO_LARGE' ? finding.diagnostics : null);
+      ['BODY_TOO_LARGE', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null);
   }
   for (const entry of complete ? list : []) {
     // Only the reconciler's complete successful redraw/readback settles a size finding. This also
@@ -506,7 +567,7 @@ function attentionCounts(attention) {
 // `Attention: <n> new, <m> acknowledged` or `Attention: clear`.
 function waitingFindings(attention, now) {
   const time = Date.parse(now);
-  return openFindings(attention).filter(entry => entry.state === 'new' && time - Date.parse(entry.first_seen) >= 24 * 60 * 60 * 1000);
+  return openFindings(attention).filter(entry => entry.state === 'new' && time - Date.parse(entry.changed_at) >= 24 * 60 * 60 * 1000);
 }
 
 function attentionLine(attention, now = new Date().toISOString()) {
@@ -522,6 +583,10 @@ function openFindings(attention) {
 }
 
 function findingText(entry) {
+  if (entry.code === 'PASS_STOPPED' && entry.diagnostics) {
+    const d = entry.diagnostics;
+    return `PASS_STOPPED #${entry.issue}: the last refresh stopped at ${d.phase.replace(/_/g, ' ')} (${d.done} of ${d.total} done); the next refresh picks up the rest`;
+  }
   return `${entry.code}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${FINDING_CODES[entry.code]?.next_action || ''}`;
 }
 
@@ -1513,7 +1578,8 @@ const WAITING_SHOWN = 5;
 function attentionBlockLines(attention, now) {
   const waiting = waitingFindings(attention, now);
   const waitingIds = new Set(waiting.map(entry => entry.id));
-  const open = openFindings(attention).filter(entry => !waitingIds.has(entry.id));
+  const open = openFindings(attention).filter(entry => !waitingIds.has(entry.id))
+    .sort((a, b) => Number(b.code === 'PASS_STOPPED') - Number(a.code === 'PASS_STOPPED'));
   return [
     `**${attentionLine(attention, now)}**`,
     ...open.slice(0, ATTENTION_SHOWN).map(entry => `- ${entry.state === 'acknowledged' ? '(acknowledged) ' : ''}${findingText(entry)}`),
@@ -1837,7 +1903,7 @@ function upsertStateBlock(text, rendered, placement = {}) {
 // The only place that runs `gh api`. Returns status and parsed JSON; never retries.
 // A takeover (STALE_WRITER) or the loss of the pass lock (PASS_LOCK_LOST) stops the whole pass at
 // once; an intent it leaves IN_FLIGHT is recovered by the next pass.
-const STOPS_PASS = new Set(['STALE_WRITER', 'PASS_LOCK_LOST']);
+const STOPS_PASS = new Set(['STALE_WRITER', 'PASS_LOCK_LOST', 'PASS_STOPPED']);
 
 class GitHubTransport {
   constructor({ ghPath, run = spawnSync, timeoutMs = 120000 }) {
@@ -3228,11 +3294,20 @@ class Reconciler {
     }
   }
 
-  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null, refreshFacts = false }) {
+  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null, refreshFacts = false, pass = null }) {
     this.store = store;
     // The clock attention findings are dated by (the store's clock dates only its own commits).
     this.now = now || (() => new Date().toISOString());
-    this.reader = reader;
+    this.pass = pass || new RefreshBudget();
+    this.planning = false;
+    // A reconciler built only for its settings has no reader to wrap.
+    this.reader = reader === null || typeof reader !== 'object' ? reader : new Proxy(reader, { get: (target, key) => {
+      const member = target[key];
+      return typeof member !== 'function' ? member : (...args) => {
+        if (this.planning) this.pass.planning();
+        return member.apply(target, args);
+      };
+    } });
     this.mutator = mutator;
     this.binding = binding;
     this.writer = writer;
@@ -3748,8 +3823,7 @@ class Reconciler {
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // Dry runs include the time change on the document that holds each effect's intent.
       const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
-        && (effects.some(effect => (effect.kind === 'reorder' ? effect.target.parent : effect.target.issue) === outcome.issue)
-          || resolutions.some(entry => entry.kind === 'child' && entry.number === outcome.issue && entry.outcome !== 'UNKNOWN')));
+        && resolutions.some(entry => entry.kind === 'child' && entry.number === outcome.issue && entry.outcome !== 'UNKNOWN'));
       // A current body at or over the threshold still moves its largest tag lists out.
       if (current && !move && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
@@ -3855,16 +3929,17 @@ class Reconciler {
     }).map(entry=>entry.id) : [];
     const unreadOpenPrHolds = observed.prGraph?.openComplete === false ? (parent.attention || []).filter(entry=>entry.code==='PR_UNTRACKED').map(entry=>entry.id) : [];
     const adoptionHolds = (observed.additions || []).map(outcome=>findingId('reconcile','CHILD_ADDED',outcome.issue));
+    const stoppedHolds = openFindings(parent.attention).filter(entry => entry.code === 'PASS_STOPPED').map(entry => entry.id);
     if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds,
-        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...(observed.prGraph?.holdWithoutTask || [])] });
+        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...(observed.prGraph?.holdWithoutTask || [])] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
     const stored = parent.attention || [];
     let next = folds.reduce((list, fold) => foldAttention(list, { ...fold, now }), stored);
     const settlingSize = !only && openFindings(stored).some(entry => entry.code === 'BODY_TOO_LARGE');
-    if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored)) && !settlingSize) return;
+    if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored)) && !settlingSize && !(stoppedHolds.length && !only)) return;
     const effect = { kind: 'update_attention', target: { issue: parent.parent_issue }, folds, now, line: attentionLine(next, now) };
     effects.push(effect);
     const number = parent.parent_issue;
@@ -3892,6 +3967,19 @@ class Reconciler {
   }
 
   plan({ issue: only = null, parentOverride = null, inventory = null } = {}) {
+    this.pass.phaseAt('planning');
+    this.planning = true;
+    try { return this.planWithinBudget({ issue: only, parentOverride, inventory }); }
+    catch (error) {
+      if (error.code !== 'PASS_STOPPED') throw error;
+      const parentRead = this.loadParent(parentOverride);
+      const finding = { code: 'PASS_STOPPED', issue: this.binding.parent_issue, diagnostics: this.pass.stopped };
+      return { parent: parentRead.doc, override: Boolean(parentOverride), children: new Map(), findings: [finding], effects: [], resolutions: [],
+        holds: [{ code: 'PASS_STOPPED', target: `#${this.binding.parent_issue}`, detail: findingText(finding) }], complete: false, stopped: true };
+    } finally { this.planning = false; }
+  }
+
+  planWithinBudget({ issue: only = null, parentOverride = null, inventory = null } = {}) {
     const holds = [];
     const parentRead = this.loadParent(parentOverride);
     if (!parentRead.doc) {
@@ -3902,13 +3990,14 @@ class Reconciler {
       throw new ProgrammeError('STATE_INVALID', 'The parent state document belongs to a different repository or parent issue.');
     }
     if (only && !parent.outcomes.some(outcome => outcome.issue === only)) throw new ProgrammeError('USAGE', `#${only} is not in the outcome catalogue.`);
-    const children = new Map(parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue)]));
+    const children = new Map(parent.outcomes.map(outcome => { this.pass.planning(); return [outcome.issue, this.store.read('child', outcome.issue)]; }));
     const observed = this.observe(parent, children, only);
     const resolutions = this.recover([
       { kind: 'parent', number: parent.parent_issue, doc: parent },
       ...[...children.values()].filter(entry => entry.doc).map(entry => ({ kind: 'child', number: entry.doc.issue, doc: entry.doc })),
     ], observed, holds);
     const findings = [];
+    if (this.pass.progress?.interrupted) findings.push({ code: 'PASS_STOPPED', issue: parent.parent_issue, diagnostics: this.pass.progress.interrupted });
     const effects = [];
     if (observed.additions.length) {
       effects.push({kind:'add_native_children',target:{issue:parent.parent_issue},outcomes:observed.additions});
@@ -3946,6 +4035,7 @@ class Reconciler {
       detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
     if (!only) for (const tie of orderTies(parent, desiredDocs)) findings.push({ code: 'ORDER_TIE', issue: parent.parent_issue, detail: `${tie.map(outcome => `#${outcome.issue}`).join(', ')} share priority order ${tie[0].order}, so child number decides. Controller: set a distinct order with update-parent; if CLASS_LEGACY is reported too, migrate first, or set COMMITTED and the priority in one update-parent patch` });
     this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions, blockHolds);
+    this.pass.planning();
     for (const effect of effects) effect.text = describeEffect(effect);
     return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), children, observed, findings, effects, holds, resolutions,
       complete: !only && !parentOverride && (!inventory || inventory.complete) && (!observed.prGraph || observed.prGraph.complete) && [...observed.discovery.values()].every(entry => entry.complete !== false)
@@ -3953,7 +4043,15 @@ class Reconciler {
         && !findings.some(entry => entry.code === 'MANAGED_BLOCK_BROKEN') };
   }
 
-  // Runs the planned effects in order: state documents, native links, order, PR links, then bodies.
+  // Only verified stored state proves the predecessor was reported. Its controller answer and
+  // whether this pass planned an attention write do not change that persistence fact.
+  reportStoredProgress(parent) {
+    const interrupted = this.pass.progress?.interrupted;
+    if (interrupted && parent.attention?.some(entry => entry.code === 'PASS_STOPPED'
+      && JSON.stringify(canonical(entry.diagnostics)) === JSON.stringify(canonical(interrupted)))) this.pass.progress.reported();
+  }
+
+  // Saved states, parent page, queue, then completion. Every group shares the process deadline.
   apply(plan) {
     if (plan.override) throw new ProgrammeError('USAGE', 'A parent document read from a file can only be used for a dry run.');
     const writer = this.writer;
@@ -3976,27 +4074,44 @@ class Reconciler {
       const fresh = this.store.read('parent', parentNumber).doc;
       authoriseWrite('parent', fresh, null, writer);
       parentDoc = fresh;
+      this.reportStoredProgress(parentDoc);
     };
     guard();
     const mutateDoc = (kind, number, options) => {
       guard();
       const result = this.store.mutate(kind, number, { writer, parentDoc, ...options });
-      if (kind === 'parent') parentDoc = result.doc;
-      else {
+      if (kind === 'parent') {
+        parentDoc = result.doc;
+        this.reportStoredProgress(parentDoc);
+      } else {
         if (result.outcome === 'WRITTEN') writtenChildren.add(number);
         if (result.doc) settledChildren.set(number,result.doc);
         if (docs && result.doc) docs.set(number, result.doc);
       }
       return result;
     };
-    const docOwner = number => (number === parentNumber ? 'parent' : 'child');
     // A hold stops later effects of the same scope on that issue: a body hold never blocks its links.
     const held = new Map();
     const markHeld = (target, scope) => { if (!held.has(target)) held.set(target, new Set()); held.get(target).add(scope); };
     const isHeld = (target, scope) => Boolean(held.get(target) && (held.get(target).has('all') || held.get(target).has(scope)));
     for (const entry of holds) markHeld(entry.target, entry.scope || 'all');
     const outcomes = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, outcome]));
-    const record = (effect, outcome, detail = null) => { results.push({ kind: effect.kind, target: effect.target, text: effect.text, outcome, ...(detail ? { detail } : {}) }); };
+    const record = (effect, outcome, detail = null) => {
+      results.push({ kind: effect.kind, target: effect.target, text: effect.text, outcome, ...(detail ? { detail } : {}) });
+      if (this.pass.phase === 'state') this.pass.tick();
+    };
+    let stoppedRecorded = false;
+    const recordStopped = () => {
+      if (!this.pass.stopped || stoppedRecorded) return;
+      const finding = { code: 'PASS_STOPPED', issue: parentNumber, diagnostics: this.pass.stopped };
+      mutateDoc('parent', parentNumber, { change: doc => {
+        doc.attention = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [finding], now: this.now() });
+        return doc;
+      } });
+      plan.findings.push(finding);
+      holds.push({ code: 'PASS_STOPPED', target: `#${parentNumber}`, detail: findingText(finding) });
+      stoppedRecorded = true;
+    };
     const hold = (effect, code, detail, diagnostics = null) => {
       const scope = holdScope(effect.kind);
       holds.push({ code, target: `#${effect.target.issue}`, detail, scope, ...(diagnostics ? { diagnostics } : {}) });
@@ -4014,11 +4129,22 @@ class Reconciler {
       }
     };
 
-    // Resolve recovered effects first: DONE and NOT_DONE leave the document; UNKNOWN stays.
-    for (const resolution of plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN')) {
-      mutateDoc(resolution.kind, resolution.number, {
+    // Resolve recovered effects once per document. Readback still decides each intent separately.
+    const recoveredDocs = new Map();
+    for (const resolution of plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN'
+      // A missing repair comment is still owed. Keep its intent until the re-planned
+      // effect runs, even if an unrelated hold or the budget skips lifecycle this pass.
+      && !(entry.outcome === 'NOT_DONE' && plan.parent.pending_effects.some(effect =>
+        effect.intent_id === entry.intent_id && effect.kind === 'post_parent_repair')))) {
+      const key = `${resolution.kind}:${resolution.number}`;
+      if (!recoveredDocs.has(key)) recoveredDocs.set(key, []);
+      recoveredDocs.get(key).push(resolution);
+    }
+    for (const resolutions of recoveredDocs.values()) {
+      const { kind, number } = resolutions[0];
+      mutateDoc(kind, number, {
         change: doc => {
-          const kept = doc.pending_effects.filter(effect => effect.intent_id !== resolution.intent_id);
+          const kept = doc.pending_effects.filter(effect => !resolutions.some(entry => entry.intent_id === effect.intent_id));
           if (kept.length === doc.pending_effects.length) return null;
           doc.pending_effects = kept;
           return doc;
@@ -4026,46 +4152,65 @@ class Reconciler {
       });
     }
 
-    // `run` calls `guard` right before its GitHub change and returns the readback outcome.
-    const withIntent = (effect, ownerKind, ownerNumber, run) => {
-      const intent = { intent_id: intentId(effect.kind, effect.target), kind: effect.kind, target: effect.target, state: 'IN_FLIGHT' };
-      const addIntent = doc => (doc.pending_effects.some(entry => entry.intent_id === intent.intent_id) ? null : (doc.pending_effects.push(intent), doc));
-      mutateDoc(ownerKind, ownerNumber, { change: addIntent });
-      let outcome;
-      let detail = null;
-      let code = null;
-      try { ({ outcome, detail = null, code = null } = run()); }
-      catch (error) {
-        if (STOPS_PASS.has(error.code)) throw error;
-        outcome = 'UNKNOWN';
-        detail = error.message;
+    // Each group's intents live on the parent. Each callback keeps its fence and independent
+    // readback. A crash leaves the whole uncommitted group for recover(), including unrun effects.
+    const withIntents = jobs => {
+      if (!jobs.length || (redrawing ? this.pass.left() < END_RESERVE_MS : this.pass.stop())) return;
+      const intents = jobs.map(({ effect }) => ({ intent_id: intentId(effect.kind, effect.target), kind: effect.kind, target: effect.target, state: 'IN_FLIGHT' }));
+      mutateDoc('parent', parentNumber, { change: doc => {
+        for (const intent of intents) if (!doc.pending_effects.some(entry => entry.intent_id === intent.intent_id)) doc.pending_effects.push(intent);
+        return doc;
+      } });
+      const settled = new Map();
+      for (const [index, { effect, run }] of jobs.entries()) {
+        if (redrawing ? this.pass.left() < END_RESERVE_MS : this.pass.stop()) break;
+        if (isHeld(`#${effect.target.issue}`, holdScope(effect.kind))) continue;
+        let outcome, detail = null, code = null;
+        try { ({ outcome, detail = null, code = null } = run()); }
+        catch (error) {
+          if (STOPS_PASS.has(error.code)) throw error;
+          outcome = 'UNKNOWN'; detail = error.message;
+        }
+        settled.set(intents[index].intent_id, outcome);
+        if (outcome === 'UNKNOWN') hold(effect, 'EFFECT_UNKNOWN', detail || 'the readback did not settle the outcome');
+        else if (outcome === 'NOT_DONE') hold(effect, code || 'EFFECT_NOT_DONE', detail || 'GitHub did not make the change');
+        record(effect, outcome, detail);
+        if (outcome !== 'UNKNOWN') this.pass.tick();
       }
-      if (outcome === 'UNKNOWN') {
-        mutateDoc(ownerKind, ownerNumber, { change: doc => {
-          const entry = doc.pending_effects.find(item => item.intent_id === intent.intent_id);
-          if (!entry || entry.state === 'UNKNOWN') return null;
-          entry.state = 'UNKNOWN';
-          return doc;
-        } });
-        hold(effect, 'EFFECT_UNKNOWN', detail || 'the readback did not settle the outcome');
-      } else {
-        mutateDoc(ownerKind, ownerNumber, { change: doc => {
-          const kept = doc.pending_effects.filter(item => item.intent_id !== intent.intent_id);
-          if (kept.length === doc.pending_effects.length) return null;
-          doc.pending_effects = kept;
-          return doc;
-        } });
-        if (outcome === 'NOT_DONE') hold(effect, code || 'EFFECT_NOT_DONE', detail || 'GitHub did not make the change');
-      }
-      record(effect, outcome, detail);
+      mutateDoc('parent', parentNumber, { change: doc => {
+        doc.pending_effects = doc.pending_effects.filter(entry => {
+          const outcome = settled.get(entry.intent_id);
+          if (outcome === 'UNKNOWN') entry.state = 'UNKNOWN';
+          return !outcome || outcome === 'UNKNOWN';
+        });
+        return doc;
+      } });
     };
+    let group = [];
+    const withIntent = (effect, run) => { group.push({ effect, run }); };
+    const flush = () => { const jobs = group; group = []; withIntents(jobs); };
+    const phase = (name, total) => { flush(); if (this.pass.stop()) return false; this.pass.phaseAt(name, total); return true; };
+    this.pass.phaseAt('state', plan.effects.filter(entry => ['add_native_children', 'update_attention', 'create_state', 'update_state', 'copy_child_lifecycle'].includes(entry.kind)).length);
 
     // These effects have no caller-supplied patch. Only the refresh observation owner may use them;
     // the lock and parent fence stay in force, and each source issue is checked again before CAS.
     const requireRefresh = () => {
       if (!this.refreshFacts || writer?.by_hash !== true) throw new ProgrammeError('ROLE_REFUSED','Only the locked refresh may copy observed graph facts.');
     };
+    const copyLifecycle = (doc, effect) => {
+      requireRefresh();
+      const observed = plan.observed.issues.get(effect.target.issue);
+      const fresh = this.reader.issue(effect.target.issue);
+      if (observed?.complete !== true || fresh?.complete !== true || fresh.is_pull_request || observed.state !== fresh.state || observed.closed_at !== fresh.closed_at || observed.state_reason !== fresh.state_reason) {
+        throw new ProgrammeError('GRAPH_FACT_STALE', 'Issue lifecycle changed after observation; refresh again.');
+      }
+      const expected = plan.children.get(effect.target.issue)?.doc;
+      if (expected && CLOSE_FIELDS.some(key => JSON.stringify(doc[key]) !== JSON.stringify(expected[key]))) throw new ProgrammeError('GRAPH_FACT_STALE', 'Controller lifecycle changed after observation; refresh again.');
+      return copyIssueLifecycle(doc, fresh);
+    };
+    const copiedChildren = new Set();
     for (const effect of plan.effects.filter(entry=>entry.kind === 'add_native_children')) {
+      if (this.pass.stop(PAGE_RESERVE_MS)) break;
       requireRefresh();
       try {
         let added=[];
@@ -4103,12 +4248,14 @@ class Reconciler {
     // 1. State documents: the parent's attention findings first, re-folded on the document read now so
     // an acknowledgement made since planning is kept.
     for (const effect of plan.effects.filter(entry => entry.kind === 'update_attention')) {
+      if (this.pass.stop(PAGE_RESERVE_MS)) break;
       try {
         const result = mutateDoc('parent', parentNumber, { change: doc => {
           const stored = doc.attention || [];
           const plannedIds = new Set((plan.parent.attention || []).map(entry => entry.id));
           const concurrent = stored.filter(entry => !plannedIds.has(entry.id)).map(entry => entry.id);
-          const next = effect.folds.reduce((list, fold) => foldAttention(list, { ...fold, hold: [...(fold.hold || []), ...concurrent], now: effect.now }), stored);
+          const stoppedIds = stored.filter(entry => entry.code === 'PASS_STOPPED').map(entry => entry.id);
+          const next = effect.folds.reduce((list, fold) => foldAttention(list, { ...fold, hold: [...(fold.hold || []), ...concurrent, ...stoppedIds], now: effect.now }), stored);
           if (JSON.stringify(canonical(next)) === JSON.stringify(canonical(stored))) return null;
           doc.attention = next;
           // A dispose reason goes when its finding drops off the list.
@@ -4127,6 +4274,7 @@ class Reconciler {
       }
     }
     for (const effect of plan.effects.filter(entry => entry.kind === 'create_state' || entry.kind === 'update_state')) {
+      if (this.pass.stop(PAGE_RESERVE_MS)) break;
       if(isHeld(`#${effect.target.issue}`,'all')) { record(effect,'SKIPPED','catalogue adoption held'); continue; }
       const checkFreshState = (doc, { created }) => {
         guard();
@@ -4156,6 +4304,8 @@ class Reconciler {
           change: (doc, context) => {
             // Recheck on every CAS retry as well as on the initial mutation read.
             checkFreshState(doc, context);
+            const copy = plan.effects.find(entry => entry.kind === 'copy_child_lifecycle' && entry.target.issue === effect.target.issue);
+            if (copy) doc = copyLifecycle(doc, copy);
             for (const key of fields) {
               if (desired[key] === undefined) delete doc[key];
               else doc[key] = clone(desired[key]);
@@ -4164,6 +4314,7 @@ class Reconciler {
           },
         });
         record(effect, result.outcome === 'NOOP' ? 'NOOP' : 'DONE');
+        copiedChildren.add(effect.target.issue);
       } catch (error) {
         if (STOPS_PASS.has(error.code)) throw error;
         record(effect, 'HELD', error.message);
@@ -4172,19 +4323,12 @@ class Reconciler {
     }
 
     for (const effect of plan.effects.filter(entry=>entry.kind==='copy_child_lifecycle')) {
+      if (copiedChildren.has(effect.target.issue)) { record(effect, 'DONE'); continue; }
+      if (this.pass.stop(PAGE_RESERVE_MS)) break;
       requireRefresh();
       if(isHeld(`#${effect.target.issue}`,'all')) {record(effect,'SKIPPED','child state held');continue;}
       try {
-        const result=mutateDoc('child',effect.target.issue,{change:doc=>{
-          const observed=plan.observed.issues.get(effect.target.issue);
-          const fresh=this.reader.issue(effect.target.issue);
-          if(observed?.complete !== true || fresh?.complete !== true || fresh.is_pull_request || observed.state !== fresh.state || observed.closed_at !== fresh.closed_at || observed.state_reason !== fresh.state_reason) {
-            throw new ProgrammeError('GRAPH_FACT_STALE','Issue lifecycle changed after observation; refresh again.');
-          }
-          const expected=plan.children.get(effect.target.issue)?.doc;
-          if(expected && CLOSE_FIELDS.some(key=>JSON.stringify(doc[key])!==JSON.stringify(expected[key]))) throw new ProgrammeError('GRAPH_FACT_STALE','Controller lifecycle changed after observation; refresh again.');
-          return copyIssueLifecycle(doc,fresh);
-        }});
+        const result=mutateDoc('child',effect.target.issue,{change:doc=>copyLifecycle(doc,effect)});
         record(effect,result.outcome==='NOOP'?'NOOP':'DONE');
       } catch(error) {
         if(STOPS_PASS.has(error.code)) throw error;
@@ -4192,10 +4336,162 @@ class Reconciler {
       }
     }
 
+    let finalRedraw = false;
+    let finalAttention = null;
+    let redrawing = false;
+    // Render only saved documents, never projected child revisions from an unfinished state loop.
+    const renderPages = parentOnly => {
+      const blockEffects = plan.effects.filter(entry => entry.kind === 'replace_block');
+      // A previously refused page may already match after a partial pass. Recheck it on the complete
+      // pass too, so lack of another planned write never counts as proof of a successful redraw.
+      if (plan.complete) for (const entry of openFindings(parentDoc.attention).filter(entry => entry.code === 'BODY_TOO_LARGE')) {
+        if (!blockEffects.some(effect => effect.target.issue === entry.issue) && plan.observed.issues.has(entry.issue)) {
+          blockEffects.push({ kind: 'replace_block', target: { issue: entry.issue }, state: true });
+        }
+      }
+      if (blockEffects.length || writtenChildren.size || this.pass.stopped || finalRedraw) {
+        guard();
+        // Queue bookkeeping now touches only the parent. Reuse this saved child snapshot for task
+        // pages and any final redraw; reading every child again adds no state written by this pass.
+        if (!docs) docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
+        const comments = new Map(plan.observed.comments);
+        const blocks = this.renderAll(parentDoc, docs, plan.observed.issues, comments);
+        const version = this.toolkitVersion;
+        // The final parent check follows actual child writes, even when planning found no body change.
+        const ordered = parentOnly ? [blockEffects.find(effect => effect.target.issue === parentNumber) || null] : blockEffects.filter(effect => effect.target.issue !== parentNumber);
+        for (const planned of ordered) {
+          if (!planned && !writtenChildren.size && !this.pass.stopped && !finalRedraw) continue;
+          if (parentOnly ? this.pass.left() < END_RESERVE_MS : this.pass.stop()) break;
+          const number = planned?.target.issue ?? parentNumber;
+          const body = number === parentNumber ? renderParentBlockBody(parentDoc, docs, plan.observed.issues, comments) : blocks.get(number);
+          const candidate = planned || { kind: 'replace_block', target: { issue: number }, state: true };
+          let effect = { ...candidate, target: { ...candidate.target, digest: blockDigest(body) } };
+          if (!effect.text) effect.text = describeEffect(effect);
+          if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
+          if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
+          if (number !== parentNumber && !docs.has(number)) { record(effect, 'SKIPPED', 'no state document yet'); continue; }
+          const navBody = this.navFor(parentDoc, number, docs);
+          // A final redraw can display settled size findings only after the queue completed.
+          // Persist those resolutions only after this exact body also reads back.
+          const displayParent = finalAttention ? { ...parentDoc, attention: finalAttention } : number === parentNumber && finalRedraw && plan.complete && !holds.length && !this.pass.stopped
+            ? { ...parentDoc, attention: (parentDoc.attention || []).map(entry => canResolveSize(entry, true) ? { ...entry, state: 'resolved' } : entry) } : parentDoc;
+          const currentBody = number === parentNumber ? renderCurrentBlockBody(displayParent, docs, plan.observed.issues, this.now()) : null;
+          const topic = this.topicFor(parentDoc, number, plan.observed.issues);
+          // Recheck minimum size and version before posting any pages as well as before the body
+          // write. A newly oversized hand-written section must not produce orphan index comments.
+          const plannedPosts = plan.effects.filter(entry => entry.kind === 'post_index_comment' && !entry.target.directory && entry.target.issue === number);
+          const topicBudget = plannedPosts.reduce((count, entry) => count + entry.target.parts.length, 0);
+          // The latest unchanged read, reused by the body write when nothing was posted after it.
+          let fresh = null;
+          const preview = (budget = topicBudget) => {
+            const page = this.reader.issue(number);
+            if (!page) throw new ProgrammeError('ISSUE_MISSING', 'The issue could not be read.');
+            const newest = newestBlockVersion(page.body);
+            if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`);
+            comments.set(number, this.reader.comments(number));
+            const next = this.projectBody(number, page.body, body, comments.get(number), version, navBody, currentBody, topic, budget);
+            if (next.body.length >= this.threshold) {
+              const error = new ProgrammeError('BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
+              error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
+              throw error;
+            }
+            fresh = { page, comments: comments.get(number) };
+            return next;
+          };
+          // Planned topic pages are checked against a fresh read before any is posted.
+          if (plannedPosts.length) {
+            try { preview(); }
+            catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message, error.diagnostics); continue; }
+          }
+          // An overflowing tag's list first moves into its own new index comment, checked by reading it back.
+          const publishIndexes = posts => {
+            flush();
+            for (const post of posts) withIntent(post, () => {
+              const intent = intentId(post.kind, post.target);
+              const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag, post.label, post.target.directory);
+              const existing = this.reader.comments(number);
+              if (indexReadback(existing, intent, post.target.parts) === null) return { outcome: 'UNKNOWN', detail: 'the index pages differ from their intent' };
+              for (const text of bodies) {
+                if (existing.some(comment => comment.body === text)) continue;
+                if (redrawing ? this.pass.left() < END_RESERVE_MS : this.pass.stop()) { this.pass.stop(); return { outcome: 'UNKNOWN', detail: 'The time budget stopped index paging.' }; }
+                guard();
+                this.mutator.postComment(number, text);
+                // Stop on the first uncertain response, including a lost successful response.
+                // The next pass reads it back before choosing the remaining pages.
+                if (!this.reader.comments(number).some(comment => comment.body === text)) return { outcome: 'UNKNOWN', detail: 'an index page did not read back exactly as written' };
+              }
+              return indexReadback(this.reader.comments(number), intent, post.target.parts) === true ? { outcome: 'DONE' } : { outcome: 'UNKNOWN', detail: 'the index pages did not read back exactly as written' };
+            });
+            flush();
+          };
+          if (plannedPosts.length) { fresh = null; publishIndexes(plannedPosts); }
+          // Page remaining full topic lines directly, reusing any older verified topic indexes.
+          if (!isHeld(`#${number}`, 'body')) {
+            try {
+              const next = preview(0);
+              if (next.overflow.some(part => !part.directory)) {
+                const error = new ProgrammeError('BODY_TOO_LARGE', 'The comment trace changed while paging; the next pass re-plans it.');
+                error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
+                throw error;
+              }
+              const posts = next.overflow.map(part => {
+                const post = indexEffect(number, part, String(comments.get(number).at(-1)?.id || ''));
+                post.text = describeEffect(post);
+                return post;
+              });
+              if (posts.length) { fresh = null; publishIndexes(posts); }
+            } catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message, error.diagnostics); }
+          }
+          if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
+          // The new body is built from a fresh read, so earlier edits by people are kept. Refuse before
+          // writing an intent when the block is broken or the body would grow past the threshold.
+          // Nothing was posted since the last preview, so its read is still the one to build on; the
+          // write itself re-reads and refuses on any change.
+          const before = fresh ? fresh.page : this.reader.issue(number);
+          if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
+          const newest = newestBlockVersion(before.body);
+          if (newest && versionNewer(newest, version)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`); continue; }
+          let next;
+          comments.set(number, fresh ? fresh.comments : this.reader.comments(number));
+          try { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0); }
+          catch (error) { if (!error.code) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+          effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
+          if (next.overflow.length || next.body.length >= this.threshold) {
+            record(effect, 'HELD', `the body would be ${next.body.length} characters`);
+            hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`, bodySizeDiagnostics(next.body, this.threshold));
+            continue;
+          }
+          if (next.body === before.body) { verifiedBodies.add(number); record(effect, 'NOOP'); continue; }
+          withIntent(effect, () => {
+            // Issue PATCH has no compare-and-swap: re-read immediately before writing and refuse on change.
+            const latest = this.reader.issue(number);
+            if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
+              return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the issue changed between the read and the write; the next pass re-plans it' };
+            }
+            guard();
+            const response = this.mutator.writeBody(number, next.body);
+            const after = this.reader.issue(number);
+            if (after && after.body === next.body) { verifiedBodies.add(number); return { outcome: 'DONE' }; }
+            if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
+            return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
+          });
+        }
+      }
+
+      flush();
+    };
+    recordStopped();
+    if (!this.pass.stopped) this.pass.phaseAt('page', 1);
+    redrawing = true;
+    renderPages(true);
+    redrawing = false;
+
+    phase('links', plan.effects.filter(entry => ['attach', 'reparent'].includes(entry.kind)).length);
     // 2. Native parent links, read back on both sides.
     for (const effect of plan.effects.filter(entry => entry.kind === 'attach' || entry.kind === 'reparent')) {
+      if (this.pass.stop()) break;
       if (isHeld(`#${effect.target.issue}`, 'links')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
-      withIntent(effect, 'child', effect.target.issue, () => {
+      withIntent(effect, () => {
         guard();
         const response = this.mutator.attach(effect.target.parent, effect.childId, effect.kind === 'reparent');
         const issue = this.reader.issue(effect.target.issue);
@@ -4206,22 +4502,20 @@ class Reconciler {
       });
     }
 
+    phase('order', plan.effects.filter(entry => entry.kind === 'reorder').length);
     // 3. Order, recomputed from a fresh list for each parent just before moving.
     const reorderParents = [...new Set(plan.effects.filter(entry => entry.kind === 'reorder').map(entry => entry.target.parent))];
     const graph = graphOrder(parentDoc, settledChildren, plan.observed.issues);
     for (const parentIssue of reorderParents) {
+      if (this.pass.stop()) break;
       const desired = graph.filter(outcome => outcome.parent === parentIssue).map(outcome => outcome.issue);
       const fresh = this.reader.subIssues(parentIssue);
       const ids = new Map(fresh.map(sub => [sub.number, sub.id]));
       for (const move of orderMoves(fresh.map(sub => sub.number), desired)) {
+        if (this.pass.stop()) break;
         const effect = { kind: 'reorder', target: { parent: parentIssue, ...move } };
         effect.text = describeEffect(effect);
-        const owner = docOwner(parentIssue);
-        if (owner === 'child' && !plan.children.get(parentIssue)?.doc && !results.some(entry => entry.kind === 'create_state' && entry.target.issue === parentIssue && entry.outcome === 'DONE')) {
-          record(effect, 'SKIPPED', `#${parentIssue} has no state document to hold the intent`);
-          continue;
-        }
-        withIntent(effect, owner, parentIssue, () => {
+        withIntent(effect, () => {
           const anchor = move.before !== undefined ? { before_id: ids.get(move.before) } : { after_id: ids.get(move.after) };
           guard();
           const response = this.mutator.reorder(parentIssue, ids.get(move.issue), anchor);
@@ -4231,22 +4525,21 @@ class Reconciler {
       }
     }
 
+    flush();
+    phase('pr_links', plan.effects.filter(entry => entry.kind === 'replace_pr_nav').length);
     // 4. The parent and task links at the top of each open or draft PR, built from a fresh read.
     for (const effect of plan.effects.filter(entry => entry.kind === 'replace_pr_nav')) {
+      if (this.pass.stop()) break;
       const number = effect.target.issue;
       const pr = effect.target.pr;
       if (isHeld(`#${number}`, 'pr')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
       if (!this.toolkitVersion) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no links were written'); continue; }
-      if (!plan.children.get(number)?.doc && !results.some(entry => entry.kind === 'create_state' && entry.target.issue === number && entry.outcome === 'DONE')) {
-        record(effect, 'SKIPPED', `#${number} has no state document to hold the intent`);
-        continue;
-      }
       const before = this.reader.issue(pr);
       if (!before) { record(effect, 'HELD', 'the PR could not be read'); hold(effect, 'ISSUE_MISSING', `PR #${pr} could not be read`); continue; }
       let next;
       try { next = upsertNavBlock(before.body, renderBlock(effect.body, this.toolkitVersion, NAV_BLOCK_NAME)); }
       catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
-      withIntent(effect, 'child', number, () => {
+      withIntent(effect, () => {
         const latest = this.reader.issue(pr);
         if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
           return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the PR changed between the read and the write; the next pass re-plans it' };
@@ -4260,154 +4553,18 @@ class Reconciler {
       });
     }
 
-    // 5. Bodies, with the parent last so it shows state writes made earlier in this pass.
-    const blockEffects = plan.effects.filter(entry => entry.kind === 'replace_block');
-    // A previously refused page may already match after a partial pass. Recheck it on the complete
-    // pass too, so lack of another planned write never counts as proof of a successful redraw.
-    if (plan.complete) for (const entry of openFindings(parentDoc.attention).filter(entry => entry.code === 'BODY_TOO_LARGE')) {
-      if (!blockEffects.some(effect => effect.target.issue === entry.issue) && plan.observed.issues.has(entry.issue)) {
-        blockEffects.push({ kind: 'replace_block', target: { issue: entry.issue }, state: true });
-      }
-    }
-    if (blockEffects.length || writtenChildren.size) {
-      guard();
-      docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, this.store.read('child', outcome.issue).doc]).filter(([, doc]) => doc));
-      const comments = new Map(plan.observed.comments);
-      const blocks = this.renderAll(parentDoc, docs, plan.observed.issues, comments);
-      const version = this.toolkitVersion;
-      // The final parent check follows actual child writes, even when planning found no body change.
-      const ordered = [...blockEffects.filter(effect => effect.target.issue !== parentNumber), blockEffects.find(effect => effect.target.issue === parentNumber) || null];
-      for (const planned of ordered) {
-        if (!planned && !writtenChildren.size) continue;
-        const number = planned?.target.issue ?? parentNumber;
-        const body = number === parentNumber ? renderParentBlockBody(parentDoc, docs, plan.observed.issues, comments) : blocks.get(number);
-        const candidate = planned || { kind: 'replace_block', target: { issue: number }, state: true };
-        let effect = { ...candidate, target: { ...candidate.target, digest: blockDigest(body) } };
-        if (!effect.text) effect.text = describeEffect(effect);
-        if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
-        if (!version) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no block was written'); continue; }
-        const owner = docOwner(number);
-        if (owner === 'child' && !docs.has(number)) { record(effect, 'SKIPPED', 'no state document yet'); continue; }
-        const navBody = this.navFor(parentDoc, number, docs);
-        // Render the settled attention count on the parent last, but persist those resolutions only
-        // after this exact body also reads back. A refused or uncertain parent leaves findings open.
-        const displayParent = number === parentNumber && plan.complete && !holds.length
-          ? { ...parentDoc, attention: (parentDoc.attention || []).map(entry => canResolveSize(entry, true) ? { ...entry, state: 'resolved' } : entry) } : parentDoc;
-        const currentBody = number === parentNumber ? renderCurrentBlockBody(displayParent, docs, plan.observed.issues, this.now()) : null;
-        const topic = this.topicFor(parentDoc, number, plan.observed.issues);
-        // Recheck minimum size and version before posting any pages as well as before the body
-        // write. A newly oversized hand-written section must not produce orphan index comments.
-        const plannedPosts = plan.effects.filter(entry => entry.kind === 'post_index_comment' && !entry.target.directory && entry.target.issue === number);
-        const topicBudget = plannedPosts.reduce((count, entry) => count + entry.target.parts.length, 0);
-        // The latest unchanged read, reused by the body write when nothing was posted after it.
-        let fresh = null;
-        const preview = (budget = topicBudget) => {
-          const page = this.reader.issue(number);
-          if (!page) throw new ProgrammeError('ISSUE_MISSING', 'The issue could not be read.');
-          const newest = newestBlockVersion(page.body);
-          if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`);
-          comments.set(number, this.reader.comments(number));
-          const next = this.projectBody(number, page.body, body, comments.get(number), version, navBody, currentBody, topic, budget);
-          if (next.body.length >= this.threshold) {
-            const error = new ProgrammeError('BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
-            error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
-            throw error;
-          }
-          fresh = { page, comments: comments.get(number) };
-          return next;
-        };
-        // Planned topic pages are checked against a fresh read before any is posted.
-        if (plannedPosts.length) {
-          try { preview(); }
-          catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message, error.diagnostics); continue; }
-        }
-        // An overflowing tag's list first moves into its own new index comment, checked by reading it back.
-        const publishIndex = post => {
-          withIntent(post, owner, number, () => {
-            const intent = intentId(post.kind, post.target);
-            const bodies = indexCommentBodies(number, post.lines, intent, post.target.tag, post.label, post.target.directory);
-            const existing = this.reader.comments(number);
-            if (indexReadback(existing, intent, post.target.parts) === null) return { outcome: 'UNKNOWN', detail: 'the index pages differ from their intent' };
-            for (const text of bodies) {
-              if (existing.some(comment => comment.body === text)) continue;
-              guard();
-              this.mutator.postComment(number, text);
-              // Stop on the first uncertain response, including a lost successful response.
-              // The next pass reads it back before choosing the remaining pages.
-              if (!this.reader.comments(number).some(comment => comment.body === text)) return { outcome: 'UNKNOWN', detail: 'an index page did not read back exactly as written' };
-            }
-            return indexReadback(this.reader.comments(number), intent, post.target.parts) === true ? { outcome: 'DONE' } : { outcome: 'UNKNOWN', detail: 'the index pages did not read back exactly as written' };
-          });
-        };
-        for (const post of plannedPosts) {
-          if (isHeld(`#${number}`, 'body')) break;
-          fresh = null;
-          publishIndex(post);
-        }
-        // Page remaining full topic lines directly, reusing any older verified topic indexes.
-        if (!isHeld(`#${number}`, 'body')) {
-          try {
-            const next = preview(0);
-            if (next.overflow.some(part => !part.directory)) {
-              const error = new ProgrammeError('BODY_TOO_LARGE', 'The comment trace changed while paging; the next pass re-plans it.');
-              error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
-              throw error;
-            }
-            for (const part of next.overflow) {
-              const post = indexEffect(number, part, String(comments.get(number).at(-1)?.id || ''));
-              post.text = describeEffect(post);
-              fresh = null;
-              publishIndex(post);
-              if (isHeld(`#${number}`, 'body')) break;
-            }
-          } catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message, error.diagnostics); }
-        }
-        if (isHeld(`#${number}`, 'body')) { record(effect, 'SKIPPED', 'the comment trace could not move to an index comment'); continue; }
-        // The new body is built from a fresh read, so earlier edits by people are kept. Refuse before
-        // writing an intent when the block is broken or the body would grow past the threshold.
-        // Nothing was posted since the last preview, so its read is still the one to build on; the
-        // write itself re-reads and refuses on any change.
-        const before = fresh ? fresh.page : this.reader.issue(number);
-        if (!before) { record(effect, 'HELD', 'the issue could not be read'); hold(effect, 'ISSUE_MISSING', 'the issue could not be read'); continue; }
-        const newest = newestBlockVersion(before.body);
-        if (newest && versionNewer(newest, version)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`); continue; }
-        let next;
-        comments.set(number, fresh ? fresh.comments : this.reader.comments(number));
-        try { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0); }
-        catch (error) { if (!error.code) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
-        effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
-        if (next.overflow.length || next.body.length >= this.threshold) {
-          record(effect, 'HELD', `the body would be ${next.body.length} characters`);
-          hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`, bodySizeDiagnostics(next.body, this.threshold));
-          continue;
-        }
-        if (next.body === before.body) { verifiedBodies.add(number); record(effect, 'NOOP'); continue; }
-        withIntent(effect, owner, number, () => {
-          // Issue PATCH has no compare-and-swap: re-read immediately before writing and refuse on change.
-          const latest = this.reader.issue(number);
-          if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
-            return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the issue changed between the read and the write; the next pass re-plans it' };
-          }
-          guard();
-          const response = this.mutator.writeBody(number, next.body);
-          const after = this.reader.issue(number);
-          if (after && after.body === next.body) { verifiedBodies.add(number); return { outcome: 'DONE' }; }
-          if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
-          return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
-        });
-      }
-    }
+    flush();
+    phase('task_pages', plan.effects.filter(entry => entry.kind === 'replace_block' && entry.target.issue !== parentNumber).length);
+    renderPages(false);
 
+    phase('lifecycle', plan.effects.filter(entry => ['set_parent_state', 'post_parent_repair'].includes(entry.kind)).length);
     // Lifecycle changes run after native links and page writes, using the same fence and intents.
     for (const effect of plan.effects.filter(entry => ['set_parent_state', 'post_parent_repair'].includes(entry.kind))) {
+      if (!plan.complete || holds.length || this.pass.stop()) break;
       if (isHeld(`#${parentNumber}`, 'lifecycle')) { record(effect, 'SKIPPED', 'parent lifecycle held earlier'); continue; }
       if (effect.kind === 'post_parent_repair' && this.binding.parent_lifecycle?.reopen_incomplete !== true) { record(effect, 'SKIPPED', 'repair permission is absent'); continue; }
       if (effect.kind === 'set_parent_state' && effect.target.state === 'closed' && (!plan.complete || holds.length)) { record(effect, 'SKIPPED', 'the pass is incomplete'); continue; }
-      if (effect.target.repair) {
-        const repair = { intent_id: intentId('post_parent_repair', effect.target.repair), kind: 'post_parent_repair', target: effect.target.repair, state: 'IN_FLIGHT' };
-        mutateDoc('parent', parentNumber, { change: doc => { if (doc.pending_effects.some(entry => entry.intent_id === repair.intent_id)) return null; doc.pending_effects.push(repair); return doc; } });
-      }
-      withIntent(effect, 'parent', parentNumber, () => {
+      withIntent(effect, () => {
         guard();
         if (effect.kind === 'set_parent_state') {
           const response = this.mutator.setIssueState(parentNumber, effect.target.state, { binding: this.binding, expected: effect.target.expected, fence: guard });
@@ -4425,20 +4582,26 @@ class Reconciler {
       });
     }
 
-    if (plan.complete && !holds.length && verifiedBodies.size) {
-      mutateDoc('parent', parentNumber, { change: doc => {
-        let changed = false;
-        doc.attention = (doc.attention || []).map(entry => {
-          if (!canResolveSize(entry)) return entry;
-          changed = true;
-          return { ...entry, state: 'resolved', changed_at: this.now() };
-        });
-        return changed ? doc : null;
-      } });
+    flush();
+    if (plan.complete && !holds.length && !this.pass.stop() && verifiedBodies.size) {
+      if ((parentDoc.attention || []).some(entry => canResolveSize(entry))) {
+        finalRedraw = true; redrawing = true; renderPages(true); redrawing = false;
+      }
+      if (!holds.length && !this.pass.stop()) {
+        mutateDoc('parent', parentNumber, { change: doc => {
+          let changed = false;
+          doc.attention = (doc.attention || []).map(entry => {
+            if (!canResolveSize(entry)) return entry;
+            changed = true;
+            return { ...entry, state: 'resolved', changed_at: this.now() };
+          });
+          return changed ? doc : null;
+        } });
+      }
     }
     for(const effect of plan.effects.filter(entry=>entry.kind==='advance_pr_watermark')) {
       requireRefresh();
-      if(!plan.complete || holds.length) {record(effect,'SKIPPED','incomplete pass keeps the prior watermark');continue;}
+      if(!plan.complete || holds.length || this.pass.stop()) {record(effect,'SKIPPED','incomplete pass keeps the prior watermark');continue;}
       try {
         const result=mutateDoc('parent',parentNumber,{change:doc=>{
           if(doc.private?.graph_pr_watermark && Date.parse(doc.private.graph_pr_watermark)>=Date.parse(effect.watermark)) return null;
@@ -4450,6 +4613,33 @@ class Reconciler {
         hold(effect,error.code || 'STATE_WRITE_FAILED',error.message); record(effect,'HELD',error.message);
       }
     }
+    recordStopped();
+    if (this.pass.stopped && this.pass.left() >= END_RESERVE_MS) {
+      redrawing = true;
+      renderPages(true);
+      redrawing = false;
+    } else if (plan.complete && !holds.length && !this.pass.stopped
+      && !parentDoc.pending_effects.some(entry => entry.kind === 'post_parent_repair')) {
+      // Only a complete, unheld pass may resolve an earlier stopped-pass finding. Use the existing
+      // fold rule and keep every unrelated finding unchanged.
+      const next = foldAttention(parentDoc.attention, { source: 'reconcile', complete: true, now: this.now(),
+        seen: plan.findings.filter(entry => entry.code === 'PASS_STOPPED'),
+        hold: (parentDoc.attention || []).filter(entry => entry.code !== 'PASS_STOPPED').map(entry => entry.id) });
+      if (JSON.stringify(next) !== JSON.stringify(parentDoc.attention)) {
+        finalAttention = next;
+        finalRedraw = true; redrawing = true; renderPages(true); redrawing = false;
+        if (!holds.length && !this.pass.stop()) {
+          mutateDoc('parent', parentNumber, { change: doc => {
+            doc.attention = foldAttention(doc.attention, { source: 'reconcile', complete: true, now: this.now(),
+              seen: plan.findings.filter(entry => entry.code === 'PASS_STOPPED'),
+              hold: (doc.attention || []).filter(entry => entry.code !== 'PASS_STOPPED').map(entry => entry.id) });
+            return doc;
+          } });
+        }
+        finalAttention = null;
+      }
+    }
+    recordStopped();
     return { results, holds, attention: attentionLine(parentDoc.attention, this.now()) };
   }
 
@@ -4470,7 +4660,17 @@ class Reconciler {
       writes: { state: 0, github: 0 },
       ...(inventory ? { inventory: { complete: inventory.complete, reason: inventory.reason, counts: inventoryCounts(inventory) } } : {}),
     };
-    if (apply && plan.parent && (plan.effects.length || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
+    if (apply && plan.stopped && plan.parent) {
+      const finding = plan.findings[0];
+      const writes = this.store.writes;
+      // Planning expiry commits only the finding. No recovered intent or planned effect is applied.
+      this.store.mutate('parent', plan.parent.parent_issue, { writer: this.writer, change: doc => {
+        doc.attention = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [finding], now: this.now() });
+        return doc;
+      } });
+      report.writes.state = this.store.writes - writes;
+      this.pass.progress?.reported();
+    } else if (apply && plan.parent && (this.pass.progress?.interrupted || plan.effects.length || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;
       const githubWrites = this.mutator.mutations;
       const { results, holds, attention } = this.apply(plan);
@@ -4535,6 +4735,7 @@ module.exports = Object.freeze({
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
+  RefreshBudget, REFRESH_BUDGET_MS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
