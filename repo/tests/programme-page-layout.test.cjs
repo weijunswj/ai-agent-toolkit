@@ -64,10 +64,11 @@ test('B-T6: retained text above the safe limit moves only the hard-limit prefix 
 });
 
 test('B-T7: impossible body size refuses before all archive and body effects', () => {
-  const f = pageFixture(state, { count: 5, hand: '# Programme\n## Archive\n### Marked\nOriginal.\n' });
+  assert.equal(state.archiveSection('# Programme\n## Archive\n### Marked\nOriginal.\n').unsafe, 'unsupported_markup');
+  const f = pageFixture(state, { count: 5, hand: '# Programme\n\n## Archive\n### Marked\nOriginal.\n' });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.parent().page_archive[0].state, 'moved');
-  const hand = '# Programme\n' + 'n'.repeat(60000) + '\n## Archive\n### Marked\nChanged.\n';
+  const hand = '# Programme\n' + 'n'.repeat(60000) + '\n\n## Archive\n### Marked\nChanged.\n';
   f.github.issues.get(12).body = hand;
   const posts = f.posts().length, edits = f.edits().length;
   const report = f.make().run({ apply: true });

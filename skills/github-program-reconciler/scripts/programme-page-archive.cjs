@@ -11,67 +11,55 @@ const unsafe = reason => ({ unsafe: reason, items: [] });
 // Accept only the stated Markdown subset. Offsets always refer to the original bytes/code units.
 function archiveSection(source) {
   const lines = [...source.matchAll(/[^\r\n]*(?:\r\n|[\r\n]|$)/g)].filter(match => match[0]);
-  let fence = null, comment = false, details = 0, managed = null, html = false;
-  let start = null, content = null, end = source.length, areaClosed = false;
+  let fence = null, managed = null, previousBlank = true, previousText = false;
+  let start = null, content = null, end = source.length, areaClosed = false, failure = null;
   const cuts = [];
+  // This is an accept-list, not an HTML/CommonMark renderer. Scan the whole body before
+  // moving anything, including text before the marker. Code and managed contents are inert.
   for (const match of lines) {
     const raw = match[0], line = raw.replace(/(?:\r\n|[\r\n])$/, ''), at = match.index;
-    if (start !== null && !areaClosed && /^<!-- AI-AGENT-TOOLKIT:[^\n]*:BEGIN /.test(line)) {
-      if (fence) return unsafe('open_fence');
-      if (comment) return unsafe('open_comment');
-      if (details) return unsafe('unbalanced_details');
-      end = at; areaClosed = true;
-    }
     if (fence) {
+      if (/^<!-- AI-AGENT-TOOLKIT:[^\n]*:BEGIN /.test(line)) failure ||= 'open_fence';
       if (new RegExp(`^ {0,3}${fence.char}{${fence.length},}[ \\t]*$`).test(line)) fence = null;
+      previousBlank = false; previousText = false;
       continue;
     }
-    if (!comment && /^<!-- AI-AGENT-TOOLKIT:[^\n]*:BEGIN /.test(line)) { managed = true; continue; }
     if (managed) {
-      if (/^<!-- AI-AGENT-TOOLKIT:[^\n]*:END /.test(line)) managed = null;
+      if (line === managed) managed = null;
+      previousBlank = false; previousText = false;
       continue;
     }
-    const open = line.lastIndexOf('<!--'), close = line.lastIndexOf('-->');
-    if (comment) {
-      if (open >= 0 || close >= 0) comment = open > close;
+    const begin = /^<!-- AI-AGENT-TOOLKIT:([^\r\n]+):BEGIN ([A-Z][A-Z0-9_-]*) v2 toolkit=[0-9]+\.[0-9]+\.[0-9]+ sha256=[a-f0-9]{12} -->$/.exec(line);
+    if (begin) {
+      if (start !== null && !areaClosed) { end = at; areaClosed = true; }
+      managed = `<!-- AI-AGENT-TOOLKIT:${begin[1]}:END ${begin[2]} -->`;
+      previousBlank = false; previousText = false;
       continue;
     }
     const opening = /^ {0,3}(`{3,}|~{3,})([^\n]*)$/.exec(line);
     if (opening) {
-      if (opening[1][0] === '`' && opening[2].includes('`')) {
-        // Invalid fence info can change how subsequent headings render. Refuse this subset.
-        if (start !== null && !areaClosed || source.slice(at).includes('## Archive')) return unsafe('invalid_fence');
-      }
-      fence = { char: opening[1][0], length: opening[1].length }; continue;
+      if (opening[1][0] === '`' && opening[2].includes('`')) failure ||= 'invalid_fence';
+      fence = { char: opening[1][0], length: opening[1].length };
+      previousBlank = false; previousText = false;
+      continue;
     }
-    // Raw HTML blocks have context-dependent Markdown rules. Do not archive through them.
-    if (!/^ {0,3}<!--/.test(line) && (/^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|pre|script|search|section|style|summary|table|tbody|td|textarea|tfoot|th|thead|title|tr|track|ul)(?:[ \t/>]|$)/i.test(line)
-      || /^ {0,3}<(?:[!?]|[a-z][a-z0-9-]*(?:[ \t][^\n]*)?\/?[ \t]*>)/i.test(line) && !/^ {0,3}<\/?details\b/i.test(line))) {
-      if (start !== null && !areaClosed) return unsafe('raw_html');
-      html = true;
-    }
-    // The last delimiter on the line owns comment state, after fence and HTML starts.
-    if (open >= 0) { comment = open > close; continue; }
-    for (const tag of line.matchAll(/<\/?details\b[^>]*>/gi)) {
-      details += /^<\//.test(tag[0]) ? -1 : 1;
-      if (details < 0 && start !== null && !areaClosed) return unsafe('unbalanced_details');
-    }
-    if (line === '## Archive') {
-      if (details) continue;
+    if (/^ {0,3}</.test(line) || line.includes('<!--') || /<\/?[a-z][a-z0-9-]*(?=[\s/>]|$)/i.test(line)) failure ||= 'raw_html';
+    if (previousText && /^ {0,3}(?:=+|-+)[ \t]*$/.test(line)) failure ||= 'unsupported_markup';
+    if (/^## Archive *$/.exec(line)?.[0] === line) {
       if (start !== null) return unsafe('duplicate_marker');
-      if (html) return unsafe('raw_html');
+      if (!previousBlank) failure ||= 'unsupported_markup';
       start = at; content = at + raw.length;
     } else if (start !== null && !areaClosed) {
-      if (/^ {0,3}#{1,2}(?:[ \t]|$)/.test(line)) {
-        if (details) return unsafe('unbalanced_details');
-        end = at; areaClosed = true;
-      } else if (/^### [^\r\n]+$/.test(line) && !details) cuts.push(at);
+      if (/^ {0,3}#{1,2}(?:[ \t]|$)/.test(line)) { end = at; areaClosed = true; }
+      else if (/^### [^\r\n]+$/.test(line)) cuts.push(at);
     }
+    previousBlank = /^[ \t]*$/.test(line);
+    previousText = !previousBlank && !/^ {0,3}#{1,6}(?:[ \t]|$)/.test(line);
   }
   if (start === null) return { items: [], start: null, end: null };
-  if (!areaClosed && fence) return unsafe('open_fence');
-  if (!areaClosed && comment) return unsafe('open_comment');
-  if (!areaClosed && details) return unsafe('unbalanced_details');
+  if (failure) return unsafe(failure);
+  if (fence) return unsafe('open_fence');
+  if (managed) return unsafe('unsupported_markup');
   const boundaries = [content, ...cuts.filter(at => at > content), end];
   const definitions = [...source.matchAll(/^ {0,3}\[([^\]\r\n]+)\]:[^\r\n]*(?:(?:\r\n|[\r\n])[ \t]+[^\r\n]*)*(?:\r\n|[\r\n]|$)/gm)];
   const items = [];

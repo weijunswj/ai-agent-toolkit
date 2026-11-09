@@ -73,7 +73,7 @@
       }
     },
     "page_archive": {
-      "description": "Public archive registry, outside the revision digest. Only comments posted under the authenticated login and read back exactly receive an id. Pending items stay in the body until its guarded write reads back. Detached ids stay in untrusted_ids and are never edited or adopted again; moved notes retain their link with missing status when deleted. No comment is deleted.",
+      "description": "Public archive registry, outside the revision digest. Only comments posted under the authenticated login and read back exactly receive an id. Pending items stay in the body until its guarded write reads back. Unchanged comments remain verified across logins, but only the current author can edit. Keep at most 32 rejected ids in untrusted_ids, retaining the registered id if rejected and the newest others. untrusted_before permanently excludes unregistered candidates at or below the highest dropped id; verified registered ids remain trusted unless explicitly rejected. Older larger lists compact on rejection. Rejected ids are never edited or adopted again; moved notes retain their link with missing status when deleted. No comment is deleted.",
       "type": "array",
       "items": {
         "type": "object", "additionalProperties": false,
@@ -88,6 +88,7 @@
           "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "source_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
           "state": { "enum": ["pending", "moved"] },
+          "untrusted_before": { "type": "integer", "minimum": 1 },
           "untrusted_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } },
           "missing": { "type": "boolean" }
         },
@@ -155,7 +156,7 @@
     },
     "archiveDiagnostics": {
       "type": "object", "additionalProperties": false, "required": ["reason"],
-      "properties": { "reason": { "enum": ["duplicate_marker", "open_fence", "open_comment", "unbalanced_details", "item_too_large", "raw_html", "invalid_fence"] } }
+      "properties": { "reason": { "enum": ["duplicate_marker", "open_fence", "open_comment", "unbalanced_details", "item_too_large", "raw_html", "invalid_fence", "unsupported_markup"] } }
     },
     "bodySizeDiagnostics": {
       "description": "Disjoint UTF-16 span lengths matching the redraw limit, with fixed labels and hand-written section numbers only. No page text. The largest five spans plus remainder equal projected_total; required_reduction gets strictly below threshold.",

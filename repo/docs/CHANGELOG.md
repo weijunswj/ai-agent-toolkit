@@ -5,7 +5,7 @@
 ### Added
 
 - Programme parents show managed CURRENT, PROGRAMME GRAPH, AGENT CONTEXT and COMMENT TRACE headings.
-- Large programme pages move only the needed graph rows into verified archive comments. Marked Archive notes move unchanged up to the next level 1 or 2 heading or managed block, with a shared five-comment budget per issue. Recovery preserves interrupted moves and detaches changed or missing archive comments without stopping redraws.
+- Large programme pages move only the needed graph rows into verified archive comments. Marked Archive notes move unchanged up to the next level 1 or 2 heading or managed block, with a shared five-comment budget per issue. A strict simple-Markdown reader refuses ambiguous markup. Recovery preserves interrupted moves, keeps unchanged archives across logins, bounds rejected ids and detaches changed or missing comments without stopping redraws.
 - Page size warnings and unsafe archive markup remain visible as durable attention findings, including refusals discovered while applying a redraw.
 
 ## 3.57.0

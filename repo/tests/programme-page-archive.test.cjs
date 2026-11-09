@@ -9,6 +9,13 @@ const { pageFixture } = require('./support/programme-page-fixture.cjs');
 const { expectDefaultDeny, BREAKS } = require('./support/hostile-inputs.cjs');
 const reader = text => state.archiveSection(text);
 
+// Positive fixtures also pin the refused form they previously accepted. No input is
+// normalised silently: the negative control must fail closed before adding the separator.
+function separatedArchive(hand) {
+  assert.equal(reader(hand).unsafe, 'unsupported_markup', 'an unseparated marker cannot authorise a move');
+  return hand.replace(/(# Programme)(\r?\n)(?=## Archive)/, '$1$2$2');
+}
+
 test('B-T8: marked notes move byte-exact with reference copies and become moved after body readback', () => {
   const text = '### Notes\r\nA [link][ref].  \r\n\r\n  Code\r\n';
   const refs = '[ref]: https://example.com\r\n';
@@ -40,7 +47,7 @@ test('B-T8: marked notes move byte-exact with reference copies and become moved 
 
 test('oversized marked items split only at blank lines with every byte retained', () => {
   const text = '### Notes\n' + 'a'.repeat(35000) + '\n\n' + 'b'.repeat(35000) + '\n';
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n' + text });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n') + text });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.posts().length, 2);
   const payloads = [...f.github.comments.values()].map(comment => comment.body.split('Moved unchanged from the programme page.\n\n')[1]);
@@ -53,7 +60,7 @@ test('oversized marked items split only at blank lines with every byte retained'
 test('reference copies cover shortcut and collapsed links and retain definitions inside the marked area', () => {
   const refs = '[ref]: https://example.com\n  "A title"\n';
   const text = `### Notes\nUse [ref] and [ref][].\n\n${refs}`;
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n' + text });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n') + text });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.ok([...f.github.comments.values()][0].body.includes(text));
   assert.ok([...f.github.comments.values()][0].body.endsWith(refs));
@@ -81,7 +88,8 @@ test('B-T5: five posts per parent pass, marked notes continue on the next pass',
 });
 
 test('the shared post budget spends graph archives before notes and trace pages', () => {
-  const f = pageFixture(state, { count: 84, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) + '\n## Archive\n' + Array.from({ length: 8 }, (_, i) => `### Note ${i}\nSmall note.\n\n`).join('') });
+  assert.equal(reader('Notes.\n## Archive\n### Note\nText.\n').unsafe, 'unsupported_markup');
+  const f = pageFixture(state, { count: 84, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) + '\n\n## Archive\n' + Array.from({ length: 8 }, (_, i) => `### Note ${i}\nSmall note.\n\n`).join('') });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.posts().length, 5);
   const kinds = f.posts().map(post => post.body.body.startsWith('<!-- programme-page-archive key=graph-') ? 0 : post.body.body.startsWith('<!-- programme-page-archive key=section-') ? 1 : 2);
@@ -92,7 +100,7 @@ test('the shared post budget spends graph archives before notes and trace pages'
 });
 
 test('a repair notice waits with its intent when archives spend all five comment slots', () => {
-  const f = pageFixture(state, { count: 1, groups: ['LATER'], hand: '# Programme\n## Archive\n' + Array.from({ length: 5 }, (_, i) => `### Note ${i}\nText.\n\n`).join('') });
+  const f = pageFixture(state, { count: 1, groups: ['LATER'], hand: separatedArchive('# Programme\n## Archive\n') + Array.from({ length: 5 }, (_, i) => `### Note ${i}\nText.\n\n`).join('') });
   Object.assign(f.binding, { schema: state.SCHEMA.bindingV2, governance: 'enabled', parent_lifecycle: { reopen_incomplete: true, complete_when_children_closed: false } });
   const parent = f.github.issues.get(12);
   parent.state = 'closed'; parent.closed_at = f.NOW;
@@ -135,7 +143,7 @@ test('B-T10: archive reader rejects hostile markers and refuses malformed marked
     ['case', '## archive\n### Notes\nText\n'],
     ['indent', '    ## Archive\nText\n'],
     ['lookalike', `## Arch${String.fromCodePoint(0x456)}ve\nText\n`],
-    ['trailing-space', '## Archive \nText\n'],
+    ['tab-suffix', '## Archive\t\nText\n'],
     ['heading-lookalike', '### Archive\nText\n'],
     ['managed', state.renderBlock('## Archive\n### Notes\nText', '3.57.0')],
   ].map(([id, text]) => ({ id, text }));
@@ -150,28 +158,62 @@ test('B-T10: archive reader rejects hostile markers and refuses malformed marked
     ]) hidden.push({ id: `${name}-${shape}`, text: prefix + '## Archive\n### Hidden\nKeep this.\n' });
   }
   hidden.push({ id: 'mixed-crlf-cr', text: '```md\r\n## Archive\r### Hidden\nKeep.\r\n```\n' });
+  const old = '## Archive\n### Hidden\nOld.\n';
+  const matrix = [
+    ['closing-span', '</span>\n' + old],
+    ['closing-custom', '</x-note>\n' + old],
+    ['details-no-gap', '<details>\nOld.\n</details>\n' + old],
+    ['details-comment', '<details><!-- folded -->\n' + old + '</details><!-- end -->\n'],
+    ['balanced-details-gap', '<details>\nOld.\n</details>\n\n' + old],
+    ['inline-tag-before', 'Text <span>hi</span>\n\n' + old],
+    ['inline-comment-before', 'Text <!-- keep -->\n\n' + old],
+    ['open-comment-before', 'Text <!-- open\n\n' + old],
+    ['closing-tag-gap', '</details>\n\n' + old],
+    ['indented-html', '   <span>\n\n' + old],
+    ['declaration', '<!DOCTYPE html>\n\n' + old],
+    ['processing-instruction', '<?xml version="1.0"?>\n\n' + old],
+    ['cdata', '<![CDATA[\n\n' + old],
+    ['script', '<script>\n' + old + '</script>\n'],
+    ['style', '<style>\n' + old + '</style>\n'],
+    ['textarea', '<textarea>\n' + old + '</textarea>\n'],
+    ['heading-comment', old + '## Risks <!-- keep -->\nRisk text.\n'],
+    ['prose-comment', old + 'Text <!-- open\n## Risks\nKeep.\n-->\n'],
+    ['setext-equals', old + 'Current plan\n===\nKeep.\n'],
+    ['setext-dashes', old + 'Current plan\n---\nKeep.\n'],
+    ['setext-before', 'Current plan\n===\n\n' + old],
+    ['marker-no-gap', 'Text.\n' + old],
+    ['heading-no-gap', '# Programme\n' + old],
+    ['nested-marker', '## Archive\n### Notes\n<div>Old.</div>\n'],
+  ];
+  assert.equal(matrix.length, 24);
+  hidden.push(...matrix.map(([id, text]) => ({ id, text })));
+  // LS/PS end the info string before a real Markdown newline. A dot-star opener
+  // would miss this fence and mistake its literal heading for permission.
+  for (const eol of [BREAKS.ls, BREAKS.ps]) for (const breakAt of ['\n', BREAKS.cr, BREAKS.crlf]) {
+    hidden.push({ id: `fence-info-${JSON.stringify(eol + breakAt)}`, text: '```info' + eol + breakAt + breakAt + old });
+  }
   expectDefaultDeny(assert, text => reader(text).items.length > 0, hidden);
   for (const [id, body, reason] of [
     ['doubled', '## Archive\nText\n## Archive\nMore\n', 'duplicate_marker'],
     ['doubled-after-block', `## Archive\nText\n${state.renderBlock('trace', '3.57.0', 'TRACE')}\n## Archive\nMore\n`, 'duplicate_marker'],
     ['fence', '## Archive\n### Notes\n```\nText\n', 'open_fence'],
-    ['comment', '## Archive\n<!--\nText\n', 'open_comment'],
-    ['comment-at-boundary', `## Archive\n<!--\nText\n${state.renderBlock('trace', '3.57.0', 'TRACE')}\n`, 'open_comment'],
+    ['comment', '## Archive\n<!--\nText\n', 'raw_html'],
+    ['comment-at-boundary', `## Archive\n<!--\nText\n${state.renderBlock('trace', '3.57.0', 'TRACE')}\n`, 'raw_html'],
     ['fence-at-boundary', `## Archive\n~~~\nText\n${state.renderBlock('trace', '3.57.0', 'TRACE')}\n~~~\n`, 'open_fence'],
-    ['details', '## Archive\n<details>\nText\n', 'unbalanced_details'],
-    ['closing-details', '## Archive\n</details>\n', 'unbalanced_details'],
+    ['details', '## Archive\n<details>\nText\n', 'raw_html'],
+    ['closing-details', '## Archive\n</details>\n', 'raw_html'],
     ['raw-html', '## Archive\n<div>\nHidden\n</div>\n', 'raw_html'],
     ['invalid-info', '## Archive\n```md`bad\nHidden\n', 'invalid_fence'],
   ]) assert.equal(reader(body).unsafe, reason, id);
   for (const eol of ['\n', BREAKS.crlf]) {
     const text = ['## Archive', '### Notes', '<details>', 'Body.', '</details>', ''].join(eol);
-    assert.equal(reader(text).items.length, 1);
-    assert.equal(reader(text).items[0].text, text.slice(text.indexOf('###')));
+    assert.equal(reader(text).unsafe, 'raw_html');
+    assert.deepEqual(reader(text).items, []);
   }
 });
 
 test('a new note with an old title keeps the old moved comment and posts a distinct item', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nFirst note.\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nFirst note.\n') });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const first = f.parent().page_archive[0].comment_id;
   f.github.issues.get(12).body += '\n## Archive\n### Notes\nSecond note.\n';
@@ -184,7 +226,7 @@ test('a new note with an old title keeps the old moved comment and posts a disti
 });
 
 test('pending note identity survives an owner title edit without another post', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nText\n') });
   f.github.intercept(call => call.method === 'PATCH' && /issues\/12$/.test(call.path) ? { status: 409, json: {} } : undefined);
   assert.ok(f.make().run({ apply: true }).holds.length);
   f.github.hooks = [];
@@ -196,7 +238,7 @@ test('pending note identity survives an owner title edit without another post', 
 });
 
 test('an interrupted body readback keeps verified notes reachable and settles the pending registry', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nText\n') });
   let landed = false, stopped = false;
   f.github.intercept(call => {
     if (call.method === 'PATCH' && /issues\/12$/.test(call.path)) landed = true;
@@ -214,7 +256,7 @@ test('an interrupted body readback keeps verified notes reachable and settles th
 });
 
 test('a comment changed during body-intent bookkeeping cannot remove the marked source', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nText\n') });
   let changed = false;
   f.github.intercept(call => {
     if (!changed && call.method === 'PUT' && call.body?.content) {
@@ -247,7 +289,7 @@ test('missing graph archives repost only under a new verified id', () => {
 });
 
 test('archive registry, effect targets and new diagnostics are closed in runtime and schema', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nText\n') });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const Ajv = require('ajv/dist/2020');
   const validate = new Ajv({ strict: false }).compile(JSON.parse(fs.readFileSync(path.join(ROOT, 'repo/contracts/programme-state/parent-state-v1.schema.json'))));
@@ -274,7 +316,7 @@ test('archive registry, effect targets and new diagnostics are closed in runtime
 });
 
 test('unsafe sections produce durable closed diagnostics and zero comment effects', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\n```\nOpen\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\n```\nOpen\n') });
   const report = f.make().run({ apply: true });
   assert.deepEqual(report.holds, []);
   assert.ok(state.findStateBlock(f.page()).block, 'unsafe notes do not stop the first redraw');
@@ -292,7 +334,7 @@ test('unsafe sections produce durable closed diagnostics and zero comment effect
 
 test('B-T11: missing, foreign and changed moved notes detach without blocking redraw', () => {
   for (const mode of ['missing', 'foreign', 'changed']) {
-    const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
+    const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nText\n') });
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
     const entry = f.parent().page_archive[0], id = entry.comment_id;
     if (mode === 'missing') f.github.comments.delete(id);
@@ -321,7 +363,7 @@ test('B-T11: missing, foreign and changed moved notes detach without blocking re
 });
 
 test('B-T12: archive comments remain untagged and every decision stays reachable', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nText\n') });
   f.github.addComment(12, { body: 'Delivery\n---\nTEST-1\nA decision.' });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.parent().page_archive.length, 1, 'the moved note is still reachable through the trace');
@@ -339,7 +381,7 @@ test('archived quotations cannot introduce decision records, supersession or tra
   ], recordPrefix: 'TEST-', repository: 'example.test/app', issue: 12 });
   assert.deepEqual(direct.unknown_supersedes, [], 'quoted text must not create a new supersession instruction');
   assert.deepEqual(direct.superseded_unmarked, []);
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Old notes\nTEST-2\nSUPERSEDES=TEST-1\nSUPERSEDES=TEST-999\n<!-- decision-trace-index -->\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Old notes\nTEST-2\nSUPERSEDES=TEST-1\nSUPERSEDES=TEST-999\n```text\n<!-- decision-trace-index -->\n```\n') });
   const original = f.github.addComment(12, { body: 'Delivery\n---\nTEST-1\nA real decision.' });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.parent().page_archive.length, 1);
@@ -423,7 +465,7 @@ test('large overflow respects graph group order, five posts and reaches a stable
 });
 
 test('archive post recovery finds a lost successful response without a second post', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nText\n') });
   let lost = false;
   f.github.intercept(call => {
     if (!lost && call.method === 'POST' && /issues\/12\/comments$/.test(call.path)) {
@@ -443,7 +485,7 @@ test('archive post recovery finds a lost successful response without a second po
 
 test('archive edit recovery distinguishes exact DONE, NOT_DONE and detached owner edits', () => {
   for (const outcome of ['DONE', 'NOT_DONE', 'UNKNOWN']) {
-    const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nOriginal.\n' });
+    const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nOriginal.\n') });
     f.github.intercept(call => call.method === 'PATCH' && /issues\/12$/.test(call.path) ? { status: 409, json: {} } : undefined);
     assert.ok(f.make().run({ apply: true }).holds.length);
     assert.equal(f.parent().page_archive[0].state, 'pending');
@@ -475,7 +517,7 @@ test('archive edit recovery distinguishes exact DONE, NOT_DONE and detached owne
 });
 
 test('single-issue passes never post or edit archive comments and keep marked text', () => {
-  const f = pageFixture(state, { count: 1, hand: '# Programme\n## Archive\n### Notes\nText\n' });
+  const f = pageFixture(state, { count: 1, hand: separatedArchive('# Programme\n## Archive\n### Notes\nText\n') });
   assert.deepEqual(f.make().run({ apply: true, issue: 100 }).holds, []);
   assert.equal(f.posts().length + f.edits().length, 0);
   assert.match(f.page(), /^### Notes/m);
@@ -485,7 +527,7 @@ test('single-issue passes never post or edit archive comments and keep marked te
 for (const count of [1, 7]) for (const mode of ['crash', 'lost-fence', '502', 'owner-edit']) {
   test(`H1: ${count} notes survive ${mode} body readback and a later new note`, () => {
     const notes = Array.from({ length: count + 1 }, (_, i) => `### Note ${i}\nPayload ${i}.\n\n`);
-    const f = pageFixture(state, { hand: '# Programme\n## Archive\n' + notes.slice(0, count).join('') });
+    const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n') + notes.slice(0, count).join('') });
     let landed = false, interrupted = false;
     f.github.intercept(call => {
       if (call.method === 'PATCH' && /issues\/12$/.test(call.path)) landed = true;
@@ -532,6 +574,14 @@ for (const mode of ['checkbox', 'typo', 'edit', 'missing', 'viewer', 'foreign'])
     const old = f.github.comments.get(id)?.body, before = f.posts().length, edits = f.edits().length;
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
     const next = f.parent().page_archive.find(entry => entry.key === first.key);
+    if (mode === 'viewer') {
+      assert.equal(next.comment_id, id);
+      assert.equal(f.posts().length, before);
+      assert.equal(f.edits().length, edits);
+      assert.equal(f.parent().attention.some(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED'), false);
+      assert.equal(f.make().run({ apply: true }).summary, 'No changes');
+      return;
+    }
     assert.notEqual(next.comment_id, id);
     assert.ok(next.untrusted_ids?.includes(id));
     assert.ok(f.posts().length > before && f.posts().length - before <= 5);
@@ -545,7 +595,7 @@ for (const mode of ['checkbox', 'typo', 'edit', 'missing', 'viewer', 'foreign'])
 }
 
 test('H2/L10: lost-reply duplicate markers select the lowest exact verified id', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nPayload.\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nPayload.\n') });
   let lost = false;
   f.github.intercept(call => {
     if (!lost && call.method === 'POST' && /issues\/12\/comments$/.test(call.path)) {
@@ -580,7 +630,7 @@ for (const issueScoped of [false, true]) for (const shape of ['duplicate', 'fenc
 }
 
 test('M1: unsafe marker after five moves still redraws an activated task', () => {
-  const f = pageFixture(state, { count: 1, hand: '# Programme\n## Archive\n' + Array.from({ length: 7 }, (_, i) => `### Note ${i}\nPayload.\n\n`).join('') });
+  const f = pageFixture(state, { count: 1, hand: separatedArchive('# Programme\n## Archive\n') + Array.from({ length: 7 }, (_, i) => `### Note ${i}\nPayload.\n\n`).join('') });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   f.github.issues.get(12).body += '\n## Archive\nMore\n';
   f.store.mutate('parent', 12, { writer: f.writer, change: doc => { doc.outcomes[0].class = 'COMMITTED'; return doc; } });
@@ -597,15 +647,25 @@ test('M2: only Archive items move; later H1/H2 sections keep their exact bytes',
   for (const boundary of ['# Current plan', '## Current plan']) {
     const later = `${boundary}\r\nKeep this.  \r\n\r\n## Risks\r\n  Keep risks.\r\n`;
     const text = '### Old decision log\r\nOld notes.\r\n#### Detail\r\nMore.\r\n';
-    const f = pageFixture(state, { hand: '# Programme\r\n## Archive\r\n' + text + later });
+    const f = pageFixture(state, { hand: separatedArchive('# Programme\r\n## Archive\r\n') + text + later });
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
     assert.ok(f.page().includes(later));
     assert.ok([...f.github.comments.values()].some(comment => comment.body.includes(text)));
     assert.ok([...f.github.comments.values()].every(comment => !comment.body.includes('Keep this.') && !comment.body.includes('Keep risks.')));
     assert.doesNotMatch(state.findStateBlock(f.page(), 'CONTEXT').block.body, /\[Current plan\]|\[Risks\]/);
   }
+  for (const tail of ['## Risks <!-- keep -->\nRisk text.\n', 'Text <!-- open\n## Risks\nRisk text.\n-->\n', 'Current plan\n===\nKeep.\n', 'Current plan\n---\nKeep.\n']) {
+    const hand = '# Programme\n\n## Archive\n### Old log\nOld.\n' + tail;
+    expectDefaultDeny(assert, text => reader(text).items.length > 0, [{ id: tail, text: hand }]);
+    const f = pageFixture(state, { hand });
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.ok(f.page().includes('## Archive\n### Old log\nOld.\n' + tail));
+    assert.equal(f.posts().length + f.edits().length, 0);
+    assert.ok(f.parent().attention.some(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE'));
+    assert.doesNotMatch(state.findStateBlock(f.page(), 'CONTEXT').block.body, /Archived notes:/);
+  }
   for (const tail of ['', '## Current plan\nKeep.\n']) {
-    const text = 'Preamble.\n\n### Log\n```md\n## Inside fence\n```\n<!--\n## Inside comment\n-->\nNotes.\n';
+    const text = 'Preamble.\n\n### Log\n```md\n## Inside fence\n```\nNotes.\n';
     const area = reader('## Archive\n' + text + tail);
     assert.equal(area.items.length, 2);
     assert.equal(area.items[0].title, 'Archived notes');
@@ -629,7 +689,7 @@ test('M3: CR and mixed CommonMark line endings preserve exact Archive offsets', 
 
 
 test('H2: detached registry and attention diagnostics fail closed in runtime and schema', () => {
-  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nText\n') });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const id = f.parent().page_archive[0].comment_id;
   f.github.comments.delete(id);
@@ -655,7 +715,7 @@ test('H2: detached registry and attention diagnostics fail closed in runtime and
 
 test('H2: lost-reply comments edited or transferred before registration cannot hold the page', () => {
   for (const mode of ['changed', 'foreign']) {
-    const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nPayload.\n' });
+    const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nPayload.\n') });
     let lost = false;
     f.github.intercept(call => {
       if (!lost && call.method === 'POST' && /issues\/12\/comments$/.test(call.path)) {
@@ -697,4 +757,220 @@ test('H2: graph replacements share five posts with the owed repair notice', () =
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.ok(f.posts().length - second <= 5);
   assert.ok(f.posts().some(call => call.body.body.includes('toolkit-parent-repair:12:9')));
+});
+
+
+test('N2/N3: trailing spaces and simple pages archive; HTML before a marker refuses while redrawing', () => {
+  const plain = '# Programme\n\n## Archive   \n### Old\nText.\n## Current plan\nKeep.  \n';
+  const f = pageFixture(state, { hand: plain });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.equal(f.posts().length, 1);
+  assert.ok(f.page().includes('## Current plan\nKeep.  \n'));
+  assert.doesNotMatch(f.posts()[0].body.body, /Current plan|Keep/);
+  for (const before of ['</span>', '<details>\nOld.\n</details>', '<details><!-- folded -->']) {
+    const hand = before + '\n\n## Archive\n### Hidden\nOld.\n</details><!-- end -->\n';
+    const denied = pageFixture(state, { hand });
+    assert.deepEqual(denied.make().run({ apply: true }).holds, []);
+    assert.equal(denied.posts().length + denied.edits().length, 0);
+    assert.ok(denied.page().includes(hand));
+    assert.ok(denied.parent().attention.some(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE'));
+    assert.ok(state.findStateBlock(denied.page()).block);
+  }
+});
+
+for (const several of [false, true]) test(`N1: six alternating logins retain verified read-only parts, several=${several}`, () => {
+  const notes = Array.from({ length: several ? 3 : 1 }, (_, i) => `### Note ${i}\nPayload ${i}.\n\n`).join('');
+  const padding = 'Notes. '.repeat(several ? 5900 : 5700);
+  const f = pageFixture(state, { count: 84, hand: '# Programme\n\n' + padding + '\n\n## Archive\n' + notes });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  const initial = f.parent().page_archive;
+  assert.equal(initial.filter(entry => entry.kind === 'graph').length, several ? 2 : 1);
+  assert.equal(initial.filter(entry => entry.kind === 'section').length, several ? 3 : 1);
+  assert.ok(f.posts().length <= 5);
+  const count = f.github.comments.size, posts = f.posts().length, edits = f.edits().length;
+  for (let pass = 0; pass < 6; pass++) {
+    f.github.login = pass % 2 ? 'owner' : 'second-login';
+    const start = f.github.calls.length;
+    const plan = f.make().run();
+    assert.equal(plan.effects.some(effect => effect.kind === 'replace_block' && effect.target.issue === 12), false);
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(f.github.comments.size, count);
+    assert.equal(f.posts().length, posts);
+    assert.equal(f.edits().length, edits);
+    assert.deepEqual(f.parent().page_archive, initial);
+    assert.ok(initial.every(entry => f.page().includes(`#issuecomment-${entry.comment_id}`)));
+    assert.equal(f.parent().attention.some(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED'), false);
+    assert.ok(f.parent().page_archive.every(entry => (entry.untrusted_ids || []).length <= 32));
+    assert.equal(f.github.calls.slice(start).filter(call => call.method === 'POST' && /issues\/12\/comments$/.test(call.path)).length, 0);
+  }
+  // A genuine graph change under the other login posts fresh content without editing
+  // any recorded owner's comment. Notes remain reachable and every pass stays <=5.
+  f.github.login = 'second-login';
+  f.github.issues.get(12).body = f.page().replace(padding, 'Short notes.');
+  const before = f.posts().length;
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.ok(f.posts().length > before && f.posts().length - before <= 5);
+  assert.equal(f.edits().length, edits);
+  assert.equal(f.parent().attention.some(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED'), false, 'a legitimate content change is not a trust failure');
+  for (const entry of initial) assert.equal(f.github.comments.get(entry.comment_id).login, 'owner');
+});
+
+
+test('L1: COMMENT TRACE links cannot settle a pending note or prevent its authorised edit', () => {
+  const f = pageFixture(state, { count: 1, hand: separatedArchive('# Programme\n## Archive\n### Notes\nOriginal.\n') });
+  f.github.intercept(call => call.method === 'PATCH' && /issues\/12$/.test(call.path) ? { status: 409, json: {} } : undefined);
+  assert.ok(f.make().run({ apply: true }).holds.length);
+  const id = f.parent().page_archive[0].comment_id;
+  f.github.hooks = [];
+  assert.deepEqual(f.make().run({ apply: true, issue: 100 }).holds, []);
+  assert.ok(state.findStateBlock(f.page(), 'TRACE').block.body.includes(`#issuecomment-${id}`));
+  assert.doesNotMatch(state.findStateBlock(f.page(), 'CONTEXT').block.body, /Archived notes:/);
+  assert.equal(f.parent().page_archive[0].state, 'pending');
+  f.github.issues.get(12).body = f.page().replace('Original.', 'Revised.');
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.equal(f.posts().length, 1);
+  assert.equal(f.edits().length, 1);
+  assert.equal(f.parent().page_archive.length, 1);
+  assert.match(f.github.comments.get(id).body, /Revised/);
+  assert.equal(state.findStateBlock(f.page(), 'CONTEXT').block.body.match(/\[Notes\]/g).length, 1);
+});
+
+function lostNote() {
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Notes\nPayload.\n') });
+  let lost = false;
+  f.github.intercept(call => {
+    if (!lost && call.method === 'POST' && /issues\/12\/comments$/.test(call.path)) {
+      lost = true; f.github.route(call.method, call.path, call.body);
+      throw Object.assign(new Error('Lost successful reply'), { code: 'PASS_LOCK_LOST' });
+    }
+  });
+  assert.throws(() => f.make().run({ apply: true }), { code: 'PASS_LOCK_LOST' });
+  f.github.hooks = [];
+  return f;
+}
+
+for (const route of ['apply', 'recovery']) test(`L3: ${route} never adopts an exact but previously rejected id`, () => {
+  const f = lostNote(), id = [...f.github.comments.keys()][0];
+  f.store.mutate('parent', 12, { writer: f.writer, change: doc => {
+    doc.page_archive[0].untrusted_ids = [id];
+    if (route === 'apply') doc.pending_effects = [];
+    return doc;
+  } });
+  const r = f.make(), plan = r.plan();
+  if (route === 'recovery') {
+    const resolution = plan.resolutions.find(entry => entry.intent_id === f.parent().pending_effects[0].intent_id);
+    assert.equal(resolution.outcome, 'NOT_DONE');
+    assert.equal(resolution.archive, undefined);
+  }
+  assert.deepEqual(r.apply(plan).holds, []);
+  assert.notEqual(f.parent().page_archive[0].comment_id, id);
+  assert.equal(f.posts().length, 2);
+  assert.equal(f.edits().length, 0);
+});
+
+test('L3: apply adoption picks the lowest exact duplicate without pending-intent recovery', () => {
+  const f = lostNote(), id = [...f.github.comments.keys()][0];
+  const higher = f.github.addComment(12, { body: f.github.comments.get(id).body });
+  assert.ok(higher > id);
+  f.store.mutate('parent', 12, { writer: f.writer, change: doc => { doc.pending_effects = []; return doc; } });
+  const r = f.make(), plan = r.plan();
+  assert.deepEqual(plan.resolutions, []);
+  assert.deepEqual(r.apply(plan).holds, []);
+  assert.equal(f.parent().page_archive[0].comment_id, id);
+  assert.ok(f.parent().page_archive[0].untrusted_ids.includes(higher));
+  assert.equal(f.posts().length, 1);
+  assert.equal(f.edits().length, 0);
+});
+
+test('L3: trust cannot edit a rejected id even after its exact bytes are restored', () => {
+  const hand = separatedArchive('# Programme\n## Archive\n### Note\nPayload.\n');
+  const padding = 'Notes. '.repeat(5700);
+  const f = pageFixture(state, { count: 84, hand: hand + '\n## Current plan\n' + padding });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  const graph = f.parent().page_archive.find(entry => entry.kind === 'graph'), id = graph.comment_id;
+  f.store.mutate('parent', 12, { writer: f.writer, change: doc => { doc.page_archive.find(entry => entry.key === graph.key).untrusted_ids = [id]; return doc; } });
+  const retained = f.github.comments.get(id).body, before = f.posts().length, edits = f.edits().length;
+  f.github.issues.get(12).body = f.page().replace(padding, 'Short notes.');
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.notEqual(f.parent().page_archive.find(entry => entry.key === graph.key).comment_id, id);
+  assert.equal(f.posts().length, before + 1);
+  assert.equal(f.edits().length, edits);
+  assert.equal(f.github.comments.get(id).body, retained);
+});
+
+test('L3: exact body-digest recovery explicitly settles the moved-note key', () => {
+  const f = pageFixture(state, { hand: separatedArchive('# Programme\n## Archive\n### Note\nPayload.\n') });
+  let landed = false, stopped = false;
+  f.github.intercept(call => {
+    if (call.method === 'PATCH' && /issues\/12$/.test(call.path)) landed = true;
+    if (landed && !stopped && call.method === 'GET' && /issues\/12$/.test(call.path)) {
+      stopped = true; throw Object.assign(new Error('Lost body readback'), { code: 'PASS_LOCK_LOST' });
+    }
+  });
+  assert.throws(() => f.make().run({ apply: true }), { code: 'PASS_LOCK_LOST' });
+  f.github.hooks = [];
+  const doc = f.parent(), target = doc.pending_effects.find(effect => effect.kind === 'replace_block').target;
+  assert.ok(target.body_digest);
+  assert.equal(doc.page_archive[0].state, 'pending');
+  const r = f.make(), plan = r.plan();
+  assert.deepEqual(plan.resolutions.find(entry => entry.settledArchives)?.settledArchives, [doc.page_archive[0].key]);
+  assert.deepEqual(r.apply(plan).holds, []);
+  assert.equal(f.parent().page_archive[0].state, 'moved');
+  assert.equal(f.posts().length, 1);
+});
+
+test('N1: rejection compaction bounds ids and permanently excludes dropped restored candidates', () => {
+  const hand = separatedArchive('# Programme\n## Archive\n### Note\nPayload.\n');
+  const f = pageFixture(state, { hand });
+  const archive = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-page-archive.cjs'));
+  const text = archive.sectionComment(reader(hand).items[0]);
+  const ids = Array.from({ length: 40 }, () => f.github.addComment(12, { body: text + 'Untrusted change.' }));
+  f.github.intercept(call => call.method === 'PATCH' && /issues\/12$/.test(call.path) ? { status: 409, json: {} } : undefined);
+  assert.ok(f.make().run({ apply: true }).holds.length);
+  const entry = f.parent().page_archive[0], id = entry.comment_id;
+  assert.equal(entry.untrusted_ids.length, 32);
+  assert.equal(entry.untrusted_before, ids[7]);
+  assert.equal(entry.untrusted_ids.includes(ids[0]), false);
+  f.github.comments.get(ids[0]).body = text;
+  f.store.mutate('parent', 12, { writer: f.writer, change: doc => { doc.page_archive[0].comment_id = null; doc.page_archive[0].login = null; return doc; } });
+  f.github.hooks = [];
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.equal(f.parent().page_archive[0].comment_id, id, 'a dropped id is still forbidden after exact bytes return');
+  assert.equal(f.posts().length, 1);
+  assert.equal(f.edits().length, 0);
+  const Ajv = require('ajv/dist/2020');
+  const validate = new Ajv({ strict: false }).compile(JSON.parse(fs.readFileSync(path.join(ROOT, 'repo/contracts/programme-state/parent-state-v1.schema.json'))));
+  for (const floor of [0, -1, 1.5, '1', null]) {
+    const bad = f.parent(); bad.page_archive[0].untrusted_before = floor;
+    assert.ok(state.validateParent(bad).length);
+    assert.equal(validate(bad), false);
+  }
+  assert.deepEqual(state.validateParent(f.parent()), []);
+  assert.equal(validate(f.parent()), true);
+});
+
+
+test('N1: compaction preserves an exact registered duplicate below the floor and pins it on rejection', () => {
+  const f = lostNote(), id = [...f.github.comments.keys()][0], body = f.github.comments.get(id).body;
+  for (let i = 0; i < 40; i++) f.github.addComment(12, { body });
+  f.store.mutate('parent', 12, { writer: f.writer, change: doc => { doc.pending_effects = []; return doc; } });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  let entry = f.parent().page_archive[0];
+  assert.equal(entry.comment_id, id);
+  assert.ok(entry.untrusted_before > id);
+  assert.equal(entry.untrusted_ids.length, 32);
+  assert.equal(entry.untrusted_ids.includes(id), false);
+  assert.equal(f.posts().length, 1);
+  f.github.login = 'second-login';
+  const before = f.posts().length;
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.equal(f.posts().length, before);
+  assert.equal(f.parent().page_archive[0].comment_id, id);
+  f.github.comments.get(id).body += 'Owner edit.';
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  entry = f.parent().page_archive[0];
+  assert.equal(entry.untrusted_ids.length, 32);
+  assert.ok(entry.untrusted_ids.includes(id), 'a rejected registered id cannot use the verified-id exception');
+  assert.equal(f.posts().length, before);
+  assert.equal(f.edits().length, 0);
 });
