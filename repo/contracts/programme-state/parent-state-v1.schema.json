@@ -56,10 +56,43 @@
         "required": ["intent_id", "kind", "target", "state"],
         "properties": {
           "intent_id": { "type": "string", "minLength": 1 },
-          "kind": { "enum": ["attach", "reparent", "reorder", "replace_block", "post_index_comment", "replace_pr_nav", "set_parent_state", "post_parent_repair"] },
+          "kind": { "enum": ["attach", "reparent", "reorder", "replace_block", "post_index_comment", "post_archive_comment", "edit_archive_comment", "replace_pr_nav", "set_parent_state", "post_parent_repair"] },
           "target": { "type": "object", "description": "Index comment intents name issue, tag, after and parts (SHA-256 page digests with the intent ID removed); directory: true identifies topic directory pages. Both kinds carry decision-trace-index, directories also decision-trace-directory. Pages stay below 60000 characters including headers. Directory lines link decisions directly or older topic indexes on the same issue; directories never link directories. Generated pages are strict, with at most two index hops and 1024 generated indexes. Hand-made indexes without an intent retain one-hop reading: foreign and missing references are ignored and index-to-index references are not followed. Foreign links never cover local comments. At most five topic comments are planned across the pass; larger traces use directory pages directly without speculative topic posts. Partial verified sets settle as NOT_DONE and are adopted before paging the remaining links; mismatched or duplicate pages stay UNKNOWN. Older intents without parts use their part/total metadata." },
           "state": { "enum": ["IN_FLIGHT", "DONE", "UNKNOWN"] }
-        }
+        },
+        "allOf": [{
+          "if": { "properties": { "kind": { "enum": ["post_archive_comment", "edit_archive_comment"] } } },
+          "then": { "properties": { "target": { "$ref": "#/$defs/archiveTarget" } } }
+        }, {
+          "if": { "properties": { "kind": { "const": "post_archive_comment" } } },
+          "then": { "properties": { "target": { "properties": { "comment_id": { "type": "null" }, "before": { "type": "null" } } } } }
+        }, {
+          "if": { "properties": { "kind": { "const": "edit_archive_comment" } } },
+          "then": { "properties": { "target": { "properties": { "comment_id": { "type": "integer" }, "before": { "type": "string" } } } } }
+        }]
+      }
+    },
+    "page_archive": {
+      "description": "Public archive registry, outside the revision digest. Only comments posted under the authenticated login and read back exactly receive an id. Pending items stay in the body until its guarded write reads back. No comment is deleted.",
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["key", "kind", "group", "title", "comment_id", "login", "digest", "source_digest", "state"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^(graph-(retired|completed|optional|later|now)-[1-9][0-9]*|section-[a-f0-9]{16}-[1-9][0-9]*)$" },
+          "kind": { "enum": ["graph", "section"] },
+          "group": { "enum": [null, "RETIRED", "COMPLETED", "OPTIONAL", "LATER", "NOW"] },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "comment_id": { "type": ["integer", "null"], "minimum": 1 },
+          "login": { "type": ["string", "null"], "minLength": 1 },
+          "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "source_digest": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+          "state": { "enum": ["pending", "moved"] }
+        },
+        "allOf": [
+          { "if": { "properties": { "comment_id": { "type": "null" } } }, "then": { "properties": { "login": { "type": "null" }, "state": { "const": "pending" } } }, "else": { "properties": { "login": { "type": "string" } } } },
+          { "if": { "properties": { "kind": { "const": "section" } } }, "then": { "properties": { "group": { "type": "null" }, "source_digest": { "type": "string" }, "key": { "pattern": "^section-" } } }, "else": { "properties": { "group": { "type": "string" }, "source_digest": { "type": "null" }, "key": { "pattern": "^graph-" } } } }
+        ]
       }
     },
     "attention": {
@@ -73,20 +106,24 @@
         "properties": {
           "id": { "type": "string", "pattern": "^[0-9a-f]{12}$", "description": "First 12 hex characters of sha256 of source|code|issue|head." },
           "source": { "enum": ["reconcile", "inventory"] },
-          "code": { "type": "string", "pattern": "^[A-Z][A-Z_]{0,63}$", "description": "From the fixed code table, which gives the next action." },
+          "code": { "enum": ["ISSUE_MISSING", "NATIVE_PARENT_UNEXPECTED", "NATIVE_CHILD_UNKNOWN", "DEPENDENCY_IMPLIES_PARENT", "PR_HEAD_MOVED", "CHECKS_RED", "READY_TO_CLOSE", "CHILD_STATE_CONFLICT", "CLOSED_WITHOUT_ACCEPTANCE", "CHILD_REOPENED", "CHILD_ADDED", "PR_WITHOUT_TASK", "MANAGED_BLOCK_BROKEN", "BODY_TOO_LARGE", "BODY_NEAR_LIMIT", "ARCHIVE_SECTION_UNSAFE", "PASS_STOPPED", "TRACE_UNLINKED", "TRACE_SUPERSEDED_UNMARKED", "PR_UNTRACKED", "COMPLETED_PR_MISSING", "PR_DISCOVERY_INCOMPLETE", "RETURN_CAPTURED", "STALE_ASSIGNMENT", "JOURNAL_ERROR", "JOURNAL_INVALID", "CLASS_LEGACY", "ORDER_TIE", "DUPLICATE_HIERARCHY", "NEEDS_PLACEMENT", "CLOSED_PARENT_OPEN_CHILD", "INVENTORY_INCOMPLETE", "ATTENTION_FULL"], "description": "The fixed runtime code table; older readers refuse new codes." },
           "issue": { "type": ["integer", "null"], "minimum": 1 },
           "head": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
           "state": { "enum": ["new", "acknowledged", "resolved", "disposed"] },
           "first_seen": { "type": "string", "minLength": 1 },
           "changed_at": { "type": "string", "minLength": 1 },
-          "diagnostics": { "oneOf": [{ "$ref": "#/$defs/bodySizeDiagnostics" }, { "$ref": "#/$defs/passStoppedDiagnostics" }] }
+          "diagnostics": { "oneOf": [{ "$ref": "#/$defs/bodySizeDiagnostics" }, { "$ref": "#/$defs/passStoppedDiagnostics" }, { "$ref": "#/$defs/archiveDiagnostics" }] }
         },
-        "if": { "properties": { "code": { "const": "BODY_TOO_LARGE" } } },
+        "if": { "properties": { "code": { "enum": ["BODY_TOO_LARGE", "BODY_NEAR_LIMIT"] } } },
         "then": { "required": ["diagnostics"], "properties": { "diagnostics": { "$ref": "#/$defs/bodySizeDiagnostics" } } },
         "else": {
           "if": { "properties": { "code": { "const": "PASS_STOPPED" } } },
           "then": { "required": ["diagnostics"], "properties": { "diagnostics": { "$ref": "#/$defs/passStoppedDiagnostics" } } },
-          "else": { "not": { "required": ["diagnostics"] } }
+          "else": {
+            "if": { "properties": { "code": { "const": "ARCHIVE_SECTION_UNSAFE" } } },
+            "then": { "required": ["diagnostics"], "properties": { "diagnostics": { "$ref": "#/$defs/archiveDiagnostics" } } },
+            "else": { "not": { "required": ["diagnostics"] } }
+          }
         }
       }
     },
@@ -94,6 +131,22 @@
     "volatile": { "type": "object" }
   },
   "$defs": {
+    "archiveTarget": {
+      "type": "object", "additionalProperties": false,
+      "required": ["issue", "key", "comment_id", "login", "before", "digest"],
+      "properties": {
+        "issue": { "type": "integer", "minimum": 1 },
+        "key": { "type": "string", "pattern": "^\\w[\\w-]{0,100}$" },
+        "comment_id": { "type": ["integer", "null"], "minimum": 1 },
+        "login": { "type": "string", "minLength": 1 },
+        "before": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "archiveDiagnostics": {
+      "type": "object", "additionalProperties": false, "required": ["reason"],
+      "properties": { "reason": { "enum": ["duplicate_marker", "open_fence", "open_comment", "unbalanced_details", "item_too_large"] } }
+    },
     "bodySizeDiagnostics": {
       "description": "Disjoint UTF-16 span lengths matching the redraw limit, with fixed labels and hand-written section numbers only. No page text. The largest five spans plus remainder equal projected_total; required_reduction gets strictly below threshold.",
       "type": "object", "additionalProperties": false,
@@ -108,7 +161,7 @@
           "items": {
             "type": "object", "additionalProperties": false, "required": ["kind", "section", "size"],
             "properties": {
-              "kind": { "enum": ["CURRENT", "STATE", "TRACE", "NAV", "hand_written"] },
+            "kind": { "enum": ["CURRENT", "STATE", "CONTEXT", "TRACE", "NAV", "hand_written"] },
               "section": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
               "size": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
             },

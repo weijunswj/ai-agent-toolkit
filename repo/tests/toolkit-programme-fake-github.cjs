@@ -37,6 +37,7 @@ class FakeGitHub {
     this.nextId = 9000;
     this.fileDates = new Map();
     this.comments = new Map();
+    this.commentSequence = 0;
     this.login = 'owner';
   }
 
@@ -65,7 +66,7 @@ class FakeGitHub {
 
   // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
   addComment(issue, { body, login = this.login, createdAt = this.tick(), type = 'User', association = 'OWNER' } = {}) {
-    const id = 7000000000 + this.comments.size + 1;
+    const id = 7000000000 + ++this.commentSequence;
     this.comments.set(id, { id, issue, body, login, type, association, created_at: createdAt });
     return id;
   }
@@ -130,9 +131,10 @@ class FakeGitHub {
     }
     if (!(match = /^repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path)) || match[1].toLowerCase() !== this.repository.toLowerCase()) return ok(404, { message: 'Not Found' });
     const rest = match[2];
-    if ((match = /^issues\/comments\/(\d+)$/.exec(rest)) && method === 'GET') {
+    if ((match = /^issues\/comments\/(\d+)$/.exec(rest)) && ['GET', 'PATCH'].includes(method)) {
       const comment = this.comments.get(Number(match[1]));
       if (!comment) return ok(404, { message: 'Not Found' });
+      if (method === 'PATCH') { comment.body = body.body; comment.updated_at = this.tick(); }
       return ok(200, { id: comment.id, body: comment.body, created_at: comment.created_at, user: { login: comment.login },
         issue_url: `https://api.github.com/repos/${this.repository}/issues/${comment.issue}` });
     }
