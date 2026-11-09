@@ -64,8 +64,7 @@ test('B-T6: retained text above the safe limit moves only the hard-limit prefix 
 });
 
 test('B-T7: impossible body size refuses before all archive and body effects', () => {
-  assert.equal(state.archiveSection('# Programme\n## Archive\n### Marked\nOriginal.\n').unsafe, 'unsupported_markup');
-  const f = pageFixture(state, { count: 5, hand: '# Programme\n\n## Archive\n### Marked\nOriginal.\n' });
+  const f = pageFixture(state, { count: 84, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.parent().page_archive[0].state, 'moved');
   const hand = '# Programme\n' + 'n'.repeat(60000) + '\n\n## Archive\n### Marked\nChanged.\n';
@@ -124,4 +123,29 @@ test('a refusal measures the smallest feasible body within the five-post budget'
   assert.equal(projected.refused, true);
   assert.ok(projected.posts <= 5);
   assert.ok(projected.body.length >= 60000, 'report the feasible body size, not the smaller impossible seven-comment body');
+});
+
+test('the smaller CONTEXT stub retains an exact disjoint size span and 5000 units of safe headroom', () => {
+  const f = pageFixture(state);
+  const projected = f.project(), context = state.findStateBlock(projected.body, 'CONTEXT').block;
+  assert.equal(context.body, state.renderContextBlockBody());
+  assert.match(context.body, /Hand-written sections stay on this page/);
+  assert.doesNotMatch(context.body, /## Archive|ARCHIVE_SECTION_UNSAFE|Archived notes:/);
+  const sizes = state.bodySizeDiagnostics(projected.body, state.SAFE_LIMIT);
+  assert.equal(sizes.largest_sections.find(part => part.kind === 'CONTEXT').size, context.end - context.start);
+  assert.equal(sizes.largest_sections.reduce((sum, part) => sum + part.size, sizes.remainder), projected.body.length);
+  assert.equal(60000 - state.SAFE_LIMIT, 5000);
+  assert.equal(sizes.required_reduction, 0);
+  assert.equal(sizes.threshold, 55000);
+});
+
+test('M1: a refused parent size does not block another page redraw', () => {
+  const f = pageFixture(state, { count: 1, groups: ['NOW'], hand: '# Programme\n' + 'n'.repeat(60000) });
+  const hand = f.page();
+  const report = f.make().run({ apply: true });
+  assert.ok(report.holds.some(hold => hold.code === 'BODY_TOO_LARGE' && hold.target === '#12'));
+  assert.equal(f.page(), hand);
+  assert.equal(f.posts().length + f.edits().length, 0);
+  assert.match(state.findStateBlock(f.github.issues.get(100).body).block.body, /Status: IN PROGRESS; class: NOW; lane: G1/);
+  assert.equal(f.store.read('child', 100).doc.lifecycle, 'ACTIVE');
 });
