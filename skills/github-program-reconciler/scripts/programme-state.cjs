@@ -545,7 +545,11 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
       // re-reporting the same stop must not reopen an acknowledged or disposed entry.
       const newEvent = ONE_TIME_CODES.has(code) || (code === 'PASS_STOPPED' && diagnosticsChanged);
       const reopens = fresh && (existing.state === 'resolved' || (newEvent && ['acknowledged', 'disposed'].includes(existing.state)));
-      if (reopens) { existing.state = 'new'; existing.changed_at = now; changed = true; }
+      if (reopens) {
+        existing.state = 'new'; existing.changed_at = now;
+        if (code === 'CLOSING_COMMENT_MISSING') existing.first_seen = now;
+        changed = true;
+      }
       if (diagnosticsChanged) {
         existing.diagnostics = clone(diagnostics);
         changed = true;
@@ -3545,6 +3549,8 @@ class Reconciler {
     const prPages = new Map();
     for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
     const closing = this.refreshFacts && !only ? this.closing.scan(parent,prGraph,this.now,excludedGraphPr) : null;
+    if (closing) this.pass.planning();
+    this.pass.phaseAt('planning');
     return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery, additions, prGraph, closing };
   }
 
@@ -4320,10 +4326,13 @@ class Reconciler {
       findings.push(...closing.seen);
       if (JSON.stringify(canonical(closing.incomplete)) !== JSON.stringify(canonical(parent.private?.closing_scan || []))
         || closing.issueWatermark !== parent.private?.graph_issue_watermark) effects.push({kind:'advance_closing_scan',target:{issue:parent.parent_issue},pending:closing.incomplete,watermark:closing.issueWatermark || null});
+      let prepared=0;
       for (const item of closing.due) {
+        if (prepared>=require('./closing-comments.cjs').POST_CAP) break;
         try {
           const body=this.closing.facts(item,children);
           effects.push({kind:'post_closing_backstop',target:{issue:item.number,kind:item.kind,closed_at:item.closed_at,body}});
+          prepared++;
         } catch(error) {
           if (STOPS_PASS.has(error.code)) throw error;
           closing.errors.push(`Facts for ${item.kind} #${item.number} could not be prepared; retry next pass.`);

@@ -351,7 +351,7 @@ test('sessions come from --session only, every --issue is 1 or more, and a dry r
 });
 
 test('binding documentation scopes opt-in to the reconciler while governed issue records remain', () => {
-  const read = file => fs.readFileSync(path.resolve(process.env.A2B_SOURCE_ROOT || path.resolve(__dirname, '..', '..'), file), 'utf8');
+  const read = file => fs.readFileSync(path.resolve(__dirname, '..', '..', file), 'utf8');
   const rules = read('repo/contracts/agent-rules/global-rules.md');
   if (!rules.includes('.github/toolkit-programme.json')) {
     for (const file of ['README.md', 'skills/github-program-reconciler/SKILL.md']) {

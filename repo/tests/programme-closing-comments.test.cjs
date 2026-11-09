@@ -2,16 +2,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
-const ROOT = process.env.A2B_SOURCE_ROOT || path.resolve(__dirname, '../..');
+const ROOT = path.resolve(__dirname, '../..');
 const state = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-state.cjs'));
 const cli = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme.cjs'));
 const { pageFixture } = require('./support/programme-page-fixture.cjs');
 const { renderScaleFixture } = require('./support/programme-render-scale.cjs');
 const SHA = 'a'.repeat(40), START = Date.parse('2026-11-09T00:00:00Z');
 const STORY = '<!-- toolkit-closing kind=story -->', FACTS = '<!-- toolkit-closing kind=facts -->';
-const scratch = path.resolve('.tmp/a2b-report');
-fs.mkdirSync(scratch, { recursive: true });
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(),'closing-comments-'));
+test.after(()=>fs.rmSync(scratch,{recursive:true,force:true}));
 
 function fixture(seed = true) {
   const f = pageFixture(state);
@@ -184,7 +185,7 @@ test('merged facts use version at merge, linked issue state, verdicts and delete
 test('closed facts page events for the closer and issues name a closing PR',()=>{
   const f=fixture(); f.close('pr',20,{merged:false}); f.close('issue',21,{state_reason:'not_planned'});
   f.github.prs.get(20).events=[...Array.from({length:100},()=>({event:'labelled'})),{event:'closed',actor:{login:'fixture-closer'},created_at:f.now()}];
-  f.github.intercept(call=>call.path==='graphql' && call.body?.variables?.number===21 ? {status:200,json:{data:{repository:{issue:{closedByPullRequestsReferences:{nodes:[{number:20}]}}}}}}:null);
+  f.github.issuePrLinks.set(21,{closing:[20]});
   f.run(); f.advance(24); f.run();
   assert.match(f.facts().find(c=>c.issue===20).body,/fixture-closer.*reason not recorded/);
   assert.match(f.facts().find(c=>c.issue===21).body,/not planned.*Closing PR: #20/);

@@ -27,8 +27,18 @@ class ClosingComments {
     return response.json;
   }
   item(kind, number) {
-    const raw = this.request('GET', `${kind === 'pr' ? 'pulls' : 'issues'}/${number}`);
-    if (raw.number !== number || (kind === 'issue' && raw.pull_request) || !['open','closed'].includes(raw.state))
+    let raw;
+    try { raw = this.request('GET', `${kind === 'pr' ? 'pulls' : 'issues'}/${number}`); }
+    catch (error) {
+      if (kind !== 'pr' || error.code !== 'CLOSING_INCOMPLETE') throw error;
+      const issue = this.request('GET', `issues/${number}`);
+      if (issue.number === number && !issue.pull_request)
+        throw new ProgrammeError('CLOSING_KIND_MISMATCH', `#${number} is an issue; use --issue ${number}.`);
+      throw error;
+    }
+    if (kind === 'issue' && raw.number === number && raw.pull_request)
+      throw new ProgrammeError('CLOSING_KIND_MISMATCH', `#${number} is a PR; use --pr ${number}.`);
+    if (raw.number !== number || !['open','closed'].includes(raw.state))
       throw new ProgrammeError('CLOSING_INCOMPLETE', 'The closing item identity or state is incomplete.');
     const closed_at = raw.closed_at || raw.merged_at;
     if (raw.state === 'closed' && !Number.isFinite(Date.parse(closed_at))) throw new ProgrammeError('CLOSING_INCOMPLETE', 'The closing time is unavailable.');
@@ -117,7 +127,7 @@ class ClosingComments {
       if (this.requests>=PLANNING_READ_CAP) { incomplete.push(candidate); continue; }
       try {
         const item=this.item(candidate.kind,candidate.number);
-        if (item.raw.state!=='closed') { incomplete.push(candidate); continue; } // Only a story settles this finding.
+        if (item.raw.state!=='closed') { checked.add(key(item)); continue; }
         if (item.kind==='pr' && excluded({author:item.raw.user?.login,branch:item.raw.head?.ref})) { checked.add(key(item)); continue; }
         const cursor=candidate.closed_at===item.closed_at ? candidate : {};
         const result=this.comments(item,{...cursor,limit:PLANNING_READ_CAP});
@@ -126,7 +136,7 @@ class ClosingComments {
         if (!result.story) {
           seen.push({code:'CLOSING_COMMENT_MISSING',issue:item.number,kind:item.kind,detail:'The closing agent posts the missing story with closing-comment; facts alone leave it waiting.'});
           const prior=(parent.attention || []).find(e=>e.code==='CLOSING_COMMENT_MISSING' && e.kind===item.kind && e.issue===item.number);
-          if (!result.facts && prior && ['new','acknowledged'].includes(prior.state) && Date.parse(now())-Date.parse(prior.first_seen)>=24*3600000 && due.length<POST_CAP) due.push(item);
+          if (!result.facts && prior && ['new','acknowledged'].includes(prior.state) && Date.parse(now())-Date.parse(prior.first_seen)>=24*3600000) due.push(item);
         }
       } catch(error) {
         if (['GH_AUTH','PASS_STOPPED'].includes(error.code)) throw error;
@@ -145,7 +155,7 @@ class ClosingComments {
         const response=this.transport.request('GET',`repos/${this.repository}/contents/repo/contracts/toolkit-local-bridge/version.json?ref=${sha}`);
         if (response.status===200) { try { const v=JSON.parse(Buffer.from(response.json.content,'base64').toString()).version; if (/^\d+\.\d+\.\d+$/.test(v)) version=v; } catch { /* Missing recorded version. */ } }
       }
-      if (raw.head?.ref) {
+      if (raw.head?.ref && raw.head.repo?.full_name?.toLowerCase()===this.repository.toLowerCase()) {
         this.pass?.planning();
         const response=this.transport.request('GET',`repos/${this.repository}/git/ref/heads/${encodeURIComponent(raw.head.ref)}`);
         if (response.status===404) branch='yes'; else if(response.status===200) branch='no';
@@ -154,8 +164,10 @@ class ClosingComments {
       const { referencedIssues }=require('./programme-state.cjs');
       const references=referencedIssues([{number:item.number,body:[raw.title,raw.body].filter(Boolean).join('\n')}]);
       for (const [number] of references) {
-        const linked=this.item('issue',number);
-        lines.push(`Refs #${number}: ${linked.raw.state}.`);
+        let state='not readable';
+        try { state=this.item('issue',number).raw.state; }
+        catch (error) { if (['PASS_STOPPED','PASS_LOCK_LOST','STALE_WRITER'].includes(error.code)) throw error; }
+        lines.push(`Refs #${number}: ${state}.`);
       }
       let linkedTask=false;
       for (const [number,entry] of children) {
@@ -187,8 +199,12 @@ class ClosingComments {
   issueClosingPr(number) {
     const [owner,name]=this.repository.split('/');
     this.pass?.planning();
-    const result=this.transport.request('POST','graphql',{query:'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:1){nodes{number}}}}}',variables:{owner,name,number}});
-    return {closing:result.status===200 ? result.json?.data?.repository?.issue?.closedByPullRequestsReferences?.nodes?.map(pr=>`#${pr.number}`).join(', ') : null};
+    const result=this.transport.request('POST','graphql',{query:'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:100, includeClosedPrs: true){nodes{number state merged}}}}}',variables:{owner,name,number}});
+    const nodes=result.json?.data?.repository?.issue?.closedByPullRequestsReferences?.nodes;
+    if (result.status!==200 || result.json?.errors?.length || !Array.isArray(nodes)
+      || nodes.some(pr=>!pr || !Number.isSafeInteger(pr.number) || pr.number<1)) return {closing:null};
+    const pr=nodes.find(pr=>pr.merged || pr.state==='MERGED') || nodes[0];
+    return {closing:pr ? `#${pr.number}` : null};
   }
 }
 module.exports={ClosingComments,STORY,FACTS,COMMENT_READ_CAP,PLANNING_READ_CAP,POST_CAP,marked};

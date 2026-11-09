@@ -141,7 +141,7 @@ class FakeGitHub {
       const pr=this.prs.get(Number(match[1]));
       return pr ? ok(200,{number:pr.number,title:pr.title || '',body:pr.body,state:pr.merged || pr.state==='CLOSED' ? 'closed':'open',
         closed_at:pr.closedAt || pr.mergedAt || null,merged_at:pr.mergedAt,merge_commit_sha:pr.merged ? pr.head:null,
-        user:{login:pr.author || 'fixture-owner'},head:{ref:pr.branch || ''}}) : ok(404,{});
+        user:{login:pr.author || 'fixture-owner'},head:{ref:pr.branch || '',repo:pr.headRepository===null ? null : {full_name:pr.headRepository || this.repository}}}) : ok(404,{});
     }
     if ((match = /^issues\/comments\/(\d+)$/.exec(rest)) && ['GET', 'PATCH'].includes(method)) {
       const comment = this.comments.get(Number(match[1]));
@@ -311,10 +311,13 @@ class FakeGitHub {
         return { __typename: 'PullRequest', number: value, state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
           mergeCommit: pr?.merged ? {oid:pr.head} : null, repository: { nameWithOwner: this.repository } };
       })();
-      for (const [, alias, number] of body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)) {
+      const includeClosed=/includeClosedPrs:\s*true/.test(body.query) || body.variables?.includeClosedPrs===true;
+      const fields=[...body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)].map(([,alias,number])=>[alias,Number(number)]);
+      if (/issue\(number:\s*\$number\)/.test(body.query)) fields.push(['issue',body.variables.number]);
+      for (const [alias, number] of fields) {
         const links = this.issuePrLinks.get(Number(number)) || {};
         repository[alias] = this.issues.has(Number(number)) ? {
-          closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node) },
+          closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node).filter(pr=>includeClosed || (!pr.merged && pr.state==='OPEN')) },
           timelineItems: { pageInfo: { hasNextPage: links.timelineTruncated || (links.timeline || []).length > 100 }, nodes: (links.timeline || []).slice(0,100).map(value => ({ source: node(value) })) },
         } : null;
       }
