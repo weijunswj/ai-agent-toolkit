@@ -17,6 +17,34 @@ function archiveFixture() {
   return f;
 }
 
+test('an explicitly excluded registered part reposts unchanged content and settles within budget', () => {
+  const f = archiveFixture();
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  const entry = f.parent().page_archive[0], id = entry.comment_id;
+  const body = f.github.comments.get(id).body, posts = f.posts().length, edits = f.edits().length;
+  f.store.mutate('parent', 12, { writer: f.writer, change: doc => {
+    doc.page_archive[0].untrusted_ids = [id]; return doc;
+  } });
+  assert.deepEqual(f.make().run({ apply: true }).holds, [], 'exclusion must not cause EFFECT_UNKNOWN');
+  const next = f.parent().page_archive[0];
+  assert.notEqual(next.comment_id, id);
+  assert.equal(next.state, 'moved');
+  assert.equal(f.posts().length, posts + 1);
+  assert.ok(f.posts().length - posts <= 5);
+  assert.equal(f.edits().length, edits);
+  assert.equal(f.github.comments.get(id).body, body);
+  assert.ok(next.untrusted_ids.includes(id));
+  const writes = f.github.mutations();
+  assert.equal(f.make().run({ apply: true }).summary, 'No changes');
+  assert.equal(f.github.mutations(), writes);
+});
+
+test('archive trust guidance covers duplicates and keeps findings open until disposed', () => {
+  const text = state.FINDING_CODES.ARCHIVE_COMMENT_UNTRUSTED.next_action;
+  assert.doesNotMatch(text, /detached/);
+  assert.match(text, /finding stays open until disposed/);
+});
+
 for (const route of ['apply', 'recovery']) test(`D3: six changing graph parts across alternating accounts retire prior ids quietly, ${route}`, () => {
   const f = archiveFixture();
   assert.deepEqual(f.make().run({ apply: true }).holds, []);

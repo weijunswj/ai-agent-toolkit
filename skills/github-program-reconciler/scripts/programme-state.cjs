@@ -27,7 +27,7 @@ const { OTHER_COMMENTS } = require('./decision-tags.cjs');
 const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs');
 const SAFE_LIMIT = 55000;
 
-// Archive grammar is needed only by page operations, never by hook binding reads.
+// Graph archive formatting is needed only by page operations, never by hook binding reads.
 function archiveTools() {
   return require('./programme-page-archive.cjs');
 }
@@ -344,7 +344,7 @@ const FINDING_CODES = Object.freeze({
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
-  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the detached graph archive comment; redraw publishes a fresh verified part' },
+  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the graph archive comment and its trust finding; redraw can publish a fresh verified part, but the finding stays open until disposed' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
@@ -1762,11 +1762,13 @@ function upsertCurrentBlock(text, rendered, sectionName) {
     const before = source.slice(0, found.start).replace(/^## CURRENT\r?\n(?=(?:[ \t]*\r?\n)*(?![\s\S]))/m, '');
     return before + block + source.slice(found.end);
   }
-  const all = headings(source);
+  // Hidden example headings cannot be the first-insert migration target. Keep original offsets.
+  const visible = source.replace(/<!--[\s\S]*?(?:-->|$)/g, comment => comment.replace(/[^\r\n]/g, ' '));
+  const all = headings(visible);
   const heading = (sectionName && all.find(entry => entry.text.toLowerCase() === String(sectionName).trim().toLowerCase())) || all.find(entry => entry.level === 1);
   const migrate = heading?.text === 'CURRENT' && heading.level === 2;
   const at = heading ? heading.end : 0;
-  const before = migrate ? source.slice(0, at).replace(/^## CURRENT\r?\n?$/m, '') : source.slice(0, at);
+  const before = migrate && /^## CURRENT\r?\n?$/.test(source.slice(heading.start, at)) ? source.slice(0, heading.start) : source.slice(0, at);
   return `${before}${eol}${block}${eol}${source.slice(at)}`;
 }
 
@@ -1795,7 +1797,7 @@ function detachArchive(entry) {
 function renderContextBlockBody() {
   return ['# AGENT CONTEXT', '<!-- programme-context -->',
     'Background for agents that pick up a task.',
-    'Hand-written sections stay on this page. Archiving old sections requires a separate sweep.'].join('\n');
+    'Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand.'].join('\n');
 }
 
 function upsertContextBlock(source, rendered) {
@@ -4647,7 +4649,7 @@ class Reconciler {
         return result.reason ? null : result.comment;
       };
       const detach = (entry, reason) => {
-        notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', { reason });
+        if (reason) notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', { reason });
         mutateDoc('parent', parentNumber, { change: doc => {
           const target = doc.page_archive.find(part => part.key === entry.key);
           detachArchive(target);
@@ -4672,7 +4674,8 @@ class Reconciler {
       // Reconcile the registry even on issue-scoped redraws; these writes never edit comments.
       let registryChanged = false;
       for (const entry of parentDoc.page_archive || []) {
-        if (!entry.comment_id || archiveUntrusted(entry, entry.comment_id)) continue;
+        if (!entry.comment_id) continue;
+        if (archiveUntrusted(entry, entry.comment_id)) { detach(entry); registryChanged = true; continue; }
         const result = this.archiveTrust(entry);
         if (result.reason) { detach(entry, result.reason); registryChanged = true; }
       }

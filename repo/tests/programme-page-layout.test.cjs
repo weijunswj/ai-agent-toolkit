@@ -30,6 +30,48 @@ test('B-T2: CURRENT migration removes just one adjacent exact heading and preser
   }
 });
 
+for (const eol of ['\n', '\r\n']) for (const example of ['backtick', 'tilde', 'comment', 'closing hashes', 'trailing spaces']) {
+  test(`B-T2: first CURRENT insertion preserves ${example} hand bytes, ${JSON.stringify(eol)}`, () => {
+    const examples = {
+      backtick: '```md\n## CURRENT\nExample.  \n```',
+      tilde: '~~~md\n## CURRENT\nExample.  \n~~~',
+      comment: '<!--\n## CURRENT\nHidden example.  \n-->',
+      'closing hashes': '## CURRENT ##',
+      'trailing spaces': '## CURRENT  ',
+    };
+    const prefix = `# Programme\n\n${examples[example]}\n\n`.replace(/\n/g, eol);
+    const suffix = `${eol}Today: shipping.  ${eol}${eol}[ref]: https://example.com${eol}  `;
+    // Decorated headings are selected but retained; exact headings alone migrate.
+    const selected = ['closing hashes', 'trailing spaces'].includes(example) ? '' : `## CURRENT${eol}`;
+    const hand = prefix + selected + suffix;
+    const f = pageFixture(state, { hand });
+    f.binding.projection = { after_section: 'CURRENT' };
+    let retained = f.project().body;
+    // Strip only known generated spans and their insertion separators, preserving all hand whitespace.
+    for (const name of ['TRACE', 'CONTEXT', 'STATE']) {
+      const block = state.findStateBlock(retained, name).block;
+      retained = retained.slice(0, block.start - 2 * eol.length) + retained.slice(block.end + (name === 'TRACE' ? eol.length : 0));
+    }
+    const block = state.findStateBlock(retained, 'CURRENT').block;
+    retained = retained.slice(0, block.start - eol.length) + retained.slice(block.end + eol.length);
+    assert.equal(retained, prefix + suffix, 'every hand byte survives except the selected exact heading line');
+  });
+}
+
+test('B-T2: full apply preserves a CURRENT code example before the migrating real heading', () => {
+  const prefix = '# Programme\n\nHow the old page looked:\n\n```md\n## CURRENT\nWhat we are doing now.\n```\n\n';
+  const suffix = '\nToday: shipping.  \n';
+  const f = pageFixture(state, { hand: prefix + '## CURRENT\n' + suffix });
+  f.binding.projection = { after_section: 'CURRENT' };
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.ok(f.page().startsWith(prefix));
+  assert.ok(f.page().includes(suffix));
+  assert.equal((f.page().match(/^## CURRENT$/gm) || []).length, 1, 'only the example heading remains');
+  const writes = f.github.mutations();
+  assert.equal(f.make().run({ apply: true }).summary, 'No changes');
+  assert.equal(f.github.mutations(), writes);
+});
+
 test('B-T3: overflow chooses the shortest row prefix, terminal groups before trace and live groups', t => {
   const f = pageFixture(state, { count: 84, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
   const projected = f.project();
@@ -67,7 +109,7 @@ test('B-T7: impossible body size refuses before all archive and body effects', (
   const f = pageFixture(state, { count: 84, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.parent().page_archive[0].state, 'moved');
-  const hand = '# Programme\n' + 'n'.repeat(60000) + '\n\n## Archive\n### Marked\nChanged.\n';
+  const hand = '# Programme\n' + 'n'.repeat(60000);
   f.github.issues.get(12).body = hand;
   const posts = f.posts().length, edits = f.edits().length;
   const report = f.make().run({ apply: true });
@@ -78,7 +120,7 @@ test('B-T7: impossible body size refuses before all archive and body effects', (
 });
 
 test('newer CONTEXT blocks stop an older page writer before all effects', () => {
-  const f = pageFixture(state, { hand: '# Programme\n' + state.renderBlock('# AGENT CONTEXT', '999.0.0', 'CONTEXT') + '\n## Archive\n### Notes\nKeep.\n' });
+  const f = pageFixture(state, { hand: '# Programme\n' + state.renderBlock('# AGENT CONTEXT', '999.0.0', 'CONTEXT') });
   const report = f.make().run({ apply: true });
   assert.ok(report.holds.some(hold => hold.code === 'BLOCK_NEWER_TOOLKIT'));
   assert.equal(f.posts().length + f.edits().length, 0);
@@ -106,7 +148,7 @@ test('apply-time near-limit warnings persist with exact sizes and resolve only a
 });
 
 test('a configured redraw threshold cannot raise the hard body limit', () => {
-  const f = pageFixture(state, { hand: '# Programme\n' + 'n'.repeat(62000) + '\n## Archive\n### Notes\nText\n' });
+  const f = pageFixture(state, { hand: '# Programme\n' + 'n'.repeat(62000) });
   const pass = f.make();
   const guarded = new state.Reconciler({ store: f.store, reader: pass.reader, mutator: pass.mutator, binding: f.binding, writer: f.writer, toolkitVersion: '3.57.0', threshold: 70000 });
   assert.equal(guarded.threshold, 60000);
@@ -129,7 +171,7 @@ test('the smaller CONTEXT stub retains an exact disjoint size span and 5000 unit
   const f = pageFixture(state);
   const projected = f.project(), context = state.findStateBlock(projected.body, 'CONTEXT').block;
   assert.equal(context.body, state.renderContextBlockBody());
-  assert.match(context.body, /Hand-written sections stay on this page/);
+  assert.match(context.body, /Toolkit never moves hand-written sections\. If the page nears its size limit, shorten them by hand\./);
   assert.doesNotMatch(context.body, /## Archive|ARCHIVE_SECTION_UNSAFE|Archived notes:/);
   const sizes = state.bodySizeDiagnostics(projected.body, state.SAFE_LIMIT);
   assert.equal(sizes.largest_sections.find(part => part.kind === 'CONTEXT').size, context.end - context.start);
