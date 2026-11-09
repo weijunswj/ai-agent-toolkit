@@ -344,7 +344,7 @@ const FINDING_CODES = Object.freeze({
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
-  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the graph archive comment and its trust finding; redraw can publish a fresh verified part, but the finding stays open until disposed' },
+  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the graph archive comment this finding names; redraw can publish a fresh verified part, but the finding stays open until disposed' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
@@ -1757,14 +1757,14 @@ function upsertCurrentBlock(text, rendered, sectionName) {
   const block = rendered.split('\n').join(eol);
   const { block: found, error } = findStateBlock(source, CURRENT_BLOCK_NAME);
   if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
+  const all = headings(source);
   if (found) {
     // The only hand-written migration: one exact adjacent heading, with blank lines only.
-    const before = source.slice(0, found.start).replace(/^## CURRENT\r?\n(?=(?:[ \t]*\r?\n)*(?![\s\S]))/m, '');
+    let before = source.slice(0, found.start);
+    const adjacent = /^## CURRENT\r?\n(?=(?:[ \t]*\r?\n)*(?![\s\S]))/m.exec(before);
+    if (adjacent && all.some(heading => heading.start === adjacent.index)) before = before.slice(0, adjacent.index) + before.slice(adjacent.index + adjacent[0].length);
     return before + block + source.slice(found.end);
   }
-  // Hidden example headings cannot be the first-insert migration target. Keep original offsets.
-  const visible = source.replace(/<!--[\s\S]*?(?:-->|$)/g, comment => comment.replace(/[^\r\n]/g, ' '));
-  const all = headings(visible);
   const heading = (sectionName && all.find(entry => entry.text.toLowerCase() === String(sectionName).trim().toLowerCase())) || all.find(entry => entry.level === 1);
   const migrate = heading?.text === 'CURRENT' && heading.level === 2;
   const at = heading ? heading.end : 0;
@@ -1913,16 +1913,34 @@ function indexEffect(number, part, after) {
   return { kind: 'post_index_comment', target, label: part.label, lines: part.lines };
 }
 
-// Headings outside fenced code, with their level, text and line offsets.
+// Headings outside fenced code and line-start HTML comments, with original line offsets.
 function headings(text) {
   const found = [];
-  let fenced = false;
+  let fence = null;
+  let comment = false;
   for (let offset = 0; offset < text.length;) {
     const next = text.indexOf('\n', offset);
     const stop = next === -1 ? text.length : next;
     const line = text.slice(offset, stop).replace(/\r$/, '');
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    const heading = !fenced && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    let hidden = false;
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (close && close[1][0] === fence.character && close[1].length >= fence.length) fence = null;
+      hidden = true;
+    } else if (comment) {
+      if (line.includes('-->')) comment = false;
+      hidden = true;
+    } else if (/^ {0,3}<!--/.test(line)) {
+      comment = !line.includes('-->', line.indexOf('<!--') + 4);
+      hidden = true;
+    } else {
+      const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (open && (open[1][0] !== '`' || !open[2].includes('`'))) {
+        fence = { character: open[1][0], length: open[1].length };
+        hidden = true;
+      }
+    }
+    const heading = !hidden && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
     if (heading) found.push({ level: heading[1].length, text: heading[2].trim(), start: offset, end: next === -1 ? stop : next + 1 });
     offset = next === -1 ? text.length : next + 1;
   }

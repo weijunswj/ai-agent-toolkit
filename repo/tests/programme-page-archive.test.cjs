@@ -42,6 +42,7 @@ test('an explicitly excluded registered part reposts unchanged content and settl
 test('archive trust guidance covers duplicates and keeps findings open until disposed', () => {
   const text = state.FINDING_CODES.ARCHIVE_COMMENT_UNTRUSTED.next_action;
   assert.doesNotMatch(text, /detached/);
+  assert.match(text, /inspect the graph archive comment this finding names/);
   assert.match(text, /finding stays open until disposed/);
 });
 
