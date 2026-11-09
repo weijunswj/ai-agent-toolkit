@@ -139,6 +139,17 @@ test('B-T10: archive reader rejects hostile markers and refuses malformed marked
     ['heading-lookalike', '### Archive\nText\n'],
     ['managed', state.renderBlock('## Archive\n### Notes\nText', '3.57.0')],
   ].map(([id, text]) => ({ id, text }));
+  for (const [name, eol] of Object.entries({ lf: '\n', cr: BREAKS.cr, crlf: BREAKS.crlf, ls: BREAKS.ls, ps: BREAKS.ps, mixed: '\r\n' })) {
+    for (const [shape, prefix] of [
+      ['fence', '```info' + eol], ['tilde', '~~~info' + eol],
+      ['fence-comment-info', '```md <!-- a -->' + eol], ['tilde-comment-info', '~~~md <!-- a -->' + eol],
+      ['reopen', '<!-- a --> <!--' + eol], ['close-reopen', '<!--\nend --> <!--' + eol],
+      ['pre', '<pre>' + eol], ['div', '<div>' + eol], ['table', '<table>' + eol],
+      ['pre-comment', '<pre><!-- a -->' + eol], ['div-comment', '<div><!-- a -->' + eol],
+      ['invalid-info', '```info`' + eol],
+    ]) hidden.push({ id: `${name}-${shape}`, text: prefix + '## Archive\n### Hidden\nKeep this.\n' });
+  }
+  hidden.push({ id: 'mixed-crlf-cr', text: '```md\r\n## Archive\r### Hidden\nKeep.\r\n```\n' });
   expectDefaultDeny(assert, text => reader(text).items.length > 0, hidden);
   for (const [id, body, reason] of [
     ['doubled', '## Archive\nText\n## Archive\nMore\n', 'duplicate_marker'],
@@ -149,6 +160,8 @@ test('B-T10: archive reader rejects hostile markers and refuses malformed marked
     ['fence-at-boundary', `## Archive\n~~~\nText\n${state.renderBlock('trace', '3.57.0', 'TRACE')}\n~~~\n`, 'open_fence'],
     ['details', '## Archive\n<details>\nText\n', 'unbalanced_details'],
     ['closing-details', '## Archive\n</details>\n', 'unbalanced_details'],
+    ['raw-html', '## Archive\n<div>\nHidden\n</div>\n', 'raw_html'],
+    ['invalid-info', '## Archive\n```md`bad\nHidden\n', 'invalid_fence'],
   ]) assert.equal(reader(body).unsafe, reason, id);
   for (const eol of ['\n', BREAKS.crlf]) {
     const text = ['## Archive', '### Notes', '<details>', 'Body.', '</details>', ''].join(eol);
@@ -263,7 +276,8 @@ test('archive registry, effect targets and new diagnostics are closed in runtime
 test('unsafe sections produce durable closed diagnostics and zero comment effects', () => {
   const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\n```\nOpen\n' });
   const report = f.make().run({ apply: true });
-  assert.ok(report.holds.some(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE'));
+  assert.deepEqual(report.holds, []);
+  assert.ok(state.findStateBlock(f.page()).block, 'unsafe notes do not stop the first redraw');
   const entry = f.parent().attention.find(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE');
   assert.deepEqual(entry.diagnostics, { reason: 'open_fence' });
   assert.equal(f.posts().length + f.edits().length, 0);
@@ -276,7 +290,7 @@ test('unsafe sections produce durable closed diagnostics and zero comment effect
   assert.ok(state.validateParent(bad).length);
 });
 
-test('B-T11: missing moved notes, foreign comments and changed comments hold without editing', () => {
+test('B-T11: missing, foreign and changed moved notes detach without blocking redraw', () => {
   for (const mode of ['missing', 'foreign', 'changed']) {
     const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
@@ -284,12 +298,25 @@ test('B-T11: missing moved notes, foreign comments and changed comments hold wit
     if (mode === 'missing') f.github.comments.delete(id);
     else if (mode === 'foreign') f.github.comments.get(id).login = 'another-user';
     else f.github.comments.get(id).body += 'Owner edit.';
-    // Ensure another projection is needed, so retained registry trust is checked.
-    f.github.issues.get(12).body += '\n## Archive\n### More\nText\n';
+    f.github.issues.get(12).body += '\n## Archive\n### More\nNew content.\n';
     const before = f.posts().length, edits = f.edits().length;
-    const report = f.make().run({ apply: true });
-    assert.ok(report.holds.some(entry => entry.code === 'EFFECT_UNKNOWN'));
-    assert.equal(f.posts().length, before); assert.equal(f.edits().length, edits);
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(f.posts().length, before + 1); assert.equal(f.edits().length, edits);
+    assert.ok(f.parent().page_archive.find(part => part.key === entry.key).untrusted_ids?.includes(id));
+    assert.match(state.findStateBlock(f.page(), 'CONTEXT').block.body, new RegExp(`\\[Notes\\]\\([^)]*#issuecomment-${id}\\)`));
+    if (mode === 'missing') assert.match(f.page(), /missing comment; owner recovery needed/);
+    assert.equal(f.parent().attention.find(finding => finding.code === 'ARCHIVE_COMMENT_UNTRUSTED').state, 'new');
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(f.parent().attention.find(finding => finding.code === 'ARCHIVE_COMMENT_UNTRUSTED').state, 'new', 'attention lasts until owner disposition');
+    assert.equal(f.edits().length, edits);
+    if (mode !== 'missing') {
+      f.store.mutate('parent', 12, { writer: f.writer, change: doc => { doc.attention.find(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED').state = 'disposed'; return doc; } });
+      f.github.comments.delete(id);
+      assert.deepEqual(f.make().run({ apply: true }).holds, []);
+      assert.match(f.page(), /missing comment; owner recovery needed/);
+      assert.equal(f.parent().attention.find(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED').state, 'new');
+      assert.equal(f.edits().length, edits);
+    }
   }
 });
 
@@ -414,7 +441,7 @@ test('archive post recovery finds a lost successful response without a second po
   assert.deepEqual(f.parent().pending_effects, []);
 });
 
-test('archive edit recovery distinguishes DONE, NOT_DONE and UNKNOWN by exact readback', () => {
+test('archive edit recovery distinguishes exact DONE, NOT_DONE and detached owner edits', () => {
   for (const outcome of ['DONE', 'NOT_DONE', 'UNKNOWN']) {
     const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nOriginal.\n' });
     f.github.intercept(call => call.method === 'PATCH' && /issues\/12$/.test(call.path) ? { status: 409, json: {} } : undefined);
@@ -434,11 +461,12 @@ test('archive edit recovery distinguishes DONE, NOT_DONE and UNKNOWN by exact re
     assert.throws(() => f.make().run({ apply: true }), { code: 'PASS_LOCK_LOST' });
     f.github.hooks = [];
     const plan = f.make().plan();
-    assert.equal(plan.resolutions.find(entry => entry.archive || entry.outcome === outcome)?.outcome, outcome);
+    assert.equal(plan.resolutions.find(entry => entry.archive || entry.untrusted || entry.outcome === outcome)?.outcome, outcome === 'UNKNOWN' ? 'NOT_DONE' : outcome);
     if (outcome === 'UNKNOWN') {
-      const before = f.github.mutations();
-      assert.ok(f.make().apply(plan).holds.some(entry => entry.code === 'EFFECT_UNKNOWN'));
-      assert.equal(f.github.mutations(), before);
+      assert.deepEqual(f.make().apply(plan).holds, []);
+      assert.equal(f.posts().length, 2, 'unlinked pending source gets a fresh verified comment');
+      assert.ok(f.parent().attention.some(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED'));
+      assert.match(f.page(), /Archived notes:/);
     } else {
       assert.deepEqual(f.make().apply(plan).holds, []);
       assert.equal(f.posts().length, 1);
@@ -452,4 +480,221 @@ test('single-issue passes never post or edit archive comments and keep marked te
   assert.equal(f.posts().length + f.edits().length, 0);
   assert.match(f.page(), /^### Notes/m);
   assert.equal(state.findStateBlock(f.page(), 'CONTEXT').block.body.includes('Archived notes:'), false);
+});
+
+for (const count of [1, 7]) for (const mode of ['crash', 'lost-fence', '502', 'owner-edit']) {
+  test(`H1: ${count} notes survive ${mode} body readback and a later new note`, () => {
+    const notes = Array.from({ length: count + 1 }, (_, i) => `### Note ${i}\nPayload ${i}.\n\n`);
+    const f = pageFixture(state, { hand: '# Programme\n## Archive\n' + notes.slice(0, count).join('') });
+    let landed = false, interrupted = false;
+    f.github.intercept(call => {
+      if (call.method === 'PATCH' && /issues\/12$/.test(call.path)) landed = true;
+      if (landed && !interrupted && call.method === 'GET' && /issues\/12$/.test(call.path)) {
+        interrupted = true;
+        if (mode === '502') return { status: 502, json: {} };
+        if (mode === 'owner-edit') { f.github.issues.get(12).body += '\nOwner readback edit.\n'; return; }
+        throw Object.assign(new Error('Interrupted after body landed'), { code: mode === 'crash' ? 'PASS_LOCK_LOST' : 'STALE_WRITER' });
+      }
+    });
+    if (['crash', 'lost-fence'].includes(mode)) assert.throws(() => f.make().run({ apply: true }), { code: mode === 'crash' ? 'PASS_LOCK_LOST' : 'STALE_WRITER' });
+    else assert.ok(f.make().run({ apply: true }).holds.length);
+    assert.equal(f.posts().length, Math.min(count, 5));
+    assert.ok(f.parent().page_archive.some(entry => entry.state === 'pending'));
+    f.github.hooks = [];
+    const area = reader(f.page());
+    f.github.issues.get(12).body = area.start === null ? f.page() + '\n## Archive\n' + notes[count]
+      : f.page().slice(0, area.end) + notes[count] + f.page().slice(area.end);
+    const before = f.posts().length;
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.ok(f.posts().length - before <= 5);
+    const context = state.findStateBlock(f.page(), 'CONTEXT').block.body;
+    for (const [i, note] of notes.entries()) {
+      const locations = Number(f.page().includes(note)) + [...f.github.comments.values()].filter(comment => comment.body.includes(note)).length;
+      assert.equal(locations, 1, `Note ${i} has exactly one location`);
+      const entry = f.parent().page_archive.find(entry => entry.title === `Note ${i}`);
+      assert.equal(entry.state, 'moved');
+      assert.ok(context.includes(`[Note ${i}](https://github.com/example.test/app/issues/12#issuecomment-${entry.comment_id})`));
+      assert.ok(f.github.comments.get(entry.comment_id).body.includes(note));
+    }
+    if (mode === 'owner-edit') assert.ok(f.page().includes('Owner readback edit.'));
+  });
+}
+
+for (const mode of ['checkbox', 'typo', 'edit', 'missing', 'viewer', 'foreign']) {
+  test(`H2: ${mode} graph comment detaches and redraws with a fresh verified part`, () => {
+    const f = pageFixture(state, { count: 84, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    const first = f.parent().page_archive.find(entry => entry.kind === 'graph'), id = first.comment_id;
+    if (mode === 'missing') f.github.comments.delete(id);
+    else if (mode === 'viewer') f.github.login = 'another-user';
+    else if (mode === 'foreign') f.github.comments.get(id).login = 'another-user';
+    else f.github.comments.get(id).body += mode === 'checkbox' ? '\n- [x] Checked by owner.' : mode === 'typo' ? '\nTypo fixed.' : '\nOwner comment edit.';
+    const old = f.github.comments.get(id)?.body, before = f.posts().length, edits = f.edits().length;
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    const next = f.parent().page_archive.find(entry => entry.key === first.key);
+    assert.notEqual(next.comment_id, id);
+    assert.ok(next.untrusted_ids?.includes(id));
+    assert.ok(f.posts().length > before && f.posts().length - before <= 5);
+    assert.ok(f.edits().slice(edits).every(call => !call.path.endsWith(`/${id}`)));
+    assert.equal(f.github.comments.get(id)?.body, old);
+    assert.ok(f.page().includes(`#issuecomment-${next.comment_id}`));
+    assert.ok(f.parent().attention.some(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED' && entry.state === 'new'));
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.ok(f.parent().attention.some(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED' && entry.state === 'new'));
+  });
+}
+
+test('H2/L10: lost-reply duplicate markers select the lowest exact verified id', () => {
+  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nPayload.\n' });
+  let lost = false;
+  f.github.intercept(call => {
+    if (!lost && call.method === 'POST' && /issues\/12\/comments$/.test(call.path)) {
+      lost = true; f.github.route(call.method, call.path, call.body);
+      f.github.addComment(12, { body: call.body.body });
+      f.github.addComment(12, { body: call.body.body + 'Different content.' });
+      throw Object.assign(new Error('Lost reply, duplicate already visible'), { code: 'PASS_LOCK_LOST' });
+    }
+  });
+  assert.throws(() => f.make().run({ apply: true }), { code: 'PASS_LOCK_LOST' });
+  f.github.hooks = [];
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.equal(f.parent().page_archive[0].comment_id, Math.min(...f.github.comments.keys()));
+  assert.equal(f.posts().length, 1);
+  assert.equal(f.edits().length, 0);
+  assert.ok(f.parent().attention.some(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED'));
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+});
+
+for (const issueScoped of [false, true]) for (const shape of ['duplicate', 'fence', 'comment', 'details']) {
+  test(`M1: ${shape} unsafe first projection redraws, issueScoped=${issueScoped}`, () => {
+    const suffix = { duplicate: '## Archive\nMore\n', fence: '```\nOpen\n', comment: '<!--\nOpen\n', details: '<details>\nOpen\n' }[shape];
+    const hand = '# Programme\n## Archive\n### Notes\nKeep.\n' + suffix;
+    const f = pageFixture(state, { count: 1, hand });
+    const report = f.make().run({ apply: true, ...(issueScoped ? { issue: 100 } : {}) });
+    assert.deepEqual(report.holds, []);
+    assert.ok(state.findStateBlock(f.page()).block);
+    assert.ok(f.page().includes('### Notes\nKeep.\n' + suffix));
+    assert.equal(f.posts().length + f.edits().length, 0);
+    assert.ok(f.parent().attention.some(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE' && entry.state === 'new'));
+  });
+}
+
+test('M1: unsafe marker after five moves still redraws an activated task', () => {
+  const f = pageFixture(state, { count: 1, hand: '# Programme\n## Archive\n' + Array.from({ length: 7 }, (_, i) => `### Note ${i}\nPayload.\n\n`).join('') });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  f.github.issues.get(12).body += '\n## Archive\nMore\n';
+  f.store.mutate('parent', 12, { writer: f.writer, change: doc => { doc.outcomes[0].class = 'COMMITTED'; return doc; } });
+  f.store.mutate('child', 100, { writer: f.writer, parentDoc: f.parent(), change: doc => { doc.lifecycle = 'ACTIVE'; return doc; } });
+  f.github.issues.get(100).state = 'open'; f.github.issues.get(100).closed_at = null;
+  const before = f.posts().length + f.edits().length;
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.match(state.findStateBlock(f.page()).block.body, /\|NOW\|IN PROGRESS\|/);
+  assert.equal(f.posts().length + f.edits().length, before);
+  assert.ok(f.parent().attention.some(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE'));
+});
+
+test('M2: only Archive items move; later H1/H2 sections keep their exact bytes', () => {
+  for (const boundary of ['# Current plan', '## Current plan']) {
+    const later = `${boundary}\r\nKeep this.  \r\n\r\n## Risks\r\n  Keep risks.\r\n`;
+    const text = '### Old decision log\r\nOld notes.\r\n#### Detail\r\nMore.\r\n';
+    const f = pageFixture(state, { hand: '# Programme\r\n## Archive\r\n' + text + later });
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.ok(f.page().includes(later));
+    assert.ok([...f.github.comments.values()].some(comment => comment.body.includes(text)));
+    assert.ok([...f.github.comments.values()].every(comment => !comment.body.includes('Keep this.') && !comment.body.includes('Keep risks.')));
+    assert.doesNotMatch(state.findStateBlock(f.page(), 'CONTEXT').block.body, /\[Current plan\]|\[Risks\]/);
+  }
+  for (const tail of ['', '## Current plan\nKeep.\n']) {
+    const text = 'Preamble.\n\n### Log\n```md\n## Inside fence\n```\n<!--\n## Inside comment\n-->\nNotes.\n';
+    const area = reader('## Archive\n' + text + tail);
+    assert.equal(area.items.length, 2);
+    assert.equal(area.items[0].title, 'Archived notes');
+    assert.equal(area.items.map(item => item.text).join(''), text);
+  }
+});
+
+test('M3: CR and mixed CommonMark line endings preserve exact Archive offsets', () => {
+  const archive = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-page-archive.cjs'));
+  for (const text of ['## Archive\r### Notes\rPayload.\r## Current\rKeep.\r', '## Archive\r\n### Notes\rPayload.\n## Current\r\nKeep.\r']) {
+    const area = reader(text);
+    assert.equal(area.items.length, 1);
+    assert.equal(area.items[0].text, text.slice(area.content, text.indexOf('## Current')));
+    assert.equal(archive.removeItems(text, area, area.items), text.slice(text.indexOf('## Current')));
+  }
+  const reference = '[ref]: https://example.com\r';
+  const referenced = reader('## Archive\r### Notes\rUse [ref].\r## Current\rKeep.\r' + reference);
+  assert.equal(referenced.items[0].refs, reference, 'CR reference copies cannot include unmarked later sections');
+  assert.doesNotMatch(archive.sectionComment(referenced.items[0]), /Keep\./);
+});
+
+
+test('H2: detached registry and attention diagnostics fail closed in runtime and schema', () => {
+  const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nText\n' });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  const id = f.parent().page_archive[0].comment_id;
+  f.github.comments.delete(id);
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  const doc = f.parent();
+  assert.equal(doc.page_archive[0].missing, true);
+  const cli = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme.cjs'));
+  const formatted = cli.formatReport({ store: f.binding.store, repository: f.binding.repository, parent_issue: 12, mode: 'preview', summary: 'Archive recovery', effects: [], recovered: [], holds: [], close_list: [], findings: [{ code: 'ARCHIVE_COMMENT_UNTRUSTED', issue: 12, detail: 'Inspect the missing comment', diagnostics: { reason: 'missing' } }] });
+  assert.match(formatted, /Archive comment: missing/);
+  assert.doesNotMatch(formatted, /Archive markup: missing/);
+  const Ajv = require('ajv/dist/2020');
+  const validate = new Ajv({ strict: false }).compile(JSON.parse(fs.readFileSync(path.join(ROOT, 'repo/contracts/programme-state/parent-state-v1.schema.json'))));
+  assert.deepEqual(state.validateParent(doc), []);
+  assert.equal(validate(doc), true, JSON.stringify(validate.errors));
+  for (const change of [value => { value.page_archive[0].untrusted_ids = [null]; }, value => { value.page_archive[0].untrusted_ids = [id, id]; }, value => { value.page_archive[0].missing = 'yes'; },
+    value => { value.attention.find(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED').diagnostics.reason = 'owner text'; },
+    value => { value.attention.find(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED').diagnostics.extra = 'text'; }]) {
+    const bad = structuredClone(doc); change(bad);
+    assert.ok(state.validateParent(bad).length);
+    assert.equal(validate(bad), false);
+  }
+});
+
+test('H2: lost-reply comments edited or transferred before registration cannot hold the page', () => {
+  for (const mode of ['changed', 'foreign']) {
+    const f = pageFixture(state, { hand: '# Programme\n## Archive\n### Notes\nPayload.\n' });
+    let lost = false;
+    f.github.intercept(call => {
+      if (!lost && call.method === 'POST' && /issues\/12\/comments$/.test(call.path)) {
+        lost = true; f.github.route(call.method, call.path, call.body);
+        throw Object.assign(new Error('Lost reply'), { code: 'PASS_LOCK_LOST' });
+      }
+    });
+    assert.throws(() => f.make().run({ apply: true }), { code: 'PASS_LOCK_LOST' });
+    f.github.hooks = [];
+    const id = [...f.github.comments.keys()][0];
+    if (mode === 'changed') f.github.comments.get(id).body += 'Owner edit.';
+    else f.github.comments.get(id).login = 'another-user';
+    const retained = f.github.comments.get(id).body;
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(f.edits().length, 0);
+    assert.equal(f.posts().length, 2);
+    assert.equal(f.github.comments.get(id).body, retained);
+    assert.ok(f.parent().page_archive[0].untrusted_ids?.includes(id));
+    assert.notEqual(f.parent().page_archive[0].comment_id, id);
+    assert.ok(f.parent().attention.some(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED'));
+  }
+});
+
+test('H2: graph replacements share five posts with the owed repair notice', () => {
+  const f = pageFixture(state, { count: 180, hand: '# Programme\n\n' + 'Notes. '.repeat(6600) });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.equal(f.posts().length, 5);
+  for (const entry of f.parent().page_archive) f.github.comments.get(entry.comment_id).body += '\nOwner edit.';
+  Object.assign(f.binding, { schema: state.SCHEMA.bindingV2, governance: 'enabled', parent_lifecycle: { reopen_incomplete: true, complete_when_children_closed: false } });
+  const issue = f.github.issues.get(12);
+  issue.state = 'closed'; issue.closed_at = f.NOW;
+  issue.events = [{ id: 9, event: 'closed', actor: { login: 'owner' }, created_at: f.NOW }];
+  const before = f.posts().length;
+  f.make().run({ apply: true });
+  assert.equal(f.posts().length - before, 5);
+  assert.ok(f.parent().pending_effects.some(effect => effect.kind === 'post_parent_repair'));
+  assert.ok(state.findStateBlock(f.page()).block);
+  const second = f.posts().length;
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.ok(f.posts().length - second <= 5);
+  assert.ok(f.posts().some(call => call.body.body.includes('toolkit-parent-repair:12:9')));
 });

@@ -236,7 +236,7 @@ function validatePageArchive(errors, archive) {
   for (const entry of Array.isArray(archive) ? archive : []) {
     check(errors, isObject(entry), 'page_archive entry must be an object');
     if (!isObject(entry)) continue;
-    checkShape(errors, entry, { all: ['key', 'kind', 'group', 'title', 'comment_id', 'login', 'digest', 'source_digest', 'state'] }, 'page_archive entry');
+    checkShape(errors, entry, { all: ['key', 'kind', 'group', 'title', 'comment_id', 'login', 'digest', 'source_digest', 'state', 'untrusted_ids', 'missing'], optional: ['untrusted_ids', 'missing'] }, 'page_archive entry');
     check(errors, typeof entry.key === 'string' && /^(?:graph-(?:retired|completed|optional|later|now)-[1-9][0-9]*|section-[a-f0-9]{16}-[1-9][0-9]*)$/.test(entry.key) && !keys.has(entry.key), 'page_archive key must be unique and fixed');
     keys.add(entry.key);
     check(errors, ['graph', 'section'].includes(entry.kind) && (entry.kind === 'graph' ? archiveTools().GROUPS.includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`) : entry.group === null && entry.key.startsWith('section-')), 'page_archive kind and group must match its key');
@@ -244,6 +244,8 @@ function validatePageArchive(errors, archive) {
     check(errors, ['pending', 'moved'].includes(entry.state), 'page_archive state must be pending or moved');
     check(errors, entry.comment_id === null ? entry.login === null && entry.state === 'pending' : isInt(entry.comment_id, 1) && isText(entry.login) && !ids.has(entry.comment_id), 'page_archive id must be unique with verified login');
     if (entry.comment_id !== null) ids.add(entry.comment_id);
+    if (entry.untrusted_ids !== undefined) check(errors, Array.isArray(entry.untrusted_ids) && entry.untrusted_ids.length > 0 && entry.untrusted_ids.every(id => isInt(id, 1)) && new Set(entry.untrusted_ids).size === entry.untrusted_ids.length, 'page_archive untrusted ids must be unique positive integers');
+    if (entry.missing !== undefined) check(errors, entry.kind === 'section' && typeof entry.missing === 'boolean', 'page_archive missing belongs only to notes');
     check(errors, typeof entry.digest === 'string' && /^[0-9a-f]{64}$/.test(entry.digest), 'page_archive digest must be SHA-256');
     check(errors, entry.kind === 'graph' ? entry.source_digest === null : typeof entry.source_digest === 'string' && /^[0-9a-f]{64}$/.test(entry.source_digest), 'page_archive source digest must match its kind');
   }
@@ -343,6 +345,7 @@ const FINDING_CODES = Object.freeze({
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: archive more marked notes to restore page headroom, then refresh' },
+  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the detached archive comment; edited notes remain linked and missing notes need owner recovery' },
   ARCHIVE_SECTION_UNSAFE: { source: 'reconcile', next_action: 'Controller: repair the Archive section markup, then refresh' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
@@ -491,9 +494,13 @@ function validateAttention(errors, attention) {
     const known = Object.hasOwn(FINDING_CODES, entry.code) ? FINDING_CODES[entry.code] : null;
     check(errors, Boolean(known), `${at}.code is not a known finding code`);
     if (SIZE_CODES.includes(entry.code)) validateBodyDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
+    else if (entry.code === 'ARCHIVE_COMMENT_UNTRUSTED') {
+      checkShape(errors, entry.diagnostics, { all: ['reason'] }, `${at}.diagnostics`);
+      check(errors, isObject(entry.diagnostics) && ['changed', 'foreign', 'missing', 'duplicate'].includes(entry.diagnostics.reason), `${at}.diagnostics must name a fixed archive trust failure`);
+    }
     else if (entry.code === 'ARCHIVE_SECTION_UNSAFE') {
       checkShape(errors, entry.diagnostics, { all: ['reason'] }, `${at}.diagnostics`);
-      check(errors, isObject(entry.diagnostics) && ['duplicate_marker', 'open_fence', 'open_comment', 'unbalanced_details', 'item_too_large'].includes(entry.diagnostics.reason), `${at}.diagnostics must name a fixed archive grammar failure`);
+      check(errors, isObject(entry.diagnostics) && ['duplicate_marker', 'open_fence', 'open_comment', 'unbalanced_details', 'item_too_large', 'raw_html', 'invalid_fence'].includes(entry.diagnostics.reason), `${at}.diagnostics must name a fixed archive grammar failure`);
     }
     else if (entry.code === 'PASS_STOPPED') validatePassDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
     else check(errors, entry.diagnostics === undefined, `${at}.diagnostics belongs only to page findings or PASS_STOPPED`);
@@ -511,7 +518,7 @@ function validateAttention(errors, attention) {
 // Codes the reconciler reports once, on the pass that first reads a journal; the next pass no longer
 // sees them although nobody acted. The reconcile pass keeps such a finding open (`hold`) until it is
 // answered or its condition is really gone (see Reconciler.oneTimeHolds).
-const ONE_TIME_CODES = new Set(['RETURN_CAPTURED', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'STALE_ASSIGNMENT', 'CHILD_REOPENED', 'CHILD_ADDED']);
+const ONE_TIME_CODES = new Set(['RETURN_CAPTURED', 'JOURNAL_ERROR', 'JOURNAL_INVALID', 'STALE_ASSIGNMENT', 'CHILD_REOPENED', 'CHILD_ADDED', 'ARCHIVE_COMMENT_UNTRUSTED']);
 
 // What a run saw, as findings: [{ code, issue, head? }]. Returns the next attention list, or the same
 // list (===) when nothing changes, so an unchanged run writes nothing. A run that was not complete
@@ -557,12 +564,12 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     const issue = ISSUELESS_CODES.has(finding.code) ? null : finding.issue;
     if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
     add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null,
-      [...PAGE_CODES, 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null);
+      [...PAGE_CODES, 'ARCHIVE_COMMENT_UNTRUSTED', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null);
   }
   for (const entry of complete ? list : []) {
     // Only the reconciler's complete successful redraw/readback settles a size finding. This also
     // protects an affected page first reported by another writer after the planning snapshot.
-    if (PAGE_CODES.includes(entry.code)) continue;
+    if (PAGE_CODES.includes(entry.code) || entry.code === 'ARCHIVE_COMMENT_UNTRUSTED') continue;
     // ATTENTION_FULL resolves on any complete run back under the bound.
     const own = entry.source === source || entry.code === 'ATTENTION_FULL';
     if (!own || seenIds.has(entry.id) || hold.includes(entry.id) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
@@ -1765,16 +1772,29 @@ function upsertCurrentBlock(text, rendered, sectionName) {
   const heading = (sectionName && all.find(entry => entry.text.toLowerCase() === String(sectionName).trim().toLowerCase())) || all.find(entry => entry.level === 1);
   const migrate = heading?.text === 'CURRENT' && heading.level === 2;
   const at = heading ? heading.end : 0;
-  const before = source.slice(0, at).replace(migrate ? /^## CURRENT\r?\n?$/m : /$^/, '');
+  const before = migrate ? source.slice(0, at).replace(/^## CURRENT\r?\n?$/m, '') : source.slice(0, at);
   return `${before}${eol}${block}${eol}${source.slice(at)}`;
+}
+
+function detachArchive(entry, reason, linked) {
+  entry.untrusted_ids = [...new Set([...(entry.untrusted_ids || []), entry.comment_id])];
+  if (entry.kind === 'section' && (entry.state === 'moved' || linked)) {
+    entry.state = 'moved'; entry.missing = reason === 'missing';
+  } else {
+    entry.comment_id = null; entry.login = null; entry.state = 'pending';
+  }
+}
+
+function archiveLinked(source, entry) {
+  return Boolean(entry.comment_id && new RegExp(`#issuecomment-${entry.comment_id}(?:[)\\s]|$)`).test(source));
 }
 
 function renderContextBlockBody(archive, repository, number) {
   const moved = (archive || []).filter(entry => entry.kind === 'section' && entry.state === 'moved' && entry.comment_id);
   return ['# AGENT CONTEXT', '<!-- programme-context -->',
     'Background for agents that pick up a task.',
-    ...(moved.length ? [`Archived notes: ${moved.map(entry => `[${publicText(entry.title)}](${commentLink(issueUrl(repository, number), entry.comment_id)})`).join(', ')}`] : []),
-    'Hand-written notes still in the body follow. To archive one, put it under a `## Archive` heading; the next refresh moves it to a linked comment unchanged.'].join('\n');
+    ...(moved.length ? [`Archived notes: ${moved.map(entry => `[${publicText(entry.title)}](${commentLink(issueUrl(repository, number), entry.comment_id)})${entry.missing ? ' (missing comment; owner recovery needed)' : ''}`).join(', ')}`] : []),
+    'To archive one, put it under `## Archive`. The area ends at the next `#` or `##` heading outside fences, HTML comments and managed blocks, next managed-block BEGIN line, or body end, whichever comes first. `###` and deeper subsections move; preceding text is one item titled Archived notes.'].join('\n');
 }
 
 function upsertContextBlock(source, rendered) {
@@ -3831,19 +3851,17 @@ class Reconciler {
   }
 
   projectParentPage(number, source, stateBody, comments, version, navBody, currentBody, topic, postBudget, page) {
-    const area = archiveTools().archiveSection(source);
-    if (area.unsafe) {
-      const error = new ProgrammeError('ARCHIVE_SECTION_UNSAFE', 'The Archive section is unsafe; repair its markup before refreshing.');
-      error.diagnostics = { reason: area.unsafe }; throw error;
-    }
+    const parsed = archiveTools().archiveSection(source);
+    const area = parsed.unsafe ? { ...parsed, start: null, end: null } : parsed;
     const archive = page?.parent?.page_archive || [];
     const originalKeys = new Set(area.items.map(item => item.key));
-    const pending = archive.filter(entry => entry.kind === 'section' && entry.state === 'pending' && !originalKeys.has(entry.key));
+    const protectedEntry = entry => entry && (entry.state === 'moved' || archiveLinked(source, entry));
+    const pending = archive.filter(entry => entry.kind === 'section' && entry.state === 'pending' && !protectedEntry(entry) && !originalKeys.has(entry.key));
     const claimed = new Set();
     for (const item of area.items) {
       const existing = archive.find(entry => entry.key === item.key);
-      if ((!existing || existing.source_digest !== archiveTools().digest(item.text)) && existing?.state !== 'pending' && pending.length) item.key = pending.shift().key;
-      else if (existing?.state === 'moved' && existing.source_digest !== archiveTools().digest(item.text)) {
+      if (pending.length && (!existing || protectedEntry(existing) || existing.state !== 'pending' && existing.source_digest !== archiveTools().digest(item.text))) item.key = pending.shift().key;
+      else if (protectedEntry(existing)) {
         // A newly marked note with the same title must not overwrite a previous moved note.
         const base = item.key.replace(/-\d+$/, '');
         let part = 1;
@@ -3871,7 +3889,7 @@ class Reconciler {
       }
       let posts = graphs.filter(part => !archive.some(entry => entry.key === part.key && entry.comment_id)).length;
       const sections = [];
-      if (!page?.only) for (const item of area.items) {
+      if (!page?.only && !area.unsafe) for (const item of area.items) {
         const registered = archive.find(entry => entry.key === item.key);
         if (!registered?.comment_id && posts >= postBudget) break;
         if (!registered?.comment_id) posts++;
@@ -3891,9 +3909,7 @@ class Reconciler {
       let graph = stateBody.split('\n').filter(line => !/^\|[^\n]*\|#\d+\|/.test(line) || !hidden.has(Number(line.split('|')[3].slice(1)))).join('\n');
       if (summary.length) graph = graph.replace('\n| Task |', `\nArchived: ${summary.join(', ')}\n\n| Task |`);
       const links = [...archive.filter(entry => entry.kind === 'section' && !sections.some(part => part.key === entry.key)
-        && (entry.state === 'moved' || entry.comment_id && source.includes(`#issuecomment-${entry.comment_id}`)
-          && !area.items.some(item => item.key === entry.key)
-          && comments.some(comment => comment.id === entry.comment_id && comment.user?.login === entry.login && archiveTools().digest(comment.body) === entry.digest))),
+        && (entry.state === 'moved' || archiveLinked(source, entry))).map(entry => ({ ...entry, state: 'moved' })),
         ...sections.map(part => ({ ...part, state: 'moved', comment_id: commentId(part) }))];
       const context = renderContextBlockBody(links, this.binding.repository, number);
       const stripped = archiveTools().removeItems(source, area, sections);
@@ -3904,7 +3920,7 @@ class Reconciler {
       const projected = this.projectTrace(number, stripped, graph, [...comments, ...future], version, navBody, currentBody, topic, remainingBudget,
         { context, threshold: tracePaging ? safe : Infinity });
       const tracePosts = projected.overflow.reduce((sum, part) => sum + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0);
-      return { ...projected, archive: parts, sections, area, graphRows: moved.map(row => row.issue), posts: posts + tracePosts,
+      return { ...projected, archiveUnsafe: area.unsafe, archive: area.unsafe ? [] : parts, sections, area, graphRows: moved.map(row => row.issue), posts: posts + tracePosts,
         budgetFits: posts + tracePosts <= postBudget };
     };
     let projected = build();
@@ -3913,7 +3929,7 @@ class Reconciler {
       if (projected.budgetFits && (!feasible || projected.body.length < feasible.body.length)) feasible = projected;
     };
     // Single-issue passes may only use archives already recorded and verified by a full pass.
-    if (page?.only) {
+    if (page?.only || area.unsafe) {
       for (const row of candidates) {
         const registered = archive.filter(entry => entry.kind === 'graph' && entry.group === row.group && entry.state === 'moved');
         if (registered.some(entry => comments.some(comment => comment.id === entry.comment_id && comment.user?.login === entry.login && archiveTools().digest(comment.body) === entry.digest && comment.body.split('\n').includes(row.text)))) moved.push(row);
@@ -4066,9 +4082,9 @@ class Reconciler {
       try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, number === parent.parent_issue ? MAX_TOPIC_COMMENTS_PER_PASS : topicBudget, { parent, only, traceTopicBudget: topicBudget }); }
       catch (error) {
         if (!error.code) throw error;
-        if (error.code === 'ARCHIVE_SECTION_UNSAFE') findings.push({ code: error.code, issue: number, diagnostics: error.diagnostics, detail: error.message });
         holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body', ...(error.diagnostics ? { diagnostics: error.diagnostics } : {}) }); continue;
       }
+      if (projected.archiveUnsafe) findings.push({ code: 'ARCHIVE_SECTION_UNSAFE', issue: number, diagnostics: { reason: projected.archiveUnsafe }, detail: 'Archive markup is unsafe; notes stay on the page while it redraws' });
       if (projected.refused || projected.body.length >= this.threshold) {
         const diagnostics = bodySizeDiagnostics(projected.body, this.threshold);
         const finding = { code: 'BODY_TOO_LARGE', issue: number, diagnostics, detail: 'The projected page reaches the redraw threshold' };
@@ -4079,12 +4095,27 @@ class Reconciler {
       }
       if (projected.nearLimit) findings.push({ code: 'BODY_NEAR_LIMIT', issue: number, diagnostics: bodySizeDiagnostics(projected.body, Math.min(SAFE_LIMIT, this.threshold)), detail: 'The projected page fits the hard limit but has lost its safe headroom' });
       const archiveEffects = (projected.archive || []).filter(part => !parent.page_archive?.some(entry => entry.key === part.key && entry.digest === archiveTools().digest(part.body) && entry.comment_id));
-      if (number === parent.parent_issue && projected.body === issue.body && !archiveEffects.length && !timeWillChange) continue;
+      const activeArchives = number === parent.parent_issue ? (parent.page_archive || []).filter(entry => entry.comment_id) : [];
+      const viewer = activeArchives.some(entry => !entry.untrusted_ids?.includes(entry.comment_id)) ? this.reader.viewer() : null;
+      const archiveNeedsRecovery = activeArchives.some(entry => {
+        const comment = comments.find(comment => comment.id === entry.comment_id);
+        if (entry.untrusted_ids?.includes(entry.comment_id)) return entry.kind === 'section' && Boolean(entry.missing) !== !comment;
+        return !comment || entry.login !== viewer || comment.user?.login !== entry.login || archiveTools().digest(comment.body) !== entry.digest;
+      });
+      if (number === parent.parent_issue && projected.body === issue.body && !archiveEffects.length && !timeWillChange && !archiveNeedsRecovery) continue;
       for (const part of archiveEffects) effects.push({ kind: parent.page_archive?.some(entry => entry.key === part.key && entry.comment_id) ? 'edit_archive_comment' : 'post_archive_comment', target: { issue: number, key: part.key } });
       for (const part of projected.overflow) effects.push(indexEffect(number, part, String(comments.at(-1)?.id || '')));
       effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
         insert: !block, move: current && move, state: !current || move, stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent }, body, updated_at: issue.updated_at });
     }
+  }
+
+  archiveTrust(entry, login) {
+    const comment = this.reader.archiveComment(entry.comment_id);
+    if (!comment) return { reason: 'missing' };
+    if (comment.id !== entry.comment_id || entry.login !== login || comment.user?.login !== login
+      || String(comment.issue_url).toLowerCase() !== `https://api.github.com/repos/${this.binding.repository}/issues/${this.binding.parent_issue}`.toLowerCase()) return { comment, reason: 'foreign' };
+    return { comment, reason: archiveTools().digest(comment.body) === entry.digest ? null : 'changed' };
   }
 
   // Resolve pending effects left by an earlier pass by reading their targets. Nothing is replayed
@@ -4094,7 +4125,7 @@ class Reconciler {
     for (const { kind, number, doc } of docs) {
       for (const effect of doc.pending_effects) {
         let done = null;
-        let recoveredId = null;
+        let recoveredId = null, untrusted = null, rejectedArchive = null;
         const target = effect.target;
         if (effect.kind === 'set_parent_state') {
           try { const issue = this.reader.issue(target.issue); done = issue ? issue.state === target.state : null; } catch { done = null; }
@@ -4126,22 +4157,32 @@ class Reconciler {
         } else if (['post_archive_comment', 'edit_archive_comment'].includes(effect.kind)) {
           try {
             const registered = doc.page_archive?.find(entry => entry.key === target.key);
-            if (!registered || target.issue !== doc.parent_issue || this.reader.viewer() !== target.login) done = null;
+            if (!registered || target.issue !== doc.parent_issue) done = null;
             else if (effect.kind === 'post_archive_comment') {
-              const matches = this.reader.comments(target.issue).filter(comment => comment.body.startsWith(`${archiveTools().marker(target.key)}\n`) && comment.user?.login === target.login);
-              done = matches.length === 0 ? false : matches.length === 1 && archiveTools().digest(matches[0].body) === target.digest ? true : null;
-              if (done) recoveredId = matches[0].id;
+              const candidates = this.reader.comments(target.issue).filter(comment => comment.body.startsWith(`${archiveTools().marker(target.key)}\n`) && !registered.untrusted_ids?.includes(comment.id));
+              const matches = candidates.filter(comment => comment.user?.login === target.login && archiveTools().digest(comment.body) === target.digest).sort((a, b) => a.id - b.id);
+              done = matches.length ? true : false;
+              if (done) {
+                const verified = this.reader.archiveComment(matches[0].id);
+                done = Boolean(verified && verified.user?.login === target.login && verified.body === matches[0].body && String(verified.issue_url).toLowerCase() === `https://api.github.com/repos/${this.binding.repository}/issues/${target.issue}`.toLowerCase());
+                if (done) recoveredId = matches[0].id;
+              }
+              const rejected = candidates.filter(comment => comment.id !== recoveredId).map(comment => comment.id);
+              if (rejected.length) rejectedArchive = { key: target.key, ids: rejected, reason: candidates.length > 1 ? 'duplicate' : candidates[0].user?.login === target.login ? 'changed' : 'foreign' };
             } else if (registered.comment_id !== target.comment_id || registered.login !== target.login) done = null;
             else {
-              const comment = this.reader.archiveComment(target.comment_id);
-              if (!comment) done = false;
-              else if (comment.id !== target.comment_id || comment.user?.login !== target.login || String(comment.issue_url).toLowerCase() !== `https://api.github.com/repos/${this.binding.repository}/issues/${target.issue}`.toLowerCase()) done = null;
-              else { const digest = archiveTools().digest(comment.body); done = digest === target.digest ? true : digest === target.before ? false : null; }
+              const result = this.archiveTrust(registered, target.login);
+              const digest = result.comment && archiveTools().digest(result.comment.body);
+              if (!result.reason || digest === target.digest && result.reason === 'changed') done = digest === target.digest;
+              else { done = false; untrusted = result.reason; }
             }
           } catch { done = null; }
         }
         if (done === null) holds.push({ code: 'EFFECT_UNKNOWN', target: `#${target.issue}`, detail: `${effect.kind} from an earlier pass could not be checked; held`, scope: holdScope(effect.kind) });
         resolutions.push({ kind, number, intent_id: effect.intent_id, outcome: done === null ? 'UNKNOWN' : done ? 'DONE' : 'NOT_DONE',
+          ...(effect.kind === 'replace_block' && done && target.body_digest ? { settledArchives: (doc.page_archive || []).filter(entry => entry.state === 'pending' && archiveLinked(observed.issues.get(target.issue)?.body || '', entry)).map(entry => entry.key) } : {}),
+          ...(untrusted ? { untrusted: { key: target.key, reason: untrusted, linked: archiveLinked(observed.issues.get(target.issue)?.body || '', doc.page_archive?.find(entry => entry.key === target.key)) } } : {}),
+          ...(rejectedArchive ? { rejectedArchive } : {}),
           ...(['post_archive_comment', 'edit_archive_comment'].includes(effect.kind) && done ? { archive: { key: target.key, comment_id: recoveredId || target.comment_id, login: target.login, digest: target.digest } } : {}) });
       }
     }
@@ -4408,6 +4449,19 @@ class Reconciler {
             const registered = doc.page_archive?.find(entry => entry.key === resolution.archive.key);
             if (registered) Object.assign(registered, resolution.archive);
           }
+          for (const resolution of resolutions.filter(entry => entry.untrusted)) {
+            const entry = doc.page_archive?.find(entry => entry.key === resolution.untrusted.key);
+            if (entry) detachArchive(entry, resolution.untrusted.reason, resolution.untrusted.linked);
+            doc.attention = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [{ code: 'ARCHIVE_COMMENT_UNTRUSTED', issue: number, diagnostics: { reason: resolution.untrusted.reason } }], now: this.now() });
+          }
+          for (const resolution of resolutions.filter(entry => entry.rejectedArchive)) {
+            const entry = doc.page_archive?.find(entry => entry.key === resolution.rejectedArchive.key);
+            if (entry) entry.untrusted_ids = [...new Set([...(entry.untrusted_ids || []), ...resolution.rejectedArchive.ids])];
+            doc.attention = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [{ code: 'ARCHIVE_COMMENT_UNTRUSTED', issue: number, diagnostics: { reason: resolution.rejectedArchive.reason } }], now: this.now() });
+          }
+          for (const resolution of resolutions.filter(entry => entry.settledArchives)) {
+            for (const entry of doc.page_archive || []) if (entry.state === 'pending' && resolution.settledArchives.includes(entry.key)) entry.state = 'moved';
+          }
           const kept = doc.pending_effects.filter(effect => !resolutions.some(entry => entry.intent_id === effect.intent_id));
           if (kept.length === doc.pending_effects.length) return null;
           doc.pending_effects = kept;
@@ -4619,14 +4673,18 @@ class Reconciler {
     const parentPage = (effect, body, version, currentBody) => {
       let login = null;
       const trust = entry => {
-        if (!entry.comment_id) return null;
-        const comment = this.reader.archiveComment(entry.comment_id);
-        if (!comment) return null;
+        if (!entry.comment_id || entry.untrusted_ids?.includes(entry.comment_id)) return null;
         login ||= this.reader.viewer();
-        if (comment.id !== entry.comment_id || entry.login !== login || comment.user?.login !== login
-          || String(comment.issue_url).toLowerCase() !== `https://api.github.com/repos/${this.binding.repository}/issues/${parentNumber}`.toLowerCase()
-          || archiveTools().digest(comment.body) !== entry.digest) throw new ProgrammeError('EFFECT_UNKNOWN', 'A registered archive comment changed or belongs to another author or issue.');
-        return comment;
+        const result = this.archiveTrust(entry, login);
+        return result.reason ? null : result.comment;
+      };
+      const detach = (entry, reason, source) => {
+        notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', { reason });
+        mutateDoc('parent', parentNumber, { change: doc => {
+          const target = doc.page_archive.find(part => part.key === entry.key);
+          detachArchive(target, reason, archiveLinked(source, target));
+          return doc;
+        } });
       };
       const preview = () => {
         guard();
@@ -4636,6 +4694,7 @@ class Reconciler {
         if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', 'Update Toolkit before redrawing this newer page.');
         const comments = this.reader.comments(parentNumber);
         const next = this.projectBody(parentNumber, before.body, body, comments, version, null, currentBody, null, postsLeft(parentNumber), { parent: parentDoc, only: plan.issueScoped });
+        if (next.archiveUnsafe) notePageFinding(parentNumber, 'ARCHIVE_SECTION_UNSAFE', { reason: next.archiveUnsafe });
         if (next.refused || next.body.length >= this.threshold) {
           const error = new ProgrammeError('BODY_TOO_LARGE', 'The programme page cannot fit below the hard body limit; no archive comments were changed.');
           error.diagnostics = bodySizeDiagnostics(next.body, this.threshold); throw error;
@@ -4643,19 +4702,32 @@ class Reconciler {
         return { before, comments, next };
       };
       let snapshot = preview();
-      // Before any posts or edits, validate every retained registry entry and the complete projected
-      // body. Missing comments may be reposted; foreign or changed comments never get overwritten.
-      if (!plan.issueScoped) {
-        let registryChanged = false;
-        for (const entry of parentDoc.page_archive || []) {
-          const comment = trust(entry);
-          if (!comment && entry.comment_id && entry.kind === 'section' && !snapshot.next.area.items.some(item => item.key === entry.key)) throw new ProgrammeError('EFFECT_UNKNOWN', 'A moved note archive is missing; restore its comment before refreshing.');
-          if (!comment && entry.comment_id) { registryChanged = true; mutateDoc('parent', parentNumber, { change: doc => {
-            const target = doc.page_archive.find(part => part.key === entry.key);
-            target.comment_id = null; target.login = null; target.state = 'pending'; return doc;
-          } }); }
+      // Reconcile the registry even on issue-scoped redraws; these writes never edit comments.
+      let registryChanged = false;
+      for (const entry of parentDoc.page_archive || []) {
+        if (entry.state === 'pending' && archiveLinked(snapshot.before.body, entry)) {
+          mutateDoc('parent', parentNumber, { change: doc => {
+            doc.page_archive.find(part => part.key === entry.key).state = 'moved'; return doc;
+          } }); registryChanged = true;
         }
-        if (registryChanged) snapshot = preview();
+        if (!entry.comment_id) continue;
+        if (entry.untrusted_ids?.includes(entry.comment_id)) {
+          if (entry.kind === 'section') {
+            const missing = !this.reader.archiveComment(entry.comment_id);
+            if (Boolean(entry.missing) !== missing) {
+              notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', { reason: missing ? 'missing' : 'changed' });
+              mutateDoc('parent', parentNumber, { change: doc => { doc.page_archive.find(part => part.key === entry.key).missing = missing; return doc; } });
+              registryChanged = true;
+            }
+          }
+          continue;
+        }
+        login ||= this.reader.viewer();
+        const result = this.archiveTrust(entry, login);
+        if (result.reason) { detach(entry, result.reason, snapshot.before.body); registryChanged = true; }
+      }
+      if (registryChanged) snapshot = preview();
+      if (!plan.issueScoped && !snapshot.next.archiveUnsafe) {
         // Comment links can alter the shortest prefix. Re-plan after verified publication, bounded
         // by the shared notification budget; never hide an unverified row or section.
         for (let round = 0; round < 8; round++) {
@@ -4688,8 +4760,17 @@ class Reconciler {
                 guard(); this.mutator.editComment(id, part.body);
               } else {
                 // A lost successful response is found under the pending key, never posted twice.
-                const existing = this.reader.comments(parentNumber).filter(comment => comment.user?.login === login && comment.body.startsWith(`${archiveTools().marker(part.key)}\n`));
-                if (existing.length > 1 || existing.length === 1 && archiveTools().digest(existing[0].body) !== digest) return { outcome: 'UNKNOWN', detail: 'An unregistered pending archive needs exact recovery.' };
+                const candidates = this.reader.comments(parentNumber).filter(comment => comment.body.startsWith(`${archiveTools().marker(part.key)}\n`)
+                  && !registered.untrusted_ids?.includes(comment.id));
+                const existing = candidates.filter(comment => comment.user?.login === login && archiveTools().digest(comment.body) === digest).sort((a, b) => a.id - b.id);
+                const rejected = candidates.filter(comment => comment.id !== existing[0]?.id).map(comment => comment.id);
+                if (rejected.length) {
+                  notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', { reason: candidates.length > 1 ? 'duplicate' : candidates[0].user?.login === login ? 'changed' : 'foreign' });
+                  mutateDoc('parent', parentNumber, { change: doc => {
+                    const target = doc.page_archive.find(entry => entry.key === part.key);
+                    target.untrusted_ids = [...new Set([...(target.untrusted_ids || []), ...rejected])]; return doc;
+                  } });
+                }
                 if (existing.length) id = existing[0].id;
                 else {
                   if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent.' };
@@ -4744,9 +4825,9 @@ class Reconciler {
       if (next.nearLimit) notePageFinding(parentNumber, 'BODY_NEAR_LIMIT', bodySizeDiagnostics(next.body, Math.min(SAFE_LIMIT, this.threshold)));
       const finish = () => {
         verifiedBodies.add(parentNumber);
-        if (!plan.issueScoped && parentDoc.page_archive?.some(entry => entry.state === 'pending' && (next.archive.some(part => part.key === entry.key) || entry.kind === 'section' && before.body.includes(`#issuecomment-${entry.comment_id}`)))) {
+        if (!plan.issueScoped && parentDoc.page_archive?.some(entry => entry.state === 'pending' && (next.archive.some(part => part.key === entry.key) || entry.kind === 'section' && archiveLinked(before.body, entry)))) {
           mutateDoc('parent', parentNumber, { change: doc => {
-            for (const entry of doc.page_archive) if (entry.comment_id && (next.archive.some(part => part.key === entry.key) || entry.kind === 'section' && next.body.includes(`#issuecomment-${entry.comment_id}`))) entry.state = 'moved';
+            for (const entry of doc.page_archive) if (entry.comment_id && (next.archive.some(part => part.key === entry.key) || entry.kind === 'section' && archiveLinked(next.body, entry))) entry.state = 'moved';
             return doc;
           } });
         }
@@ -4758,7 +4839,7 @@ class Reconciler {
         // Recording the body intent can take time. Recheck custody after that write as well, so a
         // comment edited during bookkeeping cannot authorise removing its source text.
         for (const entry of parentDoc.page_archive || []) {
-          if (entry.comment_id && !trust(entry)) return { outcome: 'UNKNOWN', detail: 'An archive disappeared before the body write.' };
+          if (entry.comment_id && !entry.untrusted_ids?.includes(entry.comment_id) && !trust(entry)) return { outcome: 'UNKNOWN', detail: 'An archive disappeared before the body write.' };
         }
         const latest = this.reader.issue(parentNumber);
         if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'The issue changed immediately before the write.' };
