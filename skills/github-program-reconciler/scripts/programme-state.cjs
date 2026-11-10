@@ -72,7 +72,7 @@ const CHECK_STATES = ['GREEN', 'PENDING', 'RED', 'UNKNOWN'];
 const UAT_STATES = ['NOT_REQUIRED', 'PENDING', 'PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'];
 const REVIEW_STATES = ['NOT_STARTED', 'IN_REVIEW', 'PASSED', 'NOT_PASSED'];
 const REVIEW_VERDICTS = ['PASSED', 'NOT_PASSED'];
-const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment', 'replace_pr_nav', 'set_parent_state', 'post_parent_repair'];
+const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment', 'replace_pr_nav', 'set_parent_state', 'post_parent_repair', 'post_closing_backstop'];
 const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
 // observation timestamps, pending effects (an intent write must not make the rendered state stale),
@@ -121,8 +121,9 @@ function canonicalText(doc) {
 
 function contentDigest(doc) {
   const copy = { ...doc };
-  if (isObject(copy.private) && Object.hasOwn(copy.private,'graph_pr_watermark')) {
-    copy.private = {...copy.private}; delete copy.private.graph_pr_watermark;
+  if (isObject(copy.private)) {
+    copy.private = {...copy.private};
+    for (const key of ['graph_pr_watermark','graph_issue_watermark','closing_scan']) delete copy.private[key];
   }
   for (const key of UNHASHED) delete copy[key];
   return sha256(JSON.stringify(canonical(copy)));
@@ -136,7 +137,9 @@ function sameState(previous, next) {
     && JSON.stringify(canonical(previous.journals_seen || {})) === JSON.stringify(canonical(next.journals_seen || {}))
     && JSON.stringify(canonical(previous.attention || [])) === JSON.stringify(canonical(next.attention || []))
     && JSON.stringify(canonical(previous.page_archive || [])) === JSON.stringify(canonical(next.page_archive || []))
-    && previous.private?.graph_pr_watermark === next.private?.graph_pr_watermark;
+    && previous.private?.graph_pr_watermark === next.private?.graph_pr_watermark
+    && previous.private?.graph_issue_watermark === next.private?.graph_issue_watermark
+    && JSON.stringify(canonical(previous.private?.closing_scan || [])) === JSON.stringify(canonical(next.private?.closing_scan || []));
 }
 
 function check(errors, condition, message) { if (!condition) errors.push(message); }
@@ -145,7 +148,7 @@ function check(errors, condition, message) { if (!condition) errors.push(message
 const SHAPES = {
   child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'], optional: ['volatile', 'journals_seen', 'completed_at', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'] },
   parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'page_archive', 'private', 'volatile'], optional: ['volatile', 'attention', 'page_archive'] },
-  finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics'], optional: ['diagnostics'] },
+  finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics', 'kind'], optional: ['diagnostics', 'kind'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
   outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix'] },
@@ -341,6 +344,7 @@ const FINDING_CODES = Object.freeze({
   CHILD_REOPENED: { source: 'reconcile', next_action: 'Controller: confirm the restored task lifecycle' },
   CHILD_ADDED: { source: 'reconcile', next_action: 'Controller: confirm the new task or move it in the catalogue' },
   PR_WITHOUT_TASK: { source: 'reconcile', next_action: 'Controller: link the PR to a task or dispose with a reason' },
+  CLOSING_COMMENT_MISSING: { source: 'reconcile', next_action: 'The closing agent posts the story with closing-comment; facts alone leave it waiting' },
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
@@ -379,7 +383,7 @@ const END_RESERVE_MS = 60 * 1000;
 // minutes of slack for requests already in flight; checks cannot cancel such a request.
 const QUEUE_RESERVE_MS = 2 * END_RESERVE_MS;
 const AGAIN_RESERVE_MS = 6 * 60 * 1000;
-const PASS_PHASES = ['planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'unknown'];
+const PASS_PHASES = ['planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'closing', 'unknown'];
 
 function validatePassDiagnostics(errors, value, at) {
   check(errors, isObject(value), `${at} must be an object`);
@@ -476,8 +480,8 @@ function validateBodyDiagnostics(errors, value, at) {
   check(errors, parts.reduce((sum, part) => sum + (part?.size || 0), value.remainder) === value.projected_total, `${at} section sizes and remainder must sum exactly`);
 }
 
-function findingId(source, code, issue, head = '') {
-  return sha256(`${source}|${code}|${issue ?? ''}|${head || ''}`).slice(0, 12);
+function findingId(source, code, issue, head = '', kind = null) {
+  return sha256(`${source}|${code}|${issue ?? ''}|${head || ''}${kind ? `|${kind}` : ''}`).slice(0, 12);
 }
 
 function validateAttention(errors, attention) {
@@ -503,7 +507,8 @@ function validateAttention(errors, attention) {
     check(errors, HEAD_BOUND_CODES.has(entry.code) ? optional(entry.head, isSha) : entry.head === null, `${at}.head must be a full 40-character SHA for a head-bound code, otherwise null`);
     check(errors, FINDING_STATES.includes(entry.state), `${at}.state must be ${FINDING_STATES.join(', ')}`);
     for (const field of ['first_seen', 'changed_at']) check(errors, isText(entry[field]) && !Number.isNaN(Date.parse(entry[field])), `${at}.${field} must be a date and time`);
-    check(errors, FINDING_ID.test(String(entry.id)) && entry.id === findingId(entry.source, entry.code, entry.issue, entry.head), `${at}.id must be the finding's own id`);
+    check(errors, entry.code === 'CLOSING_COMMENT_MISSING' ? ['pr','issue'].includes(entry.kind) : entry.kind === undefined, `${at}.kind belongs to a closing finding and must be pr or issue`);
+    check(errors, FINDING_ID.test(String(entry.id)) && entry.id === findingId(entry.source, entry.code, entry.issue, entry.head, entry.kind), `${at}.id must be the finding's own id`);
     check(errors, !ids.has(entry.id), `${at}.id is repeated`);
     ids.add(entry.id);
   }
@@ -524,8 +529,8 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
   const seenIds = new Set();
   let changed = false;
   const open = () => list.filter(entry => OPEN_FINDING_STATES.includes(entry.state)).length;
-  const add = (code, issue, head, since = null, diagnostics = null) => {
-    const id = findingId(FINDING_CODES[code].source, code, issue, head);
+  const add = (code, issue, head, since = null, diagnostics = null, kind = null) => {
+    const id = findingId(FINDING_CODES[code].source, code, issue, head, kind);
     seenIds.add(id);
     const existing = byId.get(id);
     if (existing) {
@@ -540,7 +545,11 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
       // re-reporting the same stop must not reopen an acknowledged or disposed entry.
       const newEvent = ONE_TIME_CODES.has(code) || (code === 'PASS_STOPPED' && diagnosticsChanged);
       const reopens = fresh && (existing.state === 'resolved' || (newEvent && ['acknowledged', 'disposed'].includes(existing.state)));
-      if (reopens) { existing.state = 'new'; existing.changed_at = now; changed = true; }
+      if (reopens) {
+        existing.state = 'new'; existing.changed_at = now;
+        if (code === 'CLOSING_COMMENT_MISSING') existing.first_seen = now;
+        changed = true;
+      }
       if (diagnosticsChanged) {
         existing.diagnostics = clone(diagnostics);
         changed = true;
@@ -548,7 +557,7 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
       return;
     }
     if (code !== 'ATTENTION_FULL' && open() >= ATTENTION_LIMIT) { add('ATTENTION_FULL', null, null); return; }
-    const entry = { id, source: FINDING_CODES[code].source, code, issue, head, state: 'new', first_seen: now, changed_at: now, ...(diagnostics ? { diagnostics: clone(diagnostics) } : {}) };
+    const entry = { id, source: FINDING_CODES[code].source, code, issue, head, state: 'new', first_seen: now, changed_at: now, ...(diagnostics ? { diagnostics: clone(diagnostics) } : {}), ...(kind ? {kind} : {}) };
     list.push(entry);
     byId.set(id, entry);
     changed = true;
@@ -558,7 +567,8 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     const issue = ISSUELESS_CODES.has(finding.code) ? null : finding.issue;
     if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
     add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null,
-      [...PAGE_CODES, 'ARCHIVE_COMMENT_UNTRUSTED', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null);
+      [...PAGE_CODES, 'ARCHIVE_COMMENT_UNTRUSTED', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null,
+      finding.code === 'CLOSING_COMMENT_MISSING' ? finding.kind : null);
   }
   for (const entry of complete ? list : []) {
     // Only the reconciler's complete successful redraw/readback settles a size finding. This also
@@ -633,7 +643,7 @@ function findingText(entry) {
     const d = entry.diagnostics;
     return `PASS_STOPPED #${entry.issue}: the last refresh stopped at ${d.phase.replace(/_/g, ' ')} (${d.done} of ${d.total} done); the next refresh picks up the rest`;
   }
-  return `${entry.code}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${FINDING_CODES[entry.code]?.next_action || ''}`;
+  return `${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${FINDING_CODES[entry.code]?.next_action || ''}`;
 }
 
 // A digest of the open findings and their states, to tell when the set changed.
@@ -1632,7 +1642,7 @@ function attentionBlockLines(attention, now) {
     `**${attentionLine(attention, now)}**`,
     ...open.slice(0, ATTENTION_SHOWN).map(entry => `- ${entry.state === 'acknowledged' ? '(acknowledged) ' : ''}${findingText(entry)}`),
     ...(open.length > ATTENTION_SHOWN ? [`- and ${open.length - ATTENTION_SHOWN} more: run programme.cjs attention`] : []),
-    ...(waiting.length ? ['', '**Waiting on you**', ...waiting.slice(0, WAITING_SHOWN).map(entry => `- ${entry.code}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}`),
+    ...(waiting.length ? ['', '**Waiting on you**', ...waiting.slice(0, WAITING_SHOWN).map(entry => `- ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}`),
       ...(waiting.length > WAITING_SHOWN ? [`- and ${waiting.length - WAITING_SHOWN} more: run programme.cjs attention`] : [])] : []),
   ];
 }
@@ -3243,6 +3253,7 @@ class GitHubMutator {
   }
 
   postComment(number, body) {
+    this.mutations += 1;
     return this.transport.request('POST', `repos/${this.repository}/issues/${number}/comments`, { body });
   }
 
@@ -3371,6 +3382,8 @@ const EFFECT_TEXT = {
   copy_child_lifecycle: effect => `Copy the observed issue lifecycle for #${effect.target.issue}`,
   add_native_children: effect => `Add ${effect.outcomes.length} observed native task(s) to #${effect.target.issue}'s catalogue`,
   advance_pr_watermark: effect => `Record the complete PR scan on #${effect.target.issue}`,
+  advance_closing_scan: effect => `Record closing scan progress on #${effect.target.issue}`,
+  post_closing_backstop: effect => `Append closing facts to ${effect.target.kind} #${effect.target.issue}`,
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
@@ -3396,6 +3409,7 @@ function describeEffect(effect) {
 
 // What a hold on an issue stops for the rest of a pass: its body, its links, or everything.
 function holdScope(kind) {
+  if (kind === 'post_closing_backstop') return 'closing';
   if (kind === 'set_parent_state' || kind === 'post_parent_repair') return 'lifecycle';
   if (['replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment'].includes(kind)) return 'body';
   if (kind === 'replace_pr_nav') return 'pr';
@@ -3462,6 +3476,8 @@ class Reconciler {
     this.toolkitVersion = toolkitVersion;
     this.threshold = Math.min(threshold, DEFAULT_THRESHOLD);
     this.refreshFacts = refreshFacts;
+    this.closing = reader?.transport ? new (require('./closing-comments.cjs').ClosingComments)({
+      transport:reader.transport, repository:binding.repository, pass:this.pass, screenSecrets }) : null;
   }
 
   loadParent(parentOverride) {
@@ -3532,7 +3548,10 @@ class Reconciler {
     }
     const prPages = new Map();
     for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
-    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery, additions, prGraph };
+    const closing = this.refreshFacts && !only ? this.closing.scan(parent,prGraph,this.now,excludedGraphPr) : null;
+    if (closing) this.pass.planning();
+    this.pass.phaseAt('planning');
+    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery, additions, prGraph, closing };
   }
 
   discoverGraph(parent, outcomes, children, prs, prCache, readPr) {
@@ -3551,8 +3570,9 @@ class Reconciler {
     let openListed = []; let openComplete = true;
     try { openListed = this.reader.graphPullRequests('open',spend); listed.push(...openListed); }
     catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; openComplete=false; }
-    try { listed.push(...this.reader.graphPullRequests('closed',spend,watermark)); }
-    catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; }
+    let closedListed=[], closedComplete=true;
+    try { closedListed=this.reader.graphPullRequests('closed',spend,watermark); listed.push(...closedListed); }
+    catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; closedComplete=false; }
     const references = referencedIssues(listed);
     const openReferences = referencedIssues(openListed);
     const linked = new Set();
@@ -3616,7 +3636,7 @@ class Reconciler {
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
       && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
-    return {discovery,histories,openReferences,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted};
+    return {discovery,histories,openReferences,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted,closedListed,closedComplete};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -4117,7 +4137,13 @@ class Reconciler {
         let done = null;
         let recoveredId = null, untrusted = null, rejectedArchive = null;
         const target = effect.target;
-        if (effect.kind === 'set_parent_state') {
+        if (effect.kind === 'post_closing_backstop') {
+          try {
+            const item=this.closing.item(target.kind,target.issue);
+            const result=this.closing.comments(item);
+            done=result.complete ? Boolean(result.facts || result.story) : null;
+          } catch(error) { if (STOPS_PASS.has(error.code)) throw error; done=null; }
+        } else if (effect.kind === 'set_parent_state') {
           try { const issue = this.reader.issue(target.issue); done = issue ? issue.state === target.state : null; } catch { done = null; }
         } else if (effect.kind === 'post_parent_repair') {
           try { done = this.reader.comments(target.issue).some(comment => comment.body.includes(target.marker)); } catch { done = null; }
@@ -4209,7 +4235,7 @@ class Reconciler {
       .map(([issue]) => findingId(FINDING_CODES.COMPLETED_PR_MISSING.source, 'COMPLETED_PR_MISSING', issue));
     const seen = () => findings.filter(finding => ATTENTION.has(finding.code) && (!only || PAGE_CODES.includes(finding.code)));
     const refreshHolds = !this.refreshFacts ? (parent.attention || []).filter(entry => {
-      if (['CLOSED_WITHOUT_ACCEPTANCE','PR_WITHOUT_TASK'].includes(entry.code)) return true;
+      if (['CLOSED_WITHOUT_ACCEPTANCE','PR_WITHOUT_TASK','CLOSING_COMMENT_MISSING'].includes(entry.code)) return true;
       if (entry.code !== 'CHILD_STATE_CONFLICT') return false;
       const doc=projected.get(entry.issue); const issue=observed.issues.get(entry.issue);
       return doc?.lifecycle === 'RETIRED' && issue?.state === 'open'
@@ -4221,7 +4247,8 @@ class Reconciler {
     const stoppedHolds = openFindings(parent.attention).filter(entry => entry.code === 'PASS_STOPPED').map(entry => entry.id);
     if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds,
-        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...(observed.prGraph?.holdWithoutTask || [])] });
+        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...(observed.prGraph?.holdWithoutTask || []),
+        ...(parent.attention || []).filter(entry=>entry.code==='CLOSING_COMMENT_MISSING' && !observed.closing?.checked.has(`${entry.kind}:${entry.issue}`)).map(entry=>entry.id)] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
     const now = this.now();
@@ -4256,6 +4283,7 @@ class Reconciler {
   }
 
   plan({ issue: only = null, parentOverride = null, inventory = null } = {}) {
+    this.closing?.beginPass();
     this.pass.phaseAt('planning');
     this.planning = true;
     try { return this.planWithinBudget({ issue: only, parentOverride, inventory }); }
@@ -4293,6 +4321,24 @@ class Reconciler {
       parent = {...parent,outcomes:[...parent.outcomes,...observed.additions]};
     }
     if (observed.prGraph?.advance) effects.push({kind:'advance_pr_watermark',target:{issue:parent.parent_issue},watermark:observed.prGraph.scanStarted});
+    if (observed.closing) {
+      const closing=observed.closing;
+      findings.push(...closing.seen);
+      if (JSON.stringify(canonical(closing.incomplete)) !== JSON.stringify(canonical(parent.private?.closing_scan || []))
+        || closing.issueWatermark !== parent.private?.graph_issue_watermark) effects.push({kind:'advance_closing_scan',target:{issue:parent.parent_issue},pending:closing.incomplete,watermark:closing.issueWatermark || null});
+      let prepared=0;
+      for (const item of closing.due) {
+        if (prepared>=require('./closing-comments.cjs').POST_CAP) break;
+        try {
+          const body=this.closing.facts(item,children);
+          effects.push({kind:'post_closing_backstop',target:{issue:item.number,kind:item.kind,closed_at:item.closed_at,body}});
+          prepared++;
+        } catch(error) {
+          if (STOPS_PASS.has(error.code)) throw error;
+          closing.errors.push(`Facts for ${item.kind} #${item.number} could not be prepared; retry next pass.`);
+        }
+      }
+    }
     findings.push(...(observed.prGraph?.withoutTask || []).map(pr=>({code:'PR_WITHOUT_TASK',issue:pr.number})));
     this.diffParentLifecycle(parent, observed, effects, findings, holds);
     const desiredDocs = new Map();
@@ -5079,6 +5125,28 @@ class Reconciler {
     }
 
     flush();
+    phase('closing', plan.effects.filter(entry=>entry.kind==='post_closing_backstop').length);
+    for (const effect of plan.effects.filter(entry=>entry.kind==='post_closing_backstop')) {
+      if (this.pass.stop(QUEUE_RESERVE_MS)) break;
+      requireRefresh();
+      withIntent(effect,()=>{
+        const item=this.closing.item(effect.target.kind,effect.target.issue);
+        if (item.raw.state!=='closed' || item.closed_at!==effect.target.closed_at) return {outcome:'NOT_DONE',detail:'The closing item changed; refresh again.'};
+        if (item.kind==='pr' && excludedGraphPr({author:item.raw.user?.login,branch:item.raw.head?.ref})) return {outcome:'DONE'};
+        const before=this.closing.comments(item);
+        if (!before.complete) return {outcome:'UNKNOWN',detail:'The closing comment request cap was reached; retry next pass.'};
+        if (before.story || before.facts) return {outcome:'DONE'};
+        const body=this.closing.guard(effect.target.body);
+        const fresh=this.closing.item(effect.target.kind,effect.target.issue);
+        if (fresh.raw.state!=='closed' || fresh.closed_at!==item.closed_at) return {outcome:'NOT_DONE',detail:'The item reopened or closed again; refresh before posting.'};
+        if (this.pass.stop(QUEUE_RESERVE_MS)) return {outcome:'NOT_DONE',detail:'The closing post waits for the next pass.'};
+        guard();
+        this.mutator.postComment(effect.target.issue,body);
+        const after=this.closing.comments(item);
+        return {outcome:after.complete && (after.facts || after.story) ? 'DONE':'UNKNOWN'};
+      });
+    }
+    flush();
     if (plan.complete && !holds.length && !this.pass.stop() && verifiedBodies.size) {
       if ((parentDoc.attention || []).some(entry => canResolveSize(entry))) {
         finalRedraw = true; redrawing = true; renderPages(true); redrawing = false;
@@ -5095,7 +5163,22 @@ class Reconciler {
         } });
       }
     }
+    let closingSaved=true;
+    for (const effect of plan.effects.filter(entry=>entry.kind==='advance_closing_scan')) {
+      if (this.pass.stop()) { closingSaved=false; break; }
+      requireRefresh();
+      try {
+        const result=mutateDoc('parent',parentNumber,{change:doc=>{
+          doc.private={...doc.private,closing_scan:effect.pending,...(effect.watermark ? {graph_issue_watermark:effect.watermark}:{})}; return doc;
+        }});
+        record(effect,result.outcome==='NOOP'?'NOOP':'DONE');
+      } catch(error) {
+        if(STOPS_PASS.has(error.code)) throw error;
+        closingSaved=false; hold(effect,error.code || 'STATE_WRITE_FAILED',error.message); record(effect,'HELD',error.message);
+      }
+    }
     for(const effect of plan.effects.filter(entry=>entry.kind==='advance_pr_watermark')) {
+      if (!closingSaved) break;
       requireRefresh();
       if(!plan.complete || holds.length || this.pass.stop()) {record(effect,'SKIPPED','incomplete pass keeps the prior watermark');continue;}
       try {
@@ -5154,6 +5237,8 @@ class Reconciler {
       holds: plan.holds,
       results: [],
       writes: { state: 0, github: 0 },
+      ...(plan.observed?.closing ? {closing:{complete:plan.observed.closing.complete && !plan.observed.closing.incomplete.length && !plan.observed.closing.errors.length,
+        incomplete:plan.observed.closing.incomplete.map(item=>({kind:item.kind,number:item.number})),planning_requests:plan.observed.closing.requests,requests:plan.observed.closing.requests,errors:plan.observed.closing.errors}} : {}),
       ...(inventory ? { inventory: { complete: inventory.complete, reason: inventory.reason, counts: inventoryCounts(inventory) } } : {}),
     };
     if (apply && plan.stopped && plan.parent) {
@@ -5175,6 +5260,7 @@ class Reconciler {
       report.attention = attention;
       report.writes = { state: this.store.writes - storeWrites, github: this.mutator.mutations - githubWrites };
     }
+    if (report.closing) report.closing.requests=this.closing.requests;
     report.summary = !plan.parent ? 'No parent state document'
       : !report.effects.length && !report.holds.length && !plan.resolutions.length ? 'No changes'
         : apply ? `${report.results.filter(entry => entry.outcome === 'DONE').length} of ${report.results.length} effect(s) done, ${report.holds.length} hold(s)`
@@ -5230,7 +5316,7 @@ module.exports = Object.freeze({
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
-  SECRET_SHAPES, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
+  SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   RefreshBudget, REFRESH_BUDGET_MS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,

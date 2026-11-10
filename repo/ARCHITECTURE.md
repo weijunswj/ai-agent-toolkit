@@ -2,7 +2,7 @@
 
 A compact, pointer-only map of this repository. Rules live in [CONTROLLER.md](CONTROLLER.md), the root `AGENTS.md` and the sources named below; this file only says where things are. Update it in the change that moves what it describes; `repo/tests/repo-map.test.cjs` checks that every path listed here exists.
 
-Last reviewed against `main` `19703c5`.
+Last reviewed against `main` `71b138c`.
 
 ## Parts
 
@@ -86,3 +86,5 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 ## Ownership
 
 The repository owner approves merges, releases and live effects. The appointed controller owns programme records and review routing (the programme parent issue named in `.github/toolkit-programme.json`); builders own their admitted change through UAT readiness.
+
+Closing stories and bounded gap scans: `skills/github-program-reconciler/scripts/closing-comments.cjs`, composed by `skills/github-program-reconciler/scripts/programme-state.cjs` and its CLI; the parent intent journal owns backstop posts. Agent guidance: `skills/repository-agent-rules/repo-local/docs/agent-playbooks/closing-comments.md`.

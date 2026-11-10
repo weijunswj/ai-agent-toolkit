@@ -131,6 +131,18 @@ class FakeGitHub {
     }
     if (!(match = /^repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path)) || match[1].toLowerCase() !== this.repository.toLowerCase()) return ok(404, { message: 'Not Found' });
     const rest = match[2];
+    if (rest === 'issues' && method === 'GET') {
+      const page = Number(params.get('page') || 1);
+      const rows = [...this.issues.values()].filter(issue => issue.state === params.get('state'))
+        .sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at) || b.number-a.number);
+      return ok(200, rows.slice((page-1)*100,page*100).map(issue=>this.issueJson(issue)));
+    }
+    if ((match = /^pulls\/(\d+)$/.exec(rest)) && method === 'GET') {
+      const pr=this.prs.get(Number(match[1]));
+      return pr ? ok(200,{number:pr.number,title:pr.title || '',body:pr.body,state:pr.merged || pr.state==='CLOSED' ? 'closed':'open',
+        closed_at:pr.closedAt || pr.mergedAt || null,merged_at:pr.mergedAt,merge_commit_sha:pr.merged ? pr.head:null,
+        user:{login:pr.author || 'fixture-owner'},head:{ref:pr.branch || '',repo:pr.headRepository===null ? null : {full_name:pr.headRepository || this.repository}}}) : ok(404,{});
+    }
     if ((match = /^issues\/comments\/(\d+)$/.exec(rest)) && ['GET', 'PATCH'].includes(method)) {
       const comment = this.comments.get(Number(match[1]));
       if (!comment) return ok(404, { message: 'Not Found' });
@@ -156,12 +168,12 @@ class FakeGitHub {
       return ok(200, this.issueJson(issue));
     }
     if ((match = /^issues\/(\d+)\/events$/.exec(rest))) {
-      const issue = this.issues.get(Number(match[1]));
+      const issue = this.issues.get(Number(match[1])) || this.prs.get(Number(match[1]));
       const page = Number(params.get('page') || 1);
       return issue ? ok(200, (issue.events || []).slice((page - 1) * 100, page * 100)) : ok(404, {});
     }
     if ((match = /^issues\/(\d+)\/comments$/.exec(rest))) {
-      const issue = this.issues.get(Number(match[1]));
+      const issue = this.issues.get(Number(match[1])) || this.prs.get(Number(match[1]));
       if (!issue) return ok(404, { message: 'Not Found' });
       if (method === 'POST') {
         const id = this.addComment(issue.number, { body: body.body });
@@ -299,10 +311,13 @@ class FakeGitHub {
         return { __typename: 'PullRequest', number: value, state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
           mergeCommit: pr?.merged ? {oid:pr.head} : null, repository: { nameWithOwner: this.repository } };
       })();
-      for (const [, alias, number] of body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)) {
+      const includeClosed=/includeClosedPrs:\s*true/.test(body.query) || body.variables?.includeClosedPrs===true;
+      const fields=[...body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)].map(([,alias,number])=>[alias,Number(number)]);
+      if (/issue\(number:\s*\$number\)/.test(body.query)) fields.push(['issue',body.variables.number]);
+      for (const [alias, number] of fields) {
         const links = this.issuePrLinks.get(Number(number)) || {};
         repository[alias] = this.issues.has(Number(number)) ? {
-          closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node) },
+          closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node).filter(pr=>includeClosed || (!pr.merged && pr.state==='OPEN')) },
           timelineItems: { pageInfo: { hasNextPage: links.timelineTruncated || (links.timeline || []).length > 100 }, nodes: (links.timeline || []).slice(0,100).map(value => ({ source: node(value) })) },
         } : null;
       }

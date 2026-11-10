@@ -124,6 +124,8 @@ Stop before SSHing into a real server, deploying, restarting services, changing 
 
 ## Match: PR Review, CI, Or Merge-Readiness Work
 
+Closing, merging or asking the owner to merge a PR or issue: read [Closing comments](../../../skills/repository-agent-rules/repo-local/docs/agent-playbooks/closing-comments.md).
+
 Triggers: PR review, CI status, merge readiness, test failure verification, diff analysis, PR feedback, check runs, workflow logs, or release readiness.
 
 Read: `repo/docs/agent-playbooks/pr-review-and-ci.md`.

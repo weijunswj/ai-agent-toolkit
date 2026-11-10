@@ -360,7 +360,8 @@ test('binding documentation scopes opt-in to the reconciler while governed issue
       assert.doesNotMatch(text, /Toolkit writes no issues, comments or records|without the binding it does nothing/i, file);
       assert.match(text, /binding does not change the Toolkit-governed rules[^\n]*or their issue records/, file);
       assert.match(text, /without that block get no governed issue writes/i, file);
-      assert.match(text, /every `programme\.cjs` command refuses without it/, file);
+      assert.match(text, /programme state commands refuse without it/i, file);
+      assert.match(text, /closing-comment.*(?:any GitHub repository|governance is off)/, file);
     }
   }
 });
