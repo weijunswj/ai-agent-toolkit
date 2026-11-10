@@ -56,7 +56,7 @@ test('formatting preview uses the real CLI, renders linked pages and emits no ef
   assert.deepEqual(report.writes, { state: 0, github: 0 });
   const page = (kind, number) => report.pages.find(item => item.kind === kind && item.number === number).body;
   const parent = page('parent', 1);
-  assert.deepEqual(parent.match(/^# .+$/gm), ['# CURRENT', '# PROGRAMME GRAPH', '# AGENT CONTEXT', '# COMMENT TRACE', '# MORE', '# Programme notes']);
+  assert.deepEqual(parent.match(/^# .+$/gm), ['# CURRENT', '# PROGRAMME GRAPH', '# AGENT CONTEXT', '# COMMENT TRACE', '# More', '# Programme notes']);
   assert.match(parent, /\|#2\|#13\|/);
   assert.match(parent, /\|#3\|#15\|/);
   assert.match(parent, /\|#4\|#11\|/);
@@ -65,10 +65,15 @@ test('formatting preview uses the real CLI, renders linked pages and emits no ef
   assert.ok(context.includes(pointer));
   assert.ok(!trace.includes('issuecomment-' + ctx) && !trace.includes('issuecomment-' + index));
   assert.ok(trace.includes('issuecomment-' + old) && trace.includes('issuecomment-' + fresh));
+  assert.match(trace, /\*\*Agent context decisions:\*\*/);
   assert.match(trace, /replaced by/i);
   const task = page('issue', 2);
-  assert.deepEqual(task.split('\r\n').filter(line => line.startsWith('# ')), ['# PATH', '# STATUS', '# COMMENT TRACE', '# PROBLEM', '# FIX', '# MORE', '# Design notes']);
+  assert.deepEqual(task.split('\r\n').filter(line => line.startsWith('# ')), ['# PATH', '# STATUS', '# COMMENT TRACE', '# PROBLEM', '# FIX', '# More', '# Design notes']);
   assert.ok(task.includes('Keep this note.  \r\n'));
+  assert.deepEqual(report.pages.find(item => item.kind === 'issue' && item.number === 2).sections, {
+    generated: ['PATH', 'STATUS', 'COMMENT TRACE'], required: ['PROBLEM', 'FIX'], optional: ['More'],
+  });
+  for (const item of report.pages) assert.doesNotMatch(item.body, /Section legend|Section on the page \| Ownership|Proposed Markdown/);
   assert.match(task, /#11\]\([^)]+\) DRAFT[\s\S]*#10\]\([^)]+\) OPEN[\s\S]*#12\]\([^)]+\) MERGED[\s\S]*#13\]\([^)]+\) CLOSED/);
   assert.match(page('issue', 4), /# PATH[\s\S]*# STATUS[\s\S]*# COMMENT TRACE[\s\S]*# DONE WHEN/);
   assert.deepEqual(report.pages.filter(item => item.kind === 'pr').map(item => item.number).sort((a, b) => a - b), [10, 11]);
@@ -82,7 +87,8 @@ test('formatting preview uses the real CLI, renders linked pages and emits no ef
   const scoped = JSON.parse(run('--issue', '2', '--json').output);
   assert.ok(!scoped.pages.some(item => item.kind === 'issue' && item.number !== 2));
   assert.match(scoped.pages.find(item => item.kind === 'pr' && item.number === 11).body, /\/issues\/4/);
-  assert.match(run().output, /Read-only programme page preview/);
+  const readable = run().output;
+  assert.match(readable, /Read-only programme page preview[\s\S]*Parent programme issue #1[\s\S]*Child task issue #2[\s\S]*Open task pull request #10/);
   assert.ok(github.calls.some(call => call.path === 'graphql' && call.body.variables.number === 13));
   const originals = report.pages.map(({ kind, number, body }) => {
     const entry = (kind === 'pr' ? github.prs : github.issues).get(number);
@@ -123,6 +129,7 @@ test('formatting preview uses the real CLI, renders linked pages and emits no ef
   const apply = f.reconciler().run({ apply: true });
   assert.equal(apply.mode, 'apply');
   assert.ok(!Object.hasOwn(apply, 'pages'));
+  assert.match(github.issues.get(1).body, /\*\*Agent context:\*\*/);
   assert.ok(!/^# PATH$/m.test(github.issues.get(2).body));
   assert.equal(github.prs.get(11).body, raw);
   assert.equal(patchCount(github, 11), 0);

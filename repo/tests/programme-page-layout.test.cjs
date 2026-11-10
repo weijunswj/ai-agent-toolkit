@@ -9,6 +9,51 @@ const preview = require(path.join(ROOT, 'skills/github-program-reconciler/script
 const previewHelpers = { versionNewer: (left, right) => Number(left.split('.')[0]) > Number(right.split('.')[0]) };
 const previewBlocks = [['NAV', '# PATH'], ['STATE', '# STATUS'], ['TRACE', '# COMMENT TRACE']];
 
+test('formatting preview refines the More heading and preserves the bytes of existing optional headings', () => {
+  const authored = '# MY EXISTING NOTES  \r\n\r\nKeep this wording.  \r\n\r\n## This is the section\r\nOptional text.\r\n';
+  const render = source => preview.pageBody(preview.splitBody(source, ['NAV', 'STATE', 'TRACE'], '3.59.0', previewHelpers),
+    previewBlocks, new Map(), '3.59.0');
+  const proposed = render('# PROBLEM\r\nA report is hard to share.\r\n\r\n# MORE\r\n\r\n' + authored);
+  assert.match(proposed, /\r\n# More\r\n/);
+  assert.doesNotMatch(proposed, /\r\n# MORE\r\n/);
+  assert.ok(proposed.includes(authored));
+  assert.equal(render(proposed), proposed);
+});
+
+test('formatting preview refines the readable report with page boundaries and section ownership outside the body', () => {
+  const proposed = '# PATH\n\n~~~~markdown\n# Example\n~~~~\n\n# More\n\nOptional notes.\n';
+  const report = preview.formatPreview({ repository: 'example.test/app', holds: [], pages: [
+    { kind: 'parent', number: 1, status: 'proposed', body: '# CURRENT\n', sections: { generated: ['CURRENT'], required: [], optional: [] } },
+    { kind: 'issue', number: 2, status: 'proposed', body: '# PROBLEM\n', sections: { generated: [], required: ['PROBLEM'], optional: [] } },
+    { kind: 'pr', number: 3, status: 'proposed', body: proposed, sections: { generated: ['PATH'], required: [], optional: ['More'] } },
+  ] });
+  assert.match(report, /## Section legend[\s\S]*Generated[\s\S]*Required authored[\s\S]*Optional/);
+  assert.deepEqual(report.match(/^## \d+\. .+$/gm), [
+    '## 1. Parent programme issue #1 (proposed)',
+    '## 2. Child task issue #2 (proposed)',
+    '## 3. Open task pull request #3 (proposed)',
+  ]);
+  assert.match(report, /\| PROBLEM \| Required authored \|/);
+  assert.match(report, /\| More \| Optional \|/);
+  assert.ok(report.includes('\n~~~~~markdown\n' + proposed + '~~~~~\n'));
+});
+
+test('formatting preview refines a legacy Agent context decision label without moving its link into background', () => {
+  const f = pageFixture(state);
+  const background = f.github.addComment(12, { body: 'Agent context\n---\nBackground for the fixture.' });
+  const decision = f.github.addComment(12, { body: 'Agent context\n---\nTEST-101 Use the export format.' });
+  f.github.issues.get(12).body += '\n[Agent context](https://github.com/example.test/app/issues/12#issuecomment-' + background + ')\n';
+  const report = f.make().previewPages();
+  assert.deepEqual(report.holds, []);
+  const body = report.pages[0].body;
+  const context = state.findStateBlock(body, 'CONTEXT').block.body;
+  const trace = state.findStateBlock(body, 'TRACE').block.body;
+  assert.ok(context.includes('#issuecomment-' + background));
+  assert.ok(!context.includes('#issuecomment-' + decision));
+  assert.equal(body.split('#issuecomment-' + background).length - 1, 1);
+  assert.match(trace, new RegExp('\\*\\*Agent context decisions:\\*\\* .*#issuecomment-' + decision));
+});
+
 test('formatting preview preserves fenced markers, nested HTML, Markdown references and authored line endings', () => {
   const eol = '\r\n';
   const example = ['~~~md', '# FIX', state.renderBlock('Example', '3.59.0', 'STATE'), '~~~'].join('\n');
@@ -54,11 +99,11 @@ test('formatting preview measures the whole body and keeps exact overflow bytes 
     assert.equal(planned.status, 'proposed');
     assert.equal(planned.overflow.length, 1);
     const [span] = planned.overflow;
-    assert.equal(span.section, 'MORE');
+    assert.equal(span.section, 'More');
     assert.equal(span.text, source.slice(span.start, span.end));
     assert.equal(span.sha256, state.sha256(span.text));
     assert.ok(span.comment.endsWith(span.text));
-    assert.match(planned.body, /# MORE[\s\S]*#preview-comment-more-pr-7-1[\s\S]*Closes #9/);
+    assert.match(planned.body, /# More[\s\S]*#preview-comment-more-pr-7-1[\s\S]*Closes #9/);
   }
   for (const held of [run(limit, 0), run(limit, 1, 150), run(1)]) {
     assert.equal(held.status, 'held');

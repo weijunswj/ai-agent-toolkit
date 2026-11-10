@@ -1560,7 +1560,8 @@ function traceGroups(trace, topic = null) {
 
 // A line's label, escaped once: its topic as written; for the untopiced line, a task page's own
 // task name, else "Other comments".
-function groupLabel(group, topic) {
+function groupLabel(group, topic, preview = false) {
+  if (preview && group.tag === 'AGENT CONTEXT') return 'Agent context decisions';
   return publicText(group.tag ? group.label || group.tag : topic || OTHER_COMMENTS);
 }
 
@@ -1579,7 +1580,7 @@ function traceTokens(group, base) {
 // The comment trace an issue body carries: one line per topic, listing that topic's index comments
 // and then every comment none of them lists, each as a link that opens the comment. With
 // `repository`, every link is a full URL; `topic` is a task page's own task name, as written.
-function renderTraceBlockBody(number, trace, repository = '', topic = null, parentPage = false) {
+function renderTraceBlockBody(number, trace, repository = '', topic = null, parentPage = false, preview = false) {
   const base = issueUrl(repository, number);
   const lines = [
     ...(parentPage ? ['# COMMENT TRACE'] : []),
@@ -1589,7 +1590,7 @@ function renderTraceBlockBody(number, trace, repository = '', topic = null, pare
   ];
   const groups = traceGroups(trace, topic);
   for (const [at, directory] of (trace.directories || []).entries()) lines.push(`- [topic directory ${at + 1}](${commentLink(base, directory.id)})`);
-  for (const group of groups) lines.push(`- **${groupLabel(group, topic)}:** ${traceTokens(group, base).join(' · ')}`);
+  for (const group of groups) lines.push(`- **${groupLabel(group, topic, preview)}:** ${traceTokens(group, base).join(' · ')}`);
   if (!groups.length && !trace.directories?.length) lines.push('- No comments yet.');
   return lines.join('\n');
 }
@@ -4034,7 +4035,7 @@ class Reconciler {
     const threshold = layout.threshold ?? this.threshold;
     const trace = layout.trace ? layout.trace(comments) : traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
     const build = entries => {
-      const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic, number === this.binding.parent_issue);
+      const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic, number === this.binding.parent_issue, layout.preview);
       if (layout.build) {
         const sections = { stateBody, navBody, currentBody, traceBody, context: layout.context };
         return { body: layout.build(sections), traceBody, sections };
@@ -4079,7 +4080,7 @@ class Reconciler {
       // Topic links can themselves fill the page. Page that directory, preserving every topic
       // line and leaving only root links. Existing directories are never nested in new ones.
       overflow.length = 0;
-      const lines = traceGroups(trace, topic).map(group => `- **${groupLabel(group, topic)}:** ${traceTokens(group, base).join(' · ')}`);
+      const lines = traceGroups(trace, topic).map(group => `- **${groupLabel(group, topic, layout.preview)}:** ${traceTokens(group, base).join(' · ')}`);
       if (lines.length) {
         const pages = indexCommentBodies(number, lines, '9'.repeat(16), null, null, true);
         const part = { directory: true, tag: null, lines };

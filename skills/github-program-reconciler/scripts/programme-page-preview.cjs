@@ -5,6 +5,12 @@ const audit = require('./decision-trace-audit.cjs');
 const { commentTag } = require('./decision-tags.cjs');
 
 const SECTIONS = ['PROBLEM', 'FIX', 'IF WE SKIP', 'DONE WHEN', 'NOT IN SCOPE'];
+const MORE = 'More';
+const PAGES = {
+  parent: { label: 'Parent programme issue', generated: ['CURRENT', 'PROGRAMME GRAPH', 'AGENT CONTEXT', 'COMMENT TRACE'] },
+  issue: { label: 'Child task issue', generated: ['PATH', 'STATUS', 'COMMENT TRACE'] },
+  pr: { label: 'Open task pull request', generated: ['PATH', 'STATUS'] },
+};
 const LABELS = new Map([...SECTIONS.map(label => [label, label]), ['THE PROBLEM', 'PROBLEM'], ['THE FIX', 'FIX'], ['IF WE SKIP IT', 'IF WE SKIP']]);
 const BLOCKS = ['STATE', 'TRACE', 'NAV', 'CURRENT', 'CONTEXT'];
 const fail = (code, detail) => { throw new state.ProgrammeError(code, detail); };
@@ -196,7 +202,7 @@ function pageBody(layout, generated, moved, version) {
   }
   if (extra.length) {
     const more = extra.reduce((body, span) => append(body, moved.get(span)?.link || span.text), '');
-    text = append(text, '# MORE' + eol + (/^\r?\n/.test(more) ? '' : eol) + more);
+    text = append(text, '# ' + MORE + eol + (/^\r?\n/.test(more) ? '' : eol) + more);
   }
   return text.endsWith(eol) ? text : text + eol;
 }
@@ -223,7 +229,7 @@ function previewPage(source, layout, kind, number, project, budget, limit, maxCo
       const envelope = '<!-- page-preview section=MORE start=' + span.start + ' end=' + span.end + ' sha256=' + hash + ' -->\n';
       if (envelope.length + span.text.length >= maxComment || span.text.length <= 96) continue;
       const anchor = 'more-' + kind + '-' + number + '-' + id;
-      moved.set(span, { section: 'MORE', anchor, link: '[Extra text, part ' + id + '](' + placeholder(anchor) + ')', start: span.start, end: span.end,
+      moved.set(span, { section: MORE, anchor, link: '[Extra text, part ' + id + '](' + placeholder(anchor) + ')', start: span.start, end: span.end,
         sha256: hash, text: span.text, comment: envelope + span.text });
       result = attempt();
       if (fits()) break;
@@ -342,7 +348,10 @@ function previewPages(reconciler, only, helpers) {
     if (errors.length) fail('PAGE_CONTENT_HELD', 'A secret-shaped value was detected. Review the page and continuation inputs before previewing their text.');
     report.pages.push(page);
     if (page.status === 'held') hold(kind, number, page.code, page.detail);
-    else budget -= page.overflow.length;
+    else {
+      budget -= page.overflow.length;
+      page.sections = { generated: [...PAGES[kind].generated], required: SECTIONS.filter(name => layout.specs.has(name)), optional: layout.extra.length ? [MORE] : [] };
+    }
   };
   const foreignParent = issue => typeof issue?.parent === 'string' || registered.has(issue?.parent) && issue.parent !== parentNumber;
   const sourceFor = (kind, number) => {
@@ -444,19 +453,44 @@ function previewPages(reconciler, only, helpers) {
   return report;
 }
 
+function markdownSample(text) {
+  let length = 3;
+  for (const [, tildes] of text.matchAll(/^ {0,3}(~{3,})/gm)) length = Math.max(length, tildes.length + 1);
+  const fence = '~'.repeat(length);
+  return fence + 'markdown\n' + text + (text.endsWith('\n') ? '' : '\n') + fence;
+}
+
 function formatPreview(report) {
-  const lines = ['Read-only programme page preview for ' + report.repository + '.',
-    'Comment placeholders are local to this report. Programme state writes: 0. GitHub writes: 0.'];
-  for (const page of report.pages) {
-    lines.push('', (page.kind === 'pr' ? 'Pull request' : page.kind === 'parent' ? 'Programme' : 'Task') + ' #' + page.number + ' (' + page.status + ')');
-    if (page.body !== undefined) lines.push('', page.body);
+  const lines = ['# Read-only programme page preview', '',
+    'Repository ' + report.repository + '. Programme state writes: 0. GitHub writes: 0.', '',
+    '## Section legend', '',
+    '| Section ownership | Heading style | What goes there |',
+    '| --- | --- | --- |',
+    '| Generated | ALL CAPS | Toolkit supplies the content. |',
+    '| Required authored | ALL CAPS | The author supplies the standard task details. The preview lists the sections present. |',
+    '| Optional | Sentence case for new headings | Extra notes go under More. Existing authored headings keep their wording and case. |', '',
+    'The page titles, ownership tables and continuation links below are review labels. Each proposed body is shown as Markdown.'];
+  for (const [index, page] of report.pages.entries()) {
+    lines.push('', '---', '', '## ' + (index + 1) + '. ' + PAGES[page.kind].label + ' #' + page.number + ' (' + page.status + ')');
+    if (page.body !== undefined) {
+      const { generated, required, optional } = page.sections;
+      lines.push('', '| Section on the page | Ownership |', '| --- | --- |',
+        ...generated.map(name => '| ' + name + ' | Generated |'),
+        ...required.map(name => '| ' + name + ' | Required authored |'),
+        ...optional.map(name => '| ' + name + ' | Optional |'),
+        '', '### Proposed Markdown', '', markdownSample(page.body));
+    }
+    if (page.overflow?.length) {
+      lines.push('', '### Proposed continuations', '',
+        ...page.overflow.map((part, at) => '- [' + part.section + ', part ' + (at + 1) + '](' + placeholder(part.anchor) + ')'));
+    }
     for (const part of page.overflow || []) {
-      lines.push('<a id="' + placeholder(part.anchor).slice(1) + '"></a>',
+      lines.push('', '<a id="' + placeholder(part.anchor).slice(1) + '"></a>', '',
         'Proposed continuation in ' + part.section + (part.start === undefined ? '' : ' (UTF-16 source offsets ' + part.start + ' to ' + part.end + ', SHA-256 ' + part.sha256 + ')'),
-        '', part.text || part.comment);
+        '', markdownSample(part.text || part.comment));
     }
   }
-  for (const hold of report.holds) lines.push('', hold.target + ' ' + hold.code + '. ' + hold.detail);
+  if (report.holds.length) lines.push('', '## Holds', '', ...report.holds.map(hold => '- ' + hold.target + ' ' + hold.code + '. ' + hold.detail));
   return lines.join('\n') + '\n';
 }
 
