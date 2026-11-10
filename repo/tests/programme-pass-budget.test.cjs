@@ -113,6 +113,46 @@ function cliRun(f, lockFile, extra = {}, argv = ['refresh', '--json']) {
   return { code, report: JSON.parse(output) };
 }
 
+for (const requestMs of [500, 750]) test(`verification at the measured 84-row footprint with ${requestMs} ms per request`, t => {
+  const f = fixture();
+  for (let number = 900; number < 1105; number++) {
+    f.github.addPr(number, { head: 'a'.repeat(40), merged: true, mergedAt: '2026-11-01T00:00:00Z' });
+  }
+  f.github.prs.get(900).body = 'Refs #500';
+  let elapsed = 0;
+  f.github.intercept(() => { elapsed += requestMs; });
+  const { code, report } = cliRun(f, null, { passClock: () => Date.parse(NOW) + elapsed });
+  const calls = f.github.calls.slice(f.before.calls);
+  const stats = {
+    request_ms: requestMs,
+    requests: calls.length,
+    inventory_pages: calls.filter(call => call.path === 'graphql' && call.body.query.includes('issues(states: OPEN')).length,
+    closed_pr_pages: calls.filter(call => call.path.includes('pulls?state=closed')).length,
+    task_pr_batches: calls.filter(call => call.path === 'graphql' && call.body.query.includes('closedByPullRequestsReferences')).length,
+    parent_write_request: calls.findIndex(call => call === parentWrites(calls)[0]) + 1,
+    state_commits: f.github.commits - f.before.commits,
+    github_writes: f.github.mutations() - f.before.mutations,
+    elapsed_ms: elapsed,
+  };
+  t.diagnostic(JSON.stringify(stats));
+  assert.equal(stats.closed_pr_pages, 3);
+  assert.equal(stats.task_pr_batches, 5);
+  assert.ok(stats.parent_write_request > 0);
+  if (requestMs === 500) {
+    assert.equal(code, 0);
+    assert.equal(report.outcome, 'COMPLETE');
+    assert.ok(stats.elapsed_ms < state.REFRESH_BUDGET_MS - 120000, 'fits before the queue reserve');
+  } else {
+    assert.equal(code, 1);
+    assert.equal(report.outcome, 'HELD');
+    assert.ok(report.holds.some(hold => hold.code === 'PASS_STOPPED'));
+    f.github.hooks = [];
+    assert.equal(cliRun(f, null).report.outcome, 'COMPLETE');
+  }
+  assert.match(f.github.issues.get(500).body, /#900/);
+  assert.match(f.github.issues.get(816).body, /BEGIN STATE/);
+});
+
 test('A-T4: transport failure and a dead lock leave interrupted progress, then recover', () => {
   for (const mode of ['transport', 'dead_lock']) {
     const f = fixture();

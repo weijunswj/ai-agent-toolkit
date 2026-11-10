@@ -105,17 +105,69 @@ test('fix1 M1 M2: a controller-close conflict stays acknowledged through ordinar
   f.run(); assert.equal(f.parent().attention.find(e=>e.id===entry.id).state,'acknowledged');
 });
 
-test('fix1 M3: a seeded scan stops at its overlap before 1000 old closed PRs',()=>{
+test('verification finds an old PR edited during an outage even behind its saved bookmark', () => {
+  const f = fixture();
+  for (let n = 100; n < 200; n++) pr(f, n, { merged: true, mergedAt: '2026-11-01T00:00:00Z' });
+  const edited = [20, 21, 22];
+  for (const number of edited) pr(f, number, { merged: true, mergedAt: '2026-11-01T00:00:00Z' });
+  pr(f, 23, { body: 'Refs #2' });
+  f.run();
+  const watermark = Date.parse(f.parent().private.graph_pr_watermark);
+  // One edit is immediately older than the old cutoff, one is exactly at it, and one is newer.
+  for (const [index, number] of edited.entries()) {
+    Object.assign(f.github.prs.get(number), { body: 'Refs #2',
+      updated_at: new Date(watermark - 5 * 60000 + index - 1).toISOString() });
+  }
+  const boundary = new Date(watermark).toISOString();
+  Object.assign(f.github.prs.get(23), { state: 'CLOSED', closedAt: boundary, updated_at: boundary });
+  f.time(epoch + 8 * 3600000);
+  const inventory = { complete: true, issues: [], findings: [] };
+  const report = f.pass().run({ apply: true, inventory });
+  assert.equal(report.outcome, 'COMPLETE');
+  const history = f.child(2).prs;
+  assert.deepEqual(history.map(entry => entry.number).sort((a, b) => a - b), [...edited, 23]);
+  assert.equal(history.find(entry => entry.number === 23).state, 'CLOSED');
+  assert.match(f.github.issues.get(2).body, /#20/);
+  assert.equal(f.pass().run({ apply: true, inventory }).summary, 'No changes');
+});
+
+test('verification holds when a PR moves across the list page boundary during the read', () => {
+  const f = fixture();
+  f.run();
+  const before = f.parent().private.graph_pr_watermark;
+  for (let n = 100; n <= 200; n++) pr(f, n, { state: 'CLOSED' });
+  f.time(epoch + 3600000);
+  f.github.intercept(call => {
+    if (call.method === 'GET' && call.path.includes('pulls?state=closed') && call.path.endsWith('page=2')) {
+      Object.assign(f.github.prs.get(100), { updated_at: new Date(epoch + 1).toISOString(), body: 'Refs #2' });
+    }
+  });
+  const inventory = { complete: true, issues: [], findings: [] };
+  const incomplete = f.pass().run({ apply: true, inventory });
+  assert.equal(incomplete.outcome, 'INCOMPLETE');
+  assert.ok(incomplete.incomplete.includes('GRAPH_OBSERVATION_INCOMPLETE'));
+  assert.equal(f.parent().private.graph_pr_watermark, before);
+  assert.deepEqual(f.child(2).prs || [], []);
+  f.github.hooks = [];
+  const recovered = f.pass().run({ apply: true, inventory });
+  assert.equal(recovered.outcome, 'COMPLETE');
+  assert.deepEqual(f.child(2).prs.map(entry => entry.number), [100]);
+});
+
+test('a full scan that hits the closed PR page limit reports incomplete and retains the bookmark',()=>{
   const f=fixture(); f.run();
   for(let n=100;n<1100;n++) pr(f,n,{merged:true,mergedAt:'2026-11-01T00:00:00Z'});
   pr(f,20,{merged:true,mergedAt:'2026-11-08T01:00:00Z'}); // Old PR number, new update.
+  const before = f.parent().private.graph_pr_watermark;
   f.time(epoch+2*3600000); f.github.calls=[];
-  const pass=f.pass(); const plan=pass.plan(); assert.equal(plan.complete,true); pass.apply(plan);
-  assert.equal(f.github.calls.filter(c=>/pulls\?state=closed/.test(c.path)).length,1);
-  assert.deepEqual(f.parent().attention.filter(e=>e.code==='PR_WITHOUT_TASK').map(e=>e.issue),[20]);
+  const report = f.pass().run({ apply: true, inventory: { complete: true, issues: [], findings: [] } });
+  assert.equal(report.outcome, 'INCOMPLETE');
+  assert.equal(f.github.calls.filter(c=>/pulls\?state=closed/.test(c.path)).length,10);
+  assert.equal(f.parent().private.graph_pr_watermark, before);
+  assert.ok(!openCodes(f).includes('PR_WITHOUT_TASK'));
 });
 
-test('fix1 M3: the overlap reads the next page for updates within five minutes of the watermark',()=>{
+test('a full scan reads the next page even for updates older than the bookmark',()=>{
   const f=fixture(); f.run();
   for(let n=100;n<200;n++) { pr(f,n,{merged:true,mergedAt:'2026-11-07T23:58:00Z'}); }
   pr(f,20,{merged:true,mergedAt:'2026-11-01T00:00:00Z'});
@@ -123,7 +175,7 @@ test('fix1 M3: the overlap reads the next page for updates within five minutes o
   assert.equal(f.github.calls.filter(c=>/pulls\?state=closed/.test(c.path)).length,2);
 });
 
-test('fix1 M3 control: incremental scans retain historical PR order and observe reopens',()=>{
+test('full scans retain historical PR order and observe reopens',()=>{
   const f=fixture();
   pr(f,20,{merged:true,mergedAt:'2026-11-07T00:00:00Z',body:'Refs #2'});
   pr(f,21,{merged:true,mergedAt:'2026-11-06T00:00:00Z',body:'Refs #2'});

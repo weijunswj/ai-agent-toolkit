@@ -144,6 +144,38 @@ test('E1: a failed page or a passed deadline makes the run incomplete, and it re
   }
 });
 
+test('refresh holds an unread middle inventory page and checks all pages on the first healthy pass', () => {
+  const fx = fixture();
+  for (let n = 1000; n < 1205; n++) fx.github.addIssue(n, { labels: ['programme:outside'] });
+  const inventoryCall = call => call.path === 'graphql' && call.body.query.includes('issues(states: OPEN');
+  for (const failure of ['unreachable', 'missing page info', 'premature end']) {
+    fx.github.intercept(call => {
+      if (!inventoryCall(call) || call.body.variables.after !== '100') return;
+      if (failure === 'unreachable') return { status: 503, json: {} };
+      const response = fx.github.inventoryRoute(call.body);
+      const page = response.json.data.repository.issues;
+      if (failure === 'missing page info') delete page.pageInfo;
+      else page.pageInfo = { hasNextPage: false, endCursor: null };
+      return response;
+    });
+    const start = fx.github.calls.length;
+    const held = fx.run(['refresh']);
+    assert.equal(held.error, null);
+    assert.equal(held.code, 1, `middle page response ${failure}`);
+    assert.equal(held.result.outcome, 'INCOMPLETE');
+    assert.equal(held.result.inventory.complete, false);
+    assert.deepEqual(fx.github.calls.slice(start).filter(inventoryCall).map(call => call.body.variables.after), [null, '100']);
+    fx.github.hooks = [];
+  }
+  const start = fx.github.calls.length;
+  const recovered = fx.run(['refresh']);
+  assert.equal(recovered.code, 0);
+  assert.equal(recovered.result.outcome, 'COMPLETE');
+  assert.equal(recovered.result.inventory.counts.OUTSIDE, 205);
+  assert.deepEqual(fx.github.calls.slice(start).filter(inventoryCall).map(call => call.body.variables.after), [null, '100', '200']);
+  assert.ok(!fx.open().includes('new INVENTORY_INCOMPLETE'));
+});
+
 test('E1: classes for nested children, catalogued outcomes, closed parents and outside markers', () => {
   const fx = fixture({ catalogue: [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }, { issue: 430, class: 'COMMITTED', parent: 421, order: 2 }] });
   const gh = fx.github;

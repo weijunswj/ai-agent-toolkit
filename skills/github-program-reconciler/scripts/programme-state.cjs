@@ -2975,11 +2975,11 @@ class ProgrammeGraphReader {
     throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The closed PR scan reached ten full pages.');
   }
 
-  // The refresh graph shares the discovery budget across lists, reference batches and detail reads.
-  // Closed PRs are sorted by update time so a newly closed old PR cannot fall behind a watermark.
-  graphPullRequests(status, spend, watermark = null) {
+  // The full graph comparison shares the discovery budget across lists, references and detail reads.
+  graphPullRequests(status, spend) {
     const all = [];
-    const cutoff = status === 'closed' && watermark ? Date.parse(watermark) - 5 * 60000 : null;
+    const seen = new Set();
+    let previousUpdate = Infinity;
     for (let page = 1; page <= 10; page += 1) {
       spend();
       const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=${status}&per_page=100&sort=updated&direction=desc&page=${page}`);
@@ -2987,11 +2987,16 @@ class ProgrammeGraphReader {
       if (!Array.isArray(response.json)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The PR list was not readable.');
       for (const pr of response.json) {
         const item = graphPr(pr, this.repository);
-        if (!item) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A PR history entry was incomplete.');
-        if (cutoff !== null && !Number.isFinite(Date.parse(pr.updated_at))) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The closed PR update time was not readable.');
-        // Keep a five-minute overlap for boundary updates and timestamp precision. The REST list
-        // is descending by updated_at, so nothing after this row can be newer than the cutoff.
-        if (cutoff !== null && Date.parse(pr.updated_at) < cutoff) return all;
+        const updated = Date.parse(pr.updated_at);
+        if (!item || !Number.isFinite(updated) || typeof pr.title !== 'string' || (pr.body !== null && typeof pr.body !== 'string')) {
+          throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A PR history entry was incomplete.');
+        }
+        // An observed page shift cannot justify a complete comparison or advance the bookmark.
+        if (seen.has(item.number) || updated > previousUpdate) {
+          throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The pull request list moved while it was being read.');
+        }
+        seen.add(item.number);
+        previousUpdate = updated;
         all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', closed_at:pr.closed_at || pr.merged_at || null});
       }
       if (response.json.length < 100) return all;
@@ -3044,6 +3049,7 @@ class ProgrammeGraphReader {
 const INVENTORY_QUERY = `query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     issues(states: OPEN, first: 100, after: $after) {
+      totalCount
       pageInfo { hasNextPage endCursor }
       nodes { __typename number state parent { number state repository { nameWithOwner } } labels(first: 50) { nodes { name } } }
     }
@@ -3081,24 +3087,40 @@ class ProgrammeInventory {
   openIssues() {
     const [owner, name] = this.repository.split('/');
     const issues = new Map();
+    const cursors = new Set();
+    let total = null;
     let after = null;
     for (let page = 0; page < 1000; page += 1) {
       const response = this.request('POST', 'graphql', { query: INVENTORY_QUERY, variables: { owner, name, after } });
       if (response.status !== 200 || response.json?.errors?.length || !response.json?.data?.repository?.issues) {
         throw new ProgrammeError('GH_GRAPHQL_FAILED', `the open issues could not be read (${response.status})`);
       }
-      const connection = response.json.data.repository.issues;
-      for (const node of connection.nodes || []) {
-        // The issues connection holds no pull request; anything else is never listed.
-        if (!node || node.__typename !== 'Issue' || !isInt(node.number, 1)) continue;
+      const { nodes, pageInfo, totalCount } = response.json.data.repository.issues;
+      if (!Array.isArray(nodes) || typeof pageInfo?.hasNextPage !== 'boolean' || !isInt(totalCount, 0)
+        || (total !== null && total !== totalCount)) {
+        throw new ProgrammeError('GH_GRAPHQL_FAILED', 'the open issue page was incomplete or its count changed');
+      }
+      total = totalCount;
+      for (const node of nodes) {
+        // A stray pull request is not counted in the issue-only total.
+        if (node?.__typename === 'PullRequest') continue;
+        if (!node || node.__typename !== 'Issue' || !isInt(node.number, 1) || issues.has(node.number)
+          || node.state !== 'OPEN' || !Object.hasOwn(node, 'parent') || !Array.isArray(node.labels?.nodes)) {
+          throw new ProgrammeError('GH_GRAPHQL_FAILED', 'an open issue entry was incomplete or repeated');
+        }
         issues.set(node.number, {
           number: node.number, state: 'open',
           parent: node.parent && node.parent.repository?.nameWithOwner?.toLowerCase() === this.repository.toLowerCase() ? node.parent.number : node.parent ? 'outside' : null,
           labels: (node.labels?.nodes || []).map(label => String(label?.name || '')),
         });
       }
-      if (!connection.pageInfo?.hasNextPage) return issues;
-      after = connection.pageInfo.endCursor;
+      if (!pageInfo.hasNextPage && issues.size === total) return issues;
+      const next = pageInfo.endCursor;
+      if (!pageInfo.hasNextPage || issues.size >= total || !nodes.length || typeof next !== 'string' || !next || cursors.has(next)) {
+        throw new ProgrammeError('GH_GRAPHQL_FAILED', 'the open issue pages did not cover the reported count');
+      }
+      cursors.add(next);
+      after = next;
     }
     throw new ProgrammeError('GH_FAILED', 'the open issues did not end within the page limit');
   }
@@ -3571,7 +3593,7 @@ class Reconciler {
     try { openListed = this.reader.graphPullRequests('open',spend); listed.push(...openListed); }
     catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; openComplete=false; }
     let closedListed=[], closedComplete=true;
-    try { closedListed=this.reader.graphPullRequests('closed',spend,watermark); listed.push(...closedListed); }
+    try { closedListed=this.reader.graphPullRequests('closed',spend); listed.push(...closedListed); }
     catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; closedComplete=false; }
     const references = referencedIssues(listed);
     const openReferences = referencedIssues(openListed);
@@ -3596,8 +3618,8 @@ class Reconciler {
             const listedCurrent=listed.find(pr=>pr.number===current.number);
             if(listedCurrent) history.push(listedCurrent);
           }
-          // Incremental list reads omit old closes. Reconfirm a saved terminal PR not covered by
-          // task links or the list, including its merge time so the saved order stays meaningful.
+          // A previously linked terminal PR can remain in history after its reference is edited.
+          // Reconfirm its merge time and state so the saved order stays meaningful.
           try {
             for (const previous of prior.filter(pr=>pr.state !== 'OPEN')) {
               if (history.some(pr=>pr.number===previous.number)) continue;

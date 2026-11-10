@@ -299,7 +299,7 @@ class FakeGitHub {
         labels: { nodes: (issue.labels || []).map(name => ({ name })) } };
     });
     const hasNextPage = start + 100 < open.length;
-    return ok(200, { data: { repository: { issues: { pageInfo: { hasNextPage, endCursor: hasNextPage ? String(start + 100) : null }, nodes } } } });
+    return ok(200, { data: { repository: { issues: { totalCount: open.length, pageInfo: { hasNextPage, endCursor: hasNextPage ? String(start + 100) : null }, nodes } } } });
   }
 
   graphqlRoute(body) {
