@@ -734,18 +734,13 @@ for (const failure of ['malformed', 'foreign cursor', 'oversized']) {
   });
 }
 
-for (const interruption of ['CAS conflict', 'lost write reply', 'lost readback', 'existing intent']) {
+for (const interruption of ['CAS conflict', 'lost write reply', 'lost readback']) {
   test(`sweep: ${interruption} holds its item and serves unrelated work`, t => {
     const f = slowRefresh(t);
     f.close(100);
     assert.equal(f.run().code, 1);
     f.close(101);
     const target = () => f.read(100);
-    if (interruption === 'existing intent') {
-      const doc = target();
-      doc.pending_effects.push({ intent_id: 'earlier-intent', kind: 'replace_block', target: { issue: 100, digest: 'missing' }, state: 'UNKNOWN' });
-      f.github.putFile('state/issue-100.json', doc);
-    }
     const pending = target().pending_effects;
     const parent = f.parent();
     const offset = f.github.calls.length;
@@ -881,4 +876,90 @@ test('sweep: losing private-store access during source confirmation refuses the 
   } }), { code: 'STATE_STORE_UNVERIFIED' });
   assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT').length, 0);
   assert.equal(f.read(100).lifecycle, 'PLANNED');
+});
+
+function seedSweepIntent(f, number, digest) {
+  const doc = f.read(number);
+  const intent = { intent_id: 'earlier-intent', kind: 'replace_block', target: { issue: number, digest }, state: 'UNKNOWN' };
+  doc.pending_effects.push(intent);
+  f.github.putFile(`state/issue-${number}.json`, doc);
+  return intent;
+}
+
+function seedSweepRotation(f) {
+  const parent = f.parent();
+  const writer = state.refreshWriter(parent);
+  const scope = state.sha256(state.canonicalText([f.binding, parent.parent_issue, parent.fence.epoch, writer.session_hash, state.sweepCatalogue(parent)]));
+  fs.writeFileSync(`${f.file}.resume`, JSON.stringify({ schema: 'toolkit.programme-sweep-rotation.v1', scope, after: null }) + '\n');
+}
+
+for (const count of [1, 2, 3, 4]) {
+  test(`sweep: a catalogue of ${count} gives a recoverable intent a full readback turn`, t => {
+    const f = slowRefresh(t, { count, discussion: 0, extraIssues: 0, prs: 0 });
+    assert.equal(f.run({ slow: false }).code, 0);
+    const body = f.issues.get(100).body;
+    const block = state.findStateBlock(body).block;
+    assert.ok(block);
+    const intent = seedSweepIntent(f, 100, state.blockDigest(block.body));
+    seedSweepRotation(f);
+    if (count > 1) f.close(101);
+    let sawFullRead = false;
+    const at = f.github.calls.length;
+    const { report, code } = f.run({ slow: false, fault: (call, phase) => {
+      if (phase !== 'planning' || call.method !== 'GET' || !sweepIssue(call, 100)) return;
+      sawFullRead = true;
+      assert.deepEqual(f.github.readFile('state/issue-100.json').pending_effects, [intent], 'only the full path can clear the saved intent');
+      if (count > 1) assert.equal(f.github.readFile('state/issue-101.json').lifecycle, 'DONE', 'unrelated scoped work ran before full planning');
+    } });
+    assert.equal(sawFullRead, true, 'the existing full plan gets a turn without removing the rotation');
+    assert.deepEqual(report.recovered, [{ kind: 'child', number: 100, intent_id: intent.intent_id, outcome: 'DONE' }]);
+    assert.equal(code, 0, JSON.stringify(report.holds));
+    assert.deepEqual(f.read(100).pending_effects, []);
+    assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PATCH' && sweepIssue(call, 100)).length, 0, 'the accepted body was not written again');
+    assert.equal(fs.existsSync(`${f.file}.resume`), false);
+  });
+}
+
+test('sweep: full readback keeps an unreadable prior intent held while another child progresses', t => {
+  const f = slowRefresh(t, { count: 2, discussion: 0, extraIssues: 0, prs: 0 });
+  const intent = seedSweepIntent(f, 100, 'missing');
+  seedSweepRotation(f);
+  f.close(101);
+  const at = f.github.calls.length;
+  const { report, code } = f.run({ slow: false, fault: call => sweepIssue(call, 100) && call.method === 'GET' ? { status: 404, json: {} } : undefined });
+  assert.equal(code, 1);
+  assert.notEqual(report.outcome, 'COMPLETE');
+  assert.deepEqual(report.recovered, [{ kind: 'child', number: 100, intent_id: intent.intent_id, outcome: 'UNKNOWN' }]);
+  assert.ok(report.holds.some(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === '#100'));
+  assert.deepEqual(f.read(100).pending_effects, [intent]);
+  assert.equal(f.read(101).lifecycle, 'DONE');
+  assert.ok(!f.github.calls.slice(at).some(call => call.method === 'PATCH' && sweepIssue(call, 100)));
+});
+
+test('sweep: a slow full plan retains the earlier intent and reports the time stop', t => {
+  const f = slowRefresh(t);
+  const intent = seedSweepIntent(f, 100, 'missing');
+  seedSweepRotation(f);
+  f.close(101);
+  const { report, code } = f.run();
+  assert.equal(code, 1);
+  assert.notEqual(report.outcome, 'COMPLETE');
+  assert.ok(report.holds.some(hold => hold.code === 'PASS_STOPPED'));
+  assert.deepEqual(f.read(100).pending_effects, [intent]);
+  assert.equal(f.read(101).lifecycle, 'DONE');
+  assert.equal(sweepCursor(f).after, 103);
+});
+
+test('sweep: a provider stop still defers full readback of an earlier intent', t => {
+  const f = slowRefresh(t, { count: 2, discussion: 0, extraIssues: 0, prs: 0 });
+  const intent = seedSweepIntent(f, 100, 'missing');
+  seedSweepRotation(f);
+  const at = f.github.calls.length;
+  const { report, code } = f.run({ slow: false, fault: call => sweepIssue(call, 101) ? { status: 429, json: {} } : undefined });
+  assert.equal(code, 1);
+  assert.equal(report.outcome, 'HELD');
+  assert.deepEqual(report.holds.map(hold => hold.code), ['SWEEP_SLICE_PROVIDER_HELD']);
+  assert.deepEqual(report.recovered, []);
+  assert.deepEqual(f.read(100).pending_effects, [intent]);
+  assert.ok(f.github.calls.slice(at).every(call => call.method === 'GET'));
 });

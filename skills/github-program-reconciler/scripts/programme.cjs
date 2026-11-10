@@ -520,7 +520,7 @@ function sweepScope(context, parent) {
     context.writer.session_hash, state.sweepCatalogue(parent)]));
 }
 
-const HELD_CHILD_CHECKS = new Set(['EFFECT_UNKNOWN', 'GRAPH_FACT_STALE', 'GH_FAILED', 'STATE_CONFLICT',
+const HELD_CHILD_CHECKS = new Set(['GRAPH_FACT_STALE', 'GH_FAILED', 'STATE_CONFLICT',
   'STATE_INVALID', 'STATE_READBACK_MISMATCH', 'SWEEP_SLICE_LIMIT', 'SWEEP_SLICE_PROVIDER_HELD']);
 
 function resumeStoppedRefresh(context, parent, scope, issues, note) {

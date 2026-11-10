@@ -3523,7 +3523,9 @@ class Reconciler {
     if (doc.issue !== number || doc.repository.toLowerCase() !== this.binding.repository.toLowerCase()) {
       throw new ProgrammeError('STATE_INVALID', 'The child state document does not match the selected issue.');
     }
-    if (doc.pending_effects.length) throw new ProgrammeError('EFFECT_UNKNOWN', 'The full refresh must settle this child’s earlier intent by readback.');
+    // Leave earlier intents and this child's state for the full reconciler's guarded readback.
+    // An intent already on disk is not a failed or uncertain write from this batch.
+    if (doc.pending_effects.length) return;
     const observed = this.reader.issue(number);
     if (observed?.complete !== true || observed.is_pull_request || observed.parent !== (outcome.parent ?? null)) {
       throw new ProgrammeError('GRAPH_FACT_STALE', 'The child’s issue identity or native parent could not be verified.');
