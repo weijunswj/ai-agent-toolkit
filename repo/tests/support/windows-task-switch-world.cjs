@@ -103,7 +103,8 @@ function fakeRun(answers = {}) {
   const run = (file, args) => {
     log.push([file, ...args]);
     const name = file === GH ? `gh ${args[0]}` : args[0] === '-e' ? 'reach github' : path.basename(args[0]) === 'programme.cjs' ? `programme ${args[1]}` : path.basename(args[0]);
-    const answer = answers[name] || { status: 0, stdout: '' };
+    const answer = answers[name] || { status: 0, stdout: name === 'programme refresh'
+      ? JSON.stringify({ outcome: 'COMPLETE', inventory: { complete: true }, holds: [] }) : '' };
     return { stdout: '', stderr: '', ...(typeof answer === 'function' ? answer(args) : answer) };
   };
   return { run, log };

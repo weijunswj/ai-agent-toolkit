@@ -154,7 +154,7 @@ test('A1a: programme job lock serialises processes and logs stale takeover after
 
 test('J: ENABLED, gh signed in, a clean refresh and two footers: all three steps, footers cleaned, last-run ok', (t) => {
   const sweep = { status: 4, stdout: JSON.stringify({ apply: true, results: [{ status: 'CLEANED' }, { status: 'CLEANED' }] }) };
-  const { record, log, home } = runSweep(t, { 'programme refresh': { status: 0, stdout: '{"outcome":"DONE","holds":[]}' }, 'toolkit-github-footer-sweep.cjs': sweep });
+  const { record, log, home } = runSweep(t, { 'programme refresh': { status: 0, stdout: '{"outcome":"COMPLETE","inventory":{"complete":true},"holds":[]}' }, 'toolkit-github-footer-sweep.cjs': sweep });
   assert.equal(record.status, 'ok');
   assert.equal(record.exit, 0);
   assert.deepEqual(record.summary, ['Footer sweep since 2026-10-27 09:00: 2 CLEANED.', 'Programme refresh: done.', 'Attention: clear (stored on #421, written 3 min ago)']);
@@ -165,6 +165,35 @@ test('J: ENABLED, gh signed in, a clean refresh and two footers: all three steps
   const saved = tasks.readLastRun('toolkit-programme-sweep', home);
   assert.deepEqual({ ...saved }, { ...record });
   if (process.platform !== 'win32') assert.equal(fs.statSync(tasks.lastRunPath('toolkit-programme-sweep', home)).mode & 0o777, 0o600);
+});
+
+test('J: only a complete refresh advances the last complete check in the scheduled receipt', t => {
+  const { home, scheduler } = listedHome(t);
+  const now = Date.now();
+  const first = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+  const later = new Date(now - 60 * 60 * 1000).toISOString();
+  assert.equal(runSweep(t, {}, home, first).record.programme_last_complete_at, first);
+  const cases = [
+    [{ status: 1, stdout: JSON.stringify({ outcome: 'INCOMPLETE', inventory: { complete: false }, holds: [] }) }, 'held', /incomplete.*open issues/],
+    [{ status: 0, stdout: JSON.stringify({ inventory: { complete: false }, holds: [] }) }, 'held', /incomplete.*open issues/],
+    [{ status: 0, stdout: JSON.stringify({ outcome: 'QUEUED' }) }, 'held', /queued/],
+    [{ status: 0, stdout: '{' }, 'held', /did not confirm/],
+    [{ status: 1, stdout: JSON.stringify({ outcome: 'HELD', holds: [{ code: 'PASS_STOPPED' }] }) }, 'held', /PASS_STOPPED/],
+    [{ status: null, error: 'ETIMEDOUT' }, 'failed', /failed/],
+  ];
+  for (const [refresh, status, note] of cases) {
+    const { record } = runSweep(t, { 'programme refresh': refresh }, home, later);
+    assert.equal(record.programme_status, status);
+    assert.match(record.summary.join(' '), note);
+    assert.equal(tasks.readLastRun(options.taskId, home).programme_last_complete_at, first);
+  }
+  const { record: skipped } = runSweep(t, { 'toolkit-governance.cjs': { status: 0,
+    stdout: JSON.stringify({ state: 'ENABLED', merged: { status: 'enabled', fresh: true }, refresh: { refreshed: false, reason: 'remote-unreachable' } }) } }, home, later);
+  assert.equal(skipped.programme_status, 'skipped');
+  assert.equal(skipped.programme_last_complete_at, first);
+  const list = tasks.formatList(tasks.listTasks({ home, platform: 'win32', scheduler, folderFor: () => desired(t).folder }));
+  assert.ok(list.includes(`Last complete programme check on this computer: ${first}.`));
+  assert.equal(runSweep(t, {}, home, later).record.programme_last_complete_at, later);
 });
 
 test('J: a refresh that holds is recorded and the footer sweep still runs', (t) => {

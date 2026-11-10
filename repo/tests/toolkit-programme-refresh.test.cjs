@@ -82,6 +82,71 @@ test('refresh runs the full pass as the parent holder, with no session or contro
   assert.equal(fx.run(['refresh']).result.summary, 'No changes', 'a second pass writes nothing');
 });
 
+test('an inventory-only 503 holds refresh until the next complete pass', () => {
+  const fx = fixture();
+  assert.equal(fx.run(['refresh']).code, 0);
+  fx.github.intercept(call => call.method === 'POST' && call.path === 'graphql'
+    && call.body.query.includes('$after: String') && call.body.query.includes('issues(states: OPEN')
+    ? { status: 503, json: {} } : undefined);
+
+  const degraded = fx.run(['refresh']);
+  assert.equal(degraded.error, null);
+  assert.equal(degraded.result.inventory.complete, false);
+  assert.equal(degraded.code, 1);
+  assert.equal(degraded.result.outcome, 'INCOMPLETE');
+  assert.deepEqual(degraded.result.incomplete, ['INVENTORY_INCOMPLETE']);
+  assert.equal(fx.store.read('parent', 421).doc.attention.find(entry => entry.code === 'INVENTORY_INCOMPLETE').state, 'new');
+  const attention = fx.run(['attention', '--refresh']);
+  assert.equal(attention.code, 1);
+  assert.equal(attention.result.refreshed.outcome, 'INCOMPLETE');
+
+  fx.github.hooks = [];
+  const recovered = fx.run(['refresh']);
+  assert.equal(recovered.code, 0);
+  assert.equal(recovered.result.outcome, 'COMPLETE');
+  assert.equal(fx.store.read('parent', 421).doc.attention.find(entry => entry.code === 'INVENTORY_INCOMPLETE').state, 'resolved');
+  assert.equal(fx.run(['refresh']).result.summary, 'No changes');
+});
+
+test('refresh does not verify a graph with unreadable open pull request links', () => {
+  const fx = fixture();
+  assert.equal(fx.run(['refresh']).result.outcome, 'COMPLETE');
+  fx.store.mutate('child', 423, { writer: controller, parentDoc: fx.store.read('parent', 421).doc,
+    change: doc => state.applyPatch('child', doc, { candidate: { branch: 'fixture-task' } }) });
+  fx.github.addPr(800, { head: 'a'.repeat(40), branch: 'fixture-task', body: 'Refs #423' });
+  assert.equal(fx.run(['refresh']).result.outcome, 'COMPLETE');
+  assert.match(fx.github.prs.get(800).body, /programme-nav/);
+  const body = fx.github.prs.get(800).body;
+  for (const response of [{ status: 404, json: {} }, { status: 200, json: { number: 800, state: 'open' } }]) {
+    fx.github.intercept(call => call.method === 'GET' && call.path.endsWith('/issues/800') ? response : undefined);
+    const unreadable = fx.run(['refresh']);
+    assert.equal(unreadable.code, 1);
+    assert.equal(unreadable.result.outcome, 'INCOMPLETE');
+    assert.ok(unreadable.result.incomplete.includes('PR_NAV_UNVERIFIED'));
+    assert.equal(fx.github.prs.get(800).body, body);
+    fx.github.hooks = [];
+  }
+
+  fx.github.prs.get(800).body = 'Refs #423';
+  const isPrBody = call => call.path.endsWith('/issues/800');
+  let patched = false;
+  fx.github.intercept(call => {
+    if (!isPrBody(call)) return undefined;
+    if (call.method === 'PATCH') patched = true;
+    if (patched && call.method === 'GET') return { status: 200, json: { number: 800, body: fx.github.prs.get(800).body } };
+    return undefined;
+  });
+  const unverified = fx.run(['refresh']);
+  assert.equal(patched, true);
+  assert.equal(unverified.code, 1);
+  assert.equal(unverified.result.outcome, 'HELD');
+  assert.ok(unverified.result.results.some(entry => entry.kind === 'replace_pr_nav' && entry.outcome === 'UNKNOWN'));
+  fx.github.hooks = [];
+  const calls = fx.github.calls.length;
+  assert.equal(fx.run(['refresh']).result.outcome, 'COMPLETE');
+  assert.equal(fx.github.calls.slice(calls).some(call => call.method === 'PATCH' && isPrBody(call)), false);
+});
+
 test('refresh automatically backfills a completed task and the next sweep makes no writes', () => {
   const fx = fixture();
   fx.store.mutate('parent', 421, { writer: controller, change: doc => { doc.outcomes[0].class = 'COMPLETED'; return doc; } });
@@ -394,7 +459,8 @@ for (const row of PASS_MATRIX) {
       writeLock(fx.lockFile, {});
     }
     const run = fx.run(row.argv, { environment: row.env, pidAlive: () => row.lock !== 'dead' });
-    const got = run.error ? run.error.code : run.result.outcome || (run.result.mode === 'apply' ? 'WROTE' : 'DRY');
+    if (row.argv[0] === 'refresh' && row.expect === 'WROTE') assert.equal(run.result?.outcome, 'COMPLETE');
+    const got = run.error ? run.error.code : run.result.outcome === 'QUEUED' ? 'QUEUED' : run.result.mode === 'apply' ? 'WROTE' : 'DRY';
     assert.equal(got, row.expect, run.error?.message);
     const written = /AI-AGENT-TOOLKIT:programme-state/.test(fx.github.issues.get(423).body);
     assert.equal(written, row.expect === 'WROTE', 'pages written only by a pass that ran');

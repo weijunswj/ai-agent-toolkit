@@ -4033,13 +4033,15 @@ class Reconciler {
   }
 
   // An open or draft PR for a task starts with the same links as the task page, plus the PR itself.
-  diffPrNav(number, doc, navBody, observed, effects) {
+  diffPrNav(number, doc, navBody, observed, effects, findings) {
     const pr = doc?.pr;
     if (!navBody || !pr?.number || !['OPEN', 'DRAFT'].includes(pr.state)) return;
     const page = observed.prPages?.get(pr.number);
-    if (!page) return;
-    const found = findStateBlock(page.body, NAV_BLOCK_NAME);
-    if (found.error) return;
+    const found = page && (!this.refreshFacts || page.complete) ? findStateBlock(page.body, NAV_BLOCK_NAME) : null;
+    if (!found || found.error) {
+      if (this.refreshFacts) findings.push({ code: 'PR_NAV_UNVERIFIED', kind: 'pr', issue: pr.number, detail: 'The pull request links could not be checked.' });
+      return;
+    }
     if (found.block && normalizeBlockBody(found.block.body) === normalizeBlockBody(navBody) && !found.block.tampered) return;
     effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr: pr.number, digest: blockDigest(navBody) }, body: navBody });
   }
@@ -4070,7 +4072,7 @@ class Reconciler {
       }
       const currentCurrent = !currentBody || (Boolean(summary.block) && normalizeBlockBody(summary.block.body) === normalizeBlockBody(currentBody) && !summary.block.tampered);
       const navCurrent = !navBody || (Boolean(nav.block) && normalizeBlockBody(nav.block.body) === normalizeBlockBody(navBody) && !nav.block.tampered);
-      this.diffPrNav(number, children.get(number), navBody, observed, effects, version);
+      this.diffPrNav(number, children.get(number), navBody, observed, effects, findings);
       const comments = observed.comments.get(number) || [];
       const placement = this.placementFor(number);
       const current = block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered;
@@ -5075,7 +5077,11 @@ class Reconciler {
       if (isHeld(`#${number}`, 'pr')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
       if (!this.toolkitVersion) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no links were written'); continue; }
       const before = this.reader.issue(pr);
-      if (!before) { record(effect, 'HELD', 'the PR could not be read'); hold(effect, 'ISSUE_MISSING', `PR #${pr} could not be read`); continue; }
+      if (!before || (this.refreshFacts && !before.complete)) {
+        record(effect, 'HELD', 'the PR could not be read completely');
+        hold(effect, 'PR_NAV_UNVERIFIED', `PR #${pr} could not be read completely`);
+        continue;
+      }
       let next;
       try { next = upsertNavBlock(before.body, renderBlock(effect.body, this.toolkitVersion, NAV_BLOCK_NAME)); }
       catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
@@ -5084,11 +5090,14 @@ class Reconciler {
         if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
           return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the PR changed between the read and the write; the next pass re-plans it' };
         }
+        if (this.refreshFacts && !latest.complete) return { outcome: 'NOT_DONE', code: 'PR_NAV_UNVERIFIED', detail: 'the PR could not be read completely' };
         guard();
         const response = this.mutator.writeBody(pr, next);
         const after = this.reader.issue(pr);
-        if (after && after.body === next) return { outcome: 'DONE' };
-        if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
+        if (after && (!this.refreshFacts || after.complete)) {
+          if (after.body === next) return { outcome: 'DONE' };
+          if (!okStatus(response.status) && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
+        }
         return { outcome: 'UNKNOWN', detail: 'the PR description did not read back exactly as written' };
       });
     }
@@ -5261,6 +5270,19 @@ class Reconciler {
       report.writes = { state: this.store.writes - storeWrites, github: this.mutator.mutations - githubWrites };
     }
     if (report.closing) report.closing.requests=this.closing.requests;
+    // Only the full refresh supplies inventory. Existing page comparisons and effect readbacks
+    // support its result, including a pass where the pages already agree.
+    if (apply && inventory) {
+      const incomplete = [];
+      if (!inventory.complete) incomplete.push('INVENTORY_INCOMPLETE');
+      else if (!plan.complete && !report.holds.length) incomplete.push('GRAPH_OBSERVATION_INCOMPLETE');
+      if (report.closing?.complete === false) incomplete.push('CLOSING_SCAN_INCOMPLETE');
+      if (plan.findings.some(entry => entry.code === 'PR_NAV_UNVERIFIED')) incomplete.push('PR_NAV_UNVERIFIED');
+      if (report.recovered.some(entry => entry.outcome === 'UNKNOWN')
+        || report.results.some(entry => !['DONE', 'NOOP'].includes(entry.outcome))) incomplete.push('EFFECTS_UNSETTLED');
+      report.outcome = report.holds.length ? 'HELD' : incomplete.length ? 'INCOMPLETE' : 'COMPLETE';
+      if (incomplete.length) report.incomplete = incomplete;
+    }
     report.summary = !plan.parent ? 'No parent state document'
       : !report.effects.length && !report.holds.length && !plan.resolutions.length ? 'No changes'
         : apply ? `${report.results.filter(entry => entry.outcome === 'DONE').length} of ${report.results.length} effect(s) done, ${report.holds.length} hold(s)`
@@ -5269,10 +5291,11 @@ class Reconciler {
     report.attention = report.attention ?? (planned ? planned.line : plan.parent ? attentionLine(plan.parent.attention) : null);
     const attention = report.findings.filter(finding => ATTENTION.has(finding.code));
     report.next_action = report.holds.length ? `Controller: resolve ${report.holds[0].code} on ${report.holds[0].target}: ${report.holds[0].detail}`
-      : !apply && report.effects.length ? 'Controller: run reconcile --apply --controller for this plan; other sessions report it'
-        : !apply && plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN') ? `Controller: run reconcile --apply --controller to clear ${plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN').length} settled intent(s)`
-        : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
-          : 'None: the state documents and GitHub agree';
+      : report.outcome === 'INCOMPLETE' ? 'The next refresh checks the missing information again.'
+        : !apply && report.effects.length ? 'Controller: run reconcile --apply --controller for this plan; other sessions report it'
+          : !apply && plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN') ? `Controller: run reconcile --apply --controller to clear ${plan.resolutions.filter(entry => entry.outcome !== 'UNKNOWN').length} settled intent(s)`
+            : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
+              : 'None: the state documents and GitHub agree';
     if (typeof this.store.stateBranch === 'function') report.state_branch = this.store.stateBranch();
     return report;
   }

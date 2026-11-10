@@ -273,7 +273,7 @@ test('M6 M7 L12: damaged, future and mismatched history uses a visible bounded f
 test('L7 L9: footer failure wins every programme result; lock errors never prevent eligible programme work', t => {
   for (const programme of ['ok', 'held', 'skipped', 'failed']) for (const failure of ['footer', 'acquire', 'release']) {
     const home = tempHome(t), old = baseRun(t, home);
-    const result = movingRun(t, { home, answers: { 'programme refresh': { status: programme === 'failed' ? 2 : programme === 'held' ? 1 : 0 },
+    const result = movingRun(t, { home, answers: { 'programme refresh': programme === 'ok' ? undefined : { status: programme === 'failed' ? 2 : 1 },
       ...(programme === 'skipped' ? { 'toolkit-governance.cjs': stateAnswer('unknown', false) } : {}),
       'toolkit-github-footer-sweep.cjs': { status: failure === 'footer' ? 1 : 0, stdout: '{"results":[{"status":"MISMATCH"}]}' } },
       deps: failure === 'acquire' ? { takeLock: () => { throw new Error('lock unavailable'); } } : failure === 'release' ? { takeLock: () => ({ release() { throw new Error('release failed'); } }) } : {} });

@@ -173,6 +173,17 @@ function writeTaskBackup(home, id, snapshot) {
 }
 
 // The job runner's last-run record, or null.
+// An old or foreign receipt cannot establish a complete check for this task and repository.
+function programmeLastCompleteAt(record, { id, job, repository }, now = Date.now()) {
+  if (job !== 'programme-sweep' || record?.schema !== 'toolkit.task-last-run.v1'
+    || record.id !== id || record.job !== job || typeof repository !== 'string'
+    || typeof record.repository !== 'string' || record.repository.toLowerCase() !== repository.toLowerCase()) return null;
+  const value = record.programme_last_complete_at;
+  if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value)) return null;
+  const at = Date.parse(value);
+  return Number.isFinite(at) && at <= now && new Date(at).toISOString() === value ? value : null;
+}
+
 function readLastRun(id, home) {
   try {
     const parsed = JSON.parse(fs.readFileSync(lastRunPath(id, home), 'utf8'));
@@ -395,6 +406,8 @@ function windowsRows(registry, folders, scheduler, home) {
       };
       if (owned) {
         const last = readLastRun(recorded.id, home);
+        const completeAt = programmeLastCompleteAt(last, recorded);
+        if (completeAt) row.programme_last_complete_at = completeAt;
         const edited = recorded.enrolled && JSON.stringify(windowsTasks.enrolledDefinition(task)) !== JSON.stringify(recorded.enrolled);
         row.state = !localTaskOwner(recorded.job_owner, computerIdentity(home)?.id) ? `owned by ${recorded.job_owner_label || recorded.job_owner}; ${OWNER_RECOVERY}` : missingDisabled ? 'Toolkit missing; disabled automatically' : recorded.stopped_by_owner || task.state === 'Disabled' ? 'stopped by owner'
           : edited ? ['programme-sweep', 'shard-timings'].includes(recorded.job) ? 'modified; owner choice required' : 'stopped by owner' : 'Toolkit';
@@ -499,6 +512,7 @@ function formatList(result) {
     const disabled = row.windows_state === 'Disabled' ? '; Disabled (will not run)' : '';
     lines.push(`- ${row.name}: ${row.state}${disabled}. ${where}; ${row.schedule}; ${row.ai}${last}. ${row.purpose ? `${row.purpose} ` : ''}(${row.source})`);
     for (const line of row.summary || []) lines.push(`    ${line}`);
+    if (row.programme_last_complete_at) lines.push(`    Last complete programme check on this computer: ${row.programme_last_complete_at}.`);
   }
   if (!result.rows.length) lines.push('- none found');
   lines.push(...result.notes);
@@ -555,7 +569,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
 }
 
 module.exports = {
-  SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, writeTaskBackup, readLastRun, writeLastRun,
+  SCHEMA, HOSTS, ID, TasksError, userStateDir, registryPath, lastRunPath, readRegistry, writeRegistry, updateRegistry, writeTaskBackup, readLastRun, writeLastRun, programmeLastCompleteAt,
   computerIdentity, localTaskOwner, OWNER_RECOVERY,
   SKIP_REASON, REPOSITORY, entryProblem, looksSecret, safeText, skipText, sweepLine, taskGovernanceLine, installedHours, recordTask, forgetTask, listTasks, formatList, parseArgs, main, LIVE, PRESENCE, RECORD,
 };

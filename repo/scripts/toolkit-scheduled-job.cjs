@@ -159,6 +159,11 @@ function footerLockPath(repository, home) {
   return path.join(tasks.userStateDir(home), 'tasks', `footer-${crypto.createHash('sha256').update(repository.toLowerCase()).digest('hex').slice(0, 20)}.lock`);
 }
 
+function lastCompleteRefresh(record, options, repository, now) {
+  const at = tasks.programmeLastCompleteAt(record, { id: options.taskId, job: options.job, repository }, Date.parse(now));
+  return at ? { programme_last_complete_at: at } : {};
+}
+
 function footerCursor(record, expected, repository, now) {
   const fallback = new Date(now.getTime() - FIRST_SWEEP_WINDOW_MS).toISOString();
   if (!record) return { since: fallback };
@@ -367,13 +372,24 @@ function refreshStep(job) {
   }
   const lifecycle = report?.results?.filter(entry => ['set_parent_state', 'post_parent_repair'].includes(entry.kind)) || [];
   for (const entry of lifecycle) job.note(`Parent lifecycle: ${entry.kind === 'set_parent_state' ? entry.target.state === 'open' ? 'reopen' : 'complete' : 'repair notice'} ${entry.outcome}.`);
+  if (run.status === 0 && report?.outcome === 'QUEUED') {
+    job.note('Programme refresh queued: another pass is already running.');
+    return 'held';
+  }
+  if ([0, 1].includes(run.status) && report?.inventory?.complete === false) {
+    job.note('Programme refresh incomplete: not all open issues could be read. The next refresh checks again.');
+    if (run.status === 0 || !report.holds?.length) return 'held';
+  } else if ([0, 1].includes(run.status) && report?.outcome === 'INCOMPLETE') {
+    job.note('Programme refresh incomplete: some graph checks or effects did not finish. The next refresh checks again.');
+    return 'held';
+  }
   if (run.status === 0) {
-    if (report?.outcome === 'QUEUED') {
-      job.note('Programme refresh queued: another pass is already running.');
-      return 'held';
+    if (report?.outcome === 'COMPLETE' && report.inventory?.complete === true && Array.isArray(report.holds) && !report.holds.length) {
+      job.note('Programme refresh: done.');
+      return 'ok';
     }
-    job.note(`Programme refresh: done${report && report.inventory && report.inventory.complete === false ? ' (inventory incomplete)' : ''}.`);
-    return 'ok';
+    job.note('Programme refresh held: the result did not confirm a complete check.');
+    return 'held';
   }
   if (run.status === 1) {
     const holds = report && Array.isArray(report.holds) ? report.holds.map(hold => `${hold.code} ${hold.target || ''}`.trim()) : [];
@@ -423,8 +439,10 @@ function programmeSweep(job) {
   if (observed.fresh !== true) return { status: 'skipped', reason: 'binding observation expired' };
   const refresh = refreshStep(job);
   if (refresh === 'skipped') return { status: 'skipped', reason: 'ask the appointed controller to initialise the parent state in the private evidence store' };
+  const verifiedAt = refresh === 'ok' ? job.now().toISOString() : null;
   const attention = attentionStep(job);
-  return { status: refresh === 'failed' ? 'failed' : refresh === 'held' || attention === 'held' ? 'held' : 'ok' };
+  const status = refresh === 'failed' ? 'failed' : refresh === 'held' || attention === 'held' ? 'held' : 'ok';
+  return { status, ...(status === 'ok' ? { programme_last_complete_at: verifiedAt } : {}) };
 }
 
 function footerSweep(job, watermark) {
@@ -496,10 +514,12 @@ function runJob(options, deps = {}) {
   const finishWithoutWork = (status, reason) => {
     const at = job.now().toISOString(), previous = job.readRecord();
     const history = previous?.schema === 'toolkit.task-last-run.v1' && previous.id === options.taskId && previous.job === options.job ? previous : null;
+    const repository = enrolled?.repository || history?.repository;
     const result = { ...skipStreak(history),
+      ...lastCompleteRefresh(history, options, repository, at),
       ...(typeof history?.footer_sweep_since === 'string' && Number.isFinite(Date.parse(history.footer_sweep_since)) ? { footer_sweep_since: history.footer_sweep_since } : {}),
       schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job,
-      ...(enrolled?.repository ? { repository: enrolled.repository } : {}), started: at, finished: at,
+      ...(repository ? { repository } : {}), started: at, finished: at,
       status, exit: status === 'failed' ? 1 : 0, reason, summary: [...job.summary, reason] };
     if (status === 'deferred') Object.assign(result, deferral(history, at, key));
     job.writeRecord(result);
@@ -612,6 +632,7 @@ function runJobLocked(job, options, deps, key) {
   const streak = skipStreak(previous);
   const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(job.identity());
   const base = { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, started,
+    ...lastCompleteRefresh(previous, options, repository, started),
     ...(repository ? { repository } : previous && Object.hasOwn(previous, 'repository') ? { repository: previous.repository } : {}) };
   if (options.job === 'shard-timings') job.writeRecord({ ...base, finished: null, exit: null, status: 'running', summary: [], ...streak });
   let outcome;
@@ -624,6 +645,7 @@ function runJobLocked(job, options, deps, key) {
       const status = [footer.status, programme.status].includes('failed') ? 'failed'
         : [footer.status, programme.status].includes('deferred') ? 'deferred' : programme.status === 'ok' ? footer.status === 'ok' ? 'ok' : 'held' : programme.status;
       outcome = { ...footer, status, footer_status: footer.status, programme_status: programme.status,
+        ...(programme.programme_last_complete_at ? { programme_last_complete_at: programme.programme_last_complete_at } : {}),
         ...(footer.reason ? { footer_reason: footer.reason } : {}),
         ...(programme.reason ? { programme_reason: programme.reason } : {}),
         ...(['skipped', 'deferred'].includes(status) ? { reason: footer.reason || programme.reason } : {}) };
@@ -641,7 +663,7 @@ function runJobLocked(job, options, deps, key) {
   }
   const exit = outcome.status === 'failed' ? 1 : 0;
   const record = { ...base, finished: job.now().toISOString(), exit, status: outcome.status, summary: job.summary, ...carried, ...(outcome.reason ? { reason: outcome.reason } : {}),
-    ...Object.fromEntries(['footer_status', 'programme_status', 'footer_reason', 'programme_reason'].filter(key => outcome[key] !== undefined).map(key => [key, outcome[key]])),
+    ...Object.fromEntries(['footer_status', 'programme_status', 'footer_reason', 'programme_reason', 'programme_last_complete_at'].filter(key => outcome[key] !== undefined).map(key => [key, outcome[key]])),
     ...(outcome.footer_sweep_since ? { footer_sweep_since: outcome.footer_sweep_since } : {}),
     ...(outcome.status === 'deferred' ? deferral(previous, started, key) : {}), ...skips };
   try { job.writeRecord(record); }

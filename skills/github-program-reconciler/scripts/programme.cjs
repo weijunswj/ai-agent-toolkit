@@ -793,6 +793,7 @@ function formatReport(report) {
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));
   if (report.holds.length) lines.push('', 'Holds', ...report.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`));
+  if (report.outcome === 'INCOMPLETE') lines.push('', `Refresh incomplete: ${report.incomplete.join(', ')}.`);
   if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
   if (report.closing && !report.closing.complete) lines.push('', `Closing scan: INCOMPLETE; ${report.closing.incomplete.length} item(s) remain unread for the next pass. ${report.closing.errors.join(' ')}`.trim());
   if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
@@ -842,15 +843,15 @@ function attentionCommand(args, deps, out) {
       const sink = { text: '', write(chunk) { this.text += chunk; return true; } };
       const passArgs = { command: 'refresh', json: true, ...(args['repo-root'] ? { 'repo-root': args['repo-root'] } : {}), ...(args['deadline-ms'] ? { 'deadline-ms': args['deadline-ms'] } : {}) };
       runPasses(passArgs, deps, sink);
-      // The last pass's holds are the ones still standing; they are printed and the exit code is 1, as
-      // plain refresh does.
+      // Report the last pass, whose unresolved checks and holds are still standing.
       const reports = sink.text.split(/\n(?=\{)/).map(text => { try { return JSON.parse(text); } catch { return null; } }).filter(Boolean);
       const last = reports.at(-1) || null;
       refreshed = last?.outcome === 'QUEUED' ? { outcome: 'QUEUED', reason: last.reason, holds: [] }
-        : { outcome: 'DONE', inventory_complete: last?.inventory?.complete ?? null, holds: last?.holds || [] };
+        : { outcome: last.outcome, inventory_complete: last.inventory.complete, holds: last.holds,
+          ...(last.incomplete ? { incomplete: last.incomplete } : {}) };
     }
     const code = finish({ ...args, refreshed }, deps, out);
-    return refreshed?.holds?.length ? 1 : code;
+    return refreshed?.holds?.length || refreshed?.outcome === 'INCOMPLETE' ? 1 : code;
   } catch (error) {
     const reason = error.code === 'GH_AUTH' ? 'gh not signed in' : `${error.code || 'FAIL'}: ${error.message}`;
     out.write(args.json ? `${JSON.stringify({ line: `Attention: unknown (${error.code === 'GH_AUTH' ? 'gh not signed in' : error.code || 'FAIL'})`, reason }, null, 2)}\n`
@@ -862,6 +863,7 @@ function attentionCommand(args, deps, out) {
 function formatAttention(result) {
   const lines = [result.text];
   if (result.refreshed?.outcome === 'QUEUED') lines.push(`Refresh queued: ${result.refreshed.reason}.`);
+  if (result.refreshed?.outcome === 'INCOMPLETE' && result.refreshed.inventory_complete) lines.push(`Refresh incomplete: ${result.refreshed.incomplete.join(', ')}.`);
   if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
   if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
   for (const entry of result.findings) {
@@ -962,7 +964,7 @@ function finish(args, deps, out, opened = null) {
   else if (args.command === 'attention' && !args.json) out.write(formatAttention(result));
   else if (args.command === 'inventory' && !args.json) out.write(formatInventory(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (pass) return result.holds.length ? 1 : 0;
+  if (pass) return result.holds.length || result.outcome === 'INCOMPLETE' ? 1 : 0;
   return 0;
 }
 

@@ -115,7 +115,8 @@ const run = (file, args, opts) => {
     return { status: 0, stdout: '{"results":[]}' };
   }
   if (args[0] === job.SCRIPT.programme) return args[1] === 'attention' ? ATTENTION
-    : { status: config.failProgramme ? 2 : 0, stdout: '{"holds":[]}' };
+    : { status: config.failProgramme ? 2 : 0, stdout: config.failProgramme ? ''
+      : JSON.stringify({ outcome: 'COMPLETE', inventory: { complete: true }, holds: [] }) };
   if (args[0] === job.SCRIPT.shardTimings) { event('shards'); return { status: 0, stdout: 'measured' }; }
   throw new Error(`unexpected process ${file} ${args[0]}`);
 };
