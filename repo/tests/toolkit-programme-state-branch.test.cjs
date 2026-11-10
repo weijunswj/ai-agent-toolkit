@@ -575,3 +575,50 @@ test('B: when a checkpoint write fails, the sidecar the old checkpoint names is 
   assert.equal(after.length, 2, 'the replaced revision 2 sidecar stays while the checkpoint names it');
   assert.ok(after.includes(before[0]));
 });
+
+for (const interruption of ['conflict', 'accepted without reply']) {
+  test(`sweep branch: ${interruption} at the existing public child CAS preserves recovery`, () => {
+    const fx = fixture();
+    const lockFile = path.join(fx.dir, 'sweep.lock');
+    const issue = fx.github.issues.get(12);
+    issue.state = 'closed'; issue.state_reason = 'completed'; issue.closed_at = fx.now();
+    let elapsed = 0;
+    const at = Date.parse(fx.now());
+    fx.github.intercept(() => { elapsed += 1800; });
+    const first = fx.run(['refresh'], { lockFile, passClock: () => at + elapsed, refreshBudgetMs: 80000 });
+    assert.equal(first.error, null, first.error?.message);
+    assert.equal(first.code, 1);
+    assert.ok(fs.existsSync(lockFile + '.resume'));
+    const old = fx.github.readAt(REPO, BRANCH, publicFile('issue-12'));
+    assert.equal(old.lifecycle, 'PLANNED');
+
+    const endpoint = `repos/${REPO}/contents/${publicFile('issue-12')}`;
+    let attempted = 0;
+    fx.github.hooks = [];
+    fx.github.intercept(call => {
+      if (call.method !== 'PUT' || call.path !== endpoint) return;
+      attempted++;
+      assert.ok(call.body.sha, 'the scoped copy uses the existing child CAS');
+      if (interruption === 'conflict') return { status: 409, json: {} };
+      assert.equal(fx.github.route(call.method, call.path, call.body).status, 200);
+      return { status: 502, json: {} };
+    });
+    const partial = fx.run(['refresh'], { lockFile, passClock: () => at });
+    assert.equal(partial.error, null, partial.error?.message);
+    assert.equal(partial.code, 1);
+    assert.equal(partial.result.outcome, 'HELD');
+    assert.equal(attempted, 1);
+    const pending = fx.github.readAt(REPO, BRANCH, publicFile('issue-12'));
+    assert.equal(pending.lifecycle, interruption === 'conflict' ? 'PLANNED' : 'DONE');
+
+    fx.github.hooks = [];
+    const later = fx.run(['refresh'], { lockFile, passClock: () => at });
+    assert.equal(later.error, null, later.error?.message);
+    assert.equal(later.code, 0);
+    const final = fx.store().read('child', 12).doc;
+    assert.equal(final.lifecycle, 'DONE');
+    assert.equal(final.revision, old.revision + 1);
+    assert.equal(fx.github.commitLog.filter(item => item.repository === REPO && item.branch === BRANCH
+      && item.message.includes(`issue-12 r${final.revision}`)).length, 1, 'one verified public state revision');
+  });
+}

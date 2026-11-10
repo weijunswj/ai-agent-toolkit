@@ -623,3 +623,262 @@ test('A-T8: stopped-pass diagnostics are closed and validated in the reader and 
   assert.ok(state.validateParent(make({ ...diagnostics, total: 33 })).length, 'runtime enforces total >= done');
   assert.equal(state.findingText(make(diagnostics).attention[0]), 'PASS_STOPPED #421: the last refresh stopped at task pages (34 of 61 done); the next refresh picks up the rest');
 });
+
+const { pageFixture } = require('./support/programme-page-fixture.cjs');
+
+function slowRefresh(t, { count = 60, lockFile, version = '3.59.1', discussion = 741, extraIssues = 80, prs = 320 } = {}) {
+  const fx = pageFixture(state, { count, groups: ['LATER'], width: 5 });
+  const dir = lockFile ? path.dirname(lockFile) : fs.mkdtempSync(path.join(os.tmpdir(), 'programme-sliced-'));
+  if (!lockFile) t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = lockFile || path.join(dir, 'pass.lock');
+  for (let i = 0; i < extraIssues; i++) fx.github.addIssue(100000 + i, { labels: i % 20 ? ['programme:outside'] : [] });
+  for (let i = 0; i < discussion; i++) fx.github.addComment(12, { body: 'Synthetic discussion' });
+  for (let i = 0; i < prs; i++) fx.github.addPr(200000 + i, { state: 'CLOSED', head: 'a'.repeat(40) });
+  const close = number => Object.assign(fx.issues.get(number), { state: 'closed', closed_at: fx.NOW, state_reason: 'completed' });
+  const read = number => fx.store.read('child', number).doc;
+  const run = ({ slow = true, fault = null, argv, more = {} } = {}) => {
+    let time = Date.parse(fx.NOW);
+    let phase = 'entry';
+    // Reproduce discovery's per-family planning latency without depending on new metrics.
+    const original = state.Reconciler.prototype.plan;
+    state.Reconciler.prototype.plan = function (...args) {
+      phase = 'planning';
+      try { return original.apply(this, args); } finally { phase = 'apply'; }
+    };
+    fx.github.hooks = [];
+    fx.github.intercept(call => {
+      time += !slow ? 0 : phase === 'planning' && call.method === 'GET' && call.path.includes(fx.github.storeRepository)
+        ? 2700 : phase === 'planning' && call.path.includes('/comments') ? 2800 : 1250;
+      return fault?.(call, phase, delay => { time += delay; });
+    });
+    try {
+      return cliRun(fx, file, { now: () => new Date(time).toISOString(), passClock: () => time, toolkitVersion: version, ...more }, argv);
+    } finally {
+      state.Reconciler.prototype.plan = original;
+      fx.github.hooks = [];
+    }
+  };
+  return { ...fx, file, dir, read, close, run };
+}
+
+test('sweep: repeated slow state 0/2 advances verified work across invocations', t => {
+  const f = slowRefresh(t);
+  f.close(100); f.close(106);
+  // Make the first pass reproduce exactly two planned state effects (attention and one child).
+  Object.assign(f.issues.get(106), { state: 'open', closed_at: null, state_reason: null });
+  const first = f.run();
+  const stop = first.report.holds.find(entry => entry.code === 'PASS_STOPPED');
+  assert.match(stop.detail, /state \(0 of 2 done\)/);
+  assert.equal(f.read(100).lifecycle, 'PLANNED');
+  f.close(106);
+  const second = f.run();
+  assert.equal(f.read(100).lifecycle, 'DONE');
+  assert.notEqual(second.report.outcome, 'COMPLETE');
+  assert.equal(second.code, 1);
+  assert.equal(f.read(106).lifecycle, 'PLANNED');
+  const third = f.run();
+  assert.equal(f.read(106).lifecycle, 'DONE');
+  assert.notEqual(third.report.outcome, 'COMPLETE');
+  const metrics = JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8'));
+  assert.ok(metrics.phases.resume.requests.issue > 0);
+  assert.ok(metrics.phases.resume.elapsed_ms <= 45000);
+  assert.ok(Object.values(metrics.phases.resume.requests).reduce((a, b) => a + b, 0) <= 48);
+  assert.doesNotMatch(JSON.stringify(metrics), /Synthetic discussion|example\.test|fixture-controller/);
+});
+
+const sweepIssue = (call, n) => call.path === `repos/example.test/app/issues/${n}`;
+const sweepDoc = (call, n) => call.path.split('?')[0].endsWith(`/contents/state/issue-${n}.json`);
+const sweepCursor = f => JSON.parse(fs.readFileSync(`${f.file}.resume`, 'utf8'));
+
+for (const change of ['holder epoch', 'catalogue', 'binding']) {
+  test(`sweep: changed ${change} never adopts the old rotation`, t => {
+    const f = slowRefresh(t);
+    f.close(100);
+    assert.equal(f.run().code, 1);
+    assert.equal(f.run().code, 1);
+    const old = sweepCursor(f);
+    assert.equal(old.after, 103);
+    if (change === 'holder epoch') {
+      const parent = f.parent();
+      parent.fence.epoch++;
+      f.github.putFile('state/parent-12.json', parent);
+    } else if (change === 'catalogue') {
+      const parent = f.parent();
+      parent.outcomes = parent.outcomes.filter(row => row.issue !== 103);
+      f.github.putFile('state/parent-12.json', parent);
+    } else f.binding.required_checks = ['new-required-check'];
+    f.close(104);
+    assert.equal(f.run().code, 1);
+    assert.equal(f.read(104).lifecycle, 'PLANNED', 'old position did not start a bounded write');
+    assert.notEqual(sweepCursor(f).scope, old.scope);
+    assert.equal(sweepCursor(f).after, null);
+  });
+}
+
+for (const failure of ['malformed', 'foreign cursor', 'oversized']) {
+  test(`sweep: ${failure} checkpoint holds refresh while preview stays read-only`, t => {
+    const f = slowRefresh(t);
+    f.close(100);
+    assert.equal(f.run().code, 1);
+    const file = `${f.file}.resume`;
+    const text = failure === 'malformed' ? '{' : failure === 'oversized' ? 'x'.repeat(1025) : JSON.stringify({ ...sweepCursor(f), after: 999999 });
+    fs.writeFileSync(file, text);
+    const before = [f.github.commits, f.github.mutations()];
+    f.run({ slow: false, argv: ['reconcile', '--json'] });
+    assert.throws(() => f.run(), { code: 'SWEEP_RESUME_INVALID' });
+    assert.deepEqual([f.github.commits, f.github.mutations()], before);
+    assert.equal(fs.readFileSync(file, 'utf8'), text);
+    fs.renameSync(file, file + '.preserved');
+    assert.equal(f.run().code, 1, 'a fresh full attempt can arm a new rotation');
+    assert.equal(sweepCursor(f).after, null);
+  });
+}
+
+for (const interruption of ['CAS conflict', 'lost write reply', 'lost readback', 'existing intent']) {
+  test(`sweep: ${interruption} holds its item and serves unrelated work`, t => {
+    const f = slowRefresh(t);
+    f.close(100);
+    assert.equal(f.run().code, 1);
+    f.close(101);
+    const target = () => f.read(100);
+    if (interruption === 'existing intent') {
+      const doc = target();
+      doc.pending_effects.push({ intent_id: 'earlier-intent', kind: 'replace_block', target: { issue: 100, digest: 'missing' }, state: 'UNKNOWN' });
+      f.github.putFile('state/issue-100.json', doc);
+    }
+    const pending = target().pending_effects;
+    const parent = f.parent();
+    const offset = f.github.calls.length;
+    const publicBefore = f.github.mutations();
+    let faulted = false;
+    const partial = f.run({ fault: (call, phase) => {
+      if (faulted || phase !== 'entry' || !sweepDoc(call, 100)) return;
+      if (interruption === 'lost readback' && call.method === 'GET' && /\?ref=c\d+$/.test(call.path)) {
+        faulted = true; return { status: 502, json: {} };
+      }
+      if (call.method !== 'PUT') return;
+      if (interruption === 'CAS conflict') {
+        faulted = true;
+        f.github.putFile('state/issue-100.json', { ...f.github.readFile('state/issue-100.json'), next_action: 'Concurrent controller change' });
+      } else if (interruption === 'lost write reply') {
+        faulted = true;
+        assert.equal(f.github.route(call.method, call.path, call.body).status, 200);
+        return { status: 502, json: {} };
+      }
+    } });
+    assert.equal(partial.code, 1);
+    assert.equal(partial.report.outcome, 'HELD');
+    assert.deepEqual(partial.report.inventory, { complete: false, reason: 'Full inventory deferred', counts: {} });
+    assert.ok(partial.report.holds.some(hold => hold.target === '#100'));
+    assert.equal(f.read(101).lifecycle, 'DONE');
+    assert.equal(f.github.mutations(), publicBefore, 'no public effect from a partial batch');
+    assert.deepEqual(f.parent(), parent, 'no watermark, parent state or attention settlement');
+    assert.deepEqual(target().pending_effects, pending);
+    assert.equal(sweepCursor(f).after, 103);
+    if (interruption === 'CAS conflict') assert.equal(target().next_action, 'Concurrent controller change');
+    const accepted = ['lost write reply', 'lost readback'].includes(interruption);
+    if (accepted) {
+      assert.equal(target().lifecycle, 'DONE');
+      const rev = target().revision;
+      assert.equal(f.github.calls.slice(offset).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 1);
+      const later = f.github.calls.length;
+      f.run({ slow: false });
+      assert.equal(target().revision, rev, 'fresh full read recognises the verified lifecycle already present');
+      assert.equal(f.github.calls.slice(later).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 0);
+    }
+  });
+}
+
+test('sweep: takeover during source confirmation stops before the child CAS', t => {
+  const f = slowRefresh(t);
+  f.close(100);
+  assert.equal(f.run().code, 1);
+  let reads = 0;
+  const at = f.github.calls.length;
+  assert.throws(() => f.run({ fault: call => {
+    if (sweepIssue(call, 100) && ++reads === 2) {
+      const prior = f.github.readFile('state/parent-12.json');
+      const next = state.claimDocument(prior, { session: 'fixture-successor', prefix: 'TEST-' }, { takeover: true });
+      f.github.putFile('state/parent-12.json', next);
+    }
+  } }), { code: 'STALE_WRITER' });
+  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 0);
+  assert.equal(f.read(100).lifecycle, 'PLANNED');
+});
+
+test('sweep: provider refusal stops the batch and its full follow-on', t => {
+  const f = slowRefresh(t);
+  f.close(100);
+  assert.equal(f.run().code, 1);
+  const at = f.github.calls.length;
+  const result = f.run({ fault: call => sweepIssue(call, 100) ? { status: 429, json: {} } : undefined });
+  assert.equal(result.code, 1);
+  assert.equal(result.report.holds[0].code, 'SWEEP_SLICE_PROVIDER_HELD');
+  assert.equal(f.github.calls.slice(at).filter(call => sweepIssue(call, 100)).length, 1);
+  assert.ok(f.github.calls.slice(at).every(call => call.method === 'GET'), 'no full plan or effect after the refusal');
+  assert.equal(sweepCursor(f).after, 100);
+});
+
+test('sweep: healthy refresh keeps the existing full path and writes only private aggregate metrics', t => {
+  const f = slowRefresh(t, { count: 1, discussion: 0, extraIssues: 0, prs: 0 });
+  f.close(100);
+  const result = f.run({ slow: false });
+  assert.equal(result.code, 0, JSON.stringify(result.report.holds));
+  assert.equal(f.read(100).lifecycle, 'DONE');
+  assert.equal(fs.existsSync(`${f.file}.resume`), false);
+  const metrics = JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8'));
+  assert.equal(metrics.phases.resume, undefined);
+  for (const phase of ['entry', 'inventory', 'planning', 'state']) assert.ok(metrics.phases[phase], phase);
+  assert.doesNotMatch(JSON.stringify(result.report), /elapsed_ms|toolkit.programme-sweep-metrics/);
+  assert.doesNotMatch(f.page(), /elapsed_ms|toolkit.programme-sweep-metrics/);
+});
+
+test('sweep: a slow call uses the bounded request timeout and no CAS starts after the reserve', t => {
+  const f = slowRefresh(t);
+  f.close(100);
+  assert.equal(f.run().code, 1);
+  const at = f.github.calls.length;
+  const optionsSeen = [];
+  const transport = Object.assign(Object.create(f.github), {
+    request(method, endpoint, body, options) {
+      if (sweepIssue({ path: endpoint }, 100)) optionsSeen.push(options?.timeoutMs);
+      return f.github.request(method, endpoint, body);
+    },
+  });
+  const result = f.run({ more: { transport }, fault: (call, _phase, spend) => {
+    if (sweepIssue(call, 100)) spend(44000); // A fake request that ignores the supplied deadline.
+  } });
+  assert.equal(result.code, 1);
+  assert.equal(result.report.holds[0].code, 'SWEEP_SLICE_LIMIT');
+  assert.deepEqual(optionsSeen, [10000]);
+  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT').length, 0);
+  assert.equal(f.read(100).lifecycle, 'PLANNED');
+});
+
+test('sweep: a changed source lifecycle holds its write while the next child still progresses', t => {
+  const f = slowRefresh(t);
+  f.close(100);
+  assert.equal(f.run().code, 1);
+  f.close(101);
+  let read = 0;
+  const result = f.run({ fault: call => {
+    if (sweepIssue(call, 100) && ++read === 2) Object.assign(f.issues.get(100), { state: 'open', closed_at: null, state_reason: null });
+  } });
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.report.holds.map(hold => hold.code), ['GRAPH_FACT_STALE']);
+  assert.equal(f.read(100).lifecycle, 'PLANNED');
+  assert.equal(f.read(101).lifecycle, 'DONE');
+});
+
+test('sweep: losing private-store access during source confirmation refuses the child CAS', t => {
+  const f = slowRefresh(t);
+  f.close(100);
+  assert.equal(f.run().code, 1);
+  let reads = 0;
+  const at = f.github.calls.length;
+  assert.throws(() => f.run({ fault: call => {
+    if (sweepIssue(call, 100) && ++reads === 2) f.github.repos.get(f.github.storeRepository.toLowerCase()).private = false;
+  } }), { code: 'STATE_STORE_UNVERIFIED' });
+  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT').length, 0);
+  assert.equal(f.read(100).lifecycle, 'PLANNED');
+});

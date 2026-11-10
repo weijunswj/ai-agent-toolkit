@@ -57,6 +57,7 @@ const { spawnSync } = require('node:child_process');
 const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
+const { SweepNotes, BATCH_SIZE, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
 const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = require('./programme-lock.cjs');
 
 const { ProgrammeError } = state;
@@ -200,7 +201,7 @@ class PassProgress {
     const note = { token: this.lock.token, started_at: d.started_at, phase: d.phase, done: d.done, total: d.total, unreported: true };
     const draft = `${this.file}.${this.lock.token}.draft`;
     fs.writeFileSync(draft, `${JSON.stringify(note)}\n`, { mode: 0o600 });
-    fs.renameSync(draft, this.file);
+    replaceOwnedNote(draft, this.file, this.lock);
   }
   reported() { this.interrupted = null; if (this.last) this.write(this.last); }
   finish() {
@@ -254,14 +255,26 @@ function openContext(args, deps = {}) {
   const binding = deps.binding || merged || state.loadBinding(repoRoot);
   const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
   // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
-  const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
+  const bindingAtEntry = deps.sweepNotes ? state.canonicalText(binding) : null;
+  const privateRepo = `repos/${binding.store.repository.toLowerCase()}`;
+  const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (method, endpoint, body, options) => {
+    deps.heartbeat();
+    const send = requestOptions => base.request(method, endpoint, body, requestOptions);
+    return deps.sweepNotes ? deps.sweepNotes.request(method, endpoint, privateRepo, options, send) : send(options);
+  } }) : base;
   const repository = state.bindRepository({ transport, originUrl, binding });
   const version = deps.toolkitVersion === undefined ? toolkitVersion() : deps.toolkitVersion;
   const store = state.openStore({ transport, binding, now: deps.now, toolkitVersion: version, localCheckpoint: localCheckpoint(binding.repository, deps) });
   store.verify();
   // The session comes from --session only; an inherited environment never makes a session a writer.
   const writer = args.session ? { session: args.session, prefix: args.prefix || binding.writer_prefix } : null;
-  return { binding, transport, repository, store, writer, version, repoRoot, now: deps.now };
+  return { binding, transport, repository, store, writer, version, repoRoot, now: deps.now,
+    ...(deps.sweepNotes ? { checkSweepBinding: () => {
+      if (state.canonicalText(deps.originUrl ? (deps.binding || binding) : requireGitHubGovernance(repoRoot)) !== bindingAtEntry) {
+        throw new ProgrammeError('SWEEP_SCOPE_CHANGED', 'The merged programme binding changed during the child check. Run a fresh refresh.');
+      }
+    } } : {}),
+  };
 }
 
 function requireWriter(context) {
@@ -491,6 +504,63 @@ function liveHead(context, child) {
   return number ? reader.pullRequest(number)?.head || null : null;
 }
 
+function makeReconciler(context) {
+  return new state.Reconciler({
+    store: context.store,
+    reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository }),
+    mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
+    binding: context.binding, writer: context.writer, toolkitVersion: context.version,
+    refreshFacts: context.writer?.by_hash === true, now: context.now,
+    pass: context.pass, checkSweepBinding: context.checkSweepBinding,
+  });
+}
+
+function sweepScope(context, parent) {
+  return state.sha256(state.canonicalText([context.binding, parent.parent_issue, parent.fence.epoch,
+    context.writer.session_hash, state.sweepCatalogue(parent)]));
+}
+
+const HELD_CHILD_CHECKS = new Set(['EFFECT_UNKNOWN', 'GRAPH_FACT_STALE', 'GH_FAILED', 'STATE_CONFLICT',
+  'STATE_INVALID', 'STATE_READBACK_MISMATCH', 'SWEEP_SLICE_LIMIT', 'SWEEP_SLICE_PROVIDER_HELD']);
+
+function resumeStoppedRefresh(context, parent, scope, issues, note) {
+  const { sweepNotes: notes, pass, store } = context;
+  const reconciler = makeReconciler(context);
+  const start = note.after === null ? 0 : issues.indexOf(note.after) + 1;
+  const before = store.writes;
+  const { holds, stopped } = notes.runBatch(pass.deadline - state.PAGE_RESERVE_MS, canStart => {
+    const holds = [];
+    for (let offset = 0; offset < Math.min(BATCH_SIZE, issues.length) && canStart(); offset++) {
+      const number = issues[(start + offset) % issues.length];
+      try {
+        reconciler.sweepParent(parent);
+        // Record which validated pending key had its turn, before a request can die mid-effect.
+        // This is a cyclic scheduling position. It never marks that key complete.
+        notes.save(scope, number);
+        reconciler.resumeChildLifecycle(number, parent);
+      } catch (error) {
+        if (!HELD_CHILD_CHECKS.has(error.code)) throw error;
+        holds.push({ code: error.code, target: `#${number}`,
+          detail: 'This child check could not be confirmed. Its saved state and any earlier intent will be checked again on a later refresh.' });
+        if (error.code === 'SWEEP_SLICE_LIMIT' || error.code === 'SWEEP_SLICE_PROVIDER_HELD') break;
+      }
+    }
+    return { holds };
+  });
+  if (stopped && !holds.some(hold => hold.code === stopped.code)) {
+    holds.push({ code: stopped.code, target: `#${parent.parent_issue}`, detail: stopped.message });
+  }
+  if (!holds.length) return { writes: store.writes - before };
+  return { report: {
+    repository: context.repository, parent_issue: parent.parent_issue, store: { ...context.binding.store },
+    mode: 'apply', outcome: 'HELD', parent_revision: parent.revision, findings: [], close_list: [],
+    effects: [], recovered: [], holds, results: [], writes: { state: store.writes - before, github: 0 },
+    inventory: { complete: false, reason: 'Full inventory deferred', counts: {} },
+    summary: 'Child checks ran; the full refresh is held.',
+    next_action: 'Run a later refresh to recheck the held work.',
+  } };
+}
+
 const commands = {
   reconcile(args, context) {
     if (args.apply) {
@@ -500,19 +570,13 @@ const commands = {
       else if (!state.isHolder(parentDoc, context.writer)) throw new ProgrammeError('STALE_WRITER', state.parentRefusal(parentDoc));
     }
     if (args.apply && args['parent-file']) throw usage('--parent-file is for dry runs only.');
-    const reconciler = new state.Reconciler({
-      store: context.store,
-      reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository }),
-      mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
-      binding: context.binding, writer: context.writer, toolkitVersion: context.version,
-      refreshFacts: context.writer?.by_hash === true, now: context.now,
-      pass: context.pass,
-    });
+    const reconciler = makeReconciler(context);
     const parentOverride = args['parent-file'] ? readJsonFile(args['parent-file'], 'parent') : null;
     return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride, inventory: args.inventory || null });
   },
 
-  // The same full pass as `reconcile --apply`, for any session in a governed checkout. It takes no
+  // The ordinary pass is the full `reconcile --apply`. A stopped pass may give existing child
+  // state its own bounded turn first. Refresh is for any session in a governed checkout and takes no
   // session, patch or verdict: it writes under the session that holds the parent now, so it can only
   // bring the pages and documents in line with what is already recorded and observed. Every decision
   // (assign, return, update, claim) stays the controller's. After a takeover the guard stops it at its
@@ -526,9 +590,40 @@ const commands = {
     }
     // Only the hash of the holder's session: enough to write as it, never to decide for it.
     context.writer = state.refreshWriter(parentDoc);
+    const notes = state.registeredParents(context.binding).length === 1 ? context.sweepNotes : null;
+    const scope = notes ? sweepScope(context, parentDoc) : null;
+    const issues = notes ? parentDoc.outcomes.filter(row => row.parent === parentDoc.parent_issue).map(row => row.issue).sort((a, b) => a - b) : [];
+    const note = notes?.read(scope, issues);
+    let resumed = null;
+    if (note && issues.length) {
+      resumed = resumeStoppedRefresh(context, parentDoc, scope, issues, note);
+      if (resumed.report) {
+        context.resumeHeld = true;
+        return resumed.report;
+      }
+    }
+    // A catch-up batch spends part of this pass's time. Do not let its follow-on plan
+    // spend the state window again; the ordinary full path keeps its existing deadline.
+    if (context.pass) context.pass.resumePlanning = Boolean(resumed);
+    context.sweepNotes?.phaseAt('inventory');
     const inventory = runInventory(context, parentDoc, deps, args['deadline-ms']);
     const report = commands.reconcile({ ...args, apply: true, inventory }, context);
-    cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
+    const stored = context.store.read('parent', context.binding.parent_issue).doc;
+    if (notes && stored && stored.fence.epoch === parentDoc.fence.epoch && state.isHolder(stored, context.writer)) {
+      const stopped = context.pass.stopped;
+      if (issues.length && stopped && ['planning', 'state'].includes(stopped.phase)) {
+        const currentScope = sweepScope(context, stored);
+        if (!note || scope !== currentScope) {
+          context.checkSweepBinding();
+          notes.save(currentScope, null);
+        }
+      } else if (notes.hadNote) {
+        context.checkSweepBinding();
+        notes.clear();
+      }
+    }
+    if (resumed) report.writes.state += resumed.writes;
+    cacheAttention(context, stored, inventory.complete, deps);
     return report;
   },
 
@@ -793,7 +888,10 @@ function formatReport(report) {
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));
   if (report.holds.length) lines.push('', 'Holds', ...report.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`));
-  if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
+  if (report.inventory) {
+    const counts = Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ');
+    lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}${counts ? `; ${counts}` : ''}`);
+  }
   if (report.closing && !report.closing.complete) lines.push('', `Closing scan: INCOMPLETE; ${report.closing.incomplete.length} item(s) remain unread for the next pass. ${report.closing.errors.join(' ')}`.trim());
   if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
   if (report.state_branch?.events.length) lines.push('', `State branch ${report.state_branch.branch}`, ...report.state_branch.events.map(event => `- ${event.code}: ${event.text}`));
@@ -888,7 +986,8 @@ function formatInventory(result) {
 function runPasses(args, deps, out) {
   const pass = new state.RefreshBudget({ nowMs: deps.passClock || Date.now, ...(deps.refreshBudgetMs === undefined ? {} : { budgetMs: deps.refreshBudgetMs }) });
   const beat = { fn: () => {} };
-  const passDeps = { ...deps, heartbeat: () => beat.fn() };
+  const notes = new SweepNotes({ clock: pass.nowMs });
+  const passDeps = { ...deps, heartbeat: () => beat.fn(), sweepNotes: notes };
   const context = openContext(args, passDeps);
   context.pass = pass;
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
@@ -926,10 +1025,16 @@ function runPasses(args, deps, out) {
         const passArgs = passes === 0 ? args : { command: 'refresh', json: args.json, 'repo-root': args['repo-root'] };
         // Later passes reuse the same store, which remembers its own writes through GitHub's read lag.
         if (passes > 0 && !args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
-        code = Math.max(code, finish(passArgs, deps, out, context));
+        const measure = Boolean(file && passArgs.command === 'refresh');
+        if (passes) notes.begin();
+        notes.file = file;
+        notes.lock = held;
+        context.sweepNotes = pass.metrics = measure ? notes : null;
+        try { code = Math.max(code, finish(passArgs, deps, out, context)); }
+        finally { if (measure) notes.saveMetrics(); }
         passes += 1;
         progress.finish();
-      } while (flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
+      } while (!context.resumeHeld && flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
     } catch (error) {
       if (held.owns()) progress?.write(pass.snapshot());
       throw error;
@@ -937,7 +1042,7 @@ function runPasses(args, deps, out) {
       lock.release();
     }
     // A change can be flagged between the last check and the release: take the lock back for it.
-    lock = flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS ? takeLock(file, deps) : null;
+    lock = !context.resumeHeld && flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS ? takeLock(file, deps) : null;
   }
   return code;
 }

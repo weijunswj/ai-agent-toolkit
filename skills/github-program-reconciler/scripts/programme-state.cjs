@@ -412,6 +412,7 @@ class RefreshBudget {
   left() { return this.deadline - this.nowMs(); }
   phaseAt(phase, total = 0) {
     this.phase = phase; this.done = 0; this.total = total;
+    this.metrics?.phaseAt(phase);
     this.progress?.write(this.snapshot());
   }
   tick() {
@@ -426,7 +427,7 @@ class RefreshBudget {
     return Boolean(this.stopped);
   }
   planning() {
-    if (this.stop(0)) throw new ProgrammeError('PASS_STOPPED', 'The planning time budget was reached.');
+    if (this.stop(this.resumePlanning ? PAGE_RESERVE_MS : 0)) throw new ProgrammeError('PASS_STOPPED', 'The planning time budget was reached.');
     this.tick();
   }
 }
@@ -3374,6 +3375,19 @@ function copyIssueLifecycle(doc, issue) {
   return next;
 }
 
+// Only membership is an input to the rotation or to its child observation. Reordering or
+// acknowledging a finding does not invalidate the rotation.
+function sweepCatalogue(parent) {
+  return JSON.stringify(parent.outcomes.map(row => [row.issue, row.parent ?? null]).sort((a, b) => a[0] - b[0]));
+}
+
+function checkLifecycleObservation(observed, fresh) {
+  if (observed?.complete !== true || fresh?.complete !== true || observed.id !== fresh.id || fresh.is_pull_request
+    || observed.state !== fresh.state || observed.closed_at !== fresh.closed_at || observed.state_reason !== fresh.state_reason) {
+    throw new ProgrammeError('GRAPH_FACT_STALE', 'Issue lifecycle changed after observation; refresh again.');
+  }
+}
+
 const EFFECT_TEXT = {
   set_parent_state: effect => `${effect.target.state === 'open' ? 'Reopen' : 'Complete'} the programme parent #${effect.target.issue} from every native descendant's state`,
   post_parent_repair: effect => `Report the repaired parent closure on #${effect.target.issue}`,
@@ -3456,7 +3470,7 @@ class Reconciler {
     }
   }
 
-  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null, refreshFacts = false, pass = null }) {
+  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null, refreshFacts = false, pass = null, checkSweepBinding = null }) {
     this.store = store;
     // The clock attention findings are dated by (the store's clock dates only its own commits).
     this.now = now || (() => new Date().toISOString());
@@ -3476,8 +3490,57 @@ class Reconciler {
     this.toolkitVersion = toolkitVersion;
     this.threshold = Math.min(threshold, DEFAULT_THRESHOLD);
     this.refreshFacts = refreshFacts;
+    this.checkSweepBinding = checkSweepBinding;
     this.closing = reader?.transport ? new (require('./closing-comments.cjs').ClosingComments)({
       transport:reader.transport, repository:binding.repository, pass:this.pass, screenSecrets }) : null;
+  }
+
+  // A stopped full pass can give existing child lifecycle copies a turn before expensive
+  // planning. This path cannot create a child, settle an intent or emit a public page or notice.
+  sweepParent(expected) {
+    if (!this.refreshFacts || this.writer?.by_hash !== true || registeredParents(this.binding).length !== 1) {
+      throw new ProgrammeError('ROLE_REFUSED', 'Only a single-parent refresh can resume child checks.');
+    }
+    this.checkSweepBinding?.();
+    const fresh = this.store.read('parent', expected.parent_issue).doc;
+    if (!fresh || fresh.fence.epoch !== expected.fence.epoch || !isHolder(fresh, this.writer)) {
+      throw new ProgrammeError('STALE_WRITER', 'The parent holder changed during the child check. Run a fresh refresh.');
+    }
+    if (fresh.repository.toLowerCase() !== this.binding.repository.toLowerCase() || fresh.parent_issue !== this.binding.parent_issue
+      || sweepCatalogue(fresh) !== sweepCatalogue(expected)) {
+      throw new ProgrammeError('SWEEP_SCOPE_CHANGED', 'The programme catalogue changed during the child check. Run a fresh refresh.');
+    }
+    return fresh;
+  }
+
+  resumeChildLifecycle(number, expectedParent) {
+    const outcome = expectedParent.outcomes.find(entry => entry.issue === number);
+    if (!outcome || outcome.parent !== expectedParent.parent_issue) {
+      throw new ProgrammeError('SWEEP_SCOPE_CHANGED', 'The selected child is no longer catalogued directly under this parent.');
+    }
+    const { doc, sha } = this.store.read('child', number);
+    if (!doc) return; // Creation stays with the full plan and its catalogue and PR guards.
+    if (doc.issue !== number || doc.repository.toLowerCase() !== this.binding.repository.toLowerCase()) {
+      throw new ProgrammeError('STATE_INVALID', 'The child state document does not match the selected issue.');
+    }
+    if (doc.pending_effects.length) throw new ProgrammeError('EFFECT_UNKNOWN', 'The full refresh must settle this child’s earlier intent by readback.');
+    const observed = this.reader.issue(number);
+    if (observed?.complete !== true || observed.is_pull_request || observed.parent !== (outcome.parent ?? null)) {
+      throw new ProgrammeError('GRAPH_FACT_STALE', 'The child’s issue identity or native parent could not be verified.');
+    }
+    // Reopening carries a one-time finding. The full pass owns that finding and its projection.
+    if (observed.state === 'open' && doc.closed_by_sweep) return;
+    const next = copyIssueLifecycle(doc, observed);
+    if (sameState(doc, next)) return;
+    const fresh = this.reader.issue(number);
+    checkLifecycleObservation(observed, fresh);
+    if (fresh.parent !== observed.parent) throw new ProgrammeError('GRAPH_FACT_STALE', 'The child’s native parent changed after observation.');
+    this.store.verify();
+    const parent = this.sweepParent(expectedParent);
+    authoriseWrite('child', doc, parent, this.writer);
+    // One exact CAS. A concurrent child change (including its fence) is a hold. The store's
+    // independent readback must succeed; a later turn derives the idempotent copy from fresh facts.
+    this.store.write('child', number, next, { sha, previous: doc });
   }
 
   loadParent(parentOverride) {
@@ -4554,9 +4617,7 @@ class Reconciler {
       requireRefresh();
       const observed = plan.observed.issues.get(effect.target.issue);
       const fresh = this.reader.issue(effect.target.issue);
-      if (observed?.complete !== true || fresh?.complete !== true || fresh.is_pull_request || observed.state !== fresh.state || observed.closed_at !== fresh.closed_at || observed.state_reason !== fresh.state_reason) {
-        throw new ProgrammeError('GRAPH_FACT_STALE', 'Issue lifecycle changed after observation; refresh again.');
-      }
+      checkLifecycleObservation(observed, fresh);
       const expected = plan.children.get(effect.target.issue)?.doc;
       if (expected && CLOSE_FIELDS.some(key => JSON.stringify(doc[key]) !== JSON.stringify(expected[key]))) throw new ProgrammeError('GRAPH_FACT_STALE', 'Controller lifecycle changed after observation; refresh again.');
       return copyIssueLifecycle(doc, fresh);
@@ -5320,6 +5381,6 @@ module.exports = Object.freeze({
   RefreshBudget, REFRESH_BUDGET_MS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
-  refreshWriter, isDecisionHolder, sha256, sessionsOf,
+  refreshWriter, isDecisionHolder, sha256, sessionsOf, sweepCatalogue,
   SAFE_LIMIT, renderContextBlockBody,
 });
