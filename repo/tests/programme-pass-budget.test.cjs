@@ -19,7 +19,7 @@ const parentWrites = calls => calls.filter(call => call.method === 'PATCH' && ca
 
 // Sixty-seven settled tasks, then seventeen native additions placed before them. The next pass
 // adopts 17 tasks, makes 17 order moves and writes 18 bodies. Setup writes are outside the counts.
-function fixture({ count = 67, added = 17 } = {}) {
+function fixture({ count = 67, added = 17, prepare } = {}) {
   const repository = 'example.test/app';
   const github = new FakeGitHub({ repository, store: 'example.test/store' });
   const binding = { schema: state.SCHEMA.binding, repository, parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
@@ -27,6 +27,7 @@ function fixture({ count = 67, added = 17 } = {}) {
   github.addIssue(421, { body: '# Programme\n\n## CURRENT\nHand-written notes.\n' });
   const outcomes = Array.from({ length: count }, (_, i) => ({ issue: 500 + i, class: 'COMMITTED', parent: 421, order: i + 1 }));
   for (const outcome of outcomes) github.addIssue(outcome.issue, { parent: 421 });
+  prepare?.(github, outcomes);
   const store = new state.StateStore({ transport: github, store: binding.store, now: () => NOW, toolkitVersion: '3.56.1' });
   const parent = state.claimDocument(state.newParent({ repository, parentIssue: 421, outcomes }), writer, {});
   store.write('parent', 421, parent, { sha: null, previous: null });
@@ -150,6 +151,105 @@ for (const requestMs of [500, 750]) test(`verification at the measured 84-row fo
     assert.equal(cliRun(f, null).report.outcome, 'COMPLETE');
   }
   assert.match(f.github.issues.get(500).body, /#900/);
+  assert.match(f.github.issues.get(816).body, /BEGIN STATE/);
+});
+
+for (const requestMs of [500, 750]) test(`verification at the reported production footprint with ${requestMs} ms per request`, t => {
+  const oldest = 900;
+  const historyStart = Date.parse('2026-11-01T00:00:00Z');
+  const f = fixture({ count: 66, added: 17, prepare(github, outcomes) {
+    for (const { issue } of outcomes.slice(0, 40)) {
+      Object.assign(github.issues.get(issue), { state: 'closed', state_reason: 'completed', closed_at: '2026-10-23T00:00:00Z' });
+    }
+    for (let index = 0; index < 643; index++) {
+      const number = oldest + index;
+      const date = new Date(historyStart + index * 60000).toISOString();
+      const merged = index < 500;
+      const issue = outcomes[index % outcomes.length].issue;
+      const linked = index > 0 && index <= 480;
+      github.addPr(number, { head: 'a'.repeat(40), state: 'CLOSED', merged, mergedAt: merged ? date : null,
+        body: linked ? `Refs #${issue}` : 'Unrelated history' });
+      Object.assign(github.prs.get(number), { updated_at: date, closedAt: date });
+      if (linked && index % 3 === 0) {
+        if (!github.issuePrLinks.has(issue)) github.issuePrLinks.set(issue, { timeline: [] });
+        github.issuePrLinks.get(issue).timeline.push(number);
+      }
+    }
+    github.addPr(1600, { head: 'a'.repeat(40), body: 'Refs #540' });
+    github.addPr(1601, { head: 'b'.repeat(40), body: 'Unrelated open PR' });
+  } });
+
+  const readHistory = () => f.store.read('child', 500).doc.prs;
+  const savedHistory = readHistory();
+  assert.ok(savedHistory.length > 0, 'the task already has saved PR history');
+  assert.ok(!savedHistory.some(entry => entry.number === oldest));
+  const prior = f.store.read('parent', 421).doc.private.graph_pr_watermark;
+  assert.equal(prior, NOW);
+  // This previously unrelated PR acquired a task link while the sweep was away. Its reported
+  // update time is still behind the old bookmark and older than every other closed PR.
+  Object.assign(f.github.prs.get(oldest), { body: 'Refs #500', updated_at: new Date(historyStart + 30000).toISOString() });
+  const prs = [...f.github.prs.values()];
+  const size = { direct_children: f.github.issues.get(421).subs.length,
+    open_issues: [...f.github.issues.values()].filter(issue => issue.state === 'open').length,
+    merged_prs: prs.filter(pr => pr.merged).length,
+    unmerged_closed_prs: prs.filter(pr => pr.state === 'CLOSED' && !pr.merged).length,
+    open_prs: prs.filter(pr => pr.state === 'OPEN').length };
+  assert.deepEqual(size, { direct_children: 83, open_issues: 44, merged_prs: 500, unmerged_closed_prs: 143, open_prs: 2 });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-footprint-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lockFile = path.join(dir, 'pass.lock');
+
+  function refresh(cost) {
+    const start = f.github.calls.length;
+    const writes = f.github.mutations();
+    const commits = f.github.commits;
+    let elapsed = 0, oldestPage = null;
+    f.github.intercept((call, github) => {
+      elapsed += cost;
+      if (!call.path.includes('pulls?state=closed')) return undefined;
+      const response = github.route(call.method, call.path, call.body);
+      if (response.json.some(pr => pr.number === oldest)) oldestPage = Number(new URLSearchParams(call.path.split('?')[1]).get('page'));
+      return response;
+    });
+    const { code, report } = cliRun(f, lockFile, { now: () => '2026-11-08T08:00:00Z', passClock: () => Date.parse(NOW) + elapsed });
+    f.github.hooks = [];
+    const calls = f.github.calls.slice(start);
+    const count = predicate => calls.filter(predicate).length;
+    const openPages = count(call => call.path.includes('pulls?state=open'));
+    const closedPages = count(call => call.path.includes('pulls?state=closed'));
+    const referenceBatches = count(call => call.path === 'graphql' && call.body.query.includes('closedByPullRequestsReferences'));
+    const prDetails = count(call => call.path === 'graphql' && call.body.query.includes('pullRequest(number:'));
+    const discoveryRequests = openPages + closedPages + referenceBatches + prDetails;
+    t.diagnostic(JSON.stringify({ ...size, historical_body_links_before: 480, unrelated_closed_before: 163, timeline_links: 160,
+      oldest_pr: oldest, oldest_page: oldestPage, oldest_saved: readHistory().some(entry => entry.number === oldest),
+      oldest_on_task_page: /#900\b/.test(f.github.issues.get(500).body), request_ms: cost, requests: calls.length, elapsed_ms: elapsed,
+      inventory_pages: count(call => call.path === 'graphql' && call.body.query.includes('issues(states: OPEN')),
+      open_pr_pages: openPages, closed_pr_pages: closedPages, task_pr_batches: referenceBatches, pr_detail_reads: prDetails,
+      discovery_requests: discoveryRequests, parent_write_request: calls.indexOf(parentWrites(calls)[0]) + 1,
+      state_commits: f.github.commits - commits, github_writes: f.github.mutations() - writes,
+      budget_ms: state.REFRESH_BUDGET_MS, queue_cutoff_ms: state.REFRESH_BUDGET_MS - 120000,
+      code, outcome: report.outcome, holds: report.holds.map(hold => hold.code) }));
+    assert.equal(report.inventory.counts.PARENT + report.inventory.counts.CHILD, 44);
+    assert.equal(closedPages, 7);
+    assert.equal(oldestPage, 7);
+    assert.ok(discoveryRequests <= 60);
+    return { code, report };
+  }
+
+  const result = refresh(requestMs);
+  if (requestMs === 750) {
+    assert.equal(result.code, 1);
+    assert.equal(result.report.outcome, 'HELD');
+    assert.ok(result.report.holds.some(hold => hold.code === 'PASS_STOPPED'));
+    const recovered = refresh(500);
+    assert.equal(recovered.code, 0);
+    assert.equal(recovered.report.outcome, 'COMPLETE');
+  } else {
+    assert.equal(result.code, 0);
+    assert.equal(result.report.outcome, 'COMPLETE');
+  }
+  assert.equal(readHistory().find(entry => entry.number === oldest)?.state, 'MERGED');
+  assert.match(f.github.issues.get(500).body, /#900\b/);
   assert.match(f.github.issues.get(816).body, /BEGIN STATE/);
 });
 
