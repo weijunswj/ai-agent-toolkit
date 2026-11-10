@@ -6,6 +6,7 @@
 //
 // Anyone may read:
 //   reconcile [--issue <n>] [--parent-file <file>]   dry run
+//   reconcile --page-preview [--issue <n>]           show proposed page formatting, read-only
 //   show [--parent | --issue <n>] [--include-private]; show --session <id> alone shows that session's local binding
 //   init-parent --catalogue <file>                     validate a catalogue
 //   inventory [--deadline-ms <n>]                      classify every open issue (read-only)
@@ -63,7 +64,7 @@ const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
   'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another']);
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--page-preview']);
 const VALUES = new Set(['--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
   '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
@@ -87,6 +88,9 @@ function parseArgs(argv) {
   if (args.issue !== undefined) {
     args.issue = /^\d+$/.test(args.issue) ? Number(args.issue) : NaN;
     if (!Number.isSafeInteger(args.issue) || args.issue < 1) throw usage('--issue must be an issue number (1 or more).');
+  }
+  if (args['page-preview'] && (command !== 'reconcile' || Object.keys(args).some(key => !['command', 'page-preview', 'issue', 'repo-root', 'json'].includes(key)))) {
+    throw usage('--page-preview is read-only. Use reconcile --page-preview with only --issue, --repo-root or --json.');
   }
   if (command === 'refresh') {
     const extra = Object.keys(args).filter(key => !['command', 'json', 'repo-root'].includes(key));
@@ -253,11 +257,14 @@ function openContext(args, deps = {}) {
   const merged = deps.originUrl ? null : requireGitHubGovernance(repoRoot);
   const binding = deps.binding || merged || state.loadBinding(repoRoot);
   const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
+  const preview = args['page-preview'];
   // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
-  const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
+  const transport = preview ? state.pagePreviewTransport(base)
+    : deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
   const repository = state.bindRepository({ transport, originUrl, binding });
   const version = deps.toolkitVersion === undefined ? toolkitVersion() : deps.toolkitVersion;
-  const store = state.openStore({ transport, binding, now: deps.now, toolkitVersion: version, localCheckpoint: localCheckpoint(binding.repository, deps) });
+  const store = state.openStore({ transport, binding, now: deps.now, toolkitVersion: version,
+    localCheckpoint: preview ? null : localCheckpoint(binding.repository, deps), readOnly: preview });
   store.verify();
   // The session comes from --session only; an inherited environment never makes a session a writer.
   const writer = args.session ? { session: args.session, prefix: args.prefix || binding.writer_prefix } : null;
@@ -493,6 +500,10 @@ function liveHead(context, child) {
 
 const commands = {
   reconcile(args, context) {
+    if (args['page-preview']) {
+      return new state.Reconciler({ store: context.store, binding: context.binding, toolkitVersion: context.version, now: context.now,
+        reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository }) }).previewPages(args.issue ?? null);
+    }
     if (args.apply) {
       const parentDoc = readParent(context);
       // refresh writes as the holder by its stored hash; any other apply needs the holder's own session.
@@ -958,7 +969,8 @@ function finish(args, deps, out, opened = null) {
   }
   const pass = args.command === 'reconcile' || args.command === 'refresh';
   if (args.command === 'attention') result = { ...result, ...(args.refreshed ? { refreshed: args.refreshed } : {}) };
-  if (pass && !args.json) out.write(formatReport(result));
+  if (args['page-preview'] && !args.json) out.write(require('./programme-page-preview.cjs').formatPreview(result));
+  else if (pass && !args.json) out.write(formatReport(result));
   else if (args.command === 'attention' && !args.json) out.write(formatAttention(result));
   else if (args.command === 'inventory' && !args.json) out.write(formatInventory(result));
   else out.write(`${JSON.stringify(result, null, 2)}\n`);

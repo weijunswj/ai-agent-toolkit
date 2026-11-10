@@ -205,7 +205,7 @@ function indexErrorText(errors) {
   return `Invalid comment index: ${list}. ${indexRecoveryText(errors.map(entry => entry.code))}`;
 }
 
-function traceEntries(comments, recordPrefix = null, repository = '', issue = null) {
+function traceEntries(comments, recordPrefix = null, repository = '', issue = null, contextId = null) {
   const people = comments.filter(comment => !isBot(comment));
   const graph = indexGraph({ comments, repository, issue, all: true });
   const blocking = graph.errors.filter(entry => !PROJECTION_TOLERATED.has(entry.code));
@@ -213,6 +213,22 @@ function traceEntries(comments, recordPrefix = null, repository = '', issue = nu
     const error = new Error(indexErrorText(blocking));
     error.code = 'TRACE_INDEX_INVALID';
     throw error;
+  }
+  if (contextId !== null) {
+    // Rebuild only the paths that would still expose the background note in COMMENT TRACE.
+    // Their decision originals remain in the input and are grouped from scratch on this pass.
+    const removed = new Set([String(contextId)]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const index of graph.indexes) {
+        const id = String(index.id);
+        if (removed.has(id) || !graph.localLinks.get(id).some(link => removed.has(link.id))) continue;
+        removed.add(id);
+        grew = true;
+      }
+    }
+    return traceEntries(comments.filter(comment => !removed.has(String(comment.id))), recordPrefix, repository, issue);
   }
   const { indexes } = graph;
   const covered = new Set();
@@ -390,4 +406,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ indexErrorText, indexRecoveryText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs });
+module.exports = Object.freeze({ indexErrorText, indexRecoveryText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs, recordId, isBot });

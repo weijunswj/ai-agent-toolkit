@@ -154,6 +154,7 @@ One private JSON document per outcome (`issue-<n>.json`) and one for the parent 
 | Command | Writes |
 |---|---|
 | `reconcile [--issue <n>]` | Nothing: prints findings and the effect plan |
+| `reconcile --page-preview [--issue <n>]` | Nothing. Prints proposed parent, task and eligible open PR bodies, with any continuations and holds. |
 | `reconcile --apply [--issue <n>]` | State documents and GitHub, as planned; controller only |
 | `refresh` | The same full pass with the inventory, under the parent's current holder; any session in a governed checkout |
 | `inventory [--deadline-ms <n>]` | Nothing: every open issue in one class, with the inventory's findings |

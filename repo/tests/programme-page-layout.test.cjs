@@ -5,6 +5,90 @@ const path = require('node:path');
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const state = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-state.cjs'));
 const { pageFixture } = require('./support/programme-page-fixture.cjs');
+const preview = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-page-preview.cjs'));
+const previewHelpers = { versionNewer: (left, right) => Number(left.split('.')[0]) > Number(right.split('.')[0]) };
+const previewBlocks = [['NAV', '# PATH'], ['STATE', '# STATUS'], ['TRACE', '# COMMENT TRACE']];
+
+test('formatting preview preserves fenced markers, nested HTML, Markdown references and authored line endings', () => {
+  const eol = '\r\n';
+  const example = ['~~~md', '# FIX', state.renderBlock('Example', '3.59.0', 'STATE'), '~~~'].join('\n');
+  const source = ['**The problem.** Two spaces here.  ', '', '# An extra', '', example, '', '<details>', '<summary>Example</summary>',
+    '', '<details>', '', '~~~text', '</details>', '~~~', '', '</details>', '', '# NOT IN SCOPE', '', '</details>', '', '| Name | Value |',
+    '|---|---|', '| test | [ref] |', '', '[ref]: https://example.com/a',
+    '', '> # DONE WHEN', '', '## Fix', '', 'Use the existing file.', ''].join('\n').replace(/\n/g, eol);
+  const layout = preview.splitBody(source, ['NAV', 'STATE', 'TRACE'], '3.59.0', previewHelpers);
+  assert.deepEqual([...layout.specs.keys()], ['PROBLEM', 'FIX']);
+  assert.equal(layout.extra.length, 1);
+  const original = layout.extra[0];
+  assert.equal(original.text, source.slice(original.start, original.end));
+  const proposed = preview.pageBody(layout, previewBlocks, new Map(), '3.59.0');
+  assert.ok(proposed.includes(original.text));
+  assert.ok(proposed.includes('Two spaces here.  ' + eol));
+  const reparsed = preview.splitBody(proposed, ['NAV', 'STATE', 'TRACE'], '3.59.0', previewHelpers);
+  assert.equal(preview.pageBody(reparsed, previewBlocks, new Map(), '3.59.0'), proposed);
+});
+
+test('formatting preview holds duplicate and malformed markers, newer blocks and unfinished Markdown', () => {
+  const current = state.renderBlock('# STATUS', '3.59.0');
+  for (const [source, code] of [
+    [current + '\n' + current, 'PAGE_BLOCK_HELD'],
+    [current.replace('# STATUS', '# Altered'), 'PAGE_BLOCK_HELD'],
+    [current.split('\n').slice(0, 2).join('\n'), 'PAGE_BLOCK_HELD'],
+    [state.renderBlock('# STATUS', '4.0.0'), 'BLOCK_NEWER_TOOLKIT'],
+    ['~~~text\n# PROBLEM\n', 'PAGE_MARKDOWN_HELD'],
+    ['# FIX\nFirst.\n\n**The fix.** Second.\n', 'PAGE_SECTION_HELD'],
+  ]) {
+    assert.throws(() => preview.splitBody(source, ['NAV', 'STATE', 'TRACE'], '3.59.0', previewHelpers), { code });
+  }
+});
+
+test('formatting preview measures the whole body and keeps exact overflow bytes and machine references', () => {
+  const source = '# PROBLEM\r\nKeep the spec.\r\n\r\n# Extra notes\r\n' + ('A report note. 🧾  \r\n'.repeat(180)) + '\r\n# Links\r\nCloses #9\r\n';
+  const layout = preview.splitBody(source, ['NAV', 'STATE', 'TRACE'], '3.59.0', previewHelpers);
+  const build = moved => ({ body: preview.pageBody(layout, previewBlocks, moved, '3.59.0') });
+  const limit = build(new Map()).body.length;
+  const run = (safe, budget = 1, maxComment = 6000) => preview.previewPage(source, layout, 'pr', 7, build, budget, safe, maxComment);
+  assert.deepEqual(run(limit + 1).overflow, []);
+  for (const exact of [limit, limit - 1]) {
+    const planned = run(exact);
+    assert.equal(planned.status, 'proposed');
+    assert.equal(planned.overflow.length, 1);
+    const [span] = planned.overflow;
+    assert.equal(span.section, 'MORE');
+    assert.equal(span.text, source.slice(span.start, span.end));
+    assert.equal(span.sha256, state.sha256(span.text));
+    assert.ok(span.comment.endsWith(span.text));
+    assert.match(planned.body, /# MORE[\s\S]*#preview-comment-more-pr-7-1[\s\S]*Closes #9/);
+  }
+  for (const held of [run(limit, 0), run(limit, 1, 150), run(1)]) {
+    assert.equal(held.status, 'held');
+    assert.equal(held.code, 'PAGE_SIZE_HELD');
+    assert.ok(!Object.hasOwn(held, 'overflow'));
+  }
+});
+
+test('formatting preview keeps generated continuations beside their parent graph and trace', () => {
+  const f = pageFixture(state, { count: 12, width: 140, groups: ['RETIRED'] });
+  for (let index = 0; index < 35; index++) {
+    f.github.addComment(12, { body: 'Export discussion\n---\nTEST-' + (100 + index) + ' A decision about exports.' });
+  }
+  const pass = f.make();
+  pass.threshold = 2200;
+  const before = f.github.mutations();
+  const report = pass.previewPages(100);
+  const parent = report.pages.find(page => page.kind === 'parent');
+  assert.equal(parent.status, 'proposed');
+  const graph = state.findStateBlock(parent.body, 'STATE').block;
+  const trace = state.findStateBlock(parent.body, 'TRACE').block;
+  assert.equal(graph.tampered || trace.tampered, false);
+  const graphPart = parent.overflow.find(part => part.section === 'PROGRAMME GRAPH');
+  const tracePart = parent.overflow.find(part => part.section === 'COMMENT TRACE');
+  assert.ok(graphPart && graph.body.includes('#preview-comment-' + graphPart.anchor));
+  assert.ok(tracePart && trace.body.includes('#preview-comment-' + tracePart.anchor));
+  assert.ok(tracePart.comment.includes('#issuecomment-'));
+  assert.ok(parent.overflow.length <= 5);
+  assert.equal(f.github.mutations(), before);
+});
 
 test('B-T1: the parent owns four capital H1 headings in order and settles', () => {
   const f = pageFixture(state, { count: 2 });

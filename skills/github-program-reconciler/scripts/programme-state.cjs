@@ -1510,14 +1510,14 @@ function orderTies(parent, children) {
 }
 
 // `issues` maps an issue number to what GitHub shows for it (title, close time).
-function renderParentBlockBody(parent, children, issues = new Map(), comments = new Map()) {
+function renderParentBlockBody(parent, children, issues = new Map(), comments = new Map(), latestPr = null) {
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const cls = graphClass(outcome, child);
     // History belongs on the child page. The graph grows by a count, never by PRs or SHAs.
     const current = !isRetired(outcome, child) ? child?.pr.number : null;
     const more = child?.prs?.filter(pr => pr.number !== current).length || 0;
-    const pr = `${current ? `#${current}` : '-'}${more ? ` +${more}` : ''}`;
+    const pr = latestPr ? latestPr.get(outcome.issue) ?? 'Unavailable' : `${current ? `#${current}` : '-'}${more ? ` +${more}` : ''}`;
     const issue = issues.get(outcome.issue);
     // Optional cell padding would cost fourteen characters per row, more than the PR count.
     return `|${taskName(outcome, issue)}|${descriptionText(outcome)}|#${outcome.issue}|${pr}|${cls}|${statusText(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
@@ -1526,7 +1526,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: current, +N others; history on child page.`,
+    `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: ${latestPr ? 'most recently opened, including closed PRs' : 'current, +N others'}; history on child page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -1653,18 +1653,19 @@ function renderNavBlockBody(chain, pr) {
   return ['<!-- programme-nav -->', `**Path:** ${chain.map(number => `#${number}`).join(' > ')}${pr ? ` > PR #${pr}` : ''}`].join('\n');
 }
 
-function renderChildBlockBody(child, outcome) {
+function renderChildBlockBody(child, outcome, previewHistory = null) {
   const lines = [
     `<!-- programme-state child=${child.issue}@${child.revision} -->`,
     `**Status** (issue-${child.issue}.json revision ${child.revision}; generated, so edit the state document rather than this block)`,
     '',
     `- Status: ${outcome ? statusText(outcome, child) : '-'}; class: ${graphClass(outcome, child)}; lane: ${outcome ? laneText(outcome, child) : '-'}; release: ${publicText(child.release || '-')}`,
     `- Task: ${outcome ? descriptionText(outcome) : '-'}`,
-    `- PR: ${prText(child)}; head ${shaLink(child.repository, child.pr.head)}; CI at head: ${checksText(child)}`,
+    `- ${previewHistory ? `Tracked PR: ${child.pr.number ? `#${child.pr.number} ${child.pr.state || ''}`.trim() : '-'}` : `PR: ${prText(child)}`}; head ${shaLink(child.repository, child.pr.head)}; CI at head: ${checksText(child)}`,
     `- UAT: ${uatText(child)}; review: ${reviewText(child)}`,
     `- Next action: ${publicText(child.next_action)}`,
   ];
   if (child.blockers.length) lines.push(`- Blockers: ${child.blockers.map(publicText).join('; ')}`);
+  if (previewHistory) lines.push('', ...previewHistory);
   return lines.join('\n');
 }
 
@@ -2453,7 +2454,7 @@ function assertCheckpoint(doc) {
 // unchanged; reads join each public file to its sidecar, and writes put the sidecar first, then the
 // public file, then the checkpoint.
 class BranchStateStore extends StateStore {
-  constructor({ transport, binding, now = () => new Date().toISOString(), toolkitVersion = null, localCheckpoint = null }) {
+  constructor({ transport, binding, now = () => new Date().toISOString(), toolkitVersion = null, localCheckpoint = null, readOnly = false }) {
     const block = binding?.state;
     if (!isObject(block) || block.kind !== 'branch' || block.branch !== STATE_BRANCH || block.path !== STATE_PATH) {
       throw new ProgrammeError('BINDING_INVALID', `The public state branch is always ${STATE_BRANCH}, folder ${STATE_PATH}, on the bound repository.`);
@@ -2465,6 +2466,7 @@ class BranchStateStore extends StateStore {
     this.binding = binding;
     this.private = new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion });
     this.localCheckpoint = localCheckpoint;
+    this.readOnly = readOnly;
     this.branch = null;
     this.checkpoint = null;
     this.held = null;
@@ -2525,6 +2527,9 @@ class BranchStateStore extends StateStore {
     const head = this.branchHead();
     const stored = this.readCheckpoint();
     this.checkpoint = stored.doc ? { doc: stored.doc, sha: stored.sha } : { doc: null, sha: stored.sha };
+    if (this.readOnly && (!head || stored.doc?.head_sha !== head)) {
+      this.hold('PAGE_PREVIEW_STATE_HELD', 'The state branch and its checkpoint do not agree. The controller must resolve state recovery before page formatting can be previewed.');
+    }
     if (head) {
       // A branch read can lag a write made elsewhere: read the head once more before recomputing.
       const settled = stored.doc && stored.doc.head_sha !== head ? this.branchHead() : head;
@@ -2815,16 +2820,30 @@ const STATE_BACKENDS = Object.freeze({ branch: BranchStateStore });
 
 // The store a merged binding names: the public state branch with the private store beside it when
 // the binding has `state`, else the private store alone. A disabled binding never reaches here.
-function openStore({ transport, binding, now, toolkitVersion = null, localCheckpoint = null }) {
-  if (binding.state) return new STATE_BACKENDS[binding.state.kind]({ transport, binding, now, toolkitVersion, localCheckpoint });
+function openStore({ transport, binding, now, toolkitVersion = null, localCheckpoint = null, readOnly = false }) {
+  if (binding.state) return new STATE_BACKENDS[binding.state.kind]({ transport, binding, now, toolkitVersion, localCheckpoint, readOnly });
   return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion });
+}
+
+function pagePreviewTransport(base) {
+  return Object.freeze({
+    request(method, endpoint, body) {
+      if (method === 'GET' && body === undefined) return base.request(method, endpoint);
+      // The reader sends source-owned queries with separate variables. No GraphQL mutation or REST write reaches gh.
+      if (method === 'POST' && endpoint === 'graphql' && /^query\s*\(/.test(body?.query || '') && !/\b(?:mutation|subscription)\b/i.test(body.query)) {
+        return base.request(method, endpoint, body);
+      }
+      throw new ProgrammeError('PAGE_PREVIEW_WRITE_REFUSED', 'The page preview accepts only GitHub reads.');
+    },
+    graphql: GitHubTransport.prototype.graphql,
+  });
 }
 
 const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
     pullRequest(number: $number) {
-      number state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
+      number state isDraft merged createdAt mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
       commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) {
         pageInfo { hasNextPage }
         nodes {
@@ -2933,7 +2952,7 @@ class ProgrammeGraphReader {
     return {
       number: pr.number,
       state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
-      merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
+      created_at: pr.createdAt || null, merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
       rollupOid: commit?.oid || null,
       complete: !rollup?.contexts?.pageInfo?.hasNextPage,
@@ -2992,7 +3011,8 @@ class ProgrammeGraphReader {
         // Keep a five-minute overlap for boundary updates and timestamp precision. The REST list
         // is descending by updated_at, so nothing after this row can be newer than the cutoff.
         if (cutoff !== null && Date.parse(pr.updated_at) < cutoff) return all;
-        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', closed_at:pr.closed_at || pr.merged_at || null});
+        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), page_body:pr.body || '', draft:pr.draft === true, head:pr.head?.sha || null,
+          author:pr.user?.login || '', branch:pr.head?.ref || '', closed_at:pr.closed_at || pr.merged_at || null});
       }
       if (response.json.length < 100) return all;
     }
@@ -3004,11 +3024,11 @@ class ProgrammeGraphReader {
     const [owner, name] = this.repository.split('/');
     const fields = numbers.map(number => `i${number}: issue(number: ${number}) {
       closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
-        pageInfo { hasNextPage } nodes { number state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
+        pageInfo { hasNextPage } nodes { number state merged createdAt mergedAt mergeCommit { oid } repository { nameWithOwner } }
       }
       timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
         pageInfo { hasNextPage } nodes { ... on CrossReferencedEvent {
-          source { __typename ... on PullRequest { number state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
+          source { __typename ... on PullRequest { number state merged createdAt mergedAt mergeCommit { oid } repository { nameWithOwner } } }
         } }
       }
     }`).join('\n');
@@ -3344,7 +3364,7 @@ function graphPr(pr, repository) {
   if (mergeSha !== null && !isSha(mergeSha)) return null;
   if (merged && !Number.isFinite(Date.parse(pr.mergedAt || pr.merged_at))) return null;
   return {number:pr.number, state:state === 'DRAFT' ? 'OPEN' : state, merge_sha:merged ? mergeSha : null,
-    merged_at:pr.mergedAt || pr.merged_at || null};
+    merged_at:pr.mergedAt || pr.merged_at || null, created_at:pr.createdAt || pr.created_at || null, draft:pr.draft === true || state === 'DRAFT'};
 }
 
 function prHistory(entries) {
@@ -3485,6 +3505,17 @@ class Reconciler {
     return this.store.read('parent', this.binding.parent_issue);
   }
 
+  previewPages(only) {
+    this.pass.phaseAt('planning');
+    this.planning = true;
+    try {
+      return require('./programme-page-preview.cjs').previewPages(this, only, { renderNavBlockBody, indexCommentBodies,
+        registeredParents, shaLink, publicText, versionNewer, copyIssueLifecycle, graphClass, MAX_TOPIC_COMMENTS_PER_PASS, INDEX_COMMENT_LIMIT });
+    } finally {
+      this.planning = false;
+    }
+  }
+
   observe(parent, children, only) {
     const outcomes = parent.outcomes.filter(outcome => !only || outcome.issue === only);
     const issues = new Map();
@@ -3554,8 +3585,9 @@ class Reconciler {
     return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery, additions, prGraph, closing };
   }
 
-  discoverGraph(parent, outcomes, children, prs, prCache, readPr) {
+  discoverGraph(parent, outcomes, children, prs, prCache, readPr, preview = false) {
     const discovery = new Map(); const histories = new Map();
+    const historyFacts = new Map();
     const selectedPrs = new Map();
     // Take the boundary before any PR list read, never at planning completion: a close during
     // this scan must remain eligible on the next one.
@@ -3571,10 +3603,12 @@ class Reconciler {
     try { openListed = this.reader.graphPullRequests('open',spend); listed.push(...openListed); }
     catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; openComplete=false; }
     let closedListed=[], closedComplete=true;
-    try { closedListed=this.reader.graphPullRequests('closed',spend,watermark); listed.push(...closedListed); }
+    try { closedListed=this.reader.graphPullRequests('closed',spend,preview ? null : watermark); listed.push(...closedListed); }
     catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; closedComplete=false; }
-    const references = referencedIssues(listed);
-    const openReferences = referencedIssues(openListed);
+    const referenceReader = preview ? require('./programme-page-preview.cjs').previewReferences : referencedIssues;
+    const references = referenceReader(listed);
+    const openReferences = referenceReader(openListed);
+    const listedByNumber = preview ? new Map(listed.map(pr => [pr.number, pr])) : null;
     const linked = new Set();
     // The parent's timeline can be arbitrarily long and is not task-discovery evidence.
     // Parent and task links in a PR's own title/body already identify it from the list reads.
@@ -3582,13 +3616,18 @@ class Reconciler {
       for (const pr of references.get(number) || []) linked.add(pr);
     }
     const all = outcomes.map(outcome=>outcome.issue);
+    if (preview) for (const number of all) historyFacts.set(number, (references.get(number) || []).map(pr => listedByNumber.get(pr)));
     for (let start=0; start<all.length; start+=20) {
       const batch=all.slice(start,start+20);
       try {
         const links=this.reader.issuePullRequestLinks(batch,spend);
         for (const number of batch) {
           const link=links.get(number);
-          if (!link?.complete || !listsComplete) { incomplete([number],{}); continue; }
+          if (!link?.complete || !listsComplete) {
+            if (preview && link?.complete) historyFacts.set(number, [...link.history, ...historyFacts.get(number)]);
+            incomplete([number],{});
+            continue;
+          }
           const prior = children.get(number)?.doc?.prs || [];
           const history=[...link.history,...listed.filter(pr=>(references.get(number)||[]).includes(pr.number))];
           const current=prs.get(number);
@@ -3599,7 +3638,8 @@ class Reconciler {
           // Incremental list reads omit old closes. Reconfirm a saved terminal PR not covered by
           // task links or the list, including its merge time so the saved order stays meaningful.
           try {
-            for (const previous of prior.filter(pr=>pr.state !== 'OPEN')) {
+            const saved = preview && children.get(number)?.doc?.pr?.number ? [...prior, children.get(number).doc.pr] : prior;
+            for (const previous of saved.filter(pr=>preview || pr.state !== 'OPEN')) {
               if (history.some(pr=>pr.number===previous.number)) continue;
               let item=listed.find(pr=>pr.number===previous.number);
               if (!item) {
@@ -3610,13 +3650,26 @@ class Reconciler {
               if (!item) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','A saved PR history entry could not be confirmed.');
               history.push(item);
             }
+            if (preview) {
+              const facts = [...new Map(history.map(pr => [pr.number, pr])).values()];
+              historyFacts.set(number, facts);
+              for (const pr of facts) {
+                if (Number.isFinite(Date.parse(pr.created_at))) continue;
+                if (!prCache.has(pr.number)) spend();
+                const detail = readPr(pr.number);
+                if (detail?.number !== pr.number || !Number.isFinite(Date.parse(detail.created_at))) {
+                  throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A PR creation time could not be confirmed.');
+                }
+                pr.created_at = detail.created_at;
+              }
+            }
           } catch(error) { incomplete([number],error); continue; }
           history.forEach(pr=>linked.add(pr.number));
           histories.set(number,prHistory(history));
           const candidates=mergedSelection(history.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at})));
           const result={complete:true,candidates}; discovery.set(number,result);
           const outcome=outcomes.find(outcome=>outcome.issue===number);
-          if(backfillEligible(outcome,children.get(number)?.doc) && !children.get(number)?.doc?.closed_by_sweep && candidates.length) {
+          if(!preview && backfillEligible(outcome,children.get(number)?.doc) && !children.get(number)?.doc?.closed_by_sweep && candidates.length) {
             const selected=candidates[0].number;
             try {
               if(!prCache.has(selected)) spend();
@@ -3636,7 +3689,8 @@ class Reconciler {
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
       && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
-    return {discovery,histories,openReferences,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted,closedListed,closedComplete};
+    return {discovery,histories,openReferences,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted,closedListed,closedComplete,
+      ...(preview ? {historyFacts, openListed} : {})};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -3906,14 +3960,18 @@ class Reconciler {
       const selected = new Set(moved.map(row => row.issue));
       const graphs = archiveTools().graphComments(rows.filter(row => selected.has(row.issue)));
       // Empty parts remain registered and are updated in place, never deleted or linked as rows.
-      for (const entry of archive.filter(entry => entry.kind === 'graph' && !graphs.some(part => part.key === entry.key))) {
+      for (const entry of archive.filter(entry => !page?.preview && entry.kind === 'graph' && !graphs.some(part => part.key === entry.key))) {
         graphs.push({ key: entry.key, kind: 'graph', group: entry.group, title: entry.group,
           body: `${archiveTools().marker(entry.key)}\n# Programme graph: ${entry.group}\n\nNo rows are archived in this part.\n`, count: 0 });
       }
-      const posts = graphs.filter(part => !archive.some(entry => entry.key === part.key && entry.comment_id)).length;
       const parts = graphs;
-      const entryFor = part => archive.find(entry => entry.key === part.key);
-      const commentId = part => entryFor(part)?.comment_id || '9'.repeat(19);
+      const entryFor = part => archive.find(entry => entry.key === part.key && (!page?.preview
+        || entry.state === 'moved' && entry.digest === archiveTools().digest(part.body) && comments.some(comment =>
+          comment.id === entry.comment_id && comment.user?.login === entry.login && archiveTools().digest(comment.body) === entry.digest)));
+      const pending = parts.filter(part => !entryFor(part)?.comment_id);
+      const posts = pending.length;
+      const previewId = index => '9'.repeat(15) + String(index).padStart(4, '0');
+      const commentId = part => entryFor(part)?.comment_id || (page?.preview ? previewId(pending.indexOf(part)) : '9'.repeat(19));
       const link = part => commentLink(issueUrl(this.binding.repository, number), commentId(part));
       const summary = archiveTools().GROUPS.map(group => {
         const parts = graphs.filter(part => part.group === group && part.count);
@@ -3924,15 +3982,16 @@ class Reconciler {
       const hidden = new Set(moved.map(row => row.issue));
       let graph = stateBody.split('\n').filter(line => !/^\|[^\n]*\|#\d+\|/.test(line) || !hidden.has(Number(line.split('|')[3].slice(1)))).join('\n');
       if (summary.length) graph = graph.replace('\n| Task |', `\nArchived: ${summary.join(', ')}\n\n| Task |`);
-      const context = renderContextBlockBody();
+      const context = page?.context || renderContextBlockBody();
       const remainingBudget = Math.min(Math.max(0, postBudget - posts), page?.traceTopicBudget ?? MAX_TOPIC_COMMENTS_PER_PASS);
       // Include future archive links in size selection, before spending their post slots. Otherwise
       // their own trace growth could require another graph group after the budget was spent.
       const future = parts.filter(part => !entryFor(part)?.comment_id).map((part, index) => ({ id: `${'9'.repeat(15)}${String(index).padStart(4, '0')}`, body: archiveTools().marker(part.key), user: { login: 'archive-preview' } }));
       const projected = this.projectTrace(number, source, graph, [...comments, ...future], version, navBody, currentBody, topic, remainingBudget,
-        { context, threshold: tracePaging ? safe : Infinity });
+        { context, threshold: tracePaging ? safe : Infinity, trace: page?.trace, build: page?.build, preview: page?.preview });
       const tracePosts = projected.overflow.reduce((sum, part) => sum + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0);
       return { ...projected, archive: parts, graphRows: moved.map(row => row.issue), posts: posts + tracePosts,
+        ...(page?.preview ? { previewGraphParts: pending.map((part, index) => ({ id: previewId(index), comment: part.body })) } : {}),
         budgetFits: posts + tracePosts <= postBudget };
     };
     let projected = build();
@@ -3973,9 +4032,13 @@ class Reconciler {
 
   projectTrace(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, layout = {}) {
     const threshold = layout.threshold ?? this.threshold;
-    const trace = traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
+    const trace = layout.trace ? layout.trace(comments) : traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
     const build = entries => {
       const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic, number === this.binding.parent_issue);
+      if (layout.build) {
+        const sections = { stateBody, navBody, currentBody, traceBody, context: layout.context };
+        return { body: layout.build(sections), traceBody, sections };
+      }
       const withCurrent = currentBody ? upsertCurrentBlock(source, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : source;
       const withState = layout.context ? upsertParentStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number))
         : upsertStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number));
@@ -3994,15 +4057,17 @@ class Reconciler {
     let current = trace;
     let projected = full;
     const overflow = [];
+    const previewId = index => '8'.repeat(15) + String(index).padStart(4, '0');
     let topicComments = 0;
     for (const group of movable) {
       const part = { tag: group.tag, label: group.tag ? group.label : topic, lines: links(group) };
       const pages = indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label);
       if (topicComments + pages.length > topicCommentBudget) break;
+      if (layout.preview) part.previewIds = pages.map((_, index) => previewId(topicComments + index));
       topicComments += pages.length;
       current = {
         directories: current.directories,
-        indexes: [...current.indexes, ...pages.map(() => ({ id: '9'.repeat(19), tag: group.tag, tag_label: group.label, date: '0000-00-00' }))],
+        indexes: [...current.indexes, ...pages.map((_, index) => ({ id: part.previewIds?.[index] || '9'.repeat(19), tag: group.tag, tag_label: group.label, date: '0000-00-00' }))],
         entries: current.entries.filter(entry => topicKey(entry, topic) !== group.tag),
         marks: current.marks.filter(mark => topicKey(mark, topic) !== group.tag),
       };
@@ -4017,10 +4082,12 @@ class Reconciler {
       const lines = traceGroups(trace, topic).map(group => `- **${groupLabel(group, topic)}:** ${traceTokens(group, base).join(' · ')}`);
       if (lines.length) {
         const pages = indexCommentBodies(number, lines, '9'.repeat(16), null, null, true);
-        projected = build({ directories: [...(trace.directories || []), ...pages.map(() => ({ id: '9'.repeat(19) }))], indexes: [], entries: [], marks: [] });
+        const part = { directory: true, tag: null, lines };
+        if (layout.preview) part.previewIds = pages.map((_, index) => previewId(index));
+        projected = build({ directories: [...(trace.directories || []), ...pages.map((_, index) => ({ id: part.previewIds?.[index] || '9'.repeat(19) }))], indexes: [], entries: [], marks: [] });
         const nested = trace.indexes.find(index => index.nested);
         if (projected.body.length < threshold && nested) throw new ProgrammeError('TRACE_INDEX_INVALID', `Paging this comment directory would exceed two index hops (index ${nested.id}). ${indexRecoveryText(['INDEX_DEPTH'])}`);
-        overflow.push({ directory: true, tag: null, lines });
+        overflow.push(part);
       }
     }
     const pageCount = trace.strict_count
@@ -5321,5 +5388,5 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, renderContextBlockBody,
+  SAFE_LIMIT, renderContextBlockBody, pagePreviewTransport,
 });

@@ -10,6 +10,138 @@ const cli = require('../../skills/github-program-reconciler/scripts/programme.cj
 const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
 const { gatedChild } = require('./toolkit-programme-fake-github.cjs');
 
+test('formatting preview uses the real CLI, renders linked pages and emits no effects', () => {
+  const outcomes = [
+    { issue: 2, label: 'Export a report', class: 'COMMITTED', parent: 1, order: 1 },
+    { issue: 3, label: 'Retired report', class: 'RETIRED', parent: 1, order: 2 },
+  ];
+  const f = setup({ repository: 'example.test/app', parentIssue: 1, outcomes, version: '3.59.0', issues: github => {
+    github.addIssue(2, { parent: 1, body: '**The problem.** A report is hard to share.\r\n\r\n# Design notes\r\n\r\nKeep this note.  \r\n\r\n**The fix.** Offer an export.\r\n' });
+    github.addIssue(3, { parent: 1, state: 'closed', body: '# PROBLEM\nOld report.\n' });
+    github.addIssue(4, { parent: 2, body: '# DONE WHEN\nThe report opens.\n' });
+  } });
+  const { github, repository } = f;
+  const ctx = github.addComment(1, { body: 'Agent context\n---\nThis note explains the fixture.' });
+  const old = github.addComment(1, { body: 'Routing\n---\nINT-TK421-101 Use route A.' });
+  const fresh = github.addComment(1, { body: 'Agent context\n---\nINT-TK421-102 Use route B. SUPERSEDES=INT-TK421-101' });
+  const index = github.addComment(1, { body: '<!-- decision-trace-index -->\n[1](#issuecomment-' + ctx + ') [2](#issuecomment-' + old + ')' });
+  const pointer = '[Agent context](https://github.com/' + repository + '/issues/1#issuecomment-' + ctx + ') - Background note for new agents.';
+  github.issues.get(1).body = '# Programme notes\n\n' + pointer + '\n\nKeep these notes.\n';
+  const add = (number, options) => github.addPr(number, { head: SHA_A, ...options });
+  add(10, { body: 'Refs #2\n\n# Notes\nKeep PR notes.', createdAt: '2026-10-01T00:00:00Z' });
+  add(11, { body: 'Closes #2, #4\n\n**Fix:** Export one file.', isDraft: true, head: SHA_B, createdAt: '2026-10-03T00:00:00Z' });
+  add(12, { body: 'Closes #2', merged: true, createdAt: '2026-10-05T00:00:00Z' });
+  add(13, { body: 'Refs #2', state: 'CLOSED', createdAt: '2026-10-05T00:00:00Z' });
+  github.prs.get(13).listCreatedAt = null;
+  add(14, { body: '> Closes #2\n\n~~~text\nRefs #2\n~~~\n\nCloses another/repo#2' });
+  add(15, { body: 'Refs #3', state: 'CLOSED' });
+  add(16, { body: 'Unrelated PR.' });
+  const doc = state.newChild({ repository, outcome: outcomes[0] });
+  doc.release = 'Report release';
+  doc.review.verdicts = [{ reviewer: 'Fixture reviewer', verdict: 'PASSED', head: SHA_A }];
+  f.store.write('child', 2, doc, { sha: null, previous: null });
+  const run = (...args) => {
+    let output = '';
+    const status = cli.main(['reconcile', '--page-preview', ...args], {
+      transport: github, originUrl: 'https://github.com/' + repository, binding: f.binding, repoRoot: path.resolve(__dirname, '../..'),
+      toolkitVersion: '3.59.0', now: () => '2026-11-01T00:00:00Z', stdout: { write: text => { output += text; } },
+    });
+    return { output, status };
+  };
+  const before = github.mutations();
+  const { status, output } = run('--json');
+  const report = JSON.parse(output);
+  assert.deepEqual(report.holds, []);
+  assert.equal(status, 0);
+  assert.deepEqual(report.writes, { state: 0, github: 0 });
+  const page = (kind, number) => report.pages.find(item => item.kind === kind && item.number === number).body;
+  const parent = page('parent', 1);
+  assert.deepEqual(parent.match(/^# .+$/gm), ['# CURRENT', '# PROGRAMME GRAPH', '# AGENT CONTEXT', '# COMMENT TRACE', '# MORE', '# Programme notes']);
+  assert.match(parent, /\|#2\|#13\|/);
+  assert.match(parent, /\|#3\|#15\|/);
+  assert.match(parent, /\|#4\|#11\|/);
+  const context = state.findStateBlock(parent, 'CONTEXT').block.body;
+  const trace = state.findStateBlock(parent, 'TRACE').block.body;
+  assert.ok(context.includes(pointer));
+  assert.ok(!trace.includes('issuecomment-' + ctx) && !trace.includes('issuecomment-' + index));
+  assert.ok(trace.includes('issuecomment-' + old) && trace.includes('issuecomment-' + fresh));
+  assert.match(trace, /replaced by/i);
+  const task = page('issue', 2);
+  assert.deepEqual(task.split('\r\n').filter(line => line.startsWith('# ')), ['# PATH', '# STATUS', '# COMMENT TRACE', '# PROBLEM', '# FIX', '# MORE', '# Design notes']);
+  assert.ok(task.includes('Keep this note.  \r\n'));
+  assert.match(task, /#11\]\([^)]+\) DRAFT[\s\S]*#10\]\([^)]+\) OPEN[\s\S]*#12\]\([^)]+\) MERGED[\s\S]*#13\]\([^)]+\) CLOSED/);
+  assert.match(page('issue', 4), /# PATH[\s\S]*# STATUS[\s\S]*# COMMENT TRACE[\s\S]*# DONE WHEN/);
+  assert.deepEqual(report.pages.filter(item => item.kind === 'pr').map(item => item.number).sort((a, b) => a - b), [10, 11]);
+  assert.match(page('pr', 10), /review PASSED at aaaaaaa; merge route Report release/);
+  assert.match(page('pr', 11), /# PATH[\s\S]*\/issues\/2[\s\S]*\/issues\/4[\s\S]*# STATUS[\s\S]*review stale at bbbbbbb[\s\S]*Closes #2, #4/);
+  assert.equal(github.prs.get(12).body, 'Closes #2');
+  assert.equal(github.prs.get(13).body, 'Refs #2');
+  assert.equal(github.mutations(), before);
+  assert.equal(f.store.read('child', 4).doc, null);
+  assert.ok(report.findings.some(finding => finding.code === 'PAGE_LAYOUT_DIFFERS'));
+  const scoped = JSON.parse(run('--issue', '2', '--json').output);
+  assert.ok(!scoped.pages.some(item => item.kind === 'issue' && item.number !== 2));
+  assert.match(scoped.pages.find(item => item.kind === 'pr' && item.number === 11).body, /\/issues\/4/);
+  assert.match(run().output, /Read-only programme page preview/);
+  assert.ok(github.calls.some(call => call.path === 'graphql' && call.body.variables.number === 13));
+  const originals = report.pages.map(({ kind, number, body }) => {
+    const entry = (kind === 'pr' ? github.prs : github.issues).get(number);
+    const original = entry.body;
+    entry.body = body;
+    return { entry, original };
+  });
+  const repeated = JSON.parse(run('--json').output);
+  assert.deepEqual(repeated.holds, []);
+  assert.ok(repeated.pages.every(item => item.status === 'unchanged'));
+  for (const { entry, original } of originals) entry.body = original;
+
+  github.comments.delete(ctx);
+  github.prs.get(16).body = 'Refs #2';
+  github.issuePrLinks.set(2, { timelineTruncated: true });
+  github.intercept(call => {
+    const number = call.path === 'graphql' ? call.body.variables.number : null;
+    if (number !== 10 && number !== 16) return null;
+    return { status: 200, json: { data: { repository: { pullRequest: { number, state: number === 10 ? 'OPEN' : 'CLOSED', headRefOid: SHA_B } } } } };
+  });
+  const held = run('--json');
+  assert.equal(held.status, 1);
+  const after = JSON.parse(held.output);
+  assert.ok(after.holds.some(hold => hold.code === 'PAGE_CONTEXT_HELD'));
+  assert.ok(after.holds.some(hold => hold.code === 'PAGE_PR_HISTORY_INCOMPLETE' && hold.target === '#2'));
+  assert.ok(after.holds.some(hold => hold.code === 'PAGE_PR_MOVED' && hold.target === 'PR #10'));
+  assert.ok(after.pages.some(item => item.kind === 'pr' && item.number === 11));
+  assert.ok(!after.pages.some(item => item.kind === 'pr' && item.number === 16));
+  assert.equal(github.mutations(), before);
+
+  f.binding.state = { kind: 'branch', branch: state.STATE_BRANCH, path: state.STATE_PATH };
+  const branch = JSON.parse(run('--json').output);
+  assert.deepEqual(branch.pages, []);
+  assert.ok(branch.holds.some(hold => hold.code === 'PAGE_PREVIEW_STATE_HELD'));
+  assert.equal(github.mutations(), before);
+  delete f.binding.state;
+  const raw = github.prs.get(11).body;
+  const apply = f.reconciler().run({ apply: true });
+  assert.equal(apply.mode, 'apply');
+  assert.ok(!Object.hasOwn(apply, 'pages'));
+  assert.ok(!/^# PATH$/m.test(github.issues.get(2).body));
+  assert.equal(github.prs.get(11).body, raw);
+  assert.equal(patchCount(github, 11), 0);
+});
+
+test('formatting preview refuses apply options and stops mutating transport calls before dispatch', () => {
+  for (const args of [['reconcile', '--page-preview', '--apply'], ['refresh', '--page-preview'], ['reconcile', '--page-preview', '--controller']]) {
+    assert.throws(() => cli.parseArgs(args), /read-only/);
+  }
+  const github = new FakeGitHub();
+  const transport = state.pagePreviewTransport(github);
+  for (const call of [['PATCH', 'repos/example.test/app/issues/1', {}], ['POST', 'repos/example.test/app/git/refs', {}],
+    ['PUT', 'repos/example.test/app/contents/state/parent-1.json', {}], ['POST', 'graphql', { query: 'mutation { updateIssue }' }],
+    ['POST', 'graphql', { query: 'query($id: ID!) { viewer { login } } mutation { updateIssue }' }], ['GET', 'user', {}]]) {
+    assert.throws(() => transport.request(...call), { code: 'PAGE_PREVIEW_WRITE_REFUSED' });
+  }
+  assert.equal(github.calls.length, 0);
+});
+
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
 const writer = { session: 'controller-1', prefix: 'INT-TK421-' };
