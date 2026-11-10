@@ -174,6 +174,18 @@ test('J: a refresh that holds is recorded and the footer sweep still runs', (t) 
   assert.ok(log.some(entry => path.basename(entry[1] || '') === 'toolkit-github-footer-sweep.cjs'));
 });
 
+test('J: an exit-zero queued refresh is recorded as held and attention still runs', t => {
+  const report = { outcome: 'QUEUED', reason: 'another pass is running on this computer' };
+  const { record, home } = runSweep(t, { 'programme refresh': { status: 0, stdout: JSON.stringify(report) } });
+  assert.doesNotMatch(record.summary.join(' '), /Programme refresh: done/);
+  assert.equal(record.programme_status, 'held');
+  assert.equal(record.status, 'held');
+  assert.equal(record.exit, 0);
+  assert.ok(record.summary.includes('Programme refresh queued: another pass is already running.'));
+  assert.ok(record.summary.includes('Attention: clear (stored on #421, written 3 min ago)'));
+  assert.deepEqual(tasks.readLastRun('toolkit-programme-sweep', home), record);
+});
+
 test('J: the existing sweep reports parent lifecycle results without a second repair owner', t => {
   const report = { results: [{ kind: 'set_parent_state', target: { issue: 421, state: 'open' }, outcome: 'DONE' }, { kind: 'post_parent_repair', target: { issue: 421 }, outcome: 'UNKNOWN' }], holds: [{ code: 'EFFECT_UNKNOWN', target: '#421' }] };
   const { record, log } = runSweep(t, { 'programme refresh': { status: 1, stdout: JSON.stringify(report) } });
