@@ -1730,6 +1730,16 @@ function findStateBlock(text, name = BLOCK_NAME) {
   return { block: found };
 }
 
+function verifiedPrBody(page, number) {
+  return page?.complete === true && page.number === number && page.is_pull_request === true && typeof page.body === 'string';
+}
+
+function verifiedPrNav(page, number) {
+  if (!verifiedPrBody(page, number)) return null;
+  const found = findStateBlock(page.body, NAV_BLOCK_NAME);
+  return found.error || found.block?.tampered ? null : found;
+}
+
 // True when Toolkit version `a` (x.y.z) is newer than `b`.
 function versionNewer(a, b) {
   const parts = value => String(value || '').split('.').map(part => Number(part) || 0);
@@ -2975,33 +2985,51 @@ class ProgrammeGraphReader {
     throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The closed PR scan reached ten full pages.');
   }
 
-  // The full graph comparison shares the discovery budget across lists, references and detail reads.
-  graphPullRequests(status, spend) {
-    const all = [];
-    const seen = new Set();
-    let previousUpdate = Infinity;
-    for (let page = 1; page <= 10; page += 1) {
-      spend();
-      const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=${status}&per_page=100&sort=updated&direction=desc&page=${page}`);
-      if (response.status !== 200) throw ghFailure(response, 'Reading programme PR history');
-      if (!Array.isArray(response.json)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The PR list was not readable.');
-      for (const pr of response.json) {
-        const item = graphPr(pr, this.repository);
-        const updated = Date.parse(pr.updated_at);
-        if (!item || !Number.isFinite(updated) || typeof pr.title !== 'string' || (pr.body !== null && typeof pr.body !== 'string')) {
-          throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A PR history entry was incomplete.');
+  // One all-state connection makes a close or reopen independent of page membership.
+  // Require two matching bounded observations before using the list as evidence.
+  graphPullRequests(spend) {
+    const [owner, name] = this.repository.split('/');
+    const query = 'query ProgrammePullRequests($owner: String!, $name: String!, $after: String) {'
+      + ' repository(owner: $owner, name: $name) { pullRequests(first: 100, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {'
+      + ' totalCount pageInfo { hasNextPage endCursor } nodes { number title body state closed merged createdAt updatedAt closedAt mergedAt'
+      + ' author { __typename login } headRefName mergeCommit { oid } repository { nameWithOwner } } } } }';
+    const scan = expected => {
+      const rows = [], seen = new Set(), cursors = new Set();
+      let after = null, total = null, lastCreated = -Infinity;
+      for (let page = 0; page < 10; page += 1) {
+        spend();
+        const response = this.transport.request('POST', 'graphql', { query, variables: { owner, name, after } });
+        if (response.status !== 200) throw ghFailure(response, 'Reading programme PR history');
+        const connection = response.json?.data?.repository?.pullRequests;
+        if (response.json?.errors?.length || !Array.isArray(connection?.nodes) || typeof connection.pageInfo?.hasNextPage !== 'boolean'
+          || !isInt(connection.totalCount) || connection.totalCount > 1000
+          || (total !== null && total !== connection.totalCount) || (expected && expected.length !== connection.totalCount)) {
+          throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The pull request connection was incomplete or changed.');
         }
-        // An observed page shift cannot justify a complete comparison or advance the bookmark.
-        if (seen.has(item.number) || updated > previousUpdate) {
-          throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The pull request list moved while it was being read.');
+        total = connection.totalCount;
+        for (const raw of connection.nodes) {
+          const item = graphListPr(raw, this.repository);
+          const created = item && Date.parse(item.created_at);
+          if (!item || seen.has(item.number) || created < lastCreated
+            || (expected && JSON.stringify(item) !== JSON.stringify(expected[rows.length]))) {
+            throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A pull request row was incomplete, repeated or changed.');
+          }
+          seen.add(item.number);
+          lastCreated = created;
+          rows.push(item);
         }
-        seen.add(item.number);
-        previousUpdate = updated;
-        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', closed_at:pr.closed_at || pr.merged_at || null});
+        const { hasNextPage, endCursor } = connection.pageInfo;
+        if (!hasNextPage && rows.length === total) return rows;
+        if (!hasNextPage || !connection.nodes.length || rows.length >= total
+          || typeof endCursor !== 'string' || !endCursor || cursors.has(endCursor)) {
+          throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The pull request pages did not cover the reported count.');
+        }
+        cursors.add(endCursor);
+        after = endCursor;
       }
-      if (response.json.length < 100) return all;
-    }
-    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The programme PR scan reached ten full pages.');
+      throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The programme PR scan reached its ten-page limit.');
+    };
+    return scan(scan());
   }
 
   // At most twenty aliases, each with two bounded issue connections. No partial GraphQL data is used.
@@ -3369,6 +3397,28 @@ function graphPr(pr, repository) {
     merged_at:pr.mergedAt || pr.merged_at || null};
 }
 
+function graphListPr(raw, repository) {
+  if (!raw || !['OPEN', 'CLOSED', 'MERGED'].includes(raw.state)) return null;
+  const open = raw.state === 'OPEN', merged = raw.state === 'MERGED';
+  const time = value => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)) return false;
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 19) === value.slice(0, 19);
+  };
+  if (raw.closed !== !open || raw.merged !== merged || (open ? raw.closedAt !== null : !time(raw.closedAt))
+    || (merged ? !time(raw.mergedAt) : raw.mergedAt !== null) || !time(raw.createdAt) || !time(raw.updatedAt)
+    || (!open && Date.parse(raw.closedAt) < Date.parse(raw.createdAt))
+    || (merged && Date.parse(raw.mergedAt) < Date.parse(raw.createdAt))
+    || typeof raw.title !== 'string' || typeof raw.body !== 'string' || typeof raw.headRefName !== 'string'
+    || (raw.author !== null && typeof raw.author?.login !== 'string')) return null;
+  const pr = graphPr(raw, repository);
+  const login = raw.author?.login || '';
+  // GraphQL Bot logins can omit the REST [bot] suffix used by the existing exclusions.
+  const author = raw.author?.__typename === 'Bot' && !login.endsWith('[bot]') ? login + '[bot]' : login;
+  return pr && { ...pr, body: [raw.title, raw.body].filter(Boolean).join('\n'), author,
+    branch: raw.headRefName, created_at: raw.createdAt, updated_at: raw.updatedAt, closed_at: raw.closedAt };
+}
+
 function prHistory(entries) {
   const unique = new Map(entries.map(pr => [pr.number,pr]));
   const rank = {OPEN:0,MERGED:1,CLOSED:2};
@@ -3589,28 +3639,25 @@ class Reconciler {
       if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error;
       for (const number of numbers) discovery.set(number,{complete:false,detail:'PR discovery was incomplete; existing PR history is retained.'});
     };
-    let openListed = []; let openComplete = true;
-    try { openListed = this.reader.graphPullRequests('open',spend); listed.push(...openListed); }
-    catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; openComplete=false; }
-    let closedListed=[], closedComplete=true;
-    try { closedListed=this.reader.graphPullRequests('closed',spend); listed.push(...closedListed); }
-    catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; closedComplete=false; }
+    try { listed = this.reader.graphPullRequests(spend); }
+    catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; }
+    const closedListed = listed.filter(pr => pr.state !== 'OPEN');
     const references = referencedIssues(listed);
-    const openReferences = referencedIssues(openListed);
+    const openReferences = referencedIssues(listed.filter(pr => pr.state === 'OPEN'));
     const linked = new Set();
     // The parent's timeline can be arbitrarily long and is not task-discovery evidence.
     // Parent and task links in a PR's own title/body already identify it from the list reads.
     for (const number of [parent.parent_issue,...outcomes.map(outcome=>outcome.issue)]) {
       for (const pr of references.get(number) || []) linked.add(pr);
     }
-    const all = outcomes.map(outcome=>outcome.issue);
+    const all = listsComplete ? outcomes.map(outcome=>outcome.issue) : [];
     for (let start=0; start<all.length; start+=20) {
       const batch=all.slice(start,start+20);
       try {
         const links=this.reader.issuePullRequestLinks(batch,spend);
         for (const number of batch) {
           const link=links.get(number);
-          if (!link?.complete || !listsComplete) { incomplete([number],{}); continue; }
+          if (!link?.complete) { incomplete([number],{}); continue; }
           const prior = children.get(number)?.doc?.prs || [];
           const history=[...link.history,...listed.filter(pr=>(references.get(number)||[]).includes(pr.number))];
           const current=prs.get(number);
@@ -3658,7 +3705,7 @@ class Reconciler {
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
       && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
-    return {discovery,histories,openReferences,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted,closedListed,closedComplete};
+    return {discovery,histories,openReferences,withoutTask,holdWithoutTask,complete,listComplete:listsComplete,advance,requests,watermark,scanStarted,closedListed};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -4059,7 +4106,7 @@ class Reconciler {
     const pr = doc?.pr;
     if (!navBody || !pr?.number || !['OPEN', 'DRAFT'].includes(pr.state)) return;
     const page = observed.prPages?.get(pr.number);
-    const found = page && (!this.refreshFacts || page.complete) ? findStateBlock(page.body, NAV_BLOCK_NAME) : null;
+    const found = verifiedPrBody(page, pr.number) ? findStateBlock(page.body, NAV_BLOCK_NAME) : null;
     if (!found || found.error) {
       if (this.refreshFacts) findings.push({ code: 'PR_NAV_UNVERIFIED', kind: 'pr', issue: pr.number, detail: 'The pull request links could not be checked.' });
       return;
@@ -4189,8 +4236,8 @@ class Reconciler {
             && (!target.current || Boolean(findStateBlock(issue.body, CURRENT_BLOCK_NAME).block && blockDigest(findStateBlock(issue.body, CURRENT_BLOCK_NAME).block.body) === target.current))) : null;
         } else if (effect.kind === 'replace_pr_nav') {
           const page = this.reader.issue(target.pr);
-          const nav = page ? findStateBlock(page.body, NAV_BLOCK_NAME).block : undefined;
-          done = page ? Boolean(nav && blockDigest(nav.body) === target.digest) : null;
+          const nav = verifiedPrNav(page, target.pr);
+          done = nav ? nav.block?.digest === target.digest : null;
         } else if (effect.kind === 'post_index_comment') {
           const comments = observed.comments.get(target.issue) || this.reader.comments(target.issue);
           done = indexReadback(comments, effect.intent_id, target.parts);
@@ -4266,7 +4313,7 @@ class Reconciler {
         || !doc?.closed_by_sweep && TERMINAL_LIFECYCLES.includes(doc?.lifecycle) && issue?.state === 'closed'
         && doc.lifecycle !== (String(issue.state_reason || '').toUpperCase() === 'COMPLETED' ? 'DONE' : 'RETIRED');
     }).map(entry=>entry.id) : [];
-    const unreadOpenPrHolds = observed.prGraph?.openComplete === false ? (parent.attention || []).filter(entry=>entry.code==='PR_UNTRACKED').map(entry=>entry.id) : [];
+    const unreadOpenPrHolds = observed.prGraph?.listComplete === false ? (parent.attention || []).filter(entry=>entry.code==='PR_UNTRACKED').map(entry=>entry.id) : [];
     const adoptionHolds = (observed.additions || []).map(outcome=>findingId('reconcile','CHILD_ADDED',outcome.issue));
     const stoppedHolds = openFindings(parent.attention).filter(entry => entry.code === 'PASS_STOPPED').map(entry => entry.id);
     if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
@@ -5099,7 +5146,7 @@ class Reconciler {
       if (isHeld(`#${number}`, 'pr')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
       if (!this.toolkitVersion) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no links were written'); continue; }
       const before = this.reader.issue(pr);
-      if (!before || (this.refreshFacts && !before.complete)) {
+      if (!verifiedPrBody(before, pr)) {
         record(effect, 'HELD', 'the PR could not be read completely');
         hold(effect, 'PR_NAV_UNVERIFIED', `PR #${pr} could not be read completely`);
         continue;
@@ -5109,14 +5156,14 @@ class Reconciler {
       catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
       withIntent(effect, () => {
         const latest = this.reader.issue(pr);
-        if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
+        if (!verifiedPrBody(latest, pr)) return { outcome: 'UNKNOWN', code: 'PR_NAV_UNVERIFIED', detail: 'the PR could not be read completely' };
+        if (latest.body !== before.body || latest.updated_at !== before.updated_at) {
           return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the PR changed between the read and the write; the next pass re-plans it' };
         }
-        if (this.refreshFacts && !latest.complete) return { outcome: 'NOT_DONE', code: 'PR_NAV_UNVERIFIED', detail: 'the PR could not be read completely' };
         guard();
         const response = this.mutator.writeBody(pr, next);
         const after = this.reader.issue(pr);
-        if (after && (!this.refreshFacts || after.complete)) {
+        if (verifiedPrNav(after, pr)) {
           if (after.body === next) return { outcome: 'DONE' };
           if (!okStatus(response.status) && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
         }

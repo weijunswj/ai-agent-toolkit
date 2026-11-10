@@ -116,7 +116,7 @@ class ClosingComments {
     const candidates = new Map(saved.map(item=>[key(item),item]));
     for (const entry of parent.attention || []) if (entry.code==='CLOSING_COMMENT_MISSING' && ['new','acknowledged'].includes(entry.state))
       candidates.set(`${entry.kind}:${entry.issue}`,candidates.get(`${entry.kind}:${entry.issue}`) || {kind:entry.kind,number:entry.issue});
-    if (graph?.closedComplete && graph.watermark) for (const pr of graph.closedListed) {
+    if (graph?.listComplete && graph.watermark) for (const pr of graph.closedListed) {
       if (!excluded(pr) && Date.parse(pr.closed_at)>Date.parse(graph.watermark)) {
         const item={kind:'pr',number:pr.number,closed_at:pr.closed_at}; if (!candidates.has(key(item))) candidates.set(key(item),item);
       }

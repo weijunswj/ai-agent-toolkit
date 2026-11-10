@@ -62,10 +62,13 @@ test('fix1 H1: a task reference gap holds only its discovery findings',()=>{
   assert.deepEqual(f.child(3).prs,[]);
 });
 
-test('fix1 H1: a closed-list failure still settles findings proved by the complete open list',()=>{
+test('fix1 H1: a failed all-state read holds existing open PR findings until a healthy scan',()=>{
   const f=fixture(); pr(f,20,{body:'Refs #2'}); f.run(); f.github.prs.get(20).body='Refs #1';
-  f.github.intercept(call=>call.method==='GET' && /pulls\?state=closed/.test(call.path) ? {status:503,json:{}} : null);
+  f.github.intercept(call=>historyRequest(call) ? {status:503,json:{}} : null);
   f.run(); assert.ok(openCodes(f).includes('PR_DISCOVERY_INCOMPLETE'));
+  assert.equal(f.parent().attention.find(e=>e.code==='PR_UNTRACKED' && e.issue===2).state,'new');
+  f.github.hooks = [];
+  f.run();
   assert.equal(f.parent().attention.find(e=>e.code==='PR_UNTRACKED' && e.issue===2).state,'resolved');
 });
 
@@ -105,6 +108,95 @@ test('fix1 M1 M2: a controller-close conflict stays acknowledged through ordinar
   f.run(); assert.equal(f.parent().attention.find(e=>e.id===entry.id).state,'acknowledged');
 });
 
+const historyRequest = call => call.path.includes('pulls?state=closed')
+  || call.path === 'graphql' && call.body.query.includes('query ProgrammePullRequests');
+const laterHistoryPage = call => call.path.endsWith('page=2') || Boolean(call.body?.variables?.after);
+const fullInventory = { complete: true, issues: [], findings: [] };
+
+for (const movement of ['reopen', 'close', 'remove', 'insert', 'exchange']) {
+  test('correction H1: PR pagination ' + movement + ' catches the unseen link or holds', () => {
+    const f = fixture();
+    f.run();
+    const before = f.parent().private.graph_pr_watermark;
+    for (let n = 100; n <= 200; n++) {
+      pr(f, n, { state: n === 100 && movement === 'close' ? 'OPEN' : 'CLOSED',
+        body: n === 200 ? 'Refs #2' : '', ...(n === 101 ? { branch: 'toolkit/shard-timings-fixture' } : {}) });
+      Object.assign(f.github.prs.get(n), { createdAt: new Date(epoch - 3600000 + n).toISOString(),
+        updated_at: new Date(epoch + 1000 - n).toISOString(),
+        closedAt: new Date(epoch + (n === 101 ? 2000 : -3600000 + 1000 - n)).toISOString() });
+    }
+    f.time(epoch + 3600000);
+    let shifted = false;
+    f.github.intercept(call => {
+      if (shifted || !historyRequest(call) || !laterHistoryPage(call)) return;
+      shifted = true;
+      if (movement === 'reopen' || movement === 'close') {
+        Object.assign(f.github.prs.get(100), { state: movement === 'reopen' ? 'OPEN' : 'CLOSED',
+          closedAt: movement === 'reopen' ? null : new Date(epoch + 2000).toISOString(), updated_at: new Date(epoch + 2000).toISOString() });
+      }
+      if (movement === 'remove' || movement === 'exchange') f.github.prs.delete(100);
+      if (movement === 'insert' || movement === 'exchange') {
+        pr(f, 201, { state: 'CLOSED' });
+        Object.assign(f.github.prs.get(201), { createdAt: new Date(epoch + 3000).toISOString(),
+          closedAt: new Date(epoch + 4000).toISOString(), updated_at: new Date(epoch + 4000).toISOString() });
+      }
+    });
+    const report = f.pass().run({ apply: true, inventory: fullInventory });
+    assert.ok(shifted);
+    if (report.outcome === 'COMPLETE') {
+      assert.ok(f.child(2).prs?.some(pr => pr.number === 200), 'a complete comparison must include the unseen PR');
+    } else {
+      assert.equal(report.outcome, 'INCOMPLETE');
+      assert.equal(f.parent().private.graph_pr_watermark, before);
+    }
+    f.github.hooks = [];
+    const healthy = f.pass().run({ apply: true, inventory: fullInventory });
+    assert.equal(healthy.outcome, 'COMPLETE');
+    assert.ok(f.child(2).prs.some(pr => pr.number === 200));
+  });
+}
+
+for (const fault of ['missing-close', 'invalid-close', 'non-ISO-close', 'inconsistent-state', 'inconsistent-merge', 'missing-merge']) {
+  test('correction H2: ' + fault + ' cannot advance past a later valid close', () => {
+    const f = fixture();
+    f.run();
+    const prior = f.parent().private.graph_pr_watermark;
+    f.time(epoch + 3600000);
+    const merged = fault === 'missing-merge';
+    pr(f, 20, { state: 'CLOSED', merged, mergedAt: merged ? new Date(epoch + 1000).toISOString() : null });
+    pr(f, 21, { state: 'CLOSED', branch: 'toolkit/shard-timings-fixture' });
+    for (const number of [20, 21]) {
+      const time = new Date(epoch + (number === 20 ? 1000 : 2000)).toISOString();
+      Object.assign(f.github.prs.get(number), { updated_at: time, closedAt: time });
+    }
+    f.github.intercept((call, gh) => {
+      if (!historyRequest(call)) return undefined;
+      const response = gh.route(call.method, call.path, call.body);
+      const isGraph = call.path === 'graphql';
+      const rows = isGraph ? response.json.data.repository.pullRequests.nodes : response.json;
+      const row = rows.find(item => item.number === 20);
+      if (!row) return response;
+      const closed = isGraph ? 'closedAt' : 'closed_at';
+      if (fault === 'missing-close') delete row[closed];
+      if (fault === 'invalid-close') row[closed] = 'not a time';
+      if (fault === 'non-ISO-close') row[closed] = '2026';
+      if (fault === 'inconsistent-state') row.state = isGraph ? 'OPEN' : 'open';
+      if (fault === 'inconsistent-merge') row.merged = true;
+      if (fault === 'missing-merge') delete row[isGraph ? 'mergedAt' : 'merged_at'];
+      return response;
+    });
+    const report = f.pass().run({ apply: true, inventory: fullInventory });
+    assert.equal(report.outcome, 'INCOMPLETE');
+    assert.equal(f.parent().private.graph_pr_watermark, prior);
+    assert.ok(!report.findings.some(finding => finding.code === 'PR_WITHOUT_TASK' && finding.issue === 20));
+    f.github.hooks = [];
+    const healthy = f.pass().run({ apply: true, inventory: fullInventory });
+    assert.equal(healthy.outcome, 'COMPLETE');
+    assert.ok(healthy.findings.some(finding => finding.code === 'PR_WITHOUT_TASK' && finding.issue === 20));
+    assert.notEqual(f.parent().private.graph_pr_watermark, prior);
+  });
+}
+
 test('verification finds an old PR edited during an outage even behind its saved bookmark', () => {
   const f = fixture();
   for (let n = 100; n < 200; n++) pr(f, n, { merged: true, mergedAt: '2026-11-01T00:00:00Z' });
@@ -138,7 +230,7 @@ test('verification holds when a PR moves across the list page boundary during th
   for (let n = 100; n <= 200; n++) pr(f, n, { state: 'CLOSED' });
   f.time(epoch + 3600000);
   f.github.intercept(call => {
-    if (call.method === 'GET' && call.path.includes('pulls?state=closed') && call.path.endsWith('page=2')) {
+    if (historyRequest(call) && laterHistoryPage(call)) {
       Object.assign(f.github.prs.get(100), { updated_at: new Date(epoch + 1).toISOString(), body: 'Refs #2' });
     }
   });
@@ -154,7 +246,7 @@ test('verification holds when a PR moves across the list page boundary during th
   assert.deepEqual(f.child(2).prs.map(entry => entry.number), [100]);
 });
 
-test('a full scan that hits the closed PR page limit reports incomplete and retains the bookmark',()=>{
+test('a full scan that exceeds the PR page limit reports incomplete and retains the bookmark',()=>{
   const f=fixture(); f.run();
   for(let n=100;n<1100;n++) pr(f,n,{merged:true,mergedAt:'2026-11-01T00:00:00Z'});
   pr(f,20,{merged:true,mergedAt:'2026-11-08T01:00:00Z'}); // Old PR number, new update.
@@ -162,7 +254,7 @@ test('a full scan that hits the closed PR page limit reports incomplete and reta
   f.time(epoch+2*3600000); f.github.calls=[];
   const report = f.pass().run({ apply: true, inventory: { complete: true, issues: [], findings: [] } });
   assert.equal(report.outcome, 'INCOMPLETE');
-  assert.equal(f.github.calls.filter(c=>/pulls\?state=closed/.test(c.path)).length,10);
+  assert.equal(f.github.calls.filter(historyRequest).length,1);
   assert.equal(f.parent().private.graph_pr_watermark, before);
   assert.ok(!openCodes(f).includes('PR_WITHOUT_TASK'));
 });
@@ -172,7 +264,7 @@ test('a full scan reads the next page even for updates older than the bookmark',
   for(let n=100;n<200;n++) { pr(f,n,{merged:true,mergedAt:'2026-11-07T23:58:00Z'}); }
   pr(f,20,{merged:true,mergedAt:'2026-11-01T00:00:00Z'});
   f.github.calls=[]; const plan=f.pass().plan(); assert.equal(plan.complete,true);
-  assert.equal(f.github.calls.filter(c=>/pulls\?state=closed/.test(c.path)).length,2);
+  assert.equal(f.github.calls.filter(historyRequest).length,4);
 });
 
 test('full scans retain historical PR order and observe reopens',()=>{
@@ -301,8 +393,9 @@ test('A2-4: PR history includes closing refs, text refs and timeline; unrelated 
   pr(f,20,{merged:true,mergedAt:'2026-11-06T00:00:00Z',body:'Refs #2'});
   pr(f,21,{merged:true,mergedAt:'2026-11-07T00:00:00Z'});
   pr(f,22,{state:'CLOSED'}); pr(f,24,{merged:true});
-  pr(f,25); pr(f,26,{body:'Refs #1'}); pr(f,27); pr(f,28);
+  pr(f,25); pr(f,26,{body:'Refs #1'}); pr(f,27); pr(f,28); pr(f,29);
   f.github.prs.get(24).author='dependabot[bot]'; f.github.prs.get(27).author='github-actions[bot]'; f.github.prs.get(28).author='app/github-actions';
+  Object.assign(f.github.prs.get(29), { author: 'dependabot', authorType: 'Bot' });
   f.github.issuePrLinks.set(2,{closing:[21],timeline:[22]});
   f.run(); // Seed historic closes while discovering the original task history.
   pr(f,23,{merged:true,mergedAt:'2026-11-08T01:00:00Z'});
@@ -466,7 +559,7 @@ test('sixty-request ceiling is shared; truncated connections preserve the prior 
   const pass=f.pass(); const plan=pass.plan(); assert.equal(plan.complete,false); assert.ok(plan.observed.prGraph.requests<=60);
   pass.apply(plan); assert.deepEqual(f.child(2).prs,before); assert.equal(f.parent().private.graph_pr_watermark,watermark);
   const bounded=f.pass();
-  bounded.reader.graphPullRequests=(_status,spend)=>{for(let i=0;i<61;i++)spend();return [];};
+  bounded.reader.graphPullRequests=spend=>{for(let i=0;i<61;i++)spend();return [];};
   const large=bounded.plan();
   assert.equal(large.observed.prGraph.requests,60); assert.equal(large.complete,false);
 });

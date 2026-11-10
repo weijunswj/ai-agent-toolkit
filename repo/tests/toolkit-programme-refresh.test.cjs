@@ -147,6 +147,52 @@ test('refresh does not verify a graph with unreadable open pull request links', 
   assert.equal(fx.github.calls.slice(calls).some(call => call.method === 'PATCH' && isPrBody(call)), false);
 });
 
+for (const evidence of ['omitted body', 'matching body only', 'tampered marker', 'broken marker', 'rejected write']) {
+  test('correction M1: ambiguous PR navigation ' + evidence + ' retains its intent', () => {
+    const fx = fixture();
+    assert.equal(fx.run(['refresh']).code, 0);
+    fx.store.mutate('child', 423, { writer: controller, parentDoc: fx.store.read('parent', 421).doc,
+      change: doc => state.applyPatch('child', doc, { candidate: { branch: 'fixture-task' } }) });
+    fx.github.addPr(800, { head: 'a'.repeat(40), branch: 'fixture-task', body: 'Refs #423' });
+    const isPr = call => call.path.endsWith('/issues/800');
+    let patched = false;
+    const partial = body => ({ status: 200, json: { number: 800, ...(body ? { body: fx.github.prs.get(800).body } : {}) } });
+    fx.github.intercept(call => {
+      if (!isPr(call)) return;
+      if (call.method === 'PATCH') {
+        patched = true;
+        if (evidence === 'rejected write') return { status: 503, json: {} };
+      }
+      if (patched && call.method === 'GET') return partial(false);
+    });
+    const intent = () => fx.store.read('parent', 421).doc.pending_effects.find(entry => entry.kind === 'replace_pr_nav');
+    assert.equal(fx.run(['refresh']).result.outcome, 'HELD');
+    assert.equal(intent()?.state, 'UNKNOWN');
+    fx.github.hooks = [];
+    const body = fx.github.prs.get(800).body;
+    if (evidence === 'tampered marker') fx.github.prs.get(800).body = body.replace(/sha256=[0-9a-f]+/, match => match.replace(/[0-9a-f]$/, digit => digit === 'a' ? 'b' : 'a'));
+    if (evidence === 'broken marker') fx.github.prs.get(800).body = body.replace(/<!-- AI-AGENT-TOOLKIT:[^>\n]*:END NAV -->/, '');
+    if (['omitted body', 'matching body only', 'rejected write'].includes(evidence)) {
+      fx.github.intercept(call => isPr(call) && call.method === 'GET' ? partial(evidence === 'matching body only') : undefined);
+    }
+    const start = fx.github.calls.length;
+    const ambiguous = fx.run(['refresh']);
+    assert.equal(ambiguous.error, null);
+    assert.equal(ambiguous.result.outcome, 'HELD');
+    assert.equal(ambiguous.result.recovered[0]?.outcome, 'UNKNOWN');
+    assert.equal(intent()?.state, 'UNKNOWN');
+    assert.ok(!fx.github.calls.slice(start).some(call => call.method === 'PATCH' && isPr(call)));
+    fx.github.hooks = [];
+    fx.github.prs.get(800).body = body;
+    const retry = fx.github.calls.length;
+    const healthy = fx.run(['refresh']);
+    assert.equal(healthy.result.outcome, 'COMPLETE');
+    assert.equal(healthy.result.recovered[0]?.outcome, evidence === 'rejected write' ? 'NOT_DONE' : 'DONE');
+    assert.equal(fx.github.calls.slice(retry).filter(call => call.method === 'PATCH' && isPr(call)).length, evidence === 'rejected write' ? 1 : 0);
+    assert.equal(intent(), undefined);
+  });
+}
+
 test('refresh automatically backfills a completed task and the next sweep makes no writes', () => {
   const fx = fixture();
   fx.store.mutate('parent', 421, { writer: controller, change: doc => { doc.outcomes[0].class = 'COMPLETED'; return doc; } });
@@ -168,7 +214,7 @@ test('refresh automatically backfills a completed task and the next sweep makes 
   assert.equal(fx.run(['refresh']).result.summary, 'No changes');
   assert.equal(fx.github.commits, before.commits);
   assert.equal(fx.github.mutations(), before.mutations);
-  const discovery = fx.github.calls.slice(before.calls).filter(call => /pulls\?state=(?:open|closed)/.test(call.path) || call.body?.query?.includes('closedByPullRequestsReferences'));
+  const discovery = fx.github.calls.slice(before.calls).filter(call => call.body?.query?.includes('query ProgrammePullRequests') || call.body?.query?.includes('closedByPullRequestsReferences'));
   assert.ok(discovery.length > 0 && discovery.length <= 60, 'history and unrelated PRs are re-read within the discovery budget without writes');
 });
 

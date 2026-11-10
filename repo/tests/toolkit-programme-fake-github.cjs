@@ -304,6 +304,23 @@ class FakeGitHub {
 
   graphqlRoute(body) {
     if (/issues\(states: OPEN/.test(body.query)) return this.inventoryRoute(body);
+    if (body.query.includes('query ProgrammePullRequests')) {
+      const date = pr => pr.createdAt || new Date(Date.UTC(2000, 0, 1) + pr.number * 1000).toISOString();
+      const rows = [...this.prs.values()].sort((a,b) => Date.parse(date(a)) - Date.parse(date(b)) || a.number - b.number);
+      const start = Number(body.variables.after || 0);
+      const page = rows.slice(start, start + 100);
+      const next = start + page.length;
+      const nodes = page.map(pr => {
+        const state = pr.merged ? 'MERGED' : pr.state === 'DRAFT' ? 'OPEN' : pr.state;
+        return { number: pr.number, title: pr.title || '', body: pr.body, state, closed: state !== 'OPEN', merged: pr.merged,
+          createdAt: date(pr), updatedAt: pr.updated_at || pr.mergedAt || pr.closedAt || '2026-11-08T00:00:00Z',
+          closedAt: state === 'OPEN' ? null : pr.closedAt || pr.mergedAt || '2026-11-08T00:00:00Z',
+          mergedAt: pr.mergedAt, author: { __typename: pr.authorType || 'User', login: pr.author || 'fixture-owner' }, headRefName: pr.branch || '',
+          mergeCommit: pr.merged ? { oid: pr.head } : null, repository: { nameWithOwner: this.repository } };
+      });
+      return ok(200, { data: { repository: { pullRequests: { totalCount: rows.length, nodes,
+        pageInfo: { hasNextPage: next < rows.length, endCursor: page.length ? String(next) : null } } } } });
+    }
     if (/closedByPullRequestsReferences/.test(body.query)) {
       const repository = {};
       const node = value => typeof value === 'object' ? value : (() => {

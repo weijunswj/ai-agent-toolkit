@@ -114,6 +114,8 @@ function cliRun(f, lockFile, extra = {}, argv = ['refresh', '--json']) {
   return { code, report: JSON.parse(output) };
 }
 
+const historyRequest = call => call.path === 'graphql' && call.body.query.includes('query ProgrammePullRequests');
+
 for (const requestMs of [500, 750]) test(`verification at the measured 84-row footprint with ${requestMs} ms per request`, t => {
   const f = fixture();
   for (let number = 900; number < 1105; number++) {
@@ -128,7 +130,7 @@ for (const requestMs of [500, 750]) test(`verification at the measured 84-row fo
     request_ms: requestMs,
     requests: calls.length,
     inventory_pages: calls.filter(call => call.path === 'graphql' && call.body.query.includes('issues(states: OPEN')).length,
-    closed_pr_pages: calls.filter(call => call.path.includes('pulls?state=closed')).length,
+    pr_history_pages: calls.filter(historyRequest).length,
     task_pr_batches: calls.filter(call => call.path === 'graphql' && call.body.query.includes('closedByPullRequestsReferences')).length,
     parent_write_request: calls.findIndex(call => call === parentWrites(calls)[0]) + 1,
     state_commits: f.github.commits - f.before.commits,
@@ -136,7 +138,7 @@ for (const requestMs of [500, 750]) test(`verification at the measured 84-row fo
     elapsed_ms: elapsed,
   };
   t.diagnostic(JSON.stringify(stats));
-  assert.equal(stats.closed_pr_pages, 3);
+  assert.equal(stats.pr_history_pages, 6);
   assert.equal(stats.task_pr_batches, 5);
   assert.ok(stats.parent_write_request > 0);
   if (requestMs === 500) {
@@ -169,7 +171,7 @@ for (const requestMs of [500, 750]) test(`verification at the reported productio
       const linked = index > 0 && index <= 480;
       github.addPr(number, { head: 'a'.repeat(40), state: 'CLOSED', merged, mergedAt: merged ? date : null,
         body: linked ? `Refs #${issue}` : 'Unrelated history' });
-      Object.assign(github.prs.get(number), { updated_at: date, closedAt: date });
+      Object.assign(github.prs.get(number), { updated_at: date, closedAt: date, ...(index === 0 ? { createdAt: '2000-01-02T00:00:00Z' } : {}) });
       if (linked && index % 3 === 0) {
         if (!github.issuePrLinks.has(issue)) github.issuePrLinks.set(issue, { timeline: [] });
         github.issuePrLinks.get(issue).timeline.push(number);
@@ -203,35 +205,37 @@ for (const requestMs of [500, 750]) test(`verification at the reported productio
     const start = f.github.calls.length;
     const writes = f.github.mutations();
     const commits = f.github.commits;
-    let elapsed = 0, oldestPage = null;
+    let elapsed = 0;
+    const oldestPages = [];
     f.github.intercept((call, github) => {
       elapsed += cost;
-      if (!call.path.includes('pulls?state=closed')) return undefined;
+      if (!historyRequest(call)) return undefined;
       const response = github.route(call.method, call.path, call.body);
-      if (response.json.some(pr => pr.number === oldest)) oldestPage = Number(new URLSearchParams(call.path.split('?')[1]).get('page'));
+      if (response.json.data.repository.pullRequests.nodes.some(pr => pr.number === oldest)) {
+        oldestPages.push(Number(call.body.variables.after || 0) / 100 + 1);
+      }
       return response;
     });
     const { code, report } = cliRun(f, lockFile, { now: () => '2026-11-08T08:00:00Z', passClock: () => Date.parse(NOW) + elapsed });
     f.github.hooks = [];
     const calls = f.github.calls.slice(start);
     const count = predicate => calls.filter(predicate).length;
-    const openPages = count(call => call.path.includes('pulls?state=open'));
-    const closedPages = count(call => call.path.includes('pulls?state=closed'));
+    const historyPages = count(historyRequest);
     const referenceBatches = count(call => call.path === 'graphql' && call.body.query.includes('closedByPullRequestsReferences'));
     const prDetails = count(call => call.path === 'graphql' && call.body.query.includes('pullRequest(number:'));
-    const discoveryRequests = openPages + closedPages + referenceBatches + prDetails;
+    const discoveryRequests = historyPages + referenceBatches + prDetails;
     t.diagnostic(JSON.stringify({ ...size, historical_body_links_before: 480, unrelated_closed_before: 163, timeline_links: 160,
-      oldest_pr: oldest, oldest_page: oldestPage, oldest_saved: readHistory().some(entry => entry.number === oldest),
+      oldest_pr: oldest, oldest_pages: oldestPages, oldest_saved: readHistory().some(entry => entry.number === oldest),
       oldest_on_task_page: /#900\b/.test(f.github.issues.get(500).body), request_ms: cost, requests: calls.length, elapsed_ms: elapsed,
       inventory_pages: count(call => call.path === 'graphql' && call.body.query.includes('issues(states: OPEN')),
-      open_pr_pages: openPages, closed_pr_pages: closedPages, task_pr_batches: referenceBatches, pr_detail_reads: prDetails,
+      pr_history_pages: historyPages, task_pr_batches: referenceBatches, pr_detail_reads: prDetails,
       discovery_requests: discoveryRequests, parent_write_request: calls.indexOf(parentWrites(calls)[0]) + 1,
       state_commits: f.github.commits - commits, github_writes: f.github.mutations() - writes,
       budget_ms: state.REFRESH_BUDGET_MS, queue_cutoff_ms: state.REFRESH_BUDGET_MS - 120000,
       code, outcome: report.outcome, holds: report.holds.map(hold => hold.code) }));
     assert.equal(report.inventory.counts.PARENT + report.inventory.counts.CHILD, 44);
-    assert.equal(closedPages, 7);
-    assert.equal(oldestPage, 7);
+    assert.equal(historyPages, 14);
+    assert.deepEqual(oldestPages, [7, 7]);
     assert.ok(discoveryRequests <= 60);
     return { code, report };
   }
@@ -721,7 +725,7 @@ for (const row of [
   });
   const run = f.make(pass); const plan = run.plan();
   if (row.phase === 'pr_links') for (const [number, pr] of [[500, 900], [501, 901]]) {
-    f.github.addIssue(pr);
+    f.github.addPr(pr, { head: 'a'.repeat(40) });
     plan.effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr, digest: 'fixture' }, body: 'Fixture PR navigation' });
   }
   const size = { code: 'BODY_TOO_LARGE', issue: 421, diagnostics: state.bodySizeDiagnostics('x'.repeat(60000), 60000) };
