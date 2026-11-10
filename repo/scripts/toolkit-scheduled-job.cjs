@@ -357,7 +357,7 @@ class Job {
 
 }
 
-// Step 1 and 2: { status: ok|held|failed }.
+// Refresh status: ok|held|skipped|failed.
 function refreshStep(job) {
   const run = job.node(SCRIPT.programme, ['refresh', '--repo-root', job.options.repoRoot, '--json'], TIMEOUT.refresh);
   const report = lastJson(run.stdout);
@@ -368,6 +368,10 @@ function refreshStep(job) {
   const lifecycle = report?.results?.filter(entry => ['set_parent_state', 'post_parent_repair'].includes(entry.kind)) || [];
   for (const entry of lifecycle) job.note(`Parent lifecycle: ${entry.kind === 'set_parent_state' ? entry.target.state === 'open' ? 'reopen' : 'complete' : 'repair notice'} ${entry.outcome}.`);
   if (run.status === 0) {
+    if (report?.outcome === 'QUEUED') {
+      job.note('Programme refresh queued: another pass is already running.');
+      return 'held';
+    }
     job.note(`Programme refresh: done${report && report.inventory && report.inventory.complete === false ? ' (inventory incomplete)' : ''}.`);
     return 'ok';
   }
