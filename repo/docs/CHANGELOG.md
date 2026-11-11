@@ -1,18 +1,23 @@
 # Toolkit Changelog
 
-## 3.64.0 (automatic re-bump workflow and a narrower launch rule)
+## 3.64.0 (One layout for task pages and task PRs)
 
 ### Added
 
-- A re-bump workflow for this repository: after every push to `main` it runs the re-bump command for the owner's open pull requests and pushes with the repository secret `TOOLKIT_REBUMP_TOKEN`, so their checks start by themselves. With no secret it prints a note and does nothing. A pull request it cannot re-bump gets one comment that says why.
-- `toolkit-rebump-prs.cjs --authors <login,...>` skips other authors' pull requests before any of their code runs.
+- Open task pages follow one fixed order: PATH, STATUS and COMMENT TRACE, then PROBLEM, FIX, IF WE SKIP, DONE WHEN and NOT IN SCOPE, then More with every other hand-written word in its original order. Older label lines and headings become the matching capital sections; the words under them do not change.
+- A copy of a task page is saved to the private state store and read back before any write that moves its hand-written text. Without the copy the page is not written.
+- Every open or draft PR that names a task gets PATH and STATUS at the top, with the gate, review at the head, UAT and release of each task it names. The PR description stays as written, and merged or closed PRs are never edited.
+- A managed block shown as an example inside a code block, quote, list item, indented code, details section or other HTML block is hand-written text on every page: it is never updated, moved or cut.
+- Where a block goes is read from the same top-level view of the page as the block search, and every block is read back before a page is written. A page whose block would not be found again is held with `MANAGED_BLOCK_BROKEN` and nothing is written to it.
+- The plan says when a page's text will move ("Lay out #<n>'s page in the fixed order"), and the result names the saved copy.
+- The task status block lists every PR found for the task, open first.
+- A page that cannot be laid out safely keeps its text in place, still gets fresh blocks, and raises the new `PAGE_LAYOUT_HELD` finding with the reason. A pass re-lays at most ten pages.
+- The new `TASK_IDLE` finding flags a task shown in progress with no open PR, no live gate assignment, no holder and no change for six hours.
 
 ### Changed
 
-- The re-bump command runs the pull request branch's own bump and validation scripts with every token variable and the Actions file-command paths removed from their environment.
-- The merge hold no longer refuses a command that starts Claude or Codex when its only merge wording is branch upkeep: `git merge`, merge commits, merge conflicts or merge-base. Any other merge wording still refuses the launch, and pull request merges stay guarded.
-- The merge hold's approval reader now skips a typed line whose only merge wording is the same branch upkeep, from one shared definition, so a launch the hold lets through carries no line the reader counts, as far as the hold can read the command (text the shell reshapes afterwards is not covered). A line such as `git merge 5` or `update #5 with a merge commit` no longer records an approval. This is one more reason to skip a line and nothing else in the reader changed: every line that was held before is still held, and `merge 5` and `merge owner/name#5` count as before.
-- A pull request that changes the re-bump scripts (`toolkit-rebump-prs.cjs`, `toolkit-rebump-report.cjs`, `toolkit-rebump-action.sh`) now waits for the owner's typed merge.
+- The Programme Graph PR column shows one PR per row, the most recently opened one, with no count of other PRs.
+- The generated blocks on task pages carry capital headings, matching the programme page.
 
 ## 3.63.1 (Update lines only on edited posts)
 
