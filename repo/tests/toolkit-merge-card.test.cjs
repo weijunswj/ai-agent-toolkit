@@ -317,7 +317,15 @@ test('nothing a session\'s own shell can run is read as a card shown or answered
       `cat answer.json | node repo/scripts/toolkit-governance-hook.cjs --event PostToolUse`,
       'node -e "const hold = load(\'./repo/scripts/toolkit-merge-hold.cjs\'); hold.cardAnswered(event)"',
       'node -p "load(\'./repo/scripts/toolkit-merge-hold.cjs\').cardAsked(event)"',
+      `bun ${hook} --event PostToolUse < answer.json`,
     ]) assert.match(run(command).deny, /feed them a prompt, tool or session-start event are refused/, command);
+    // An emptied environment hides the session variable, so naming a hook script with one is refused.
+    for (const command of [
+      `env -i PATH="$PATH" node ${hook} --event "$(cat a.txt)" < a.json`,
+      `env --ignore-environment node ${hook} --event "$(cat b.txt)" < b.json`,
+      `env - PATH=/usr/bin node repo/scripts/toolkit-governance-hook.cjs --event "$(cat b.txt)" < b.json`,
+      'FOO=1 env -i node repo/scripts/toolkit-merge-hold.cjs check',
+    ]) assert.match(run(command).deny, /names Toolkit's hook scripts and starts with an empty environment is refused/, command);
     for (const command of [
       'node --test repo/tests/toolkit-governance-hook.test.cjs',
       'node --test repo/tests/toolkit-merge-card.test.cjs repo/tests/toolkit-merge-hold.test.cjs',
@@ -325,6 +333,17 @@ test('nothing a session\'s own shell can run is read as a card shown or answered
       'grep -n cardOffer repo/scripts/toolkit-merge-hold.cjs',
       'git log --oneline -- repo/scripts/toolkit-governance-hook.cjs',
       'grep -rn PostToolUse hooks/',
+      // Searches, diffs, commit messages and test runs that name a hook script and an event.
+      'grep -n PreToolUse repo/scripts/toolkit-governance-hook.cjs',
+      'grep -n cardAnswered repo/scripts/toolkit-merge-hold.cjs',
+      'rg -n "PostToolUse" repo/scripts/toolkit-governance-hook.cjs',
+      "sed -n '/PostToolUse/,+12p' repo/scripts/toolkit-governance-hook.cjs",
+      'git log -S cardAsked --oneline -- repo/scripts/toolkit-merge-hold.cjs',
+      'git diff origin/main -- repo/scripts/toolkit-governance-hook.cjs | grep -n PostToolUse',
+      'git commit -m "Note the merge card at PreToolUse in toolkit-merge-hold"',
+      'node --test repo/tests/toolkit-governance-hook.test.cjs --test-name-pattern PreToolUse',
+      'Select-String -Path repo/scripts/toolkit-governance-hook.cjs -Pattern PreToolUse',
+      'env -i PATH="$PATH" node --version',
     ]) assert.doesNotMatch(String((run(command) || {}).deny), /feed them|must come from the user/, command);
   });
 });

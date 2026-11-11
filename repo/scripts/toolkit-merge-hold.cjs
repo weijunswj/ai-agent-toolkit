@@ -81,25 +81,28 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // host marks as idle, follow-up, free text or noted, any field the reader does not know, and a card
 // in a launched, resumed or unmarked session all record nothing. Any exact card counts, whether or
 // not a refusal came first: the user still taps and the SHA is pinned.
-// The card's invariant: nothing a session's own shell can run is read as a card shown or answered.
-// The host starts its tool hooks with its own environment, and only a session's shell commands
-// carry TOOLKIT_HOST_SESSION, so a card event whose environment holds that variable at all
+// Shell feeds: the host starts its tool hooks with its own environment, and only a session's shell
+// commands carry TOOLKIT_HOST_SESSION, so a card event whose environment holds that variable at all
 // (matching, different or empty) is a shell feed and is neither noted nor counted. The typed route
 // cannot use this test, because a typed line may arrive where the variable matches. The tripwire
-// below also refuses the direct feed.
+// below refuses the direct feed and a hook script named with an emptied environment. This is a
+// tripwire, not a lock: an agent in the user's own chat can still feed a card event from a saved
+// script, as it can feed a typed line, so the card adds no route the typed line lacks.
 // It prevents no new failure; the failure it must not cause is an approval the owner did not give,
 // so it trusts only what the typed route already trusts (the session's start marks) plus the host's
 // own report of the tap. Accepted gaps, where the host itself reports an answer nobody tapped:
-//   - a permission answer that carries the answers: an SDK canUseTool callback, another plugin's
-//     PermissionRequest hook, a permission-prompt tool, or a launcher's answer. These reach a
+//   - a permission answer that carries the answers: an SDK canUseTool callback, a PermissionRequest
+//     hook (from any plugin or from the user's or a project's settings), a permission-prompt tool,
+//     or a launcher's answer. These reach a
 //     session a program started. Such a session counts as user-started only where the typed route
 //     already has that limit: one launched from a Codex shell or from anywhere else without the
 //     host-session variable. A PermissionRequest hook installed on this computer reaches every chat;
 //   - a background session, where a reply sent by a connected client answers the open question;
 //   - a host that auto-resolves the card without marking it (the marked idle path records nothing);
-//   - a shell feed whose environment had the variable cleared indirectly (the direct forms are
-//     refused below) or never held it (a session whose shell export failed), where only the
-//     tripwire stands, with the wrapped feeds the typed route also lists as not covered.
+//   - a shell feed that hides the variable in a way the tripwire does not read: a saved script
+//     that runs the hook or calls the card functions, an event name read from a file without an
+//     emptied environment where the variable was cleared indirectly, a session whose shell export
+//     failed, and the wrapped feeds the typed route also lists as not covered.
 // Never click a card through a UI or computer use. Codex has no card and keeps the typed line. Cloud
 // sessions skip this hook, so a Projects card there is a written rule, not a recorded approval.
 //
@@ -129,7 +132,10 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     unset, env -u, Remove-Item Env:\, export -n, declare +x, SetEnvironmentVariable, or an empty
 //     environment on a host launch through env -i, --ignore-environment or a bare -), names
 //     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt,
-//     a tool event (PreToolUse, PostToolUse or the card functions) or a SessionStart event.
+//     a SessionStart event, or (in a command that runs node, bun or deno, but not its test runner)
+//     a tool event (PreToolUse, PostToolUse or the card functions); also a command that names the
+//     hook scripts and empties its environment (env -i, --ignore-environment or a bare -). A search,
+//     a diff or a commit message that names a hook script and a tool event is not refused.
 //
 // Not covered: a fresh `codex exec` launch from a running Codex shell still keeps standing as it
 // did before, wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
@@ -231,7 +237,10 @@ const GH_ALIAS_MERGE = /\bgh(?:\.exe)?\s+alias\s+(?:set|import)\b[^\n;&|]*merge/
 const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\bTOOLKIT_HOST_SESSION\s*=|(?:\bunset|-u|--unset(?:=|\s+)|\benv:\\?|\$env:|\bexport\s+-n\s+|\bdeclare\s+\+x\s+)\s*TOOLKIT_HOST_SESSION\b|\bSetEnvironmentVariable\s*\(\s*['"]TOOLKIT_HOST_SESSION['"]/i;
 const PROMPT_HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook)/i;
 const HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook|codex-session-start)/i;
-const FEED_WORDS = /\brequire\b|\brecordPrompt\b|\bUserPromptSubmit\b|\bimport\b|\bPreToolUse\b|\bPostToolUse\b|\bcardAsked\b|\bcardAnswered\b/;
+const FEED_WORDS = /\brequire\b|\brecordPrompt\b|\bUserPromptSubmit\b|\bimport\b/;
+// Tool-event words count only in a command that runs a script runtime (not its test runner), so a
+// search, a diff or a commit message that names a hook script and an event is not a feed.
+const TOOL_FEED_WORDS = /\bPreToolUse\b|\bPostToolUse\b|\bcardAsked\b|\bcardAnswered\b/;
 const HOST_WORD = /^(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?$|claude-code|@openai\/codex/i;
 // gh pr merge flags that take a value, so the value is not read as the pull request.
 const VALUE_FLAGS = new Set(['--repo', '-R', '--match-head-commit', '--subject', '-t', '--body', '-b', '--body-file', '-F', '--author-email', '-A']);
@@ -863,7 +872,8 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   // Search arguments and test files are not hook invocations. Read the common command wrappers
   // and Node's harmless warning flag; Codex's start script writes a mark without any event flag.
   const sessionStartFeed = hookStartFeed(text);
-  if (HOOK_FEED.test(text) && ((PROMPT_HOOK_FEED.test(text) && FEED_WORDS.test(text)) || sessionStartFeed)) return refuse('merge authority must come from the user, so commands that load Toolkit\'s hook scripts or feed them a prompt, tool or session-start event are refused.');
+  if (HOOK_FEED.test(text) && clearedEnvironment(text)) return refuse('merge authority must come from the user, so a command that names Toolkit\'s hook scripts and starts with an empty environment is refused.');
+  if (HOOK_FEED.test(text) && ((PROMPT_HOOK_FEED.test(text) && (FEED_WORDS.test(text) || (TOOL_FEED_WORDS.test(text) && runsScript(text)))) || sessionStartFeed)) return refuse('merge authority must come from the user, so commands that load Toolkit\'s hook scripts or feed them a prompt, tool or session-start event are refused.');
   const parts = segments(text);
   for (const words of parts) {
     let index = 0;
@@ -895,7 +905,9 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
 
 // Read command position with shell quoting intact: an env launch inside a message is just text.
 // Reuse the host-launch pattern and common wrappers above, within this command only.
-function clearedHostEnvironment(text) {
+// Whether any command in the text starts env with an emptied environment (-i, --ignore-environment
+// or a bare -), and, when `host` is set, goes on to start Claude or Codex.
+function clearedEnvironment(text, host = false) {
   return shellCommands(text).some(({ words }) => {
     let index = words[0] === '&' ? 1 : 0;
     while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] || '')) index += 1;
@@ -906,8 +918,20 @@ function clearedHostEnvironment(text) {
       if (['-i', '--ignore-environment', '-'].includes(words[index])) cleared = true;
       index += 1;
     }
-    return cleared && HOST_WORD.test(path.basename(words[index] || ''));
+    return cleared && (!host || HOST_WORD.test(path.basename(words[index] || '')));
   });
+}
+
+function clearedHostEnvironment(text) { return clearedEnvironment(text, true); }
+
+// Whether a command in the text runs a script runtime (node, bun or deno) other than its test runner.
+function runsScript(text) {
+  return shellCommands(text).some(({ words }) => words.some((word, index) => {
+    if (!/^(?:node|node\.exe|bun|bun\.exe|deno|deno\.exe)$/i.test(path.basename(word))) return false;
+    let next = index + 1;
+    while (words[next] === '--no-warnings') next += 1;
+    return !['--test', 'test'].includes(words[next]);
+  }));
 }
 
 function hookStartFeed(text, depth = 0) {
