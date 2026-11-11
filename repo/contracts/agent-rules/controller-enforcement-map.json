@@ -1,10 +1,11 @@
 {
   "schema": "toolkit-controller-enforcement-map/v1",
-  "description": "What enforces each controller rule (repo/CONTROLLER.md and its pages): a hook, a script, a CI check or the programme reconciler, each with the test that proves it, or instruction-only with the reason. Checked by repo/scripts/check-controller-enforcement-map.cjs.",
+  "description": "What enforces each controller rule (repo/CONTROLLER.md and its pages): a hook, a script, a CI check or the programme reconciler, each with the test that proves it and one line on which part of the rule it covers, or instruction-only with the reason. Checked by repo/scripts/check-controller-enforcement-map.cjs.",
   "rows": [
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**GitHub governance**",
+      "covers": "Governance state decides on or off only from the merged programme file, and the governance hook holds work in a repository whose answer is not yet decided.",
       "enforced_by": [
         {
           "kind": "script",
@@ -26,6 +27,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Repository fence:**",
+      "covers": "The merge hold refuses a merge without the owner's OK. The rest of the fence (binding the named repository, no cross-repository authority) is instruction-only.",
       "enforced_by": [
         {
           "kind": "hook",
@@ -47,6 +49,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "Preserve Now and Later commitments",
+      "covers": "The reconciler works out each child's group (Now, Later, optional) and the parent's order; it does not keep owners or commitments.",
       "enforced_by": [
         {
           "kind": "reconciler",
@@ -68,6 +71,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "On \"you are taking over as controller for <repo>\"",
+      "covers": "The reconciler's takeover claim stops the old writer before its next write. The capability check and the journey are instruction-only.",
       "enforced_by": [
         {
           "kind": "reconciler",
@@ -104,6 +108,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Standing approvals:**",
+      "covers": "The merge hold and the auto-merge check stop merges without the owner's OK or a passing check. Deletions, keys and other irreversible steps are instruction-only.",
       "enforced_by": [
         {
           "kind": "hook",
@@ -120,6 +125,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "**Transport stores:**",
+      "covers": "The merge hold lets merges into an evidence store through without asking. Secret scans and the sole-copy rule are instruction-only.",
       "enforced_by": [
         {
           "kind": "hook",
@@ -131,6 +137,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "These pages are part of this file",
+      "covers": "The pages check fails when a page is missing, unlisted, out of step with its hash or has a rule with two homes.",
       "enforced_by": [
         {
           "kind": "ci",
@@ -142,6 +149,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Roles and routes](controller/roles-and-routes.md)",
+      "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
           "kind": "ci",
@@ -153,6 +161,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Gates](controller/gates.md)",
+      "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
           "kind": "ci",
@@ -164,6 +173,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Evidence, progress and finish](controller/evidence-and-finish.md)",
+      "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
           "kind": "ci",
@@ -175,6 +185,7 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Resolve DISCOVERY, DISCOVERY_HELPER, BUILDER",
+      "covers": "Stack selection resolves each role and the reviewer set only from the pinned registry, with no default or fallback.",
       "enforced_by": [
         {
           "kind": "script",
@@ -196,6 +207,7 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Subagents are helpers, never gates",
+      "covers": "The helper guard checks a helper launch against its pinned route and refuses one that would launch another agent, when a host hook calls it; the depth setting keeps spawn depth at one. Reading run logs is instruction-only.",
       "enforced_by": [
         {
           "kind": "hook",
@@ -217,6 +229,7 @@
     {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "G2 begins after builder readiness",
+      "covers": "Stack selection resolves the full reviewer set from the same selection. When G2 starts, fresh contexts and independence are instruction-only.",
       "enforced_by": [
         {
           "kind": "script",
@@ -233,6 +246,7 @@
     {
       "file": "repo/controller/gates.md",
       "rule": "Gate states: ACTIVE, WAITING_OWNER",
+      "covers": "The reconciler records each child's gate state from its checkpoints and flags a stale or competing one. Reusing a session and consuming a return once are instruction-only.",
       "enforced_by": [
         {
           "kind": "reconciler",
@@ -244,6 +258,7 @@
     {
       "file": "repo/controller/gates.md",
       "rule": "At admission split acceptance",
+      "covers": "The auto-merge check needs a UAT line on the pull request, and the reconciler records UAT retained, partial or full. Deciding which steps need owner UAT is instruction-only.",
       "enforced_by": [
         {
           "kind": "script",
@@ -265,6 +280,7 @@
     {
       "file": "repo/controller/gates.md",
       "rule": "**Scope confirmation:**",
+      "covers": "The decision history reads the SCOPE-CONFIRMED tag as the owner's confirmation of a child's scope. Asking the owner is instruction-only.",
       "enforced_by": [
         {
           "kind": "reconciler",
@@ -286,13 +302,7 @@
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "Executors publish concise authorised progress",
-      "enforced_by": [
-        {
-          "kind": "reconciler",
-          "path": "skills/github-program-reconciler/scripts/programme-checkpoint.cjs",
-          "test": "repo/tests/toolkit-programme-authority.test.cjs"
-        }
-      ]
+      "instruction_only": "No Toolkit code publishes progress with conditional writes and readback; the programme checkpoint script writes only a local journal."
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
@@ -302,6 +312,7 @@
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "Reuse the user-selected private evidence store",
+      "covers": "Governance discovery lists the owner's existing private evidence stores before proposing a new one, and a name alone selects nothing. Verifying access through the backend is instruction-only.",
       "enforced_by": [
         {
           "kind": "script",
@@ -318,13 +329,7 @@
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "Scratch follows the global rules",
-      "enforced_by": [
-        {
-          "kind": "script",
-          "path": "repo/scripts/workspace-residue-report.cjs",
-          "test": "repo/tests/workspace-residue-report.test.cjs"
-        }
-      ]
+      "instruction_only": "The workspace residue report lists worktrees and branches that are safe to remove by this rule's tests, but nothing runs it automatically or stops a forced removal."
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
@@ -334,13 +339,7 @@
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "Native coverage: Codex/Claude Code on real selected paths",
-      "enforced_by": [
-        {
-          "kind": "script",
-          "path": "repo/scripts/toolkit-install-health.cjs",
-          "test": "repo/tests/toolkit-install-health.test.cjs"
-        }
-      ]
+      "instruction_only": "The rule itself says host qualification is not implemented. Install health checks only that installed copies, hooks and helper files are current, not the listed host behaviours."
     }
   ]
 }

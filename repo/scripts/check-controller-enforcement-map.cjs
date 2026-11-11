@@ -3,17 +3,19 @@
 
 // The controller rules are repo/CONTROLLER.md plus the pages its Pages section lists. The map at
 // repo/contracts/agent-rules/controller-enforcement-map.json says, for each rule, what enforces it
-// (a hook, a script, a CI check or the programme reconciler, each with the test that proves it) or
-// that it is instruction-only and why. The map lives outside the rules files, so they gain no bytes.
+// (a hook, a script, a CI check or the programme reconciler, each with the test that proves it, and
+// one line on which part of the rule they cover) or that it is instruction-only and why. The map lives outside the rules files, so they gain no bytes.
 //
 // A rule is one non-empty line under a `##` or `###` heading of a controller file: a bullet or a
-// paragraph. A map row finds its rule by `rule`, a phrase that must appear in exactly one rule line
+// paragraph. A fenced block or a `####` line inside a section also counts as rule lines, so it
+// needs a row too; that fails closed. A map row finds its rule by `rule`, a phrase that must appear in exactly one rule line
 // of its `file`. This check fails when:
 //   - a rule line has no row, or more than one row;
 //   - a row's phrase matches no rule line, or more than one;
-//   - a row has both or neither of `enforced_by` and `instruction_only`;
-//   - an enforcer names an unknown kind, a file that does not exist, a test that does not exist,
-//     or a test that never mentions the enforcer's file name.
+//   - a row has both or neither of `enforced_by` and `instruction_only`, or an enforced row has no
+//     `covers` line;
+//   - an enforcer names an unknown kind, a path that is not a file inside the repository, a test
+//     that is not, or a test that never names the enforcer's file (with its extension).
 // It reads files only and writes nothing.
 //
 // Usage: node repo/scripts/check-controller-enforcement-map.cjs [--root <dir>]
@@ -25,7 +27,7 @@ const { CORE, PAGES_DIR, listedPages } = require('./sync-controller-pages.cjs');
 const MAP = 'repo/contracts/agent-rules/controller-enforcement-map.json';
 const SCHEMA = 'toolkit-controller-enforcement-map/v1';
 const KINDS = Object.freeze(['hook', 'script', 'ci', 'reconciler']);
-const ROW_KEYS = Object.freeze(['file', 'rule', 'enforced_by', 'instruction_only']);
+const ROW_KEYS = Object.freeze(['file', 'rule', 'covers', 'enforced_by', 'instruction_only']);
 const ENFORCER_KEYS = Object.freeze(['kind', 'path', 'test']);
 
 const normalise = text => text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
@@ -54,15 +56,24 @@ function ruleLines(text) {
   return rules;
 }
 
+// A repository-relative path to a regular file inside root: no absolute path, no `..`, no folder.
+function isRepoFile(root, rel) {
+  if (!isText(rel) || path.isAbsolute(rel) || rel.includes('\\') || rel.split('/').some(part => part === '..' || part === '.' || part === '')) return false;
+  const target = path.resolve(full(root, rel));
+  if (!target.startsWith(`${path.resolve(root)}${path.sep}`)) return false;
+  try { return fs.statSync(target).isFile(); } catch { return false; }
+}
+
 function checkEnforcer(root, where, enforcer, errors) {
   if (!isRecord(enforcer)) { errors.push(`${where}: each enforcer must be an object`); return; }
   for (const key of Object.keys(enforcer)) if (!ENFORCER_KEYS.includes(key)) errors.push(`${where}: unknown enforcer key "${key}"`);
   if (!KINDS.includes(enforcer.kind)) errors.push(`${where}: kind must be one of ${KINDS.join(', ')}`);
-  if (!isText(enforcer.path) || !fs.existsSync(full(root, enforcer.path))) errors.push(`${where}: enforcer file ${enforcer.path || '(none)'} does not exist`);
-  if (!isText(enforcer.test) || !fs.existsSync(full(root, enforcer.test))) { errors.push(`${where}: test ${enforcer.test || '(none)'} does not exist`); return; }
-  if (isText(enforcer.path)) {
-    const name = path.basename(enforcer.path).replace(/\.[^.]+$/, '');
-    if (!fs.readFileSync(full(root, enforcer.test), 'utf8').includes(name)) errors.push(`${where}: test ${enforcer.test} never mentions ${name}`);
+  const pathOk = isRepoFile(root, enforcer.path);
+  if (!pathOk) errors.push(`${where}: enforcer ${enforcer.path || '(none)'} is not a file inside the repository`);
+  if (!isRepoFile(root, enforcer.test)) { errors.push(`${where}: test ${enforcer.test || '(none)'} is not a file inside the repository`); return; }
+  if (pathOk) {
+    const name = path.basename(enforcer.path);
+    if (!fs.readFileSync(full(root, enforcer.test), 'utf8').includes(name)) errors.push(`${where}: test ${enforcer.test} never names ${name}`);
   }
 }
 
@@ -89,6 +100,8 @@ function check(root = path.resolve(__dirname, '..', '..')) {
     const enforced = row.enforced_by !== undefined, instructed = row.instruction_only !== undefined;
     if (enforced === instructed) errors.push(`${where}: needs exactly one of "enforced_by" and "instruction_only"`);
     if (instructed && !isText(row.instruction_only)) errors.push(`${where}: "instruction_only" must say why in one line`);
+    if (instructed && row.covers !== undefined) errors.push(`${where}: an instruction-only row has no "covers" line`);
+    if (enforced && !isText(row.covers)) errors.push(`${where}: an enforced row needs a "covers" line saying which part of the rule its enforcers act on`);
     if (enforced) {
       if (!Array.isArray(row.enforced_by) || row.enforced_by.length === 0) errors.push(`${where}: "enforced_by" must list at least one enforcer`);
       else row.enforced_by.forEach((enforcer, at) => checkEnforcer(root, `${where} enforcer ${at + 1}`, enforcer, errors));

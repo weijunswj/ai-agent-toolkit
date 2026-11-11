@@ -50,6 +50,7 @@ test('every row is either enforced or instruction-only with a reason, and kinds 
     assert.ok((row.enforced_by === undefined) !== (row.instruction_only === undefined), row.rule);
     for (const enforcer of row.enforced_by || []) assert.ok(KINDS.includes(enforcer.kind), `${row.rule}: ${enforcer.kind}`);
     if (row.instruction_only !== undefined) assert.ok(row.instruction_only.trim().length > 20, `${row.rule}: says why`);
+    if (row.enforced_by !== undefined) assert.ok(typeof row.covers === 'string' && row.covers.trim().length > 20, `${row.rule}: says what it covers`);
   }
 });
 
@@ -81,9 +82,14 @@ test('D7-1: a new rule with no row fails, in the core and in a page, bullet or p
 
 test('D7-1: a row pointing at a missing test, a missing enforcer or a test that never names it fails', t => {
   const cases = [
-    [enforcer => { enforcer.test = 'repo/tests/no-such-file.test.cjs'; }, /test repo\/tests\/no-such-file\.test\.cjs does not exist/],
-    [enforcer => { enforcer.path = 'repo/scripts/no-such-script.cjs'; }, /enforcer file repo\/scripts\/no-such-script\.cjs does not exist/],
-    [enforcer => { enforcer.test = 'repo/tests/controller-pages.test.cjs'; }, /test repo\/tests\/controller-pages\.test\.cjs never mentions toolkit-merge-hold/],
+    [enforcer => { enforcer.test = 'repo/tests/no-such-file.test.cjs'; }, /test repo\/tests\/no-such-file\.test\.cjs is not a file inside the repository/],
+    [enforcer => { enforcer.path = 'repo/scripts/no-such-script.cjs'; }, /enforcer repo\/scripts\/no-such-script\.cjs is not a file inside the repository/],
+    [enforcer => { enforcer.path = 'repo/scripts'; }, /enforcer repo\/scripts is not a file inside the repository/],
+    [enforcer => { enforcer.path = '../outside.cjs'; }, /enforcer \.\.\/outside\.cjs is not a file inside the repository/],
+    [enforcer => { enforcer.path = 'repo/scripts/../scripts/toolkit-merge-hold.cjs'; }, /is not a file inside the repository/],
+    [enforcer => { enforcer.path = '/etc/hostname'; }, /enforcer \/etc\/hostname is not a file inside the repository/],
+    [enforcer => { enforcer.test = 'repo/tests'; }, /test repo\/tests is not a file inside the repository/],
+    [enforcer => { enforcer.test = 'repo/tests/controller-pages.test.cjs'; }, /test repo\/tests\/controller-pages\.test\.cjs never names toolkit-merge-hold\.cjs/],
     [enforcer => { enforcer.kind = 'vibes'; }, /kind must be one of hook, script, ci, reconciler/],
     [enforcer => { enforcer.owner = 'someone'; }, /unknown enforcer key "owner"/],
   ];
@@ -124,6 +130,9 @@ test('a row must be enforced or instruction-only, never both or neither, and say
     [row => { row.enforced_by = []; }, /"enforced_by" must list at least one enforcer/],
     [row => { delete row.enforced_by; row.instruction_only = '  '; }, /"instruction_only" must say why in one line/],
     [row => { row.note = 'extra'; }, /unknown key "note"/],
+    [row => { delete row.covers; }, /an enforced row needs a "covers" line/],
+    [row => { row.covers = ' '; }, /an enforced row needs a "covers" line/],
+    [row => { delete row.enforced_by; row.instruction_only = 'nothing in code checks this rule today'; }, /an instruction-only row has no "covers" line/],
   ];
   for (const [change, expected] of cases) {
     const root = copy(t);
