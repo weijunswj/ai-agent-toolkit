@@ -1804,10 +1804,43 @@ function detachArchive(entry) {
   entry.comment_id = null; entry.login = null; entry.state = 'pending';
 }
 
-function renderContextBlockBody() {
+// The parent's Agent context comments: every comment a person wrote whose first line is the topic
+// "Agent context" (then `---`). Generated index and archive comments never count. A record ID in
+// the text does not rule a comment out: background notes link to the records they explain.
+const CONTEXT_TAG = 'AGENT CONTEXT';
+function contextCommentIds(comments) {
+  // Both modules are already loaded above; the extra names stay out of the pinned top-level requires.
+  const { isBot } = require('./decision-trace-audit.cjs');
+  const { commentTag, isArchiveComment } = require('./decision-tags.cjs');
+  return (comments || []).filter(comment => !isBot(comment) && commentTag(comment.body) === CONTEXT_TAG && !isArchiveComment(comment.body)
+    && ![INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER].some(marker => String(comment.body).includes(marker))).map(comment => String(comment.id));
+}
+
+// The comment AGENT CONTEXT lists and COMMENT TRACE leaves out: the only match, else none.
+function contextCommentId(comments) {
+  const ids = contextCommentIds(comments);
+  return ids.length === 1 ? ids[0] : null;
+}
+
+// A trace without the comment AGENT CONTEXT lists. A comment an index page already lists is not in
+// `entries`, so that page keeps its line.
+function withoutContextComment(trace, id) {
+  return id ? { ...trace, entries: trace.entries.filter(entry => entry.id !== id) } : trace;
+}
+
+// The AGENT CONTEXT block. With one Agent context comment it links that comment; with more than one
+// it holds, names them (the first five) and leaves them in COMMENT TRACE; with none it is the two
+// fixed lines alone.
+const CONTEXT_NAMED = 5;
+function renderContextBlockBody(number = null, comments = [], repository = '') {
+  const ids = contextCommentIds(comments);
+  const link = id => `[${id}](${commentLink(issueUrl(repository, number), id)})`;
   return ['# AGENT CONTEXT', '<!-- programme-context -->',
     'Background for agents that pick up a task.',
-    'Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand.'].join('\n');
+    'Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand.',
+    ...(ids.length === 1 ? ['', `- [Agent context](${commentLink(issueUrl(repository, number), ids[0])})`] : []),
+    ...(ids.length > 1 ? ['', `- Held: ${ids.length} comments have "Agent context" as their topic, so none is listed here: ${ids.slice(0, CONTEXT_NAMED).map(link).join(' · ')}${ids.length > CONTEXT_NAMED ? ` and ${ids.length - CONTEXT_NAMED} more` : ''}. They stay in COMMENT TRACE. Keep that topic on one comment and the next redraw lists it here.`] : []),
+  ].join('\n');
 }
 
 function upsertContextBlock(source, rendered) {
@@ -3924,13 +3957,13 @@ class Reconciler {
       const hidden = new Set(moved.map(row => row.issue));
       let graph = stateBody.split('\n').filter(line => !/^\|[^\n]*\|#\d+\|/.test(line) || !hidden.has(Number(line.split('|')[3].slice(1)))).join('\n');
       if (summary.length) graph = graph.replace('\n| Task |', `\nArchived: ${summary.join(', ')}\n\n| Task |`);
-      const context = renderContextBlockBody();
+      const context = renderContextBlockBody(number, comments, this.binding.repository);
       const remainingBudget = Math.min(Math.max(0, postBudget - posts), page?.traceTopicBudget ?? MAX_TOPIC_COMMENTS_PER_PASS);
       // Include future archive links in size selection, before spending their post slots. Otherwise
       // their own trace growth could require another graph group after the budget was spent.
       const future = parts.filter(part => !entryFor(part)?.comment_id).map((part, index) => ({ id: `${'9'.repeat(15)}${String(index).padStart(4, '0')}`, body: archiveTools().marker(part.key), user: { login: 'archive-preview' } }));
       const projected = this.projectTrace(number, source, graph, [...comments, ...future], version, navBody, currentBody, topic, remainingBudget,
-        { context, threshold: tracePaging ? safe : Infinity });
+        { context, contextId: contextCommentId(comments), threshold: tracePaging ? safe : Infinity });
       const tracePosts = projected.overflow.reduce((sum, part) => sum + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0);
       return { ...projected, archive: parts, graphRows: moved.map(row => row.issue), posts: posts + tracePosts,
         budgetFits: posts + tracePosts <= postBudget };
@@ -3973,7 +4006,7 @@ class Reconciler {
 
   projectTrace(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, layout = {}) {
     const threshold = layout.threshold ?? this.threshold;
-    const trace = traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
+    const trace = withoutContextComment(traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), layout.contextId);
     const build = entries => {
       const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic, number === this.binding.parent_issue);
       const withCurrent = currentBody ? upsertCurrentBlock(source, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : source;
@@ -4077,7 +4110,10 @@ class Reconciler {
       const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
       const topic = this.topicFor(parent, number, observed.issues);
       let traceBody;
-      try { traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), this.binding.repository, topic, number === this.binding.parent_issue); }
+      try {
+        const trace = traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
+        traceBody = renderTraceBlockBody(number, number === this.binding.parent_issue ? withoutContextComment(trace, contextCommentId(comments)) : trace, this.binding.repository, topic, number === this.binding.parent_issue);
+      }
       catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // Dry runs include the time change on the document that holds each effect's intent.
@@ -5322,4 +5358,5 @@ module.exports = Object.freeze({
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
   SAFE_LIMIT, renderContextBlockBody,
+  contextCommentIds,
 });
