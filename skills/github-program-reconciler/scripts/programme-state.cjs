@@ -1754,8 +1754,7 @@ function withoutShownMarkers(source) {
   const shown = line => !line.top && (unfinishedFrom === null || line.start < unfinishedFrom);
   let masked = source;
   if (lines.some(line => shown(line) && BLOCK_ANY.test(line.text))) {
-    // A block is shown when its BEGIN line is: its END line goes with it wherever that sits (a
-    // BEGIN line inside an HTML comment closes the comment, so its END reads as top-level).
+    // A block is shown when its BEGIN line is: its END line goes with it wherever that sits.
     let closing = null;
     masked = lines.map(line => {
       const text = source.slice(line.start, line.end);
@@ -1811,6 +1810,23 @@ function findStateBlock(text, name = BLOCK_NAME, { literal = false } = {}) {
   }
   if (open) return { error: `${name} block BEGIN without END` };
   return { block: found };
+}
+
+// The last check before a page is written: every block this pass writes must be found again, once
+// and with the content just written, by the same search that reads the page on the next pass. A
+// block that would not be found would be written again on every pass, so the page is held and
+// nothing is written to it. `blocks` lists [name, block body] pairs; a pair without a body is
+// skipped.
+function assertBlocksReadBack(body, blocks, page) {
+  for (const [name, expected] of blocks) {
+    if (expected === null || expected === undefined) continue;
+    const { block, error } = findStateBlock(body, name);
+    if (error || !block || normalizeBlockBody(block.body) !== normalizeBlockBody(expected)) {
+      throw new ProgrammeError('MANAGED_BLOCK_BROKEN', `${page}: the ${name} block cannot be written where the next pass would read it back`
+        + `${error ? ` (${error})` : ''}, so nothing was written to this page. Look for a code block, comment, details section or other HTML block that is not closed, or a broken Toolkit marker line, fix it by hand, and the next pass writes the page`);
+    }
+  }
+  return body;
 }
 
 // True when Toolkit version `a` (x.y.z) is newer than `b`.
@@ -1963,7 +1979,9 @@ function upsertNavBlock(text, rendered) {
   const { block: found, error } = findStateBlock(source, NAV_BLOCK_NAME);
   if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
   if (found) return source.slice(0, found.start) + block + source.slice(found.end);
-  const after = source.replace(/^\s+/, '');
+  // Only blank lines are dropped at the join: the first line's own indent (an indented code line)
+  // stays, so the text below reads the same as before.
+  const after = trimStart(source);
   return `${block}${eol}${after ? `${eol}${after}` : ''}`;
 }
 
@@ -2059,36 +2077,14 @@ function indexEffect(number, part, after) {
   return { kind: 'post_index_comment', target, label: part.label, lines: part.lines };
 }
 
-// Headings outside fenced code and line-start HTML comments, with original line offsets.
+// Top-level headings with original line offsets: the same reading of the page the block search
+// uses (see withoutShownMarkers), so a block placed at a heading is always found again. A `#` line
+// inside a code block, an HTML comment, a details section or another HTML block is no heading.
 function headings(text) {
   const found = [];
-  let fence = null;
-  let comment = false;
-  for (let offset = 0; offset < text.length;) {
-    const next = text.indexOf('\n', offset);
-    const stop = next === -1 ? text.length : next;
-    const line = text.slice(offset, stop).replace(/\r$/, '');
-    let hidden = false;
-    if (fence) {
-      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
-      if (close && close[1][0] === fence.character && close[1].length >= fence.length) fence = null;
-      hidden = true;
-    } else if (comment) {
-      if (line.includes('-->')) comment = false;
-      hidden = true;
-    } else if (/^ {0,3}<!--/.test(line)) {
-      comment = !line.includes('-->', line.indexOf('<!--') + 4);
-      hidden = true;
-    } else {
-      const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-      if (open && (open[1][0] !== '`' || !open[2].includes('`'))) {
-        fence = { character: open[1][0], length: open[1].length };
-        hidden = true;
-      }
-    }
-    const heading = !hidden && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
-    if (heading) found.push({ level: heading[1].length, text: heading[2].trim(), start: offset, end: next === -1 ? stop : next + 1 });
-    offset = next === -1 ? text.length : next + 1;
+  for (const line of pageLayout().markdownLines(text).lines) {
+    const heading = line.top && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line.text);
+    if (heading) found.push({ level: heading[1].length, text: heading[2].trim(), start: line.start, end: line.end });
   }
   return found;
 }
@@ -2102,12 +2098,13 @@ function blockTarget(text, placement = {}) {
   const anchor = placement.after_block ? findStateBlock(text, placement.after_block).block : null;
   if (anchor) return { start: anchor.end, end: anchor.end, replaces: false };
   // A heading a generated block prints (PATH, STATUS, COMMENT TRACE) is not a page title.
-  const spans = [...text.matchAll(new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:BEGIN ([A-Z]+) [^\\n]*-->\\r?\\n[\\s\\S]*?^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END \\1 -->`, 'gm'))]
+  const real = withoutShownMarkers(text);
+  const spans = [...real.matchAll(new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:BEGIN ([A-Z]+) [^\\n]*-->\\r?\\n[\\s\\S]*?^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END \\1 -->`, 'gm'))]
     .map(match => [match.index, match.index + match[0].length]);
   const all = headings(text).filter(entry => !spans.some(([from, to]) => entry.start > from && entry.start < to));
   // A section ends at the next heading of its level or higher, or at the next managed block, so a
   // last section never runs into the comment trace or the text after it.
-  const markers = [...text.matchAll(/^<!-- AI-AGENT-TOOLKIT:/gm)].map(match => match.index);
+  const markers = [...real.matchAll(/^<!-- AI-AGENT-TOOLKIT:/gm)].map(match => match.index);
   const sectionEnd = heading => {
     const next = all.find(entry => entry.start > heading.start && entry.level <= heading.level);
     const marker = markers.find(at => at > heading.start);
@@ -4196,6 +4193,7 @@ class Reconciler {
         // A task page: generated blocks first, then the spec sections, then everything else.
         try {
           const laid = pageLayout().layoutTaskPage(source, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, stateBody], [TRACE_BLOCK_NAME, traceBody]].filter(([, body]) => body), version);
+          assertBlocksReadBack(laid.body, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, stateBody], [TRACE_BLOCK_NAME, traceBody]], `#${number}`);
           return { body: laid.body, traceBody, moved: false, relaid: true, moves: laid.moves };
         } catch (error) {
           if (error.code !== 'PAGE_LAYOUT_HELD') throw error;
@@ -4207,7 +4205,9 @@ class Reconciler {
         : upsertStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number));
       const withNav = navBody ? upsertNavBlock(withState.body, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withState.body;
       const withContext = layout.context ? upsertContextBlock(withNav, renderBlock(layout.context, version, CONTEXT_BLOCK_NAME)) : withNav;
-      return { body: upsertTraceBlock(withContext, renderBlock(traceBody, version, TRACE_BLOCK_NAME)), traceBody, moved: withState.moved, ...(layoutHold ? { layoutHold } : {}) };
+      const body = assertBlocksReadBack(upsertTraceBlock(withContext, renderBlock(traceBody, version, TRACE_BLOCK_NAME)),
+        [[CURRENT_BLOCK_NAME, currentBody], [BLOCK_NAME, stateBody], [NAV_BLOCK_NAME, navBody], [CONTEXT_BLOCK_NAME, layout.context], [TRACE_BLOCK_NAME, traceBody]], `#${number}`);
+      return { body, traceBody, moved: withState.moved, ...(layoutHold ? { layoutHold } : {}) };
     };
     const full = build(trace);
     if (full.body.length < threshold) return { ...full, overflow: [] };
@@ -4343,13 +4343,17 @@ class Reconciler {
         && resolutions.some(entry => entry.kind === 'child' && entry.number === outcome.issue && entry.outcome !== 'UNKNOWN'));
       // A current body at or over the threshold still moves its largest tag lists out.
       // An open task page is re-laid into the fixed order; a closed one keeps its text where it is.
-      let ordered = !relay.relay;
-      if (relay.relay) { try { ordered = pageLayout().inOrder(issue.body); } catch (error) { if (error.code !== 'PAGE_LAYOUT_HELD') throw error; ordered = true; } }
-      if (number !== parent.parent_issue && issue.state === 'open' && !issue.is_pull_request) {
-        let reason = relay.reason;
-        if (relay.relay) { try { pageLayout().splitPage(issue.body); } catch (error) { if (error.code !== 'PAGE_LAYOUT_HELD') throw error; reason = error.reason; } }
-        if (reason) findings.push({ code: 'PAGE_LAYOUT_HELD', issue: number, detail: `the page was not re-laid: ${reason}` });
+      // The plan asks the layout itself, with this pass's blocks, so it never plans a lay-out the
+      // write would then refuse: a page the layout holds keeps its order and raises its finding.
+      let ordered = true;
+      let reason = relay.reason;
+      if (relay.relay) {
+        try {
+          pageLayout().layoutTaskPage(issue.body, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, body], [TRACE_BLOCK_NAME, traceBody]].filter(([, text]) => text), version);
+          ordered = pageLayout().inOrder(issue.body);
+        } catch (error) { if (error.code !== 'PAGE_LAYOUT_HELD') throw error; reason = error.reason; }
       }
+      if (reason && number !== parent.parent_issue && issue.state === 'open' && !issue.is_pull_request) findings.push({ code: 'PAGE_LAYOUT_HELD', issue: number, detail: `the page was not re-laid: ${reason}` });
       if (number !== parent.parent_issue && current && !move && ordered && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
       if (!ordered) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: 'the page is not in the fixed section order' });
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
@@ -5123,8 +5127,11 @@ class Reconciler {
         }
       };
       if (next.body === before.body) { finish(); record(effect, 'NOOP'); return; }
-      const state = findStateBlock(next.body).block, trace = findStateBlock(next.body, TRACE_BLOCK_NAME).block;
-      effect.target = { issue: parentNumber, digest: state.digest, trace: trace.digest, current: blockDigest(currentBody), context: findStateBlock(next.body, CONTEXT_BLOCK_NAME).block.digest, body_digest: sha256(next.body) };
+      // Every block was read back when the body was projected; a missing one holds the page here
+      // instead of failing on a digest that is not there.
+      const state = findStateBlock(next.body).block, trace = findStateBlock(next.body, TRACE_BLOCK_NAME).block, context = findStateBlock(next.body, CONTEXT_BLOCK_NAME).block;
+      if (!state || !trace || !context) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', `#${parentNumber}: a block of the programme page cannot be read back, so nothing was written to this page`);
+      effect.target = { issue: parentNumber, digest: state.digest, trace: trace.digest, current: blockDigest(currentBody), context: context.digest, body_digest: sha256(next.body) };
       withIntent(effect, () => {
         // Recording the body intent can take time. Recheck custody after that write as well, so a
         // comment edited during bookkeeping cannot authorise hiding its graph rows.
@@ -5375,6 +5382,7 @@ class Reconciler {
       try {
         next = effect.status_body ? upsertPrBlocks(before.body, renderBlock(effect.body, this.toolkitVersion, NAV_BLOCK_NAME), renderBlock(effect.status_body, this.toolkitVersion))
           : upsertNavBlock(before.body, renderBlock(effect.body, this.toolkitVersion, NAV_BLOCK_NAME));
+        assertBlocksReadBack(next, [[NAV_BLOCK_NAME, effect.body], [BLOCK_NAME, effect.status_body]], `PR #${pr}`);
       } catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
       if (next === before.body) { record(effect, 'NOOP'); continue; }
       withIntent(effect, () => {
@@ -5619,6 +5627,6 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS,
+  SAFE_LIMIT, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS,
   contextCommentIds,
 });

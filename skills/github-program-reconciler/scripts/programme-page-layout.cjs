@@ -58,6 +58,7 @@ function markdownLines(source) {
       continue;
     }
     if (html) {
+      let marker = false;
       if (html.details) {
         fence = fenceStart(text);
         if (fence) fenceAt = start;
@@ -65,11 +66,16 @@ function markdownLines(source) {
           html.details += detailsDelta(text);
           if (html.details <= 0) html = null;
         }
+      } else if (html.comment && TOOLKIT_MARKER.test(text)) {
+        // A Toolkit marker line is itself an HTML comment, so it ends a comment left open above it,
+        // as a browser reads it, and what follows is shown: the marker is read as a real one.
+        html = null;
+        marker = true;
       } else if (html.until?.test(text) || html.blank && !text.trim()) html = null;
-      // A Toolkit marker line ends an HTML block that only a blank line would end otherwise, so a
-      // block written straight under a line of HTML is still found.
-      if (!(html?.blank && TOOLKIT_MARKER.test(text))) continue;
-      html = null;
+      // A Toolkit marker line also ends an HTML block that only a blank line would end otherwise,
+      // so a block written straight under a line of HTML is still found.
+      if (html?.blank && TOOLKIT_MARKER.test(text)) { html = null; marker = true; }
+      if (!marker) continue;
     }
     if (!text.trim()) continue;
     const indent = /^ */.exec(text)[0].length;
@@ -89,7 +95,7 @@ function markdownLines(source) {
     if (literal) {
       const until = new RegExp(`</${literal[1]}\\s*>`, 'i');
       if (!until.test(text)) { html = { until }; htmlAt = start; }
-    } else if (/^ {0,3}<!--/.test(text) && !COMMENT_END.test(text)) { html = { until: COMMENT_END }; htmlAt = start; }
+    } else if (/^ {0,3}<!--/.test(text) && !COMMENT_END.test(text)) { html = { until: COMMENT_END, comment: true }; htmlAt = start; }
     else if (/^ {0,3}<(?:\/?[a-z][\w-]*(?:\s[^<>]*)?\/?>|[!?])/i.test(text) && !/^ {0,3}<!--.*--!?>[ \t]*$/.test(text)) html = { blank: true };
   }
   // `unfinishedFrom` is where the block that never closes began: lines before it read as usual.

@@ -500,3 +500,194 @@ test('a page whose text stays where it is never claims a lay-out: closed tasks a
     assert.equal(entry.detail, 'the blocks were updated where they are; the page is laid out in a later pass (at most 10 pages are laid out per pass)');
   }
 });
+
+// A block the pass writes is always found again by the next pass: where the block goes is read
+// from the same top-level view of the page as the block search, and a last check before every
+// write holds the page when a block would not be read back.
+
+// Every BEGIN line with this name, wherever it sits: an independent count of what is on the page.
+const rawBlocks = body => Object.fromEntries(['NAV', 'STATE', 'TRACE', 'CURRENT', 'CONTEXT'].map(name => [name, body.split(/\r?\n/).filter(line => line.startsWith(`<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN ${name} `)).length]).filter(([, count]) => count));
+const TASK_ONCE = { NAV: 1, STATE: 1, TRACE: 1 };
+const PARENT_ONCE = { STATE: 1, TRACE: 1, CURRENT: 1, CONTEXT: 1 };
+// Where the first `# ` line of the page (the place a block would be put) can hide.
+const ANCHORS = {
+  'a details section': '<details><summary>Plan</summary>\n\n# Title\n\nPlan text.\n\n</details>\n\nBelow.\n',
+  'a details section with no blank line': '<details>\n# Title\nPlan text.\n</details>\n\nBelow.\n',
+  'a pre block': '<pre>\n# install first\nnpm ci\n</pre>\n\nBelow.\n',
+  'a textarea block': '<textarea>\n# Title\n</textarea>\n\nBelow.\n',
+  'a script block': '<script>\n# Title\n</script>\n\nBelow.\n',
+  'an HTML block': '<div>\n# Title\n</div>\n\nBelow.\n',
+  'a comment that is never closed': 'Intro.\n\n<!-- TODO\n# Title\n\nBelow.\n',
+  'a comment that is never closed, on the last line': '# Title\n\nBelow.\n\n<!-- TODO\n',
+  'a code block that is never closed': 'Intro.\n\n```\n# Title\n\nBelow.\n',
+  'a details section that is never closed': 'Intro.\n\n<details>\n# Title\n\nBelow.\n',
+  'a pre block that is never closed': 'Intro.\n\n<pre>\n# Title\n\nBelow.\n',
+  'indented code on the first line': '    # not a heading\n    code\n\n# Title\n\nBelow.\n',
+  'the top level (control)': '# Title\n\nBelow.\n',
+};
+const threePasses = (f, read, expected, label) => {
+  const sizes = [];
+  for (let pass = 1; pass <= 3; pass += 1) {
+    const report = f.reconciler().run({ apply: true });
+    assert.deepEqual(report.holds.filter(hold => hold.code !== 'CLOSED_WITHOUT_ACCEPTANCE'), [], `${label}, pass ${pass}`);
+    assert.deepEqual(rawBlocks(read()), expected, `${label}: one block of each name after pass ${pass}`);
+    sizes.push(read().length);
+  }
+  assert.equal(new Set(sizes).size, 1, `${label}: the page stops changing after the first pass (${sizes.join(', ')})`);
+  const plan = f.reconciler().run();
+  assert.deepEqual(plan.effects, [], `${label}: the next pass plans nothing`);
+  assert.equal(plan.findings.some(finding => finding.code === 'MANAGED_BLOCK_BROKEN'), false, label);
+};
+
+for (const [where, page] of Object.entries(ANCHORS)) {
+  test(`a task page whose first heading line is inside ${where} gets one block of each name and settles`, () => {
+    for (const [kind, options, body] of [
+      ['closed task', { closed: [806] }, page],
+      ['open task', {}, page],
+      ['open task held for a section written twice', {}, `${page}\n# PROBLEM\n\nOne.\n\n# PROBLEM\n\nTwo.\n`],
+      ['open task held for a secret-shaped value', {}, `${page}\ntoken ghp_${'A1b2'.repeat(9)}\n`],
+    ]) {
+      // A section written twice cannot follow a block that never closes: that page is one held page already.
+      const f = setup({ bodies: { 806: body }, closed: options.closed || [] });
+      threePasses(f, () => f.github.issues.get(806).body, TASK_ONCE, `${kind}, ${where}`);
+      const text = layout.withoutBlocks(f.github.issues.get(806).body);
+      for (const line of body.split('\n').filter(entry => entry.trim())) assert.ok(text.includes(line), `${kind}, ${where}: "${line}" is still on the page`);
+    }
+  });
+
+  test(`the programme page with its first heading line, or the section the binding names, inside ${where} gets one block of each name and settles`, () => {
+    for (const [kind, projection, body] of [
+      ['first heading', null, page],
+      ['after_section', { after_section: 'Title' }, page],
+      ['replace_section', { replace_section: 'Title' }, page],
+      ['after_section, with a top-level heading of another name', { after_section: 'Title' }, `# Programme\n\n${page}`],
+    ]) {
+      const f = setup();
+      f.github.issues.get(421).body = body;
+      if (projection) f.binding.projection = projection;
+      threePasses(f, () => f.github.issues.get(421).body, PARENT_ONCE, `${kind}, ${where}`);
+      assert.deepEqual(rawBlocks(f.github.issues.get(806).body), TASK_ONCE);
+    }
+  });
+
+  test(`a PR description that starts inside ${where} gets PATH and STATUS once and settles`, () => {
+    const f = setup();
+    f.reconciler().run({ apply: true });
+    f.github.addPr(900, { head: SHA_A, branch: 'feature', body: `${page}\nRefs #806` });
+    threePasses(f, () => f.github.prs.get(900).body, { NAV: 1, STATE: 1 }, where);
+    assert.ok(f.github.prs.get(900).body.endsWith(`-->\n\n${page}\nRefs #806`), 'the description is exactly what was written');
+  });
+}
+
+test('a section the binding names ends at a real block, never at a marker line shown inside it', () => {
+  const example = `\`\`\`\n${shownBlock('STATE')}\n\`\`\``;
+  const body = `# Programme\n\n## Notes\n\n${example}\n\nAfter the example.\n\n## Later\n\nTail.\n`;
+  const f = setup();
+  f.github.issues.get(421).body = body;
+  f.binding.projection = { after_section: 'Notes' };
+  threePasses(f, () => f.github.issues.get(421).body, { ...PARENT_ONCE, STATE: 2 }, 'example inside the named section');
+  assert.ok(f.github.issues.get(421).body.includes(`${example}\n\nAfter the example.`), 'the example and the rest of the section stay together');
+  // The placement itself: the block goes after the whole section, not in front of the example's marker line.
+  const rendered = state.renderBlock('Real.', VERSION);
+  const placed = state.upsertStateBlock(body, rendered, { after_section: 'Notes' }).body;
+  assert.equal(placed, body.replace('After the example.\n\n', `After the example.\n\n${rendered}\n\n`));
+  assert.equal(state.upsertStateBlock(placed, rendered, { after_section: 'Notes' }).body, placed);
+  const replaced = state.upsertStateBlock(body, rendered, { replace_section: 'Notes' }).body;
+  assert.equal(replaced, `# Programme\n\n${rendered}\n\n## Later\n\nTail.\n`, 'replace_section takes the whole section, example included');
+});
+
+test('a Toolkit marker line ends a comment left open above it, as a browser reads it: the block below is the real one', () => {
+  const real = state.renderBlock('<!-- programme-state child=806@1 -->\n# STATUS\n\nReal.', VERSION);
+  const open = `Intro.\n\n<!-- TODO\nhidden words\n${real}\n\nAfter.\n`;
+  const found = state.findStateBlock(open);
+  assert.equal(open.slice(found.block.start, found.block.end), real);
+  assert.equal(layout.markdownLines(open).unfinished, false, 'the comment ended at the marker line');
+  // A marker line does not end a code block, a pre block or a details section.
+  for (const [start, end] of [['```', '```'], ['<pre>', '</pre>'], ['<details>', '</details>']]) {
+    assert.equal(state.findStateBlock(`${start}\n${real}\n${end}\n`).block, null, start);
+  }
+});
+
+test('the links block keeps the indent of the first line below it', () => {
+  const nav = state.renderBlock(state.renderNavBlockBody([421, 806], null), VERSION, 'NAV');
+  assert.equal(state.upsertNavBlock('\n\n    code line\n\nText.\n', nav), `${nav}\n\n    code line\n\nText.\n`);
+  assert.equal(state.upsertNavBlock('   \n', nav), `${nav}\n`);
+});
+
+test('the last check before a write: a block that would not be read back holds the page and nothing is written to it', () => {
+  const real = state.renderBlock('Body.', VERSION);
+  const nav = state.renderBlock('Links.', VERSION, 'NAV');
+  assert.equal(state.assertBlocksReadBack(`${nav}\n\n${real}\n`, [['NAV', 'Links.'], ['STATE', 'Body.'], ['TRACE', null]], '#1'), `${nav}\n\n${real}\n`);
+  for (const [name, body, why] of [
+    ['a block inside a code block', `${nav}\n\n\`\`\`\n${real}\n\`\`\`\n`, /the STATE block cannot be written where the next pass would read it back, so nothing was written/],
+    ['a block inside a details section', `${nav}\n\n<details>\n${real}\n</details>\n`, /the STATE block cannot be written/],
+    ['a block that is missing', `${nav}\n`, /the STATE block cannot be written/],
+    ['a block written twice', `${nav}\n\n${real}\n\n${real}\n`, /duplicate STATE block/],
+    ['a block with other content', `${nav}\n\n${state.renderBlock('Other.', VERSION)}\n`, /the STATE block cannot be written/],
+    ['a BEGIN line without its END', `${nav}\n\n${real.split('\n')[0]}\nBody.\n`, /BEGIN without END/],
+  ]) {
+    assert.throws(() => state.assertBlocksReadBack(body, [['NAV', 'Links.'], ['STATE', 'Body.']], '#1'), error => error.code === 'MANAGED_BLOCK_BROKEN' && why.test(error.message) && /^#1: /.test(error.message), name);
+  }
+
+  // In a pass: a layout that put the blocks where they cannot be read (forced here) is refused
+  // before the saved copy and before the page write; other pages are still written.
+  const file = require.resolve('../../skills/github-program-reconciler/scripts/programme-page-layout.cjs');
+  const original = require.cache[file].exports;
+  const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }], bodies: { 806: OLD_PAGE, 807: '# PROBLEM\n\nFine.\n' } });
+  require.cache[file].exports = { ...original, layoutTaskPage: (source, generated, version) => {
+    const laid = original.layoutTaskPage(source, generated, version);
+    return source === OLD_PAGE ? { ...laid, body: `<details>\n${laid.body}\n</details>\n` } : laid;
+  } };
+  try {
+    for (let pass = 1; pass <= 2; pass += 1) {
+      const report = f.reconciler().run({ apply: true });
+      const held = report.holds.filter(hold => hold.code === 'MANAGED_BLOCK_BROKEN');
+      assert.equal(held.length, 1, JSON.stringify(report.holds));
+      assert.match(JSON.stringify(held[0]), /#806: the NAV block cannot be written where the next pass would read it back, so nothing was written to this page/);
+      assert.equal(f.github.issues.get(806).body, OLD_PAGE, 'the held page is untouched');
+      assert.equal(f.bodyWrites(806).length, 0);
+      assert.equal(f.copies().filter(call => call.path.includes('issue-806-')).length, 0, 'no copy is saved for a page that is not written');
+      assert.deepEqual(rawBlocks(f.github.issues.get(807).body), TASK_ONCE, 'the other page is written as usual');
+    }
+  } finally { require.cache[file].exports = original; }
+  assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
+  assert.equal(layout.inOrder(f.github.issues.get(806).body), true, 'with the fault gone the page is laid out');
+});
+
+// Pages built from ordinary Markdown pieces, written in place and laid out several times with the
+// same block contents: every page stops changing after the first write and holds one block of each
+// name. The pieces include the shapes a block could be hidden by.
+test('generated pages settle after one write with one block of each name', () => {
+  let seed = 840;
+  const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
+  const pick = list => list[Math.floor(random() * list.length)];
+  const closedPieces = ['Some plain words here.', '# A title', '## A section', '**The problem:** Something is off.', '- one\n- two\n  continued', '> quoted words\n> # not a heading',
+    '    # not a heading\n    code', '```\n# not a heading\ncode\n```', '<details><summary>More</summary>\n\nHidden words.\n\n</details>', '<details><summary>Plan</summary>\n\n# Plan title\n\nText.\n\n</details>',
+    '<pre>\n# install first\nnpm ci\n</pre>', '<!-- a note -->', '<!--\nhidden\n# not a heading\n-->', '<div align="center">Logo</div>', '| a | b |\n|---|---|\n| 1 | 2 |', '<textarea>\n# Draft\n</textarea>'];
+  const openPieces = ['```\nnever closed', '<details>\nnever closed', '<pre>\nnever closed', '<!-- never closed'];
+  const blocks = [['NAV', state.renderNavBlockBody([421, 806], null)], ['STATE', '<!-- programme-state child=806@1 -->\n# STATUS\n\nStatus lines.'], ['TRACE', '# COMMENT TRACE\n<!-- programme-trace issue=806 -->\n- No comments yet.']];
+  const inPlace = source => {
+    const withState = state.upsertStateBlock(source, state.renderBlock(blocks[1][1], VERSION), {}).body;
+    const withNav = state.upsertNavBlock(withState, state.renderBlock(blocks[0][1], VERSION, 'NAV'));
+    const trace = state.renderBlock(blocks[2][1], VERSION, 'TRACE');
+    const found = state.findStateBlock(withNav, 'TRACE').block;
+    const eol = withNav.includes('\r\n') ? '\r\n' : '\n';
+    const block = trace.replace(/\n/g, eol);
+    return state.assertBlocksReadBack(found ? withNav.slice(0, found.start) + block + withNav.slice(found.end) : `${withNav}${withNav.endsWith(eol) ? eol : `${eol}${eol}`}${block}${eol}`, blocks, '#806');
+  };
+  const write = source => { try { return layout.layoutTaskPage(source, blocks, VERSION).body; } catch (error) { if (error.code !== 'PAGE_LAYOUT_HELD') throw error; return inPlace(source); } };
+  let pages = 0;
+  for (let at = 0; at < 1500; at += 1) {
+    const pieces = Array.from({ length: 1 + Math.floor(random() * 5) }, () => pick(closedPieces));
+    if (random() < 0.3) pieces.push(pick(openPieces));
+    // Every fifth page uses Windows line endings.
+    const page = `${pieces.join('\n\n')}\n`.replace(/\n/g, at % 5 ? '\n' : '\r\n');
+    for (const [kind, run] of [['in place', inPlace], ['laid out, else in place', write]]) {
+      const first = run(page);
+      assert.deepEqual(rawBlocks(first), TASK_ONCE, `${kind}: ${JSON.stringify(page)}`);
+      assert.equal(run(first), first, `${kind}, second write: ${JSON.stringify(page)}`);
+      pages += 1;
+    }
+  }
+  assert.equal(pages, 3000);
+});
