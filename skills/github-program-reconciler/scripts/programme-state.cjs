@@ -412,6 +412,7 @@ class RefreshBudget {
   left() { return this.deadline - this.nowMs(); }
   phaseAt(phase, total = 0) {
     this.phase = phase; this.done = 0; this.total = total;
+    this.metrics?.phaseAt(phase);
     this.progress?.write(this.snapshot());
   }
   tick() {
@@ -1804,10 +1805,43 @@ function detachArchive(entry) {
   entry.comment_id = null; entry.login = null; entry.state = 'pending';
 }
 
-function renderContextBlockBody() {
+// The parent's Agent context comments: every comment a person wrote whose first line is the topic
+// "Agent context" (then `---`). Generated index and archive comments never count. A record ID in
+// the text does not rule a comment out: background notes link to the records they explain.
+const CONTEXT_TAG = 'AGENT CONTEXT';
+function contextCommentIds(comments) {
+  // Both modules are already loaded above; the extra names stay out of the pinned top-level requires.
+  const { isBot } = require('./decision-trace-audit.cjs');
+  const { commentTag, isArchiveComment } = require('./decision-tags.cjs');
+  return (comments || []).filter(comment => !isBot(comment) && commentTag(comment.body) === CONTEXT_TAG && !isArchiveComment(comment.body)
+    && ![INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER].some(marker => String(comment.body).includes(marker))).map(comment => String(comment.id));
+}
+
+// The comment AGENT CONTEXT lists and COMMENT TRACE leaves out: the only match, else none.
+function contextCommentId(comments) {
+  const ids = contextCommentIds(comments);
+  return ids.length === 1 ? ids[0] : null;
+}
+
+// A trace without the comment AGENT CONTEXT lists. A comment an index page already lists is not in
+// `entries`, so that page keeps its line.
+function withoutContextComment(trace, id) {
+  return id ? { ...trace, entries: trace.entries.filter(entry => entry.id !== id) } : trace;
+}
+
+// The AGENT CONTEXT block. With one Agent context comment it links that comment; with more than one
+// it holds, names them (the first five) and leaves them in COMMENT TRACE; with none it is the two
+// fixed lines alone.
+const CONTEXT_NAMED = 5;
+function renderContextBlockBody(number = null, comments = [], repository = '') {
+  const ids = contextCommentIds(comments);
+  const link = id => `[${id}](${commentLink(issueUrl(repository, number), id)})`;
   return ['# AGENT CONTEXT', '<!-- programme-context -->',
     'Background for agents that pick up a task.',
-    'Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand.'].join('\n');
+    'Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand.',
+    ...(ids.length === 1 ? ['', `- [Agent context](${commentLink(issueUrl(repository, number), ids[0])})`] : []),
+    ...(ids.length > 1 ? ['', `- Held: ${ids.length} comments have "Agent context" as their topic, so none is listed here: ${ids.slice(0, CONTEXT_NAMED).map(link).join(' · ')}${ids.length > CONTEXT_NAMED ? ` and ${ids.length - CONTEXT_NAMED} more` : ''}. They stay in COMMENT TRACE. Keep that topic on one comment and the next redraw lists it here.`] : []),
+  ].join('\n');
 }
 
 function upsertContextBlock(source, rendered) {
@@ -2099,6 +2133,13 @@ function ghFailure(response, what) {
 
 // Reads and compare-and-swap writes of state documents in a private GitHub repository (store kind
 // `github`), through the Contents API.
+// An existing document is replaced only against the exact version that was read. A read that
+// came back without a usable blob id cannot prove that version, so nothing is requested.
+function requireVersionToken(sha, docPath) {
+  if (typeof sha === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) return;
+  throw new ProgrammeError('STATE_TOKEN_MISSING', `${docPath} was read without its version id, so it was not replaced. Nothing was written; run refresh again.`);
+}
+
 class StateStore {
   constructor({ transport, store, now = () => new Date().toISOString(), toolkitVersion = null }) {
     this.transport = transport;
@@ -2229,6 +2270,7 @@ class StateStore {
   // content changes. Rejected compare-and-swap surfaces as STATE_CONFLICT; every write is read back.
   write(kind, number, next, { sha, previous }) {
     if (previous && sameState(previous, next)) return { outcome: 'NOOP', doc: previous, sha };
+    if (previous) requireVersionToken(sha, this.docPath(kind, number));
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
@@ -2742,6 +2784,8 @@ class BranchStateStore extends StateStore {
   // then the public file (compare-and-swap, read back), then the checkpoint.
   write(kind, number, next, { sha, previous }) {
     if (previous && sameState(previous, next)) return { outcome: 'NOOP', doc: previous, sha };
+    // Before the sidecar: a sidecar is never written for a public write that cannot be conditional.
+    if (previous) requireVersionToken(sha, this.docPath(kind, number));
     const branch = this.ensureBranch();
     if (!branch.exists) {
       throw new ProgrammeError('STATE_BRANCH_MISSING', `The state branch ${STATE_BRANCH} was never created, so nothing was written. Only programme.cjs migrate-state --apply creates it.`);
@@ -2876,7 +2920,12 @@ class ProgrammeGraphReader {
     const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}`);
     if (response.status === 404 || response.status === 410) return null;
     if (response.status !== 200) throw ghFailure(response, `Reading issue ${number}`);
-    const issue = response.json;
+    return this.issueFacts(response.json, number);
+  }
+
+  // The facts the reconciler uses from one issue object, whether it came from a single read or as a
+  // row of its parent's sub-issue list (GitHub sends the same object in both).
+  issueFacts(issue, number) {
     const complete = isObject(issue) && issue.number === number && isInt(issue.id, 1) && ['open','closed'].includes(issue.state)
       && (typeof issue.title === 'string') && (typeof issue.body === 'string' || issue.body === null)
       && (issue.state !== 'closed' || Boolean(issue.closed_at && !Number.isNaN(Date.parse(issue.closed_at))));
@@ -2891,28 +2940,45 @@ class ProgrammeGraphReader {
       parent: parentFromUrl(issue.parent_issue_url, this.repository),
       blocked_by_total: issue.issue_dependencies_summary?.total_blocked_by ?? 0,
       open_sub_issues: Math.max(0, (issue.sub_issues_summary?.total ?? 0) - (issue.sub_issues_summary?.completed ?? 0)),
+      // Counts GitHub reports on the issue itself; null when it sent none, so the lists are read.
+      comments: isInt(issue.comments, 0) ? issue.comments : null,
+      sub_issues_total: isInt(issue.sub_issues_summary?.total, 0) ? issue.sub_issues_summary.total : null,
     };
   }
 
-  subIssues(number) {
+  subIssues(number) { return this.subIssueRows(number).map(row => ({ number: row.number, id: row.id })); }
+
+  // The sub-issue list with each row's own issue facts: one request per hundred children in place
+  // of one request per child. `facts` is null when a row is not a usable issue object.
+  subIssueRows(number) {
     const all = [];
     for (let page = 1; page < 50; page += 1) {
       const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}/sub_issues?per_page=100&page=${page}`);
       if (response.status !== 200) throw ghFailure(response, `Reading sub-issues of ${number}`);
-      all.push(...response.json.map(issue => ({ number: issue.number, id: issue.id })));
+      all.push(...response.json.map(issue => ({ number: issue.number, id: issue.id, facts: isObject(issue) && isInt(issue.number, 1) ? this.issueFacts(issue, issue.number) : null })));
       if (response.json.length < 100) return all;
     }
     throw new ProgrammeError('GH_FAILED', `Issue ${number} has more sub-issues than this reader pages through.`);
   }
 
   // Every comment on an issue, for the comment trace and its audit.
-  comments(number) {
+  comments(number) { return this.commentsChanged(number).comments; }
+
+  // The comments last changed at or after `since` (all of them without it), oldest first, with the
+  // newest change time GitHub reported: the bookmark for the next read.
+  commentsChanged(number, since = null) {
     const all = [];
+    let newest = null;
+    const filter = since ? `&since=${encodeURIComponent(since)}` : '';
     for (let page = 1; page < 100; page += 1) {
-      const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}/comments?per_page=100&page=${page}`);
+      const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}/comments?per_page=100&page=${page}${filter}`);
       if (response.status !== 200) throw ghFailure(response, `Reading comments of ${number}`);
-      all.push(...response.json.map(comment => ({ id: comment.id, user: comment.user, body: comment.body || '', created_at: comment.created_at })));
-      if (response.json.length < 100) return all;
+      for (const comment of response.json) {
+        const changed = comment.updated_at || comment.created_at;
+        if (Number.isFinite(Date.parse(changed)) && (!newest || Date.parse(changed) > Date.parse(newest))) newest = changed;
+        all.push({ id: comment.id, user: comment.user, body: comment.body || '', created_at: comment.created_at });
+      }
+      if (response.json.length < 100) return { comments: all, newest };
     }
     throw new ProgrammeError('GH_FAILED', `Issue ${number} has more comments than this reader pages through.`);
   }
@@ -3374,6 +3440,13 @@ function copyIssueLifecycle(doc, issue) {
   return next;
 }
 
+function checkLifecycleObservation(observed, fresh) {
+  if (observed?.complete !== true || fresh?.complete !== true || observed.id !== fresh.id || fresh.is_pull_request
+    || observed.state !== fresh.state || observed.closed_at !== fresh.closed_at || observed.state_reason !== fresh.state_reason) {
+    throw new ProgrammeError('GRAPH_FACT_STALE', 'Issue lifecycle changed after observation; refresh again.');
+  }
+}
+
 const EFFECT_TEXT = {
   set_parent_state: effect => `${effect.target.state === 'open' ? 'Reopen' : 'Complete'} the programme parent #${effect.target.issue} from every native descendant's state`,
   post_parent_repair: effect => `Report the repaired parent closure on #${effect.target.issue}`,
@@ -3456,7 +3529,7 @@ class Reconciler {
     }
   }
 
-  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null, refreshFacts = false, pass = null }) {
+  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null, refreshFacts = false, pass = null, readCache = null }) {
     this.store = store;
     // The clock attention findings are dated by (the store's clock dates only its own commits).
     this.now = now || (() => new Date().toISOString());
@@ -3476,6 +3549,8 @@ class Reconciler {
     this.toolkitVersion = toolkitVersion;
     this.threshold = Math.min(threshold, DEFAULT_THRESHOLD);
     this.refreshFacts = refreshFacts;
+    // Only a refresh that owns the pass lock brings one. Without it every read goes to GitHub.
+    this.readCache = readCache;
     this.closing = reader?.transport ? new (require('./closing-comments.cjs').ClosingComments)({
       transport:reader.transport, repository:binding.repository, pass:this.pass, screenSecrets }) : null;
   }
@@ -3488,17 +3563,30 @@ class Reconciler {
   observe(parent, children, only) {
     const outcomes = parent.outcomes.filter(outcome => !only || outcome.issue === only);
     const issues = new Map();
+    // On a full pass the parent's own sub-issue list carries the issue facts of every native direct
+    // child, so those children need no read of their own. Anything the list does not show
+    // completely, as an issue under this parent, is read singly as before.
+    const rows = new Map();
+    let parentRows = null;
     const read = number => {
-      if (!issues.has(number)) issues.set(number, this.reader.issue(number));
+      if (!issues.has(number)) issues.set(number, rows.get(number) || this.reader.issue(number));
       const issue=issues.get(number);
       if (this.refreshFacts && issue && issue.complete !== true) throw new ProgrammeError('GH_FAILED',`Issue ${number} was not read completely; no lifecycle observation is usable.`);
       return issue;
     };
-    read(parent.parent_issue);
+    if (read(parent.parent_issue) && !only && typeof this.reader.subIssueRows === 'function') {
+      parentRows = this.reader.subIssueRows(parent.parent_issue);
+      for (const row of parentRows) {
+        if (row.facts?.complete === true && !row.facts.is_pull_request && row.facts.parent === parent.parent_issue) rows.set(row.number, row.facts);
+      }
+    }
     for (const outcome of outcomes) read(outcome.issue);
     const parents = new Set([parent.parent_issue, ...outcomes.map(outcome => outcome.parent).filter(Boolean), ...(this.refreshFacts && !only ? outcomes.map(outcome => outcome.issue) : [])]);
     for (const number of parents) read(number);
-    const subIssues = new Map([...parents].filter(number => issues.get(number)).map(number => [number, this.reader.subIssues(number)]));
+    // An issue that reports no sub-issues has no list to read.
+    const subIssues = new Map([...parents].filter(number => issues.get(number)).map(number => [number,
+      number === parent.parent_issue && parentRows ? parentRows.map(row => ({ number: row.number, id: row.id }))
+        : issues.get(number).sub_issues_total === 0 ? [] : this.reader.subIssues(number)]));
     const additions = [];
     if (this.refreshFacts && !only) {
       const known = new Set([parent.parent_issue,...parent.outcomes.map(outcome => outcome.issue)]);
@@ -3521,10 +3609,25 @@ class Reconciler {
       if (!prCache.has(number)) prCache.set(number, this.reader.pullRequest(number));
       return prCache.get(number);
     };
+    // Settled children whose live row still matches the copy kept from an earlier pass: their
+    // comments and merged PR are not read again.
+    const cache = this.refreshFacts && !only ? this.readCache : null;
+    const observedAt = this.now();
+    const settled = outcome => {
+      const doc = children.get(outcome.issue)?.doc;
+      const facts = rows.get(outcome.issue);
+      return Boolean(doc && facts && facts.state === 'closed' && isInt(facts.comments) && isInt(facts.sub_issues_total)
+        && isFinished(outcome, doc) && !doc.pending_effects.length);
+    };
+    cache?.beginPass();
+    if (cache) cache.counts.rows = rows.size;
+    const kept = cache ? cache.usable(outcomes.filter(settled).map(outcome => [outcome.issue, rows.get(outcome.issue)]), observedAt) : new Map();
     for (const outcome of outcomes) {
       const issue = issues.get(outcome.issue);
       if (issue?.blocked_by_total > 0) blockedBy.set(outcome.issue, this.reader.blockedBy(outcome.issue));
       const doc = children.get(outcome.issue)?.doc;
+      const keptPr = kept.get(outcome.issue)?.pr;
+      if (keptPr && keptPr.number === doc?.pr?.number && !prCache.has(keptPr.number)) prCache.set(keptPr.number, keptPr);
       const number = doc?.pr?.number || (!isFinished(outcome, doc) && doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
       if (number) prs.set(outcome.issue, readPr(number));
     }
@@ -3541,7 +3644,23 @@ class Reconciler {
       return !isFinished(outcome, doc) && !doc?.pr?.number && !doc?.candidate?.branch;
     });
     const references = prGraph ? prGraph.openReferences : untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
-    const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number, this.reader.comments(number)]));
+    const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number,
+      number === parent.parent_issue ? this.discussion(number, issues.get(number), cache)
+        : kept.has(number) ? kept.get(number).comments
+        // An issue that reports no comments has no list to read.
+        : issues.get(number).comments === 0 ? [] : this.reader.comments(number)]));
+    if (cache) {
+      for (const outcome of outcomes) {
+        // A child that is open again, unfinished or waiting on an intent keeps no copy.
+        if (!settled(outcome)) { cache.dropChild(outcome.issue); continue; }
+        if (kept.has(outcome.issue)) continue;
+        const facts = rows.get(outcome.issue);
+        const pr = prs.get(outcome.issue);
+        cache.setChild(outcome.issue, { updated_at: facts.updated_at, comment_count: facts.comments, sub_total: facts.sub_issues_total, read_at: observedAt,
+          comments: comments.get(outcome.issue), pr: pr?.state === 'MERGED' && pr.number === children.get(outcome.issue).doc.pr?.number ? pr : null });
+      }
+      cache.retain(parent.outcomes.map(outcome => outcome.issue));
+    }
     // Even an issue-scoped pass renders the whole parent, including every NOW task's comment time.
     for (const outcome of parent.outcomes) {
       if (!comments.has(outcome.issue) && graphClass(outcome, children.get(outcome.issue)?.doc) === 'NOW') comments.set(outcome.issue, this.reader.comments(outcome.issue));
@@ -3552,6 +3671,30 @@ class Reconciler {
     if (closing) this.pass.planning();
     this.pass.phaseAt('planning');
     return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery, additions, prGraph, closing };
+  }
+
+  // The parent's comments. With a copy from an earlier pass only the comments changed since its
+  // bookmark are requested and laid over it. The result is used only when it accounts for exactly
+  // the number of comments the issue itself reports, leaving out any posted after that issue read;
+  // otherwise, and without a copy, every page is read.
+  discussion(number, issue, cache) {
+    if (!cache || typeof this.reader.commentsChanged !== 'function') return this.reader.comments(number);
+    const since = cache.since();
+    if (since && isInt(issue.comments) && Number.isFinite(Date.parse(issue.updated_at))) {
+      const changed = this.reader.commentsChanged(number, since);
+      const merged = require('./programme-read-cache.cjs').mergeComments(cache.discussion.comments, changed.comments);
+      const later = merged.filter(comment => Date.parse(comment.created_at) > Date.parse(issue.updated_at)).length;
+      if (merged.length - later === issue.comments) {
+        const bookmark = changed.newest && Date.parse(changed.newest) > Date.parse(cache.discussion.bookmark) ? changed.newest : cache.discussion.bookmark;
+        cache.setDiscussion(merged, bookmark);
+        cache.counts.bookmark = 'used';
+        return merged;
+      }
+    }
+    const full = this.reader.commentsChanged(number);
+    cache.setDiscussion(full.comments, full.newest);
+    cache.counts.bookmark = 'full';
+    return full.comments;
   }
 
   discoverGraph(parent, outcomes, children, prs, prCache, readPr) {
@@ -3924,13 +4067,13 @@ class Reconciler {
       const hidden = new Set(moved.map(row => row.issue));
       let graph = stateBody.split('\n').filter(line => !/^\|[^\n]*\|#\d+\|/.test(line) || !hidden.has(Number(line.split('|')[3].slice(1)))).join('\n');
       if (summary.length) graph = graph.replace('\n| Task |', `\nArchived: ${summary.join(', ')}\n\n| Task |`);
-      const context = renderContextBlockBody();
+      const context = renderContextBlockBody(number, comments, this.binding.repository);
       const remainingBudget = Math.min(Math.max(0, postBudget - posts), page?.traceTopicBudget ?? MAX_TOPIC_COMMENTS_PER_PASS);
       // Include future archive links in size selection, before spending their post slots. Otherwise
       // their own trace growth could require another graph group after the budget was spent.
       const future = parts.filter(part => !entryFor(part)?.comment_id).map((part, index) => ({ id: `${'9'.repeat(15)}${String(index).padStart(4, '0')}`, body: archiveTools().marker(part.key), user: { login: 'archive-preview' } }));
       const projected = this.projectTrace(number, source, graph, [...comments, ...future], version, navBody, currentBody, topic, remainingBudget,
-        { context, threshold: tracePaging ? safe : Infinity });
+        { context, contextId: contextCommentId(comments), threshold: tracePaging ? safe : Infinity });
       const tracePosts = projected.overflow.reduce((sum, part) => sum + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0);
       return { ...projected, archive: parts, graphRows: moved.map(row => row.issue), posts: posts + tracePosts,
         budgetFits: posts + tracePosts <= postBudget };
@@ -3973,7 +4116,7 @@ class Reconciler {
 
   projectTrace(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, layout = {}) {
     const threshold = layout.threshold ?? this.threshold;
-    const trace = traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
+    const trace = withoutContextComment(traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), layout.contextId);
     const build = entries => {
       const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic, number === this.binding.parent_issue);
       const withCurrent = currentBody ? upsertCurrentBlock(source, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : source;
@@ -4077,7 +4220,10 @@ class Reconciler {
       const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
       const topic = this.topicFor(parent, number, observed.issues);
       let traceBody;
-      try { traceBody = renderTraceBlockBody(number, traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), this.binding.repository, topic, number === this.binding.parent_issue); }
+      try {
+        const trace = traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
+        traceBody = renderTraceBlockBody(number, number === this.binding.parent_issue ? withoutContextComment(trace, contextCommentId(comments)) : trace, this.binding.repository, topic, number === this.binding.parent_issue);
+      }
       catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // Dry runs include the time change on the document that holds each effect's intent.
@@ -4293,7 +4439,11 @@ class Reconciler {
       const finding = { code: 'PASS_STOPPED', issue: this.binding.parent_issue, diagnostics: this.pass.stopped };
       return { parent: parentRead.doc, override: Boolean(parentOverride), children: new Map(), findings: [finding], effects: [], resolutions: [],
         holds: [{ code: 'PASS_STOPPED', target: `#${this.binding.parent_issue}`, detail: findingText(finding) }], complete: false, stopped: true };
-    } finally { this.planning = false; }
+    } finally {
+      this.planning = false;
+      // Kept even when planning was cut, so a slow first pass makes the next one cheaper.
+      if (this.refreshFacts && !only) this.readCache?.save();
+    }
   }
 
   planWithinBudget({ issue: only = null, parentOverride = null, inventory = null } = {}) {
@@ -4554,9 +4704,7 @@ class Reconciler {
       requireRefresh();
       const observed = plan.observed.issues.get(effect.target.issue);
       const fresh = this.reader.issue(effect.target.issue);
-      if (observed?.complete !== true || fresh?.complete !== true || fresh.is_pull_request || observed.state !== fresh.state || observed.closed_at !== fresh.closed_at || observed.state_reason !== fresh.state_reason) {
-        throw new ProgrammeError('GRAPH_FACT_STALE', 'Issue lifecycle changed after observation; refresh again.');
-      }
+      checkLifecycleObservation(observed, fresh);
       const expected = plan.children.get(effect.target.issue)?.doc;
       if (expected && CLOSE_FIELDS.some(key => JSON.stringify(doc[key]) !== JSON.stringify(expected[key]))) throw new ProgrammeError('GRAPH_FACT_STALE', 'Controller lifecycle changed after observation; refresh again.');
       return copyIssueLifecycle(doc, fresh);
@@ -5240,6 +5388,8 @@ class Reconciler {
       ...(plan.observed?.closing ? {closing:{complete:plan.observed.closing.complete && !plan.observed.closing.incomplete.length && !plan.observed.closing.errors.length,
         incomplete:plan.observed.closing.incomplete.map(item=>({kind:item.kind,number:item.number})),planning_requests:plan.observed.closing.requests,requests:plan.observed.closing.requests,errors:plan.observed.closing.errors}} : {}),
       ...(inventory ? { inventory: { complete: inventory.complete, reason: inventory.reason, counts: inventoryCounts(inventory) } } : {}),
+      // What the read copy saved this pass: counts only.
+      ...(this.readCache && this.refreshFacts && !issue ? { reads: { ...this.readCache.counts } } : {}),
     };
     if (apply && plan.stopped && plan.parent) {
       const finding = plan.findings[0];
@@ -5322,4 +5472,5 @@ module.exports = Object.freeze({
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
   SAFE_LIMIT, renderContextBlockBody,
+  contextCommentIds,
 });
