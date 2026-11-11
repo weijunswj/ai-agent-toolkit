@@ -855,7 +855,14 @@ test('merge wording beside upkeep still refuses the launch, and the reader still
     // Other spacing is not an upkeep phrase.
     ['git merge 5', [5]], ['git-merge 5', [5]], ['gitmerge merge 5', [5]],
     // Upkeep followed by a real merge on the same line.
-    ['merge commits only, merge 5', [5]], ['git merge-base and merge #5', [5]], ['merge 5 with a merge commit', [5]], ['merge-base merge 5', [5]],
+    ['merge commits only, merge 5', [5]], ['merge 5 with a merge commit', [5]],
+    // A hold word inside an upkeep phrase ("conflicts", "base") still holds the line: the reader
+    // reads hold words on the line as typed, so setting upkeep aside never makes a line count.
+    ['git merge-base and merge #5', []], ['merge-base merge 5', []], ['merge 5 with merge conflicts', []], ['merge 5 (merge conflicts gone)', []],
+    ['merge 5 despite merge conflicts', []], ['merge 5 even with merge-conflicts', []], ['merge 5 merge conflicts', []], ['merge conflicts merge 5', []],
+    ['merge #5, merge base is fine', []], ['merge 5 \u2014 merge conflicts', []],
+    // Hold words outside a phrase hold as they always did.
+    ['merge 5 if no merge conflicts', []], ['merge 5 has conflicts', []], ['merge 5 into base', []], ['merge 5 after merge conflicts are fixed', []],
   ];
   for (const [prompt, numbers] of real) {
     assert.deepEqual(hold.approvalsIn(prompt).map(item => item.pr), numbers, JSON.stringify(prompt));
@@ -887,7 +894,8 @@ test('one definition: every text the launch rule passes reads as no approval, li
     assert.equal(hold.mergeWording(prompt), !launched, JSON.stringify(prompt));
   }
   assert.ok(passed > 300 && refused > 300, `${passed} passed, ${refused} refused`);
-  // The reader stops at its length limit on a whole word, so a cut never turns "merged" into "merge".
+  // The upkeep test reads each line as typed, before the length limit, so a cut never turns
+  // "merged" or "merge commits" into the bare word.
   const filler = `${'x'.repeat(99)}\n`.repeat(79);
   for (const tail of ['#5 merged', '#5 merge-base', '#5 merge commits', '5 merges']) {
     for (let pad = 80; pad < 100; pad += 1) {
@@ -897,6 +905,11 @@ test('one definition: every text the launch rule passes reads as no approval, li
   }
   // A real approval inside the limit still counts, and one cut off by it does not half-count.
   assert.deepEqual(hold.approvalsIn(`${filler}merge 5`).map(item => item.pr), [5]);
+  // The limit is measured on the text as typed: upkeep lines take their full length, so setting
+  // them aside does not bring a later line inside the limit.
+  const upkeep = count => `${'git merge origin/main\n'.repeat(count)}merge 5`;
+  assert.deepEqual(hold.approvalsIn(upkeep(360)).map(item => item.pr), [5]);
+  for (const count of [364, 370, 400]) assert.deepEqual(hold.approvalsIn(upkeep(count)), [], `${count} upkeep lines`);
 });
 
 test('agent routes that could make an approval are refused', (t) => {
