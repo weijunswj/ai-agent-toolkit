@@ -577,28 +577,21 @@ test('B: when a checkpoint write fails, the sidecar the old checkpoint names is 
 });
 
 for (const interruption of ['conflict', 'accepted without reply']) {
-  test(`sweep branch: ${interruption} at the existing public child CAS preserves recovery`, () => {
+  test(`refresh branch: ${interruption} at the existing public child CAS preserves recovery`, () => {
     const fx = fixture();
     const lockFile = path.join(fx.dir, 'sweep.lock');
     const issue = fx.github.issues.get(12);
     issue.state = 'closed'; issue.state_reason = 'completed'; issue.closed_at = fx.now();
-    let elapsed = 0;
     const at = Date.parse(fx.now());
-    fx.github.intercept(() => { elapsed += 1800; });
-    const first = fx.run(['refresh'], { lockFile, passClock: () => at + elapsed, refreshBudgetMs: 80000 });
-    assert.equal(first.error, null, first.error?.message);
-    assert.equal(first.code, 1);
-    assert.ok(fs.existsSync(lockFile + '.resume'));
     const old = fx.github.readAt(REPO, BRANCH, publicFile('issue-12'));
     assert.equal(old.lifecycle, 'PLANNED');
 
     const endpoint = `repos/${REPO}/contents/${publicFile('issue-12')}`;
     let attempted = 0;
-    fx.github.hooks = [];
     fx.github.intercept(call => {
       if (call.method !== 'PUT' || call.path !== endpoint) return;
       attempted++;
-      assert.ok(call.body.sha, 'the scoped copy uses the existing child CAS');
+      assert.ok(call.body.sha, 'the copy uses the existing child CAS');
       if (interruption === 'conflict') return { status: 409, json: {} };
       assert.equal(fx.github.route(call.method, call.path, call.body).status, 200);
       return { status: 502, json: {} };
@@ -606,11 +599,8 @@ for (const interruption of ['conflict', 'accepted without reply']) {
     const partial = fx.run(['refresh'], { lockFile, passClock: () => at });
     assert.equal(partial.error, null, partial.error?.message);
     assert.equal(partial.code, 1);
-    assert.equal(partial.result.outcome, 'HELD');
-    assert.equal(attempted, 1);
-    assert.equal(JSON.parse(fs.readFileSync(lockFile + '.resume', 'utf8')).full_first, true);
-    const pending = fx.github.readAt(REPO, BRANCH, publicFile('issue-12'));
-    assert.equal(pending.lifecycle, interruption === 'conflict' ? 'PLANNED' : 'DONE');
+    assert.ok(attempted >= 1);
+    assert.equal(fs.existsSync(lockFile + '.resume'), false, 'no rotation note exists any more');
 
     fx.github.hooks = [];
     const later = fx.run(['refresh'], { lockFile, passClock: () => at });
@@ -624,21 +614,15 @@ for (const interruption of ['conflict', 'accepted without reply']) {
   });
 }
 
-test('sweep branch: a public child read without its version id requests no sidecar and no public write', () => {
+test('refresh branch: a public child read without its version id requests no sidecar and no public write', () => {
   const fx = fixture();
   const lockFile = path.join(fx.dir, 'sweep.lock');
   const issue = fx.github.issues.get(12);
   issue.state = 'closed'; issue.state_reason = 'completed'; issue.closed_at = fx.now();
-  let elapsed = 0;
   const at = Date.parse(fx.now());
-  fx.github.intercept(() => { elapsed += 1800; });
-  assert.equal(fx.run(['refresh'], { lockFile, passClock: () => at + elapsed, refreshBudgetMs: 80000 }).code, 1);
-  assert.ok(fs.existsSync(lockFile + '.resume'));
-
   const endpoint = `repos/${REPO}/contents/${publicFile('issue-12')}`;
   const sidecars = `repos/${STORE_REPO}/contents/${sidecarDir('issue-12')}/`;
   const requested = [];
-  fx.github.hooks = [];
   fx.github.intercept(call => {
     if (call.method === 'PUT' && (call.path === endpoint || call.path.startsWith(sidecars))) requested.push(call.path);
     if (call.method !== 'GET' || call.path.split('?')[0] !== endpoint) return;
@@ -650,9 +634,8 @@ test('sweep branch: a public child read without its version id requests no sidec
   const held = fx.run(['refresh'], { lockFile, passClock: () => at });
   assert.equal(held.error, null, held.error?.message);
   assert.equal(held.code, 1);
-  assert.deepEqual(held.result.left_to_full_refresh.map(entry => entry.code), ['STATE_TOKEN_MISSING']);
-  assert.ok(held.result.holds.some(hold => hold.code === 'STATE_TOKEN_MISSING'), 'the full refresh refuses the same read itself');
-  assert.deepEqual(requested, [], 'neither path asked for a sidecar or an unconditional public write');
+  assert.ok(held.result.holds.some(hold => hold.code === 'STATE_TOKEN_MISSING'), 'the refresh refuses the read without its version id');
+  assert.deepEqual(requested, [], 'no sidecar and no unconditional public write was requested');
   assert.equal(fx.github.readAt(REPO, BRANCH, publicFile('issue-12')).lifecycle, 'PLANNED');
 
   fx.github.hooks = [];

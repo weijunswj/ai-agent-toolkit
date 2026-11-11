@@ -57,7 +57,8 @@ const { spawnSync } = require('node:child_process');
 const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
-const { SweepNotes, BATCH_SIZE, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
+const { SweepNotes, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
+const { ReadCache } = require('./programme-read-cache.cjs');
 const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = require('./programme-lock.cjs');
 
 const { ProgrammeError } = state;
@@ -255,7 +256,6 @@ function openContext(args, deps = {}) {
   const binding = deps.binding || merged || state.loadBinding(repoRoot);
   const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
   // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
-  const bindingAtEntry = deps.sweepNotes ? state.canonicalText(binding) : null;
   const privateRepo = `repos/${binding.store.repository.toLowerCase()}`;
   const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (method, endpoint, body, options) => {
     deps.heartbeat();
@@ -268,13 +268,7 @@ function openContext(args, deps = {}) {
   store.verify();
   // The session comes from --session only; an inherited environment never makes a session a writer.
   const writer = args.session ? { session: args.session, prefix: args.prefix || binding.writer_prefix } : null;
-  return { binding, transport, repository, store, writer, version, repoRoot, now: deps.now,
-    ...(deps.sweepNotes ? { checkSweepBinding: () => {
-      if (state.canonicalText(deps.originUrl ? (deps.binding || binding) : requireGitHubGovernance(repoRoot)) !== bindingAtEntry) {
-        throw new ProgrammeError('SWEEP_SCOPE_CHANGED', 'The merged programme binding changed during the child check. Run a fresh refresh.');
-      }
-    } } : {}),
-  };
+  return { binding, transport, repository, store, writer, version, repoRoot, now: deps.now };
 }
 
 function requireWriter(context) {
@@ -511,79 +505,8 @@ function makeReconciler(context) {
     mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
     binding: context.binding, writer: context.writer, toolkitVersion: context.version,
     refreshFacts: context.writer?.by_hash === true, now: context.now,
-    pass: context.pass, checkSweepBinding: context.checkSweepBinding,
+    pass: context.pass, readCache: context.readCache || null,
   });
-}
-
-function sweepScope(context, parent) {
-  return state.sha256(state.canonicalText([context.binding, parent.parent_issue, parent.fence.epoch,
-    context.writer.session_hash, state.sweepCatalogue(parent)]));
-}
-
-// A bounded child check ends in one of three ways besides success.
-// Left to the full refresh: the child's facts could not be confirmed and no write was requested
-// (missing or wrong native parent, unreadable or changed issue facts, an unusable state read).
-// Other children keep their turn and the full guarded refresh runs in the same pass, under its
-// own authority, and reports its own findings, repairs and holds.
-const LEFT_TO_FULL_REFRESH = new Set(['GRAPH_FACT_STALE', 'GH_FAILED', 'STATE_INVALID', 'STATE_TOKEN_MISSING']);
-// Whole-pass refusal: a requested write is rejected or unconfirmed, the holder could not be
-// re-read, or the batch reached its limit or a provider refusal. The pass ends held, and the
-// next refresh runs the full path first, so no such refusal can repeat without a full refresh
-// in between. Every other error (authority, scope, store identity, lock) still ends the pass.
-const BATCH_STOPS = new Set(['SWEEP_SLICE_LIMIT', 'SWEEP_SLICE_PROVIDER_HELD']);
-const HELD_CHILD_CHECKS = new Set([...LEFT_TO_FULL_REFRESH, ...BATCH_STOPS, 'STATE_CONFLICT', 'STATE_READBACK_MISMATCH']);
-
-function resumeStoppedRefresh(context, parent, scope, issues, note) {
-  const { sweepNotes: notes, pass, store } = context;
-  const reconciler = makeReconciler(context);
-  const start = note.after === null ? 0 : issues.indexOf(note.after) + 1;
-  const before = store.writes;
-  let last = note.after;
-  const { holds, left, stopped } = notes.runBatch(pass.deadline - state.PAGE_RESERVE_MS, canStart => {
-    const holds = [];
-    const left = [];
-    for (let offset = 0; offset < Math.min(BATCH_SIZE, issues.length) && canStart(); offset++) {
-      const number = issues[(start + offset) % issues.length];
-      let step = 'holder';
-      try {
-        reconciler.sweepParent(parent);
-        // Record which validated pending key had its turn, before a request can die mid-effect.
-        // This is a cyclic scheduling position. It never marks that key complete.
-        notes.save(scope, number);
-        last = number;
-        step = 'confirm';
-        const write = reconciler.resumeChildLifecycle(number, parent);
-        step = 'write';
-        write?.();
-      } catch (error) {
-        if (!HELD_CHILD_CHECKS.has(error.code)) throw error;
-        if (step === 'confirm' && LEFT_TO_FULL_REFRESH.has(error.code)) {
-          left.push({ code: error.code, target: `#${number}`,
-            detail: 'This child could not be confirmed in its bounded turn, so nothing was written for it. The full refresh checks it.' });
-          continue;
-        }
-        holds.push({ code: error.code, target: `#${number}`,
-          detail: 'This child check could not be confirmed. Its saved state and any earlier intent will be checked again on a later refresh.' });
-        if (BATCH_STOPS.has(error.code)) break;
-      }
-    }
-    return { holds, left };
-  });
-  if (stopped && !holds.some(hold => hold.code === stopped.code)) {
-    holds.push({ code: stopped.code, target: `#${parent.parent_issue}`, detail: stopped.message });
-  }
-  if (!holds.length) return { writes: store.writes - before, left };
-  // The rotation keeps its place. The marker sends the next refresh to the full path first.
-  notes.save(scope, last, true);
-  return { report: {
-    repository: context.repository, parent_issue: parent.parent_issue, store: { ...context.binding.store },
-    mode: 'apply', outcome: 'HELD', parent_revision: parent.revision, findings: [], close_list: [],
-    effects: [], recovered: [], holds, results: [], writes: { state: store.writes - before, github: 0 },
-    inventory: { complete: false, reason: 'Full inventory deferred', counts: {} },
-    ...(left.length ? { left_to_full_refresh: left } : {}),
-    summary: 'Child checks ran; the full refresh is held.',
-    next_action: 'Run refresh again. The next refresh runs the full path first.',
-  } };
 }
 
 const commands = {
@@ -600,8 +523,7 @@ const commands = {
     return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride, inventory: args.inventory || null });
   },
 
-  // The ordinary pass is the full `reconcile --apply`. A stopped pass may give existing child
-  // state its own bounded turn first. Refresh is for any session in a governed checkout and takes no
+  // The same full pass as `reconcile --apply`, for any session in a governed checkout. It takes no
   // session, patch or verdict: it writes under the session that holds the parent now, so it can only
   // bring the pages and documents in line with what is already recorded and observed. Every decision
   // (assign, return, update, claim) stays the controller's. After a takeover the guard stops it at its
@@ -615,42 +537,11 @@ const commands = {
     }
     // Only the hash of the holder's session: enough to write as it, never to decide for it.
     context.writer = state.refreshWriter(parentDoc);
-    const notes = state.registeredParents(context.binding).length === 1 ? context.sweepNotes : null;
-    const scope = notes ? sweepScope(context, parentDoc) : null;
-    const issues = notes ? parentDoc.outcomes.filter(row => row.parent === parentDoc.parent_issue).map(row => row.issue).sort((a, b) => a - b) : [];
-    const note = notes?.read(scope, issues);
-    let resumed = null;
-    // After a held batch the full path runs first, without another batch in front of it.
-    if (note && issues.length && !note.full_first) {
-      resumed = resumeStoppedRefresh(context, parentDoc, scope, issues, note);
-      if (resumed.report) {
-        context.resumeHeld = true;
-        return resumed.report;
-      }
-    }
-    // A catch-up batch spends part of this pass's time. Do not let its follow-on plan
-    // spend the state window again; the ordinary full path keeps its existing deadline.
-    if (context.pass) context.pass.resumePlanning = Boolean(resumed);
     context.sweepNotes?.phaseAt('inventory');
     const inventory = runInventory(context, parentDoc, deps, args['deadline-ms']);
     const report = commands.reconcile({ ...args, apply: true, inventory }, context);
-    const stored = context.store.read('parent', context.binding.parent_issue).doc;
-    if (notes && stored && stored.fence.epoch === parentDoc.fence.epoch && state.isHolder(stored, context.writer)) {
-      const stopped = context.pass.stopped;
-      if (issues.length && stopped && ['planning', 'state'].includes(stopped.phase)) {
-        const currentScope = sweepScope(context, stored);
-        if (!note || scope !== currentScope || note.full_first) {
-          context.checkSweepBinding();
-          notes.save(currentScope, note && scope === currentScope ? note.after : null);
-        }
-      } else if (notes.hadNote) {
-        context.checkSweepBinding();
-        notes.clear();
-      }
-    }
-    if (resumed) report.writes.state += resumed.writes;
-    if (resumed?.left.length) report.left_to_full_refresh = resumed.left;
-    cacheAttention(context, stored, inventory.complete, deps);
+    if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
+    cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
     return report;
   },
 
@@ -915,11 +806,8 @@ function formatReport(report) {
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));
   if (report.holds.length) lines.push('', 'Holds', ...report.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`));
-  if (report.left_to_full_refresh?.length) lines.push('', 'Child checks left to the full refresh', ...report.left_to_full_refresh.map(entry => `- ${entry.code} ${entry.target}: ${entry.detail}`));
-  if (report.inventory) {
-    const counts = Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ');
-    lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}${counts ? `; ${counts}` : ''}`);
-  }
+  if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
+  if (report.reads) lines.push('', `Reads: ${report.reads.rows} child issue(s) read from the parent's list; ${report.reads.reused} settled child(ren) reused, ${report.reads.reread} read again; parent comments ${report.reads.bookmark === 'used' ? 'read from the bookmark' : report.reads.bookmark === 'full' ? 'read in full' : 'not read'}`);
   if (report.closing && !report.closing.complete) lines.push('', `Closing scan: INCOMPLETE; ${report.closing.incomplete.length} item(s) remain unread for the next pass. ${report.closing.errors.join(' ')}`.trim());
   if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
   if (report.state_branch?.events.length) lines.push('', `State branch ${report.state_branch.branch}`, ...report.state_branch.events.map(event => `- ${event.code}: ${event.text}`));
@@ -973,8 +861,7 @@ function attentionCommand(args, deps, out) {
       const reports = sink.text.split(/\n(?=\{)/).map(text => { try { return JSON.parse(text); } catch { return null; } }).filter(Boolean);
       const last = reports.at(-1) || null;
       refreshed = last?.outcome === 'QUEUED' ? { outcome: 'QUEUED', reason: last.reason, holds: [] }
-        : { outcome: last?.outcome === 'HELD' ? 'HELD' : 'DONE', inventory_complete: last?.inventory?.complete ?? null,
-          ...(last?.outcome === 'HELD' && last.inventory?.reason ? { inventory_reason: last.inventory.reason } : {}), holds: last?.holds || [] };
+        : { outcome: 'DONE', inventory_complete: last?.inventory?.complete ?? null, holds: last?.holds || [] };
     }
     const code = finish({ ...args, refreshed }, deps, out);
     return refreshed?.holds?.length ? 1 : code;
@@ -989,8 +876,7 @@ function attentionCommand(args, deps, out) {
 function formatAttention(result) {
   const lines = [result.text];
   if (result.refreshed?.outcome === 'QUEUED') lines.push(`Refresh queued: ${result.refreshed.reason}.`);
-  if (result.refreshed?.outcome === 'HELD') lines.push('The refresh was held before the full scan, so the inventory did not run this time.');
-  else if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
+  if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
   if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
   for (const entry of result.findings) {
     lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
@@ -1060,11 +946,13 @@ function runPasses(args, deps, out) {
         notes.file = file;
         notes.lock = held;
         context.sweepNotes = pass.metrics = measure ? notes : null;
+        // The read copy belongs to the lock's owner, like the notes beside it.
+        context.readCache = measure ? new ReadCache({ file, lock: held, repository: context.binding.repository, parent: context.binding.parent_issue }) : null;
         try { code = Math.max(code, finish(passArgs, deps, out, context)); }
         finally { if (measure) notes.saveMetrics(); }
         passes += 1;
         progress.finish();
-      } while (!context.resumeHeld && flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
+      } while (flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
     } catch (error) {
       if (held.owns()) progress?.write(pass.snapshot());
       throw error;
@@ -1072,7 +960,7 @@ function runPasses(args, deps, out) {
       lock.release();
     }
     // A change can be flagged between the last check and the release: take the lock back for it.
-    lock = !context.resumeHeld && flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS ? takeLock(file, deps) : null;
+    lock = flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS ? takeLock(file, deps) : null;
   }
   return code;
 }

@@ -1,15 +1,15 @@
 # Toolkit Changelog
 
-## 3.60.0
+## 3.60.0 (Programme refresh reads only what changed)
 
 ### Added
 
-- When programme refresh repeatedly runs out of time, the next run gives existing child updates a bounded turn before the full scan. Private timing and request counts show where the refresh spends its budget. A child the bounded turn cannot confirm is left to the full refresh in the same run, and a held bounded turn is always followed by a full refresh first.
+- Programme refresh reads only what can have changed. One request for the parent's sub-issue list replaces a read per child, empty comment and sub-issue lists are not requested, the parent's comments are read from a bookmark, and a settled child that has not changed reuses its last comments and merged pull request. Every reused child is read in full again within twelve passes.
+- Private timing, request counts and reuse counts show where a refresh spends its budget. The refresh report has a `Reads:` line.
 
 ### Fixed
 
 - Programme state documents are replaced only against the version they were read with. A read that comes back without its version id writes nothing.
-- `attention --refresh --json` reports a held refresh as `HELD` with its holds.
 
 ## 3.59.1 (Show queued programme refreshes)
 

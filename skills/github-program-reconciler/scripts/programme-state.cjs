@@ -427,7 +427,7 @@ class RefreshBudget {
     return Boolean(this.stopped);
   }
   planning() {
-    if (this.stop(this.resumePlanning ? PAGE_RESERVE_MS : 0)) throw new ProgrammeError('PASS_STOPPED', 'The planning time budget was reached.');
+    if (this.stop(0)) throw new ProgrammeError('PASS_STOPPED', 'The planning time budget was reached.');
     this.tick();
   }
 }
@@ -2887,7 +2887,12 @@ class ProgrammeGraphReader {
     const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}`);
     if (response.status === 404 || response.status === 410) return null;
     if (response.status !== 200) throw ghFailure(response, `Reading issue ${number}`);
-    const issue = response.json;
+    return this.issueFacts(response.json, number);
+  }
+
+  // The facts the reconciler uses from one issue object, whether it came from a single read or as a
+  // row of its parent's sub-issue list (GitHub sends the same object in both).
+  issueFacts(issue, number) {
     const complete = isObject(issue) && issue.number === number && isInt(issue.id, 1) && ['open','closed'].includes(issue.state)
       && (typeof issue.title === 'string') && (typeof issue.body === 'string' || issue.body === null)
       && (issue.state !== 'closed' || Boolean(issue.closed_at && !Number.isNaN(Date.parse(issue.closed_at))));
@@ -2902,28 +2907,45 @@ class ProgrammeGraphReader {
       parent: parentFromUrl(issue.parent_issue_url, this.repository),
       blocked_by_total: issue.issue_dependencies_summary?.total_blocked_by ?? 0,
       open_sub_issues: Math.max(0, (issue.sub_issues_summary?.total ?? 0) - (issue.sub_issues_summary?.completed ?? 0)),
+      // Counts GitHub reports on the issue itself; null when it sent none, so the lists are read.
+      comments: isInt(issue.comments, 0) ? issue.comments : null,
+      sub_issues_total: isInt(issue.sub_issues_summary?.total, 0) ? issue.sub_issues_summary.total : null,
     };
   }
 
-  subIssues(number) {
+  subIssues(number) { return this.subIssueRows(number).map(row => ({ number: row.number, id: row.id })); }
+
+  // The sub-issue list with each row's own issue facts: one request per hundred children in place
+  // of one request per child. `facts` is null when a row is not a usable issue object.
+  subIssueRows(number) {
     const all = [];
     for (let page = 1; page < 50; page += 1) {
       const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}/sub_issues?per_page=100&page=${page}`);
       if (response.status !== 200) throw ghFailure(response, `Reading sub-issues of ${number}`);
-      all.push(...response.json.map(issue => ({ number: issue.number, id: issue.id })));
+      all.push(...response.json.map(issue => ({ number: issue.number, id: issue.id, facts: isObject(issue) && isInt(issue.number, 1) ? this.issueFacts(issue, issue.number) : null })));
       if (response.json.length < 100) return all;
     }
     throw new ProgrammeError('GH_FAILED', `Issue ${number} has more sub-issues than this reader pages through.`);
   }
 
   // Every comment on an issue, for the comment trace and its audit.
-  comments(number) {
+  comments(number) { return this.commentsChanged(number).comments; }
+
+  // The comments last changed at or after `since` (all of them without it), oldest first, with the
+  // newest change time GitHub reported: the bookmark for the next read.
+  commentsChanged(number, since = null) {
     const all = [];
+    let newest = null;
+    const filter = since ? `&since=${encodeURIComponent(since)}` : '';
     for (let page = 1; page < 100; page += 1) {
-      const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}/comments?per_page=100&page=${page}`);
+      const response = this.transport.request('GET', `repos/${this.repository}/issues/${number}/comments?per_page=100&page=${page}${filter}`);
       if (response.status !== 200) throw ghFailure(response, `Reading comments of ${number}`);
-      all.push(...response.json.map(comment => ({ id: comment.id, user: comment.user, body: comment.body || '', created_at: comment.created_at })));
-      if (response.json.length < 100) return all;
+      for (const comment of response.json) {
+        const changed = comment.updated_at || comment.created_at;
+        if (Number.isFinite(Date.parse(changed)) && (!newest || Date.parse(changed) > Date.parse(newest))) newest = changed;
+        all.push({ id: comment.id, user: comment.user, body: comment.body || '', created_at: comment.created_at });
+      }
+      if (response.json.length < 100) return { comments: all, newest };
     }
     throw new ProgrammeError('GH_FAILED', `Issue ${number} has more comments than this reader pages through.`);
   }
@@ -3385,12 +3407,6 @@ function copyIssueLifecycle(doc, issue) {
   return next;
 }
 
-// Only membership is an input to the rotation or to its child observation. Reordering or
-// acknowledging a finding does not invalidate the rotation.
-function sweepCatalogue(parent) {
-  return JSON.stringify(parent.outcomes.map(row => [row.issue, row.parent ?? null]).sort((a, b) => a[0] - b[0]));
-}
-
 function checkLifecycleObservation(observed, fresh) {
   if (observed?.complete !== true || fresh?.complete !== true || observed.id !== fresh.id || fresh.is_pull_request
     || observed.state !== fresh.state || observed.closed_at !== fresh.closed_at || observed.state_reason !== fresh.state_reason) {
@@ -3480,7 +3496,7 @@ class Reconciler {
     }
   }
 
-  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null, refreshFacts = false, pass = null, checkSweepBinding = null }) {
+  constructor({ store, reader, mutator, binding, writer = null, toolkitVersion = null, threshold = DEFAULT_THRESHOLD, now = null, refreshFacts = false, pass = null, readCache = null }) {
     this.store = store;
     // The clock attention findings are dated by (the store's clock dates only its own commits).
     this.now = now || (() => new Date().toISOString());
@@ -3500,65 +3516,10 @@ class Reconciler {
     this.toolkitVersion = toolkitVersion;
     this.threshold = Math.min(threshold, DEFAULT_THRESHOLD);
     this.refreshFacts = refreshFacts;
-    this.checkSweepBinding = checkSweepBinding;
+    // Only a refresh that owns the pass lock brings one. Without it every read goes to GitHub.
+    this.readCache = readCache;
     this.closing = reader?.transport ? new (require('./closing-comments.cjs').ClosingComments)({
       transport:reader.transport, repository:binding.repository, pass:this.pass, screenSecrets }) : null;
-  }
-
-  // A stopped full pass can give existing child lifecycle copies a turn before expensive
-  // planning. This path cannot create a child, settle an intent or emit a public page or notice.
-  sweepParent(expected) {
-    if (!this.refreshFacts || this.writer?.by_hash !== true || registeredParents(this.binding).length !== 1) {
-      throw new ProgrammeError('ROLE_REFUSED', 'Only a single-parent refresh can resume child checks.');
-    }
-    this.checkSweepBinding?.();
-    const fresh = this.store.read('parent', expected.parent_issue).doc;
-    if (!fresh || fresh.fence.epoch !== expected.fence.epoch || !isHolder(fresh, this.writer)) {
-      throw new ProgrammeError('STALE_WRITER', 'The parent holder changed during the child check. Run a fresh refresh.');
-    }
-    if (fresh.repository.toLowerCase() !== this.binding.repository.toLowerCase() || fresh.parent_issue !== this.binding.parent_issue
-      || sweepCatalogue(fresh) !== sweepCatalogue(expected)) {
-      throw new ProgrammeError('SWEEP_SCOPE_CHANGED', 'The programme catalogue changed during the child check. Run a fresh refresh.');
-    }
-    return fresh;
-  }
-
-  // Confirms one child's facts. Returns null when there is nothing for this turn to copy, else
-  // the write step. A refusal thrown here happens before any write is requested, so the caller
-  // can leave the child to the full pass. A refusal from the returned step is a write outcome.
-  resumeChildLifecycle(number, expectedParent) {
-    const outcome = expectedParent.outcomes.find(entry => entry.issue === number);
-    if (!outcome || outcome.parent !== expectedParent.parent_issue) {
-      throw new ProgrammeError('SWEEP_SCOPE_CHANGED', 'The selected child is no longer catalogued directly under this parent.');
-    }
-    const { doc, sha } = this.store.read('child', number);
-    if (!doc) return null; // Creation stays with the full plan and its catalogue and PR guards.
-    if (doc.issue !== number || doc.repository.toLowerCase() !== this.binding.repository.toLowerCase()) {
-      throw new ProgrammeError('STATE_INVALID', 'The child state document does not match the selected issue.');
-    }
-    // Leave earlier intents and this child's state for the full reconciler's guarded readback.
-    // An intent already on disk is not a failed or uncertain write from this batch.
-    if (doc.pending_effects.length) return null;
-    requireVersionToken(sha, this.store.docPath('child', number));
-    const observed = this.reader.issue(number);
-    if (observed?.complete !== true || observed.is_pull_request || observed.parent !== (outcome.parent ?? null)) {
-      throw new ProgrammeError('GRAPH_FACT_STALE', 'The child’s issue identity or native parent could not be verified.');
-    }
-    // Reopening carries a one-time finding. The full pass owns that finding and its projection.
-    if (observed.state === 'open' && doc.closed_by_sweep) return null;
-    const next = copyIssueLifecycle(doc, observed);
-    if (sameState(doc, next)) return null;
-    const fresh = this.reader.issue(number);
-    checkLifecycleObservation(observed, fresh);
-    if (fresh.parent !== observed.parent) throw new ProgrammeError('GRAPH_FACT_STALE', 'The child’s native parent changed after observation.');
-    return () => {
-      this.store.verify();
-      const parent = this.sweepParent(expectedParent);
-      authoriseWrite('child', doc, parent, this.writer);
-      // One exact CAS. A concurrent child change (including its fence) is a hold. The store's
-      // independent readback must succeed; a later turn derives the idempotent copy from fresh facts.
-      this.store.write('child', number, next, { sha, previous: doc });
-    };
   }
 
   loadParent(parentOverride) {
@@ -3569,17 +3530,30 @@ class Reconciler {
   observe(parent, children, only) {
     const outcomes = parent.outcomes.filter(outcome => !only || outcome.issue === only);
     const issues = new Map();
+    // On a full pass the parent's own sub-issue list carries the issue facts of every native direct
+    // child, so those children need no read of their own. Anything the list does not show
+    // completely, as an issue under this parent, is read singly as before.
+    const rows = new Map();
+    let parentRows = null;
     const read = number => {
-      if (!issues.has(number)) issues.set(number, this.reader.issue(number));
+      if (!issues.has(number)) issues.set(number, rows.get(number) || this.reader.issue(number));
       const issue=issues.get(number);
       if (this.refreshFacts && issue && issue.complete !== true) throw new ProgrammeError('GH_FAILED',`Issue ${number} was not read completely; no lifecycle observation is usable.`);
       return issue;
     };
-    read(parent.parent_issue);
+    if (read(parent.parent_issue) && !only && typeof this.reader.subIssueRows === 'function') {
+      parentRows = this.reader.subIssueRows(parent.parent_issue);
+      for (const row of parentRows) {
+        if (row.facts?.complete === true && !row.facts.is_pull_request && row.facts.parent === parent.parent_issue) rows.set(row.number, row.facts);
+      }
+    }
     for (const outcome of outcomes) read(outcome.issue);
     const parents = new Set([parent.parent_issue, ...outcomes.map(outcome => outcome.parent).filter(Boolean), ...(this.refreshFacts && !only ? outcomes.map(outcome => outcome.issue) : [])]);
     for (const number of parents) read(number);
-    const subIssues = new Map([...parents].filter(number => issues.get(number)).map(number => [number, this.reader.subIssues(number)]));
+    // An issue that reports no sub-issues has no list to read.
+    const subIssues = new Map([...parents].filter(number => issues.get(number)).map(number => [number,
+      number === parent.parent_issue && parentRows ? parentRows.map(row => ({ number: row.number, id: row.id }))
+        : issues.get(number).sub_issues_total === 0 ? [] : this.reader.subIssues(number)]));
     const additions = [];
     if (this.refreshFacts && !only) {
       const known = new Set([parent.parent_issue,...parent.outcomes.map(outcome => outcome.issue)]);
@@ -3602,10 +3576,25 @@ class Reconciler {
       if (!prCache.has(number)) prCache.set(number, this.reader.pullRequest(number));
       return prCache.get(number);
     };
+    // Settled children whose live row still matches the copy kept from an earlier pass: their
+    // comments and merged PR are not read again.
+    const cache = this.refreshFacts && !only ? this.readCache : null;
+    const observedAt = this.now();
+    const settled = outcome => {
+      const doc = children.get(outcome.issue)?.doc;
+      const facts = rows.get(outcome.issue);
+      return Boolean(doc && facts && facts.state === 'closed' && isInt(facts.comments) && isInt(facts.sub_issues_total)
+        && isFinished(outcome, doc) && !doc.pending_effects.length);
+    };
+    cache?.beginPass();
+    if (cache) cache.counts.rows = rows.size;
+    const kept = cache ? cache.usable(outcomes.filter(settled).map(outcome => [outcome.issue, rows.get(outcome.issue)]), observedAt) : new Map();
     for (const outcome of outcomes) {
       const issue = issues.get(outcome.issue);
       if (issue?.blocked_by_total > 0) blockedBy.set(outcome.issue, this.reader.blockedBy(outcome.issue));
       const doc = children.get(outcome.issue)?.doc;
+      const keptPr = kept.get(outcome.issue)?.pr;
+      if (keptPr && keptPr.number === doc?.pr?.number && !prCache.has(keptPr.number)) prCache.set(keptPr.number, keptPr);
       const number = doc?.pr?.number || (!isFinished(outcome, doc) && doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
       if (number) prs.set(outcome.issue, readPr(number));
     }
@@ -3622,7 +3611,23 @@ class Reconciler {
       return !isFinished(outcome, doc) && !doc?.pr?.number && !doc?.candidate?.branch;
     });
     const references = prGraph ? prGraph.openReferences : untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
-    const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number, this.reader.comments(number)]));
+    const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number,
+      number === parent.parent_issue ? this.discussion(number, issues.get(number), cache)
+        : kept.has(number) ? kept.get(number).comments
+        // An issue that reports no comments has no list to read.
+        : issues.get(number).comments === 0 ? [] : this.reader.comments(number)]));
+    if (cache) {
+      for (const outcome of outcomes) {
+        // A child that is open again, unfinished or waiting on an intent keeps no copy.
+        if (!settled(outcome)) { cache.dropChild(outcome.issue); continue; }
+        if (kept.has(outcome.issue)) continue;
+        const facts = rows.get(outcome.issue);
+        const pr = prs.get(outcome.issue);
+        cache.setChild(outcome.issue, { updated_at: facts.updated_at, comment_count: facts.comments, sub_total: facts.sub_issues_total, read_at: observedAt,
+          comments: comments.get(outcome.issue), pr: pr?.state === 'MERGED' && pr.number === children.get(outcome.issue).doc.pr?.number ? pr : null });
+      }
+      cache.retain(parent.outcomes.map(outcome => outcome.issue));
+    }
     // Even an issue-scoped pass renders the whole parent, including every NOW task's comment time.
     for (const outcome of parent.outcomes) {
       if (!comments.has(outcome.issue) && graphClass(outcome, children.get(outcome.issue)?.doc) === 'NOW') comments.set(outcome.issue, this.reader.comments(outcome.issue));
@@ -3633,6 +3638,30 @@ class Reconciler {
     if (closing) this.pass.planning();
     this.pass.phaseAt('planning');
     return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery, additions, prGraph, closing };
+  }
+
+  // The parent's comments. With a copy from an earlier pass only the comments changed since its
+  // bookmark are requested and laid over it. The result is used only when it accounts for exactly
+  // the number of comments the issue itself reports, leaving out any posted after that issue read;
+  // otherwise, and without a copy, every page is read.
+  discussion(number, issue, cache) {
+    if (!cache || typeof this.reader.commentsChanged !== 'function') return this.reader.comments(number);
+    const since = cache.since();
+    if (since && isInt(issue.comments) && Number.isFinite(Date.parse(issue.updated_at))) {
+      const changed = this.reader.commentsChanged(number, since);
+      const merged = require('./programme-read-cache.cjs').mergeComments(cache.discussion.comments, changed.comments);
+      const later = merged.filter(comment => Date.parse(comment.created_at) > Date.parse(issue.updated_at)).length;
+      if (merged.length - later === issue.comments) {
+        const bookmark = changed.newest && Date.parse(changed.newest) > Date.parse(cache.discussion.bookmark) ? changed.newest : cache.discussion.bookmark;
+        cache.setDiscussion(merged, bookmark);
+        cache.counts.bookmark = 'used';
+        return merged;
+      }
+    }
+    const full = this.reader.commentsChanged(number);
+    cache.setDiscussion(full.comments, full.newest);
+    cache.counts.bookmark = 'full';
+    return full.comments;
   }
 
   discoverGraph(parent, outcomes, children, prs, prCache, readPr) {
@@ -4374,7 +4403,11 @@ class Reconciler {
       const finding = { code: 'PASS_STOPPED', issue: this.binding.parent_issue, diagnostics: this.pass.stopped };
       return { parent: parentRead.doc, override: Boolean(parentOverride), children: new Map(), findings: [finding], effects: [], resolutions: [],
         holds: [{ code: 'PASS_STOPPED', target: `#${this.binding.parent_issue}`, detail: findingText(finding) }], complete: false, stopped: true };
-    } finally { this.planning = false; }
+    } finally {
+      this.planning = false;
+      // Kept even when planning was cut, so a slow first pass makes the next one cheaper.
+      if (this.refreshFacts && !only) this.readCache?.save();
+    }
   }
 
   planWithinBudget({ issue: only = null, parentOverride = null, inventory = null } = {}) {
@@ -5319,6 +5352,8 @@ class Reconciler {
       ...(plan.observed?.closing ? {closing:{complete:plan.observed.closing.complete && !plan.observed.closing.incomplete.length && !plan.observed.closing.errors.length,
         incomplete:plan.observed.closing.incomplete.map(item=>({kind:item.kind,number:item.number})),planning_requests:plan.observed.closing.requests,requests:plan.observed.closing.requests,errors:plan.observed.closing.errors}} : {}),
       ...(inventory ? { inventory: { complete: inventory.complete, reason: inventory.reason, counts: inventoryCounts(inventory) } } : {}),
+      // What the read copy saved this pass: counts only.
+      ...(this.readCache && this.refreshFacts && !issue ? { reads: { ...this.readCache.counts } } : {}),
     };
     if (apply && plan.stopped && plan.parent) {
       const finding = plan.findings[0];
@@ -5399,6 +5434,6 @@ module.exports = Object.freeze({
   RefreshBudget, REFRESH_BUDGET_MS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
-  refreshWriter, isDecisionHolder, sha256, sessionsOf, sweepCatalogue,
+  refreshWriter, isDecisionHolder, sha256, sessionsOf,
   SAFE_LIMIT, renderContextBlockBody,
 });

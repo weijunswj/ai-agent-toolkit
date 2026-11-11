@@ -1,19 +1,12 @@
 'use strict';
 
-// Private, per-computer notes beside the existing refresh lock. The cursor is a rotation
-// hint over the live catalogue, with an optional marker that the full path runs first next time.
-// It contains no facts, effect payloads or completion proof.
+// Private, per-computer measurements beside the existing refresh lock: how long each phase of the
+// latest refresh took and how many GitHub requests it made, by family. No facts, no payloads.
 const fs = require('node:fs');
 const { ProgrammeError } = require('./resolve-executable.cjs');
 
-const SCHEMA = 'toolkit.programme-sweep-rotation.v1';
 const METRICS_SCHEMA = 'toolkit.programme-sweep-metrics.v1';
-const MAX_BYTES = 1024;
-const BATCH_SIZE = 4;
-const BATCH_REQUESTS = 48;
-const BATCH_MS = 45000;
-const REQUEST_MS = 10000;
-const PHASES = ['entry', 'resume', 'inventory', 'planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'closing', 'unknown'];
+const PHASES = ['entry', 'inventory', 'planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'closing', 'unknown'];
 const COUNTER_MAX = 1000000;
 const bounded = n => Math.max(0, Math.min(COUNTER_MAX, Math.floor(n)));
 
@@ -49,7 +42,6 @@ class SweepNotes {
     this.file = file;
     this.lock = lock;
     this.clock = clock;
-    this.batch = null;
     this.begin();
   }
 
@@ -57,6 +49,7 @@ class SweepNotes {
     this.phases = Object.create(null);
     this.phase = 'entry';
     this.since = this.clock();
+    this.reads = null;
   }
 
   phaseAt(name) {
@@ -73,106 +66,28 @@ class SweepNotes {
   measure() {
     const row = this.row();
     row.elapsed_ms = bounded(row.elapsed_ms + Math.max(0, this.clock() - this.since));
+    this.since = this.clock();
   }
 
   request(method, endpoint, privateRepo, options, run) {
-    const batch = this.batch;
-    let nextOptions = options;
-    if (batch) {
-      const left = batch.deadline - this.clock();
-      if (batch.stopped) throw batch.stopped;
-      if (batch.requests >= BATCH_REQUESTS || left <= 0) {
-        batch.stopped = new ProgrammeError('SWEEP_SLICE_LIMIT', 'The bounded child check reached its request or time limit.');
-        throw batch.stopped;
-      }
-      batch.requests++;
-      nextOptions = { ...options, timeoutMs: Math.min(options?.timeoutMs ?? REQUEST_MS, REQUEST_MS, left) };
-    }
     const key = family(method, endpoint, privateRepo);
     const counts = this.row().requests;
     counts[key] = bounded((counts[key] || 0) + 1);
-    const response = run(nextOptions);
-    if (batch && [401, 403, 429].includes(response?.status)) {
-      batch.stopped = new ProgrammeError('SWEEP_SLICE_PROVIDER_HELD', 'The provider refused or throttled the child check. Retry on a later refresh when access is available.');
-      throw batch.stopped;
-    }
-    return response;
+    return run(options);
   }
 
-  runBatch(deadline, run) {
-    this.phaseAt('resume');
-    this.batch = { deadline: Math.min(deadline, this.clock() + BATCH_MS), requests: 0, stopped: null };
-    try {
-      const result = run(() => !this.batch.stopped && this.batch.requests < BATCH_REQUESTS && this.clock() < this.batch.deadline);
-      return { ...result, stopped: this.batch.stopped };
-    } finally {
-      this.batch = null;
-      this.phaseAt('entry');
-    }
-  }
-
-  owned() {
-    if (!this.lock.owns()) throw new ProgrammeError('PASS_LOCK_LOST', 'The pass lost its lock before saving the private sweep note.');
-  }
-
-  read(scope, issues) {
-    this.hadNote = false;
-    const name = this.file + '.resume';
-    const invalid = () => new ProgrammeError('SWEEP_RESUME_INVALID', 'The private sweep note is invalid or unreadable. Preserve it, then move the .resume file aside before retrying.');
-    let fd;
-    try {
-      if (!fs.lstatSync(name).isFile()) throw invalid();
-      fd = fs.openSync(name, 'r');
-      this.hadNote = true;
-      const raw = Buffer.alloc(MAX_BYTES + 1);
-      const size = fs.readSync(fd, raw);
-      if (size > MAX_BYTES) throw invalid();
-      const value = JSON.parse(raw.toString('utf8', 0, size));
-      if (!value || !['after,schema,scope', 'after,full_first,schema,scope'].includes(Object.keys(value).sort().join(','))
-        || ('full_first' in value && value.full_first !== true) || value.schema !== SCHEMA || typeof value.scope !== 'string' || !/^[a-f0-9]{64}$/.test(value.scope)
-        || !(value.after === null || Number.isSafeInteger(value.after) && value.after > 0)) throw invalid();
-      if (value.scope !== scope) return null;
-      if (value.after !== null && !issues.includes(value.after)) throw invalid();
-      return value;
-    } catch (error) {
-      if (error.code === 'ENOENT' && fd === undefined) return null;
-      throw invalid();
-    } finally {
-      if (fd !== undefined) fs.closeSync(fd);
-    }
-  }
-
-  replace(suffix, value) {
-    this.owned();
-    const name = this.file + suffix;
-    const draft = name + '.' + this.lock.token + '.draft';
-    try {
-      fs.writeFileSync(draft, JSON.stringify(value) + '\n', { mode: 0o600, flag: 'wx' });
-      replaceOwnedNote(draft, name, this.lock);
-    } catch (error) {
-      if (error.code === 'PASS_LOCK_LOST') throw error;
-      throw new ProgrammeError('SWEEP_NOTE_WRITE_FAILED', 'The private sweep note could not be saved. Check local access to the refresh lock directory and retry.');
-    } finally {
-      try { fs.unlinkSync(draft); } catch { /* missing or locked draft; the next lock has its own token */ }
-    }
-  }
-
-  // fullFirst asks the next refresh to run the full path before any further batch.
-  save(scope, after, fullFirst = false) { this.replace('.resume', { schema: SCHEMA, scope, after, ...(fullFirst ? { full_first: true } : {}) }); }
-
-  clear() {
-    this.owned();
-    try { fs.unlinkSync(this.file + '.resume'); }
-    catch (error) {
-      if (error.code !== 'ENOENT') throw new ProgrammeError('SWEEP_NOTE_WRITE_FAILED', 'The old private sweep note could not be retired. Check local access and retry.');
-    }
-  }
-
+  // Passive: a measurement that cannot be saved never decides whether programme work can run.
   saveMetrics() {
     this.measure();
-    try { this.replace('.metrics', { schema: METRICS_SCHEMA, phases: this.phases }); }
-    catch { /* Passive measurements never decide whether programme work can run. */ }
+    const name = this.file + '.metrics';
+    const draft = name + '.' + this.lock.token + '.draft';
+    try {
+      const value = { schema: METRICS_SCHEMA, phases: this.phases, ...(this.reads ? { reads: this.reads } : {}) };
+      fs.writeFileSync(draft, JSON.stringify(value) + '\n', { mode: 0o600, flag: 'wx' });
+      replaceOwnedNote(draft, name, this.lock);
+    } catch { /* not saved this time */ }
+    finally { try { fs.unlinkSync(draft); } catch { /* already renamed, or never written */ } }
   }
 }
 
-module.exports = { SweepNotes, BATCH_SIZE, replaceOwnedNote };
+module.exports = { SweepNotes, replaceOwnedNote };

@@ -72,7 +72,7 @@ test('A-T2: the parent redraw precedes every queue write', () => {
 test('A-T3: a short budget redraws all saved rows, reports the stop and resumes', () => {
   const f = fixture(); let elapsed = 0;
   f.github.intercept(() => { elapsed += 800; });
-  const report = f.make(budget(() => Date.parse(NOW) + elapsed, 500000)).run({ apply: true });
+  const report = f.make(budget(() => Date.parse(NOW) + elapsed, 300000)).run({ apply: true });
   assert.ok(report.holds.some(entry => entry.code === 'PASS_STOPPED'));
   assert.equal(openStop(f)?.diagnostics.cause, 'time_limit');
   assert.equal((f.github.issues.get(421).body.match(/^\|[^\n]*\|#\d+\|/gm) || []).length, 84);
@@ -661,171 +661,8 @@ function slowRefresh(t, { count = 60, lockFile, version = '3.59.1', discussion =
   return { ...fx, file, dir, read, close, run };
 }
 
-test('sweep: repeated slow state 0/2 advances verified work across invocations', t => {
-  const f = slowRefresh(t);
-  f.close(100); f.close(106);
-  // Make the first pass reproduce exactly two planned state effects (attention and one child).
-  Object.assign(f.issues.get(106), { state: 'open', closed_at: null, state_reason: null });
-  const first = f.run();
-  const stop = first.report.holds.find(entry => entry.code === 'PASS_STOPPED');
-  assert.match(stop.detail, /state \(0 of 2 done\)/);
-  assert.equal(f.read(100).lifecycle, 'PLANNED');
-  f.close(106);
-  const second = f.run();
-  assert.equal(f.read(100).lifecycle, 'DONE');
-  assert.notEqual(second.report.outcome, 'COMPLETE');
-  assert.equal(second.code, 1);
-  assert.equal(f.read(106).lifecycle, 'PLANNED');
-  const third = f.run();
-  assert.equal(f.read(106).lifecycle, 'DONE');
-  assert.notEqual(third.report.outcome, 'COMPLETE');
-  const metrics = JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8'));
-  assert.ok(metrics.phases.resume.requests.issue > 0);
-  assert.ok(metrics.phases.resume.elapsed_ms <= 45000);
-  assert.ok(Object.values(metrics.phases.resume.requests).reduce((a, b) => a + b, 0) <= 48);
-  assert.doesNotMatch(JSON.stringify(metrics), /Synthetic discussion|example\.test|fixture-controller/);
-});
 
-const sweepIssue = (call, n) => call.path === `repos/example.test/app/issues/${n}`;
-const sweepDoc = (call, n) => call.path.split('?')[0].endsWith(`/contents/state/issue-${n}.json`);
-const sweepCursor = f => JSON.parse(fs.readFileSync(`${f.file}.resume`, 'utf8'));
-
-for (const change of ['holder epoch', 'catalogue', 'binding']) {
-  test(`sweep: changed ${change} never adopts the old rotation`, t => {
-    const f = slowRefresh(t);
-    f.close(100);
-    assert.equal(f.run().code, 1);
-    assert.equal(f.run().code, 1);
-    const old = sweepCursor(f);
-    assert.equal(old.after, 103);
-    if (change === 'holder epoch') {
-      const parent = f.parent();
-      parent.fence.epoch++;
-      f.github.putFile('state/parent-12.json', parent);
-    } else if (change === 'catalogue') {
-      const parent = f.parent();
-      parent.outcomes = parent.outcomes.filter(row => row.issue !== 103);
-      f.github.putFile('state/parent-12.json', parent);
-    } else f.binding.required_checks = ['new-required-check'];
-    f.close(104);
-    assert.equal(f.run().code, 1);
-    assert.equal(f.read(104).lifecycle, 'PLANNED', 'old position did not start a bounded write');
-    assert.notEqual(sweepCursor(f).scope, old.scope);
-    assert.equal(sweepCursor(f).after, null);
-  });
-}
-
-for (const failure of ['malformed', 'foreign cursor', 'oversized', 'bad marker']) {
-  test(`sweep: ${failure} checkpoint holds refresh while preview stays read-only`, t => {
-    const f = slowRefresh(t);
-    f.close(100);
-    assert.equal(f.run().code, 1);
-    const file = `${f.file}.resume`;
-    const text = failure === 'malformed' ? '{' : failure === 'oversized' ? 'x'.repeat(1025)
-      : JSON.stringify({ ...sweepCursor(f), ...(failure === 'bad marker' ? { full_first: false } : { after: 999999 }) });
-    fs.writeFileSync(file, text);
-    const before = [f.github.commits, f.github.mutations()];
-    f.run({ slow: false, argv: ['reconcile', '--json'] });
-    assert.throws(() => f.run(), { code: 'SWEEP_RESUME_INVALID' });
-    assert.deepEqual([f.github.commits, f.github.mutations()], before);
-    assert.equal(fs.readFileSync(file, 'utf8'), text);
-    fs.renameSync(file, file + '.preserved');
-    assert.equal(f.run().code, 1, 'a fresh full attempt can arm a new rotation');
-    assert.equal(sweepCursor(f).after, null);
-  });
-}
-
-for (const interruption of ['CAS conflict', 'lost write reply', 'lost readback']) {
-  test(`sweep: ${interruption} holds its item and serves unrelated work`, t => {
-    const f = slowRefresh(t);
-    f.close(100);
-    assert.equal(f.run().code, 1);
-    f.close(101);
-    const target = () => f.read(100);
-    const pending = target().pending_effects;
-    const parent = f.parent();
-    const offset = f.github.calls.length;
-    const publicBefore = f.github.mutations();
-    let faulted = false;
-    const partial = f.run({ fault: (call, phase) => {
-      if (faulted || phase !== 'entry' || !sweepDoc(call, 100)) return;
-      if (interruption === 'lost readback' && call.method === 'GET' && /\?ref=c\d+$/.test(call.path)) {
-        faulted = true; return { status: 502, json: {} };
-      }
-      if (call.method !== 'PUT') return;
-      if (interruption === 'CAS conflict') {
-        faulted = true;
-        f.github.putFile('state/issue-100.json', { ...f.github.readFile('state/issue-100.json'), next_action: 'Concurrent controller change' });
-      } else if (interruption === 'lost write reply') {
-        faulted = true;
-        assert.equal(f.github.route(call.method, call.path, call.body).status, 200);
-        return { status: 502, json: {} };
-      }
-    } });
-    assert.equal(partial.code, 1);
-    assert.equal(partial.report.outcome, 'HELD');
-    assert.deepEqual(partial.report.inventory, { complete: false, reason: 'Full inventory deferred', counts: {} });
-    assert.ok(partial.report.holds.some(hold => hold.target === '#100'));
-    assert.equal(f.read(101).lifecycle, 'DONE');
-    assert.equal(f.github.mutations(), publicBefore, 'no public effect from a partial batch');
-    assert.deepEqual(f.parent(), parent, 'no watermark, parent state or attention settlement');
-    assert.deepEqual(target().pending_effects, pending);
-    assert.equal(sweepCursor(f).after, 103);
-    assert.equal(sweepCursor(f).full_first, true, 'the next refresh runs the full path first');
-    if (interruption === 'CAS conflict') assert.equal(target().next_action, 'Concurrent controller change');
-    const accepted = ['lost write reply', 'lost readback'].includes(interruption);
-    if (accepted) {
-      assert.equal(target().lifecycle, 'DONE');
-      const rev = target().revision;
-      assert.equal(f.github.calls.slice(offset).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 1);
-      const later = f.github.calls.length;
-      f.run({ slow: false });
-      assert.equal(target().revision, rev, 'fresh full read recognises the verified lifecycle already present');
-      assert.equal(f.github.calls.slice(later).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 0);
-    }
-  });
-}
-
-test('sweep: takeover during source confirmation stops before the child CAS', t => {
-  const f = slowRefresh(t);
-  f.close(100);
-  assert.equal(f.run().code, 1);
-  let reads = 0;
-  const at = f.github.calls.length;
-  assert.throws(() => f.run({ fault: call => {
-    if (sweepIssue(call, 100) && ++reads === 2) {
-      const prior = f.github.readFile('state/parent-12.json');
-      const next = state.claimDocument(prior, { session: 'fixture-successor', prefix: 'TEST-' }, { takeover: true });
-      f.github.putFile('state/parent-12.json', next);
-    }
-  } }), { code: 'STALE_WRITER' });
-  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 0);
-  assert.equal(f.read(100).lifecycle, 'PLANNED');
-});
-
-test('sweep: provider refusal stops the batch and its full follow-on', t => {
-  const f = slowRefresh(t);
-  f.close(100);
-  assert.equal(f.run().code, 1);
-  const at = f.github.calls.length;
-  const result = f.run({ fault: call => sweepIssue(call, 100) ? { status: 429, json: {} } : undefined });
-  assert.equal(result.code, 1);
-  assert.equal(result.report.holds[0].code, 'SWEEP_SLICE_PROVIDER_HELD');
-  assert.equal(f.github.calls.slice(at).filter(call => sweepIssue(call, 100)).length, 1);
-  assert.ok(f.github.calls.slice(at).every(call => call.method === 'GET'), 'no full plan or effect after the refusal');
-  assert.deepEqual([sweepCursor(f).after, sweepCursor(f).full_first], [100, true]);
-  // The refusal cannot repeat without a full refresh in between: the next run has no batch.
-  const next = f.run();
-  assert.notEqual(next.report.outcome, 'HELD');
-  assert.ok(next.report.holds.some(hold => hold.code === 'PASS_STOPPED'), 'the full path ran and reported its own stop');
-  assert.equal(JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8')).phases.resume, undefined);
-  assert.deepEqual(sweepCursor(f), { schema: 'toolkit.programme-sweep-rotation.v1', scope: sweepCursor(f).scope, after: 100 }, 'the rotation keeps its place and the marker is spent');
-  const third = f.run();
-  assert.ok(JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8')).phases.resume, 'the bounded turn resumes after the full attempt');
-  assert.equal(third.code, 1);
-});
-
-test('sweep: healthy refresh keeps the existing full path and writes only private aggregate metrics', t => {
+test('sweep: a healthy refresh writes only private aggregate metrics and no rotation note', t => {
   const f = slowRefresh(t, { count: 1, discussion: 0, extraIssues: 0, prs: 0 });
   f.close(100);
   const result = f.run({ slow: false });
@@ -835,354 +672,251 @@ test('sweep: healthy refresh keeps the existing full path and writes only privat
   const metrics = JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8'));
   assert.equal(metrics.phases.resume, undefined);
   for (const phase of ['entry', 'inventory', 'planning', 'state']) assert.ok(metrics.phases[phase], phase);
+  assert.deepEqual(Object.keys(metrics.reads).sort(), ['bookmark', 'reread', 'reused', 'rows']);
+  assert.doesNotMatch(JSON.stringify(metrics), /Synthetic discussion|example\.test|fixture-controller/);
   assert.doesNotMatch(JSON.stringify(result.report), /elapsed_ms|toolkit.programme-sweep-metrics/);
   assert.doesNotMatch(f.page(), /elapsed_ms|toolkit.programme-sweep-metrics/);
 });
 
-test('sweep: a slow call uses the bounded request timeout and no CAS starts after the reserve', t => {
-  const f = slowRefresh(t);
-  f.close(100);
-  assert.equal(f.run().code, 1);
-  const at = f.github.calls.length;
-  const optionsSeen = [];
-  const transport = Object.assign(Object.create(f.github), {
-    request(method, endpoint, body, options) {
-      if (sweepIssue({ path: endpoint }, 100)) optionsSeen.push(options?.timeoutMs);
-      return f.github.request(method, endpoint, body);
-    },
-  });
-  const result = f.run({ more: { transport }, fault: (call, _phase, spend) => {
-    if (sweepIssue(call, 100)) spend(44000); // A fake request that ignores the supplied deadline.
-  } });
-  assert.equal(result.code, 1);
-  assert.equal(result.report.holds[0].code, 'SWEEP_SLICE_LIMIT');
-  assert.equal(sweepCursor(f).full_first, true);
-  assert.deepEqual(optionsSeen, [10000]);
-  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT').length, 0);
-  assert.equal(f.read(100).lifecycle, 'PLANNED');
-});
-
-test('sweep: a changed source lifecycle leaves its child to the full refresh while the next child still progresses', t => {
-  const f = slowRefresh(t);
-  f.close(100);
-  assert.equal(f.run().code, 1);
-  f.close(101);
-  let read = 0;
-  const at = f.github.calls.length;
-  const result = f.run({ fault: (call, phase) => {
-    if (phase === 'entry' && sweepIssue(call, 100) && ++read === 2) Object.assign(f.issues.get(100), { state: 'open', closed_at: null, state_reason: null });
-  } });
-  assert.equal(result.code, 1);
-  assert.notEqual(result.report.outcome, 'HELD');
-  assert.deepEqual(result.report.left_to_full_refresh.map(entry => [entry.code, entry.target]), [['GRAPH_FACT_STALE', '#100']]);
-  assert.ok(result.report.holds.some(hold => hold.code === 'PASS_STOPPED'), 'the full refresh had its turn and reported its own stop');
-  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 0, 'no bounded write on unconfirmed facts');
-  assert.equal(f.read(100).lifecycle, 'PLANNED');
-  assert.equal(f.read(101).lifecycle, 'DONE');
-  assert.equal(sweepCursor(f).full_first, undefined);
-});
-
-test('sweep: losing private-store access during source confirmation refuses the child CAS', t => {
-  const f = slowRefresh(t);
-  f.close(100);
-  assert.equal(f.run().code, 1);
-  let reads = 0;
-  const at = f.github.calls.length;
-  assert.throws(() => f.run({ fault: call => {
-    if (sweepIssue(call, 100) && ++reads === 2) f.github.repos.get(f.github.storeRepository.toLowerCase()).private = false;
-  } }), { code: 'STATE_STORE_UNVERIFIED' });
-  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT').length, 0);
-  assert.equal(f.read(100).lifecycle, 'PLANNED');
-});
-
-function seedSweepIntent(f, number, digest) {
-  const doc = f.read(number);
-  const intent = { intent_id: 'earlier-intent', kind: 'replace_block', target: { issue: number, digest }, state: 'UNKNOWN' };
-  doc.pending_effects.push(intent);
-  f.github.putFile(`state/issue-${number}.json`, doc);
-  return intent;
-}
-
-function seedSweepRotation(f) {
-  const parent = f.parent();
-  const writer = state.refreshWriter(parent);
-  const scope = state.sha256(state.canonicalText([f.binding, parent.parent_issue, parent.fence.epoch, writer.session_hash, state.sweepCatalogue(parent)]));
-  fs.writeFileSync(`${f.file}.resume`, JSON.stringify({ schema: 'toolkit.programme-sweep-rotation.v1', scope, after: null }) + '\n');
-}
-
-for (const count of [1, 2, 3, 4]) {
-  test(`sweep: a catalogue of ${count} gives a recoverable intent a full readback turn`, t => {
-    const f = slowRefresh(t, { count, discussion: 0, extraIssues: 0, prs: 0 });
-    assert.equal(f.run({ slow: false }).code, 0);
-    const body = f.issues.get(100).body;
-    const block = state.findStateBlock(body).block;
-    assert.ok(block);
-    const intent = seedSweepIntent(f, 100, state.blockDigest(block.body));
-    seedSweepRotation(f);
-    if (count > 1) f.close(101);
-    let sawFullRead = false;
-    const at = f.github.calls.length;
-    const { report, code } = f.run({ slow: false, fault: (call, phase) => {
-      if (phase !== 'planning' || call.method !== 'GET' || !sweepIssue(call, 100)) return;
-      sawFullRead = true;
-      assert.deepEqual(f.github.readFile('state/issue-100.json').pending_effects, [intent], 'only the full path can clear the saved intent');
-      if (count > 1) assert.equal(f.github.readFile('state/issue-101.json').lifecycle, 'DONE', 'unrelated scoped work ran before full planning');
-    } });
-    assert.equal(sawFullRead, true, 'the existing full plan gets a turn without removing the rotation');
-    assert.deepEqual(report.recovered, [{ kind: 'child', number: 100, intent_id: intent.intent_id, outcome: 'DONE' }]);
-    assert.equal(code, 0, JSON.stringify(report.holds));
-    assert.deepEqual(f.read(100).pending_effects, []);
-    assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PATCH' && sweepIssue(call, 100)).length, 0, 'the accepted body was not written again');
-    assert.equal(fs.existsSync(`${f.file}.resume`), false);
-  });
-}
-
-test('sweep: full readback keeps an unreadable prior intent held while another child progresses', t => {
-  const f = slowRefresh(t, { count: 2, discussion: 0, extraIssues: 0, prs: 0 });
-  const intent = seedSweepIntent(f, 100, 'missing');
-  seedSweepRotation(f);
-  f.close(101);
-  const at = f.github.calls.length;
-  const { report, code } = f.run({ slow: false, fault: call => sweepIssue(call, 100) && call.method === 'GET' ? { status: 404, json: {} } : undefined });
-  assert.equal(code, 1);
-  assert.notEqual(report.outcome, 'COMPLETE');
-  assert.deepEqual(report.recovered, [{ kind: 'child', number: 100, intent_id: intent.intent_id, outcome: 'UNKNOWN' }]);
-  assert.ok(report.holds.some(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === '#100'));
-  assert.deepEqual(f.read(100).pending_effects, [intent]);
-  assert.equal(f.read(101).lifecycle, 'DONE');
-  assert.ok(!f.github.calls.slice(at).some(call => call.method === 'PATCH' && sweepIssue(call, 100)));
-});
-
-test('sweep: a slow full plan retains the earlier intent and reports the time stop', t => {
-  const f = slowRefresh(t);
-  const intent = seedSweepIntent(f, 100, 'missing');
-  seedSweepRotation(f);
-  f.close(101);
-  const { report, code } = f.run();
-  assert.equal(code, 1);
-  assert.notEqual(report.outcome, 'COMPLETE');
-  assert.ok(report.holds.some(hold => hold.code === 'PASS_STOPPED'));
-  assert.deepEqual(f.read(100).pending_effects, [intent]);
-  assert.equal(f.read(101).lifecycle, 'DONE');
-  assert.equal(sweepCursor(f).after, 103);
-});
-
-test('sweep: a provider stop still defers full readback of an earlier intent', t => {
-  const f = slowRefresh(t, { count: 2, discussion: 0, extraIssues: 0, prs: 0 });
-  const intent = seedSweepIntent(f, 100, 'missing');
-  seedSweepRotation(f);
-  const at = f.github.calls.length;
-  const { report, code } = f.run({ slow: false, fault: call => sweepIssue(call, 101) ? { status: 429, json: {} } : undefined });
-  assert.equal(code, 1);
-  assert.equal(report.outcome, 'HELD');
-  assert.deepEqual(report.holds.map(hold => hold.code), ['SWEEP_SLICE_PROVIDER_HELD']);
-  assert.deepEqual(report.recovered, []);
-  assert.deepEqual(f.read(100).pending_effects, [intent]);
-  assert.ok(f.github.calls.slice(at).every(call => call.method === 'GET'));
-});
-
-// Closure matrix for the bounded turn. A child whose facts cannot be confirmed is left to the full
-// refresh in the same pass. Only a write outcome or a batch-wide stop holds the pass, and then
-// the next refresh runs the full path first.
-const SUBS = 'repos/example.test/app/issues/12/sub_issues';
-const sweepAttaches = (f, at) => f.github.calls.slice(at).filter(call => call.method === 'POST' && call.path === SUBS).length;
-const sweepBodyWrites = (f, at, n) => f.github.calls.slice(at).filter(call => call.method === 'PATCH' && sweepIssue(call, n) && typeof call.body?.body === 'string').length;
-const sweepMetrics = f => JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8')).phases;
-const sweepLeft = report => (report.left_to_full_refresh || []).map(entry => [entry.code, entry.target]);
-
-function settledSweep(t, count) {
-  const f = slowRefresh(t, { count, discussion: 0, extraIssues: 0, prs: 0 });
-  assert.equal(f.run({ slow: false }).code, 0);
-  return f;
-}
-
-function unlinkSweepChild(f, number) {
-  const parent = f.github.issues.get(12);
-  parent.subs = parent.subs.filter(entry => entry !== number);
-  f.issues.get(number).parent = null;
-}
-
-function acceptedSweepIntent(f, number) {
-  const block = state.findStateBlock(f.issues.get(number).body).block;
-  assert.ok(block, 'the managed body is really present');
-  return seedSweepIntent(f, number, state.blockDigest(block.body));
-}
-
-for (const count of [1, 2, 3, 4]) {
-  test(`sweep matrix: with ${count} direct children a missing native link is repaired and an accepted intent settled in one refresh`, t => {
-    const f = settledSweep(t, count);
-    // With one child both conditions sit on it. Otherwise the accepted intent is on another child.
-    const holder = count === 1 ? 100 : 101;
-    const body = f.issues.get(holder).body;
-    const intent = acceptedSweepIntent(f, holder);
-    unlinkSweepChild(f, 100);
-    if (count > 2) f.close(102);
-    seedSweepRotation(f);
-    const at = f.github.calls.length;
-    const { report, code } = f.run({ slow: false });
-    assert.equal(code, 0, JSON.stringify(report.holds));
-    assert.equal(report.outcome, undefined, 'the report is the full refresh\'s own');
-    assert.equal(report.inventory.complete, true);
-    assert.ok(report.findings.some(finding => finding.code === 'NATIVE_PARENT_MISSING' && finding.issue === 100));
-    assert.equal(f.issues.get(100).parent, 12);
-    assert.equal(sweepAttaches(f, at), 1);
-    assert.deepEqual(report.recovered, [{ kind: 'child', number: holder, intent_id: intent.intent_id, outcome: 'DONE' }]);
-    assert.deepEqual(f.read(holder).pending_effects, []);
-    assert.equal(sweepBodyWrites(f, at, holder), 0, 'the accepted body was not written again');
-    assert.equal(f.issues.get(holder).body, body);
-    assert.deepEqual(sweepLeft(report), count === 1 ? [] : [['GRAPH_FACT_STALE', '#100']]);
-    if (count > 2) assert.equal(f.read(102).lifecycle, 'DONE');
-    assert.ok(sweepMetrics(f).resume, 'the bounded turn ran first');
-    assert.equal(fs.existsSync(`${f.file}.resume`), false);
-    const again = f.github.calls.length;
-    assert.equal(f.run({ slow: false }).code, 0);
-    assert.deepEqual([sweepAttaches(f, again), sweepBodyWrites(f, again, holder)], [0, 0]);
-  });
-}
-
-test('sweep matrix: a lone child with only a missing native link is left to the full refresh and repaired', t => {
-  const f = settledSweep(t, 1);
-  unlinkSweepChild(f, 100);
-  seedSweepRotation(f);
-  const at = f.github.calls.length;
-  const { report, code } = f.run({ slow: false });
-  assert.equal(code, 0, JSON.stringify(report.holds));
-  assert.deepEqual(sweepLeft(report), [['GRAPH_FACT_STALE', '#100']]);
-  assert.deepEqual([f.issues.get(100).parent, sweepAttaches(f, at)], [12, 1]);
-});
-
-test('sweep matrix: a stable missing link never keeps a slow full refresh from its turn', t => {
-  const f = slowRefresh(t);
-  unlinkSweepChild(f, 100);
-  assert.equal(f.run().code, 1);
-  for (let turn = 0; turn < 3; turn++) {
-    const { report, code } = f.run();
-    assert.equal(code, 1);
-    assert.notEqual(report.outcome, 'HELD', 'never the early held report');
-    assert.ok(report.holds.some(hold => hold.code === 'PASS_STOPPED'), 'the full refresh ran and reported its own stop');
-    assert.ok(report.inventory.reason !== 'Full inventory deferred');
-    assert.equal(sweepCursor(f).full_first, undefined);
-  }
-});
-
-test('sweep matrix: a wrong native parent is left to the full refresh, which reports it', t => {
-  const f = settledSweep(t, 2);
-  f.github.addIssue(900);
-  f.github.link(900, 100);
-  f.close(101);
-  seedSweepRotation(f);
-  const at = f.github.calls.length;
-  const { report } = f.run({ slow: false });
-  assert.notEqual(report.outcome, 'HELD');
-  assert.deepEqual(sweepLeft(report), [['GRAPH_FACT_STALE', '#100']]);
-  assert.ok(report.findings.some(finding => finding.code === 'NATIVE_PARENT_WRONG' && finding.issue === 100), 'the full refresh gives its own evidence');
-  assert.equal(f.read(101).lifecycle, 'DONE');
-  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 0);
-});
-
-for (const [fact, code] of [['incomplete', 'GRAPH_FACT_STALE'], ['unreadable', 'GH_FAILED']]) {
-  test(`sweep matrix: ${fact} issue facts are left to the full refresh, which copies the lifecycle from its own read`, t => {
-    const f = settledSweep(t, 2);
-    f.close(100); f.close(101);
-    seedSweepRotation(f);
-    let faulted = false;
-    const puts = [];
-    const { report, code: exit } = f.run({ slow: false, fault: (call, phase) => {
-      if (call.method === 'PUT' && sweepDoc(call, 100)) puts.push(phase);
-      if (faulted || phase !== 'entry' || !sweepIssue(call, 100)) return;
-      faulted = true;
-      if (fact === 'unreadable') return { status: 500, json: {} };
-      const { id, ...rest } = f.github.route(call.method, call.path, call.body).json;
-      return { status: 200, json: rest };
-    } });
-    assert.equal(faulted, true);
-    assert.equal(exit, 0, JSON.stringify(report.holds));
-    assert.deepEqual(sweepLeft(report), [[code, '#100']]);
-    assert.deepEqual(puts, ['apply'], 'the only write of that child is the full refresh\'s own');
-    assert.deepEqual([f.read(100).lifecycle, f.read(101).lifecycle], ['DONE', 'DONE']);
-  });
-}
+const sweepDoc = (call, n) => call.path.split('?')[0].endsWith(`/contents/state/issue-${n}.json`);
 
 for (const omit of [false, true]) {
-  test(`sweep matrix: ${omit ? 'a state read without its version id never requests a write' : 'a healthy state read writes with its version id'}`, t => {
-    const f = settledSweep(t, 1);
+  test(`state write: ${omit ? 'a read without its version id never requests a write' : 'a healthy read writes with its version id'}`, t => {
+    const f = slowRefresh(t, { count: 1, discussion: 0, extraIssues: 0, prs: 0 });
+    assert.equal(f.run({ slow: false }).code, 0);
     f.close(100);
-    seedSweepRotation(f);
     const puts = [];
     const outcome = f.run({ slow: false, fault: call => {
-        if (!sweepDoc(call, 100)) return;
-        if (call.method === 'PUT') puts.push(typeof call.body.sha === 'string');
-        if (call.method === 'GET' && omit) {
-          const { sha, ...rest } = f.github.route(call.method, call.path, call.body).json;
-          assert.equal(typeof sha, 'string');
-          return { status: 200, json: rest };
-        }
-      } });
+      if (!sweepDoc(call, 100)) return;
+      if (call.method === 'PUT') puts.push(typeof call.body.sha === 'string');
+      if (call.method === 'GET' && omit) {
+        const { sha, ...rest } = f.github.route(call.method, call.path, call.body).json;
+        assert.equal(typeof sha, 'string');
+        return { status: 200, json: rest };
+      }
+    } });
     if (!omit) {
       assert.equal(outcome.code, 0);
       assert.deepEqual(puts, [true]);
       assert.equal(f.read(100).lifecycle, 'DONE');
       return;
     }
-    // The bounded turn leaves the child alone, and the full refresh refuses the same read itself.
-    assert.deepEqual(puts, [], 'no request without the comparison token, from either path');
+    assert.deepEqual(puts, [], 'no request without the comparison token');
     assert.equal(outcome.code, 1);
-    assert.deepEqual(sweepLeft(outcome.report), [['STATE_TOKEN_MISSING', '#100']]);
-    assert.deepEqual(outcome.report.holds.map(hold => [hold.code, hold.target]), [['STATE_TOKEN_MISSING', '#100']], 'the full refresh holds that child by its own check');
+    assert.deepEqual(outcome.report.holds.map(hold => [hold.code, hold.target]), [['STATE_TOKEN_MISSING', '#100']]);
     assert.equal(f.read(100).lifecycle, 'PLANNED');
     assert.equal(f.run({ slow: false }).code, 0, 'a later healthy read completes the copy');
     assert.equal(f.read(100).lifecycle, 'DONE');
   });
 }
 
-test('sweep matrix: a write refused in every bounded turn cannot keep the full refresh away', t => {
-  const f = settledSweep(t, 2);
-  f.close(100);
-  unlinkSweepChild(f, 101);
-  seedSweepRotation(f);
-  // A competing writer wins only while the bounded turn is writing.
-  const fault = (call, phase) => (phase === 'entry' && call.method === 'PUT' && sweepDoc(call, 100) ? { status: 409, json: {} } : undefined);
-  const at = f.github.calls.length;
-  const first = f.run({ slow: false, fault });
-  assert.deepEqual([first.code, first.report.outcome], [1, 'HELD']);
-  assert.deepEqual(first.report.holds.map(hold => [hold.code, hold.target]), [['STATE_CONFLICT', '#100']]);
-  assert.deepEqual(sweepLeft(first.report), [['GRAPH_FACT_STALE', '#101']]);
-  assert.equal(sweepAttaches(f, at), 0);
-  assert.equal(sweepCursor(f).full_first, true);
-  const second = f.run({ slow: false, fault });
+// Reading only what changed. The parent's sub-issue list carries every native child's issue
+// facts, empty lists are not requested, the parent's comments are read from a bookmark, and a
+// settled child whose live row still matches its kept copy is not read again.
+const APP = 'repos/example.test/app';
+const readCache = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-read-cache.cjs'));
+
+function readFixture(t, { count = 24, groups = ['COMPLETED'], cached = true } = {}) {
+  const fx = pageFixture(state, { count, groups, width: 5 });
+  fx.github.commentsMoveIssue = true;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-reads-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = cached ? path.join(dir, 'pass.lock') : null;
+  let time = Date.parse(fx.NOW);
+  const run = (extra = {}) => {
+    time += 3600000;
+    const at = fx.github.calls.length;
+    const result = cliRun(fx, file, { now: () => new Date(time).toISOString(), passClock: () => time, toolkitVersion: '3.59.1', ...extra });
+    return { ...result, calls: fx.github.calls.slice(at) };
+  };
+  const gets = (calls, pattern) => calls.filter(call => call.method === 'GET' && pattern.test(call.path)).length;
+  const kept = () => JSON.parse(fs.readFileSync(`${file}.reads`, 'utf8'));
+  const withPr = (number, pr) => {
+    fx.github.addPr(pr, { head: 'b'.repeat(40), state: 'MERGED', merged: true });
+    fx.store.mutate('child', number, { writer: fx.writer, parentDoc: fx.parent(), change: doc => { doc.pr = { ...doc.pr, number: pr, state: 'MERGED', head: 'b'.repeat(40) }; return doc; } });
+  };
+  const prReads = (calls, pr) => calls.filter(call => call.path === 'graphql' && call.body?.variables?.number === pr).length;
+  return { ...fx, dir, file, run, gets, kept, withPr, prReads };
+}
+
+test('reads: the parent list replaces a read per child, and empty lists are not requested', t => {
+  const f = readFixture(t, { count: 6, groups: ['LATER'] });
+  assert.equal(f.run().code, 0);
+  const second = f.run();
   assert.equal(second.code, 0, JSON.stringify(second.report.holds));
-  assert.equal(sweepMetrics(f).resume, undefined, 'no bounded turn in front of this full refresh');
-  assert.deepEqual([f.issues.get(101).parent, sweepAttaches(f, at)], [12, 1]);
-  assert.equal(f.read(100).lifecycle, 'DONE');
-  assert.equal(fs.existsSync(`${f.file}.resume`), false);
+  assert.equal(second.report.reads.rows, 6);
+  assert.equal(f.gets(second.calls, new RegExp(`^${APP}/issues/10\\d$`)), 0, 'no single issue read for a child the list shows');
+  assert.equal(f.gets(second.calls, new RegExp(`^${APP}/issues/10\\d/sub_issues`)), 0, 'no sub-issue list for a child that reports none');
+  assert.equal(f.gets(second.calls, new RegExp(`^${APP}/issues/10\\d/comments`)), 0, 'no comment list for a child that reports none');
+  // A child the list cannot vouch for is read on its own, as before.
+  f.github.addComment(103, { body: 'A note' });
+  f.github.intercept(call => {
+    if (call.method !== 'GET' || !call.path.startsWith(`${APP}/issues/12/sub_issues`)) return undefined;
+    const listed = f.github.route(call.method, call.path, call.body);
+    return { status: listed.status, json: listed.json.map(row => row.number === 104 ? { number: row.number, id: row.id } : row) };
+  });
+  const third = f.run();
+  f.github.hooks = [];
+  assert.equal(third.report.reads.rows, 5);
+  assert.equal(f.gets(third.calls, new RegExp(`^${APP}/issues/104$`)) >= 1, true, 'the incomplete row falls back to its own read');
+  assert.equal(f.gets(third.calls, new RegExp(`^${APP}/issues/103/comments`)) >= 1, true, 'a child with a comment has its list read');
 });
 
-test('sweep matrix: attention --refresh --json keeps HELD, the deferred inventory and the holds, beside done results', t => {
-  const f = settledSweep(t, 2);
-  const attention = ['attention', '--refresh', '--json'];
-  const done = f.run({ slow: false, argv: attention });
-  assert.deepEqual([done.code, done.report.refreshed], [0, { outcome: 'DONE', inventory_complete: true, holds: [] }]);
+test('reads: settled children are reused, and the oldest share is read again each pass', t => {
+  const f = readFixture(t);
+  f.github.addComment(100, { body: 'Closing story' });
+  f.withPr(100, 500);
+  const first = f.run();
+  assert.equal(first.code, 0, JSON.stringify(first.report.holds));
+  assert.deepEqual([first.report.reads.reused, first.report.reads.reread], [0, 0]);
+  assert.ok(f.prReads(first.calls, 500) >= 1);
+  assert.equal(Object.keys(f.kept().children).length, 24);
+  // The first pass wrote every child page, which moved each issue's update time: all are read again once.
+  const settling = f.run();
+  assert.deepEqual([settling.report.reads.reused, settling.report.reads.reread], [0, 0]);
+  const stamp = f.kept().children[100].read_at;
+  const second = f.run();
+  assert.equal(second.code, 0);
+  assert.deepEqual([second.report.reads.reused, second.report.reads.reread], [22, 2]);
+  assert.equal(second.report.summary, 'No changes');
+  // Twelve passes in all re-read every copy at least once.
+  for (let pass = 0; pass < 11; pass++) assert.equal(f.run().code, 0);
+  for (const entry of Object.values(f.kept().children)) assert.ok(Date.parse(entry.read_at) > Date.parse(stamp));
+  // A pass that reuses #100 asks for neither its comments nor its merged PR.
+  const reusing = [f.run(), f.run()].find(result => !f.gets(result.calls, new RegExp(`^${APP}/issues/100/comments`)));
+  assert.ok(reusing, 'at least one of two passes reuses the copy');
+  assert.equal(f.prReads(reusing.calls, 500), 0);
+});
+
+test('reads: a changed settled child is read live', t => {
+  const f = readFixture(t);
+  for (const number of [100, 101, 102, 103]) f.github.addComment(number, { body: `Story ${number}` });
+  f.run(); f.run(); f.run();
+  const live = (result, number) => f.gets(result.calls, new RegExp(`^${APP}/issues/${number}/comments`)) > 0;
+  // A new comment moves the update time and the count.
+  f.github.addComment(100, { body: 'Late note' });
+  // A deleted comment changes only the count.
+  const gone = [...f.github.comments.values()].find(comment => comment.issue === 101).id;
+  f.github.comments.delete(gone);
+  // A new sub-issue changes neither the update time nor the comments, only the sub-issue count.
+  const before = f.github.issues.get(102).updated_at;
+  f.github.addIssue(900, { parent: 102 });
+  f.github.issues.get(102).updated_at = before;
+  const changed = f.run();
+  assert.equal(live(changed, 100), true, 'new comment');
+  assert.equal(f.gets(changed.calls, new RegExp(`^${APP}/issues/102/sub_issues`)) > 0, true, 'the new sub-issue is found');
+  assert.ok(changed.report.effects.some(effect => effect.kind === 'add_native_children'), 'and adopted, as on a full read');
+  assert.equal(f.kept().children[101].comment_count, 0, 'the deleted comment left the copy');
+  assert.equal(f.kept().children[100].comment_count, 2);
+  // A reopened child is no longer settled: nothing kept is used for it.
+  Object.assign(f.github.issues.get(103), { state: 'open', closed_at: null, state_reason: null, updated_at: f.github.tick() });
+  const reopened = f.run();
+  assert.equal(live(reopened, 103), true, 'reopened');
+  assert.equal(f.kept().children[103], undefined, 'no copy is kept for an open child');
+});
+
+test('reads: a child with a pending intent, or with no usable copy, is never reused', t => {
+  const f = readFixture(t);
+  f.github.addComment(100, { body: 'Story' });
+  f.run(); f.run();
+  f.run();
+  const doc = f.store.read('child', 100).doc;
+  doc.pending_effects.push({ intent_id: 'earlier-intent', kind: 'replace_block', target: { issue: 100, digest: 'missing' }, state: 'UNKNOWN' });
+  f.github.putFile('state/issue-100.json', doc);
+  const pending = f.run();
+  assert.ok(f.gets(pending.calls, new RegExp(`^${APP}/issues/100/comments`)) > 0, 'a pending intent is checked against a live read');
+  // An unreadable, foreign or wrong-shaped file only means everything is read again.
+  for (const text of ['{not json', JSON.stringify({ schema: readCache.SCHEMA, repository: 'someone/else', parent: 12, children: {} }),
+    JSON.stringify({ schema: readCache.SCHEMA, repository: 'example.test/app', parent: 12, discussion: { bookmark: 'x', comments: [{}] }, children: { 101: { updated_at: 1 } } })]) {
+    fs.writeFileSync(`${f.file}.reads`, text);
+    const cold = f.run();
+    assert.equal(cold.code === 0 || cold.report.holds.every(hold => hold.code === 'EFFECT_UNKNOWN'), true, JSON.stringify(cold.report.holds));
+    assert.deepEqual([cold.report.reads.reused, cold.report.reads.bookmark], [0, 'full']);
+    assert.equal(f.kept().schema, readCache.SCHEMA, 'the file is rebuilt');
+  }
+});
+
+test('reads: the parent comments come from a bookmark that must account for every comment', t => {
+  const f = readFixture(t, { count: 2, groups: ['LATER'] });
+  for (let i = 0; i < 245; i++) f.github.addComment(12, { body: `Discussion ${i}` });
+  // The fake clock gives each comment its own second; leave a gap wider than the bookmark overlap.
+  f.github.clock += 3600000;
+  for (let i = 245; i < 250; i++) f.github.addComment(12, { body: `Discussion ${i}` });
+  const pages = result => f.gets(result.calls.filter(call => !/since=/.test(call.path)), new RegExp(`^${APP}/issues/12/comments`));
+  const since = result => f.gets(result.calls.filter(call => /since=/.test(call.path)), new RegExp(`^${APP}/issues/12/comments`));
+  const first = f.run();
+  assert.deepEqual([first.report.reads.bookmark, since(first)], ['full', 0]);
+  assert.ok(pages(first) >= 3);
+  const planningPages = pages(first);
+  const second = f.run();
+  assert.deepEqual([second.report.reads.bookmark, since(second), pages(second)], ['used', 1, 0]);
+  // New and edited comments arrive through the bookmark read.
+  f.github.addComment(12, { body: 'A new note' });
+  const edited = [...f.github.comments.values()].find(comment => comment.body === 'Discussion 7');
+  f.github.request('PATCH', `${APP}/issues/comments/${edited.id}`, { body: 'Discussion 7, edited' });
+  const third = f.run();
+  assert.equal(third.report.reads.bookmark, 'used');
+  const bodies = f.kept().discussion.comments.map(comment => comment.body);
+  assert.equal(bodies.length, 251);
+  assert.ok(bodies.includes('A new note') && bodies.includes('Discussion 7, edited') && !bodies.includes('Discussion 7'));
+  assert.deepEqual(f.kept().discussion.comments.map(comment => comment.id), f.github.commentsOf(12).map(comment => comment.id), 'same order as a full read');
+  // A deleted comment cannot be seen by the bookmark read: the count disagrees, so all pages are read.
+  f.github.comments.delete(edited.id);
+  const fourth = f.run();
+  assert.deepEqual([fourth.report.reads.bookmark, since(fourth)], ['full', 1]);
+  assert.ok(pages(fourth) >= planningPages);
+  assert.equal(f.kept().discussion.comments.length, 250);
+  assert.equal(f.run().report.reads.bookmark, 'used');
+});
+
+test('reads: a warm pass plans exactly what a pass with no copy plans', t => {
+  const script = f => {
+    for (const number of [100, 101, 102]) f.github.addComment(number, { body: `Story ${number}` });
+    f.withPr(101, 501);
+    for (let i = 0; i < 120; i++) f.github.addComment(12, { body: `Discussion ${i}` });
+    const reports = [f.run().report, f.run().report];
+    f.github.addComment(102, { body: 'More' });
+    f.github.addComment(12, { body: 'Decision\n---\nRecorded.' });
+    Object.assign(f.github.issues.get(105), { state: 'open', closed_at: null, state_reason: null, updated_at: f.github.tick() });
+    f.github.issues.get(106).title = 'Renamed task'; f.github.issues.get(106).updated_at = f.github.tick();
+    reports.push(f.run().report, f.run().report);
+    return reports.map(({ reads, ...report }) => report);
+  };
+  const warm = readFixture(t, { count: 26, groups: ['COMPLETED', 'COMPLETED', 'LATER'] });
+  const cold = readFixture(t, { count: 26, groups: ['COMPLETED', 'COMPLETED', 'LATER'], cached: false });
+  const [a, b] = [script(warm), script(cold)];
+  assert.deepEqual(a, b);
+  assert.equal(warm.page(), cold.page());
+  for (const number of [100, 102, 105, 106]) assert.equal(warm.github.issues.get(number).body, cold.github.issues.get(number).body, `#${number}`);
+  assert.ok(warm.kept().discussion.comments.length >= 121);
+});
+
+test('reads: a slow programme finishes its plan, and a cut plan still keeps what it read', t => {
+  const f = slowRefresh(t);
   f.close(100);
-  seedSweepRotation(f);
-  const held = f.run({ slow: false, argv: attention, fault: call => sweepIssue(call, 100) ? { status: 429, json: {} } : undefined });
-  assert.equal(held.code, 1);
-  assert.deepEqual({ ...held.report.refreshed, holds: held.report.refreshed.holds.map(hold => hold.code) },
-    { outcome: 'HELD', inventory_complete: false, inventory_reason: 'Full inventory deferred', holds: ['SWEEP_SLICE_PROVIDER_HELD'] });
-  // A full refresh with its own holds keeps its existing status and exit.
-  unlinkSweepChild(f, 101);
-  const full = f.run({ slow: false, argv: attention, fault: call => call.method === 'POST' && call.path === SUBS ? { status: 500, json: {} } : undefined });
-  assert.equal(full.code, 1);
-  assert.equal(full.report.refreshed.outcome, 'DONE');
-  assert.ok(full.report.refreshed.holds.length);
-  // Plain text names the held refresh, not an unreadable inventory.
-  seedSweepRotation(f);
-  let text = '';
-  f.github.intercept(call => sweepIssue(call, 100) ? { status: 429, json: {} } : undefined);
-  const exit = cli.main(['attention', '--refresh'], { transport: f.github, binding: f.binding, originUrl: 'https://github.com/example.test/app.git', repoRoot: '.',
-    toolkitVersion: '3.59.1', now: () => f.NOW, passClock: () => Date.parse(f.NOW), lockFile: f.file, environment: {}, stdout: { write: chunk => { text += chunk; } } });
-  f.github.hooks = [];
-  assert.equal(exit, 1);
-  assert.match(text, /The refresh was held before the full scan/);
-  assert.match(text, /SWEEP_SLICE_PROVIDER_HELD/);
-  assert.doesNotMatch(text, /INVENTORY_INCOMPLETE/);
+  const first = f.run();
+  // Before reads were reduced this profile stopped at "state (0 of 2 done)" and wrote nothing. Now
+  // the first pass finishes planning and state, and each later pass advances the remaining queue.
+  const stopOf = result => result.report.holds.find(hold => hold.code === 'PASS_STOPPED')?.detail || '';
+  assert.equal(f.read(100).lifecycle, 'DONE');
+  assert.equal(first.report.reads.rows, 60);
+  assert.doesNotMatch(stopOf(first), /stopped at (planning|state)/);
+  assert.ok(first.report.results.filter(entry => entry.outcome === 'DONE').length > 0);
+  const second = f.run();
+  assert.equal(second.report.reads.bookmark, 'used');
+  assert.doesNotMatch(stopOf(second), /stopped at (planning|state)/);
+  assert.ok(second.report.results.filter(entry => entry.outcome === 'DONE').length > 0);
+  // Planning has the whole budget and no private note can shorten it. A plan that is still cut,
+  // here by one very slow read after the comments, writes nothing and keeps what it read.
+  fs.rmSync(`${f.file}.reads`);
+  f.close(101);
+  const cut = f.run({ slow: false, fault: (call, phase, delay) => { if (phase === 'planning' && /issues\?state=closed/.test(call.path)) delay(11 * 60000); } });
+  assert.equal(cut.code, 1);
+  assert.match(stopOf(cut), /stopped at/);
+  assert.deepEqual(cut.report.results, []);
+  assert.equal(f.read(101).lifecycle, 'PLANNED');
+  assert.ok(JSON.parse(fs.readFileSync(`${f.file}.reads`, 'utf8')).discussion.comments.length >= 741);
+  const after = f.run({ slow: false });
+  assert.equal(after.report.reads.bookmark, 'used');
+  assert.equal(f.read(101).lifecycle, 'DONE');
 });
