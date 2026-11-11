@@ -1,0 +1,346 @@
+{
+  "schema": "toolkit-controller-enforcement-map/v1",
+  "description": "What enforces each controller rule (repo/CONTROLLER.md and its pages): a hook, a script, a CI check or the programme reconciler, each with the test that proves it, or instruction-only with the reason. Checked by repo/scripts/check-controller-enforcement-map.cjs.",
+  "rows": [
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "**GitHub governance**",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-governance-state.cjs",
+          "test": "repo/tests/toolkit-governance-state.test.cjs"
+        },
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-governance-hook.cjs",
+          "test": "repo/tests/session-start-task-governance.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "Bind one canonical repo, programme, release",
+      "instruction_only": "Choosing the repository, release and one owning builder is a controller judgement; no code can tell which builder owns an outcome."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "**Repository fence:**",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-merge-hold.cjs",
+          "test": "repo/tests/toolkit-merge-hold.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "**Task intake:**",
+      "instruction_only": "Vetting feedback and choosing to extend, reopen or create a child is a judgement; the reconciler records children but does not decide them."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "Keep in-flight gates on their admitted Controller revision",
+      "instruction_only": "No launcher records the controller revision a gate was admitted on, so nothing can compare it."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "Preserve Now and Later commitments",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/toolkit-programme-state.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "**Batch small fixes:**",
+      "instruction_only": "Whether a fix is small and which slice it joins is a judgement made before any branch exists."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "**Change-local hygiene law",
+      "instruction_only": "A test pins the wording, but which routes and files are obsolete is a review judgement no check can make."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "On \"you are taking over as controller for <repo>\"",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme.cjs",
+          "test": "repo/tests/toolkit-programme-authority.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "Beneath explicit owner authority and platform instructions",
+      "instruction_only": "Instruction precedence and what a session loads are read by the agent; no hook sees which instructions it followed."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "An authorised in-gate refresh reads changed sources",
+      "instruction_only": "The refresh notice and the choice not to restart happen inside the session; nothing outside it can check them."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "Substantive returns include programme/release/child/role",
+      "instruction_only": "What a return says is free text read by the controller; no schema checks it."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "Routines/executors ask the owner only when the owner must act",
+      "instruction_only": "Whether the owner must act is a judgement per message."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "Record standing authority's owner/provenance",
+      "instruction_only": "Native host controls hold standing authority; Toolkit code records none of it and cannot see uncertain effects."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "**Standing approvals:**",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-merge-hold.cjs",
+          "test": "repo/tests/toolkit-merge-hold.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-auto-merge-eligible.cjs",
+          "test": "repo/tests/toolkit-auto-merge-eligible.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "**Transport stores:**",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-merge-hold.cjs",
+          "test": "repo/tests/toolkit-merge-hold.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "These pages are part of this file",
+      "enforced_by": [
+        {
+          "kind": "ci",
+          "path": "repo/scripts/sync-controller-pages.cjs",
+          "test": "repo/tests/controller-pages.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "- [Roles and routes](controller/roles-and-routes.md)",
+      "enforced_by": [
+        {
+          "kind": "ci",
+          "path": "repo/scripts/sync-controller-pages.cjs",
+          "test": "repo/tests/controller-pages.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "- [Gates](controller/gates.md)",
+      "enforced_by": [
+        {
+          "kind": "ci",
+          "path": "repo/scripts/sync-controller-pages.cjs",
+          "test": "repo/tests/controller-pages.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "- [Evidence, progress and finish](controller/evidence-and-finish.md)",
+      "enforced_by": [
+        {
+          "kind": "ci",
+          "path": "repo/scripts/sync-controller-pages.cjs",
+          "test": "repo/tests/controller-pages.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/roles-and-routes.md",
+      "rule": "Resolve DISCOVERY, DISCOVERY_HELPER, BUILDER",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-stack-selection.cjs",
+          "test": "repo/tests/toolkit-stack-selection.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/roles-and-routes.md",
+      "rule": "Launch every gate with model and effort pinned explicitly",
+      "instruction_only": "Gates start from Projects threads, Remote Control or a person; no Toolkit launcher starts them, so there is nothing to hook a route check to."
+    },
+    {
+      "file": "repo/controller/roles-and-routes.md",
+      "rule": "One gatekeeper per lane",
+      "instruction_only": "A gatekeeper is a session the controller opens by hand; no Toolkit launcher starts it, so its tier cannot be checked."
+    },
+    {
+      "file": "repo/controller/roles-and-routes.md",
+      "rule": "Subagents are helpers, never gates",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-v3-helper-guard.cjs",
+          "test": "repo/tests/toolkit-v3-helper-guard.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-claude-subagent-depth.cjs",
+          "test": "repo/tests/toolkit-claude-subagent-depth.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/roles-and-routes.md",
+      "rule": "Service tier is the controller",
+      "instruction_only": "The service tier is chosen in the host when a session starts; Toolkit has no setting to check."
+    },
+    {
+      "file": "repo/controller/roles-and-routes.md",
+      "rule": "G2 begins after builder readiness",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-stack-selection.cjs",
+          "test": "repo/tests/toolkit-stack-selection.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/roles-and-routes.md",
+      "rule": "The owner may address G0/G1 directly",
+      "instruction_only": "Whether a relay is faithful and which input is stale is read by the gate; no record carries it."
+    },
+    {
+      "file": "repo/controller/gates.md",
+      "rule": "Gate states: ACTIVE, WAITING_OWNER",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/toolkit-programme-state.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/gates.md",
+      "rule": "At admission split acceptance",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-auto-merge-eligible.cjs",
+          "test": "repo/tests/toolkit-auto-merge-eligible.test.cjs"
+        },
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/toolkit-programme-reconcile.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/gates.md",
+      "rule": "**Models before building:**",
+      "instruction_only": "Whether a feature needs an invariant model is a G0 judgement that G2 checks by reading."
+    },
+    {
+      "file": "repo/controller/gates.md",
+      "rule": "**Scope confirmation:**",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/decision-history.cjs",
+          "test": "repo/tests/decision-history.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/gates.md",
+      "rule": "G2 tests scope, execution, security and evidence",
+      "instruction_only": "Rating findings is the reviewer's judgement."
+    },
+    {
+      "file": "repo/controller/gates.md",
+      "rule": "For new/changed human-facing work",
+      "instruction_only": "Readable text is judged by G1 and G2; the plain-reference check covers only issue and PR references in docs."
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
+      "rule": "Executors publish concise authorised progress",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-checkpoint.cjs",
+          "test": "repo/tests/toolkit-programme-authority.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
+      "rule": "Finish authorised work before stopping",
+      "instruction_only": "Whether work is finished is a judgement at the end of each turn."
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
+      "rule": "Reuse the user-selected private evidence store",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-governance-discovery.cjs",
+          "test": "repo/tests/toolkit-governance-evidence-store.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
+      "rule": "**Custody without ritual:**",
+      "instruction_only": "Which files to archive and when is a judgement at gate end; the push and fetch use plain Git."
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
+      "rule": "Scratch follows the global rules",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/workspace-residue-report.cjs",
+          "test": "repo/tests/workspace-residue-report.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
+      "rule": "**Promises:**",
+      "instruction_only": "Promises live in free text (PR, issue comments or project memory); the hourly nudge reads them, but no code parses them."
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
+      "rule": "Native coverage: Codex/Claude Code on real selected paths",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-install-health.cjs",
+          "test": "repo/tests/toolkit-install-health.test.cjs"
+        }
+      ]
+    }
+  ]
+}
