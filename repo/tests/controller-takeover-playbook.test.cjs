@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { controllerFiles } = require('./support/controller-text.cjs');
 const ROOT = path.resolve(__dirname, '../..');
 const PLAYBOOK = 'repo/docs/agent-playbooks/controller-takeover.md';
 const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
@@ -53,7 +54,7 @@ test('T2 removing any safety clause fails the contract', () => {
 
 test('T3 Controller points to the ordered journey, keeps the routes sentence and unchanged cap', () => {
   const text = read('repo/CONTROLLER.md');
-  const takeover = text.split('## Takeover\n')[1].split('## Roles and routes')[0];
+  const takeover = text.split('## Takeover\n')[1].split('## Instructions and returns')[0];
   for (const part of ['you are taking over as controller for <repo>', 'capability check',
     "then that harness's extras", 'host-assigned coordinator', 'relays', 'stops', 'Continue approved scope without reapproval',
     'a thread/worker on its takeover relays the entry and stops']) {
@@ -66,7 +67,7 @@ test('T3 Controller points to the ordered journey, keeps the routes sentence and
   assert.equal(links.length, 2);
   for (const [, link] of links) assert.ok(fs.existsSync(path.join(ROOT, 'repo', link.split('#')[0])));
   assert.ok(Buffer.byteLength(text.replace(/\n/g, '\r\n')) <= 17453);
-  assert.match(read('repo/tests/instruction-budget.test.cjs'), /<= 18500/);
+  assert.match(read('repo/tests/instruction-budget.test.cjs'), /crlfBytes\(read\('repo\/CONTROLLER\.md'\)\) <= 9500/);
 });
 
 function surfaceClaimContract(text) {
@@ -92,7 +93,7 @@ function markdownFiles(dir) {
     return entry.isDirectory() ? markdownFiles(rel) : /\.md$/i.test(entry.name) ? [rel] : [];
   });
 }
-const capabilityFiles = [...new Set([PLAYBOOK, 'repo/CONTROLLER.md',
+const capabilityFiles = [...new Set([PLAYBOOK, ...controllerFiles(),
   'skills/controller-bootstrap/SKILL.md', 'repo/contracts/claude-projects/web-controller-projects/SKILL.md',
   ...markdownFiles('skills/controller-bootstrap'),
   ...markdownFiles('repo/contracts/claude-projects/web-controller-projects')])];

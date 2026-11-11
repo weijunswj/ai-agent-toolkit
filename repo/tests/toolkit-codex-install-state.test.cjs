@@ -420,7 +420,7 @@ test('AT5: session reminder and setup status explain changed and unverified appr
 });
 
 test('AT6: --check holds Codex gate launches unless the files and Codex agree every hook is on', t => {
-  assert.ok(fs.readFileSync(path.join(repoRoot, 'repo/CONTROLLER.md'), 'utf8').includes('[Codex hold](docs/HOST-CONTRACT.md)'));
+  assert.ok(fs.readFileSync(path.join(repoRoot, 'repo/controller/roles-and-routes.md'), 'utf8').includes('[Codex hold](../docs/HOST-CONTRACT.md)'));
   const contract = fs.readFileSync(path.join(repoRoot, 'repo/docs/HOST-CONTRACT.md'), 'utf8');
   assert.match(contract, /toolkit-codex-install-state\.cjs[\s\S]*?--check/);
   assert.ok(contract.includes('--check --codex "<codex>"'));

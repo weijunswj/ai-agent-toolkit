@@ -1,23 +1,37 @@
 # Toolkit Changelog
 
-## 3.62.0 (One layout for task pages and task PRs)
-
-### Added
-
-- Open task pages follow one fixed order: PATH, STATUS and COMMENT TRACE, then PROBLEM, FIX, IF WE SKIP, DONE WHEN and NOT IN SCOPE, then More with every other hand-written word in its original order. Older label lines and headings become the matching capital sections; the words under them do not change.
-- A copy of a task page is saved to the private state store and read back before any write that moves its hand-written text. Without the copy the page is not written.
-- Every open or draft PR that names a task gets PATH and STATUS at the top, with the gate, review at the head, UAT and release of each task it names. The PR description stays as written, and merged or closed PRs are never edited.
-- A managed block shown as an example inside a code block, quote, list item, indented code, details section or other HTML block is hand-written text on every page: it is never updated, moved or cut.
-- Where a block goes is read from the same top-level view of the page as the block search, and every block is read back before a page is written. A page whose block would not be found again is held with `MANAGED_BLOCK_BROKEN` and nothing is written to it.
-- The plan says when a page's text will move ("Lay out #<n>'s page in the fixed order"), and the result names the saved copy.
-- The task status block lists every PR found for the task, open first.
-- A page that cannot be laid out safely keeps its text in place, still gets fresh blocks, and raises the new `PAGE_LAYOUT_HELD` finding with the reason. A pass re-lays at most ten pages.
-- The new `TASK_IDLE` finding flags a task shown in progress with no open PR, no live gate assignment, no holder and no change for six hours.
+## 3.63.0 (Controller core plus pages, mixed stack removed, device-offline alert)
 
 ### Changed
 
-- The Programme Graph PR column shows one PR per row, the most recently opened one, with no count of other PRs.
-- The generated blocks on task pages carry capital headings, matching the programme page.
+- Split `repo/CONTROLLER.md` into a small core that every controller always loads and three pages under `repo/controller/` that are read at the step they cover: roles and routes, gates, and evidence, progress and finish. Every rule moved word for word; only the relative link paths inside the pages changed.
+- The core's new Pages section lists each page with a short hash of its content, so a page change also changes the core file and one bound CONTROLLER.md blob still covers every rule. `node repo/scripts/sync-controller-pages.cjs --write` refreshes the hashes, and the check fails on a stale hash, an unlisted or missing page, a rule with two homes or a broken link.
+- Lowered the core's size budget from 18,500 to 9,500 bytes and gave each page a 5,000-byte budget.
+- The pages are RISKY and always need the owner's merge OK, like the core, and both plugin setups check them in the installed copy.
+- A gatekeeper is no registry role. It is a launcher session on the mid tier at medium effort, stated in the controller rules and on the cost-control ladder, never the small tier, and a raise needs its written reason.
+- Installed Codex helper files that name a removed mixed stack are refreshed from `owner-gpt`, which has the same helper model and effort. Setup says so in one line. Any other unknown stack name is still held.
+
+### Removed
+
+- The stack registry ships two stacks only, `owner-gpt` and `owner-claude`. The mixed stack `claude-projects-stack` (older name `owner-mixed`) and its `GATEKEEPER` route are gone from the registry, its schemas and the role list, so a decision or a captured registry that names one is refused.
+
+### Added
+
+- The Projects coordinator alerts the owner when a device with unfinished lanes goes offline: one notifying ask per outage that names the device, links each affected thread and gives the one step, kept under the waiting list until the device is back. The hourly nudge lists such lanes under its owner steps and starts its report with `DEVICE OFFLINE: <n> | `. A failed status read is reported as not checked, never as offline.
+
+## 3.62.0 (UAT verdict on every pull request)
+
+### Added
+
+- Every pull request body now carries one `UAT:` line that says whether the owner has to test the change: `UAT: NOT_REQUIRED (reason)`, `UAT: OWNER_TEST_NEEDED (what the owner tries)` or `UAT: PASSED (the owner's OK)`. The plan proposes it, the builder writes it and the reviewer confirms it. The portable Git completion playbook holds the format.
+- The task auto-merge check reads that line: `toolkit-auto-merge-eligible.cjs --base <SHA> --head <SHA> --body-file <file>`. A pull request with no line, a malformed line or an owner test still open now exits 1 and names the reason (`Missing UAT verdict`, `UAT verdict invalid`, `Owner test needed`) together with any merge-rule path, so a finished pull request no longer waits in silence for an answer nobody was asked for.
+- The hourly nudge and the daily check-in list a ready pull request with no `UAT:` line as `missing UAT verdict`.
+
+### Changed
+
+- The check no longer answers when it is called with neither `--body-file` nor `--scope-only`: it exits 2 with its usage, so an older habit cannot read a scope-only pass as merge readiness. `--scope-only` keeps the previous scope report and says it grants no readiness. The merge hold is unchanged and still checks scope only.
+- The check reads a saved body safely. It reads UTF-8 and UTF-16 with a byte order mark (what Windows PowerShell 5.1 writes for `> file`) and exits 2 for any other bytes, so a wrongly saved body is never reported as a missing line. A line dressed up to look like a UAT line (invisible characters, unusual spaces, look-alike letters, a bullet, a heading, or a spot beside an HTML comment) counts as a line and makes the verdict invalid. It is never skipped. The playbook says how to save the body on Windows.
+- A missing or invalid line goes back to the gate that owns the pull request and is never turned into a question for the owner. Only the owner's own answer turns `OWNER_TEST_NEEDED` into `PASSED`.
 
 ## 3.61.0 (Programme refresh reads only what changed)
 

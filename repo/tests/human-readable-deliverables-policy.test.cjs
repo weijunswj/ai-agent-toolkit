@@ -163,7 +163,7 @@ function checkDefaultRules(load) {
 }
 
 function checkController(load) {
-  const controller = normalise(load('repo/CONTROLLER.md'));
+  const controller = normalise(load('repo/controller/gates.md'));
   assert.equal(controller.includes('## Historical compatibility reference'), false);
   const active = controller;
   assert.match(active, /### Human-readable product and operational text/);

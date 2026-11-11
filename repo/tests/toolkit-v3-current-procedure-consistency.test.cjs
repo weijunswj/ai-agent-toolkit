@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { controllerText } = require('./support/controller-text.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 // Windows checkouts may convert text files to CRLF; the contracts are about the words, not line ends.
@@ -37,7 +38,7 @@ const GATE_SURFACES = ['repo/contracts/agent-rules/gate-rules.md'];
 const RENEWAL_SURFACES = ['skills/controller-bootstrap/SKILL.md'];
 
 function surfaces() {
-  const value = { 'repo/CONTROLLER.md': current(read('repo/CONTROLLER.md')) };
+  const value = { 'repo/CONTROLLER.md': current(controllerText()) };
   for (const rel of [...GATE_SURFACES, ...RENEWAL_SURFACES]) value[rel] = read(rel);
   return value;
 }
@@ -112,7 +113,7 @@ function reviewerCardinalityContract(text, registry) {
 
 test('documented reviewer cardinalities are derived from the pinned registry', () => {
   const registry = JSON.parse(read('repo/contracts/controller-kernel/stack-registry-v3.json'));
-  assert.deepEqual(Object.keys(registry.profiles).map(id => registry.profiles[id].reviewers.length), [1, 1, 1]);
+  assert.deepEqual(Object.keys(registry.profiles).map(id => registry.profiles[id].reviewers.length), [1, 1]);
   for (const rel of ['repo/contracts/source-of-truth-contract.md', 'README.md']) reviewerCardinalityContract(read(rel), registry);
   const stale = read('repo/contracts/source-of-truth-contract.md').replace('currently contain one member each', 'currently contain two and one members');
   assert.throws(() => reviewerCardinalityContract(stale, registry));
@@ -137,8 +138,7 @@ test('every documented profile row projects the registry routes and complete rev
     assert.deepEqual(profile.routes.DISCOVERY, profile.routes.BUILDER);
     assert.deepEqual(profile.routes.DISCOVERY_HELPER, profile.routes.BUILDER_HELPER);
     assert.equal(profile.reviewers.length, 1);
-    const gatekeeper = profile.routes.GATEKEEPER ? label(profile.routes.GATEKEEPER) : 'None';
-    const expected = `| \`${id}\` | ${gatekeeper} | ${label(profile.routes.DISCOVERY)} | ${label(profile.routes.DISCOVERY_HELPER)} | ${label(profile.routes.DESIGN_CHALLENGE)} | One ${label(profile.reviewers[0])} review |`;
+    const expected = `| \`${id}\` | ${label(profile.routes.DISCOVERY)} | ${label(profile.routes.DISCOVERY_HELPER)} | ${label(profile.routes.DESIGN_CHALLENGE)} | One ${label(profile.reviewers[0])} review |`;
     assert.equal(rows.filter(row => row === expected).length, 1, expected);
   }
 });
@@ -149,8 +149,8 @@ test('neither the directive nor CONTROLLER keeps a retention clock', () => {
   assert.match(v3, /There is no expiry clock, pin or cleanup ledger/);
   assert.match(v3, /In a Git store the commit is the manifest, and a successful push plus one fetch is the read-back/);
   assert.doesNotMatch(v3, /21 days|30-day|restart the clock/);
-  assert.doesNotMatch(current(read('repo/CONTROLLER.md')), /expires 21 days|restart the clock/);
-  assert.doesNotMatch(current(read('repo/CONTROLLER.md')), /Historical v1 records/);
+  assert.doesNotMatch(current(controllerText()), /expires 21 days|restart the clock/);
+  assert.doesNotMatch(current(controllerText()), /Historical v1 records/);
 });
 
 function securityReviewContract(text) {

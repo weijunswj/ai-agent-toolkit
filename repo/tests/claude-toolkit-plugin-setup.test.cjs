@@ -1008,7 +1008,8 @@ test('installed enforcement byte verification rejects missing and stale cache fi
   for (const directory of ['repo/scripts','repo/contracts','.claude-plugin','skills/github-program-reconciler/scripts','skills/secure-ci-cd/scripts']) {
     fs.cpSync(path.join(repoRoot,directory),path.join(cache,directory),{recursive:true});
   }
-  for(const file of ['repo/CONTROLLER.md','repo/ARCHITECTURE.md'])fs.copyFileSync(path.join(repoRoot,file),path.join(cache,file));
+  fs.mkdirSync(path.join(cache,'repo','controller'),{recursive:true});
+  for(const file of ['repo/CONTROLLER.md','repo/controller/roles-and-routes.md','repo/controller/gates.md','repo/controller/evidence-and-finish.md','repo/ARCHITECTURE.md'])fs.copyFileSync(path.join(repoRoot,file),path.join(cache,file));
   assert.equal(setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot }).ok, true);
   fs.appendFileSync(path.join(cache, '.claude-plugin', 'hooks', 'hooks.json'), ' ');
   let state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
