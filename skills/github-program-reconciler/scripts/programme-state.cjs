@@ -199,6 +199,7 @@ function screenSecrets(errors, value, at) {
   } else if (Array.isArray(value)) value.forEach((entry, index) => screenSecrets(errors, entry, `${at}[${index}]`));
   else if (isObject(value)) for (const [key, entry] of Object.entries(value)) { screenSecrets(errors, key, `${at} key`); screenSecrets(errors, entry, `${at}.${key}`); }
 }
+const secretShaped = text => SECRET_SHAPES.some(([, pattern]) => pattern.test(String(text || '')));
 const optional = (value, test) => value === null || value === undefined || test(value);
 const isInt = (value, min = 0) => Number.isInteger(value) && value >= min;
 const isText = value => typeof value === 'string' && value.length > 0;
@@ -224,7 +225,7 @@ function validateEffects(errors, effects) {
     if (['post_archive_comment', 'edit_archive_comment'].includes(effect?.kind)) {
       const target = effect.target;
       checkShape(errors, target, { all: ['issue', 'key', 'comment_id', 'login', 'before', 'digest'] }, `pending_effects[${index}].target`);
-      check(errors, isObject(target) && isInt(target.issue, 1) && /^graph-(?:retired|completed|optional|later|now)-[1-9][0-9]*$/.test(target.key)
+      check(errors, isObject(target) && isInt(target.issue, 1) && (/^graph-(?:retired|completed|optional|later|now)-[1-9][0-9]*$/.test(target.key) || effect.kind === 'post_archive_comment' && archiveTools().NOTE_KEY.test(target.key))
         && isText(target.login) && /^[0-9a-f]{64}$/.test(target.digest)
         && (effect.kind === 'post_archive_comment' ? target.comment_id === null && target.before === null
           : isInt(target.comment_id, 1) && /^[0-9a-f]{64}$/.test(target.before)), `pending_effects[${index}].target must name a bounded archive intent`);
@@ -239,12 +240,16 @@ function validatePageArchive(errors, archive) {
   for (const entry of Array.isArray(archive) ? archive : []) {
     check(errors, isObject(entry), 'page_archive entry must be an object');
     if (!isObject(entry)) continue;
-    checkShape(errors, entry, { all: ['key', 'kind', 'group', 'title', 'comment_id', 'login', 'digest', 'state', 'untrusted_ids', 'untrusted_before'], optional: ['untrusted_ids', 'untrusted_before'] }, 'page_archive entry');
-    check(errors, typeof entry.key === 'string' && /^graph-(?:retired|completed|optional|later|now)-[1-9][0-9]*$/.test(entry.key) && !keys.has(entry.key), 'page_archive key must be unique and fixed');
+    const note = entry.kind === 'note';
+    checkShape(errors, entry, { all: ['key', 'kind', 'group', 'title', 'comment_id', 'login', 'digest', 'state', 'untrusted_ids', 'untrusted_before', ...(note ? ['copy'] : [])], optional: ['untrusted_ids', 'untrusted_before'] }, 'page_archive entry');
+    check(errors, typeof entry.key === 'string' && (note ? archiveTools().NOTE_KEY : /^graph-(?:retired|completed|optional|later|now)-[1-9][0-9]*$/).test(entry.key) && !keys.has(entry.key), 'page_archive key must be unique and fixed');
     keys.add(entry.key);
-    check(errors, entry.kind === 'graph' && archiveTools().GROUPS.includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`), 'page_archive kind and group must match its key');
+    // A note part is one verified, never-edited comment holding marked hand-written text; `copy`
+    // is the SHA-256 of the whole page saved to the private store before that text could move.
+    if (note) check(errors, entry.group === null && typeof entry.copy === 'string' && /^[0-9a-f]{64}$/.test(entry.copy), 'page_archive note must have no group and name its saved page copy');
+    else check(errors, entry.kind === 'graph' && archiveTools().GROUPS.includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`), 'page_archive kind and group must match its key');
     check(errors, isText(entry.title) && entry.title.length <= 200, 'page_archive title must be bounded text');
-    check(errors, ['pending', 'moved'].includes(entry.state), 'page_archive state must be pending or moved');
+    check(errors, ['pending', 'moved', ...(note ? ['withdrawn'] : [])].includes(entry.state), 'page_archive state must be pending or moved, or withdrawn for a note');
     check(errors, entry.comment_id === null ? entry.login === null && entry.state === 'pending' : isInt(entry.comment_id, 1) && isText(entry.login) && !ids.has(entry.comment_id), 'page_archive id must be unique with verified login');
     if (entry.comment_id !== null) ids.add(entry.comment_id);
     if (entry.untrusted_before !== undefined) check(errors, isInt(entry.untrusted_before, 1), 'page_archive untrusted floor must be a positive integer');
@@ -348,7 +353,8 @@ const FINDING_CODES = Object.freeze({
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
-  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the graph archive comments on the page this finding names; redraw can publish a fresh verified part, but the finding stays open until disposed' },
+  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the archive comments on the page this finding names; redraw can publish a fresh verified graph part, an archived note is restored by hand from the saved page copy in the private store (page-copies), and the finding stays open until disposed' },
+  ARCHIVE_SECTION_UNSAFE: { source: 'reconcile', next_action: 'Controller: fix the text under the `## Archive` line as the reason says, or remove that line; nothing was moved' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
@@ -500,6 +506,10 @@ function validateAttention(errors, attention) {
       checkShape(errors, entry.diagnostics, { all: ['reason'] }, `${at}.diagnostics`);
       check(errors, isObject(entry.diagnostics) && ['changed', 'foreign', 'missing', 'duplicate'].includes(entry.diagnostics.reason), `${at}.diagnostics must name a fixed archive trust failure`);
     }
+    else if (entry.code === 'ARCHIVE_SECTION_UNSAFE') {
+      checkShape(errors, entry.diagnostics, { all: ['reason'] }, `${at}.diagnostics`);
+      check(errors, isObject(entry.diagnostics) && archiveTools().NOTE_REASONS.includes(entry.diagnostics.reason), `${at}.diagnostics must name a fixed Archive section reason`);
+    }
     else if (entry.code === 'PASS_STOPPED') validatePassDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
     else check(errors, entry.diagnostics === undefined, `${at}.diagnostics belongs only to page findings or PASS_STOPPED`);
     check(errors, Boolean(known) && entry.source === known.source, `${at}.source must be the code's source`);
@@ -567,7 +577,7 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     const issue = ISSUELESS_CODES.has(finding.code) ? null : finding.issue;
     if (!ISSUELESS_CODES.has(finding.code) && !isInt(issue, 1)) continue;
     add(finding.code, issue, HEAD_BOUND_CODES.has(finding.code) && isSha(finding.head) ? finding.head : null, typeof finding.since === 'string' ? finding.since : null,
-      [...PAGE_CODES, 'ARCHIVE_COMMENT_UNTRUSTED', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null,
+      [...PAGE_CODES, 'ARCHIVE_COMMENT_UNTRUSTED', 'ARCHIVE_SECTION_UNSAFE', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null,
       finding.code === 'CLOSING_COMMENT_MISSING' ? finding.kind : null);
   }
   for (const entry of complete ? list : []) {
@@ -638,10 +648,29 @@ function openFindings(attention) {
     .sort((a, b) => Date.parse(b.changed_at) - Date.parse(a.changed_at) || a.id.localeCompare(b.id));
 }
 
+// Why marked notes stayed on the page, in the owner's words. The keys are the reader's closed list.
+const NOTE_REASON_TEXT = Object.freeze({
+  two_markers: 'there is more than one `## Archive` line',
+  marker_nested: 'the `## Archive` line sits inside a code block, a comment, a folded section or a generated block',
+  open_fence: 'a code block under it is not closed',
+  open_comment: 'an HTML comment under it is not closed',
+  open_html: 'a folded section or raw HTML block under it is not closed, or is closed without being opened',
+  ambiguous_markup: 'a heading under it sits in markup that can be read two ways',
+  underlined_heading: 'a heading under it is written by underlining; write it with `#` marks, or put a blank line above the rule',
+  control_character: 'the text holds a character GitHub may change (a lone carriage return, a null or a line separator)',
+  link_definition_split: 'a link definition under it is still used by text that stays on the page',
+  part_too_large: 'a stretch with no `###` heading or blank line is too long for one comment',
+  secret_like: 'the page holds text shaped like a secret, so no copy was saved',
+  comment_not_exact: 'the comment posted for this exact text did not stay as written, so it was set aside; change the notes',
+});
+
 function findingText(entry) {
   if (entry.code === 'PASS_STOPPED' && entry.diagnostics) {
     const d = entry.diagnostics;
     return `PASS_STOPPED #${entry.issue}: the last refresh stopped at ${d.phase.replace(/_/g, ' ')} (${d.done} of ${d.total} done); the next refresh picks up the rest`;
+  }
+  if (entry.code === 'ARCHIVE_SECTION_UNSAFE' && entry.diagnostics) {
+    return `ARCHIVE_SECTION_UNSAFE #${entry.issue}: the notes under \`## Archive\` were not moved (${NOTE_REASON_TEXT[entry.diagnostics.reason] || entry.diagnostics.reason}); fix that or remove the line`;
   }
   return `${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${FINDING_CODES[entry.code]?.next_action || ''}`;
 }
@@ -1804,11 +1833,17 @@ function detachArchive(entry) {
   entry.comment_id = null; entry.login = null; entry.state = 'pending';
 }
 
-function renderContextBlockBody() {
+// `notes` are the archived note comments to list: [{ title, link }], oldest first.
+function renderContextBlockBody(notes = []) {
   return ['# AGENT CONTEXT', '<!-- programme-context -->',
     'Background for agents that pick up a task.',
-    'Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand.'].join('\n');
+    // The same length as the line it replaced, so size-tuned pages keep their headroom.
+    'Toolkit moves only notes under one `## Archive` heading: unchanged, to linked comments shown here.',
+    ...(notes.length ? ['', ...notes.map(note => `- [${note.title}](${note.link})`)] : [])].join('\n');
 }
+
+// The calendar date in Singapore time (UTC+8), as the graph shows times.
+function sgtDate(iso) { return new Date(Date.parse(iso) + 8 * 3600 * 1000).toISOString().slice(0, 10); }
 
 function upsertContextBlock(source, rendered) {
   const found = findStateBlock(source, CONTEXT_BLOCK_NAME);
@@ -2168,6 +2203,36 @@ class StateStore {
     return assertValid(kind, doc);
   }
 
+  // The whole page as it stood, kept in the private store before marked notes can leave it. The
+  // file is named by its content, so a retry finds the same file. It is read back before use, and a
+  // store that is not private, or text shaped like a secret, saves nothing.
+  pageCopyPath(issue, digest) { return `${this.store.path}page-copies/issue-${issue}/${digest}.md`; }
+
+  savePageCopy(issue, text) {
+    if (secretShaped(text)) throw new ProgrammeError('PAGE_COPY_REFUSED', 'The page holds text shaped like a secret, so no copy was saved and nothing was moved.');
+    const repo = this.transport.request('GET', `repos/${this.store.repository}`);
+    if (repo.status !== 200) throw ghFailure(repo, 'Reading the private store');
+    if (repo.json?.private !== true) throw new ProgrammeError('STORE_NOT_PRIVATE', `The store ${this.store.repository} is not private, so no page copy was saved and nothing was moved.`);
+    const digest = sha256(text);
+    const docPath = this.pageCopyPath(issue, digest);
+    const decoded = response => (response.json?.encoding === 'base64' ? Buffer.from(response.json.content, 'base64').toString('utf8') : null);
+    const existing = this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(this.store.branch)}`);
+    if (existing.status === 200) {
+      if (decoded(existing) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} exists with other content.`);
+      return { digest, path: docPath, outcome: 'EXISTS' };
+    }
+    if (existing.status !== 404) throw ghFailure(existing, `Reading ${docPath}`);
+    const response = this.transport.request('PUT', this.encodedContents(docPath), {
+      message: `programme page copy: issue-${issue} ${digest.slice(0, 12)}`, content: Buffer.from(text, 'utf8').toString('base64'), branch: this.store.branch,
+    });
+    if (!okStatus(response.status)) throw ghFailure(response, `Writing ${docPath}`);
+    this.writes += 1;
+    const commit = response.json?.commit?.sha;
+    const readback = commit ? this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(commit)}`) : null;
+    if (!readback || readback.status !== 200 || decoded(readback) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} did not read back as written.`);
+    return { digest, path: docPath, outcome: 'WRITTEN' };
+  }
+
   // PUT with compare-and-swap, then read back. A stale sha (409) or a create over an existing file
   // (422) is STATE_CONFLICT.
   putVerified(docPath, kind, text, sha, message) {
@@ -2479,6 +2544,9 @@ class BranchStateStore extends StateStore {
   // The private store must be private, readable and writable. The bound repository is checked by
   // bindRepository; the branch itself by the read path.
   verify() { return this.private.verify(); }
+
+  // Page copies hold hand-written text, so they go to the private store, never the public branch.
+  savePageCopy(issue, text) { this.requirePrivateStore(); return this.private.savePageCopy(issue, text); }
 
   // Journals stay in the private store, unchanged.
   journalDir(issue) { return this.private.journalDir(issue); }
@@ -3891,8 +3959,33 @@ class Reconciler {
     return this.projectTrace(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget);
   }
 
+  // Marked notes (`## Archive`) leave the page only on a full pass, and only when the whole move fits
+  // this pass: otherwise the page is projected with the notes still on it. `noteKeys` names the
+  // current area's parts either way, so their pending comments are kept for the next pass.
   projectParentPage(number, source, stateBody, comments, version, navBody, currentBody, topic, postBudget, page) {
+    let scan = page?.only ? { kind: 'none' } : archiveTools().noteArea(source);
+    if (scan.kind === 'area' && secretShaped(source)) scan = { kind: 'unsafe', reason: 'secret_like' };
+    // The saved copy must be the page byte for byte, so a page that UTF-8 cannot carry moves nothing.
+    if (scan.kind === 'area' && Buffer.from(source, 'utf8').toString('utf8') !== source) scan = { kind: 'unsafe', reason: 'control_character' };
+    // A comment set aside for this exact text is used again only while it still reads as written.
+    // Otherwise nothing is posted for the same text again: a host that alters it would alter it each pass.
+    if (scan.kind === 'area' && (page?.parent?.page_archive || []).some(entry => entry.kind === 'note' && entry.state === 'withdrawn' && entry.comment_id
+      && scan.parts.some(part => part.key === entry.key) && !(comments || []).some(comment => comment.id === entry.comment_id && archiveTools().digest(comment.body) === entry.digest))) scan = { kind: 'unsafe', reason: 'comment_not_exact' };
+    const noteKeys = scan.kind === 'area' ? scan.parts.map(part => part.key) : [];
+    if (scan.kind === 'area') {
+      const cut = this.projectParentLayout(number, source, stateBody, comments, version, navBody, currentBody, topic, postBudget, page, scan);
+      if (!cut.refused && cut.budgetFits && cut.body.length < this.threshold) return { ...cut, noteKeys, noteCut: true };
+    }
+    const kept = this.projectParentLayout(number, source, stateBody, comments, version, navBody, currentBody, topic, postBudget, page, null);
+    return { ...kept, noteKeys, ...(scan.kind === 'unsafe' ? { noteUnsafe: scan.reason } : {}) };
+  }
+
+  projectParentLayout(number, fullSource, stateBody, comments, version, navBody, currentBody, topic, postBudget, page, notes) {
     const archive = page?.parent?.page_archive || [];
+    const source = notes ? fullSource.slice(0, notes.start) + fullSource.slice(notes.end) : fullSource;
+    const date = sgtDate(this.now());
+    const noteParts = (notes?.parts || []).map(part => ({ ...part, title: archive.find(entry => entry.key === part.key)?.title
+      || `Notes archived ${date} (part ${part.key.split('-').at(-1)} of ${notes.parts.length})` }));
     const rowLines = stateBody.split('\n').filter(line => /^\|[^\n]*\|#\d+\|/.test(line));
     const rows = rowLines.map(text => { const cells = text.split('|'); return { text, issue: Number(cells[3].slice(1)), group: ['RETIRED', 'COMPLETED'].includes(cells[6]) ? cells[6] : cells[5] }; });
     const candidates = archiveTools().GROUPS.flatMap(group => {
@@ -3910,8 +4003,8 @@ class Reconciler {
         graphs.push({ key: entry.key, kind: 'graph', group: entry.group, title: entry.group,
           body: `${archiveTools().marker(entry.key)}\n# Programme graph: ${entry.group}\n\nNo rows are archived in this part.\n`, count: 0 });
       }
-      const posts = graphs.filter(part => !archive.some(entry => entry.key === part.key && entry.comment_id)).length;
-      const parts = graphs;
+      const parts = [...graphs, ...noteParts];
+      const posts = parts.filter(part => !archive.some(entry => entry.key === part.key && entry.comment_id)).length;
       const entryFor = part => archive.find(entry => entry.key === part.key);
       const commentId = part => entryFor(part)?.comment_id || '9'.repeat(19);
       const link = part => commentLink(issueUrl(this.binding.repository, number), commentId(part));
@@ -3924,7 +4017,11 @@ class Reconciler {
       const hidden = new Set(moved.map(row => row.issue));
       let graph = stateBody.split('\n').filter(line => !/^\|[^\n]*\|#\d+\|/.test(line) || !hidden.has(Number(line.split('|')[3].slice(1)))).join('\n');
       if (summary.length) graph = graph.replace('\n| Task |', `\nArchived: ${summary.join(', ')}\n\n| Task |`);
-      const context = renderContextBlockBody();
+      // Moved notes stay listed from the registry; the current area's parts follow them.
+      const listed = [...archive.filter(entry => entry.kind === 'note' && entry.state === 'moved' && entry.comment_id && !noteParts.some(part => part.key === entry.key))
+        .map(entry => ({ title: entry.title, link: commentLink(issueUrl(this.binding.repository, number), entry.comment_id) })),
+      ...noteParts.map(part => ({ title: part.title, link: link(part) }))];
+      const context = renderContextBlockBody(listed);
       const remainingBudget = Math.min(Math.max(0, postBudget - posts), page?.traceTopicBudget ?? MAX_TOPIC_COMMENTS_PER_PASS);
       // Include future archive links in size selection, before spending their post slots. Otherwise
       // their own trace growth could require another graph group after the budget was spent.
@@ -4106,7 +4203,8 @@ class Reconciler {
       }
       if (projected.nearLimit) findings.push({ code: 'BODY_NEAR_LIMIT', issue: number, diagnostics: bodySizeDiagnostics(projected.body, Math.min(SAFE_LIMIT, this.threshold)), detail: 'The projected page fits the hard limit but has lost its safe headroom' });
       const archiveEffects = (projected.archive || []).filter(part => !parent.page_archive?.some(entry => entry.key === part.key && entry.digest === archiveTools().digest(part.body) && entry.comment_id));
-      const activeArchives = number === parent.parent_issue ? (parent.page_archive || []).filter(entry => entry.comment_id) : [];
+      if (projected.noteUnsafe) findings.push({ code: 'ARCHIVE_SECTION_UNSAFE', issue: number, diagnostics: { reason: projected.noteUnsafe }, detail: 'The marked Archive section cannot be moved safely' });
+      const activeArchives = number === parent.parent_issue ? (parent.page_archive || []).filter(entry => entry.comment_id && entry.state !== 'withdrawn') : [];
       const archiveNeedsRecovery = activeArchives.some(entry => {
         const comment = comments.find(comment => comment.id === entry.comment_id);
         if (archiveUntrusted(entry, entry.comment_id)) return true;
@@ -4735,15 +4833,41 @@ class Reconciler {
         return { before, comments, next };
       };
       let snapshot = preview();
+      // A cut that landed before its bookkeeping: the page already links the note comment in the
+      // generated context block and no longer holds that text, so the entry is moved, not set aside.
+      const landed = entry => entry.kind === 'note' && entry.state === 'pending' && entry.comment_id && !snapshot.next.noteKeys.includes(entry.key)
+        && (findStateBlock(snapshot.before.body, CONTEXT_BLOCK_NAME).block?.body || '').includes(`/issues/${parentNumber}#issuecomment-${entry.comment_id})`);
+      if (parentDoc.page_archive?.some(landed)) {
+        mutateDoc('parent', parentNumber, { change: doc => { for (const entry of doc.page_archive) if (landed(entry)) entry.state = 'moved'; return doc; } });
+        snapshot = preview();
+      }
       // Reconcile the registry even on issue-scoped redraws; these writes never edit comments.
       let registryChanged = false;
       for (const entry of parentDoc.page_archive || []) {
-        if (!entry.comment_id) continue;
+        if (!entry.comment_id || entry.state === 'withdrawn') continue;
+        if (entry.kind === 'note' && entry.state === 'moved') {
+          // The page no longer holds this text, so its link and id stay. A changed or missing
+          // comment is reported; the saved page copy in the private store restores it by hand.
+          const listed = snapshot.comments.find(comment => comment.id === entry.comment_id);
+          if (listed && listed.user?.login === entry.login && archiveTools().digest(listed.body) === entry.digest) continue;
+          const result = this.archiveTrust(entry);
+          if (result.reason) notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', { reason: result.reason });
+          continue;
+        }
         if (archiveUntrusted(entry, entry.comment_id)) { detach(entry); registryChanged = true; continue; }
         const result = this.archiveTrust(entry);
         if (result.reason) { detach(entry, result.reason); registryChanged = true; }
       }
       if (registryChanged) snapshot = preview();
+      // A posted part whose marked text changed before the cut is set aside: never linked, never
+      // edited, never reused for other text. The same text coming back finds it again by key.
+      if (!plan.issueScoped && parentDoc.page_archive?.some(entry => entry.kind === 'note' && entry.state === 'pending' && entry.comment_id && !snapshot.next.noteKeys.includes(entry.key))) {
+        const current = snapshot.next.noteKeys;
+        mutateDoc('parent', parentNumber, { change: doc => {
+          for (const entry of doc.page_archive) if (entry.kind === 'note' && entry.state === 'pending' && entry.comment_id && !current.includes(entry.key)) entry.state = 'withdrawn';
+          return doc;
+        } });
+      }
       if (!plan.issueScoped) {
         // Comment links can alter the shortest prefix. Re-plan after verified publication, bounded
         // by the shared notification budget; never hide an unverified row.
@@ -4757,10 +4881,13 @@ class Reconciler {
             const digest = archiveTools().digest(part.body);
             let entry = parentDoc.page_archive?.find(entry => entry.key === part.key);
             // Other recorded authors remain verified read-only; changed content gets a new post.
-            const prior = entry?.comment_id && entry.login === login ? trust(entry) : null;
+            // A note comment is never edited: its key is bound to its exact text.
+            const prior = part.kind !== 'note' && entry?.comment_id && entry.login === login ? trust(entry) : null;
+            // Saved copy first: the whole page as it stands, before any marked text is posted.
+            const copy = part.kind === 'note' ? this.store.savePageCopy(parentNumber, snapshot.before.body).digest : null;
             if (!entry) {
               entry = { key: part.key, kind: part.kind, group: part.group, title: part.title.slice(0, 200), comment_id: null, login: null,
-                digest, state: 'pending' };
+                digest, state: 'pending', ...(copy ? { copy } : {}) };
               mutateDoc('parent', parentNumber, { change: doc => { (doc.page_archive ||= []).push(entry); return doc; } });
             }
             const kind = prior ? 'edit_archive_comment' : 'post_archive_comment';
@@ -4798,13 +4925,21 @@ class Reconciler {
                 }
               }
               const readback = this.reader.archiveComment(id);
+              // A fresh note comment that the host did not keep byte for byte is set aside at once,
+              // so the same text is never posted again pass after pass.
+              if (part.kind === 'note' && readback?.id === id && readback.user?.login === login && readback.body !== part.body) {
+                mutateDoc('parent', parentNumber, { change: doc => {
+                  Object.assign(doc.page_archive.find(entry => entry.key === part.key), { comment_id: id, login, digest, state: 'withdrawn' }); return doc;
+                } });
+                return { outcome: 'NOT_DONE', detail: 'The note comment did not read back as written; it was set aside and the notes stay on the page.' };
+              }
               if (!readback || readback.id !== id || readback.user?.login !== login || readback.body !== part.body
                 || String(readback.issue_url).toLowerCase() !== `https://api.github.com/repos/${this.binding.repository}/issues/${parentNumber}`.toLowerCase()) return { outcome: 'UNKNOWN', detail: 'The archive did not read back exactly under the authenticated login.' };
               mutateDoc('parent', parentNumber, { change: doc => {
                 const registered = doc.page_archive.find(entry => entry.key === part.key);
                 // Superseded parts from another login are expected history, not trust failures.
                 if (registered.comment_id && registered.comment_id !== id && registered.login !== login) rejectArchiveIds(registered, [registered.comment_id]);
-                Object.assign(registered, { comment_id: id, login, digest, title: part.title.slice(0, 200), state: 'pending' }); return doc;
+                Object.assign(registered, { comment_id: id, login, digest, title: part.title.slice(0, 200), state: 'pending', ...(copy ? { copy } : {}) }); return doc;
               } });
               return { outcome: 'DONE' };
             });
@@ -4843,22 +4978,35 @@ class Reconciler {
         if (!entry || !trust(entry) || entry.digest !== archiveTools().digest(part.body)) throw new ProgrammeError('EFFECT_UNKNOWN', 'An archive is not verified; the body was kept.');
       }
       if (next.nearLimit) notePageFinding(parentNumber, 'BODY_NEAR_LIMIT', bodySizeDiagnostics(next.body, Math.min(SAFE_LIMIT, this.threshold)));
+      let cutCopy = null;
       const finish = () => {
         verifiedBodies.add(parentNumber);
-        if (!plan.issueScoped && parentDoc.page_archive?.some(entry => entry.state === 'pending' && next.archive.some(part => part.key === entry.key))) {
+        // A note comment posted earlier in this pass for text the owner then changed is set aside here.
+        const stale = entry => entry.kind === 'note' && entry.state === 'pending' && entry.comment_id && !next.noteKeys.includes(entry.key);
+        if (!plan.issueScoped && parentDoc.page_archive?.some(entry => stale(entry) || entry.state !== 'moved' && next.archive.some(part => part.key === entry.key))) {
           mutateDoc('parent', parentNumber, { change: doc => {
-            for (const entry of doc.page_archive) if (entry.comment_id && next.archive.some(part => part.key === entry.key)) entry.state = 'moved';
+            for (const entry of doc.page_archive) {
+              if (stale(entry)) entry.state = 'withdrawn';
+              else if (entry.comment_id && next.archive.some(part => part.key === entry.key)) {
+                entry.state = 'moved';
+                if (entry.kind === 'note' && cutCopy) entry.copy = cutCopy;
+              }
+            }
             return doc;
           } });
         }
       };
       if (next.body === before.body) { finish(); record(effect, 'NOOP'); return; }
+      // Saved copy first (again): the exact page this write replaces, before marked text leaves it.
+      if (next.noteCut) cutCopy = this.store.savePageCopy(parentNumber, before.body).digest;
       const state = findStateBlock(next.body).block, trace = findStateBlock(next.body, TRACE_BLOCK_NAME).block;
       effect.target = { issue: parentNumber, digest: state.digest, trace: trace.digest, current: blockDigest(currentBody), context: findStateBlock(next.body, CONTEXT_BLOCK_NAME).block.digest, body_digest: sha256(next.body) };
       withIntent(effect, () => {
         // Recording the body intent can take time. Recheck custody after that write as well, so a
         // comment edited during bookkeeping cannot authorise hiding its graph rows.
         for (const entry of parentDoc.page_archive || []) {
+          // Notes already moved or set aside play no part in this write; the current area's do.
+          if (entry.kind === 'note' && !next.archive.some(part => part.key === entry.key)) continue;
           if (entry.comment_id && !archiveUntrusted(entry, entry.comment_id) && !trust(entry)) return { outcome: 'UNKNOWN', detail: 'An archive disappeared before the body write.' };
         }
         const latest = this.reader.issue(parentNumber);

@@ -292,8 +292,8 @@ test('the smaller CONTEXT stub retains an exact disjoint size span and 5000 unit
   const f = pageFixture(state);
   const projected = f.project(), context = state.findStateBlock(projected.body, 'CONTEXT').block;
   assert.equal(context.body, state.renderContextBlockBody());
-  assert.match(context.body, /Toolkit never moves hand-written sections\. If the page nears its size limit, shorten them by hand\./);
-  assert.doesNotMatch(context.body, /## Archive|ARCHIVE_SECTION_UNSAFE|Archived notes:/);
+  assert.match(context.body, /Toolkit moves only notes under one `## Archive` heading: unchanged, to linked comments shown here\./);
+  assert.doesNotMatch(context.body, /ARCHIVE_SECTION_UNSAFE|Archived notes:|Notes archived|\]\(https/);
   const sizes = state.bodySizeDiagnostics(projected.body, state.SAFE_LIMIT);
   assert.equal(sizes.largest_sections.find(part => part.kind === 'CONTEXT').size, context.end - context.start);
   assert.equal(sizes.largest_sections.reduce((sum, part) => sum + part.size, sizes.remainder), projected.body.length);
