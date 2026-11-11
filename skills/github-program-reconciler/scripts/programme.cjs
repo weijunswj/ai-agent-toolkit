@@ -57,6 +57,8 @@ const { spawnSync } = require('node:child_process');
 const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
+const { SweepNotes, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
+const { ReadCache } = require('./programme-read-cache.cjs');
 const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = require('./programme-lock.cjs');
 
 const { ProgrammeError } = state;
@@ -200,7 +202,7 @@ class PassProgress {
     const note = { token: this.lock.token, started_at: d.started_at, phase: d.phase, done: d.done, total: d.total, unreported: true };
     const draft = `${this.file}.${this.lock.token}.draft`;
     fs.writeFileSync(draft, `${JSON.stringify(note)}\n`, { mode: 0o600 });
-    fs.renameSync(draft, this.file);
+    replaceOwnedNote(draft, this.file, this.lock);
   }
   reported() { this.interrupted = null; if (this.last) this.write(this.last); }
   finish() {
@@ -254,7 +256,12 @@ function openContext(args, deps = {}) {
   const binding = deps.binding || merged || state.loadBinding(repoRoot);
   const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
   // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
-  const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
+  const privateRepo = `repos/${binding.store.repository.toLowerCase()}`;
+  const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (method, endpoint, body, options) => {
+    deps.heartbeat();
+    const send = requestOptions => base.request(method, endpoint, body, requestOptions);
+    return deps.sweepNotes ? deps.sweepNotes.request(method, endpoint, privateRepo, options, send) : send(options);
+  } }) : base;
   const repository = state.bindRepository({ transport, originUrl, binding });
   const version = deps.toolkitVersion === undefined ? toolkitVersion() : deps.toolkitVersion;
   const store = state.openStore({ transport, binding, now: deps.now, toolkitVersion: version, localCheckpoint: localCheckpoint(binding.repository, deps) });
@@ -491,6 +498,17 @@ function liveHead(context, child) {
   return number ? reader.pullRequest(number)?.head || null : null;
 }
 
+function makeReconciler(context) {
+  return new state.Reconciler({
+    store: context.store,
+    reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository }),
+    mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
+    binding: context.binding, writer: context.writer, toolkitVersion: context.version,
+    refreshFacts: context.writer?.by_hash === true, now: context.now,
+    pass: context.pass, readCache: context.readCache || null,
+  });
+}
+
 const commands = {
   reconcile(args, context) {
     if (args.apply) {
@@ -500,14 +518,7 @@ const commands = {
       else if (!state.isHolder(parentDoc, context.writer)) throw new ProgrammeError('STALE_WRITER', state.parentRefusal(parentDoc));
     }
     if (args.apply && args['parent-file']) throw usage('--parent-file is for dry runs only.');
-    const reconciler = new state.Reconciler({
-      store: context.store,
-      reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository }),
-      mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
-      binding: context.binding, writer: context.writer, toolkitVersion: context.version,
-      refreshFacts: context.writer?.by_hash === true, now: context.now,
-      pass: context.pass,
-    });
+    const reconciler = makeReconciler(context);
     const parentOverride = args['parent-file'] ? readJsonFile(args['parent-file'], 'parent') : null;
     return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride, inventory: args.inventory || null });
   },
@@ -526,8 +537,10 @@ const commands = {
     }
     // Only the hash of the holder's session: enough to write as it, never to decide for it.
     context.writer = state.refreshWriter(parentDoc);
+    context.sweepNotes?.phaseAt('inventory');
     const inventory = runInventory(context, parentDoc, deps, args['deadline-ms']);
     const report = commands.reconcile({ ...args, apply: true, inventory }, context);
+    if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
     cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
     return report;
   },
@@ -794,6 +807,7 @@ function formatReport(report) {
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));
   if (report.holds.length) lines.push('', 'Holds', ...report.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`));
   if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
+  if (report.reads) lines.push('', `Reads: ${report.reads.rows} child issue(s) read from the parent's list; ${report.reads.reused} settled child(ren) reused, ${report.reads.reread} read again; parent comments ${report.reads.bookmark === 'used' ? 'read from the bookmark' : report.reads.bookmark === 'full' ? 'read in full' : 'not read'}`);
   if (report.closing && !report.closing.complete) lines.push('', `Closing scan: INCOMPLETE; ${report.closing.incomplete.length} item(s) remain unread for the next pass. ${report.closing.errors.join(' ')}`.trim());
   if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
   if (report.state_branch?.events.length) lines.push('', `State branch ${report.state_branch.branch}`, ...report.state_branch.events.map(event => `- ${event.code}: ${event.text}`));
@@ -888,7 +902,8 @@ function formatInventory(result) {
 function runPasses(args, deps, out) {
   const pass = new state.RefreshBudget({ nowMs: deps.passClock || Date.now, ...(deps.refreshBudgetMs === undefined ? {} : { budgetMs: deps.refreshBudgetMs }) });
   const beat = { fn: () => {} };
-  const passDeps = { ...deps, heartbeat: () => beat.fn() };
+  const notes = new SweepNotes({ clock: pass.nowMs });
+  const passDeps = { ...deps, heartbeat: () => beat.fn(), sweepNotes: notes };
   const context = openContext(args, passDeps);
   context.pass = pass;
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
@@ -926,7 +941,15 @@ function runPasses(args, deps, out) {
         const passArgs = passes === 0 ? args : { command: 'refresh', json: args.json, 'repo-root': args['repo-root'] };
         // Later passes reuse the same store, which remembers its own writes through GitHub's read lag.
         if (passes > 0 && !args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
-        code = Math.max(code, finish(passArgs, deps, out, context));
+        const measure = Boolean(file && passArgs.command === 'refresh');
+        if (passes) notes.begin();
+        notes.file = file;
+        notes.lock = held;
+        context.sweepNotes = pass.metrics = measure ? notes : null;
+        // The read copy belongs to the lock's owner, like the notes beside it.
+        context.readCache = measure ? new ReadCache({ file, lock: held, repository: context.binding.repository, parent: context.binding.parent_issue }) : null;
+        try { code = Math.max(code, finish(passArgs, deps, out, context)); }
+        finally { if (measure) notes.saveMetrics(); }
         passes += 1;
         progress.finish();
       } while (flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
