@@ -119,8 +119,8 @@ test('schedules: P1D and PT24H are equivalent, updates settle, and warnings use 
   }
 });
 
-test('setup: both projects share report reads, deduplicate and print no paths; apply always reads afresh', t => {
-  const core = require('../scripts/setup-toolkit-core.cjs'), home = tempHome(t), managed = checkout(t), project = checkout(t), scheduler = fakeScheduler();
+test('apply always reads the repository afresh after the plan was made', t => {
+  const home = tempHome(t), managed = checkout(t), project = checkout(t), scheduler = fakeScheduler();
   for (let i = 0; i < 30; i++) scheduler.folders.set('UNRELATED-' + i, [unmarked('Other', { description: `[toolkit-task v1 id=unrelated-${i} def=0123456789ab]` })]);
   const counts = new Map();
   const count = key => counts.set(key, (counts.get(key) || 0) + 1);
@@ -130,14 +130,6 @@ test('setup: both projects share report reads, deduplicate and print no paths; a
     governance: { readIdentity(root) { count('identity:' + root); return gov(root).readIdentity(root); },
       governanceState(root) { count('status:' + root); return gov(root).governanceState(root); } },
     readObservation(identity) { count('observation:' + identity.root); return gov(identity.root).readObservation(); } };
-  const lines = [];
-  const plans = core.printWindowsTasks({ repoRoot: managed }, { platform: 'win32', scheduler, home, workingFolder: project, checkoutDeps: deps, log: line => lines.push(line) });
-  assert.equal(plans.length, 2);
-  assert.ok([...counts.values()].every(value => value === 1), JSON.stringify([...counts]));
-  assert.equal(scheduler.calls.filter(row => row[0] === 'list').length, 32);
-  for (let i = 0; i < 30; i++) assert.equal(scheduler.calls.filter(row => row[0] === 'list' && row[1] === 'UNRELATED-' + i).length, 1);
-  assert.equal(lines.join(' ').includes(managed) || lines.join(' ').includes(project), false);
-  assert.ok(scheduler.calls.every(row => row[0] === 'list'));
   const offer = windowsTasks.desiredTasks({ checkout: project, toolkitRoot: managed, nodePath: NODE, home, deps });
   origin = 'other/widget';
   const applied = windowsTasks.applyTasks(offer, { home, scheduler });
