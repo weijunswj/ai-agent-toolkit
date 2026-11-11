@@ -57,15 +57,17 @@ const { spawnSync } = require('node:child_process');
 const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
+const { SweepNotes, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
+const { ReadCache } = require('./programme-read-cache.cjs');
 const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = require('./programme-lock.cjs');
 
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
-  'inventory', 'attention', 'ack', 'dispose', 'migrate-state'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run']);
+  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment'];
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another']);
 const VALUES = new Set(['--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -106,6 +108,12 @@ function parseArgs(argv) {
     throw usage('Only the appointed controller writes programme state. Other sessions run reconcile (a dry run) or show and report to the controller; an executor the controller assigned records its work only in its own checkpoint journal (bind, then its turn-end hook).');
   }
   const needs = (condition, message) => { if (!condition) throw usage(message); };
+  if (command === 'closing-comment') {
+    needs(Boolean(args.pr) !== (args.issue !== undefined), 'closing-comment needs exactly one of --pr N or --issue N.');
+    needs(args['body-file'], 'closing-comment needs --body-file F.');
+    needs(args.pr === undefined || /^[1-9][0-9]*$/.test(args.pr) && Number.isSafeInteger(Number(args.pr)), '--pr must be a positive PR number.');
+    needs(!Object.keys(args).some(key=>!['command','pr','issue','body-file','dry-run','force-another','json','repo-root'].includes(key)), 'Unsupported closing-comment option.');
+  } else needs(args.pr === undefined && args['body-file'] === undefined && !args['force-another'], 'Closing comment options belong only to closing-comment.');
   if (command === 'show') needs(!(args.parent && args.issue !== undefined), 'show takes --parent or --issue <n>, not both.');
   if (command === 'claim') {
     needs(Boolean(args.parent) !== (args.issue !== undefined), 'claim needs --issue <n> --lane or --parent.');
@@ -165,6 +173,42 @@ const flagged = file => Boolean(file) && fs.existsSync(againFile(file));
 function setAgain(file) { fs.writeFileSync(againFile(file), `${new Date().toISOString()}\n`, { mode: 0o600 }); }
 function clearAgain(file) { try { fs.unlinkSync(againFile(file)); } catch { /* not set */ } }
 
+// Beside the lock, never inside it: a killed process leaves its last durable progress for the next
+// lock owner. Only that owner may replace or remove the note.
+class PassProgress {
+  constructor(file, lock) {
+    this.file = file ? `${file}.progress` : null;
+    this.lock = lock;
+    this.interrupted = null;
+    if (!this.file || !fs.existsSync(this.file)) return;
+    let note;
+    try { note = JSON.parse(fs.readFileSync(this.file, 'utf8')); }
+    catch { throw new ProgrammeError('PASS_PROGRESS_INVALID', 'The pass progress note is unreadable; preserve it for inspection before retrying.'); }
+    if (!note || typeof note !== 'object') throw new ProgrammeError('PASS_PROGRESS_INVALID', 'The pass progress note must be an object.');
+    const errors = [];
+    state.validatePassDiagnostics(errors, { cause: 'interrupted', phase: note.phase, done: note.done, total: note.total, started_at: note.started_at }, 'progress');
+    if (!note || Object.keys(note).some(key => !['token', 'started_at', 'phase', 'done', 'total', 'unreported'].includes(key))
+      || typeof note.token !== 'string' || !note.token || typeof note.unreported !== 'boolean' || errors.length) {
+      throw new ProgrammeError('PASS_PROGRESS_INVALID', 'The pass progress note is invalid; preserve it for inspection before retrying.');
+    }
+    if (note.unreported) this.interrupted = { cause: 'interrupted', phase: note.phase, done: note.done, total: note.total, started_at: note.started_at };
+  }
+  write(diagnostics) {
+    this.last = diagnostics;
+    if (!this.file) return;
+    if (!this.lock.owns()) throw new ProgrammeError('PASS_LOCK_LOST', 'The pass lost its lock before writing progress.');
+    // Preserve an interrupted predecessor until its finding has reached the attention document.
+    const d = this.interrupted || diagnostics;
+    const note = { token: this.lock.token, started_at: d.started_at, phase: d.phase, done: d.done, total: d.total, unreported: true };
+    const draft = `${this.file}.${this.lock.token}.draft`;
+    fs.writeFileSync(draft, `${JSON.stringify(note)}\n`, { mode: 0o600 });
+    replaceOwnedNote(draft, this.file, this.lock);
+  }
+  reported() { this.interrupted = null; if (this.last) this.write(this.last); }
+  finish() {
+    if (this.file && this.lock.owns() && !this.interrupted) fs.rmSync(this.file, { force: true });
+  }
+}
 
 function readJsonFile(file, what) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); }
@@ -212,7 +256,12 @@ function openContext(args, deps = {}) {
   const binding = deps.binding || merged || state.loadBinding(repoRoot);
   const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
   // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
-  const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (...call) => { deps.heartbeat(); return base.request(...call); } }) : base;
+  const privateRepo = `repos/${binding.store.repository.toLowerCase()}`;
+  const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (method, endpoint, body, options) => {
+    deps.heartbeat();
+    const send = requestOptions => base.request(method, endpoint, body, requestOptions);
+    return deps.sweepNotes ? deps.sweepNotes.request(method, endpoint, privateRepo, options, send) : send(options);
+  } }) : base;
   const repository = state.bindRepository({ transport, originUrl, binding });
   const version = deps.toolkitVersion === undefined ? toolkitVersion() : deps.toolkitVersion;
   const store = state.openStore({ transport, binding, now: deps.now, toolkitVersion: version, localCheckpoint: localCheckpoint(binding.repository, deps) });
@@ -295,6 +344,7 @@ function runInventory(context, parentDoc, deps = {}, deadlineMs = undefined) {
     transport: context.transport, repository: context.repository,
     parents: state.registeredParents(context.binding), catalogue: (parentDoc?.outcomes || []).map(outcome => outcome.issue),
     ...(deadlineMs ? { deadlineMs } : {}), ...(deps.inventoryClock ? { nowMs: deps.inventoryClock } : {}),
+    ...(context.pass ? { nowMs: deps.inventoryClock || context.pass.nowMs, deadlineMs: Math.max(1, Math.min(deadlineMs || state.INVENTORY_DEADLINE_MS, context.pass.left())) } : {}),
   }).run();
 }
 
@@ -448,6 +498,17 @@ function liveHead(context, child) {
   return number ? reader.pullRequest(number)?.head || null : null;
 }
 
+function makeReconciler(context) {
+  return new state.Reconciler({
+    store: context.store,
+    reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository }),
+    mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
+    binding: context.binding, writer: context.writer, toolkitVersion: context.version,
+    refreshFacts: context.writer?.by_hash === true, now: context.now,
+    pass: context.pass, readCache: context.readCache || null,
+  });
+}
+
 const commands = {
   reconcile(args, context) {
     if (args.apply) {
@@ -457,13 +518,7 @@ const commands = {
       else if (!state.isHolder(parentDoc, context.writer)) throw new ProgrammeError('STALE_WRITER', state.parentRefusal(parentDoc));
     }
     if (args.apply && args['parent-file']) throw usage('--parent-file is for dry runs only.');
-    const reconciler = new state.Reconciler({
-      store: context.store,
-      reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository }),
-      mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
-      binding: context.binding, writer: context.writer, toolkitVersion: context.version,
-      refreshFacts: context.writer?.by_hash === true, now: context.now,
-    });
+    const reconciler = makeReconciler(context);
     const parentOverride = args['parent-file'] ? readJsonFile(args['parent-file'], 'parent') : null;
     return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride, inventory: args.inventory || null });
   },
@@ -482,8 +537,10 @@ const commands = {
     }
     // Only the hash of the holder's session: enough to write as it, never to decide for it.
     context.writer = state.refreshWriter(parentDoc);
+    context.sweepNotes?.phaseAt('inventory');
     const inventory = runInventory(context, parentDoc, deps, args['deadline-ms']);
     const report = commands.reconcile({ ...args, apply: true, inventory }, context);
+    if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
     cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
     return report;
   },
@@ -730,7 +787,9 @@ const localCommands = {
 
 function formatBodyDiagnostics(d) {
   if (!d) return [];
-  const labels = { CURRENT: 'Generated CURRENT', STATE: 'Generated status or graph', TRACE: 'Generated comment trace', NAV: 'Generated navigation' };
+  if (d.cause) return [`  ${d.cause}: stopped at ${d.phase.replace(/_/g, ' ')} (${d.done} of ${d.total} done); started ${d.started_at}. Run refresh again.`];
+  if (d.reason) return [`  Archive comment: ${d.reason.replace(/_/g, ' ')}.`];
+  const labels = { CURRENT: 'Generated CURRENT', STATE: 'Generated status or graph', CONTEXT: 'Generated agent context', TRACE: 'Generated comment trace', NAV: 'Generated navigation' };
   return [`  UTF-16 units: projected ${d.projected_total}; threshold ${d.threshold}; reduce by ${d.required_reduction}.`,
     ...d.largest_sections.map(part => `  ${part.kind === 'hand_written' ? `Hand-written section ${part.section}` : labels[part.kind]}: ${part.size}`),
     `  Other sections and formatting remainder: ${d.remainder}`];
@@ -741,13 +800,15 @@ function formatReport(report) {
     `Repository ${report.repository}, parent #${report.parent_issue}; state store ${report.store.repository} ${report.store.branch} ${report.store.path} (parent revision ${report.parent_revision ?? 'none'})`,
     `${report.mode === 'apply' ? 'Apply' : 'Dry run'}: ${report.summary}`,
   ];
-  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code} #${finding.issue}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
+  if (report.findings.length) lines.push('', 'Findings', ...report.findings.flatMap(finding => [`- ${finding.code}${finding.kind ? ` ${finding.kind === 'pr' ? 'PR' : 'issue'}` : ''} #${finding.issue}: ${finding.detail}`, ...formatBodyDiagnostics(finding.diagnostics)]));
   if (report.close_list.length) lines.push('', 'Ready to close (the controller closes each closable one as completed unless a criterion is still open; the reconciler never closes)', ...report.close_list.map(entry => `- #${entry.issue}: PR #${entry.pr}, head ${entry.head.slice(0, 7)}; ${entry.gate || 'unassigned gate'} ${entry.gate_accepted ? 'acceptance recorded' : 'not accepted'}; UAT: ${entry.uat || 'not recorded'}; review: ${entry.review || 'not recorded'}${entry.accepted ? '' : '; completion not accepted'}${entry.closable ? '; closable' : ''}`));
   if (report.mode === 'apply' && report.results.length) lines.push('', 'Effects', ...report.results.map(entry => `- ${entry.outcome}: ${entry.text}${entry.detail ? ` (${entry.detail})` : ''}`));
   else if (report.effects.length) lines.push('', 'Planned effects', ...report.effects.map((effect, index) => `${index + 1}. ${effect.text}`));
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));
   if (report.holds.length) lines.push('', 'Holds', ...report.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`));
   if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
+  if (report.reads) lines.push('', `Reads: ${report.reads.rows} child issue(s) read from the parent's list; ${report.reads.reused} settled child(ren) reused, ${report.reads.reread} read again; parent comments ${report.reads.bookmark === 'used' ? 'read from the bookmark' : report.reads.bookmark === 'full' ? 'read in full' : 'not read'}`);
+  if (report.closing && !report.closing.complete) lines.push('', `Closing scan: INCOMPLETE; ${report.closing.incomplete.length} item(s) remain unread for the next pass. ${report.closing.errors.join(' ')}`.trim());
   if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
   if (report.state_branch?.events.length) lines.push('', `State branch ${report.state_branch.branch}`, ...report.state_branch.events.map(event => `- ${event.code}: ${event.text}`));
   if (report.mode === 'apply') lines.push('', `Writes: ${report.writes.state} state, ${report.writes.github} GitHub`);
@@ -762,6 +823,20 @@ const EXECUTOR_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HEL
 function main(argv = process.argv.slice(2), deps = {}) {
   const out = deps.stdout || process.stdout;
   const args = parseArgs(argv);
+  if (args.command === 'closing-comment') {
+    const repoRoot=args['repo-root'] || deps.repoRoot || process.cwd();
+    const originUrl=deps.originUrl || runGit(state.resolveExecutable('git'),repoRoot,['remote','get-url','origin']);
+    const origin=state.originSlug(originUrl);
+    if (!origin) throw new ProgrammeError('REPO_IDENTITY_MISMATCH','The origin remote must name a github.com repository.');
+    const transport=deps.transport || new state.GitHubTransport({ghPath:state.resolveExecutable('gh')});
+    const repository=state.bindRepository({transport,originUrl,binding:{repository:origin}});
+    const auth=transport.request('GET','user');
+    if (auth.status!==200 || !auth.json?.login) throw new ProgrammeError('GH_AUTH','Sign in with gh before posting a closing story.');
+    const owner=new (require('./closing-comments.cjs').ClosingComments)({transport,repository,screenSecrets:state.screenSecrets});
+    const result=owner.story({kind:args.pr ? 'pr':'issue',number:Number(args.pr || args.issue),body:fs.readFileSync(args['body-file'],'utf8'),dryRun:Boolean(args['dry-run']),force:Boolean(args['force-another'])});
+    out.write(`${JSON.stringify(result,null,2)}\n`);
+    return 0;
+  }
   const environment = deps.environment || process.env;
   const marker = EXECUTOR_MARKERS.find(name => typeof environment[name] === 'string' && environment[name] !== '');
   if (marker && isWrite(args)) {
@@ -804,7 +879,7 @@ function formatAttention(result) {
   if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
   if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
   for (const entry of result.findings) {
-    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
+    lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
     lines.push(...formatBodyDiagnostics(entry.diagnostics));
   }
   if (result.findings.length) lines.push('', 'The controller answers each new finding in this turn: fix it, or ack --finding <id>, or dispose --finding <id> --reason <text>.');
@@ -825,9 +900,12 @@ function formatInventory(result) {
 // reconcile --apply and refresh hold the repository's pass lock. The owner runs one more refresh pass
 // for each change that came in while it ran, then lets go.
 function runPasses(args, deps, out) {
+  const pass = new state.RefreshBudget({ nowMs: deps.passClock || Date.now, ...(deps.refreshBudgetMs === undefined ? {} : { budgetMs: deps.refreshBudgetMs }) });
   const beat = { fn: () => {} };
-  const passDeps = { ...deps, heartbeat: () => beat.fn() };
+  const notes = new SweepNotes({ clock: pass.nowMs });
+  const passDeps = { ...deps, heartbeat: () => beat.fn(), sweepNotes: notes };
   const context = openContext(args, passDeps);
+  context.pass = pass;
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
   let lock = takeLock(file, deps);
   if (!lock && args.command !== 'refresh') {
@@ -847,11 +925,15 @@ function runPasses(args, deps, out) {
   let passes = 0;
   while (lock) {
     const held = lock;
+    let progress;
     beat.fn = () => {
       if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', `Another pass took over the lock for ${context.binding.repository} while this one ran, so this pass stopped before its next GitHub request. The next refresh or the hourly sweep finishes the work.`);
       held.beat();
     };
     try {
+      progress = new PassProgress(file, held);
+      pass.progress = progress;
+      progress.write(pass.snapshot());
       do {
         // A pass that lost its lock before its first request must not clear a flag left for the new owner.
         beat.fn();
@@ -859,14 +941,26 @@ function runPasses(args, deps, out) {
         const passArgs = passes === 0 ? args : { command: 'refresh', json: args.json, 'repo-root': args['repo-root'] };
         // Later passes reuse the same store, which remembers its own writes through GitHub's read lag.
         if (passes > 0 && !args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
-        code = Math.max(code, finish(passArgs, deps, out, context));
+        const measure = Boolean(file && passArgs.command === 'refresh');
+        if (passes) notes.begin();
+        notes.file = file;
+        notes.lock = held;
+        context.sweepNotes = pass.metrics = measure ? notes : null;
+        // The read copy belongs to the lock's owner, like the notes beside it.
+        context.readCache = measure ? new ReadCache({ file, lock: held, repository: context.binding.repository, parent: context.binding.parent_issue }) : null;
+        try { code = Math.max(code, finish(passArgs, deps, out, context)); }
+        finally { if (measure) notes.saveMetrics(); }
         passes += 1;
-      } while (flagged(file) && passes < MAX_PASSES);
+        progress.finish();
+      } while (flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
+    } catch (error) {
+      if (held.owns()) progress?.write(pass.snapshot());
+      throw error;
     } finally {
       lock.release();
     }
     // A change can be flagged between the last check and the release: take the lock back for it.
-    lock = flagged(file) && passes < MAX_PASSES ? takeLock(file, deps) : null;
+    lock = flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS ? takeLock(file, deps) : null;
   }
   return code;
 }

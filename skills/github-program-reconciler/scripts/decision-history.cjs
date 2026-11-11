@@ -23,7 +23,7 @@
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const { resolveExecutable } = require('./resolve-executable.cjs');
-const { OTHER_COMMENTS, splitTag, groupByTag } = require('./decision-tags.cjs');
+const { OTHER_COMMENTS, splitTag, groupByTag, isArchiveComment } = require('./decision-tags.cjs');
 const { INDEX_COMMENT_MARKER } = require('./decision-trace-audit.cjs');
 
 const CONFIRMATION_TAG = 'SCOPE-CONFIRMED';
@@ -38,7 +38,7 @@ function isBot(comment) {
 
 // The declared literal prefix followed by digits, for example INT-TK421-042; never a regex.
 function recordId(text, prefix) {
-  if (!prefix) return null;
+  if (!prefix || isArchiveComment(text)) return null;
   const source = String(text || '');
   for (let at = source.indexOf(prefix); at !== -1; at = source.indexOf(prefix, at + 1)) {
     const digits = /^\d+/.exec(source.slice(at + prefix.length))?.[0];
@@ -48,6 +48,7 @@ function recordId(text, prefix) {
 }
 
 function supersededIds(text, prefix) {
+  if (isArchiveComment(text)) return [];
   return [...String(text || '').matchAll(SUPERSEDES)].map(match => (prefix ? recordId(match[1], prefix) : match[1])).filter(Boolean);
 }
 
@@ -78,7 +79,7 @@ function entriesFromComments(issue, comments, { repo = '', prefix = null } = {})
   for (const comment of comments) {
     if (isBot(comment)) { counts.bots += 1; continue; }
     const body = String(comment.body || '');
-    if (body.includes(INDEX_COMMENT_MARKER)) { counts.index_comments += 1; continue; }
+    if (!isArchiveComment(body) && body.includes(INDEX_COMMENT_MARKER)) { counts.index_comments += 1; continue; }
     const { tag, text } = splitTag(body);
     entries.push({
       issue, id: String(comment.id), tag,

@@ -1,5 +1,54 @@
 # Toolkit Changelog
 
+## 3.61.0 (Programme refresh reads only what changed)
+
+### Added
+
+- Programme refresh reads only what can have changed. One request for the parent's sub-issue list replaces a read per child, empty comment and sub-issue lists are not requested, the parent's comments are read from a bookmark, and a settled child that has not changed reuses its last comments and merged pull request. Every reused child is read in full again within twelve passes.
+- Private timing, request counts and reuse counts show where a refresh spends its budget. The refresh report has a `Reads:` line.
+
+### Fixed
+
+- Programme state documents are replaced only against the version they were read with. A read that comes back without its version id writes nothing.
+
+## 3.60.0 (Agent context comment under AGENT CONTEXT)
+
+### Changed
+
+- The programme parent's AGENT CONTEXT block now links the comment whose topic is "Agent context", and COMMENT TRACE no longer lists that comment. When more than one comment carries that topic, the block says so, names them and leaves them in COMMENT TRACE.
+
+## 3.59.1 (Show queued programme refreshes)
+
+### Fixed
+
+- The scheduled programme sweep reports a queued refresh as held and still checks attention. A run that waits behind another pass no longer reports the refresh as done.
+
+## 3.59.0
+
+### Added
+
+- A closing-story command for agents in any GitHub repository, with close-word and secret screening, duplicate protection, preview and readback.
+- Governed refresh checks recent PR and issue closes for missing stories, seeds historic watermarks quietly, and carries unread items forward within the shared pass budget. After 24 hours it appends at most 20 facts comments per pass, using the existing intent journal to prevent duplicate posts after a crash. Facts stay waiting until an agent supplies the story.
+- A portable closing-comments playbook and merge-ask pointers explaining who stays subscribed and records what shipped, verdicts and follow-ups.
+
+## 3.58.0
+
+### Added
+
+- Programme parents show managed CURRENT, PROGRAMME GRAPH, AGENT CONTEXT and COMMENT TRACE headings.
+- Large programme pages move only the needed graph rows into verified archive comments at the 55,000 safe limit, with linked Archived group counts and a shared five-comment budget per issue. Only the first exact CURRENT heading outside code fences and HTML comments migrates on first insertion (raw HTML blocks, a fence that starts on a list-marker line, a leading byte-order mark and a lone carriage return are not modelled yet); an exact adjacent CURRENT heading outside those examples and comments also migrates into an existing managed block. Recovery keeps unchanged graph parts verified read-only across logins, quietly excludes superseded parts within the bounded registry and detaches excluded, changed or missing comments without stopping redraws. Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand.
+- BODY_NEAR_LIMIT and BODY_TOO_LARGE remain visible as durable attention findings with exact section sizes, including refusals discovered while applying a redraw.
+
+## 3.57.0
+
+### Added
+
+- Programme refresh has a ten-minute budget, reserving its last two minutes to record unfinished progress and redraw CURRENT. Applying passes clear interrupted notes only from exact verified stored diagnostics in any finding state, including when no changes are planned; issue-scoped applies preserve interruptions not yet stored. Different stopped-pass diagnostics reopen answered findings, waiting counts age from when a finding last became new, ordinary effect failures hold only their scope, and unposted parent repair notices remain recoverable.
+
+### Changed
+
+- Redraw the parent programme page before its link, order and task-page queue, and batch each group's intent commits on the parent while retaining fence checks and independent read-back.
+
 ## 3.56.1
 
 ### Fixed

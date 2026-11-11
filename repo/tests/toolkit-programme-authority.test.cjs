@@ -77,8 +77,9 @@ test('a takeover during a pass stops the old writer before its next GitHub or st
   const writesAfter = github.calls.slice(takenAt).filter(call => call.method !== 'GET' && call.path !== 'graphql');
   assert.deepEqual(writesAfter.map(call => `${call.method} ${call.path}`), [], 'the old writer made no GitHub or store write after the takeover');
   // The interrupted attach is left IN_FLIGHT and the successor settles it by readback, without replay.
-  const inFlight = store.read('child', 423).doc.pending_effects;
-  assert.deepEqual(inFlight.map(effect => effect.state), ['IN_FLIGHT']);
+  const inFlight = store.read('parent', 421).doc.pending_effects;
+  assert.deepEqual(store.read('child', 423).doc.pending_effects, [], 'the parent owns the interrupted group');
+  assert.deepEqual(inFlight.map(effect => [effect.target.issue, effect.state]), CATALOGUE.map(outcome => [outcome.issue, 'IN_FLIGHT']), 'the whole attach group stays recoverable');
   const attachesBefore = github.calls.filter(call => call.method === 'POST' && call.body?.sub_issue_id === github.issues.get(423).id).length;
   const recovered = reconciler(successor).run({ apply: true });
   assert.ok(recovered.recovered.some(entry => entry.outcome === 'DONE'));
@@ -359,7 +360,8 @@ test('binding documentation scopes opt-in to the reconciler while governed issue
       assert.doesNotMatch(text, /Toolkit writes no issues, comments or records|without the binding it does nothing/i, file);
       assert.match(text, /binding does not change the Toolkit-governed rules[^\n]*or their issue records/, file);
       assert.match(text, /without that block get no governed issue writes/i, file);
-      assert.match(text, /every `programme\.cjs` command refuses without it/, file);
+      assert.match(text, /programme state commands refuse without it/i, file);
+      assert.match(text, /closing-comment.*(?:any GitHub repository|governance is off)/, file);
     }
   }
 });

@@ -269,7 +269,7 @@ test('the Programme Graph has seven columns, works out NOW, LATER and OPTIONAL, 
   ]);
   const body = state.renderParentBlockBody(parent, children, issues);
   const lines = body.split('\n');
-  assert.equal(lines[1], '## Programme Graph');
+  assert.equal(lines[1], '# PROGRAMME GRAPH');
   assert.ok(lines.includes('| Task | Task Description | Child # | PR # | Class | Status | Last updated (SGT) |'));
   assert.equal(/CORE|HARDENING/.test(body), false, 'the old classes never show');
   const rows = lines.filter(line => /^\|[^|]+\|[^|]+\|#\d+\|/.test(line)).map(line => line.slice(1, -1).split('|'));
@@ -387,8 +387,9 @@ test('the generated CURRENT summary lists work in progress, saying what waits on
   ]);
   const body = state.renderCurrentBlockBody(parent, children, new Map());
   assert.equal(body, [
+    '# CURRENT',
     '<!-- programme-current -->',
-    '_Generated from the programme state (revision 0). The Programme Graph follows; hand-written notes come after it._',
+    '_Generated from the programme state (revision 0). PROGRAMME GRAPH, AGENT CONTEXT and COMMENT TRACE follow._',
     '',
     '**In progress**',
     '- Task 1 (#1): G1, PR #541; next: Finish the sweep',

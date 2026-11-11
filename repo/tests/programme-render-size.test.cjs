@@ -21,7 +21,7 @@ test('72-row programme with four PRs per task and 106 waiting findings fits with
   assert.deepEqual(result.holds, []);
   const body = f.github.issues.get(421).body;
   t.diagnostic(`applied_total=${body.length}`);
-  const withoutBlocks = body.replace(/<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN (CURRENT|STATE|TRACE)[^]*?<!-- AI-AGENT-TOOLKIT:programme-state:END \1 -->/g, '');
+  const withoutBlocks = body.replace(/<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN (CURRENT|STATE|CONTEXT|TRACE)[^]*?<!-- AI-AGENT-TOOLKIT:programme-state:END \1 -->/g, '');
   assert.ok(withoutBlocks.replace(/\n{3,}/g, '\n\n').trim() === f.handWritten.trim(), 'keep the owner sections intact');
   assert.ok(body.length < 57000, `applied body: ${body.length}`);
   assert.match(body, /106 waiting on you/);
@@ -91,8 +91,10 @@ test('waiting preview omits absent issue numbers and distinguishes findings at d
   ].sort());
 });
 
-test('deliberately oversized programme still holds with BODY_TOO_LARGE and preserves the parent page', () => {
+test('deliberately oversized unmarked prose still holds with BODY_TOO_LARGE and preserves the parent page', () => {
   const f = renderScaleFixture(state, { count: 300 });
+  // Graph rows can now move. Immovable hand text must still exercise the original hard refusal.
+  f.github.issues.get(421).body += 'Unmarked prose. '.repeat(4000);
   const before = f.github.issues.get(421).body;
   const plan = f.reconciler.plan();
   const hold = plan.holds.find(h => h.code === 'BODY_TOO_LARGE' && h.target === '#421');

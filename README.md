@@ -4,7 +4,7 @@ Skills and working rules for AI coding agents. Toolkit installs them into Codex 
 
 **Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)
 
-**Programme reconciler:** the reconciler, its state documents, managed blocks and sub-issue links act only where the owner adds `.github/toolkit-programme.json` and the user has turned Toolkit's GitHub governance on; every `programme.cjs` command refuses without it or while governance is off. It supports github.com only, with `kind: github` as its only state store backend. The binding does not change the Toolkit-governed rules (the `TOOLKIT-GOVERNED-RULES` block in `AGENTS.md`) or their issue records. Plain folders, repositories not on github.com and repositories without that block get no governed issue writes, only the coding gates, subagents and portable skills; global rules still apply, including PRs after requested edits and task issues when the user asks to add one.
+**Programme reconciler:** the reconciler, its state documents, managed blocks and sub-issue links act only where the owner adds `.github/toolkit-programme.json` and the user has turned Toolkit's GitHub governance on; programme state commands refuse without it or while governance is off. The separate `closing-comment` command lets any agent post a story in any GitHub repository, even while governance is off, without programme state writes. It supports github.com only, with `kind: github` as its only state store backend. The binding does not change the Toolkit-governed rules (the `TOOLKIT-GOVERNED-RULES` block in `AGENTS.md`) or their issue records. Plain folders, repositories not on github.com and repositories without that block get no governed issue writes, only the coding gates, subagents and portable skills; global rules still apply, including PRs after requested edits and task issues when the user asks to add one.
 
 **Evidence custody:** the private evidence (transport) store can be any backend. It is separate from the reconciler's state store.
 
@@ -48,7 +48,7 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | [Skill Product Review](skills/skill-product-review/) | Review third-party agent skills before using or adapting them. |
 | [Local AI Safety](skills/local-ai-safety/) | Review local AI runtimes, model downloads and exposed endpoints. |
 | [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare managed services before building auth, databases or other foundations yourself. |
-| [GitHub Program Reconciler](skills/github-program-reconciler/) | Keep a GitHub programme issue and its children in step with the real PR and review state. |
+| [GitHub Program Reconciler](skills/github-program-reconciler/) | Keep programme pages, task and review state in step, with verified graph archives across logins, recovery for changed comments and visible redraw warnings. Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand. |
 | [Release Readiness Audit](skills/release-readiness-audit/) | Run a guarded release-readiness audit and fix batches. |
 | [Codex SSH Hostinger Coolify Setup Maintainer](skills/codex-ssh-hostinger-coolify-setup-maintainer/) | Set up and maintain a Hostinger VPS with Coolify, with owner approval gates. |
 | [Agent Cost Control](skills/agent-cost-control/) | Pick the cheapest model and effort for scheduled tasks, automations, non-gate helpers and spawned threads, and keep long-running threads short. |
@@ -75,7 +75,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.56.1 sha256=292d20379c1a -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.61.0 sha256=292d20379c1a -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

@@ -37,6 +37,8 @@ class FakeGitHub {
     this.nextId = 9000;
     this.fileDates = new Map();
     this.comments = new Map();
+    this.commentSequence = 0;
+    this.commentsMoveIssue = false;
     this.login = 'owner';
   }
 
@@ -65,15 +67,19 @@ class FakeGitHub {
 
   // A comment on an issue, as `login` posted it; `created_at` defaults to the fake clock.
   addComment(issue, { body, login = this.login, createdAt = this.tick(), type = 'User', association = 'OWNER' } = {}) {
-    const id = 7000000000 + this.comments.size + 1;
+    const id = 7000000000 + ++this.commentSequence;
     this.comments.set(id, { id, issue, body, login, type, association, created_at: createdAt });
+    // On GitHub a new comment moves the issue's update time. Tests of the read copy turn this on;
+    // the older fixtures were written without it.
+    const target = this.issues.get(issue);
+    if (this.commentsMoveIssue && target && Date.parse(createdAt) > Date.parse(target.updated_at)) target.updated_at = createdAt;
     return id;
   }
 
   // An issue's comments as the REST list shows them, oldest first.
   commentsOf(issue) {
     return [...this.comments.values()].filter(comment => comment.issue === issue)
-      .map(comment => ({ id: comment.id, user: { login: comment.login, type: comment.type || 'User' }, author_association: comment.association || 'OWNER', body: comment.body, created_at: comment.created_at }));
+      .map(comment => ({ id: comment.id, user: { login: comment.login, type: comment.type || 'User' }, author_association: comment.association || 'OWNER', body: comment.body, created_at: comment.created_at, updated_at: comment.updated_at || comment.created_at }));
   }
 
   // A hook runs before every call and may answer it: (call) => response | undefined.
@@ -86,7 +92,7 @@ class FakeGitHub {
     if (issue.state === 'closed' && !issue.closed_at) issue.closed_at = issue.updated_at;
     return {
       number: issue.number, id: issue.id, url: `https://api.github.com/repos/${this.repository}/issues/${issue.number}`, title: issue.title, body: issue.body, state: issue.state, state_reason: issue.state_reason || null, closed_at: issue.closed_at || null,
-      updated_at: issue.updated_at,
+      updated_at: issue.updated_at, comments: [...this.comments.values()].filter(comment => comment.issue === issue.number).length,
       parent_issue_url: issue.parent ? `https://api.github.com/repos/${this.repository}/issues/${issue.parent}` : null,
       issue_dependencies_summary: { total_blocked_by: issue.blockedBy.length },
       sub_issues_summary: { total: issue.subs.length, completed: issue.subs.filter(n => this.issues.get(n)?.state === 'closed').length },
@@ -130,9 +136,22 @@ class FakeGitHub {
     }
     if (!(match = /^repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path)) || match[1].toLowerCase() !== this.repository.toLowerCase()) return ok(404, { message: 'Not Found' });
     const rest = match[2];
-    if ((match = /^issues\/comments\/(\d+)$/.exec(rest)) && method === 'GET') {
+    if (rest === 'issues' && method === 'GET') {
+      const page = Number(params.get('page') || 1);
+      const rows = [...this.issues.values()].filter(issue => issue.state === params.get('state'))
+        .sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at) || b.number-a.number);
+      return ok(200, rows.slice((page-1)*100,page*100).map(issue=>this.issueJson(issue)));
+    }
+    if ((match = /^pulls\/(\d+)$/.exec(rest)) && method === 'GET') {
+      const pr=this.prs.get(Number(match[1]));
+      return pr ? ok(200,{number:pr.number,title:pr.title || '',body:pr.body,state:pr.merged || pr.state==='CLOSED' ? 'closed':'open',
+        closed_at:pr.closedAt || pr.mergedAt || null,merged_at:pr.mergedAt,merge_commit_sha:pr.merged ? pr.head:null,
+        user:{login:pr.author || 'fixture-owner'},head:{ref:pr.branch || '',repo:pr.headRepository===null ? null : {full_name:pr.headRepository || this.repository}}}) : ok(404,{});
+    }
+    if ((match = /^issues\/comments\/(\d+)$/.exec(rest)) && ['GET', 'PATCH'].includes(method)) {
       const comment = this.comments.get(Number(match[1]));
       if (!comment) return ok(404, { message: 'Not Found' });
+      if (method === 'PATCH') { comment.body = body.body; comment.updated_at = this.tick(); }
       return ok(200, { id: comment.id, body: comment.body, created_at: comment.created_at, user: { login: comment.login },
         issue_url: `https://api.github.com/repos/${this.repository}/issues/${comment.issue}` });
     }
@@ -154,19 +173,20 @@ class FakeGitHub {
       return ok(200, this.issueJson(issue));
     }
     if ((match = /^issues\/(\d+)\/events$/.exec(rest))) {
-      const issue = this.issues.get(Number(match[1]));
+      const issue = this.issues.get(Number(match[1])) || this.prs.get(Number(match[1]));
       const page = Number(params.get('page') || 1);
       return issue ? ok(200, (issue.events || []).slice((page - 1) * 100, page * 100)) : ok(404, {});
     }
     if ((match = /^issues\/(\d+)\/comments$/.exec(rest))) {
-      const issue = this.issues.get(Number(match[1]));
+      const issue = this.issues.get(Number(match[1])) || this.prs.get(Number(match[1]));
       if (!issue) return ok(404, { message: 'Not Found' });
       if (method === 'POST') {
         const id = this.addComment(issue.number, { body: body.body });
         return ok(201, this.commentsOf(issue.number).find(comment => comment.id === id));
       }
       const page = Number(params.get('page') || 1);
-      return ok(200, this.commentsOf(issue.number).slice((page - 1) * 100, page * 100));
+      const since = params.get('since');
+      return ok(200, this.commentsOf(issue.number).filter(comment => !since || Date.parse(comment.updated_at) >= Date.parse(since)).slice((page - 1) * 100, page * 100));
     }
     if ((match = /^issues\/(\d+)\/sub_issues$/.exec(rest))) {
       const parent = this.issues.get(Number(match[1]));
@@ -297,10 +317,13 @@ class FakeGitHub {
         return { __typename: 'PullRequest', number: value, state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
           mergeCommit: pr?.merged ? {oid:pr.head} : null, repository: { nameWithOwner: this.repository } };
       })();
-      for (const [, alias, number] of body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)) {
+      const includeClosed=/includeClosedPrs:\s*true/.test(body.query) || body.variables?.includeClosedPrs===true;
+      const fields=[...body.query.matchAll(/(i\d+): issue\(number: (\d+)\)/g)].map(([,alias,number])=>[alias,Number(number)]);
+      if (/issue\(number:\s*\$number\)/.test(body.query)) fields.push(['issue',body.variables.number]);
+      for (const [alias, number] of fields) {
         const links = this.issuePrLinks.get(Number(number)) || {};
         repository[alias] = this.issues.has(Number(number)) ? {
-          closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node) },
+          closedByPullRequestsReferences: { pageInfo: { hasNextPage: links.closingTruncated || false }, nodes: (links.closing || []).map(node).filter(pr=>includeClosed || (!pr.merged && pr.state==='OPEN')) },
           timelineItems: { pageInfo: { hasNextPage: links.timelineTruncated || (links.timeline || []).length > 100 }, nodes: (links.timeline || []).slice(0,100).map(value => ({ source: node(value) })) },
         } : null;
       }
