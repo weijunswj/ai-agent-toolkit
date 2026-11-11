@@ -14,15 +14,15 @@ const { checkClaudeArguments, helperRedefinitions, pinnedRoutes } = require('../
 const routes = pinnedRoutes('owner-claude', ROOT);
 const onRoute = role => ({ description: 'x', prompt: 'y', model: routes[role].model, effort: routes[role].effort, disallowedTools: ['Agent', 'Task'] });
 
-test('mixed selection never turns the Claude --agents checker into a cross-host reviewer launcher', () => {
-  assert.throws(() => pinnedRoutes('claude-projects-stack', ROOT), { code: 'CLAUDE_NATIVE_ROUTE_UNSUPPORTED' });
+test('a GPT stack selection never turns the Claude --agents checker into a cross-host reviewer launcher', () => {
+  assert.throws(() => pinnedRoutes('owner-gpt', ROOT), { code: 'CLAUDE_NATIVE_ROUTE_UNSUPPORTED' });
   for (const argv of [
     ['--agents', '{}'], ['--agents={}'],
     ['--agents', JSON.stringify({ 'toolkit-g0-helper': onRoute('G0') })]
-  ]) assert.throws(() => checkClaudeArguments(argv, { stack: 'claude-projects-stack', toolkitRoot: ROOT }), { code: 'CLAUDE_NATIVE_ROUTE_UNSUPPORTED' });
+  ]) assert.throws(() => checkClaudeArguments(argv, { stack: 'owner-gpt', toolkitRoot: ROOT }), { code: 'CLAUDE_NATIVE_ROUTE_UNSUPPORTED' });
   // With no helper definitions, this is only an argument check, never G2 admission.
   for (const argv of [[], ['-p', 'review', '--model', 'claude-opus-5-5']])
-    assert.deepEqual(checkClaudeArguments(argv, { stack: 'claude-projects-stack', toolkitRoot: ROOT }), { refused: false, reasons: [] });
+    assert.deepEqual(checkClaudeArguments(argv, { stack: 'owner-gpt', toolkitRoot: ROOT }), { refused: false, reasons: [] });
 });
 
 test('A14: the pinned routes come from the rendered helper definitions of the selected stack', () => {
