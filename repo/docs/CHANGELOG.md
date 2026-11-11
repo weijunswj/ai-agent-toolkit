@@ -1,17 +1,23 @@
 # Toolkit Changelog
 
-## 3.64.0 (typed commands and remove Toolkit)
+## 3.64.0 (One layout for task pages and task PRs)
 
 ### Added
 
-- **Typed commands:** `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup` and `toolkit show env`, typed as the whole message on your own computer, are matched exactly by the Codex and Claude Code prompt hooks. The agent is told which action was asked for, so `toolkit show env` always opens the editor. A phrase inside a longer message, in a relayed message or in a cloud session stays plain text, and a governance hold is unchanged. `node repo/scripts/toolkit-commands.cjs` prints the command list.
-- **Remove Toolkit from this computer:** `remove toolkit` routes to `repo/scripts/toolkit-remove.cjs`. `plan` lists every scheduled task that carries Toolkit's marker in any Task Scheduler folder, Toolkit's own task files and the Toolkit block in each global rules file, with a plan code. `apply --confirm <plan code>` removes exactly that list after the owner's OK; a list that changed removes nothing. Tasks changed by hand stay unless named, the owner's own listed tasks always stay, and no repository, key, settings file or plugin is touched.
-- **Leftover file report:** `repo/scripts/toolkit-leftover-files.cjs scan` lists files that are provably Toolkit's in GitHub checkouts whose governance is off or undecided. It reports only and never deletes.
+- Open task pages follow one fixed order: PATH, STATUS and COMMENT TRACE, then PROBLEM, FIX, IF WE SKIP, DONE WHEN and NOT IN SCOPE, then More with every other hand-written word in its original order. Older label lines and headings become the matching capital sections; the words under them do not change.
+- A copy of a task page is saved to the private state store and read back before any write that moves its hand-written text. Without the copy the page is not written.
+- Every open or draft PR that names a task gets PATH and STATUS at the top, with the gate, review at the head, UAT and release of each task it names. The PR description stays as written, and merged or closed PRs are never edited.
+- A managed block shown as an example inside a code block, quote, list item, indented code, details section or other HTML block is hand-written text on every page: it is never updated, moved or cut.
+- Where a block goes is read from the same top-level view of the page as the block search, and every block is read back before a page is written. A page whose block would not be found again is held with `MANAGED_BLOCK_BROKEN` and nothing is written to it.
+- The plan says when a page's text will move ("Lay out #<n>'s page in the fixed order"), and the result names the saved copy.
+- The task status block lists every PR found for the task, open first.
+- A page that cannot be laid out safely keeps its text in place, still gets fresh blocks, and raises the new `PAGE_LAYOUT_HELD` finding with the reason. A pass re-lays at most ten pages.
+- The new `TASK_IDLE` finding flags a task shown in progress with no open PR, no live gate assignment, no holder and no change for six hours.
 
 ### Changed
 
-- **Setup covers the computer only:** setup no longer prints a task plan for the managed checkout and the folder it was started in. The computer-wide task update under the saved approval stays, and the direct task plan still gives one repository's details.
-- **Hook pack:** context checks now also read the context a prompt hook adds.
+- The Programme Graph PR column shows one PR per row, the most recently opened one, with no count of other PRs.
+- The generated blocks on task pages carry capital headings, matching the programme page.
 
 ## 3.63.1 (Update lines only on edited posts)
 
