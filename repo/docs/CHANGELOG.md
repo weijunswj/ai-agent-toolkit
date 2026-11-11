@@ -1,23 +1,15 @@
 # Toolkit Changelog
 
-## 3.61.0 (One layout for task pages and task PRs)
+## 3.61.0 (Programme refresh reads only what changed)
 
 ### Added
 
-- Open task pages follow one fixed order: PATH, STATUS and COMMENT TRACE, then PROBLEM, FIX, IF WE SKIP, DONE WHEN and NOT IN SCOPE, then More with every other hand-written word in its original order. Older label lines and headings become the matching capital sections; the words under them do not change.
-- A copy of a task page is saved to the private state store and read back before any write that moves its hand-written text. Without the copy the page is not written.
-- Every open or draft PR that names a task gets PATH and STATUS at the top, with the gate, review at the head, UAT and release of each task it names. The PR description stays as written, and merged or closed PRs are never edited.
-- A managed block shown as an example inside a code block, quote, list item, indented code, details section or other HTML block is hand-written text on every page: it is never updated, moved or cut.
-- Where a block goes is read from the same top-level view of the page as the block search, and every block is read back before a page is written. A page whose block would not be found again is held with `MANAGED_BLOCK_BROKEN` and nothing is written to it.
-- The plan says when a page's text will move ("Lay out #<n>'s page in the fixed order"), and the result names the saved copy.
-- The task status block lists every PR found for the task, open first.
-- A page that cannot be laid out safely keeps its text in place, still gets fresh blocks, and raises the new `PAGE_LAYOUT_HELD` finding with the reason. A pass re-lays at most ten pages.
-- The new `TASK_IDLE` finding flags a task shown in progress with no open PR, no live gate assignment, no holder and no change for six hours.
+- Programme refresh reads only what can have changed. One request for the parent's sub-issue list replaces a read per child, empty comment and sub-issue lists are not requested, the parent's comments are read from a bookmark, and a settled child that has not changed reuses its last comments and merged pull request. Every reused child is read in full again within twelve passes.
+- Private timing, request counts and reuse counts show where a refresh spends its budget. The refresh report has a `Reads:` line.
 
-### Changed
+### Fixed
 
-- The Programme Graph PR column shows one PR per row, the most recently opened one, with no count of other PRs.
-- The generated blocks on task pages carry capital headings, matching the programme page.
+- Programme state documents are replaced only against the version they were read with. A read that comes back without its version id writes nothing.
 
 ## 3.60.0 (Agent context comment under AGENT CONTEXT)
 
