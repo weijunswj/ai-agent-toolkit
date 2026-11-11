@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { capturedStack } = require('./support/captured-stack-fixture.cjs');
+const { controllerText } = require('./support/controller-text.cjs');
 const { HOST_ENTRIES, createHelperRouteGuard } = require('../scripts/toolkit-v3-helper-guard.cjs');
 const { createNativeHelperAdapter, resolveClaudeNativeState, HostDialect } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
 
@@ -47,8 +48,8 @@ function manualClaudeRoot({ rootModel, rootEffort, environment = {} }) {
   } };
 }
 
-function manualProjectsStackCodexRoot({ rootModel, rootReasoning }) {
-  const captured = capturedStack('claude-projects-stack'), dispatches = [], state = hostState('codex_spawn_agent', captured);
+function manualGptStackCodexRoot({ rootModel, rootReasoning }) {
+  const captured = capturedStack('owner-gpt'), dispatches = [], state = hostState('codex_spawn_agent', captured);
   const actualRootRoute = Object.freeze({ model:rootModel, reasoning:rootReasoning });
   const adapter = createNativeHelperAdapter({ source_capture:captured.source_capture, selection:captured.selection,
     entry_id:'codex_spawn_agent', helper_identity:'ai-agent-toolkit:g1-helper', timeout_ms:50,
@@ -171,12 +172,6 @@ test('synthetic captured sources resolve every non-helper role while documented 
       DESIGN_CHALLENGE: { provider: 'anthropic', model: 'opus-5.5', reasoning: 'xhigh' },
       G2: { reviewer_id: 'opus', provider: 'anthropic', model: 'opus-5.5', reasoning: 'xhigh' },
     },
-    'claude-projects-stack': {
-      DISCOVERY: { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' },
-      BUILDER: { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'high' },
-      DESIGN_CHALLENGE: { provider: 'openai', model: 'gpt-6.1-sol', reasoning: 'xhigh' },
-      G2: { reviewer_id: 'opus', provider: 'anthropic', model: 'opus-5.5', reasoning: 'xhigh' },
-    },
   };
   const hosts = ['codex', 'claude-code'];
   const roles = ['DISCOVERY', 'BUILDER', 'DESIGN_CHALLENGE', 'G2'];
@@ -189,12 +184,8 @@ test('synthetic captured sources resolve every non-helper role while documented 
       codex: { DISCOVERY: false, BUILDER: false, DESIGN_CHALLENGE: false, G2: false },
       'claude-code': { DISCOVERY: true, BUILDER: true, DESIGN_CHALLENGE: true, G2: true },
     },
-    'claude-projects-stack': {
-      codex: { DISCOVERY: true, BUILDER: true, DESIGN_CHALLENGE: true, G2: false },
-      'claude-code': { DISCOVERY: false, BUILDER: false, DESIGN_CHALLENGE: false, G2: true },
-    },
   };
-  const controller = fs.readFileSync(path.join(ROOT, 'repo', 'CONTROLLER.md'), 'utf8');
+  const controller = controllerText();
   const gateRules = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'gate-rules.md'), 'utf8');
   const delivery = fs.readFileSync(path.join(ROOT, 'repo', 'docs', 'TOOLKIT-DELIVERY.md'), 'utf8');
 
@@ -226,9 +217,10 @@ test('synthetic captured sources resolve every non-helper role while documented 
   assert.match(gateRules, /recorded as the actual route/);
   assert.match(gateRules, /Every automation-launched .* exact pinned route/);
   assert.match(controller, /G2 has no helpers/);
-  assert.match(delivery, /does not supply automated cross-host gate launches/);
-  assert.match(delivery, /G2 is a fresh Opus xhigh session started by the gatekeeper in Claude Projects .* without helpers/);
-  assert.match(controller, /One gatekeeper per lane is a fresh session in the controller's harness at the registry GATEKEEPER route/);
+  assert.match(delivery, /ships no mixed stack and does not supply automated cross-host gate launches/);
+  assert.match(delivery, /A gatekeeper is no registry role/);
+  assert.match(controller, /One gatekeeper per lane is a fresh session in the controller's harness on the mid tier at medium effort \(`agent-cost-control`\)\. It starts gate runs/);
+  assert.doesNotMatch(controller, /GATEKEEPER/);
   assert.match(controller, /one blocking call \(no polling or progress posts\).*relays the report verbatim/);
   assert.match(controller, /never judges findings, merges, closes, takes controller authority or a gate's verdict/);
   assert.match(controller, /Every report includes a Route line naming actual model and effort/);
@@ -236,8 +228,8 @@ test('synthetic captured sources resolve every non-helper role while documented 
   assert.match(controller, /This rule supplies no launcher or hook enforcement/);
 });
 
-test('synthetic Projects stack G2 requests cannot delegate through either host guard', async () => {
-  const captured = capturedStack('claude-projects-stack'), dispatches = [];
+test('synthetic GPT stack G2 requests cannot delegate through either host guard', async () => {
+  const captured = capturedStack('owner-gpt'), dispatches = [];
   const hostCases = [
     { host: 'codex', entryId: 'codex_spawn_agent' },
     { host: 'claude-code', entryId: 'claude_parent_agent' },
@@ -247,17 +239,17 @@ test('synthetic Projects stack G2 requests cannot delegate through either host g
     const guard = createHelperRouteGuard({ entry_id: entryId, source_capture: captured.source_capture, selection: captured.selection,
       observe_host_state: () => clone(hostState(entryId, captured, 'G1')),
       controlled_dispatch: request => { dispatches.push(request); return {}; } });
-    const result = await guard.invoke({ caller_role: 'G2', profile_id: 'claude-projects-stack', registry_revision: captured.selection.registry_digest,
+    const result = await guard.invoke({ caller_role: 'G2', profile_id: 'owner-gpt', registry_revision: captured.selection.registry_digest,
       helper_role: 'BUILDER_HELPER', helper_requested: true, route_overrides: {}, session_transition: 'fresh' });
-    assert.equal(result.code, 'CALLER_CANNOT_DELEGATE', `${host}: mixed-profile G2 cannot request helpers`);
+    assert.equal(result.code, 'CALLER_CANNOT_DELEGATE', `${host}: G2 cannot request helpers`);
   }
   assert.equal(dispatches.length, 0, 'both synthetic host observations refuse before controlled dispatch');
 });
 
-test('synthetic human-opened Projects stack Codex root choices remain advisory while the helper stays exact', async () => {
+test('synthetic human-opened GPT stack Codex root choices remain advisory while the helper stays exact', async () => {
   const recommended = { provider:'openai', model:'gpt-6.1-sol', reasoning:'high' };
   for (const [rootModel, rootReasoning] of [['gpt-6.1-sol', 'low'], ['gpt-6-luna', 'max']]) {
-    const root = manualProjectsStackCodexRoot({ rootModel, rootReasoning });
+    const root = manualGptStackCodexRoot({ rootModel, rootReasoning });
     assert.deepEqual(root.captured.selection.routes.BUILDER, recommended);
     assert.deepEqual(root.actualRootRoute, { model:rootModel, reasoning:rootReasoning }, 'synthetic actual route chosen by the human');
     const result = await root.invoke();
@@ -265,4 +257,9 @@ test('synthetic human-opened Projects stack Codex root choices remain advisory w
     assert.deepEqual(root.dispatches[0].route, root.captured.selection.routes.BUILDER_HELPER,
       'the actual manually chosen root route does not loosen the pinned helper route');
   }
+});
+
+test('the cost-control ladder carries the gatekeeper tier rule', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '../../skills/agent-cost-control/SKILL.md'), 'utf8');
+  assert.match(skill, /\*\*A gatekeeper is on the ladder\.\*\* A session that only starts gate runs, waits and relays their reports is no gate: it runs at step 2 \(mid, medium\), never the small tier, and a raise needs its written reason\./);
 });
