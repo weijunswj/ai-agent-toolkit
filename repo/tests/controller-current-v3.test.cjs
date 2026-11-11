@@ -1,12 +1,13 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),test=require('node:test');
 const {capturedStack}=require('./support/captured-stack-fixture.cjs');
+const {controllerText}=require('./support/controller-text.cjs');
 const {CapturedStackBinding}=require('../scripts/toolkit-stack-selection.cjs');
-const root=path.resolve(__dirname,'../..'),document=fs.readFileSync(path.join(root,'repo/CONTROLLER.md'),'utf8');
+const root=path.resolve(__dirname,'../..'),document=controllerText();
 function current(text){assert.equal(text.includes('## Historical compatibility reference'),false,'the pre-V3 history is removed');return text;}
 
 test('current procedure resolves all concrete routes solely from captured registry and CURRENT',()=>{
- const body=current(document);assert.match(body,/canonical \[stack registry\]\(contracts\/controller-kernel\/stack-registry-v3\.json\)/);assert.match(body,/exact captured registry revision and pinned CURRENT selection/);assert.match(body,/Model, effort and reviewer choices come only from it/);
+ const body=current(document);assert.match(body,/canonical \[stack registry\]\(\.\.\/contracts\/controller-kernel\/stack-registry-v3\.json\)/);assert.match(body,/exact captured registry revision and pinned CURRENT selection/);assert.match(body,/Model, effort and reviewer choices come only from it/);
  for(const role of ['GATEKEEPER','DISCOVERY','DISCOVERY_HELPER','BUILDER','BUILDER_HELPER','DESIGN_CHALLENGE'])assert.ok(body.includes(role),role);
  const registry=JSON.parse(fs.readFileSync(path.join(root,'repo/contracts/controller-kernel/stack-registry-v3.json')));
  for(const p of Object.values(registry.profiles))for(const r of [...Object.values(p.routes),...p.reviewers])if(r)assert.equal(body.includes(r.model),false,'current Controller cannot duplicate '+r.model);

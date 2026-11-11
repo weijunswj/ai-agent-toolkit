@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { controllerText } = require('./support/controller-text.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const SKILL_REL = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
@@ -267,7 +268,7 @@ test('Projects setup relay rejects narrowed triggers, premature writes and relay
   assert.ok(playbook.indexOf('before takeover writes') < playbook.indexOf('## Journey'));
   const skill = read(SKILL_REL);
   assert.ok(skill.includes('Follow for the whole session'));
-  assert.ok(read('repo/CONTROLLER.md').includes('Routines/executors ask the owner only when the owner must act'));
+  assert.ok(controllerText().includes('Routines/executors ask the owner only when the owner must act'));
   assert.doesNotMatch(surfaces.controller + surfaces.skill, /`start_thread`\/`read_project_chat`/);
   assert.doesNotMatch(surfaces.guide, /tools include `mcp__hearthbot__start_thread` and `mcp__hearthbot__read_project_chat`/);
 });
@@ -354,7 +355,7 @@ test('Projects correction: generic step 7 is an explicit exception on every rout
 });
 
 test('Projects correction restores every rule qualifier lost in the earlier trims', () => {
-  const controller = read('repo/CONTROLLER.md');
+  const controller = controllerText();
   const skill = read(SKILL_REL);
   for (const clause of ['owns agreed Core through integration', 'need their own authority',
     'publish concise authorised progress and screened private evidence directly',
@@ -387,7 +388,7 @@ test('Projects bootstrap loads the verified skill before setup and preserves gen
     'old writer stopped with proof', 'Read it back before continuing',
     'With DISABLED or Later, record in the verified evidence store',
     'same GitHub account that posted the record']) assert.ok(journey.includes(clause), clause);
-  assert.ok(read('repo/CONTROLLER.md').includes('Continue approved scope without reapproval'));
+  assert.ok(controllerText().includes('Continue approved scope without reapproval'));
   assert.doesNotMatch(bootstrap, /work from the managed block until|once the block that carries the guidebook line arrives/);
   assertProjectsEntry(projectsEntry(), ['failure hold', 'outside appointment']);
 });
