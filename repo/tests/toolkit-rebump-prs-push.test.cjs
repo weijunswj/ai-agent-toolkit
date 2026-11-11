@@ -54,3 +54,14 @@ test('generation failure and symlink trees never reach a push', t => {
   assert.equal(linked.status, 'held'); assert.match(linked.reason, /symlinks/);
   assert.equal(f.pr().head.sha, linkHead);
 });
+
+test('a successful apply only reads GitHub, so the pull request body and its UAT line stay as written', t => {
+  const f = fixture(t); const calls = [];
+  const body = 'Change.\n\nUAT: NOT_REQUIRED (internal check only)\n';
+  const result = f.operation(true, { github: args => { calls.push(args); return JSON.stringify({ ...f.pr(), body }); } }).process({ ...f.pr(), body });
+  assert.equal(result.status, 'verified', JSON.stringify(result));
+  assert.ok(calls.length > 0);
+  for (const args of calls) assert.ok(args.length === 2 && args[0] === 'api' && /^repos\/[^?\s]+\/pulls\/\d+$/.test(args[1]), `a GitHub read only: ${args.join(' ')}`);
+  const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-rebump-prs.cjs'), 'utf8');
+  assert.deepEqual([...source.matchAll(/this\.github\(\[([^\]]*)\]\)/g)].map(match => match[1]), ["'api', endpoint", "'auth', 'status'"], 'no GitHub call but reads and the sign-in check');
+});
