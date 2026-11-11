@@ -69,6 +69,22 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // plain merge-commit CLI and connector shapes above qualify, from the store's own folder or an
 // explicitly named target from its parent. A name prefix or governance-off state grants nothing.
 //
+// The merge card (Claude Code on this computer): a tap in place of the typed line. When a merge that
+// names its repository, number and full head SHA is refused for want of an approval, in a session
+// that could record a typed one, the refusal carries one exact AskUserQuestion input: "Merge
+// owner/name#N at <7 characters>?" with the options Merge (its description names the full SHA) and
+// Not now. cardAsked (PreToolUse) notes that exact call for the session's run; cardAnswered
+// (PostToolUse) records an approval for that pull request at that full SHA when the answer the host
+// reports is Merge, and removes any unused approval for it when the answer is Not now. Nothing is
+// refused for the card's sake: a card with other wording, options, keys or a filled-in answer, a
+// call that was not noted, a typed "Other" answer, and a card in a launched, resumed or unmarked
+// session all record nothing. It prevents no new failure; the failure it must not cause is an
+// approval the owner did not give, so it trusts only what the typed route already trusts (the
+// session's start marks) plus the host's own report of the tap. Accepted gaps: a host that answers
+// the card without the user (not seen; never click a card through a UI or computer use), and the
+// same hook-feed gaps as the typed route below. Codex has no card and keeps the typed line. Cloud
+// sessions skip this hook, so a Projects card there is a written rule, not a recorded approval.
+//
 // What one approval allows: one merge, of that pull request in that repository, within a day, by any
 // session on this computer. A typed SHA pins the head commit; without one the merge must still name
 // the head it expects, so a push after that read makes GitHub refuse it. Connector auto-merge cannot
@@ -273,6 +289,16 @@ class MergeApprovals {
     const state = this.#read();
     state.approvals = state.approvals.filter(entry => !(entry.pr === approval.pr && entry.at === approval.at && entry.repository === approval.repository));
     this.#write(state);
+  }
+
+  // Removes every unused approval for this repository and number; returns how many went.
+  drop(repository, pr) {
+    const wanted = String(repository).toLowerCase();
+    const state = this.#read();
+    const kept = state.approvals.filter(entry => !(entry.pr === pr && entry.repository.toLowerCase() === wanted));
+    const dropped = state.approvals.length - kept.length;
+    if (dropped > 0) this.#write({ ...state, approvals: kept });
+    return dropped;
   }
 }
 
@@ -640,6 +666,108 @@ function standingProblem(merge, standing) {
   const other = merge.flags.filter(flag => !STANDING_FLAGS.test(flag));
   if (other.length > 0) return `adds ${other.join(', ')}`;
   return '';
+}
+
+// ---- merge card -------------------------------------------------------------------------------
+
+const CARD_TOOL = 'AskUserQuestion';
+const CARD_HEADER = 'Merge';
+const CARD_KEYS = Object.freeze(['questions', 'metadata']);
+const CARD_QUESTION = new RegExp(`^Merge (${SLUG})#([1-9]\\d{0,5}) at ([0-9a-f]{7})\\?$`);
+const CARD_MERGE = /^Merge it at commit ([0-9a-f]{40})\. Nothing else is approved\.$/;
+const CARD_NOT_NOW = 'Leave it open. Nothing is merged.';
+const CARD_LABELS = Object.freeze(['Merge', 'Not now']);
+const CARD_UNCOUNTED = `Toolkit: no merge approval was recorded from that card. It counts only as Toolkit's exact merge card, from the refusal of a merge in a chat the user started, answered by the user's own tap on Merge. ${ASK_TEXT}`;
+
+// The one AskUserQuestion input that is the merge card for a pull request at a full head SHA.
+function mergeCard(repository, pr, sha) {
+  return { questions: [{ question: `Merge ${repository}#${pr} at ${sha.slice(0, 7)}?`, header: CARD_HEADER, multiSelect: false, options: [
+    { label: CARD_LABELS[0], description: `Merge it at commit ${sha}. Nothing else is approved.` },
+    { label: CARD_LABELS[1], description: CARD_NOT_NOW },
+  ] }] };
+}
+
+// What an exact merge card asks, { repository, pr, sha, question }, or null for anything else: other
+// keys, a filled-in answer, more questions, other options or wording, or a short and a full SHA
+// that disagree.
+function cardOf(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) return null;
+  if (Object.keys(toolInput).some(key => !CARD_KEYS.includes(key))) return null;
+  const questions = toolInput.questions;
+  if (!Array.isArray(questions) || questions.length !== 1) return null;
+  const [question] = questions;
+  if (!question || typeof question !== 'object' || typeof question.question !== 'string' || question.question.length > MAX_APPROVAL_LINE) return null;
+  if (Object.keys(question).some(key => !['question', 'header', 'multiSelect', 'options'].includes(key))) return null;
+  if (question.header !== CARD_HEADER || (question.multiSelect !== undefined && question.multiSelect !== false)) return null;
+  const asked = CARD_QUESTION.exec(question.question);
+  const options = question.options;
+  if (!asked || !Array.isArray(options) || options.length !== 2) return null;
+  if (!options.every((option, index) => option && typeof option === 'object' && !Array.isArray(option)
+    && Object.keys(option).every(key => ['label', 'description'].includes(key)) && option.label === CARD_LABELS[index] && typeof option.description === 'string')) return null;
+  const full = CARD_MERGE.exec(options[0].description);
+  if (!full || options[1].description !== CARD_NOT_NOW || !full[1].startsWith(asked[3])) return null;
+  return { repository: asked[1], pr: Number(asked[2]), sha: full[1], question: question.question };
+}
+
+// What a card's note must say for its answer to count: this card, for this pull request and SHA.
+function cardMark(card) { return `merge-card ${card.repository.toLowerCase()}#${card.pr} ${card.sha}`; }
+
+// Whether this run of the session may take an approval the way a typed line does.
+function cardSession(input, environment, registryOptions, now) {
+  const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
+  if (!startedByUser(sessionChecks(sessionId, environment || {}, registryOptions, now))) return null;
+  const mark = new gate.SessionEpochs({ registryOptions, now }).get(sessionId);
+  return mark === null ? null : { sessionId, mark };
+}
+
+// PreToolUse: notes an exact merge card shown by a session that may take an approval, so the answer
+// that comes back is known to come from that call. Decides nothing and refuses nothing.
+function cardAsked(input, { environment = process.env, registryOptions = {}, now } = {}) {
+  if (String(input && input.tool_name || '') !== CARD_TOOL) return false;
+  const card = cardOf(input.tool_input);
+  const session = card && cardSession(input, environment, registryOptions, now);
+  if (!session) return false;
+  try {
+    new gate.PickerNotes({ registryOptions, now }).note(input.tool_use_id, { session_id: session.sessionId, session: session.mark, repository: cardMark(card) });
+    return true;
+  } catch { return false; }
+}
+
+// PostToolUse: the card's answer. null when the call was not a merge card; else { context } for
+// the agent, after recording the approval (Merge) or removing unused ones (Not now).
+function cardAnswered(input, { environment = process.env, registryOptions = {}, now } = {}) {
+  if (String(input && input.tool_name || '') !== CARD_TOOL) return null;
+  const response = input.tool_response && typeof input.tool_response === 'object' ? input.tool_response : {};
+  const questions = Array.isArray(response.questions) ? response.questions : [];
+  if (!questions.some(question => question && typeof question.question === 'string' && question.question.length <= MAX_APPROVAL_LINE && CARD_QUESTION.test(question.question))) return null;
+  // Taken whatever follows, so one note answers one call.
+  const noted = new gate.PickerNotes({ registryOptions, now }).take(input.tool_use_id);
+  // The card shown must still be exactly Toolkit's: changed options make the tap mean something else.
+  const shown = cardOf({ questions });
+  // Where the host also reports what was asked, that must be the same exact card.
+  const asked = input.tool_input === undefined ? shown : cardOf(input.tool_input);
+  const card = shown && asked && cardMark(shown) === cardMark(asked) ? shown : null;
+  const session = card && cardSession(input, environment, registryOptions, now);
+  const answers = response.answers && typeof response.answers === 'object' && !Array.isArray(response.answers) ? response.answers : {};
+  const label = card && Object.hasOwn(answers, card.question) ? answers[card.question] : null;
+  if (!session || noted === null || noted.session_id !== session.sessionId || noted.session !== session.mark || noted.repository !== cardMark(card) || !CARD_LABELS.includes(label)) return { context: CARD_UNCOUNTED };
+  const name = `${card.repository}#${card.pr}`;
+  const approvals = new MergeApprovals({ registryOptions, now });
+  if (label === CARD_LABELS[1]) {
+    approvals.drop(card.repository, card.pr);
+    return { context: `Toolkit: the user tapped Not now for ${name}, so no merge approval is recorded and any unused one for it is removed. Do not merge it, and do not show the card again for this commit unless the user asks.` };
+  }
+  approvals.add([{ repository: card.repository, pr: card.pr, sha: card.sha, session: session.sessionId, card: true }]);
+  return { context: `Toolkit recorded the user's tap on Merge as one approval for ${name} at ${card.sha}. Run the same merge again, naming that head commit. A new head needs a new card.` };
+}
+
+// The merge card offer added to a refusal that asks for the user's approval, when this session
+// could record one and the merge names everything the card needs; '' otherwise.
+function cardOffer(merge, input, { environment, registryOptions, now, host }) {
+  if (host !== 'claude' || !merge || merge.pr === null || typeof merge.repository !== 'string' || !new RegExp(`^${SLUG}$`).test(merge.repository)) return '';
+  if (!cardSession(input, environment, registryOptions, now)) return '';
+  if (!(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return ' To offer the user a tap card instead of typing, retry this merge naming its full 40 character head SHA.';
+  return ` In this chat the user may tap instead of typing: after the merge summary, call ${CARD_TOOL} once with exactly this input, adding no answers field, and retry this merge only after Toolkit says the tap was recorded: ${JSON.stringify(mergeCard(merge.repository, merge.pr, merge.sha.toLowerCase()))}`;
 }
 
 // The refusal for one requested merge, or the approval it uses. `standing` is the owner's standing
@@ -1080,7 +1208,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   for (const merge of merges) {
     // Preserve specific authority refusals; closure safety still precedes approval consumption.
     const { refusal, approval } = judge(merge, approvals, standing, evidence);
-    if (refusal) return refusal;
+    if (refusal) return refusal.deny.endsWith(ASK_TEXT) ? { deny: refusal.deny + cardOffer(merge, input, { environment: environment || {}, registryOptions, now, host }) } : refusal;
     if (!consume) continue;
     const call = ShellCall.from(input);
     let mergeTexts = [];
@@ -1176,5 +1304,5 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = Object.freeze({
   APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, CONNECTOR_MERGE, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError,
-  approvalsIn, check, connectorMergeArgs, decide, main, mayMerge, recordPrompt, shellMerges, standingAnswer,
+  approvalsIn, cardAnswered, cardAsked, cardOf, check, connectorMergeArgs, decide, main, mergeCard, mayMerge, recordPrompt, shellMerges, standingAnswer,
 });

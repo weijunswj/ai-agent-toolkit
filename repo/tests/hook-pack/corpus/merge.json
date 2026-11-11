@@ -1212,6 +1212,241 @@
       "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
       "expect": {"decision":"allow"},
       "status": "pass"
+    },
+    {
+      "id": "MERGE.card-tap-merge",
+      "source": "merge by card: the user's tap on Merge in their own chat approves that pull request at that head",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-tap-is-single-use",
+      "source": "merge by card: one tap is one merge",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-tap-not-now",
+      "source": "merge by card: Not now approves nothing",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Not now"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-not-now-withdraws-typed",
+      "source": "merge by card: Not now withdraws an unused typed approval for that pull request",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Not now"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-typed-other-answer",
+      "source": "merge by card: words typed into Other are not a tap",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge it"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-answer-without-card",
+      "source": "merge by card: an answer with no card shown first records nothing",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-options-swapped",
+      "source": "merge by card: a card with its options swapped records nothing",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Not now","description":"Leave it open. Nothing is merged."},{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Not now","description":"Leave it open. Nothing is merged."},{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Not now","description":"Leave it open. Nothing is merged."},{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-second-option-relabelled",
+      "source": "merge by card: Not now relabelled Merge records nothing",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Merge","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Merge","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Merge","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-answer-filled-in",
+      "source": "merge by card: a card whose caller filled in the answer records nothing",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-shown-exact-reported-altered",
+      "source": "merge by card: an exact card reported back with swapped options records nothing",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Not now","description":"Leave it open. Nothing is merged."},{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-other-head",
+      "source": "merge by card: a tap for one commit does not approve another head",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at aaaaaaa?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at aaaaaaa?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at aaaaaaa?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at aaaaaaa?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-launched-session",
+      "source": "merge by card: a session another session started cannot take a card approval",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"},"host_session":"mismatching"},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"},"host_session":"mismatching"}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-unmarked-session",
+      "source": "merge by card: a session with no start mark cannot take a card approval",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-resumed-session",
+      "source": "merge by card: a resumed chat cannot take a card approval, as it cannot take a typed one",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"},"host_session":"matching"},
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-protected-path",
+      "source": "merge by card: a pull request that changes the merge rules waits with the switch On, and the user's tap approves it",
+      "kind": "state",
+      "hosts": ["claude"],
+      "steps": [
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},"expect":{"decision":"deny"}},
+        {"payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},"expect":{"decision":"allow"}},
+        {"event":"PostToolUse","payload":{"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{".github/workflows/ci.yml":"name: ci\n"},"message":"workflow change"}]},"owner_session":true},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-ordinary-question",
+      "source": "merge by card: an ordinary question with a Merge option is never refused",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Merge the two lists or keep them apart?","header":"Lists","multiSelect":false,"options":[{"label":"Merge","description":"One list."},{"label":"Keep apart","description":"Two lists."}]}]}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.card-shown-is-never-refused",
+      "source": "merge by card: showing the card is never refused, whoever shows it",
+      "kind": "benign",
+      "hosts": ["claude"],
+      "payload": {"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merge it at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
     }
   ]
 }

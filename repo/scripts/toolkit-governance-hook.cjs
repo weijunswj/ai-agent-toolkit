@@ -7,7 +7,8 @@
 //                     keeps each "merge N" the user types, for the merge hold.
 //   PreToolUse        refuses every tool there but the card, and agent answers everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs).
-//   PostToolUse       records the answer tapped on the card (AskUserQuestion).
+//   PostToolUse       records the answer tapped on the governance card or on the merge card
+//                     (AskUserQuestion).
 //   SessionStart      adds context stating the effective governance state, exports the session's
 //                     id to its shell commands (CLAUDE_ENV_FILE), so a session an agent starts from
 //                     one of them is known not to be the user typing, and records the run's session
@@ -80,6 +81,8 @@ function respond(event, input, options = {}) {
     if (event === 'PreToolUse') {
       const decision = new gate.ToolGate(options).decide(input);
       if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
+      // Notes an exact merge card so its answer can count; it refuses nothing.
+      if (input.tool_name === 'AskUserQuestion') try { (options.mergeHold || mergeHold()).cardAsked(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now }); } catch { /* an unnoted card records nothing */ }
       const closure = closureDecision(input, options);
       if (closure.hookSpecificOutput) return closure;
       const merge = mergeDecision(input, options);
@@ -88,7 +91,9 @@ function respond(event, input, options = {}) {
     if (event === 'PostToolUse') {
       if (input.tool_name !== 'AskUserQuestion') return {};
       const picked = new gate.PromptHold(options).picked({ cwd: input.cwd, sessionId: gate.sessionIdOf(input), toolUseId: input.tool_use_id, toolResponse: input.tool_response });
-      return picked ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: picked.context } } : {};
+      if (picked) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: picked.context } };
+      const card = (options.mergeHold || mergeHold()).cardAnswered(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now });
+      return card ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: card.context } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
     gate.startSession(input, { ...options, host: 'claude-code' });
