@@ -12,6 +12,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { renderBlock } = require('../scripts/toolkit-managed-block.cjs');
 const { globalRulesBlock } = require('../scripts/toolkit-global-rules.cjs');
+const { controllerFiles } = require('./support/controller-text.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const RAISED_LIMIT = 64 * 1024;
@@ -46,9 +47,14 @@ test('each block stays inside its own budget', () => {
   assert.ok(crlfBytes(GLOBAL) <= 19400, `global block ${crlfBytes(GLOBAL)} bytes`);
   assert.ok(crlfBytes(GOVERNED) <= 4250, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
-  // CONTROLLER.md loads only for controllers, not every session; the rules audit cut it below 18000.
-  // owner-approved headroom so Takeover rule wording is not cut
-  assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 18500, 'CONTROLLER.md');
+  // CONTROLLER.md loads only for controllers, not every session. It was one file capped at 18,500
+  // bytes until its step-by-step sections moved, word for word, into the pages under
+  // repo/controller/. The core is what a controller always loads, so its cap dropped to 9,500; a
+  // page loads at its step and holds at most 5,000. A new rule goes on the page for its step.
+  assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 9500, `CONTROLLER.md ${crlfBytes(read('repo/CONTROLLER.md'))} bytes`);
+  const pages = controllerFiles().slice(1);
+  assert.equal(pages.length, 3);
+  for (const rel of pages) assert.ok(crlfBytes(read(rel)) <= 5000, `${rel} ${crlfBytes(read(rel))} bytes`);
   // The gate rules load on demand for gate sessions only, but stay compact. The cap rose from
   // 10,500 to hold the review-round rules (self-check, finding severities, narrow rechecks), then to
   // 11,750 for the hook-change merge rule (the hook test pack, revert proof and real-host smoke), then

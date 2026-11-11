@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const roles = Object.freeze(['GATEKEEPER', 'DISCOVERY', 'DISCOVERY_HELPER', 'BUILDER', 'BUILDER_HELPER', 'DESIGN_CHALLENGE']);
+const roles = Object.freeze(['DISCOVERY', 'DISCOVERY_HELPER', 'BUILDER', 'BUILDER_HELPER', 'DESIGN_CHALLENGE']);
 function reject(code) { throw Object.assign(new Error(code), { code }); }
 function compiler() { return require('./toolkit-gate-contract-compiler.cjs'); }
 function digest(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
@@ -32,7 +32,7 @@ class StackRegistrySnapshot {
     if (ref.blob_sha1 !== null && blob !== ref.blob_sha1) reject('STACK_REGISTRY_BLOB_DRIFT');
     let registry;
     try { registry = JSON.parse(bytes); } catch { reject('STACK_REGISTRY_BYTES_INVALID'); }
-    // Validate the bundled shape or a retained closed shape from a pinned legacy capture.
+    // Validate the one closed shape: exactly the two owner profiles.
     compiler().checkCoreSchema(registry, compiler().contractSchema('stack-registry-v3.schema.json'));
     for (const profile of Object.values(registry.profiles)) {
       const ids = new Set();
