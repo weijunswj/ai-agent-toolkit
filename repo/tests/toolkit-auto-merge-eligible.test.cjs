@@ -121,7 +121,7 @@ test('a section runs from its heading to the next heading of the same or a highe
 
 test('nothing in the repository still uses the old label, its workflow or its status', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-auto-merge-eligible.cjs'), 'utf8');
-  assert.deepEqual([...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map(match => match[1].trim()), ["'node:child_process'"], 'it needs nothing but Node\'s own modules');
+  assert.deepEqual([...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map(match => match[1].trim()), ["'node:fs'", "'node:path'", "'node:child_process'"], 'it needs nothing but Node\'s own modules');
   assert.equal(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'auto-merge-eligible.yml')), false, 'the label workflow is gone');
   const old = 'toolkit-owner-merge';
   for (const file of ['repo/scripts/toolkit-auto-merge-eligible.cjs', 'repo/scripts/toolkit-merge-hold.cjs', 'repo/scripts/toolkit-governance-state.cjs',
@@ -150,24 +150,24 @@ test('the CLI reads the diff with git: exit 0 eligible, 1 waits for the owner, 2
   const bump = commit('repo/contracts/toolkit-local-bridge/version.json', '{"version":"4.0.0"}\n');
   const out = [];
   const io = { cwd: root, stdout: { write: text => out.push(text) }, stderr: { write: text => out.push(text) } };
-  assert.equal(eligible.main(['--base', base, '--head', docs], io), 0);
-  assert.match(out.at(-1), /^Auto-merge: yes/);
-  assert.equal(eligible.main(['--base', docs, '--head', hook], io), 1, 'a hook waits for typed merge');
-  assert.equal(eligible.main(['--base', hook, '--head', workflow, '--json'], io), 1);
+  assert.equal(eligible.main(['--scope-only', '--base', base, '--head', docs], io), 0);
+  assert.match(out.at(-1), /^Scope only: nothing here changes the merge rules\. The UAT verdict was not read, so this grants no merge readiness/);
+  assert.equal(eligible.main(['--scope-only', '--base', docs, '--head', hook], io), 1, 'a hook waits for typed merge');
+  assert.equal(eligible.main(['--scope-only', '--base', hook, '--head', workflow, '--json'], io), 1);
   assert.deepEqual(JSON.parse(out.at(-1)).reasons, [{ path: '.github/workflows/ci.yml', why: 'a CI workflow' }]);
-  assert.equal(eligible.main(['--base', hook, '--head', workflow], io), 1);
+  assert.equal(eligible.main(['--scope-only', '--base', hook, '--head', workflow], io), 1);
   assert.match(out.at(-1), /^Waits for the owner's typed merge[\s\S]*\.github\/workflows\/ci\.yml: a CI workflow/);
-  assert.equal(eligible.main(['--base', workflow, '--head', bump], io), 0, 'a first version file is no major bump');
+  assert.equal(eligible.main(['--scope-only', '--base', workflow, '--head', bump], io), 0, 'a first version file is no major bump');
   const stamped = commit('repo/CONTROLLER.md', '<!-- AI-AGENT-TOOLKIT:x:BEGIN Y v2 toolkit=3.19.19 sha256=59b80466f009 -->\nrules\n');
   const restamped = commit('repo/CONTROLLER.md', '<!-- AI-AGENT-TOOLKIT:x:BEGIN Y v2 toolkit=3.20.0 sha256=59b80466f009 -->\nrules\n');
-  assert.equal(eligible.main(['--base', stamped, '--head', restamped], io), 0, 'the release bump\'s marker change is eligible');
+  assert.equal(eligible.main(['--scope-only', '--base', stamped, '--head', restamped], io), 0, 'the release bump\'s marker change is eligible');
   const reworded = commit('repo/CONTROLLER.md', '<!-- AI-AGENT-TOOLKIT:x:BEGIN Y v2 toolkit=3.20.0 sha256=59b80466f009 -->\nlooser rules\n');
-  assert.equal(eligible.main(['--base', restamped, '--head', reworded], io), 1, 'a rules change is not');
-  assert.equal(eligible.main(['--base', bump, '--head', stamped], io), 1, 'a new rules file is not stamp-only');
+  assert.equal(eligible.main(['--scope-only', '--base', restamped, '--head', reworded], io), 1, 'a rules change is not');
+  assert.equal(eligible.main(['--scope-only', '--base', bump, '--head', stamped], io), 1, 'a new rules file is not stamp-only');
   let previous = reworded;
   for (const file of ['repo/scripts/toolkit-local-bridge.cjs', 'repo/scripts/toolkit-codex-session-start.cjs', 'repo/scripts/toolkit-codex-session-start.ps1']) {
     const head = commit(file, 'hook entrypoint\n');
-    assert.equal(eligible.main(['--base', previous, '--head', head, '--json'], io), 1, `${file} waits for typed merge`);
+    assert.equal(eligible.main(['--scope-only', '--base', previous, '--head', head, '--json'], io), 1, `${file} waits for typed merge`);
     assert.deepEqual(JSON.parse(out.at(-1)).reasons, [{ path: file, why: 'a host hook entrypoint' }]);
     previous = head;
   }
@@ -176,24 +176,160 @@ test('the CLI reads the diff with git: exit 0 eligible, 1 waits for the owner, 2
   const skillText = approvals => `# Skill\nVersion: 2026-10-30.2\n\n## Threads\n- threads\n\n## Approvals\n- ${approvals}\n\n## Live systems\n- live\n`;
   const skillBase = commit(skill, skillText('ask first'));
   const otherSection = commit(skill, skillText('ask first').replace('- threads', '- threads, reworded').replace('30.2', '31.1'));
-  assert.equal(eligible.main(['--base', skillBase, '--head', otherSection], io), 0, 'another section of the skill');
+  assert.equal(eligible.main(['--scope-only', '--base', skillBase, '--head', otherSection], io), 0, 'another section of the skill');
   const approvals = commit(skill, skillText('merge whenever'));
-  assert.equal(eligible.main(['--base', otherSection, '--head', approvals, '--json'], io), 1, 'its Approvals section');
+  assert.equal(eligible.main(['--scope-only', '--base', otherSection, '--head', approvals, '--json'], io), 1, 'its Approvals section');
   assert.deepEqual(JSON.parse(out.at(-1)).reasons, [{ path: skill, why: 'the Projects controller skill\'s Approvals section' }]);
   const headingGone = commit(skill, skillText('merge whenever').replace('## Approvals', '## Approval'));
-  assert.equal(eligible.main(['--base', approvals, '--head', headingGone], io), 1, 'renaming the heading away counts');
+  assert.equal(eligible.main(['--scope-only', '--base', approvals, '--head', headingGone], io), 1, 'renaming the heading away counts');
   assert.equal(run(['rm', '-q', 'repo/contracts/agent-rules/global-rules.md']).status, 0);
   assert.equal(run(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'drop']).status, 0);
   const dropped = run(['rev-parse', 'HEAD']).stdout.trim();
-  assert.equal(eligible.main(['--base', headingGone, '--head', dropped, '--json'], io), 1, 'deleting the marker still gets the Toolkit list');
+  assert.equal(eligible.main(['--scope-only', '--base', headingGone, '--head', dropped, '--json'], io), 1, 'deleting the marker still gets the Toolkit list');
   assert.deepEqual(JSON.parse(out.at(-1)).reasons, [{ path: 'repo/contracts/agent-rules/global-rules.md', why: 'the agent rules on merging' }]);
-  assert.equal(eligible.main(['--base', 'nope', '--head', hook], io), 2);
-  assert.equal(eligible.main(['--base', 'f'.repeat(40), '--head', hook], io), 2);
-  assert.equal(eligible.main(['--head', hook], io), 2);
+  assert.equal(eligible.main(['--scope-only', '--base', 'nope', '--head', hook], io), 2);
+  assert.equal(eligible.main(['--scope-only', '--base', 'f'.repeat(40), '--head', hook], io), 2);
+  assert.equal(eligible.main(['--scope-only', '--head', hook], io), 2);
+  assert.equal(eligible.main(['--base', base, '--head', docs], io), 2, 'neither a body nor --scope-only: no readiness claim');
+  assert.match(out.at(-1), /--body-file/);
   // The merge hold reads the base from this folder's copy of the remote's default branch.
   assert.equal(run(['update-ref', 'refs/remotes/origin/main', docs]).status, 0);
   assert.equal(eligible.commitOf(root, 'refs/remotes/origin/main'), docs);
   assert.equal(eligible.commitOf(root, 'refs/remotes/origin/missing'), null);
   assert.equal(eligible.commitOf(root, '--all'), null, 'an option is never a ref');
   assert.equal(eligible.commitOf(root, 'HEAD; rm -rf /'), null);
+});
+
+// The UAT verdict: one hand-written line in the pull request body. One row per closure-matrix row.
+const UAT_ROWS = [
+  // [name, body, state, problem pattern]
+  ['absent', 'Fixes the thing.\n', 'absent', null],
+  ['empty body', '', 'absent', null],
+  ['not required', 'Intro\n\nUAT: NOT_REQUIRED (internal check only)\n', 'NOT_REQUIRED', null],
+  ['owner test needed', 'UAT: OWNER_TEST_NEEDED (open the report and check the totals)', 'OWNER_TEST_NEEDED', null],
+  ['passed', 'UAT: PASSED (owner OK, 11 Nov 2026, https://example.com/thread/1)', 'PASSED', null],
+  ['CRLF and trailing spaces', 'Intro\r\nUAT: NOT_REQUIRED (docs only)  \r\nMore\r\n', 'NOT_REQUIRED', null],
+  ['reason holding brackets', 'UAT: NOT_REQUIRED (covered by test (a) and test (b))', 'NOT_REQUIRED', null],
+  ['no reason', 'UAT: NOT_REQUIRED', 'invalid', /reason/],
+  ['empty reason', 'UAT: NOT_REQUIRED ()', 'invalid', /reason/],
+  ['blank reason', 'UAT: NOT_REQUIRED (   )', 'invalid', /reason/],
+  ['passed with no evidence', 'UAT: PASSED', 'invalid', /reason/],
+  ['two lines, same', 'UAT: NOT_REQUIRED (a)\nUAT: NOT_REQUIRED (a)', 'invalid', /more than one/],
+  ['two lines, different', 'UAT: NOT_REQUIRED (a)\n\nUAT: OWNER_TEST_NEEDED (b)', 'invalid', /more than one/],
+  ['unknown word', 'UAT: SKIP (no need)', 'invalid', /NOT_REQUIRED, OWNER_TEST_NEEDED or PASSED/],
+  ['a dash', 'UAT: -', 'invalid', /NOT_REQUIRED, OWNER_TEST_NEEDED or PASSED/],
+  ['lower case label', 'uat: NOT_REQUIRED (a)', 'invalid', /start of a line/],
+  ['lower case value', 'UAT: not_required (a)', 'invalid', /NOT_REQUIRED, OWNER_TEST_NEEDED or PASSED/],
+  ['bulleted', '- UAT: NOT_REQUIRED (a)', 'invalid', /start of a line/],
+  ['bold', '**UAT:** NOT_REQUIRED (a)', 'invalid', /start of a line/],
+  ['indented', '  UAT: NOT_REQUIRED (a)', 'invalid', /start of a line/],
+  ['text after the reason', 'UAT: NOT_REQUIRED (a) and more', 'invalid', /reason/],
+  ['a control character in the reason', 'UAT: NOT_REQUIRED (a\u001b[2Kb)', 'invalid', /reason/],
+  ['a tab in the reason', 'UAT: NOT_REQUIRED (a\tb)', 'invalid', /reason/],
+  ['one good line and one near miss', 'UAT: NOT_REQUIRED (a)\n- UAT: PASSED (b)', 'invalid', /more than one/],
+  ['only in a code fence', '```\nUAT: NOT_REQUIRED (a)\n```\n', 'absent', null],
+  ['only in a tilde fence', '~~~text\nUAT: NOT_REQUIRED (a)\n~~~\n', 'absent', null],
+  ['only in an unclosed fence', 'Intro\n```\nUAT: NOT_REQUIRED (a)\n', 'absent', null],
+  ['only in a quote', '> UAT: NOT_REQUIRED (a)\n', 'absent', null],
+  ['only in an HTML comment', '<!--\nUAT: NOT_REQUIRED (a)\n-->\n', 'absent', null],
+  ['only in an unclosed HTML comment', 'Intro\n<!--\nUAT: NOT_REQUIRED (a)\n', 'absent', null],
+  ['only in a Toolkit marker block', '<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.60.0 sha256=9557d29730c2 -->\n**Status**\n\nUAT: NOT_REQUIRED (a)\n- UAT: -; review: -\n<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\nBody\n', 'absent', null],
+  ['only in an unclosed Toolkit marker block', 'Body\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.60.0 sha256=9557d29730c2 -->\nUAT: NOT_REQUIRED (a)\n', 'absent', null],
+  ['a marker block then the real line', '<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.60.0 sha256=9557d29730c2 -->\n- UAT: PASSED; review: PASS\n<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\nUAT: OWNER_TEST_NEEDED (try the export)\n', 'OWNER_TEST_NEEDED', null],
+  ['a fence then the real line', '```\nUAT: PASSED (x)\n```\nUAT: NOT_REQUIRED (docs)\n', 'NOT_REQUIRED', null],
+  ['prose that mentions UAT', 'The UAT: line is described in the playbook. Owner UAT is not needed.\n', 'absent', null],
+  ['not a string', null, 'absent', null],
+];
+
+test('the UAT verdict is exactly one hand-written line; anything else is absent or invalid, never assumed', () => {
+  for (const [name, body, state, problem] of UAT_ROWS) {
+    const verdict = eligible.uatVerdict(body);
+    assert.equal(verdict.state, state, name);
+    assert.equal(verdict.ready, state === 'NOT_REQUIRED' || state === 'PASSED', name);
+    if (problem) assert.match(verdict.problem, problem, name); else assert.equal(verdict.problem, null, name);
+  }
+  assert.equal(eligible.uatVerdict('UAT: OWNER_TEST_NEEDED (try the export)').detail, 'try the export');
+  assert.equal(eligible.uatVerdict(`UAT: NOT_REQUIRED (${'x'.repeat(501)})`).state, 'invalid', 'an over-long reason');
+});
+
+test('the CLI with a pull request body: every waiting reason is named together, and only a ready verdict on an eligible scope exits 0', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-eligible-uat-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const run = args => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+  const commit = (file, text) => {
+    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    fs.writeFileSync(path.join(root, file), text);
+    assert.equal(run(['add', '-A']).status, 0);
+    assert.equal(run(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', file]).status, 0);
+    return run(['rev-parse', 'HEAD']).stdout.trim();
+  };
+  // A consumer repository: no Toolkit layout, only the general list applies.
+  assert.equal(run(['init', '-q', '-b', 'main']).status, 0);
+  const base = commit('README.md', 'a\n');
+  const docs = commit('docs/a.md', 'a\n');
+  const workflow = commit('.github/workflows/ci.yml', 'name: ci\n');
+  const out = [];
+  const io = { cwd: root, stdout: { write: text => out.push(text) }, stderr: { write: text => out.push(text) } };
+  const bodies = path.join(root, '.bodies');
+  fs.mkdirSync(bodies);
+  let count = 0;
+  const check = (scope, body, extra = []) => {
+    const file = path.join(bodies, `body-${count += 1}.md`);
+    fs.writeFileSync(file, body);
+    out.length = 0;
+    const [from, to] = scope === 'eligible' ? [base, docs] : [docs, workflow];
+    return eligible.main(['--base', from, '--head', to, '--body-file', file, ...extra], io);
+  };
+  const said = () => out.join('');
+  // [scope, body, exit, expected text patterns, forbidden text patterns]
+  const rows = [
+    ['eligible', 'Body\n', 1, [/^Missing UAT verdict/m, /not a question for the owner/], [/typed merge/, /Auto-merge: yes/]],
+    ['protected', 'Body\n', 1, [/^Missing UAT verdict/m, /^Waits for the owner's typed merge/m, /ci\.yml: a CI workflow/], [/Auto-merge: yes/]],
+    ['eligible', 'UAT: NOT_REQUIRED (docs only)\n', 0, [/^Auto-merge: yes/, /NOT_REQUIRED \(docs only\)/], [/Missing/, /typed merge/]],
+    ['protected', 'UAT: NOT_REQUIRED (docs only)\n', 1, [/^Waits for the owner's typed merge/m], [/Missing/, /UAT verdict invalid/, /Owner test needed/, /Auto-merge: yes/]],
+    ['eligible', 'UAT: NOT_REQUIRED\n', 1, [/^UAT verdict invalid/m, /reason/], [/Auto-merge: yes/, /typed merge/]],
+    ['eligible', 'UAT: OWNER_TEST_NEEDED (open the report)\n', 1, [/^Owner test needed: open the report/m], [/Auto-merge: yes/, /typed merge/]],
+    ['protected', 'UAT: OWNER_TEST_NEEDED (open the report)\n', 1, [/^Owner test needed: open the report/m, /^Waits for the owner's typed merge/m], [/Auto-merge: yes/]],
+    ['eligible', 'UAT: PASSED (owner OK, https://example.com/t/1)\n', 0, [/^Auto-merge: yes/, /PASSED/], []],
+    ['eligible', 'UAT: PASSED\n', 1, [/^UAT verdict invalid/m], [/Auto-merge: yes/]],
+    ['eligible', 'UAT: NOT_REQUIRED (a)\nUAT: PASSED (b)\n', 1, [/^UAT verdict invalid/m, /more than one/], [/Auto-merge: yes/]],
+    ['eligible', 'UAT: SKIP (a)\n', 1, [/^UAT verdict invalid/m], [/Auto-merge: yes/]],
+    ['eligible', '```\nUAT: NOT_REQUIRED (a)\n```\n', 1, [/^Missing UAT verdict/m], [/Auto-merge: yes/]],
+    ['eligible', '<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.60.0 sha256=9557d29730c2 -->\n- UAT: NOT_REQUIRED; review: PASS\n<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n', 1, [/^Missing UAT verdict/m], [/Auto-merge: yes/]],
+    ['eligible', 'uat: NOT_REQUIRED (a)\n', 1, [/^UAT verdict invalid/m], [/Auto-merge: yes/]],
+    ['eligible', 'Intro\r\nUAT: NOT_REQUIRED (a)  \r\n', 0, [/^Auto-merge: yes/], []],
+  ];
+  for (const [scope, body, exit, wanted, unwanted] of rows) {
+    const name = `${scope}: ${JSON.stringify(body)}`;
+    assert.equal(check(scope, body), exit, name);
+    for (const pattern of wanted) assert.match(said(), pattern, name);
+    for (const pattern of unwanted) assert.doesNotMatch(said(), pattern, name);
+  }
+  // --json carries both halves.
+  assert.equal(check('protected', 'Body\n', ['--json']), 1);
+  const report = JSON.parse(said());
+  assert.equal(report.ready, false);
+  assert.equal(report.eligible, false);
+  assert.equal(report.uat.state, 'absent');
+  assert.deepEqual(report.reasons, [{ path: '.github/workflows/ci.yml', why: 'a CI workflow' }]);
+  assert.equal(check('eligible', 'UAT: NOT_REQUIRED (a)\n', ['--json']), 0);
+  assert.deepEqual(JSON.parse(said()), { eligible: true, reasons: [], uat: { state: 'NOT_REQUIRED', detail: 'a', problem: null, ready: true }, ready: true });
+  // The body from standard input.
+  out.length = 0;
+  assert.equal(eligible.main(['--base', base, '--head', docs, '--body-file', '-'], { ...io, stdin: 'UAT: NOT_REQUIRED (a)\n' }), 0);
+  out.length = 0;
+  assert.equal(eligible.main(['--base', base, '--head', docs, '--body-file', '-'], { ...io, stdin: '' }), 1, 'an empty body has no verdict');
+  // Unreadable inputs make no readiness claim.
+  out.length = 0;
+  assert.equal(eligible.main(['--base', base, '--head', docs, '--body-file', path.join(bodies, 'missing.md')], io), 2);
+  assert.match(said(), /could not be read/);
+  fs.writeFileSync(path.join(bodies, 'big.md'), `UAT: NOT_REQUIRED (a)\n${'x'.repeat(256 * 1024)}`);
+  out.length = 0;
+  assert.equal(eligible.main(['--base', base, '--head', docs, '--body-file', path.join(bodies, 'big.md')], io), 2, 'an over-long body');
+  out.length = 0;
+  assert.equal(eligible.main(['--base', base, '--head', docs, '--body-file'], io), 2, 'a flag with no value');
+  out.length = 0;
+  assert.equal(eligible.main(['--base', base, '--head', docs, '--body-file', path.join(bodies, 'body-1.md'), '--scope-only'], io), 2, 'both modes at once');
+  out.length = 0;
+  assert.equal(eligible.main(['--base', 'nope', '--head', docs, '--body-file', path.join(bodies, 'body-3.md')], io), 2, 'unreadable commits');
 });

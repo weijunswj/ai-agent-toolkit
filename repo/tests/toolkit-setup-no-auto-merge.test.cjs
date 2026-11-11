@@ -54,9 +54,10 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         assert.doesNotMatch(source, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
         assert.deepEqual([...source.matchAll(/\.request\('([A-Z]+)',\s*([^)]*)\)/g)].map(match => [match[1], match[2]]), [['GET', 'apiPath']]);
         // The merge-scope check it loads starts only git, with read-only subcommands, and loads only
-        // Node's process module.
+        // Node's own modules. Its one file read is the pull request body its CLI is handed; it writes nothing.
         const scope = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-auto-merge-eligible.cjs'), 'utf8');
-        assert.deepEqual([...scope.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:child_process'"]);
+        assert.deepEqual([...scope.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:fs'", "'node:path'", "'node:child_process'"]);
+        assert.deepEqual([...new Set([...scope.matchAll(/\bfs\.(\w+)/g)].map((match) => match[1]))], ['readFileSync']);
         assert.deepEqual([...scope.matchAll(/(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(([^,]*)/g)].map((match) => match[1].trim()), ["'git'"]);
         const subcommands = new Set([...scope.matchAll(/\bgit\(cwd, \['([\w-]+)'/g)].map((match) => match[1]));
         assert.deepEqual([...subcommands].sort(), ['cat-file', 'diff', 'merge-base', 'rev-parse', 'show']);
