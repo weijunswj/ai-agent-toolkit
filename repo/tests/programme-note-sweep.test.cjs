@@ -476,6 +476,20 @@ test('a second marked area later adds a new entry and keeps the first link', () 
   assert.equal(f.github.comments.get(first.comment_id).body.includes('Second batch.'), false);
 });
 
+test('the Agent context comment and moved notes are both listed, the comment first, and a note comment never counts as context', () => {
+  const f = pageFixture(state, { count: 3, hand: HEAD + '## Archive\nAgent context\n\n---\nOld background.\n\n' + TAIL });
+  const id = f.github.addComment(12, { body: 'Agent context\n---\nBackground for agents.' });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  const [entry] = noteEntries(f);
+  assert.equal(entry.state, 'moved');
+  const link = number => `https://github.com/example.test/app/issues/12#issuecomment-${number}`;
+  assert.equal(context(f), `${state.renderContextBlockBody()}\n\n- [Agent context](${link(id)})\n\n- [${entry.title}](${link(entry.comment_id)})`);
+  assert.equal(f.page().includes('Old background.'), false);
+  const writes = f.github.mutations();
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  assert.equal(f.github.mutations(), writes);
+});
+
 test('notes share the five-comment budget after graph rows: with no slot left they wait, uncut, for the next pass', () => {
   const f = pageFixture(state, { count: 3, hand: HAND });
   const none = f.project(f.page(), 0);
