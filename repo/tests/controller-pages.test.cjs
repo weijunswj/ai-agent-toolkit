@@ -80,9 +80,16 @@ test('a page edit without the sync fails the check and names the page; --write r
   assert.equal(run(root).status, 0);
 });
 
-test('a line-ending change alone does not move a page hash', () => {
+test('a line-ending change alone does not move a page hash, and --write keeps a Windows checkout on CRLF', t => {
   assert.equal(pages.pageHash('a\r\nb\r\n'), pages.pageHash('a\nb\n'));
   assert.notEqual(pages.pageHash('a\nb\n'), pages.pageHash('a\nc\n'));
+  const root = copyOfControllerSet(t);
+  for (const rel of controllerFiles()) edit(root, rel, text => text.replace(/\r?\n/g, '\r\n'));
+  assert.equal(run(root).status, 0, 'a CRLF checkout of the same text is in step');
+  edit(root, 'repo/controller/gates.md', text => text.replace('Gate states: ACTIVE', 'Gate states: BUSY'));
+  assert.equal(run(root, '--write').status, 0);
+  const core = fs.readFileSync(path.join(root, 'repo', 'CONTROLLER.md'), 'utf8');
+  assert.equal(core.split('\r\n').length, core.split('\n').length, 'every line still ends in CRLF');
 });
 
 test('an unlisted page, a missing page and a malformed entry each fail', t => {

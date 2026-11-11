@@ -123,7 +123,12 @@ function write(root) {
     lines[entry.index] = lines[entry.index].replace(`\`${entry.hash}\``, `\`${entry.actual}\``);
     changed += 1;
   }
-  if (changed) fs.writeFileSync(path.join(root, ...CORE.split('/')), lines.join('\n'));
+  if (changed) {
+    // Keep the checkout's own line endings, so a Windows working copy is not rewritten wholesale.
+    const file = path.join(root, ...CORE.split('/'));
+    const eol = fs.readFileSync(file, 'utf8').includes('\r\n') ? '\r\n' : '\n';
+    fs.writeFileSync(file, lines.join(eol));
+  }
   return { changed, errors: check(root) };
 }
 
