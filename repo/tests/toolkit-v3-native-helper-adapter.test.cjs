@@ -28,13 +28,13 @@ function fixture(entry_id) {
   return { captured,adapter,event,route,dispatches,get state(){return state},set state(s){state=s},set observe(fn){observe=fn} };
 }
 
-function projectsStackCodexAdapterFixture() {
-  const entry_id = 'codex_spawn_agent', captured = capturedStack('claude-projects-stack'), dispatches = [];
+function gptStackCodexAdapterFixture() {
+  const entry_id = 'codex_spawn_agent', captured = capturedStack('owner-gpt'), dispatches = [];
   const helperRoute = captured.selection.routes.BUILDER_HELPER;
   const state = { state:'ready', host_version:'synthetic manual-route observation (not native qualification)',
     registration:{...HOST_ENTRIES[entry_id],registered:true,loaded:true,enabled:true},
-    session:{caller_role:'G1',profile_id:'claude-projects-stack',registry_revision:captured.selection.registry_digest,lifecycle:'fresh'},
-    routing:{profile_id:'claude-projects-stack',registry_revision:captured.selection.registry_digest,helper_role:'BUILDER_HELPER',
+    session:{caller_role:'G1',profile_id:'owner-gpt',registry_revision:captured.selection.registry_digest,lifecycle:'fresh'},
+    routing:{profile_id:'owner-gpt',registry_revision:captured.selection.registry_digest,helper_role:'BUILDER_HELPER',
       effective_route:helperRoute,native_defaults:helperRoute,
       pinned_defaults:{provider:true,model:true,reasoning:true},inherited_route:null} };
   const adapter = createNativeHelperAdapter({ source_capture:captured.source_capture, selection:captured.selection, entry_id,
@@ -46,14 +46,14 @@ function projectsStackCodexAdapterFixture() {
   return { captured, adapter, event, dispatches, get state(){return state}, set state(s){Object.assign(state,s)} };
 }
 
-function projectsStackClaudeNativeFixture(provider) {
-  const entry_id = 'claude_parent_agent', captured = capturedStack('claude-projects-stack'), helperIdentity = 'ai-agent-toolkit:g1-helper';
+function gptStackClaudeNativeFixture(provider) {
+  const entry_id = 'claude_parent_agent', captured = capturedStack('owner-gpt'), helperIdentity = 'ai-agent-toolkit:g1-helper';
   const toolInput = { subagent_type:helperIdentity };
   const binding = { helper_identity:helperIdentity,
     host_state:{ state:'ready', host_version:'synthetic Claude config observation (not native qualification)',
       registration:{...HOST_ENTRIES[entry_id],registered:true,loaded:true,enabled:true},
-      session:{caller_role:'G1',profile_id:'claude-projects-stack',registry_revision:captured.selection.registry_digest,lifecycle:'fresh'},
-      routing:{profile_id:'claude-projects-stack',registry_revision:captured.selection.registry_digest,helper_role:'BUILDER_HELPER',
+      session:{caller_role:'G1',profile_id:'owner-gpt',registry_revision:captured.selection.registry_digest,lifecycle:'fresh'},
+      routing:{profile_id:'owner-gpt',registry_revision:captured.selection.registry_digest,helper_role:'BUILDER_HELPER',
         effective_route:captured.selection.routes.BUILDER_HELPER,native_defaults:captured.selection.routes.BUILDER_HELPER,
         pinned_defaults:{provider:true,model:true,reasoning:true},inherited_route:null} },
     native_config:{loaded_agent:helperIdentity,mods_present:false,provider,parent_model:'claude-opus-5-5',
@@ -253,8 +253,6 @@ test('synthetic captured profiles resolve exact helper definitions only on match
     { profile: 'owner-gpt', host: 'claude-code', supported: false },
     { profile: 'owner-claude', host: 'codex', supported: false },
     { profile: 'owner-claude', host: 'claude-code', supported: true },
-    { profile: 'claude-projects-stack', host: 'codex', supported: true },
-    { profile: 'claude-projects-stack', host: 'claude-code', supported: false },
   ];
 
   for (const { profile, host, supported } of profileHostCases) for (const callerRole of ['G0', 'G1']) {
@@ -291,21 +289,21 @@ test('synthetic captured profiles resolve exact helper definitions only on match
   }
 });
 
-test('synthetic Projects stack adapter enforces the captured Codex helper route and refuses profile or digest drift', async () => {
-  const accepted = projectsStackCodexAdapterFixture();
+test('synthetic GPT stack adapter enforces the captured Codex helper route and refuses profile or digest drift', async () => {
+  const accepted = gptStackCodexAdapterFixture();
   const allowed = await accepted.adapter.invoke(accepted.event);
   assert.equal(allowed.decision, 'ALLOW', allowed.code);
   assert.deepEqual(accepted.dispatches[0].route, accepted.captured.selection.routes.BUILDER_HELPER);
 
   const driftCases = [
-    ['observed profile', state => { state.session.profile_id = 'owner-gpt'; state.routing.profile_id = 'owner-gpt'; }],
+    ['observed profile', state => { state.session.profile_id = 'owner-claude'; state.routing.profile_id = 'owner-claude'; }],
     ['observed capture digest', state => {
       state.session.registry_revision = '0'.repeat(64);
       state.routing.registry_revision = '0'.repeat(64);
     }],
   ];
   for (const [label, mutate] of driftCases) {
-    const f = projectsStackCodexAdapterFixture();
+    const f = gptStackCodexAdapterFixture();
     const state = clone(f.state);
     mutate(state);
     f.state = state;
@@ -315,13 +313,13 @@ test('synthetic Projects stack adapter enforces the captured Codex helper route 
     assert.equal(f.dispatches.length, 0, `${label}: refuse before dispatch`);
   }
 
-  const claude = projectsStackClaudeNativeFixture('anthropic');
+  const claude = gptStackClaudeNativeFixture('anthropic');
   const claudeRoute = await claude.invoke();
   assert.equal(claudeRoute.decision, 'DENY', claudeRoute.code);
   assert.equal(claudeRoute.code, 'ROUTE_MISMATCH', 'the native observer reconstructs the effective Anthropic route');
-  assert.equal(claude.dispatches.length, 0, 'Claude Code must refuse the captured mixed OpenAI helper route');
+  assert.equal(claude.dispatches.length, 0, 'Claude Code must refuse the captured OpenAI helper route');
 
-  const forgedProvider = projectsStackClaudeNativeFixture('openai');
+  const forgedProvider = gptStackClaudeNativeFixture('openai');
   const unverified = await forgedProvider.invoke();
   assert.equal(unverified.decision, 'DENY', unverified.code);
   assert.equal(unverified.code, 'CLAUDE_EFFECTIVE_CONFIG_UNVERIFIED');

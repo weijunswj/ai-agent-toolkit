@@ -113,7 +113,7 @@ function reviewerCardinalityContract(text, registry) {
 
 test('documented reviewer cardinalities are derived from the pinned registry', () => {
   const registry = JSON.parse(read('repo/contracts/controller-kernel/stack-registry-v3.json'));
-  assert.deepEqual(Object.keys(registry.profiles).map(id => registry.profiles[id].reviewers.length), [1, 1, 1]);
+  assert.deepEqual(Object.keys(registry.profiles).map(id => registry.profiles[id].reviewers.length), [1, 1]);
   for (const rel of ['repo/contracts/source-of-truth-contract.md', 'README.md']) reviewerCardinalityContract(read(rel), registry);
   const stale = read('repo/contracts/source-of-truth-contract.md').replace('currently contain one member each', 'currently contain two and one members');
   assert.throws(() => reviewerCardinalityContract(stale, registry));
@@ -138,8 +138,7 @@ test('every documented profile row projects the registry routes and complete rev
     assert.deepEqual(profile.routes.DISCOVERY, profile.routes.BUILDER);
     assert.deepEqual(profile.routes.DISCOVERY_HELPER, profile.routes.BUILDER_HELPER);
     assert.equal(profile.reviewers.length, 1);
-    const gatekeeper = profile.routes.GATEKEEPER ? label(profile.routes.GATEKEEPER) : 'None';
-    const expected = `| \`${id}\` | ${gatekeeper} | ${label(profile.routes.DISCOVERY)} | ${label(profile.routes.DISCOVERY_HELPER)} | ${label(profile.routes.DESIGN_CHALLENGE)} | One ${label(profile.reviewers[0])} review |`;
+    const expected = `| \`${id}\` | ${label(profile.routes.DISCOVERY)} | ${label(profile.routes.DISCOVERY_HELPER)} | ${label(profile.routes.DESIGN_CHALLENGE)} | One ${label(profile.reviewers[0])} review |`;
     assert.equal(rows.filter(row => row === expected).length, 1, expected);
   }
 });

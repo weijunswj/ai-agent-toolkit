@@ -18,6 +18,7 @@ Every automation and every non-gate worker starts on the cheapest model and effo
 - **Medium is the floor.** Never pick the lowest effort a host offers; it skips checks on multi-step work. Where "medium" does not exist, use the closest setting above the lowest.
 - **Set both, every time:** the model tier and the effort, in the place the host reads them (table below). A host with no effort setting gets the model alone and a note in the task saying "effort: not settable here".
 - **Gates are outside the ladder.** G0, G1, G2, reviewers and the helpers a G0 or G1 lead launches keep the models, effort and routes their gate rules pin.
+- **A gatekeeper is on the ladder.** A session that only starts gate runs, waits and relays their reports is no gate: it runs at step 2 (mid, medium), never the small tier, and a raise needs its written reason.
 
 ## Raising and lowering
 
