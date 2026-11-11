@@ -42,6 +42,10 @@ const ACCEPTED = [
   ['a generated block ends it', old + state.renderBlock('x', '3.57.0', 'TRACE') + '\n', old],
   ['a rule after a blank line is not a heading', old + 'Text.\n\n---\n\n## Next\n', old + 'Text.\n\n---\n\n'],
   ['a table rule is not a heading', old + '| a |\n|---|\n| b |\n\n## Next\n', old + '| a |\n|---|\n| b |\n\n'],
+  // Controls for the shapes refused below: the same markup at level three, or inside a code block.
+  ['an HTML level three heading stays inside', old + '<h3>Detail</h3>\n\n## Next\n', old + '<h3>Detail</h3>\n\n'],
+  ['a quoted level three heading stays inside', old + '> ### Quoted\n\n## Next\n', old + '> ### Quoted\n\n'],
+  ['an HTML heading inside a code block stays inside', old + '```html\n<h2>Sample</h2>\n```\n\n## Next\n', old + '```html\n<h2>Sample</h2>\n```\n\n'],
 ];
 const REFUSED = [
   ['two_markers', old + '## Archive\nMore\n'],
@@ -76,6 +80,16 @@ const REFUSED = [
   ['ambiguous_markup', old + 'Text <!-- open\n## Risks\nKeep.\n-->\n'],
   ['ambiguous_markup', old + '- x\n  ```\n\nTail\n\n## Risks\nx\n'],
   ['ambiguous_markup', old + '> ```\n> code\n\n## Risks\n'],
+  // Level one or two headings GitHub draws that the line reader does not model. Each would otherwise
+  // carry the unmarked section under it off the page.
+  ['ambiguous_markup', old + 'Use `<details>` to fold.\n\n## Current plan\nNever marked.\n\nClose with `</details>`.\n\n## Risks\n'],
+  ['ambiguous_markup', old + '<h2>Current plan</h2>\nNever marked.\n\n## Risks\n'],
+  ['ambiguous_markup', old + '<H1 class="x">Current plan</H1>\nNever marked.\n\n## Risks\n'],
+  ['ambiguous_markup', old + '> ## Current plan\n> Never marked.\n\n## Risks\n'],
+  ['ambiguous_markup', old + '>## Current plan\n\n## Risks\n'],
+  ['ambiguous_markup', old + '- ## Current plan\n\n## Risks\n'],
+  ['ambiguous_markup', old + '1. # Current plan\n\n## Risks\n'],
+  ['ambiguous_markup', 'Close with `</details>`.\n\n' + old],
   ['underlined_heading', old + 'Current plan\n===\nKeep.\n'],
   ['underlined_heading', old + 'Current plan\n---\nKeep.\n'],
   ['control_character', '## Archive\nA\rB\n'],
@@ -483,6 +497,33 @@ test('a moved note whose comment later changes or disappears keeps its link, rai
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
     assert.equal(f.posts().length, 1);
     assert.deepEqual(untrusted(f), [first]);
+  }
+});
+
+test('two damaged notes from different saved copies: the one finding points to the copies folder and names neither file alone', () => {
+  for (const together of [true, false]) {
+    const f = pageFixture(state, { count: 3, hand: HAND });
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    f.github.issues.get(12).body = f.page().replace('## Current plan\n', '## Archive\nSecond batch.\n\n## Current plan\n');
+    f.github.issues.get(12).updated_at = f.github.tick();
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    const [first, second] = noteEntries(f);
+    assert.notEqual(first.copy, second.copy);
+    damage(f, first, 'changed');
+    if (!together) {
+      assert.deepEqual(f.make().run({ apply: true }).holds, []);
+      assert.deepEqual(untrusted(f).map(found => found.diagnostics), [{ reason: 'changed', copy: first.copy }]);
+    }
+    damage(f, second, 'missing');
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(untrusted(f).length, 1);
+    assert.equal(untrusted(f)[0].diagnostics.copy, undefined, 'no single copy is named for two notes');
+    const text = state.findingText(untrusted(f)[0]);
+    assert.match(text, /page-copies/);
+    assert.equal(text.includes(first.copy) || text.includes(second.copy), false);
+    for (const entry of [first, second]) assert.ok(f.github.files.has(`state/page-copies/issue-12/${entry.copy}.md`));
+    assert.deepEqual(state.validateParent(f.parent()), []);
+    assert.equal(f.posts().length, 2); assert.equal(f.edits().length, 0);
   }
 });
 

@@ -657,7 +657,7 @@ const NOTE_REASON_TEXT = Object.freeze({
   open_fence: 'a code block under it is not closed',
   open_comment: 'an HTML comment under it is not closed',
   open_html: 'a folded section or raw HTML block under it is not closed, or is closed without being opened',
-  ambiguous_markup: 'a heading under it sits in markup that can be read two ways',
+  ambiguous_markup: 'a heading under it sits in markup that can be read two ways, is an HTML heading tag, or sits in a quote or a list; or a folded-section tag is named in inline code',
   underlined_heading: 'a heading under it is written by underlining; write it with `#` marks, or put a blank line above the rule',
   control_character: 'the page holds a character GitHub reads differently (a lone carriage return, a leading byte-order mark, a null or a line separator)',
   link_definition_split: 'a link definition under it is still used by text that stays on the page',
@@ -5003,6 +5003,11 @@ class Reconciler {
       }
       // Reconcile the registry even on issue-scoped redraws; these writes never edit comments.
       let registryChanged = false;
+      // One open finding covers every damaged archive comment on the page. It names a saved page
+      // copy only while every damaged note it covers came from that same copy; otherwise it points
+      // to the page-copies folder, so no note's copy goes unnamed.
+      const reportedCopies = new Set(openFindings(parentDoc.attention).filter(entry => entry.code === 'ARCHIVE_COMMENT_UNTRUSTED' && entry.issue === parentNumber)
+        .map(entry => entry.diagnostics?.copy || ''));
       for (const entry of parentDoc.page_archive || []) {
         if (!entry.comment_id || entry.state === 'withdrawn') continue;
         if (entry.kind === 'note' && entry.state === 'moved') {
@@ -5015,7 +5020,8 @@ class Reconciler {
           if (!reported && listed && listed.user?.login === entry.login && archiveTools().digest(listed.body) === entry.digest) continue;
           const reason = reported ? null : this.archiveTrust(entry).reason;
           if (!reported && !reason) continue;
-          const diagnostics = reason ? { reason, copy: entry.copy } : null;
+          if (reason) reportedCopies.add(entry.copy);
+          const diagnostics = reason ? { reason, ...(reportedCopies.size === 1 ? { copy: entry.copy } : {}) } : null;
           if (snapshot.next.noteKeys.includes(entry.key)) {
             // The owner put the same notes back under the marker (as the saved copy holds them):
             // the damaged comment is let go and a fresh one is posted for them on this full pass.

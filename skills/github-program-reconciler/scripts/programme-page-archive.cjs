@@ -37,6 +37,13 @@ const STRICT_FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const LOOSE_FENCE = /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t>]+)*(`{3,}|~{3,})(.*)$/;
 const RAW_TAGS = ['pre', 'script', 'style', 'textarea'];
 const DEFINITION = /^ {0,3}\[([^\]\n]+)\]:[ \t]*\S/;
+// Level one or two headings GitHub draws that this line reader does not model: an HTML heading tag,
+// and a `#` heading behind block quote or list markers.
+const HTML_HEADING = /<h[12](?=[\s>/])/i;
+const CONTAINED_HEADING = /^ {0,3}(?:(?:>[ \t]?)|(?:[-*+]|\d{1,9}[.)])[ \t]+)+[ \t]*#{1,2}(?:[ \t]|$)/;
+// A tag the reader counts, on a line that also holds inline code: the tag may be only a name in the
+// code, so the count, and every fold or raw-block decision built on it, is in doubt.
+const COUNTED_TAG = /<\/?(?:details|pre|script|style|textarea)(?=[\s>/])/i;
 
 function sourceLines(text) {
   const lines = [];
@@ -129,7 +136,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
   const everywhere = () => readers.every(([state]) => inside(state));
   const nowhere = () => readers.every(([state]) => !inside(state));
   const neutral = () => nowhere() && depth.strict === 0 && depth.loose === 0 && raw === 0;
-  let markers = 0, nested = false, managed = false, start = -1, end = -1, reason = null, stray = false, previous = null;
+  let markers = 0, nested = false, managed = false, start = -1, end = -1, reason = null, stray = false, previous = null, codeTag = false;
   const seams = [];
   const fail = why => { reason ||= why; };
   const close = at => {
@@ -158,6 +165,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
     } else if (open) {
       // Inside a code block or comment by every reading, or inside a folded section by both counts.
       const skipped = everywhere() || nowhere() && depth.strict > 0 && depth.loose > 0 && raw === 0;
+      if (!everywhere() && (HTML_HEADING.test(line.text) || CONTAINED_HEADING.test(line.text))) fail('ambiguous_markup');
       if (/^ {0,3}#{1,2}(?:[ \t]|$)/.test(line.text)) {
         if (plain) { close(line.start); }
         else if (!skipped) fail('ambiguous_markup');
@@ -169,6 +177,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
       }
     }
     const hidden = inside(strict);
+    if (end === -1 && !everywhere() && line.text.includes('`') && COUNTED_TAG.test(line.text)) codeTag = true;
     for (const [state, mode] of readers) advance(state, line.text, mode);
     const opens = count(line.text, /<details(?=[\s>])/gi), closes = count(line.text, /<\/details\s*>/gi);
     if (!hidden && !inside(strict)) depth.strict += opens - closes;
@@ -187,6 +196,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
   if (text.charCodeAt(0) === 0xFEFF || /\r(?!\n)/.test(text)) return { kind: 'unsafe', reason: 'control_character' };
   if (nested || start === -1) return { kind: 'unsafe', reason: 'marker_nested' };
   if (reason) return { kind: 'unsafe', reason };
+  if (codeTag) return { kind: 'unsafe', reason: 'ambiguous_markup' };
   const area = text.slice(start, end);
   if (/\r(?!\n)|\u0000|\u2028|\u2029|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(area)) return { kind: 'unsafe', reason: 'control_character' };
   // Link definitions: one that leaves with the area must not be needed by what stays, and one that
