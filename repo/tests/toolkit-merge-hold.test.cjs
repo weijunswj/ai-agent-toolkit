@@ -798,6 +798,27 @@ test('an approval is recorded only in a session the user started', (t) => {
   assert.equal(typed(ctx, 'merge owner/b#618', { cwd: ctx.root }), 1, 'a named repository outside one');
 });
 
+test('a launch that only mentions branch upkeep passes; any other merge wording still refuses it', (t) => {
+  const ctx = context(t);
+  const upkeep = [
+    'claude -p "git merge origin/main into the branch and run the tests"',
+    'codex exec "git merge origin/main into the branch and run the tests"',
+    'claude -p "Merge commits only, no force-push. Fix the merge conflicts in README.md."',
+    'codex exec "Use a merge commit; find the merge-base with git merge-base HEAD origin/main"',
+    'npx @anthropic-ai/claude-code -p "git merge --no-ff origin/main"',
+  ];
+  for (const command of upkeep) assert.equal(decide(ctx, bash(ctx.repo, command)), null, command);
+  const guarded = [
+    'claude -p "git merge origin/main then merge 618"',
+    'codex exec "git merge origin/main then gh pr merge 5"',
+    'claude -p "approve the merge"',
+    'claude -p "merge commits only; ok to merge #618"',
+    'codex exec "resolve the merge conflicts, then gh pr merge 5 --merge"',
+    'claude -p "merge the pull request"',
+  ];
+  for (const command of guarded) assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /must not approve a merge/, command);
+});
+
 test('agent routes that could make an approval are refused', (t) => {
   const ctx = context(t);
   const forging = [

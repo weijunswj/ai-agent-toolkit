@@ -1212,6 +1212,60 @@
       "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
       "expect": {"decision":"allow"},
       "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-git-merge-claude",
+      "source": "note 15b: a launch that mentions only branch upkeep is not a pull request merge",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"claude -p \"git merge origin/main into the branch and run the tests\""}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-git-merge-codex",
+      "source": "note 15b: a launch that mentions only branch upkeep is not a pull request merge",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"codex exec \"git merge origin/main into the branch and run the tests\""}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-commits-conflicts",
+      "source": "note 15b: a launch that mentions only branch upkeep is not a pull request merge",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"claude -p \"Merge commits only, no force-push. Fix the merge conflicts in README.md.\""}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-then-pr-merge",
+      "source": "note 15b: pull request merge wording next to branch upkeep still refuses the launch",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"codex exec \"git merge origin/main then gh pr merge 5\""}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-then-approval",
+      "source": "note 15b: pull request merge wording next to branch upkeep still refuses the launch",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"claude -p \"merge commits only; ok to merge #618\""}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-plain-merge",
+      "source": "note 15b: pull request merge wording next to branch upkeep still refuses the launch",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"claude -p \"merge 618\""}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
     }
   ]
 }
