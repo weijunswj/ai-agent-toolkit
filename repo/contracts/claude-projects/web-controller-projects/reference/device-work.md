@@ -1,6 +1,6 @@
 # Web Controller for Claude Projects: device work
 
-Reference for the `web-controller-projects` skill, opened before the coordinator starts a local Remote Control thread, moves device evidence, writes outward text from the cloud or runs a recovery sweep. The skill's precedence, style and approvals apply; where this file and the skill differ, the skill wins. A bold section name, such as **Hourly nudge**, names a section of the skill.
+Reference for the `web-controller-projects` skill, opened before the coordinator starts a local Remote Control thread, moves device evidence, writes outward text from the cloud, sees a device go offline or runs a recovery sweep. The skill's precedence, style and approvals apply; where this file and the skill differ, the skill wins. A bold section name, such as **Hourly nudge**, names a section of the skill.
 
 ## Device and cloud writes
 - **Read back outward text written from the cloud.** A cloud write path may alter what it sends, for example by appending a footer or changing link formatting. Diff PR bodies, comments and commit messages against what was sent; evidence files pushed to a Git store need no diff. If it was altered, repair it once through another path. If that is altered too, route that kind of write through local rc and record the limit in project memory.
@@ -8,6 +8,13 @@ Reference for the `web-controller-projects` skill, opened before the coordinator
 - **Make the GitHub repository first, then clone it.** Before preparing a local Remote Control lane, make its GitHub repository and clone that remote. Never run `git init` in a local scratch folder before its remote exists. Until then, use a plain folder or an already-decided repository's ignored `.tmp/` folder.
 - **Batch device writes behind one typed line.** Auto mode on the device blocks writes approved only by relay. Group a local Remote Control thread's writes into one step, and give the user the exact line to type in that thread before it starts, not after it trips.
 - **Move device evidence through the shared folder.** A local Remote Control thread copies evidence it produced to the project's shared folder, and cloud archives it to the transport store once, at gate end (in a Git store the commit is the manifest and a push plus one fetch the read-back). If a cloud write path is refused (for example, pushes limited to a session branch), say so once and use the next path that works.
+
+## Offline alert
+Used by **Remote Control wake** in the skill when a device that unfinished local rc lanes run on is not reachable.
+- **Ping in the turn you see it.** When a wake, a `remote_control_status` read, `list_devices` or an hourly nudge report shows an unfinished local rc lane waiting for a device that is not reachable, post the ask under **Device offline is an owner ask** in `reference/owner-asks.md` in that same turn. Never wait for the owner to notice. Finished, superseded and resolved lanes need no ping.
+- **Offline is not parked.** A parked lane's device is reachable and the lane only needs the owner to type in it: that is **Recovery sweep**. An offline device cannot be reached at all, so typing in the thread does nothing until the device is back. Say which one you observed; if the status read failed or the inventory is incomplete, say "could not be checked", never "offline".
+- **One entry per outage.** Keep one entry for the outage in the existing promise list: the device, the observation time, the affected lanes and the post link. A repeated observation of the same outage posts nothing new; the hourly reminder carries it under **Waiting on you** until the device is back. A lane that drops later in the same outage joins the entry. After context loss or uncertain posting, reconcile chat before posting again.
+- **Back online.** When current status shows the device reachable again, add one "back online" line under **Update**, mark the entry done and run **Recovery sweep**, because its lanes are usually parked. A gap in reports or a successful task run alone is not proof that the device is back.
 
 ## Recovery sweep
 Used by **Remote Control wake** in the skill once work can run again after an interruption.

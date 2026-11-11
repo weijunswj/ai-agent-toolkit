@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-11-09.1
+Version: 2026-11-11.1
 
 Run Toolkit repos through Claude Projects. Global rules and coding gates apply everywhere; GitHub governance (issues, records, decision traces, evidence custody) only to ENABLED github.com repos. Keep project facts in project memory; durable work state in the branch, PR and programme comments or evidence store, mirrored in memory, never only there.
 
@@ -155,7 +155,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - Gates run as fresh sessions per `CONTROLLER.md`'s run standard; the coordinator and non-gate threads coordinate and relay, never take over a gate's verdict.
 - Local rc threads follow the managed block and `CONTROLLER.md` scratch location and cleanup rule.
 - Local sessions sharing one checkout must not clash. Nothing switches branches, edits or deletes while another session uses that checkout. Give each lane its own checkout per the Toolkit rule, or wait.
-- **Remote Control wake.** A local rc thread can stay parked after a usage-limit pause, sleep or restart; only the owner typing in it wakes it. Arm a `send_later` check after starting one; on it and your first wake after an interruption, follow **Recovery sweep** in `reference/device-work.md`.
+- **Remote Control wake.** A local rc thread can stay parked after a usage-limit pause, sleep or restart; only the owner typing in it wakes it. Arm a `send_later` check after starting one; on it and your first wake after an interruption, follow **Offline alert** and **Recovery sweep** in `reference/device-work.md`.
 - Local Remote Control threads can't receive file uploads; describe the upload in text instead.
 - Cloud threads, when used for code, push only to their own branch.
 
