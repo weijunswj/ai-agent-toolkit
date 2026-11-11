@@ -1,21 +1,18 @@
 # Toolkit Changelog
 
-## 3.62.0 (one-time permission blocks and checked cleanup)
+## 3.62.0 (UAT verdict on every pull request)
 
 ### Added
 
-- **`toolkit permissions`:** `repo/scripts/toolkit-permissions.cjs` prints two paste-once blocks so Toolkit's own reversible commands stop asking each time. The computer block covers the programme commands that keep records in step, the scheduled-task commands and the cleanup command. The repository block covers pull request and issue comments and the evidence store push; merges are never in a block. It only prints and checks; the owner pastes. `--check <file>` reports missing and stale lines, and `--format allowed-tools` prints the same lines for a single launch.
-- **`toolkit cleanup`:** `repo/scripts/toolkit-cleanup.cjs plan|apply` removes Toolkit scratch only: finished worktrees, temp files under the scratch folders and local branches already merged into the default branch. It reads the evidence store back first and prints one line saying what it cleaned and what it kept.
-- **Start a recorded scheduled task:** `repo/scripts/toolkit-windows-tasks.cjs start --task <id>` runs one Toolkit-owned task now, and refuses tasks Toolkit does not own or the owner stopped.
+- Every pull request body now carries one `UAT:` line that says whether the owner has to test the change: `UAT: NOT_REQUIRED (reason)`, `UAT: OWNER_TEST_NEEDED (what the owner tries)` or `UAT: PASSED (the owner's OK)`. The plan proposes it, the builder writes it and the reviewer confirms it. The portable Git completion playbook holds the format.
+- The task auto-merge check reads that line: `toolkit-auto-merge-eligible.cjs --base <SHA> --head <SHA> --body-file <file>`. A pull request with no line, a malformed line or an owner test still open now exits 1 and names the reason (`Missing UAT verdict`, `UAT verdict invalid`, `Owner test needed`) together with any merge-rule path, so a finished pull request no longer waits in silence for an answer nobody was asked for.
+- The hourly nudge and the daily check-in list a ready pull request with no `UAT:` line as `missing UAT verdict`.
 
 ### Changed
 
-- **Safety gates:** the hard stop on saved permission rules now names the printed blocks as the supported route. Agents still never write host settings or rule files.
-- **Merge authority:** changes to the permission and cleanup scripts wait for a typed merge.
-
-### Not included
-
-- Claiming a controller seat, removing or adopting tasks, repairs, closing issues, deleting remote branches, force pushes, settings edits and secrets stay outside every block and keep asking.
+- The check no longer answers when it is called with neither `--body-file` nor `--scope-only`: it exits 2 with its usage, so an older habit cannot read a scope-only pass as merge readiness. `--scope-only` keeps the previous scope report and says it grants no readiness. The merge hold is unchanged and still checks scope only.
+- The check reads a saved body safely. It reads UTF-8 and UTF-16 with a byte order mark (what Windows PowerShell 5.1 writes for `> file`) and exits 2 for any other bytes, so a wrongly saved body is never reported as a missing line. A line dressed up to look like a UAT line (invisible characters, unusual spaces, look-alike letters, a bullet, a heading, or a spot beside an HTML comment) counts as a line and makes the verdict invalid. It is never skipped. The playbook says how to save the body on Windows.
+- A missing or invalid line goes back to the gate that owns the pull request and is never turned into a question for the owner. Only the owner's own answer turns `OWNER_TEST_NEEDED` into `PASSED`.
 
 ## 3.61.0 (Programme refresh reads only what changed)
 
