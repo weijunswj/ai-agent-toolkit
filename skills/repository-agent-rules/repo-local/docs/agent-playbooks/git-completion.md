@@ -15,3 +15,24 @@ Use this for requested repo edits that should be committed, pushed, opened as a 
 - If checks are pending, failed, or inaccessible, report the exact state and next useful command.
 
 Keep the PR body aligned with the full branch diff when you can update it directly.
+
+## UAT Line
+
+Every pull request body carries exactly one line that says whether the owner has to test the change. It starts at the beginning of a line, with no bullet, bold or quote:
+
+```text
+UAT: NOT_REQUIRED (why the owner has nothing to try)
+UAT: OWNER_TEST_NEEDED (the one thing the owner tries, in plain words)
+UAT: PASSED (the owner's OK: a link or a date)
+```
+
+- **Who writes it:** the plan proposes the verdict, the builder writes the line when the pull request opens, and the reviewer confirms it against the change. A wrong verdict is a blocking review finding.
+- **Owner tests:** use `OWNER_TEST_NEEDED` only for a step the owner runs on the finished product. Only the owner's own answer turns it into `PASSED`; the controller makes that edit and puts the owner's OK in the brackets. A builder never writes `PASSED`.
+- **No line is not a verdict.** A missing or invalid line is never read as `NOT_REQUIRED`, and neither is a risk tier, a label or a green check. It goes back to whoever owns the pull request to add or correct, and it is never turned into a question for the owner.
+- **The check:** before a merge, save the body as GitHub has it now and run `node <Toolkit>/repo/scripts/toolkit-auto-merge-eligible.cjs --base <base SHA> --head <head SHA> --body-file <file>` from the repository's folder (`<Toolkit>` is the installed Toolkit copy; `-` reads the body from standard input). Exit 0 needs `NOT_REQUIRED` or `PASSED`. Any other state exits 1 and names the reason: `Missing UAT verdict`, `UAT verdict invalid` or `Owner test needed`. Exit 2 means the body or the commits could not be read, so there is no answer yet.
+- **Saving the body on Windows:** pipe it straight in, `gh pr view <number> --json body --jq .body | node <Toolkit>/repo/scripts/toolkit-auto-merge-eligible.cjs --base <base SHA> --head <head SHA> --body-file -`, or save it as UTF-8. Windows PowerShell 5.1 saves `> file` as UTF-16 with a byte order mark; the check reads that too. A file in any other encoding exits 2 and is saved again; it is never treated as a missing line.
+- **A yes counts only when it names the verdict:** the answer reads `Auto-merge: yes` and names the UAT verdict it read. A copy of the check from before this rule ignores `--body-file` and says yes on the merge scope alone; that answer proves nothing, so update the Toolkit copy and run it again.
+- **Rebumps:** a version-only rebump never edits the body, so the line stays. A source change after the verdict gets the usual delta review, which confirms the line again.
+- **What is not read:** lines inside code fences, quotes and HTML comments that start a line. Toolkit's generated status line (`- UAT: <state>; review: <state>`) inside a generated block is set aside too; only the hand-written line counts for the check.
+- **What makes the line invalid:** anything else that looks like a UAT line counts as one, so a second one makes the verdict invalid. That covers a line dressed as a bullet, a numbered item, a heading, bold or italic, a line with invisible characters, unusual spaces or look-alike letters, and a line beside an HTML comment that starts in the middle of a line. Retype the line with plain characters on a line of its own.
+- The line is evidence for the check. It grants no merge authority.
