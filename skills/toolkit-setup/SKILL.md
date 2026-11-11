@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit update scheduled task` for fixed scheduled tasks on this computer. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
+description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit update scheduled task` for fixed scheduled tasks on this computer, `toolkit permissions` for the paste-once permission blocks and `toolkit cleanup` for rebuildable scraps. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
 ---
 
 
@@ -17,6 +17,20 @@ Bridge setup, repo auto-update, sync, audit, disable, and troubleshooting are To
 For `toolkit update scheduled task`, resolve the managed Toolkit checkout and run `node <Toolkit>/repo/scripts/toolkit-update-scheduled-task.cjs` for the plan, then `--apply` within the requested scope. The updater reuses the existing task planner and approved repair path. It lists recorded cloud and Projects tasks for the coordinator and never changes cloud triggers.
 
 Exit 23 returns questions for the host's question UI: Codex's picker, Claude Code's `AskUserQuestion`, or the Projects decision card. Ask the displayed approval, hand-edit or computer-ownership question with its choices and scope; never supply your own answer. Resume with `--answers <file>` containing the actual answers keyed by question id, each with its original `answer_ref` and the supplied observation where present. A typed question is a last fallback when the host has no question UI. The setup bank's Windows scheduled task row uses this same UI-first route and saves the same dated approval. New task kinds and hand-edited tasks ask again. Saved approval never clears a native permission block, includes no cloud triggers and never reactivates an owner stop.
+
+## Permission blocks
+
+For `toolkit permissions`, resolve the managed Toolkit checkout and run `node "<Toolkit>/repo/scripts/toolkit-permissions.cjs"`. It prints two blocks and writes nothing: a computer block for the app's user settings (Toolkit's own reversible commands, each pinned to the managed checkout's full path and one subcommand, naming no repository) and, inside a repository with Toolkit governance on, a repo block for that repository's local settings (comments, merges the merge hold still checks, and the evidence store push when `--store <folder>` names its checkout). `--host codex` prints the Codex rule files instead. `--check <settings file>` lists missing and stale lines and changes nothing.
+
+Show the printed text to the owner and stop there. The owner pastes a block; you never write, merge or edit it into a settings or rules file, by any route (safety-gates playbook). A `Stopped: ... Next: ...` line says which part was left out and why. After the managed checkout moves, the owner pastes a fresh block.
+
+Write each allowed command exactly as its line shows, one command per call: `node`, then the script's full path in forward slashes inside double quotes, then the subcommand. A different spelling, a `cd` in front or two commands joined together does not match a line, so the app asks again.
+
+## Cleanup
+
+For `toolkit cleanup`, run `node "<Toolkit>/repo/scripts/toolkit-cleanup.cjs" plan` (read-only) or `apply`, naming your own scraps with `--path`, a merged local branch with `--branch`, or `--stale` for scraps untouched for 7 days. It removes only rebuildable scraps inside a scratch root (the repository's `.tmp/`, the Toolkit user-state temp folder, or a folder named `ai-agent-toolkit-<name>` in the OS temp folder): a registered worktree that is clean, unlocked and fully on a remote, and plain files and folders with no link and no Git checkout inside. In a repository with an evidence store, `apply` first reads the store back (`--store <folder>`: clean and fully pushed); when that fails it deletes nothing and says why.
+
+Archive what must be kept first, then clean up at the end of the task and report the one `cleaned:` line. Everything listed as kept or refused needs the owner: ask, never delete it another way. The command never deletes a remote branch, a branch that is not fully in the default branch, anything outside the scratch roots, or a task or setting.
 
 ## Platform Split
 

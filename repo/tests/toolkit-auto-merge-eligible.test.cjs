@@ -26,6 +26,7 @@ test('merge-authority paths and a major bump wait for the owner; everything else
     'repo/scripts/toolkit-repository-identity.cjs', 'repo/scripts/toolkit-user-state.cjs', 'repo/scripts/toolkit-governance-proposal.cjs', 'repo/contracts/agent-rules/toolkit-governed-rules.md',
     'repo/docs/agent-playbooks/safety-gates.md',
     'skills/repository-agent-rules/repo-local/docs/agent-playbooks/safety-gates.md',
+    'repo/scripts/toolkit-permissions.cjs', 'repo/scripts/toolkit-cleanup.cjs',
   ];
   for (const file of authority) {
     const result = verdict(['repo/docs/README.md', file]);
