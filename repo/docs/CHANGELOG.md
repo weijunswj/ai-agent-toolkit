@@ -1,13 +1,15 @@
 # Toolkit Changelog
 
-## 3.61.0 (Controller core plus pages)
+## 3.61.0 (Programme refresh reads only what changed)
 
-### Changed
+### Added
 
-- Split `repo/CONTROLLER.md` into a small core that every controller always loads and three pages under `repo/controller/` that are read at the step they cover: roles and routes, gates, and evidence, progress and finish. Every rule moved word for word; only the relative link paths inside the pages changed.
-- The core's new Pages section lists each page with a short hash of its content, so a page change also changes the core file and one bound CONTROLLER.md blob still covers every rule. `node repo/scripts/sync-controller-pages.cjs --write` refreshes the hashes, and the check fails on a stale hash, an unlisted or missing page, a rule with two homes or a broken link.
-- Lowered the core's size budget from 18,500 to 9,500 bytes and gave each page a 5,000-byte budget.
-- The pages are RISKY and always need the owner's merge OK, like the core, and both plugin setups check them in the installed copy.
+- Programme refresh reads only what can have changed. One request for the parent's sub-issue list replaces a read per child, empty comment and sub-issue lists are not requested, the parent's comments are read from a bookmark, and a settled child that has not changed reuses its last comments and merged pull request. Every reused child is read in full again within twelve passes.
+- Private timing, request counts and reuse counts show where a refresh spends its budget. The refresh report has a `Reads:` line.
+
+### Fixed
+
+- Programme state documents are replaced only against the version they were read with. A read that comes back without its version id writes nothing.
 
 ## 3.60.0 (Agent context comment under AGENT CONTEXT)
 

@@ -187,7 +187,14 @@ test('closure matrix: partial, incomplete, newer-version and failed readback pas
     if (mode === 'incomplete') options.inventory = { complete: false, findings: [], issues: [], reason: 'deadline' };
     if (mode === 'newer') fx.github.issues.get(12).body += state.renderBlock('new', '9.9.9');
     if (mode === 'broken-other') fx.github.issues.get(13).body = '<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.9.0 sha256=000000000000 -->';
-    if (mode === 'missing-other') fx.github.intercept(call => call.method === 'GET' && call.path === 'repos/acme/app/issues/13' ? { status: 404, json: {} } : undefined);
+    // The parent's list no longer shows the child as a usable issue, and its own read fails.
+    if (mode === 'missing-other') fx.github.intercept(call => {
+      if (call.method !== 'GET') return undefined;
+      if (call.path === 'repos/acme/app/issues/13') return { status: 404, json: {} };
+      if (!call.path.startsWith('repos/acme/app/issues/12/sub_issues')) return undefined;
+      const listed = fx.github.route(call.method, call.path, call.body);
+      return { status: listed.status, json: listed.json.map(row => row.number === 13 ? { number: row.number, id: row.id } : row) };
+    });
     if (mode === 'discovery') fx.github.issuePrLinks.set(13, { timelineTruncated: true });
     if (mode === 'readback') fx.github.intercept(call => call.method === 'PATCH' && /issues\/12$/.test(call.path) ? { status: 500, json: {} } : undefined);
     const report = fx.reconciler.run({ apply: true, ...options });
