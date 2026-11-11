@@ -194,7 +194,7 @@ test('an evidence store a binding names and a scratch clone in an ignored .tmp f
   };
   const store = clone(path.join(scratch, 'store'), 'toolkit-test-fixture/store');
   const scratchClone = clone(path.join(app, '.tmp', 'library'), 'toolkit-test-fixture/library');
-  const held = clone(path.join(scratch, 'held'), 'toolkit-test-fixture/undecided');
+  const held = clone(path.join(scratch, 'undecided'), 'toolkit-test-fixture/undecided');
   support.recordAbsent(held);
   for (const cwd of [store, scratchClone]) {
     const prompt = run({ hook_event_name: 'UserPromptSubmit', cwd, prompt: 'list the files here' });
@@ -204,7 +204,9 @@ test('an evidence store a binding names and a scratch clone in an ignored .tmp f
     const reach = run({ tool_name: 'exec_command', hook_event_name: 'PreToolUse', cwd: app, tool_input: { cmd: `git -C "${cwd}" status`, workdir: app } });
     assert.deepEqual([reach.status, reach.output], [0, {}], `reach ${cwd}`);
   }
-  assert.equal(run({ hook_event_name: 'UserPromptSubmit', cwd: held, prompt: 'list the files here' }).status, 2, 'an undecided repository is still held');
+  const undecided = run({ hook_event_name: 'UserPromptSubmit', cwd: held, prompt: 'list the files here' });
+  assert.equal(undecided.status, 0, 'an undecided repository is not held either');
+  assert.match(JSON.stringify(undecided.output), /no governance decision yet, so it counts as off/, 'but it is told apart from the store and the scratch clone');
   // The refused shape from a Claude Code session, as Codex sends it: the store named through a variable.
   const push = run({ tool_name: 'exec_command', hook_event_name: 'PreToolUse', cwd: app, tool_input: { cmd: `$d = '${store}'; git -C $d push origin HEAD:main`, workdir: app } });
   assert.doesNotMatch(push.stderr + JSON.stringify(push.output), /default branch `main`/);

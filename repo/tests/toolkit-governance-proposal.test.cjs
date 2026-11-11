@@ -81,7 +81,8 @@ test('conflicting proposals require the owner choice, never newest wins', t => {
 test('unavailable discovery continues ordinary work and grants no decision or merge authority', t => {
   const f = fixture(t, { list() { throw Error('offline'); } });
   assert.equal(f.owner.refresh(f.cwd).ok, false);
-  assert.equal(new gate.GovernanceGate(f.options).evaluate(f.cwd).hold, false);
+  const unavailable = new gate.GovernanceGate(f.options).evaluate(f.cwd);
+  assert.deepEqual([unavailable.open, unavailable.reason], [false, 'unavailable'], 'no question is asked while GitHub cannot be read');
   assert.match(f.owner.pending(f.cwd).text, /couldn't check/);
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).programme_records_bind, false);
 });
@@ -92,18 +93,24 @@ test('merged repository decision beats an opposite pending proposal and historic
   seedMerged(f.cwd, 'enable', f.options);
   const state = governance.governanceState(f.cwd, f.registryOptions);
   assert.equal(state.state, 'ENABLED');
-  assert.equal(new gate.GovernanceGate(f.options).evaluate(f.cwd).hold, false);
+  assert.deepEqual([new gate.GovernanceGate(f.options).evaluate(f.cwd).open, new gate.GovernanceGate(f.options).evaluate(f.cwd).reason], [false, 'decided']);
   assert.equal(fs.readFileSync(f.registryPath, 'utf8'), '{damaged');
 });
-test('later is same run only; concurrent chat does not invalidate accepted provenance', t => {
+test('being asked is same run only; a concurrent chat is asked itself and does not invalidate the first', t => {
   const f = fixture(t), options = { registryOptions: f.registryOptions, environment: {} };
   gate.startSession({ cwd: f.cwd, session_id: 'owner', source: 'startup' }, options);
   const hold = new gate.PromptHold(options);
-  assert.equal(hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Do this work' }).action, 'block');
+  const first = hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Do this work' });
+  assert.equal(first.action, 'pass');
+  assert.match(first.context, /Turn on GitHub governance/);
   gate.startSession({ cwd: f.cwd, session_id: 'other', source: 'startup' }, options);
-  assert.equal(hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'later' }).action, 'pass');
-  assert.equal(new gate.GovernanceGate(options).evaluate(f.cwd, { sessionId: 'owner' }).hold, false);
-  assert.equal(new gate.GovernanceGate(options).evaluate(f.cwd, { sessionId: 'other' }).hold, true);
+  const later = hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'later' });
+  assert.equal(later.action, 'pass');
+  assert.match(later.context, / ANSWER [0-9a-f]{32}\n/, 'the other chat starting does not cost the owner their reply');
+  assert.equal(new gate.GovernanceGate(options).evaluate(f.cwd, { sessionId: 'owner' }).reason, 'asked');
+  assert.equal(new gate.GovernanceGate(options).evaluate(f.cwd, { sessionId: 'other' }).reason, 'undecided');
+  assert.equal(hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'toolkit governance disable' }).action, 'pass');
+  assert.equal(new gate.GovernanceGate(options).evaluate(f.cwd, { sessionId: 'owner' }).reason, 'pending');
 });
 test('hostile proposal metadata and answer shapes never pass validation', t => {
   const f = fixture(t);
@@ -282,11 +289,14 @@ test('first yes goes from the owner prompt through discovery and real publicatio
   const options = { registryOptions: f.registryOptions, environment: {}, proposalTransport: github.transport };
   gate.startSession({ cwd: f.cwd, session_id: 'owner', source: 'startup' }, options);
   const hold = new gate.PromptHold(options);
-  assert.equal(hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Do this work' }).action, 'block');
-  const answer = hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'yes' });
-  assert.equal(answer.action, 'pass');
-  assert.match(answer.context, /governance discover/);
-  assert.match(answer.context, /repository-agent-rules/);
+  assert.equal(hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Do this work' }).action, 'pass');
+  // The owner's "yes" reaches the agent with a reply ticket; recording it starts the adoption.
+  const reply = hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'yes' });
+  assert.equal(reply.action, 'pass');
+  const answer = hold.answerTicket((/ ANSWER ([0-9a-f]{32})\n/.exec(reply.context) || [])[1], 'yes');
+  assert.equal(answer.ok, true, answer.text);
+  assert.match(answer.text, /governance discover/);
+  assert.match(answer.text, /repository-agent-rules/);
   const epoch = new gate.SessionEpochs(options).get('owner');
   const pending = f.owner.pending(f.cwd, { sessionId: 'owner', epoch });
   const stdout = [], stderr = [];
@@ -339,13 +349,13 @@ test('first yes goes from the owner prompt through discovery and real publicatio
   assert.match(gate.sessionLine(f.cwd, options), /Follow.*TOOLKIT-GOVERNED-RULES/);
 });
 
-for (const permission of ['write', 'read-only', 'unavailable']) test(`startup permission ${permission}: only a verified writer holds for a decision`, t => {
+for (const permission of ['write', 'read-only', 'unavailable']) test(`startup permission ${permission}: only a verified writer is asked for a decision`, t => {
   const f = fixture(t);
   const transport = { canWrite() { if (permission === 'unavailable') throw Error('no login'); return permission === 'write'; }, list: () => [] };
   const options = { registryOptions: f.registryOptions, environment: {}, proposalTransport: transport };
   gate.startSession({ cwd: f.cwd, session_id: 'owner', source: 'startup' }, options);
   const verdict = new gate.GovernanceGate(options).evaluate(f.cwd, { sessionId: 'owner' });
-  assert.equal(verdict.hold, permission === 'write');
+  assert.equal(verdict.open, permission === 'write');
   assert.equal(verdict.state.programme_records_bind, false);
   if (permission === 'read-only') {
     assert.match(gate.sessionLine(f.cwd, options), /account cannot write/);
@@ -374,7 +384,8 @@ for (const closed of ['merged', 'unmerged']) test(`next prompt after ${closed} c
   assert.equal(refreshes, 1);
   assert.equal(reads, initialReads + 1, 'prompt reads only the known PR state');
   assert.ok(!JSON.stringify(result).includes('merge this pull request now'));
-  assert.equal(result.action, closed === 'merged' ? 'pass' : 'block');
+  assert.equal(result.action, 'pass', 'nothing is held either way');
+  assert.equal(String(result.context).includes('no governance decision yet, so it counts as off'), closed === 'unmerged', 'closed without merging: undecided again, and the agent is told so');
   assert.equal(f.owner.pending(f.cwd, run), null);
 });
 
