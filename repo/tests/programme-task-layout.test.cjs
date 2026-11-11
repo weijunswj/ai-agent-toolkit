@@ -121,6 +121,15 @@ test('text inside code, lists, quotes and details is never taken for a heading',
   assert.equal(afterBlocks(result.body), `\n\n# More\n\n${page}`);
 });
 
+test('a comment that runs over several lines hides headings until it ends, at either end form', () => {
+  for (const end of ['-->', '--!>']) {
+    const page = `Lead.\n\n<!-- note\n# PROBLEM\nstill a comment ${end}\n\n# FIX\n\nReal.\n`;
+    const result = lay(page);
+    assert.deepEqual(result.sections, ['FIX'], end);
+    assert.equal(afterBlocks(result.body), `\n\n# FIX\n\nReal.\n\n# More\n\nLead.\n\n<!-- note\n# PROBLEM\nstill a comment ${end}\n`, end);
+  }
+});
+
 test('a section runs to the next section; a heading of the same or a higher level that is not a section ends it', () => {
   const result = lay('## The problem\n\nA.\n\n### Detail\n\nStill the problem.\n\n## Other heading\n\nNot the problem.\n');
   assert.equal(afterBlocks(result.body), '\n\n# PROBLEM\n\nA.\n\n### Detail\n\nStill the problem.\n\n# More\n\n## Other heading\n\nNot the problem.\n');

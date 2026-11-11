@@ -30,6 +30,9 @@ const normalLabel = text => text.trim().replace(/[:.]$/, '').trim().toUpperCase(
 
 // Every line with its offsets, and whether it is top-level Markdown. Text inside code fences,
 // lists, quotes, indented code, HTML blocks and details is never read as a heading or a marker.
+// An HTML comment ends at `-->`, and browsers also end it at `--!>`.
+const COMMENT_END = /--!?>/;
+
 function markdownLines(source) {
   const result = [];
   let fence = null, html = null, listIndent = 0;
@@ -79,8 +82,8 @@ function markdownLines(source) {
     if (literal) {
       const until = new RegExp(`</${literal[1]}\\s*>`, 'i');
       if (!until.test(text)) html = { until };
-    } else if (/^ {0,3}<!--/.test(text) && !text.includes('-->')) html = { until: /-->/ };
-    else if (/^ {0,3}<(?:\/?[a-z][\w-]*(?:\s[^<>]*)?\/?>|[!?])/i.test(text) && !/^ {0,3}<!--.*-->[ \t]*$/.test(text)) html = { blank: true };
+    } else if (/^ {0,3}<!--/.test(text) && !COMMENT_END.test(text)) html = { until: COMMENT_END };
+    else if (/^ {0,3}<(?:\/?[a-z][\w-]*(?:\s[^<>]*)?\/?>|[!?])/i.test(text) && !/^ {0,3}<!--.*--!?>[ \t]*$/.test(text)) html = { blank: true };
   }
   return { lines: result, unfinished: Boolean(fence || html?.until || html?.details) };
 }
@@ -183,7 +186,8 @@ function buildPage(layout, generated, version, render = null) {
     if (span) text = append(text, under(name, span.text));
   }
   if (extra.length) text = append(text, under(MORE_HEADING, extra.reduce((body, span) => append(body, span.text), '')));
-  return text.endsWith(eol) ? text : text + eol;
+  // The page ends with one line ending, whatever blank lines the last piece of text carried.
+  return text.replace(/(?:\r?\n[ \t]*)+$/, '') + eol;
 }
 
 // What people wrote, in a form that survives a re-lay: each spec section's words and the other
