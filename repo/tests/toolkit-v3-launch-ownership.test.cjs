@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { capturedStack } = require('./support/captured-stack-fixture.cjs');
+const { controllerText } = require('./support/controller-text.cjs');
 const { HOST_ENTRIES, createHelperRouteGuard } = require('../scripts/toolkit-v3-helper-guard.cjs');
 const { createNativeHelperAdapter, resolveClaudeNativeState, HostDialect } = require('../scripts/toolkit-v3-native-helper-adapter.cjs');
 
@@ -194,7 +195,7 @@ test('synthetic captured sources resolve every non-helper role while documented 
       'claude-code': { DISCOVERY: false, BUILDER: false, DESIGN_CHALLENGE: false, G2: true },
     },
   };
-  const controller = fs.readFileSync(path.join(ROOT, 'repo', 'CONTROLLER.md'), 'utf8');
+  const controller = controllerText();
   const gateRules = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'gate-rules.md'), 'utf8');
   const delivery = fs.readFileSync(path.join(ROOT, 'repo', 'docs', 'TOOLKIT-DELIVERY.md'), 'utf8');
 

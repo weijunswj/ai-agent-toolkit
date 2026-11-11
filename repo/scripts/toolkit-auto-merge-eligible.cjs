@@ -50,6 +50,7 @@ const TOOLKIT = Object.freeze([
   [/^repo\/contracts\/toolkit-local-bridge\/(?:claude|codex)-plugin\/hooks\/hooks\.json$/, 'a host hook manifest source'],
   [/^repo\/contracts\/agent-rules\/(?:global|gate|toolkit-governed)-rules\.md$/, 'the agent rules on merging'],
   [/^repo\/CONTROLLER\.md$/, 'the controller rules'],
+  [/^repo\/controller\//, 'the controller rules'],
   [/^repo\/docs\/agent-playbooks\/controller-takeover\.md$/, 'the controller rules'],
   [/^repo\/scripts\/setup-[^/]+\.cjs$/, 'setup and its host bank helpers'],
   [/^repo\/scripts\/toolkit-governance(?:-[^/]+)?\.cjs$/, 'governance runtime and state'],

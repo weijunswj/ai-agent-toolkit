@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { controllerText } = require('./support/controller-text.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 // Windows checkouts may convert text files to CRLF; the contracts are about the words, not line ends.
@@ -37,7 +38,7 @@ const GATE_SURFACES = ['repo/contracts/agent-rules/gate-rules.md'];
 const RENEWAL_SURFACES = ['skills/controller-bootstrap/SKILL.md'];
 
 function surfaces() {
-  const value = { 'repo/CONTROLLER.md': current(read('repo/CONTROLLER.md')) };
+  const value = { 'repo/CONTROLLER.md': current(controllerText()) };
   for (const rel of [...GATE_SURFACES, ...RENEWAL_SURFACES]) value[rel] = read(rel);
   return value;
 }
@@ -149,8 +150,8 @@ test('neither the directive nor CONTROLLER keeps a retention clock', () => {
   assert.match(v3, /There is no expiry clock, pin or cleanup ledger/);
   assert.match(v3, /In a Git store the commit is the manifest, and a successful push plus one fetch is the read-back/);
   assert.doesNotMatch(v3, /21 days|30-day|restart the clock/);
-  assert.doesNotMatch(current(read('repo/CONTROLLER.md')), /expires 21 days|restart the clock/);
-  assert.doesNotMatch(current(read('repo/CONTROLLER.md')), /Historical v1 records/);
+  assert.doesNotMatch(current(controllerText()), /expires 21 days|restart the clock/);
+  assert.doesNotMatch(current(controllerText()), /Historical v1 records/);
 });
 
 function securityReviewContract(text) {
