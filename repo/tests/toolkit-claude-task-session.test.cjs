@@ -4,10 +4,10 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const task=require('../scripts/toolkit-claude-task-session.cjs');
 const clone=x=>JSON.parse(JSON.stringify(x));
 
-test('mixed Claude qualification task profiles refuse GPT helpers for both lead roles',()=>{
+test('Claude qualification task profiles refuse the GPT stack helpers for both lead roles',()=>{
  for(const role of ['G0','G1'])assert.throws(()=>task.createTaskSessionProfile({
-  ...capturedStack('claude-projects-stack'),control_root:path.join(os.tmpdir(),'synthetic-mixed-profile'),
-  cwd:path.resolve(__dirname,'../..'),session_id:'synthetic-mixed-parent',role
+  ...capturedStack('owner-gpt'),control_root:path.join(os.tmpdir(),'synthetic-gpt-profile'),
+  cwd:path.resolve(__dirname,'../..'),session_id:'synthetic-gpt-parent',role
  }),{code:'NATIVE_HELPER_ROUTE_UNSUPPORTED'});
 });
 function fixture(t){

@@ -80,13 +80,12 @@ Live permission-controlling instructions, destructive migration, privileged prod
 
 The central named stack registry is the sole source of model and effort choices. Every consumer resolves an explicitly selected stack and role against its pinned registry revision, with no competing choice, default or silent fallback, and a new revision is adopted deliberately. When selection is missing, the controller asks once **and holds dependent execution**, and launch admission enforces the hold without the hook. Launch ownership and route proof are in the gate rules.
 
-| Selected stack | Gatekeeper | G0 and G1 lead | G0 and G1 helpers | Design challenge | Final G2 set |
-|---|---|---|---|---|---|
-| `owner-gpt` | None | Sol 6.1 High | Luna Max | Sol 6.1 XHigh | One Sol 6.1 XHigh review |
-| `owner-claude` | None | Opus 5.5 High | Haiku 5.5 XHigh | Opus 5.5 XHigh | One Opus 5.5 XHigh review |
-| `claude-projects-stack` | Sonnet 5.5 Medium | Sol 6.1 High | Luna Max | Sol 6.1 XHigh | One Opus 5.5 XHigh review |
+| Selected stack | G0 and G1 lead | G0 and G1 helpers | Design challenge | Final G2 set |
+|---|---|---|---|---|
+| `owner-gpt` | Sol 6.1 High | Luna Max | Sol 6.1 XHigh | One Sol 6.1 XHigh review |
+| `owner-claude` | Opus 5.5 High | Haiku 5.5 XHigh | Opus 5.5 XHigh | One Opus 5.5 XHigh review |
 
-This table projects the registry. G0.Discuss resolves to the same selected lead binding as G0.Discovery, with no separate registry role or hardcoded provider/model. Helpers are leaves: no recursive delegation, scope approval, gate dispatch or final acceptance. An absent exact route is reported, never substituted.
+This table projects the registry. G0.Discuss resolves to the same selected lead binding as G0.Discovery, with no separate registry role or hardcoded provider/model. Helpers are leaves: no recursive delegation, scope approval, gate dispatch or final acceptance. An absent exact route is reported, never substituted. A gatekeeper is no registry role: it is a launcher session on the mid tier at medium effort under the cost-control ladder, and the controller rules say what it may do.
 
 ## 11. Controller and executor responsibilities
 
@@ -104,7 +103,7 @@ In a Git store the commit is the manifest, and a successful push plus one fetch 
 
 ## 14. Installation and supported surfaces
 
-Native plugins target Codex and Claude Code; Antigravity gets a portable skills copy only. Codex helper definitions support OpenAI routes, including the helpers in `claude-projects-stack`; Claude Code helper definitions support Anthropic routes and refuse mixed-profile G0/G1 helpers. Selecting `claude-projects-stack` requires deliberate adoption of its captured registry revision and does not supply automated cross-host gate launches. Its GPT discovery and building use Codex; G2 is a fresh Opus xhigh session started by the gatekeeper in Claude Projects with the same selection, candidate, scope and evidence, without helpers. The gatekeeper may launch the other harness through its CLI with model and effort pinned and route proof from that CLI's own launch record; launcher and hook enforcement are not supplied here. Existing selections keep their captured revision until explicit adoption.
+Native plugins target Codex and Claude Code; Antigravity gets a portable skills copy only. Codex helper definitions support OpenAI routes and Claude Code helper definitions support Anthropic routes; each refuses the other provider's helpers. The registry ships no mixed stack and does not supply automated cross-host gate launches: each shipped stack keeps one provider for discovery, building and review. A decision that names a removed mixed stack is refused. Installed Codex helper files that name one are refreshed from `owner-gpt`, which has the same helper model and effort, and setup says so in one line. The gatekeeper may launch the other harness through its CLI with model and effort pinned and route proof from that CLI's own launch record; launcher and hook enforcement are not supplied here. Existing selections keep their captured revision until explicit adoption.
 
 Before inference by an automation-launched agent or helper, deterministically enforce the requested-helper permission, the selected profile and pinned revision, the effective provider, model and effort, and native inheritance and overrides; leaves and G2 cannot delegate. These checks never lock a human's manually selected first-layer model or effort (section 10). Use the host's blocking parent PreToolUse path; a child hook or SubagentStart alone is insufficient.
 

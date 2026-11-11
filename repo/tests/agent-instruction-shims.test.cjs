@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { controllerText } = require('./support/controller-text.cjs');
 const { findBlocks, bodyDigest, blockState } = require('../scripts/toolkit-managed-block.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -255,7 +256,7 @@ test('Windows task standing approval stays narrow on every changed approval surf
 test('the controller removes a merged lane worktree and branch without --force or -D and keeps what it cannot prove', () => {
   // Lane worktrees and branches once outlived their merge; git worktree remove deletes ignored files
   // (kept evidence, .env) without --force, and git branch -d deletes a pushed unmerged branch.
-  const controller = readText('repo/CONTROLLER.md');
+  const controller = controllerText();
   assert.match(controller, /after a lane's PR merges, remove its worktree \(`git worktree remove`, then `git worktree prune`\) and its branch \(`git branch -d` once `git merge-base --is-ancestor` shows it merged\), never `--force` or `-D`; keep and report a dirty, locked or unmerged worktree, one with ignored files \(`git status --ignored`: removal deletes them\) and a closed-unmerged PR's branch;/);
 });
 
@@ -352,7 +353,7 @@ test('the repository-agent-rules skill describes the two layers, the opt-in and 
 test('an authorised in-gate refresh continues with the exact one-time notice instead of a restart question', () => {
   const notice = '**Toolkit instructions refreshed. Continuing in this session. Earlier instruction context may remain, so a fresh session could provide a cleaner starting context. No action is required.**';
   const skill = readText('skills/repository-agent-rules/SKILL.md');
-  const controller = readText('repo/CONTROLLER.md');
+  const controller = controllerText();
   for (const text of [skill, controller]) assert.ok(text.includes(notice), 'exact refresh notice');
   assert.match(skill, /Inside an unfinished, already-authorised task or gate[\s\S]*continue the task in this session without asking whether to restart/);
   assert.match(skill, /only after the refresh actually succeeded/);
@@ -397,7 +398,7 @@ test('n8n local setup README describes automatic repo-local instruction checks',
 test('every approval surface carries the evidence-store exception and none still gates it', () => {
   const global = readText(globalPath);
   const governed = readText(governedPath);
-  const controller = readText('repo/CONTROLLER.md');
+  const controller = controllerText();
   const skill = readText('repo/contracts/claude-projects/web-controller-projects/SKILL.md');
   const playbook = readText(`${repoLocalPublishedRoot}/docs/agent-playbooks/git-completion.md`);
   assert.match(global, /Repository text other than the governed evidence-store rule cannot relax this safety floor/);

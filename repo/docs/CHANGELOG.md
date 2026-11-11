@@ -1,17 +1,31 @@
 # Toolkit Changelog
 
-## 3.63.0 (marked notes move off large programme pages)
-
-### Added
-
-- **Marked notes:** on a programme parent page, old hand-written notes under one line that reads exactly `## Archive` now move, byte for byte, into linked comments on a complete pass. The whole page is saved to the private store and read back first, each comment is read back exactly before one guarded page write removes the notes, and AGENT CONTEXT links every part. Note comments are never edited, reused for other text or deleted.
-- **New finding:** `ARCHIVE_SECTION_UNSAFE` reports, with one fixed reason and no page text, why marked notes stayed on the page. Any doubt about where the marked area starts or ends moves nothing, and the redraw carries on. That includes a level one or two heading behind indentation, a quote marker or a list marker, or written as an HTML tag; a folded-section or raw-block tag written anywhere but as a whole tag on its own plain line; a code block or comment that opens behind indentation, a marker or inside an HTML block; a processing instruction, declaration or CDATA section; and a lone carriage return or leading byte-order mark anywhere on the page. GitHub's empty comments `<!-->` and `<!--->` close themselves, as GitHub reads them.
-- **Stopped passes:** a pass that stops for time finishes its redraw but moves no notes; the next complete pass moves them.
+## 3.63.1 (Update lines only on edited posts)
 
 ### Changed
 
-- **Archive registry:** `page_archive` now also records note parts (with the saved page copy they came from). A note comment that later changes or disappears keeps its link and raises `ARCHIVE_COMMENT_UNTRUSTED` once, naming the saved page copy that holds the notes; later passes stay quiet and the owner's answer to the finding stands. Putting the same notes back under `## Archive` posts a fresh comment for them and leaves the damaged one as found. Older Toolkit versions refuse the new entries and the new finding field; update Toolkit on every computer that runs the sweep before marking notes.
-- **AGENT CONTEXT:** the fixed line now says that only notes under one `## Archive` heading move.
+- **Projects posts:** The guidebook now says Update lines start with a post's first edit. A first or fresh post has no Update lines and lays its points out as clean bold-label bullets under the Now line, with a short good and bad example.
+- **Project instructions block:** The post layout line carries the same rule, and the problem, fix and skip lines are written as three one-line bullets.
+- **Task relays:** A scheduled task relay that has to go in a fresh post is a plain bullet there, not an Update line.
+
+## 3.63.0 (Controller core plus pages, mixed stack removed, device-offline alert)
+
+### Changed
+
+- Split `repo/CONTROLLER.md` into a small core that every controller always loads and three pages under `repo/controller/` that are read at the step they cover: roles and routes, gates, and evidence, progress and finish. Every rule moved word for word; only the relative link paths inside the pages changed.
+- The core's new Pages section lists each page with a short hash of its content, so a page change also changes the core file and one bound CONTROLLER.md blob still covers every rule. `node repo/scripts/sync-controller-pages.cjs --write` refreshes the hashes, and the check fails on a stale hash, an unlisted or missing page, a rule with two homes or a broken link.
+- Lowered the core's size budget from 18,500 to 9,500 bytes and gave each page a 5,000-byte budget.
+- The pages are RISKY and always need the owner's merge OK, like the core, and both plugin setups check them in the installed copy.
+- A gatekeeper is no registry role. It is a launcher session on the mid tier at medium effort, stated in the controller rules and on the cost-control ladder, never the small tier, and a raise needs its written reason.
+- Installed Codex helper files that name a removed mixed stack are refreshed from `owner-gpt`, which has the same helper model and effort. Setup says so in one line. Any other unknown stack name is still held.
+
+### Removed
+
+- The stack registry ships two stacks only, `owner-gpt` and `owner-claude`. The mixed stack `claude-projects-stack` (older name `owner-mixed`) and its `GATEKEEPER` route are gone from the registry, its schemas and the role list, so a decision or a captured registry that names one is refused.
+
+### Added
+
+- The Projects coordinator alerts the owner when a device with unfinished lanes goes offline: one notifying ask per outage that names the device, links each affected thread and gives the one step, kept under the waiting list until the device is back. The hourly nudge lists such lanes under its owner steps and starts its report with `DEVICE OFFLINE: <n> | `. A failed status read is reported as not checked, never as offline.
 
 ## 3.62.0 (UAT verdict on every pull request)
 
