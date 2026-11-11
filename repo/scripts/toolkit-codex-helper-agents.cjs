@@ -119,6 +119,11 @@ class CodexHelperAgentRenderer {
 // The stack a managed file names. A file that names none cannot be checked and is held.
 const STACK_REFERENCE = /^# Stack `([A-Za-z0-9._-]+)`/m;
 function stackReference(text) { return STACK_REFERENCE.exec(text)?.[1] || null; }
+// Stacks the registry no longer ships, each with the shipped stack whose Codex helper routes it
+// shared. An installed helper file naming one is refreshed from that stack; any other unknown
+// stack stays held. Remove at the next major version.
+const RETIRED_STACKS = Object.freeze({ 'claude-projects-stack': 'owner-gpt', 'owner-mixed': 'owner-gpt' });
+function currentStack(stack) { return Object.hasOwn(RETIRED_STACKS, stack) ? RETIRED_STACKS[stack] : stack; }
 // Checks a helper agent Codex would load against a fresh rendering from the registry for the
 // stack it names. Any byte difference, an unknown stack or an unrenderable route is a mismatch.
 function matchesRenderedDefinition(role, text, repositoryRoot = TOOLKIT_ROOT) {
@@ -232,7 +237,9 @@ class CodexHelperDefinitions {
     const files = install ? ROLE_KEYS.map(role => CodexHelperAgentRenderer.fromRepository(stack, this.#repositoryRoot).render(role))
       : assessed.entries.filter(({ rendered }) => rendered !== null).map(({ file, rendered }) => ({ file, text: rendered }));
     const result = new CodexAgentDirectoryInstaller(dir, files, this.#probe ? { probe: this.#probe } : {}).apply(this.#backupRoot);
-    return { status: install ? 'installed' : 'updated', backup_dir: result.backup_dir, load_check: result.load_check, detail: result.load_check.status === 'verified' ? '' : result.load_check.detail };
+    const retired = install ? null : assessed.entries.find(entry => entry.retired);
+    return { status: install ? 'installed' : 'updated', backup_dir: result.backup_dir, load_check: result.load_check, detail: result.load_check.status === 'verified' ? '' : result.load_check.detail,
+      ...(retired ? { moved: { from: retired.retired, to: retired.stack } } : {}) };
   }
 
   #assess(dir, projectDirectories) {
@@ -242,7 +249,9 @@ class CodexHelperDefinitions {
     const held = this.#holdDetail(entries, projects, dir);
     if (held) return { entries, projects, status: 'held', detail: held };
     if (entries.some(entry => entry.state === 'update' || entry.state === 'missing')) {
-      return { entries, projects, status: 'stale', detail: `The Toolkit helper agents in ${dir} are out of date or incomplete. Run setup toolkit to refresh them.` };
+      const retired = entries.find(entry => entry.retired);
+      const carried = retired ? ` They name the stack ${retired.retired}, which Toolkit no longer ships; the refresh moves them to ${retired.stack}, which uses the same helper model and effort.` : '';
+      return { entries, projects, status: 'stale', detail: `The Toolkit helper agents in ${dir} are out of date or incomplete. Run setup toolkit to refresh them.${carried}` };
     }
     return { entries, projects, status: 'current', detail: '' };
   }
@@ -265,18 +274,19 @@ class CodexHelperDefinitions {
     const installed = Object.fromEntries(ROLE_KEYS.map(role => [role, this.#installed(path.join(dir, fileFor(role)))]));
     const inheritedStack = role => ROLE_KEYS.filter(other => other !== role).map(other => installed[other])
       .filter(other => other.managed).map(other => stackReference(other.text)).find(Boolean) || null;
+    const retiredName = named => (named && currentStack(named) !== named ? named : null);
     return ROLE_KEYS.map(role => {
       const file = fileFor(role), own = installed[role];
       if (!own.present) {
-        const stack = inheritedStack(role);
+        const named = inheritedStack(role), stack = named && currentStack(named);
         const rendered = stack ? this.#render(role, stack) : null;
-        return { role, file, present: false, state: stack && rendered === null ? 'unrenderable' : 'missing', stack, rendered };
+        return { role, file, present: false, state: stack && rendered === null ? 'unrenderable' : 'missing', stack, rendered, retired: retiredName(named) };
       }
-      if (!own.managed) return { role, file, present: true, state: 'skip-unmanaged', stack: null, rendered: null };
-      const stack = stackReference(own.text);
+      if (!own.managed) return { role, file, present: true, state: 'skip-unmanaged', stack: null, rendered: null, retired: null };
+      const named = stackReference(own.text), stack = named && currentStack(named);
       const rendered = stack ? this.#render(role, stack) : null;
       const state = rendered === null ? 'unrenderable' : rendered === own.text ? 'unchanged' : 'update';
-      return { role, file, present: true, state, stack, rendered };
+      return { role, file, present: true, state, stack, rendered, retired: retiredName(named) };
     });
   }
 
@@ -316,6 +326,7 @@ function describeSetupResult(result, checkout = path.resolve(TOOLKIT_ROOT).repla
   if (result.status === 'updated' || result.status === 'installed') {
     const backup = result.backup_dir ? ` (backup: ${result.backup_dir.replace(/\\/g, '/')})` : '';
     return [`Toolkit helpers: ${result.status} this run${backup}. Start a new Codex session to use them.`,
+      ...(result.moved ? [`Toolkit no longer ships the stack ${result.moved.from}, so the helpers now follow ${result.moved.to}. Their model and effort are the same.`] : []),
       ...(result.load_check?.status === 'verified' ? [] : [`Codex load check: ${result.detail || NOT_CHECKED.detail}`])];
   }
   if (result.status === 'not-installed') {

@@ -371,12 +371,12 @@ test('dispatcher exception reports called with unknown downstream outcome', asyn
   assert.equal(result.downstream_result, 'UNKNOWN');
 });
 
-test('mixed synthetic Codex helper closure preserves every guard and never retries unknown dispatch', async (t) => {
+test('synthetic Codex helper closure on the GPT stack preserves every guard and never retries unknown dispatch', async (t) => {
   const entries = ['codex_spawn_agent', 'codex_agent_alias'].flatMap(entry_id => ['G0', 'G1'].map(caller_role => ({ entry_id, caller_role })));
   const extra = [
     { id: 'wrong-model', expected: 'ROUTE_MISMATCH', state: s => { s.routing.effective_route.model = 'opus-5.5'; } },
-    { id: 'wrong-selected-profile', expected: 'PROFILE_NOT_SELECTED', call: c => { c.profile_id = 'owner-gpt'; } },
-    { id: 'host-derived-profile', expected: 'PROFILE_BINDING_MISMATCH', state: s => { s.session.profile_id = 'owner-gpt'; } },
+    { id: 'wrong-selected-profile', expected: 'PROFILE_NOT_SELECTED', call: c => { c.profile_id = 'owner-claude'; } },
+    { id: 'host-derived-profile', expected: 'PROFILE_BINDING_MISMATCH', state: s => { s.session.profile_id = 'owner-claude'; } },
     { id: 'wrong-invocation-revision', expected: 'REGISTRY_REVISION_MISMATCH', call: c => { c.registry_revision = 'newest-bundle'; } },
     { id: 'wrong-observed-revision', expected: 'REGISTRY_REVISION_MISMATCH', state: s => { s.routing.registry_revision = 'newest-bundle'; } },
     { id: 'missing-session-metadata', expected: 'MALFORMED_HOST_STATE', state: s => { delete s.session; } },
@@ -389,7 +389,7 @@ test('mixed synthetic Codex helper closure preserves every guard and never retri
   ];
   for (const entry of entries) for (const item of [...matrix, ...extra]) {
     await t.test(`${entry.entry_id}/${entry.caller_role}/${item.id}`, async () => {
-      const f = makeFixture(entry, { selected_profile_id: 'claude-projects-stack', timeout_ms: item.id === '08-guard-timeout-fails-closed' ? 5 : 20 });
+      const f = makeFixture(entry, { selected_profile_id: 'owner-gpt', timeout_ms: item.id === '08-guard-timeout-fails-closed' ? 5 : 20 });
       assert.deepEqual(f.leafRoute, { provider: 'openai', model: 'gpt-6-luna', reasoning: 'max' });
       const call = alterCase(f, item.id);
       if (item.call) item.call(call);
@@ -400,7 +400,7 @@ test('mixed synthetic Codex helper closure preserves every guard and never retri
       assert.equal(result.host_qualification, 'PREPARATION_ONLY');
       if (item.expected === 'ALLOW') {
         assert.equal(result.decision, 'ALLOW'); assert.equal(result.code, 'ROUTE_VERIFIED');
-        assert.equal(f.dispatchCalls, 1); assert.equal(result.profile_id, 'claude-projects-stack');
+        assert.equal(f.dispatchCalls, 1); assert.equal(result.profile_id, 'owner-gpt');
         assert.deepEqual(result.effective_route, f.leafRoute);
         assert.equal(result.registry_revision, f.resolved.registry_digest);
         assert.deepEqual(result.downstream_result.request.registry_reference, f.resolved.registry_reference);

@@ -45,7 +45,7 @@ Last reviewed against `main` `71b138c`.
 | Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
 | Shell session check (two booleans, no authority) | `repo/scripts/toolkit-session-shell-check.cjs`; meaning and installed-shell qualification in the [host contract](docs/HOST-CONTRACT.md#check-what-a-shell-received) |
 | Leftover worktrees and merged branches (read-only list) | `repo/scripts/workspace-residue-report.cjs` |
-| Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs` |
+| Instruction sync | `repo/scripts/sync-agent-instruction-shims.cjs`, `repo/scripts/sync-repo-doc-contract.cjs`, `repo/scripts/sync-controller-pages.cjs` |
 | Full validation list | `repo/scripts/run-validation-gate.cjs` |
 | Plain-text check | Portable check `skills/secure-ci-cd/scripts/plain-text-check.cjs` and installer `skills/secure-ci-cd/scripts/install-plain-text-check.cjs`; Toolkit runs it through `repo/scripts/check-plain-references.cjs` (run by `validate-toolkit.cjs`) with settings `.github/plain-text.json` and baseline `repo/contracts/plain-references/baseline.json` |
 | Projects instructions block | `repo/scripts/toolkit-projects-instructions.cjs`, source `repo/contracts/claude-projects/web-controller-projects/project-instructions.md` |
@@ -70,7 +70,7 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 
 | Subject | Source |
 |---|---|
-| Controller procedure | `repo/CONTROLLER.md`; generic takeover, capability routes and relay formats: `repo/docs/agent-playbooks/controller-takeover.md` |
+| Controller procedure | `repo/CONTROLLER.md` (the core) and the pages it lists under `repo/controller/`, kept in step by `repo/scripts/sync-controller-pages.cjs`; generic takeover, capability routes and relay formats: `repo/docs/agent-playbooks/controller-takeover.md` |
 | Programme direction | `repo/docs/TOOLKIT-DELIVERY.md` |
 | Global rules (every harness session) | `repo/contracts/agent-rules/global-rules.md` |
 | Gate rules (gate sessions and their controllers) | `repo/contracts/agent-rules/gate-rules.md` |

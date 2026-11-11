@@ -1,17 +1,31 @@
 # Toolkit Changelog
 
-## 3.63.0 (typed commands and remove Toolkit)
-
-### Added
-
-- **Typed commands:** `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup` and `toolkit show env`, typed as the whole message on your own computer, are matched exactly by the Codex and Claude Code prompt hooks. The agent is told which action was asked for, so `toolkit show env` always opens the editor. A phrase inside a longer message, in a relayed message or in a cloud session stays plain text, and a governance hold is unchanged. `node repo/scripts/toolkit-commands.cjs` prints the command list.
-- **Remove Toolkit from this computer:** `remove toolkit` routes to `repo/scripts/toolkit-remove.cjs`. `plan` lists every scheduled task that carries Toolkit's marker in any Task Scheduler folder, Toolkit's own task files and the Toolkit block in each global rules file, with a plan code. `apply --confirm <plan code>` removes exactly that list after the owner's OK; a list that changed removes nothing. Tasks changed by hand stay unless named, the owner's own listed tasks always stay, and no repository, key, settings file or plugin is touched.
-- **Leftover file report:** `repo/scripts/toolkit-leftover-files.cjs scan` lists files that are provably Toolkit's in GitHub checkouts whose governance is off or undecided. It reports only and never deletes.
+## 3.63.1 (Update lines only on edited posts)
 
 ### Changed
 
-- **Setup covers the computer only:** setup no longer prints a task plan for the managed checkout and the folder it was started in. The computer-wide task update under the saved approval stays, and the direct task plan still gives one repository's details.
-- **Hook pack:** context checks now also read the context a prompt hook adds.
+- **Projects posts:** The guidebook now says Update lines start with a post's first edit. A first or fresh post has no Update lines and lays its points out as clean bold-label bullets under the Now line, with a short good and bad example.
+- **Project instructions block:** The post layout line carries the same rule, and the problem, fix and skip lines are written as three one-line bullets.
+- **Task relays:** A scheduled task relay that has to go in a fresh post is a plain bullet there, not an Update line.
+
+## 3.63.0 (Controller core plus pages, mixed stack removed, device-offline alert)
+
+### Changed
+
+- Split `repo/CONTROLLER.md` into a small core that every controller always loads and three pages under `repo/controller/` that are read at the step they cover: roles and routes, gates, and evidence, progress and finish. Every rule moved word for word; only the relative link paths inside the pages changed.
+- The core's new Pages section lists each page with a short hash of its content, so a page change also changes the core file and one bound CONTROLLER.md blob still covers every rule. `node repo/scripts/sync-controller-pages.cjs --write` refreshes the hashes, and the check fails on a stale hash, an unlisted or missing page, a rule with two homes or a broken link.
+- Lowered the core's size budget from 18,500 to 9,500 bytes and gave each page a 5,000-byte budget.
+- The pages are RISKY and always need the owner's merge OK, like the core, and both plugin setups check them in the installed copy.
+- A gatekeeper is no registry role. It is a launcher session on the mid tier at medium effort, stated in the controller rules and on the cost-control ladder, never the small tier, and a raise needs its written reason.
+- Installed Codex helper files that name a removed mixed stack are refreshed from `owner-gpt`, which has the same helper model and effort. Setup says so in one line. Any other unknown stack name is still held.
+
+### Removed
+
+- The stack registry ships two stacks only, `owner-gpt` and `owner-claude`. The mixed stack `claude-projects-stack` (older name `owner-mixed`) and its `GATEKEEPER` route are gone from the registry, its schemas and the role list, so a decision or a captured registry that names one is refused.
+
+### Added
+
+- The Projects coordinator alerts the owner when a device with unfinished lanes goes offline: one notifying ask per outage that names the device, links each affected thread and gives the one step, kept under the waiting list until the device is back. The hourly nudge lists such lanes under its owner steps and starts its report with `DEVICE OFFLINE: <n> | `. A failed status read is reported as not checked, never as offline.
 
 ## 3.62.0 (UAT verdict on every pull request)
 

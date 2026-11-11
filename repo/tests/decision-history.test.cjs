@@ -5,6 +5,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { controllerText } = require('./support/controller-text.cjs');
 
 const SCRIPTS = path.resolve(__dirname, '../../skills/github-program-reconciler/scripts');
 const { OTHER_COMMENTS, commentTag, commentTagLabel, splitTag, groupByTag } = require(path.join(SCRIPTS, 'decision-tags.cjs'));
@@ -220,7 +221,7 @@ test('the G0 history step is routed from the rules, both playbook indexes, the P
   assert.ok(read('repo/docs/agent-playbooks/INDEX.md').includes(`Read: \`${playbook}\`.`));
   assert.match(read('repo/contracts/agent-rules/toolkit-governed-rules.md'), /Decision traces:[^\n]*parent and child traces never mix[^\n]*latest comment wins[^\n]*G0 reads both traces[^\n]*\(decision-trace playbook\)/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Every G0 brief for a programme child says to read the parent's and the child's decision traces first/);
-  assert.match(read('repo/CONTROLLER.md'), /live-scope summary \(decision-trace playbook\) is the spec only once the owner confirms it; record that as a `SCOPE-CONFIRMED` comment/);
+  assert.match(controllerText(), /live-scope summary \(decision-trace playbook\) is the spec only once the owner confirms it; record that as a `SCOPE-CONFIRMED` comment/);
   const text = read(playbook);
   assert.ok(text.includes(`--child <n>`) && text.includes('SCOPE-CONFIRMED') && text.includes('never every child'));
   assert.doesNotMatch(text, /github\.com|#\d/);
