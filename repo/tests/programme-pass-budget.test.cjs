@@ -57,7 +57,8 @@ test('A-T1: the 84-row catch-up pass batches state commits by group', t => {
   const f = fixture(); const { result, stats } = measured(f);
   t.diagnostic(JSON.stringify(stats));
   assert.deepEqual(result.holds, []);
-  assert.equal(stats.state_commits, 24);
+  // 24 grouped state commits, plus one saved copy for each of the ten pages re-laid in a pass.
+  assert.equal(stats.state_commits, 24 + state.MAX_RELAYS_PER_PASS);
   assert.equal(stats.github_writes, 35);
 });
 
@@ -581,7 +582,7 @@ for (const row of [
   });
   const run = f.make(pass); const plan = run.plan();
   if (row.phase === 'pr_links') for (const [number, pr] of [[500, 900], [501, 901]]) {
-    f.github.addIssue(pr);
+    f.github.addPr(pr, { head: 'a'.repeat(40), body: 'Fixture PR.' }); // only an open PR is ever written
     plan.effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr, digest: 'fixture' }, body: 'Fixture PR navigation' });
   }
   const size = { code: 'BODY_TOO_LARGE', issue: 421, diagnostics: state.bodySizeDiagnostics('x'.repeat(60000), 60000) };
