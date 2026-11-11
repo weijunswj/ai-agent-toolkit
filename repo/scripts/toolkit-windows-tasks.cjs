@@ -433,6 +433,12 @@ function powerShellScheduler(options = {}) {
       });
     },
     unregister: (folder, name, id, previous) => ps('unregister', { folder, name, marker: `[toolkit-task v1 id=${id} `, expected_xml: previous?.definition_xml || null }),
+    // A task the launcher disabled carries its fixed description instead of the marker; it is removed
+    // only while it is still exactly the recorded snapshot.
+    unregisterDisabled: (folder, name, previous) => {
+      if (!previous?.definition_xml) throw new WindowsTasksError('disabled task has no exact XML readback; left alone', 1);
+      return ps('unregister', { folder, name, marker: require('./toolkit-task-launcher.cjs').DISABLED_DESCRIPTION, expected_xml: previous.definition_xml });
+    },
     restore: (definition, previous, written) => ps('restore', { folder: definition.folder, name: definition.name, previous_xml: previous.definition_xml, expected_xml: written.definition_xml }),
     removeFolderIfEmpty: folder => ps('remove-folder', { folder }),
     start: (folder, name) => ps('start', { folder, name }),
