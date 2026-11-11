@@ -15,7 +15,7 @@ const HEAD = '# Programme\n\nOwner text that stays.  \n\n';
 const AREA = '## Archive\n### Old plan\nKeep every byte.  \n\n<details><summary>Folded</summary>\n\n## Inside the fold\nStill marked.\n</details>\n\n';
 const TAIL = '## Current plan\nNever marked.\n';
 const HAND = HEAD + AREA + TAIL;
-const copies = f => f.github.calls.filter(call => call.method === 'PUT' && call.path.includes('/contents/state/page-copies/'));
+const copies = f => f.github.calls.filter(call => call.method === 'PUT' && call.path.includes('/contents/state/page-copies/issue-12/'));
 const noteEntries = f => (f.parent().page_archive || []).filter(entry => entry.kind === 'note');
 const context = f => state.findStateBlock(f.page(), 'CONTEXT').block.body;
 const unsafe = f => (f.parent().attention || []).filter(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE');
@@ -342,7 +342,7 @@ test('no saved copy, no move: a store that is not private, a failed copy and sec
   assert.equal(broken.posts().length + copies(broken).length, 0);
   assert.ok(broken.page().includes(AREA));
   assert.deepEqual(unsafe(broken).map(entry => entry.diagnostics), [{ reason: 'control_character' }]);
-  assert.throws(() => secret.store.savePageCopy(12, `token ghp_${'a'.repeat(30)}`), { code: 'PAGE_COPY_REFUSED' });
+  assert.throws(() => secret.store.saveNoteCopy(12, `token ghp_${'a'.repeat(30)}`), { code: 'PAGE_COPY_REFUSED' });
 });
 
 test('a lost post reply is found under its key and never posted twice', () => {

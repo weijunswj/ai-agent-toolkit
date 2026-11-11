@@ -28,6 +28,9 @@ const { ProgrammeError, resolveExecutable } = require('./resolve-executable.cjs'
 const SAFE_LIMIT = 55000;
 
 // Graph archive formatting is needed only by page operations, never by hook binding reads.
+function pageLayout() {
+  return require('./programme-page-layout.cjs');
+}
 function archiveTools() {
   return require('./programme-page-archive.cjs');
 }
@@ -352,12 +355,14 @@ const FINDING_CODES = Object.freeze({
   CLOSING_COMMENT_MISSING: { source: 'reconcile', next_action: 'The closing agent posts the story with closing-comment; facts alone leave it waiting' },
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
+  PAGE_LAYOUT_HELD: { source: 'reconcile', next_action: 'Controller: fix what the finding names on the task page (an unclosed code block, a section that appears twice, an unknown marker or a secret-shaped value); until then its blocks are updated where they are and its text is not moved' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
   ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the archive comments on the page this finding names; redraw can publish a fresh verified graph part; archived notes are in the saved page copies in the private store under page-copies/issue-<n>/ and are restored by putting them back on the page under `## Archive` for a fresh comment; the finding stays open until disposed' },
   ARCHIVE_SECTION_UNSAFE: { source: 'reconcile', next_action: 'Controller: fix the text under the `## Archive` line as the reason says, or remove that line; nothing was moved' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
+  TASK_IDLE: { source: 'reconcile', next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
   PR_DISCOVERY_INCOMPLETE: { source: 'reconcile', next_action: 'Controller: retry reconciliation; merged PR discovery could not finish within its read limits' },
@@ -389,6 +394,11 @@ const END_RESERVE_MS = 60 * 1000;
 // minutes of slack for requests already in flight; checks cannot cancel such a request.
 const QUEUE_RESERVE_MS = 2 * END_RESERVE_MS;
 const AGAIN_RESERVE_MS = 6 * 60 * 1000;
+// Task pages re-laid (hand-written text moved, with a saved copy each) in one pass.
+const MAX_RELAYS_PER_PASS = 10;
+// A task shown IN PROGRESS with no open PR, no live gate and no holder counts as idle once its
+// state document and its comments have been still for this long.
+const TASK_IDLE_HOURS = 6;
 const PASS_PHASES = ['planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'closing', 'unknown'];
 
 function validatePassDiagnostics(errors, value, at) {
@@ -1435,10 +1445,22 @@ function reviewText(child) {
   return stale ? `${state} (STALE_HEAD)` : state;
 }
 
-function prText(child) {
-  if (child.prs?.length) return child.prs.map(pr => `#${pr.number} ${pr.state}${pr.state === 'MERGED' ? ` ${shaLink(child.repository, pr.merge_sha)}` : ''}`).join(', ');
-  if (!child.pr.number) return '-';
-  return `#${child.pr.number} ${child.pr.state || ''}`.trim();
+// The task's most recently opened PR, whatever its state, or null. GitHub numbers PRs in the order
+// they are opened, so the highest number among the tracked PR and the discovered history is it.
+function latestPr(child) {
+  const numbers = [child?.pr?.number, ...(child?.prs || []).map(pr => pr.number)].filter(number => isInt(number, 1));
+  return numbers.length ? Math.max(...numbers) : null;
+}
+
+// Every PR found for a task, open first, one line each: the discovered history, and the tracked
+// PR when the history does not hold it yet.
+function prHistoryLines(child) {
+  const listed = child.prs || [];
+  const tracked = child.pr?.number && !listed.some(pr => pr.number === child.pr.number)
+    ? [{ number: child.pr.number, state: child.pr.state === 'DRAFT' ? 'OPEN' : child.pr.state || 'OPEN', merge_sha: null }] : [];
+  const rank = { OPEN: 0, MERGED: 1, CLOSED: 2 };
+  const all = [...tracked, ...listed].sort((a, b) => (rank[a.state] ?? 3) - (rank[b.state] ?? 3));
+  return all.length ? all.map(pr => `- #${pr.number} ${pr.state}${pr.state === 'MERGED' && isSha(pr.merge_sha) ? ` ${shaLink(child.repository, pr.merge_sha)}` : ''}`) : ['- None found.'];
 }
 
 function revisionLine(parent, children) {
@@ -1549,10 +1571,10 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const cls = graphClass(outcome, child);
-    // History belongs on the child page. The graph grows by a count, never by PRs or SHAs.
-    const current = !isRetired(outcome, child) ? child?.pr.number : null;
-    const more = child?.prs?.filter(pr => pr.number !== current).length || 0;
-    const pr = `${current ? `#${current}` : '-'}${more ? ` +${more}` : ''}`;
+    // One PR per row; the full history is on the task page.
+    // A retired task shows none: its PRs are no longer the way to the work.
+    const latest = isRetired(outcome, child) ? null : latestPr(child);
+    const pr = latest ? `#${latest}` : '-';
     const issue = issues.get(outcome.issue);
     // Optional cell padding would cost fourteen characters per row, more than the PR count.
     return `|${taskName(outcome, issue)}|${descriptionText(outcome)}|#${outcome.issue}|${pr}|${cls}|${statusText(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
@@ -1561,7 +1583,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: current, +N others; history on child page.`,
+    `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: the latest opened, whatever its state (none for a retired task); history on the task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -1617,7 +1639,7 @@ function traceTokens(group, base) {
 function renderTraceBlockBody(number, trace, repository = '', topic = null, parentPage = false) {
   const base = issueUrl(repository, number);
   const lines = [
-    ...(parentPage ? ['# COMMENT TRACE'] : []),
+    '# COMMENT TRACE',
     `<!-- programme-trace issue=${number} -->`,
     '**Comment trace** (generated from every comment on this issue). One line per topic; each number is a comment and opens it. Read the body first; within a topic, where comments disagree, the latest one wins. To put a comment under a topic, make its first line the topic (the task\'s name, or a short subject for a programme-wide comment) and its second line `---`.',
     '',
@@ -1685,21 +1707,47 @@ function attentionBlockLines(attention, now) {
 // The links that open a task page or PR: the programme parent, any expected parents in between,
 // the task, then its PR. GitHub turns each #n into a link.
 function renderNavBlockBody(chain, pr) {
-  return ['<!-- programme-nav -->', `**Path:** ${chain.map(number => `#${number}`).join(' > ')}${pr ? ` > PR #${pr}` : ''}`].join('\n');
+  return ['# PATH', '<!-- programme-nav -->', `${chain.map(number => `#${number}`).join(' > ')}${pr ? ` > PR #${pr}` : ''}`].join('\n');
 }
 
+// The links block of a PR page: one path line per task the PR works on.
+function renderPrNavBlockBody(chains, pr) {
+  return ['# PATH', '<!-- programme-nav -->', ...chains.map(chain => `${chains.length > 1 ? '- ' : ''}${chain.map(number => `#${number}`).join(' > ')} > PR #${pr}`)].join('\n');
+}
+
+// The status block of a task page. Section headings generated or required by Toolkit are in
+// capitals; a heading people add themselves keeps its own case.
 function renderChildBlockBody(child, outcome) {
   const lines = [
     `<!-- programme-state child=${child.issue}@${child.revision} -->`,
-    `**Status** (issue-${child.issue}.json revision ${child.revision}; generated, so edit the state document rather than this block)`,
+    '# STATUS',
+    '',
+    `State revision ${child.revision} (issue-${child.issue}.json). Generated: edit the state document, not this block.`,
     '',
     `- Status: ${outcome ? statusText(outcome, child) : '-'}; class: ${graphClass(outcome, child)}; lane: ${outcome ? laneText(outcome, child) : '-'}; release: ${publicText(child.release || '-')}`,
     `- Task: ${outcome ? descriptionText(outcome) : '-'}`,
-    `- PR: ${prText(child)}; head ${shaLink(child.repository, child.pr.head)}; CI at head: ${checksText(child)}`,
+    `- Tracked PR: ${child.pr.number ? `#${child.pr.number} ${child.pr.state || ''}`.trim() : '-'}; head ${shaLink(child.repository, child.pr.head)}; CI at head: ${checksText(child)}`,
     `- UAT: ${uatText(child)}; review: ${reviewText(child)}`,
     `- Next action: ${publicText(child.next_action)}`,
   ];
   if (child.blockers.length) lines.push(`- Blockers: ${child.blockers.map(publicText).join('; ')}`);
+  lines.push('', '**Pull requests** (every PR found for this task, open first)', ...prHistoryLines(child));
+  return lines.join('\n');
+}
+
+// The status block of an open PR page: one line per task the PR works on, from that task's state.
+// A review verdict counts only at the PR's present head.
+function renderPrStatusBlockBody(pr, head, tasks) {
+  const lines = [`<!-- programme-pr-status pr=${pr} -->`, '# STATUS', '', 'Generated from the programme state of each task this PR names.', ''];
+  for (const { issue, child } of tasks) {
+    if (!child) { lines.push(`- Task #${issue}: no state yet.`); continue; }
+    const gate = [child.gate?.role, child.gate?.state].filter(Boolean).join(' ') || '-';
+    const verdicts = child.review?.verdicts || [];
+    const atHead = isSha(head) ? verdicts.filter(verdict => verdict.head === head) : [];
+    const review = atHead.length ? `${atHead.map(verdict => publicText(verdict.verdict)).join(', ')} at ${shortSha(head)}`
+      : verdicts.length ? 'none at this head (an earlier head was reviewed)' : child.review?.state ? publicText(child.review.state) : 'none yet';
+    lines.push(`- Task #${issue}: gate ${publicText(gate)}; review ${review}; UAT ${publicText(child.uat?.state || '-')}; release ${publicText(child.release || '-')}`);
+  }
   return lines.join('\n');
 }
 
@@ -1727,10 +1775,44 @@ const BLOCK_END = new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END ([A-Z]+
 // Only a line that starts as an HTML comment is a marker; rendered free text has `<` escaped.
 const BLOCK_ANY = new RegExp(`^\\s*<!--\\s*AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:`);
 
+// A body with every marker line that is only shown, not meant, blanked out: one inside a code
+// fence, indented code, a quote, a list item or a literal HTML block. Offsets and line endings are
+// unchanged, so a block found in the result sits at the same place in the body. Where a code block,
+// HTML block or details section is never closed, the lines from its start on are left as they
+// are: a real block down there would look quoted, and treating it as absent would add a second.
+const shownMarkerCache = new Map();
+function withoutShownMarkers(source) {
+  if (!source.includes('AI-AGENT-TOOLKIT:')) return source;
+  const known = shownMarkerCache.get(source);
+  if (known !== undefined) return known;
+  const { lines, unfinishedFrom } = pageLayout().markdownLines(source);
+  const shown = line => !line.top && (unfinishedFrom === null || line.start < unfinishedFrom);
+  let masked = source;
+  if (lines.some(line => shown(line) && BLOCK_ANY.test(line.text))) {
+    // A block is shown when its BEGIN line is: its END line goes with it wherever that sits.
+    let closing = null;
+    masked = lines.map(line => {
+      const text = source.slice(line.start, line.end);
+      if (!BLOCK_ANY.test(line.text)) return text;
+      const marker = /:(BEGIN|END) ([A-Z]+)\b/.exec(line.text);
+      const ends = closing && marker?.[1] === 'END' && marker[2] === closing;
+      // A real BEGIN line means the example before it never showed its END: nothing is owed.
+      if (!shown(line) && !ends) { if (marker?.[1] === 'BEGIN') closing = null; return text; }
+      if (ends) closing = null;
+      else if (marker?.[1] === 'BEGIN') closing = marker[2];
+      return text.replace(/[^\r\n]/g, ' ');
+    }).join('');
+  }
+  if (shownMarkerCache.size >= 32) shownMarkerCache.delete(shownMarkerCache.keys().next().value);
+  shownMarkerCache.set(source, masked);
+  return masked;
+}
+
 // The one block with this name in a body, with offsets; `error` for broken, nested or duplicated
-// markers. Blocks with other names are skipped.
-function findStateBlock(text, name = BLOCK_NAME) {
-  const source = String(text || '');
+// markers. Blocks with other names are skipped, and so is a block that is only shown as an example
+// (see withoutShownMarkers). `literal` searches the text exactly as given.
+function findStateBlock(text, name = BLOCK_NAME, { literal = false } = {}) {
+  const source = literal ? String(text || '') : withoutShownMarkers(String(text || ''));
   const lines = [];
   for (let offset = 0; offset <= source.length;) {
     const next = source.indexOf('\n', offset);
@@ -1763,6 +1845,23 @@ function findStateBlock(text, name = BLOCK_NAME) {
   }
   if (open) return { error: `${name} block BEGIN without END` };
   return { block: found };
+}
+
+// The last check before a page is written: every block this pass writes must be found again, once
+// and with the content just written, by the same search that reads the page on the next pass. A
+// block that would not be found would be written again on every pass, so the page is held and
+// nothing is written to it. `blocks` lists [name, block body] pairs; a pair without a body is
+// skipped.
+function assertBlocksReadBack(body, blocks, page) {
+  for (const [name, expected] of blocks) {
+    if (expected === null || expected === undefined) continue;
+    const { block, error } = findStateBlock(body, name);
+    if (error || !block || normalizeBlockBody(block.body) !== normalizeBlockBody(expected)) {
+      throw new ProgrammeError('MANAGED_BLOCK_BROKEN', `${page}: the ${name} block cannot be written where the next pass would read it back`
+        + `${error ? ` (${error})` : ''}, so nothing was written to this page. Look for a code block, comment, details section or other HTML block that is not closed, or a broken Toolkit marker line, fix it by hand, and the next pass writes the page`);
+    }
+  }
+  return body;
 }
 
 // True when Toolkit version `a` (x.y.z) is newer than `b`.
@@ -1921,8 +2020,30 @@ function upsertNavBlock(text, rendered) {
   const { block: found, error } = findStateBlock(source, NAV_BLOCK_NAME);
   if (error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', error);
   if (found) return source.slice(0, found.start) + block + source.slice(found.end);
-  const after = source.replace(/^\s+/, '');
+  // Only blank lines are dropped at the join: the first line's own indent (an indented code line)
+  // stays, so the text below reads the same as before.
+  const after = trimStart(source);
   return `${block}${eol}${after ? `${eol}${after}` : ''}`;
+}
+
+// A PR description with its two generated blocks first: the links block at the very top and the
+// status block right under it. Everything the author wrote stays below, byte for byte.
+function upsertPrBlocks(text, nav, status) {
+  let body = upsertNavBlock(text, nav);
+  const eol = /\r\n/.test(body) ? '\r\n' : '\n';
+  const block = status.split('\n').join(eol);
+  const links = findStateBlock(body, NAV_BLOCK_NAME).block;
+  const found = findStateBlock(body);
+  if (found.error) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', found.error);
+  if (found.block && found.block.start >= links.end && !body.slice(links.end, found.block.start).trim()) return body.slice(0, found.block.start) + block + body.slice(found.block.end);
+  if (found.block) {
+    const before = trimEnd(body.slice(0, found.block.start));
+    const after = trimStart(body.slice(found.block.end));
+    body = before && after ? `${before}${eol}${eol}${after}` : before || after;
+  }
+  const at = findStateBlock(body, NAV_BLOCK_NAME).block.end;
+  const rest = trimStart(body.slice(at));
+  return `${body.slice(0, at)}${eol}${eol}${block}${rest ? `${eol}${eol}${rest}` : eol}`;
 }
 
 // Index comment bodies for a topic's comment links, each under the comment size limit. The links
@@ -1997,36 +2118,14 @@ function indexEffect(number, part, after) {
   return { kind: 'post_index_comment', target, label: part.label, lines: part.lines };
 }
 
-// Headings outside fenced code and line-start HTML comments, with original line offsets.
+// Top-level headings with original line offsets: the same reading of the page the block search
+// uses (see withoutShownMarkers), so a block placed at a heading is always found again. A `#` line
+// inside a code block, an HTML comment, a details section or another HTML block is no heading.
 function headings(text) {
   const found = [];
-  let fence = null;
-  let comment = false;
-  for (let offset = 0; offset < text.length;) {
-    const next = text.indexOf('\n', offset);
-    const stop = next === -1 ? text.length : next;
-    const line = text.slice(offset, stop).replace(/\r$/, '');
-    let hidden = false;
-    if (fence) {
-      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
-      if (close && close[1][0] === fence.character && close[1].length >= fence.length) fence = null;
-      hidden = true;
-    } else if (comment) {
-      if (line.includes('-->')) comment = false;
-      hidden = true;
-    } else if (/^ {0,3}<!--/.test(line)) {
-      comment = !line.includes('-->', line.indexOf('<!--') + 4);
-      hidden = true;
-    } else {
-      const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-      if (open && (open[1][0] !== '`' || !open[2].includes('`'))) {
-        fence = { character: open[1][0], length: open[1].length };
-        hidden = true;
-      }
-    }
-    const heading = !hidden && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
-    if (heading) found.push({ level: heading[1].length, text: heading[2].trim(), start: offset, end: next === -1 ? stop : next + 1 });
-    offset = next === -1 ? text.length : next + 1;
+  for (const line of pageLayout().markdownLines(text).lines) {
+    const heading = line.top && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line.text);
+    if (heading) found.push({ level: heading[1].length, text: heading[2].trim(), start: line.start, end: line.end });
   }
   return found;
 }
@@ -2039,10 +2138,14 @@ function headings(text) {
 function blockTarget(text, placement = {}) {
   const anchor = placement.after_block ? findStateBlock(text, placement.after_block).block : null;
   if (anchor) return { start: anchor.end, end: anchor.end, replaces: false };
-  const all = headings(text);
+  // A heading a generated block prints (PATH, STATUS, COMMENT TRACE) is not a page title.
+  const real = withoutShownMarkers(text);
+  const spans = [...real.matchAll(new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:BEGIN ([A-Z]+) [^\\n]*-->\\r?\\n[\\s\\S]*?^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END \\1 -->`, 'gm'))]
+    .map(match => [match.index, match.index + match[0].length]);
+  const all = headings(text).filter(entry => !spans.some(([from, to]) => entry.start > from && entry.start < to));
   // A section ends at the next heading of its level or higher, or at the next managed block, so a
   // last section never runs into the comment trace or the text after it.
-  const markers = [...text.matchAll(/^<!-- AI-AGENT-TOOLKIT:/gm)].map(match => match.index);
+  const markers = [...real.matchAll(/^<!-- AI-AGENT-TOOLKIT:/gm)].map(match => match.index);
   const sectionEnd = heading => {
     const next = all.find(entry => entry.start > heading.start && entry.level <= heading.level);
     const marker = markers.find(at => at > heading.start);
@@ -2173,6 +2276,14 @@ function ghFailure(response, what) {
 
 // Reads and compare-and-swap writes of state documents in a private GitHub repository (store kind
 // `github`), through the Contents API.
+const PAGE_COPY_SCHEMA = 'toolkit.programme-page-copy.v1';
+function assertPageCopy(doc) {
+  if (!isObject(doc) || doc.schema !== PAGE_COPY_SCHEMA || !isInt(doc.issue, 1) || typeof doc.body !== 'string' || doc.sha256 !== sha256(doc.body)) {
+    throw new ProgrammeError('STATE_INVALID', 'A saved page copy is not readable as written.');
+  }
+  return doc;
+}
+
 // An existing document is replaced only against the exact version that was read. A read that
 // came back without a usable blob id cannot prove that version, so nothing is requested.
 function requireVersionToken(sha, docPath) {
@@ -2246,21 +2357,22 @@ class StateStore {
   validateRead(kind, doc) {
     if (kind === 'sidecar') return assertSidecar(doc);
     if (kind === 'checkpoint') return assertCheckpoint(doc);
+    if (kind === 'page_copy') return assertPageCopy(doc);
     return assertValid(kind, doc);
   }
 
   // The whole page as it stood, kept in the private store before marked notes can leave it. The
   // file is named by its content, so a retry finds the same file. It is read back before use, and a
   // store that is not private, or text shaped like a secret, saves nothing.
-  pageCopyPath(issue, digest) { return `${this.store.path}page-copies/issue-${issue}/${digest}.md`; }
+  noteCopyPath(issue, digest) { return `${this.store.path}page-copies/issue-${issue}/${digest}.md`; }
 
-  savePageCopy(issue, text) {
+  saveNoteCopy(issue, text) {
     if (secretShaped(text)) throw new ProgrammeError('PAGE_COPY_REFUSED', 'The page holds text shaped like a secret, so no copy was saved and nothing was moved.');
     const repo = this.transport.request('GET', `repos/${this.store.repository}`);
     if (repo.status !== 200) throw ghFailure(repo, 'Reading the private store');
     if (repo.json?.private !== true) throw new ProgrammeError('STORE_NOT_PRIVATE', `The store ${this.store.repository} is not private, so no page copy was saved and nothing was moved.`);
     const digest = sha256(text);
-    const docPath = this.pageCopyPath(issue, digest);
+    const docPath = this.noteCopyPath(issue, digest);
     const decoded = response => (response.json?.encoding === 'base64' ? Buffer.from(response.json.content, 'base64').toString('utf8') : null);
     const existing = this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(this.store.branch)}`);
     if (existing.status === 200) {
@@ -2302,6 +2414,23 @@ class StateStore {
     this.ownWrites.set(docPath, { replaced: sha || null, doc: clone(readback.doc), sha: blob });
     this.lastCommit = commit;
     return { outcome: 'WRITTEN', doc: readback.doc, sha: blob };
+  }
+
+  // A copy of a page as it was before a write that moves hand-written text, kept in the private
+  // store under the page's own digest and read back. Saving the same page twice writes once.
+  pageCopyPath(number, digest) { return `${this.store.path}page-copies/issue-${number}-${digest.slice(0, 16)}.json`; }
+
+  savePageCopy(number, page) {
+    const digest = sha256(page.body);
+    const file = this.pageCopyPath(number, digest);
+    const existing = this.readPath(file, 'page_copy');
+    if (existing.doc) {
+      if (existing.doc.issue !== number || existing.doc.body !== page.body) throw new ProgrammeError('STATE_CONFLICT', `${file} holds a different page.`);
+      return { outcome: 'NOOP', path: file };
+    }
+    const doc = { schema: PAGE_COPY_SCHEMA, issue: number, sha256: digest, updated_at: page.updated_at || null, saved_at: this.now(), body: page.body };
+    this.putVerified(file, 'page_copy', canonicalText(doc), null, `programme page copy: issue-${number}`);
+    return { outcome: 'WRITTEN', path: file };
   }
 
   listJournals(issue) {
@@ -2585,6 +2714,9 @@ class BranchStateStore extends StateStore {
     this.sessions = new Set();
   }
 
+  // Page copies hold whole pages, so they stay in the private store.
+  savePageCopy(number, page) { return this.private.savePageCopy(number, page); }
+
   // The public file holds only what validatePublic allows.
   validateRead(kind, doc) { return validatePublic(kind, doc); }
 
@@ -2593,7 +2725,7 @@ class BranchStateStore extends StateStore {
   verify() { return this.private.verify(); }
 
   // Page copies hold hand-written text, so they go to the private store, never the public branch.
-  savePageCopy(issue, text) { this.requirePrivateStore(); return this.private.savePageCopy(issue, text); }
+  saveNoteCopy(issue, text) { this.requirePrivateStore(); return this.private.saveNoteCopy(issue, text); }
 
   // Journals stay in the private store, unchanged.
   journalDir(issue) { return this.private.journalDir(issue); }
@@ -3089,7 +3221,7 @@ class ProgrammeGraphReader {
     for (let page = 1; page < 50; page += 1) {
       const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=open&per_page=100&page=${page}`);
       if (response.status !== 200) throw ghFailure(response, 'Listing open pull requests');
-      all.push(...response.json.map(pr => ({ number: pr.number, body: pr.body || '' })));
+      all.push(...response.json.map(pr => ({ number: pr.number, body: pr.body || '', head_sha: pr.head?.sha || null })));
       if (response.json.length < 100) return all;
     }
     throw new ProgrammeError('GH_FAILED', 'The repository has more open pull requests than this reader pages through.');
@@ -3131,7 +3263,7 @@ class ProgrammeGraphReader {
         // Keep a five-minute overlap for boundary updates and timestamp precision. The REST list
         // is descending by updated_at, so nothing after this row can be newer than the cutoff.
         if (cutoff !== null && Date.parse(pr.updated_at) < cutoff) return all;
-        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', closed_at:pr.closed_at || pr.merged_at || null});
+        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', head_sha:pr.head?.sha || null, closed_at:pr.closed_at || pr.merged_at || null});
       }
       if (response.json.length < 100) return all;
     }
@@ -3533,8 +3665,9 @@ const EFFECT_TEXT = {
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
-  replace_block: effect => (effect.state === false ? `Update the ${staleParts(effect)} in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
-  replace_pr_nav: effect => `Add the parent and task links at the top of PR #${effect.target.pr}`,
+  replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, STATUS, COMMENT TRACE, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first`
+    : effect.state === false ? `Update the ${staleParts(effect)} in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
+  replace_pr_nav: effect => `Write the PATH and STATUS blocks at the top of PR #${effect.target.pr}`,
   update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,
   post_index_comment: effect => effect.target.directory ? `Move #${effect.target.issue}'s comment topics into index pages` : `Move #${effect.target.issue}'s "${effect.label || effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} link(s)) into a new index comment`,
   post_archive_comment: effect => (/^note-/.test(String(effect.target.key)) ? `Move the notes marked under \`## Archive\` off #${effect.target.issue}'s page into a verified comment` : `Archive programme content from #${effect.target.issue} in a verified comment`),
@@ -3711,12 +3844,11 @@ class Reconciler {
       const doc = children.get(outcome.issue)?.doc;
       if (doc && (doc.gate.assignment || Object.keys(doc.journals_seen || {}).length)) journals.set(outcome.issue, this.readJournals(doc));
     }
-    // Open PRs are listed only when some open outcome tracks no PR and no branch.
-    const untracked = outcomes.some(outcome => {
-      const doc = children.get(outcome.issue)?.doc;
-      return !isFinished(outcome, doc) && !doc?.pr?.number && !doc?.candidate?.branch;
-    });
-    const references = prGraph ? prGraph.openReferences : untracked ? referencedIssues(this.reader.openPullRequests()) : new Map();
+    // Every open PR that names a catalogued task gets the links and status blocks, so the open
+    // list is read on every pass that plans page writes.
+    const openList = prGraph ? prGraph.openListed : this.reader.openPullRequests();
+    const references = prGraph ? prGraph.openReferences : referencedIssues(openList);
+    const prHeads = new Map(openList.map(pr => [pr.number, pr.head_sha || null]));
     const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number,
       number === parent.parent_issue ? this.discussion(number, issues.get(number), cache)
         : kept.has(number) ? kept.get(number).comments
@@ -3740,10 +3872,13 @@ class Reconciler {
     }
     const prPages = new Map();
     for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
+    for (const outcome of outcomes) for (const number of references.get(outcome.issue) || []) {
+      if (!prPages.has(number)) prPages.set(number, this.reader.issue(number));
+    }
     const closing = this.refreshFacts && !only ? this.closing.scan(parent,prGraph,this.now,excludedGraphPr) : null;
     if (closing) this.pass.planning();
     this.pass.phaseAt('planning');
-    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, discovery, additions, prGraph, closing };
+    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, prHeads, discovery, additions, prGraph, closing };
   }
 
   // The parent's comments. With a copy from an earlier pass only the comments changed since its
@@ -3852,7 +3987,7 @@ class Reconciler {
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
       && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
-    return {discovery,histories,openReferences,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted,closedListed,closedComplete};
+    return {discovery,histories,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted,closedListed,closedComplete};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -3910,6 +4045,30 @@ class Reconciler {
       if (isFinished(outcome, doc) || doc?.pr?.number || doc?.candidate?.branch) continue;
       const numbers = observed.references.get(outcome.issue) || [];
       if (numbers.length) findings.push({ code: 'PR_UNTRACKED', issue: outcome.issue, detail: `open PR ${numbers.map(number => `#${number}`).join(', ')} references this outcome, but its state records no PR or branch; the controller confirms and records it with update --patch` });
+    }
+  }
+
+  // Report-only: a task the graph shows IN PROGRESS that nothing is moving. No open or draft PR
+  // (tracked, in its history, or naming it), no live gate assignment, no holder on its state
+  // document, and neither the document nor a comment has changed for TASK_IDLE_HOURS. A task
+  // waiting on the owner is left out: the owner already has it.
+  diffIdle(parent, docs, observed, only, findings) {
+    const now = Date.parse(this.now());
+    for (const outcome of parent.outcomes) {
+      if (only && outcome.issue !== only) continue;
+      const doc = docs.get(outcome.issue);
+      if (!doc || statusText(outcome, doc) !== 'IN PROGRESS' || doc.lifecycle === 'WAITING_OWNER') continue;
+      if (['OPEN', 'DRAFT'].includes(doc.pr?.state) || (doc.prs || []).some(pr => pr.state === 'OPEN')) continue;
+      if ((observed.references.get(outcome.issue) || []).length) continue;
+      if (LIVE_GATE_STATES.includes(doc.gate?.state) || doc.fence?.holder_prefix) continue;
+      const written = Date.parse(doc.volatile?.written_at || '');
+      // A document with no write time is new in this pass or cannot be dated; neither is idle.
+      if (!Number.isFinite(written)) continue;
+      const comments = (observed.comments.get(outcome.issue) || []).filter(comment => !String(comment.body || '').includes('programme-trace intent='))
+        .map(comment => Date.parse(comment.created_at)).filter(Number.isFinite);
+      const latest = Math.max(written, ...comments);
+      if (now - latest < TASK_IDLE_HOURS * 60 * 60 * 1000) continue;
+      findings.push({ code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no open PR, no live gate assignment and no holder, and nothing on it has changed since ${new Date(latest).toISOString().slice(0, 16)}Z (over ${TASK_IDLE_HOURS} hours)` });
     }
   }
 
@@ -4060,6 +4219,11 @@ class Reconciler {
   // The links block for a task page (null for the parent page).
   navFor(parent, number, docs) {
     if (number === parent.parent_issue) return null;
+    return renderNavBlockBody(this.chainFor(parent, number), docs.get(number)?.pr?.number || null);
+  }
+
+  // The programme parent, any catalogued parents in between, then the task.
+  chainFor(parent, number) {
     const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
     const chain = [number];
     const seen = new Set(chain);
@@ -4068,7 +4232,7 @@ class Reconciler {
       seen.add(at);
     }
     chain.unshift(parent.parent_issue);
-    return renderNavBlockBody(chain, docs.get(number)?.pr?.number || null);
+    return chain;
   }
 
   renderAll(parent, children, issues, comments) {
@@ -4104,7 +4268,22 @@ class Reconciler {
   // measured with a link to that comment in their place.
   projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, page = null) {
     if (number === this.binding.parent_issue) return this.projectParentPage(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget, page);
-    return this.projectTrace(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget);
+    return this.projectTrace(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget, { relay: page?.relay === true });
+  }
+
+  // Whether a task page may be re-laid into the fixed order: only an open task, and never a page
+  // holding a secret-shaped value (its copy could not be saved). `reason` is set for a refusal the
+  // controller should hear about.
+  taskRelay(number, page) {
+    if (number === this.binding.parent_issue || !page || page.is_pull_request) return { relay: false, reason: null };
+    if (page.state !== 'open') {
+      // A closed task keeps its text where it is; one already in the fixed order stays in it.
+      try { return { relay: pageLayout().inOrder(page.body), reason: null }; }
+      catch (error) { if (error.code !== 'PAGE_LAYOUT_HELD') throw error; return { relay: false, reason: null }; }
+    }
+    const errors = [];
+    screenSecrets(errors, page.body, 'page');
+    return errors.length ? { relay: false, reason: 'the page holds a secret-shaped value, so no copy of it can be saved' } : { relay: true, reason: null };
   }
 
   // Marked notes (`## Archive`) leave the page only on a full pass, and only when the whole move fits
@@ -4222,12 +4401,26 @@ class Reconciler {
     const trace = withoutContextComment(traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), layout.contextId);
     const build = entries => {
       const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic, number === this.binding.parent_issue);
+      let layoutHold = null;
+      if (layout.relay) {
+        // A task page: generated blocks first, then the spec sections, then everything else.
+        try {
+          const laid = pageLayout().layoutTaskPage(source, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, stateBody], [TRACE_BLOCK_NAME, traceBody]].filter(([, body]) => body), version);
+          assertBlocksReadBack(laid.body, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, stateBody], [TRACE_BLOCK_NAME, traceBody]], `#${number}`);
+          return { body: laid.body, traceBody, moved: false, relaid: true, moves: laid.moves };
+        } catch (error) {
+          if (error.code !== 'PAGE_LAYOUT_HELD') throw error;
+          layoutHold = error.reason;
+        }
+      }
       const withCurrent = currentBody ? upsertCurrentBlock(source, renderBlock(currentBody, version, CURRENT_BLOCK_NAME), this.placementFor(number).after_section) : source;
       const withState = layout.context ? upsertParentStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number))
         : upsertStateBlock(withCurrent, renderBlock(stateBody, version), this.placementFor(number));
       const withNav = navBody ? upsertNavBlock(withState.body, renderBlock(navBody, version, NAV_BLOCK_NAME)) : withState.body;
       const withContext = layout.context ? upsertContextBlock(withNav, renderBlock(layout.context, version, CONTEXT_BLOCK_NAME)) : withNav;
-      return { body: upsertTraceBlock(withContext, renderBlock(traceBody, version, TRACE_BLOCK_NAME)), traceBody, moved: withState.moved };
+      const body = assertBlocksReadBack(upsertTraceBlock(withContext, renderBlock(traceBody, version, TRACE_BLOCK_NAME)),
+        [[CURRENT_BLOCK_NAME, currentBody], [BLOCK_NAME, stateBody], [NAV_BLOCK_NAME, navBody], [CONTEXT_BLOCK_NAME, layout.context], [TRACE_BLOCK_NAME, traceBody]], `#${number}`);
+      return { body, traceBody, moved: withState.moved, ...(layoutHold ? { layoutHold } : {}) };
     };
     const full = build(trace);
     if (full.body.length < threshold) return { ...full, overflow: [] };
@@ -4278,16 +4471,43 @@ class Reconciler {
     return { ...projected, overflow };
   }
 
-  // An open or draft PR for a task starts with the same links as the task page, plus the PR itself.
-  diffPrNav(number, doc, navBody, observed, effects) {
-    const pr = doc?.pr;
-    if (!navBody || !pr?.number || !['OPEN', 'DRAFT'].includes(pr.state)) return;
-    const page = observed.prPages?.get(pr.number);
-    if (!page) return;
-    const found = findStateBlock(page.body, NAV_BLOCK_NAME);
-    if (found.error) return;
-    if (found.block && normalizeBlockBody(found.block.body) === normalizeBlockBody(navBody) && !found.block.tampered) return;
-    effects.push({ kind: 'replace_pr_nav', target: { issue: number, pr: pr.number, digest: blockDigest(navBody) }, body: navBody });
+  // Every open or draft PR that names a catalogued task (the task's tracked PR, or a PR whose text
+  // says Refs or Closes for it) starts with a PATH block and a STATUS block. The PR's own
+  // description is left as written below them, and a merged or closed PR is never edited.
+  prPageBodies(parent, docs, pr, issues, head) {
+    const chains = issues.map(issue => this.chainFor(parent, issue));
+    return { nav: renderPrNavBlockBody(chains, pr), status: renderPrStatusBlockBody(pr, head, issues.map(issue => ({ issue, child: docs.get(issue) || null }))) };
+  }
+
+  prTasks(parent, docs, observed, only = null) {
+    const tasks = new Map();
+    const add = (pr, issue) => { if (!tasks.has(pr)) tasks.set(pr, []); if (!tasks.get(pr).includes(issue)) tasks.get(pr).push(issue); };
+    for (const outcome of parent.outcomes) {
+      const doc = docs.get(outcome.issue);
+      if (doc?.pr?.number && ['OPEN', 'DRAFT'].includes(doc.pr.state)) add(doc.pr.number, outcome.issue);
+      for (const pr of observed.references?.get(outcome.issue) || []) add(pr, outcome.issue);
+    }
+    if (only) for (const [pr, issues] of tasks) if (!issues.includes(only)) tasks.delete(pr);
+    return tasks;
+  }
+
+  prHead(docs, observed, pr, issues) {
+    const tracked = issues.map(issue => docs.get(issue)?.pr).find(entry => entry?.number === pr && isSha(entry.head));
+    return tracked?.head || observed.prHeads?.get(pr) || null;
+  }
+
+  diffPrPages(parent, docs, observed, only, effects) {
+    for (const [pr, issues] of this.prTasks(parent, docs, observed, only)) {
+      const page = observed.prPages?.get(pr);
+      if (!page || !page.is_pull_request || page.state !== 'open') continue;
+      const nav = findStateBlock(page.body, NAV_BLOCK_NAME);
+      const status = findStateBlock(page.body, BLOCK_NAME);
+      if (nav.error || status.error) continue;
+      const bodies = this.prPageBodies(parent, docs, pr, issues, this.prHead(docs, observed, pr, issues));
+      const same = (found, body) => Boolean(found.block) && normalizeBlockBody(found.block.body) === normalizeBlockBody(body) && !found.block.tampered;
+      if (same(nav, bodies.nav) && same(status, bodies.status)) continue;
+      effects.push({ kind: 'replace_pr_nav', target: { issue: issues[0], pr, digest: blockDigest(bodies.nav), status: blockDigest(bodies.status) }, body: bodies.nav, status_body: bodies.status });
+    }
   }
 
   diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null, resolutions = []) {
@@ -4295,6 +4515,7 @@ class Reconciler {
     const version = this.toolkitVersion || '0.0.0';
     const requested = targetsOverride || (only ? [only, parent.parent_issue] : [...blocks.keys()]);
     const targets = [...requested.filter(number => number !== parent.parent_issue), ...requested.filter(number => number === parent.parent_issue)];
+    if (!targetsOverride) this.diffPrPages(parent, children, observed, only, effects);
     for (const number of targets) {
       const issue = observed.issues.get(number);
       const body = blocks.get(number);
@@ -4316,11 +4537,12 @@ class Reconciler {
       }
       const currentCurrent = !currentBody || (Boolean(summary.block) && normalizeBlockBody(summary.block.body) === normalizeBlockBody(currentBody) && !summary.block.tampered);
       const navCurrent = !navBody || (Boolean(nav.block) && normalizeBlockBody(nav.block.body) === normalizeBlockBody(navBody) && !nav.block.tampered);
-      this.diffPrNav(number, children.get(number), navBody, observed, effects, version);
       const comments = observed.comments.get(number) || [];
       const placement = this.placementFor(number);
       const current = block && normalizeBlockBody(block.body) === normalizeBlockBody(body) && !block.tampered;
-      const move = Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
+      // A page that is re-laid has no separate place for its state block.
+      const relay = this.taskRelay(number, issue);
+      const move = !relay.relay && Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
       const topic = this.topicFor(parent, number, observed.issues);
       let traceBody;
       try {
@@ -4333,14 +4555,27 @@ class Reconciler {
       const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
         && resolutions.some(entry => entry.kind === 'child' && entry.number === outcome.issue && entry.outcome !== 'UNKNOWN'));
       // A current body at or over the threshold still moves its largest tag lists out.
-      if (number !== parent.parent_issue && current && !move && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
+      // An open task page is re-laid into the fixed order; a closed one keeps its text where it is.
+      // The plan asks the layout itself, with this pass's blocks, so it never plans a lay-out the
+      // write would then refuse: a page the layout holds keeps its order and raises its finding.
+      let ordered = true;
+      let reason = relay.reason;
+      if (relay.relay) {
+        try {
+          pageLayout().layoutTaskPage(issue.body, [[NAV_BLOCK_NAME, navBody], [BLOCK_NAME, body], [TRACE_BLOCK_NAME, traceBody]].filter(([, text]) => text), version);
+          ordered = pageLayout().inOrder(issue.body);
+        } catch (error) { if (error.code !== 'PAGE_LAYOUT_HELD') throw error; reason = error.reason; }
+      }
+      if (reason && number !== parent.parent_issue && issue.state === 'open' && !issue.is_pull_request) findings.push({ code: 'PAGE_LAYOUT_HELD', issue: number, detail: `the page was not re-laid: ${reason}` });
+      if (number !== parent.parent_issue && current && !move && ordered && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
+      if (!ordered) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: 'the page is not in the fixed section order' });
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
       if (!currentCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: summary.block ? 'the CURRENT summary differs from the state documents' : 'no CURRENT summary yet' });
       let projected;
       const topicBudget = Math.max(0, MAX_TOPIC_COMMENTS_PER_PASS - effects.filter(effect => effect.kind === 'post_index_comment' && !effect.target.directory).reduce((count, effect) => count + effect.target.parts.length, 0));
-      try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, number === parent.parent_issue ? MAX_TOPIC_COMMENTS_PER_PASS : topicBudget, { parent, only, traceTopicBudget: topicBudget }); }
+      try { projected = this.projectBody(number, issue.body, body, comments, version, navBody, currentBody, topic, number === parent.parent_issue ? MAX_TOPIC_COMMENTS_PER_PASS : topicBudget, { parent, only, traceTopicBudget: topicBudget, relay: relay.relay }); }
       catch (error) {
         if (!error.code) throw error;
         holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body', ...(error.diagnostics ? { diagnostics: error.diagnostics } : {}) }); continue;
@@ -4373,7 +4608,7 @@ class Reconciler {
       for (const part of archiveEffects) effects.push({ kind: parent.page_archive?.some(entry => entry.key === part.key && entry.comment_id) ? 'edit_archive_comment' : 'post_archive_comment', target: { issue: number, key: part.key } });
       for (const part of projected.overflow) effects.push(indexEffect(number, part, String(comments.at(-1)?.id || '')));
       effects.push({ kind: 'replace_block', target: { issue: number, digest: blockDigest(body), trace: blockDigest(projected.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) },
-        insert: !block, move: current && move, state: !current || move, stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent }, body, updated_at: issue.updated_at });
+        insert: !block, move: current && move && ordered, state: !current || move, relay: Boolean(projected.relaid && projected.moves), stale: { trace: !traceCurrent, nav: !navCurrent, current: !currentCurrent }, body, updated_at: issue.updated_at });
     }
   }
 
@@ -4423,7 +4658,8 @@ class Reconciler {
         } else if (effect.kind === 'replace_pr_nav') {
           const page = this.reader.issue(target.pr);
           const nav = page ? findStateBlock(page.body, NAV_BLOCK_NAME).block : undefined;
-          done = page ? Boolean(nav && blockDigest(nav.body) === target.digest) : null;
+          const status = page && target.status ? findStateBlock(page.body).block : undefined;
+          done = page ? Boolean(nav && blockDigest(nav.body) === target.digest && (!target.status || (status && blockDigest(status.body) === target.status))) : null;
         } else if (effect.kind === 'post_index_comment') {
           const comments = observed.comments.get(target.issue) || this.reader.comments(target.issue);
           done = indexReadback(comments, effect.intent_id, target.parts);
@@ -4626,6 +4862,7 @@ class Reconciler {
     const blockHolds = new Set(holds.slice(blockHoldStart));
     this.auditTraces(parent, observed, only, findings, effects);
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
+    this.diffIdle(parent, desiredDocs, observed, only, findings);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
       detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
@@ -4949,6 +5186,7 @@ class Reconciler {
     }
 
     let finalRedraw = false;
+    let relays = 0;
     let finalAttention = null;
     let redrawing = false;
     const postsByIssue = new Map();
@@ -5064,7 +5302,7 @@ class Reconciler {
             // A note comment is never edited: its key is bound to its exact text.
             const prior = part.kind !== 'note' && entry?.comment_id && entry.login === login ? trust(entry) : null;
             // Saved copy first: the whole page as it stands, before any marked text is posted.
-            const copy = part.kind === 'note' ? this.store.savePageCopy(parentNumber, snapshot.before.body).digest : null;
+            const copy = part.kind === 'note' ? this.store.saveNoteCopy(parentNumber, snapshot.before.body).digest : null;
             if (!entry) {
               entry = { key: part.key, kind: part.kind, group: part.group, title: part.title.slice(0, 200), comment_id: null, login: null,
                 digest, state: 'pending', ...(copy ? { copy } : {}) };
@@ -5177,10 +5415,13 @@ class Reconciler {
         }
       };
       if (next.body === before.body) { finish(); record(effect, 'NOOP'); return; }
+      // Every block was read back when the body was projected; a missing one holds the page here
+      // instead of failing on a digest that is not there.
+      const state = findStateBlock(next.body).block, trace = findStateBlock(next.body, TRACE_BLOCK_NAME).block, context = findStateBlock(next.body, CONTEXT_BLOCK_NAME).block;
+      if (!state || !trace || !context) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', `#${parentNumber}: a block of the programme page cannot be read back, so nothing was written to this page`);
       // Saved copy first (again): the exact page this write replaces, before marked text leaves it.
-      if (next.noteCut) cutCopy = this.store.savePageCopy(parentNumber, before.body).digest;
-      const state = findStateBlock(next.body).block, trace = findStateBlock(next.body, TRACE_BLOCK_NAME).block;
-      effect.target = { issue: parentNumber, digest: state.digest, trace: trace.digest, current: blockDigest(currentBody), context: findStateBlock(next.body, CONTEXT_BLOCK_NAME).block.digest, body_digest: sha256(next.body) };
+      if (next.noteCut) cutCopy = this.store.saveNoteCopy(parentNumber, before.body).digest;
+      effect.target = { issue: parentNumber, digest: state.digest, trace: trace.digest, current: blockDigest(currentBody), context: context.digest, body_digest: sha256(next.body) };
       withIntent(effect, () => {
         // Recording the body intent can take time. Recheck custody after that write as well, so a
         // comment edited during bookkeeping cannot authorise hiding its graph rows.
@@ -5255,7 +5496,7 @@ class Reconciler {
             const newest = newestBlockVersion(page.body);
             if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`);
             comments.set(number, this.reader.comments(number));
-            const next = this.projectBody(number, page.body, body, comments.get(number), version, navBody, currentBody, topic, budget);
+            const next = this.projectBody(number, page.body, body, comments.get(number), version, navBody, currentBody, topic, budget, { relay: this.taskRelay(number, page).relay });
             if (next.refused || next.body.length >= this.threshold) {
               const error = new ProgrammeError('BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`);
               error.diagnostics = bodySizeDiagnostics(next.body, this.threshold);
@@ -5320,16 +5561,37 @@ class Reconciler {
           const newest = newestBlockVersion(before.body);
           if (newest && versionNewer(newest, version)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`); continue; }
           let next;
+          let waits = false;
           comments.set(number, fresh ? fresh.comments : this.reader.comments(number));
-          try { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0); }
-          catch (error) { if (!error.code) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+          try {
+            next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0, { relay: this.taskRelay(number, before).relay });
+            // Past the per-pass limit a page that would have its text moved keeps its old layout
+            // for now; its blocks are still updated where they are.
+            if (next.relaid && next.moves && relays >= MAX_RELAYS_PER_PASS) { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0, { relay: false }); waits = true; }
+          } catch (error) { if (!error.code) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
           effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
+          // The result says what was done to this page: a re-lay names its saved copy, and a page
+          // that keeps its old order for now says so.
+          const laidOut = Boolean(next.relaid && next.moves);
+          if (Boolean(effect.relay) !== laidOut) { effect = { ...effect, relay: laidOut }; effect.text = describeEffect(effect); }
+          let done = waits ? `the blocks were updated where they are; the page is laid out in a later pass (at most ${MAX_RELAYS_PER_PASS} pages are laid out per pass)` : null;
           if (next.overflow.length || next.body.length >= this.threshold) {
             record(effect, 'HELD', `the body would be ${next.body.length} characters`);
             hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`, bodySizeDiagnostics(next.body, this.threshold));
             continue;
           }
           if (next.body === before.body) { verifiedBodies.add(number); record(effect, 'NOOP'); continue; }
+          if (next.relaid && next.moves) {
+            // Hand-written text is about to move: the page as it is now is saved and read back
+            // first. Without that copy nothing is written.
+            try { guard(); const copy = this.store.savePageCopy(number, before); relays += 1; done = `the page was laid out in the fixed order; the page as it was is saved at ${copy.path} in the state store`; }
+            catch (error) {
+              if (!error.code || STOPS_PASS.has(error.code)) throw error;
+              record(effect, 'HELD', 'the copy of the page could not be saved');
+              hold(effect, 'PAGE_COPY_FAILED', `#${number} was not re-laid because the copy of its present page could not be saved (${error.code}); the next pass tries again`);
+              continue;
+            }
+          }
           withIntent(effect, () => {
             // Issue PATCH has no compare-and-swap: re-read immediately before writing and refuse on change.
             const latest = this.reader.issue(number);
@@ -5339,7 +5601,7 @@ class Reconciler {
             guard();
             const response = this.mutator.writeBody(number, next.body);
             const after = this.reader.issue(number);
-            if (after && after.body === next.body) { verifiedBodies.add(number); return { outcome: 'DONE' }; }
+            if (after && after.body === next.body) { verifiedBodies.add(number); return { outcome: 'DONE', ...(done ? { detail: done } : {}) }; }
             if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
             return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
           });
@@ -5404,9 +5666,17 @@ class Reconciler {
       if (!this.toolkitVersion) { record(effect, 'HELD', 'the Toolkit version could not be read'); hold(effect, 'TOOLKIT_VERSION_UNKNOWN', 'the Toolkit version could not be read, so no links were written'); continue; }
       const before = this.reader.issue(pr);
       if (!before) { record(effect, 'HELD', 'the PR could not be read'); hold(effect, 'ISSUE_MISSING', `PR #${pr} could not be read`); continue; }
+      // A PR merged or closed since planning is never edited.
+      if (!before.is_pull_request || before.state !== 'open') { record(effect, 'SKIPPED', 'the PR is no longer open'); continue; }
+      const newest = newestBlockVersion(before.body);
+      if (newest && versionNewer(newest, this.toolkitVersion)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `PR #${pr} was written by Toolkit ${newest}, newer than this copy (${this.toolkitVersion}); update Toolkit on this computer, then run again`); continue; }
       let next;
-      try { next = upsertNavBlock(before.body, renderBlock(effect.body, this.toolkitVersion, NAV_BLOCK_NAME)); }
-      catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+      try {
+        next = effect.status_body ? upsertPrBlocks(before.body, renderBlock(effect.body, this.toolkitVersion, NAV_BLOCK_NAME), renderBlock(effect.status_body, this.toolkitVersion))
+          : upsertNavBlock(before.body, renderBlock(effect.body, this.toolkitVersion, NAV_BLOCK_NAME));
+        assertBlocksReadBack(next, [[NAV_BLOCK_NAME, effect.body], [BLOCK_NAME, effect.status_body]], `PR #${pr}`);
+      } catch (error) { record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
+      if (next === before.body) { record(effect, 'NOOP'); continue; }
       withIntent(effect, () => {
         const latest = this.reader.issue(pr);
         if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
@@ -5651,6 +5921,6 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, renderContextBlockBody,
+  SAFE_LIMIT, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS,
   contextCommentIds,
 });
