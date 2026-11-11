@@ -14,7 +14,7 @@
 //             commands, each pinned to the managed checkout's full path and one subcommand. It
 //             names no repository.
 //   repo      pasted once per governed repository into that repository's local settings, for its
-//             GitHub writes: comments, merges the merge hold still checks, evidence store pushes.
+//             GitHub writes: comments and evidence store pushes. Merges are never in a block.
 //
 // Every printed line comes from one row of ROWS below, and every row names the guard that still
 // checks the command after the host stops asking. A line the table does not hold is never printed.
@@ -26,8 +26,6 @@ const nodeFs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { samePath } = require('./toolkit-canonical-path.cjs');
-const { ClaudePluginRegistry } = require('./toolkit-claude-plugin-registry.cjs');
 
 class PermissionsError extends Error {
   constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); this.exitCode = exitCode; }
@@ -46,7 +44,6 @@ const GUARDS = Object.freeze({
   readOnly: 'Read-only: it lists or prints and changes nothing.',
   cleanup: 'The script checks every path itself: inside a scratch root after links are resolved, a clean and fully pushed worktree, and the evidence store read back first. Anything else is reported, never deleted.',
   comment: 'The footer hook and the footer sweep check every posted comment.',
-  merge: 'The merge hold hook checks every merge first: switch, eligibility, the exact head commit, and the owner card or typed OK.',
   store: 'The secret scan before upload, the store identity check when this line is printed, and the history guard hook, which refuses forced pushes.',
 });
 
@@ -77,7 +74,6 @@ const ROWS = Object.freeze([
   scriptRow('cleanup-apply', CLEANUP, 'apply', GUARDS.cleanup),
   Object.freeze({ id: 'gh-pr-comment', scope: 'repo', kind: 'command', command: 'gh pr comment', guard: GUARDS.comment }),
   Object.freeze({ id: 'gh-issue-comment', scope: 'repo', kind: 'command', command: 'gh issue comment', guard: GUARDS.comment }),
-  Object.freeze({ id: 'gh-pr-merge', scope: 'repo', kind: 'command', command: 'gh pr merge', guard: GUARDS.merge, needs: 'merge-hold' }),
   Object.freeze({ id: 'store-push', scope: 'repo', kind: 'store-push', guard: GUARDS.store, needs: 'store' }),
 ]);
 
@@ -87,12 +83,6 @@ const ASK_NETS = Object.freeze({
   'tasks-apply': [{ after: '*--repair-owned*', why: 'A same-job repair needs approval naming the affected tasks.' }],
   'gh-pr-comment': [{ after: '*--delete-last*', why: 'Deleting a comment is a delete.' }],
   'gh-issue-comment': [{ after: '*--delete-last*', why: 'Deleting a comment is a delete.' }],
-  'gh-pr-merge': [
-    { after: '*--admin*', why: 'An admin merge skips the repository\'s own protections.' },
-    { after: '*--delete-branch*', why: 'Deleting a branch is a delete.' },
-    { after: '-d*', why: 'Deleting a branch is a delete.' },
-    { after: '* -d*', why: 'Deleting a branch is a delete.' },
-  ],
   'store-push': [
     { after: '*--force*', why: 'A forced push rewrites history.' },
     { after: '-f*', why: 'A forced push rewrites history.' },
@@ -113,6 +103,7 @@ const NEVER = Object.freeze([
   ['a bare or blanket tool rule', /^(?:Bash|PowerShell)(?:\(\s*\*?\s*\))?$/],
   ['an interpreter with no script', new RegExp(`${START}(?:node|python[0-9.]*|pwsh|powershell|bash|sh|cmd|npx|npm|pnpm|yarn)\\s*\\*`, 'i')],
   ['a wildcard before the command', new RegExp(`${START}\\*`)],
+  ['a merge', new RegExp(`${START}gh\\s+pr\\s+merge\\b|mcp__\\w*merge`, 'i')],
   ['a close', new RegExp(`${START}gh (?:pr|issue) close\\b`, 'i')],
   ['a delete', new RegExp(`${START}(?:rm|rmdir|del|erase|rd|Remove-Item|git worktree remove|git branch -[dD]|gh repo delete|Unregister-ScheduledTask)\\b`, 'i')],
   ['a history rewrite', new RegExp(`${START}git (?:reset|rebase|filter-branch|commit --amend)\\b`, 'i')],
@@ -186,17 +177,6 @@ class PermissionBlocks {
     return { ok: true, root, binding };
   }
 
-  // Whether Claude Code runs Toolkit's hooks from the managed checkout, so the merge hold is in place.
-  mergeHold(managed) {
-    const registry = new ClaudePluginRegistry({ environment: this.#environment, homeDir: this.#home });
-    const install = registry.toolkitInstall();
-    if (!install.installed || !samePath(install.runningRoot, managed.recorded)) return { ok: false, reason: 'Claude Code does not run Toolkit from the Toolkit folder on this computer, so no merge hold would check a merge.' };
-    if (registry.toolkitEnabled() === false) return { ok: false, reason: 'Toolkit is turned off in Claude Code, so no merge hold would check a merge.' };
-    const hooks = this.#readJson(path.join(managed.recorded, '.claude-plugin', 'hooks', 'hooks.json'));
-    const guarded = (hooks?.hooks?.PreToolUse || []).some(entry => /Bash/.test(String(entry.matcher || '')) && entry.hooks?.some(hook => /toolkit-governance-hook\.cjs/.test(String(hook.command || '')) && hook.onFailure === 'block'));
-    return guarded ? { ok: true } : { ok: false, reason: 'the Toolkit hook list has no blocking merge hold for shell commands.' };
-  }
-
   // The evidence store's local checkout, checked against the binding: a Git checkout whose origin
   // is the store the merged programme file names.
   store(storePath, binding) {
@@ -250,10 +230,8 @@ class PermissionBlocks {
       const repo = this.repository(repoRoot);
       if (!repo.ok) stops.push({ scope: 'repo', stopped: `no repo block: ${repo.reason}`, next: 'run toolkit permissions inside a repository with Toolkit governance on.' });
       else {
-        const hold = host === 'claude' ? this.mergeHold(managed) : { ok: false, reason: 'Codex can switch Toolkit hooks off after an update, so a merge there keeps asking.' };
         const store = this.store(storePath, repo.binding);
-        const rows = ROWS.filter(row => row.scope === 'repo' && (row.needs !== 'merge-hold' || hold.ok) && (row.needs !== 'store' || store.ok));
-        if (!hold.ok) stops.push({ scope: 'repo', stopped: `the merge line is left out: ${hold.reason}`, next: host === 'claude' ? 'run setup toolkit so Claude Code runs the Toolkit hooks, then toolkit permissions again.' : 'merge from Claude Code, or answer the Codex prompt.' });
+        const rows = ROWS.filter(row => row.scope === 'repo' && (row.needs !== 'store' || store.ok));
         if (!store.ok) stops.push({ scope: 'repo', soft: !storePath, stopped: `the evidence store line is left out: ${store.reason}`, next: 'run toolkit permissions --store <the store\'s folder on this computer>.' });
         const made = emit(rows, { store: store.safe });
         blocks.push(this.#block({ host, scope: 'repo', made, excluded: [],

@@ -55,8 +55,8 @@ test('both blocks print from the table, parse as JSON and print the same bytes t
   for (const block of built.blocks) assert.deepEqual(JSON.parse(block.text).permissions.allow, block.allow);
   const wanted = permissions.ROWS.filter(row => row.scope === 'computer' && !row.windowsOnly).map(row => `Bash(node "${ROOT.replace(/\\/g, '/')}/${row.script}"${row.sub ? ` ${row.sub}` : ''} *)`);
   assert.deepEqual(built.blocks[0].allow, wanted);
-  assert.deepEqual(built.blocks[1].allow, ['Bash(gh pr comment *)', 'Bash(gh issue comment *)', 'Bash(gh pr merge *)', 'Bash(git -C "/work/store" push *)']);
-  assert.ok(built.blocks[1].ask.includes('Bash(git -C "/work/store" push *--force*)') && built.blocks[1].ask.includes('Bash(gh pr merge *--admin*)'));
+  assert.deepEqual(built.blocks[1].allow, ['Bash(gh pr comment *)', 'Bash(gh issue comment *)', 'Bash(git -C "/work/store" push *)']);
+  assert.ok(built.blocks[1].ask.includes('Bash(git -C "/work/store" push *--force*)') && built.blocks.every(block => [...block.allow, ...block.ask].every(line => !/merge/.test(line))));
   assert.match(built.blocks[0].target.replace(/\\/g, '/'), /\/\.claude\/settings\.json$/);
   assert.match(built.blocks[1].target.replace(/\\/g, '/'), /\/work\/repo\/\.claude\/settings\.local\.json$/);
   assert.equal(built.coverage.length, built.blocks.reduce((sum, block) => sum + block.allow.length, 0));
@@ -90,7 +90,7 @@ test('no printed line holds a never class, and the never list catches each class
   assert.ok(lines.length > 40);
   for (const line of lines) {
     assert.equal(permissions.NEVER.find(([, pattern]) => pattern.test(line)), undefined, line);
-    assert.match(line, /^(?:Bash|PowerShell)\((?:node "C:\/tk\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs"(?: [a-z-]+)?|gh pr comment|gh issue comment|gh pr merge|git -C "C:\/store" push) \*\)$/);
+    assert.match(line, /^(?:Bash|PowerShell)\((?:node "C:\/tk\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs"(?: [a-z-]+)?|gh pr comment|gh issue comment|git -C "C:\/store" push) \*\)$/);
   }
   assert.ok(built.blocks[0].allow.every(line => !/owner|store|work\/repo/i.test(line)), 'the computer block names no repository');
   const bad = ['Bash', 'Bash(*)', 'PowerShell(*)', 'Bash(node *)', 'Bash(python3 *)', 'Bash(* --version)', 'Bash(gh pr close *)', 'Bash(gh issue close *)', 'Bash(rm *)',
@@ -124,7 +124,7 @@ test('missing pieces stop with a plain line and leave only the safe part', t => 
 
   const noHold = new permissions.PermissionBlocks({ ...computer(t, { claude: false }), fs: governedFs(), run: fakeGit() }).build({ storePath: '/work/store' });
   assert.deepEqual(noHold.blocks[1].allow, ['Bash(gh pr comment *)', 'Bash(gh issue comment *)', 'Bash(git -C "/work/store" push *)']);
-  assert.match(noHold.stops[0].stopped, /^the merge line is left out: Claude Code does not run Toolkit from the Toolkit folder/);
+  assert.ok(noHold.stops.every(stop => !/merge/.test(stop.stopped)));
 
   const wrongStore = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(), run: fakeGit({ origin: 'https://github.com/someone/else.git' }) }).build({ storePath: '/work/store' });
   assert.ok(wrongStore.blocks[1].allow.every(line => !line.includes('push')));
@@ -136,7 +136,7 @@ test('missing pieces stop with a plain line and leave only the safe part', t => 
     assert.match(off.stops[0].stopped, /^no repo block: this repository has no Toolkit programme file with governance enabled/);
   }
   const codex = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(), run: fakeGit() }).build({ host: 'codex', storePath: '/work/store' });
-  assert.ok(codex.blocks[1].allow.every(line => !line.includes('merge')), 'Codex never gets the merge line');
+  assert.ok(codex.blocks[1].allow.every(line => !line.includes('merge')), 'no block carries a merge line');
   assert.match(codex.blocks[0].text, /prefix_rule\(\n {4}pattern = \["node","[^"]+programme\.cjs","refresh"\],\n {4}decision = "allow"/);
   assert.match(codex.blocks[0].text, /pattern = \["node","[^"]+programme\.cjs","claim"\],\n {4}decision = "prompt"/);
 });
