@@ -1,17 +1,18 @@
 # Toolkit Changelog
 
-## 3.62.0 (typed commands and remove Toolkit)
+## 3.62.0 (UAT verdict on every pull request)
 
 ### Added
 
-- **Typed commands:** `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup` and `toolkit show env`, typed as the whole message on your own computer, are matched exactly by the Codex and Claude Code prompt hooks. The agent is told which action was asked for, so `toolkit show env` always opens the editor. A phrase inside a longer message, in a relayed message or in a cloud session stays plain text, and a governance hold is unchanged. `node repo/scripts/toolkit-commands.cjs` prints the command list.
-- **Remove Toolkit from this computer:** `remove toolkit` routes to `repo/scripts/toolkit-remove.cjs`. `plan` lists every scheduled task that carries Toolkit's marker in any Task Scheduler folder, Toolkit's own task files and the Toolkit block in each global rules file, with a plan code. `apply --confirm <plan code>` removes exactly that list after the owner's OK; a list that changed removes nothing. Tasks changed by hand stay unless named, the owner's own listed tasks always stay, and no repository, key, settings file or plugin is touched.
-- **Leftover file report:** `repo/scripts/toolkit-leftover-files.cjs scan` lists files that are provably Toolkit's in GitHub checkouts whose governance is off or undecided. It reports only and never deletes.
+- Every pull request body now carries one `UAT:` line that says whether the owner has to test the change: `UAT: NOT_REQUIRED (reason)`, `UAT: OWNER_TEST_NEEDED (what the owner tries)` or `UAT: PASSED (the owner's OK)`. The plan proposes it, the builder writes it and the reviewer confirms it. The portable Git completion playbook holds the format.
+- The task auto-merge check reads that line: `toolkit-auto-merge-eligible.cjs --base <SHA> --head <SHA> --body-file <file>`. A pull request with no line, a malformed line or an owner test still open now exits 1 and names the reason (`Missing UAT verdict`, `UAT verdict invalid`, `Owner test needed`) together with any merge-rule path, so a finished pull request no longer waits in silence for an answer nobody was asked for.
+- The hourly nudge and the daily check-in list a ready pull request with no `UAT:` line as `missing UAT verdict`.
 
 ### Changed
 
-- **Setup covers the computer only:** setup no longer prints a task plan for the managed checkout and the folder it was started in. The computer-wide task update under the saved approval stays, and the direct task plan still gives one repository's details.
-- **Hook pack:** context checks now also read the context a prompt hook adds.
+- The check no longer answers when it is called with neither `--body-file` nor `--scope-only`: it exits 2 with its usage, so an older habit cannot read a scope-only pass as merge readiness. `--scope-only` keeps the previous scope report and says it grants no readiness. The merge hold is unchanged and still checks scope only.
+- The check reads a saved body safely. It reads UTF-8 and UTF-16 with a byte order mark (what Windows PowerShell 5.1 writes for `> file`) and exits 2 for any other bytes, so a wrongly saved body is never reported as a missing line. A line dressed up to look like a UAT line (invisible characters, unusual spaces, look-alike letters, a bullet, a heading, or a spot beside an HTML comment) counts as a line and makes the verdict invalid. It is never skipped. The playbook says how to save the body on Windows.
+- A missing or invalid line goes back to the gate that owns the pull request and is never turned into a question for the owner. Only the owner's own answer turns `OWNER_TEST_NEEDED` into `PASSED`.
 
 ## 3.61.0 (Programme refresh reads only what changed)
 
