@@ -691,9 +691,8 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // Cheapest first: every non-gate thread starts on the ladder's cheapest fitting step, never on High by default.
   assert.doesNotMatch(text, /Non-gate threads get High|one notch higher/);
   assert.match(text, /\*\*Set model and effort explicitly on every thread you start\.\*\* Gates get the pinned stack route/);
-  // The project's own model and effort settings stay on Default unless the owner names a value.
-  assert.match(text, /\*\*Project settings stay on Default\.\*\* Leave the project's own model and effort settings/);
-  assert.match(text, /Never change them, ask the owner to, or switch your own model unless the owner names a value/);
+  // The project's own model and effort settings, and the coordinator's own model, stay on Default unless the owner names one.
+  assert.match(text, /Never inherit the app default, but keep the project's model and effort settings, and your own model, on Default unless the owner names one\./);
   assert.match(text, /cheapest step of the `agent-cost-control` ladder that fits its brief \(small, mid or top tier; medium effort at least\)/);
   // Restarting on the next step up is for non-gate threads; gates keep their pinned routes.
   assert.match(text, /When a non-gate thread's output falls short \(a missed check, a wrong fact, a shallow review\), restart that work on the next step up/);
