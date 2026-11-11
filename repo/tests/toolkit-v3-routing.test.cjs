@@ -22,9 +22,8 @@ test('builder qualifiers never downgrade a lead: every route comes from the sele
 test('the current registry gives each helper role its own route and G2 reviewers no helper route', () => {
   for (const [id, profile] of Object.entries(registry.profiles)) {
     const roles = ['BUILDER', 'BUILDER_HELPER', 'DESIGN_CHALLENGE', 'DISCOVERY', 'DISCOVERY_HELPER'];
-    if (id === 'claude-projects-stack') roles.push('GATEKEEPER');
     assert.deepEqual(Object.keys(profile.routes).sort(), roles, id);
     for (const member of profile.reviewers) assert.deepEqual(Object.keys(member).sort(), ['model', 'provider', 'reasoning', 'reviewer_id'], id);
   }
-  assert.deepEqual(Object.keys(registry.profiles).sort(), ['claude-projects-stack', 'owner-claude', 'owner-gpt']);
+  assert.deepEqual(Object.keys(registry.profiles).sort(), ['owner-claude', 'owner-gpt']);
 });

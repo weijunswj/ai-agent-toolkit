@@ -22,6 +22,7 @@ test('merge-authority paths and a major bump wait for the owner; everything else
   const authority = [
     '.github/toolkit-programme.json', '.github/ai-agent-toolkit-programme.json', '.github/workflows/validate.yml',
     'repo/contracts/agent-rules/global-rules.md', 'repo/contracts/agent-rules/gate-rules.md', 'repo/CONTROLLER.md',
+    'repo/controller/roles-and-routes.md', 'repo/controller/gates.md', 'repo/controller/evidence-and-finish.md',
     'repo/contracts/programme-state/binding-v2.schema.json', 'skills/github-program-reconciler/scripts/programme-state.cjs',
     'repo/scripts/toolkit-merge-hold.cjs', 'repo/scripts/toolkit-shell-call.cjs', 'repo/scripts/toolkit-governance-gate.cjs',
     'repo/scripts/toolkit-governance-state.cjs', 'repo/scripts/toolkit-auto-merge-eligible.cjs',

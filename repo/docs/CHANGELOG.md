@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.63.0 (automatic re-bump workflow and a narrower launch rule)
+## Unreleased (automatic re-bump workflow and a narrower launch rule)
 
 ### Added
 
@@ -13,6 +13,25 @@
 - The merge hold no longer refuses a command that starts Claude or Codex when its only merge wording is branch upkeep: `git merge`, merge commits, merge conflicts or merge-base. Any other merge wording still refuses the launch, and pull request merges stay guarded.
 - The merge hold's approval reader now skips a typed line whose only merge wording is the same branch upkeep, from one shared definition, so a launch the hold lets through carries no line the reader counts, as far as the hold can read the command (text the shell reshapes afterwards is not covered). A line such as `git merge 5` or `update #5 with a merge commit` no longer records an approval. This is one more reason to skip a line and nothing else in the reader changed: every line that was held before is still held, and `merge 5` and `merge owner/name#5` count as before.
 - A pull request that changes the re-bump scripts (`toolkit-rebump-prs.cjs`, `toolkit-rebump-report.cjs`, `toolkit-rebump-action.sh`) now waits for the owner's typed merge.
+
+## 3.63.0 (Controller core plus pages, mixed stack removed, device-offline alert)
+
+### Changed
+
+- Split `repo/CONTROLLER.md` into a small core that every controller always loads and three pages under `repo/controller/` that are read at the step they cover: roles and routes, gates, and evidence, progress and finish. Every rule moved word for word; only the relative link paths inside the pages changed.
+- The core's new Pages section lists each page with a short hash of its content, so a page change also changes the core file and one bound CONTROLLER.md blob still covers every rule. `node repo/scripts/sync-controller-pages.cjs --write` refreshes the hashes, and the check fails on a stale hash, an unlisted or missing page, a rule with two homes or a broken link.
+- Lowered the core's size budget from 18,500 to 9,500 bytes and gave each page a 5,000-byte budget.
+- The pages are RISKY and always need the owner's merge OK, like the core, and both plugin setups check them in the installed copy.
+- A gatekeeper is no registry role. It is a launcher session on the mid tier at medium effort, stated in the controller rules and on the cost-control ladder, never the small tier, and a raise needs its written reason.
+- Installed Codex helper files that name a removed mixed stack are refreshed from `owner-gpt`, which has the same helper model and effort. Setup says so in one line. Any other unknown stack name is still held.
+
+### Removed
+
+- The stack registry ships two stacks only, `owner-gpt` and `owner-claude`. The mixed stack `claude-projects-stack` (older name `owner-mixed`) and its `GATEKEEPER` route are gone from the registry, its schemas and the role list, so a decision or a captured registry that names one is refused.
+
+### Added
+
+- The Projects coordinator alerts the owner when a device with unfinished lanes goes offline: one notifying ask per outage that names the device, links each affected thread and gives the one step, kept under the waiting list until the device is back. The hourly nudge lists such lanes under its owner steps and starts its report with `DEVICE OFFLINE: <n> | `. A failed status read is reported as not checked, never as offline.
 
 ## 3.62.0 (UAT verdict on every pull request)
 

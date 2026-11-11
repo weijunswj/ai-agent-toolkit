@@ -72,44 +72,132 @@ test('refuses a stack whose helper route is not an OpenAI route', () => {
   assert.throws(() => CodexHelperAgentRenderer.fromRepository(''), { code: 'HELPER_AGENTS_STACK_SELECTION_REQUIRED' });
 });
 
-test('mixed Codex G0/G1 definitions pin Luna Max and the captured profile and digest', () => {
+test('captured Codex G0/G1 definitions pin Luna Max and the captured profile and digest', () => {
   const { capturedStack } = require('./support/captured-stack-fixture.cjs');
-  const captured = capturedStack('claude-projects-stack');
+  const captured = capturedStack('owner-gpt');
   for (const [role, registryRole] of [['G0', 'DISCOVERY_HELPER'], ['G1', 'BUILDER_HELPER']]) {
     const { file, text } = new CodexHelperAgentRenderer(captured).render(role);
     assert.equal(file, FILE[role]);
     assert.deepEqual(captured.selection.routes[registryRole], { provider: 'openai', model: 'gpt-6-luna', reasoning: 'max' });
     assert.match(text, /^model = "gpt-6-luna"$/m);
     assert.match(text, /^model_reasoning_effort = "max"$/m);
-    assert.ok(text.includes('Stack `claude-projects-stack`'));
+    assert.ok(text.includes('Stack `owner-gpt`'));
     assert.ok(text.includes(captured.selection.registry_digest));
     assert.deepEqual(topLevelKeys(text), DOCUMENTED_KEYS);
-    assert.deepEqual(matchesRenderedDefinition(role, text), { matches: false, stack: 'claude-projects-stack' },
+    assert.deepEqual(matchesRenderedDefinition(role, text), { matches: false, stack: 'owner-gpt' },
       'a different captured source path cannot byte-match the repository projection');
-    const repositoryText = CodexHelperAgentRenderer.fromRepository('claude-projects-stack').render(role).text;
-    assert.deepEqual(matchesRenderedDefinition(role, repositoryText), { matches: true, stack: 'claude-projects-stack' });
+    const repositoryText = CodexHelperAgentRenderer.fromRepository('owner-gpt').render(role).text;
+    assert.deepEqual(matchesRenderedDefinition(role, repositoryText), { matches: true, stack: 'owner-gpt' });
   }
 });
 
-test('digest changes stale both mixed helpers even when their routes stay unchanged', t => {
+// The registry shipped one mixed stack under two names. Its Codex helper routes were the ones
+// owner-gpt still has, so an installed file naming either moves to owner-gpt on refresh.
+const RETIRED = ['claude-projects-stack', 'owner-mixed'];
+// A helper file exactly as an older Toolkit wrote it for a stack that is no longer shipped.
+function retiredFile(root, role, stack) {
+  return CodexHelperAgentRenderer.fromRepository('owner-gpt', root).render(role).text.replaceAll('`owner-gpt`', `\`${stack}\``);
+}
+
+test('the registry ships no mixed stack, so the generator refuses to render one', () => {
+  for (const stack of RETIRED) {
+    assert.throws(() => CodexHelperAgentRenderer.fromRepository(stack), { code: 'STACK_SELECTION_UNKNOWN' });
+    const run = spawnSync(process.execPath, [SCRIPT, '--stack', stack], { encoding: 'utf8' });
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /STACK_SELECTION_UNKNOWN/);
+  }
+});
+
+for (const stack of RETIRED) {
+  test(`installed helpers naming the removed stack ${stack} are stale and refresh to owner-gpt with one plain line`, t => {
+    const f = fixture(t);
+    fs.mkdirSync(f.agents, { recursive: true });
+    const before = {};
+    for (const role of ['G0', 'G1']) {
+      before[role] = retiredFile(f.repoRoot, role, stack);
+      assert.ok(before[role].includes(`# Stack \`${stack}\``), 'the old file names the removed stack');
+      fs.writeFileSync(path.join(f.agents, FILE[role]), before[role]);
+    }
+    const checked = f.defs().check();
+    assert.equal(checked.status, 'stale', 'never held, never current');
+    assert.deepEqual(checked.files, [{ file: FILE.G0, state: 'update', stack: 'owner-gpt' }, { file: FILE.G1, state: 'update', stack: 'owner-gpt' }]);
+    assert.match(checked.detail, new RegExp(`name the stack ${stack}, which Toolkit no longer ships; the refresh moves them to owner-gpt`));
+    const result = f.defs().refresh();
+    assert.equal(result.status, 'updated');
+    assert.deepEqual(result.moved, { from: stack, to: 'owner-gpt' });
+    for (const role of ['G0', 'G1']) {
+      assert.equal(read(path.join(result.backup_dir, FILE[role])), before[role], 'the exact old bytes are backed up');
+      const after = read(path.join(f.agents, FILE[role]));
+      assert.equal(after, CodexHelperAgentRenderer.fromRepository('owner-gpt', f.repoRoot).render(role).text);
+      assert.match(after, /^model = "gpt-6-luna"$/m);
+      assert.match(after, /^model_reasoning_effort = "max"$/m);
+      assert.ok(!after.includes(stack));
+    }
+    const { describeSetupResult } = require('../scripts/toolkit-codex-helper-agents.cjs');
+    assert.equal(describeSetupResult(result).filter(line => line.includes(stack)).join('\n'),
+      `Toolkit no longer ships the stack ${stack}, so the helpers now follow owner-gpt. Their model and effort are the same.`);
+    assert.equal(f.defs().check().status, 'current');
+    assert.equal(f.defs().refresh().moved, undefined, 'said once, not on every later run');
+  });
+}
+
+test('one helper naming a removed stack and the other missing: both are rendered from owner-gpt', t => {
   const f = fixture(t);
-  assert.equal(f.defs().refresh({ stack: 'claude-projects-stack' }).status, 'installed');
+  fs.mkdirSync(f.agents, { recursive: true });
+  fs.writeFileSync(path.join(f.agents, FILE.G0), retiredFile(f.repoRoot, 'G0', 'owner-mixed'));
+  assert.deepEqual(f.defs().check().files, [{ file: FILE.G0, state: 'update', stack: 'owner-gpt' }, { file: FILE.G1, state: 'missing', stack: 'owner-gpt' }]);
+  assert.equal(f.defs().refresh().status, 'updated');
+  for (const role of ['G0', 'G1']) assert.equal(read(path.join(f.agents, FILE[role])), CodexHelperAgentRenderer.fromRepository('owner-gpt', f.repoRoot).render(role).text);
+});
+
+test('only the two removed names carry over: any other unknown stack stays held and is never rewritten', t => {
+  for (const stack of ['owner-mixed-claude-gpt', 'owner-gpt-2', 'constructor', '__proto__', 'toString']) {
+    const f = fixture(t);
+    fs.mkdirSync(f.agents, { recursive: true });
+    const text = retiredFile(f.repoRoot, 'G0', stack);
+    fs.writeFileSync(path.join(f.agents, FILE.G0), text);
+    fs.writeFileSync(path.join(f.agents, FILE.G1), retiredFile(f.repoRoot, 'G1', stack));
+    const checked = f.defs().check();
+    assert.equal(checked.status, 'held', stack);
+    assert.match(checked.detail, /which the current stack registry cannot render for Codex/);
+    assert.equal(f.defs().refresh().status, 'held');
+    assert.equal(read(path.join(f.agents, FILE.G0)), text);
+  }
+});
+
+test('a project copy naming a removed stack is a mismatch and is never written', t => {
+  const f = fixture(t);
+  f.defs().refresh({ stack: 'owner-gpt' });
+  const project = path.join(f.base, 'project', '.codex', 'agents');
+  fs.mkdirSync(project, { recursive: true });
+  const text = retiredFile(f.repoRoot, 'G0', 'claude-projects-stack');
+  fs.writeFileSync(path.join(project, FILE.G0), text);
+  assert.deepEqual(matchesRenderedDefinition('G0', text, f.repoRoot), { matches: false, stack: 'claude-projects-stack' });
+  const checked = f.defs().check({ projectDirectories: [project] });
+  assert.equal(checked.status, 'held');
+  assert.equal(read(path.join(project, FILE.G0)), text);
+});
+
+test('a digest change makes both helpers stale even when their routes stay unchanged', t => {
+  const f = fixture(t);
+  assert.equal(f.defs().refresh({ stack: 'owner-gpt' }).status, 'installed');
   const before = Object.fromEntries(['G0', 'G1'].map(role => [role, read(path.join(f.agents, FILE[role]))]));
-  // Adoption changes another profile only; the mixed route is identical but source bytes differ.
+  // Adoption changes another profile only; this stack's routes are identical but source bytes differ.
   f.editRegistry(value => { value.profiles['owner-claude'].routes.BUILDER.reasoning = 'xhigh'; });
   assert.equal(f.defs().check().status, 'stale');
   assert.deepEqual(f.defs().check().files.map(f => f.state), ['update', 'update']);
   const result = f.defs().refresh();
   assert.equal(result.status, 'updated');
+  assert.equal(result.moved, undefined);
   for (const role of ['G0', 'G1']) {
     assert.equal(read(path.join(result.backup_dir, FILE[role])), before[role]);
     const after = read(path.join(f.agents, FILE[role]));
     assert.notEqual(after, before[role]);
-    assert.equal(after, CodexHelperAgentRenderer.fromRepository('claude-projects-stack', f.repoRoot).render(role).text);
+    assert.equal(after, CodexHelperAgentRenderer.fromRepository('owner-gpt', f.repoRoot).render(role).text);
     assert.match(after, /^model = "gpt-6-luna"$/m);
     assert.match(after, /^model_reasoning_effort = "max"$/m);
   }
-  assert.deepEqual(f.defs().check().files.map(f => f.stack), ['claude-projects-stack', 'claude-projects-stack']);
+  assert.deepEqual(f.defs().check().files.map(f => f.stack), ['owner-gpt', 'owner-gpt']);
   assert.equal(f.defs().check().status, 'current');
   assert.equal(result.load_check.status, 'unverified', 'fixture readback is not native host loading');
 });

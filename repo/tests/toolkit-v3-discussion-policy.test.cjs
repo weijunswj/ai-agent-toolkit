@@ -145,10 +145,10 @@ test('Discuss shares Discovery agent and selected route without a peer or new ga
   assert.match(discovery, /no separate gate, standing peer agent or additional model route/);
   assert.match(routing, /G0\.Discuss resolves to the same selected lead binding as G0\.Discovery/);
   assert.match(routing, /no separate registry role or hardcoded provider\/model/);
-  for (const stack of ['owner-gpt', 'owner-claude', 'claude-projects-stack']) {
+  for (const stack of ['owner-gpt', 'owner-claude']) {
     assert.ok(routing.includes(`\`${stack}\``), `retained explicit stack: ${stack}`);
   }
-  assert.equal(routing.includes('`owner-mixed-claude-gpt`'), false, 'the mixed profile is removed');
+  for (const removed of ['claude-projects-stack', 'owner-mixed', 'owner-mixed-claude-gpt']) assert.equal(routing.includes(`\`${removed}\``), false, `the mixed profile ${removed} is removed`);
   const addedPolicy = discovery.slice(discovery.indexOf('**G0.Discuss'), discovery.indexOf('G0 is a strong reasoning lead.'));
   assert.doesNotMatch(addedPolicy, /Claude|Opus|Sol|Luna|Haiku|Astra/);
 });
