@@ -56,6 +56,7 @@ Allowed scoped writes:
 
 - Local agent-rule generation may write generated source-side templates, root repo-local instruction shims, and published repo-local agent-rule template outputs.
 - No privileged generated-output writeback is part of the canonical topology. Review direct skill, contract, provenance, and root-instruction changes in the PR.
+- The re-bump workflow may push a version re-bump (version fields, generated stamps and the new changelog entry) to the owner's own open pull request branches after `main` moves. It writes nothing to `main`, and each re-bumped head still needs its own CI.
 - n8n sanitizer helpers may write ignored staging folders.
 - n8n sync helpers may write reviewed consumer repo workflow JSON plus ignored local `.tmp/**` and `.n8n-local/**`.
 

@@ -85,6 +85,8 @@ const TOOLKIT = Object.freeze([
   [/^repo\/scripts\/toolkit-merge-hold\.cjs$/, 'the merge hold'],
   [/^repo\/scripts\/toolkit-shell-call\.cjs$/, 'the merge hold'],
   [/^repo\/scripts\/toolkit-auto-merge-eligible\.cjs$/, 'this merge-scope check'],
+  [/^repo\/scripts\/toolkit-rebump-(?:prs|report)\.cjs$/, 'the re-bump scripts that run with the push key'],
+  [/^repo\/scripts\/toolkit-rebump-action\.sh$/, 'the re-bump scripts that run with the push key'],
 ]);
 
 // Files where only one section is on the list: [pattern, heading, why]. The file counts only when

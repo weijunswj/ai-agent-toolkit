@@ -9,8 +9,10 @@
 
 ### Changed
 
-- The re-bump command runs the pull request branch's own bump and validation scripts with every token variable removed from their environment.
+- The re-bump command runs the pull request branch's own bump and validation scripts with every token variable and the Actions file-command paths removed from their environment.
 - The merge hold no longer refuses a command that starts Claude or Codex when its only merge wording is branch upkeep: `git merge`, merge commits, merge conflicts or merge-base. Any other merge wording still refuses the launch, and pull request merges stay guarded.
+- The merge hold's approval reader sets the same upkeep phrases aside, from one shared definition, so a launch that passes can never carry a line that counts as a typed approval. A typed line whose only merge wording is upkeep, such as `git merge 5` or `update #5 with a merge commit`, no longer records an approval; `merge 5` and `merge owner/name#5` work as before.
+- A pull request that changes the re-bump scripts (`toolkit-rebump-prs.cjs`, `toolkit-rebump-report.cjs`, `toolkit-rebump-action.sh`) now waits for the owner's typed merge.
 
 ## 3.62.0 (UAT verdict on every pull request)
 

@@ -88,9 +88,11 @@ function runProcess(command, args, cwd, env = process.env) {
   if (result.error) throw new Error(`${command} could not run: ${result.error.code || 'process error'}`);
   return result;
 }
-// The pull request branch's own bump and validation scripts run without any sign-in: every token
-// variable is removed from their environment, so an unattended run cannot hand them its push key.
-const TOKEN_VARIABLE = /(?:^|_)(?:TOKEN|PAT|SECRET|PASSWORD|KEY)$|^ACTIONS_/i;
+// The pull request branch's own bump and validation scripts run without any sign-in in their
+// environment: every token variable is removed, and so are the Actions file-command paths, so a
+// branch script cannot set a step output, a later step's variables or its path. This is not a
+// sandbox: on the runner such a script could still read the push key from the parent process.
+const TOKEN_VARIABLE = /(?:^|_)(?:TOKEN|PAT|SECRET|PASSWORD|KEY)$|^ACTIONS_|^GITHUB_(?:OUTPUT|ENV|PATH|STATE|STEP_SUMMARY)$/i;
 function scrubbedEnv(env = process.env) {
   return Object.fromEntries(Object.entries(env).filter(([name]) => !TOKEN_VARIABLE.test(name)));
 }

@@ -55,6 +55,7 @@ Do not run `--write` commands in the required validation workflow.
 None of these is part of the merge gate.
 
 - `.github/workflows/dependency-auto-merge.yml` (Dependency auto-merge): on Dependabot pull requests, turns on GitHub auto-merge, merge commit only, for patch and minor updates once every required check passes, when the programme binding allows it. Major, risky and GitHub Actions updates stay open for the owner. Governed repositories get a copy of this file.
+- `.github/workflows/toolkit-rebump.yml` (Toolkit re-bump): after every push to `main`, re-bumps the owner's open release pull requests with the owner's push key and comments on the ones it holds. Without the key it does nothing and ends green. It is the one workflow here that pushes to pull request branches; it never pushes to `main`, merges or approves.
 - `.github/workflows/source-watch-plan.yml` (Source Watch Advisory Plan): started by hand; writes the advisory third-party source update plan to the run summary and checks the source locks and Toolkit surfaces. Read-only.
 - `.github/workflows/source-watch-pr.yml` (Source Watch PR Notifier): scheduled three times a day on trusted `main`; checks active third-party sources for updates and keeps one review notification pull request open while something is left to review.
 
