@@ -1022,7 +1022,7 @@ const ctaRecoveryCases = [
   ['recovery check without being asked', 'device', ['On the first successful wake after a recorded interruption', 'never wait for the owner to request the reminder']],
   ['no new ask or confirmed resumable lane', 'skill', ['a new owner ask', 'every confirmed resumable lane needing owner input']],
   ['parked status is not proof of recovery', 'device', ['A gap or a parked status alone does not prove that a device or usage limit recovered']],
-  ['device goes offline mid-lane', 'device', ['## Offline alert', '**Ping in the turn you see it.**', 'post the ask under **Device offline is an owner ask** in `reference/owner-asks.md` in that same turn', 'Never wait for the owner to notice']],
+  ['device goes offline mid-lane', 'device', ['## Offline alert', '**Offline first.** If a wake or status read shows a lane\'s device is not reachable, follow **Offline alert** above before this sweep', '**Ping in the turn you see it.**', 'post the ask under **Device offline is an owner ask** in `reference/owner-asks.md` in that same turn', 'Never wait for the owner to notice']],
   ['offline is told apart from parked and from unknown', 'device', ['**Offline is not parked.**', 'typing in the thread does nothing until the device is back', 'say "could not be checked", never "offline"']],
   ['same outage seen again', 'device', ['**One entry per outage.**', 'A repeated observation of the same outage posts nothing new', 'A lane that drops later in the same outage joins the entry']],
   ['device comes back', 'device', ['add one "back online" line under **Update**, mark the entry done and run **Recovery sweep**', 'A gap in reports or a successful task run alone is not proof that the device is back']],
@@ -1049,7 +1049,7 @@ test('recovery reports stay observational and both periodic findings route to th
     'Combine the report with the other affected lanes and the existing recovery entry',
     'not a separate reminder per lane or proof that every device and usage limit recovered']) assert.ok(periodic.includes(phrase), phrase);
   const device = read(`${REFERENCE_DIR}/device-work.md`);
-  assert.ok(read(SKILL_REL).includes('follow **Offline alert** and **Recovery sweep** in `reference/device-work.md`'));
+  assert.ok(read(SKILL_REL).includes('follow **Recovery sweep** in `reference/device-work.md`'));
   assert.ok(read(SKILL_REL).includes('Read `reference/owner-asks.md` first, and on any restart or context reset'));
   for (const phrase of ['## Recovery sweep', 'never claim an exact reset time or a working lane without evidence',
     'After context loss or uncertain posting, reconcile chat and thread status before posting again',
