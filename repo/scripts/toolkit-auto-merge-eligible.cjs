@@ -15,6 +15,11 @@
 // --body-file is the pull request body as GitHub has it now, saved by whoever runs the check (`gh pr
 // view N --json body --jq .body`, or a connector read), or - for standard input. --scope-only reads
 // the scope alone and grants no merge readiness; with neither, the check refuses to answer.
+// On Windows, pipe the body straight in (`gh pr view N --json body --jq .body | node ... --body-file -`)
+// or save it as UTF-8. Windows PowerShell 5.1 writes `> file` as UTF-16 with a byte order mark, which
+// is read too; a body that is not text this check reads exits 2 and is never called a missing line.
+// A copy of this check from before the UAT line ignores --body-file and can answer yes on scope
+// alone: only a yes that names the UAT verdict counts.
 //
 // Exit 0: auto-merge may go ahead once the other gate conditions hold. Exit 1: it waits, with every
 // reason named together (a missing, invalid or owner-test verdict; each merge-rule path). Exit 2: the
@@ -27,9 +32,8 @@
 // No line is never read as NOT_REQUIRED, and neither is a tier, a label or a green check. A missing
 // or invalid line goes back to the gate that owns the pull request; it is not a question for the
 // owner. Only the owner's own answer turns OWNER_TEST_NEEDED into PASSED. Lines in code fences,
-// quotes, HTML comments and Toolkit's generated marker blocks (the programme status block shows a
-// UAT state of its own) are never read as the verdict. The line is evidence for this check, never
-// merge authority.
+// quotes and HTML comments that start a line are never read as the verdict (see uatVerdict for the
+// whole subset). The line is evidence for this check, never merge authority.
 //
 // The merge-authority list, each for the failure it prevents: a pull request that loosens the
 // rules for whether and how merges happen would otherwise merge itself on those looser rules.
@@ -196,64 +200,155 @@ function commitOf(cwd, ref) {
 
 // The UAT verdict in a pull request body: { state, detail, problem, ready }. `state` is absent,
 // invalid, NOT_REQUIRED, OWNER_TEST_NEEDED or PASSED; `detail` is the text in brackets; `problem`
-// says what is wrong with an invalid line; `ready` is true only for NOT_REQUIRED and PASSED.
+// says what is wrong with an invalid line (or that an absent body was empty); `ready` is true only
+// for NOT_REQUIRED and PASSED.
+//
+// The reader is default-deny over a small subset of what GitHub draws. It reads lines the way
+// GitHub's Markdown does (LF, CRLF and a lone CR end a line; one leading byte order mark is
+// dropped) and sets aside only what GitHub certainly does not show as a line of the description's
+// own text: fenced code, quotes, and HTML comments that start a line. Everything else that looks
+// like a UAT line counts as one, so it makes the verdict invalid rather than being skipped:
+//   - a line dressed as a bullet, a numbered item, a heading, bold or italic, in another letter
+//     case, or indented;
+//   - a line with invisible characters, other kinds of space, look-alike letters or full-width
+//     forms in or before the word (compared after Unicode compatibility folding, accents dropped);
+//   - a line after any other break character (NEL, LS, PS, vertical tab, form feed);
+//   - a line inside an HTML comment that starts in the middle of a line, where a reader and
+//     GitHub can disagree about what is hidden.
+// Toolkit's generated marker blocks are read like any other text; only the generated task status
+// line (`- UAT: <state>; review: <state>`) inside one is set aside.
+// Accepted gaps, each leaning to a refusal or left to the reviewer who confirms the line: a UAT
+// statement written as a table cell, inline code or inside other HTML is not counted;
+// look-alike letters outside the small list below are not folded; a quoted or fenced UAT line is
+// visible on the page but never read.
 const UAT_STATES = Object.freeze(['NOT_REQUIRED', 'OWNER_TEST_NEEDED', 'PASSED']);
 const UAT_FORMAT = 'UAT: NOT_REQUIRED (reason), UAT: OWNER_TEST_NEEDED (what the owner tries) or UAT: PASSED (the owner\'s OK)';
-const MAX_BODY_BYTES = 256 * 1024;
+const MAX_BODY_BYTES = 512 * 1024;
 const MAX_UAT_DETAIL = 500;
-// Generated blocks and comments are not the author's visible words. An unclosed one hides the rest.
-const MARKER_BLOCK = /<!--\s*AI-AGENT-TOOLKIT:[^>]*?:BEGIN\b[\s\S]*?(?:<!--\s*AI-AGENT-TOOLKIT:[^>]*?:END\b[^>]*-->|$)/g;
-const HTML_COMMENT = /<!--[\s\S]*?(?:-->|$)/g;
-const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})/;
-// A line that tries to be the verdict, however it is dressed (a bullet, bold, another case).
-const UAT_CANDIDATE = /^[ \t]*(?:[-*+][ \t]+)?(?:\*\*|__)?uat(?:\*\*|__)?[ \t]*:/i;
+const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const MARKER_LINE = /^ {0,3}<!--\s*AI-AGENT-TOOLKIT:[^>]*?:(BEGIN|END)\b/;
+const GENERATED_STATUS = /^- UAT: [^;]*; review: /;
+// Break characters GitHub does not end a line at, but a terminal or another reader may.
+const OTHER_BREAKS = /[\u0085\u2028\u2029\u000b\u000c]/;
+// Letters that draw like U, A or T.
+const LOOK_ALIKES = Object.freeze({ '\u0410': 'A', '\u0430': 'a', '\u0391': 'A', '\u03b1': 'a', '\u0422': 'T', '\u03a4': 'T', '\u0442': 't', '\u03c4': 't', '\u054d': 'U', '\u222a': 'U', '\u03c5': 'u', '\u057d': 'u' });
+const LOOK_ALIKE = new RegExp(`[${Object.keys(LOOK_ALIKES).join('')}]`, 'g');
+const UAT_CANDIDATE = /^ *(?:(?:[-*+]|#{1,6}|\d{1,9}[.)]) +)*(?:\*\*|__|\*|_)?uat(?:\*\*|__|\*|_)? *:/i;
+
+// Whether a piece of a line tries to be the verdict, however it is dressed. Other kinds of space
+// are tried both as a space and as nothing, since some draw as a gap and some as none.
+const ODD_SPACE = /(?! )[\p{Z}\s]/gu;
+function looksLikeUat(piece) {
+  const plain = gap => piece.replace(ODD_SPACE, gap).normalize('NFKD').replace(ODD_SPACE, gap).replace(/[\p{C}\p{M}]/gu, '')
+    .replace(LOOK_ALIKE, letter => LOOK_ALIKES[letter]);
+  return UAT_CANDIDATE.test(plain(' ')) || UAT_CANDIDATE.test(plain(''));
+}
 
 function uatVerdict(body) {
   const verdict = (state, detail = null, problem = null) => ({ state, detail, problem, ready: state === 'NOT_REQUIRED' || state === 'PASSED' });
   if (typeof body !== 'string') return verdict('absent');
-  const visible = body.replace(/\r\n?/g, '\n').replace(MARKER_BLOCK, '\n').replace(HTML_COMMENT, '\n');
+  const text = body.startsWith('\ufeff') ? body.slice(1) : body;
+  if (text.trim() === '') return verdict('absent', null, 'the pull request body is empty');
   const candidates = [];
-  let fence = null;
-  for (const line of visible.split('\n')) {
-    const mark = FENCE_LINE.exec(line);
+  let fence = null; // the opening fence run while inside fenced code
+  let comment = null; // 'block' (starts a line: hidden) or 'inline' (starts mid-line: unsure)
+  let marker = false;
+  // Whether a piece of a line ends inside an HTML comment it opened.
+  const leftOpen = piece => piece.lastIndexOf('<!--') > piece.lastIndexOf('-->');
+  for (const line of text.split(/\r\n|\r|\n/)) {
     if (fence) {
-      if (mark && mark[1][0] === fence[0] && mark[1].length >= fence.length && line.trim() === mark[1]) fence = null;
+      const close = FENCE_LINE.exec(line);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length && close[2].trim() === '') fence = null;
       continue;
     }
-    if (mark) { fence = mark[1]; continue; }
-    if (/^\s*>/.test(line)) continue;
-    if (UAT_CANDIDATE.test(line)) candidates.push(line.trimEnd());
+    let read = line; // the part of the line a reader may see
+    let unsure = false;
+    if (comment === 'inline') {
+      unsure = true;
+      if (line.includes('-->') && !leftOpen(line)) comment = null;
+    } else if (comment === 'block') {
+      const end = line.indexOf('-->');
+      if (end < 0) continue;
+      comment = null;
+      // Text after the comment's end, on the same line, is shown.
+      read = line.slice(end + 3);
+      if (read.trim() === '') continue;
+      unsure = true;
+      if (leftOpen(read)) comment = 'inline';
+    } else {
+      const open = FENCE_LINE.exec(line);
+      // A backtick fence whose info string holds a backtick is not a fence to GitHub.
+      if (open && !(open[1][0] === '`' && open[2].includes('`'))) { fence = open[1]; continue; }
+      if (/^ {0,3}>/.test(line)) continue;
+      const at = line.indexOf('<!--');
+      if (at >= 0 && /^ {0,3}<!--/.test(line)) {
+        const mark = MARKER_LINE.exec(line);
+        if (mark) marker = mark[1] === 'BEGIN';
+        const end = line.indexOf('-->', at + 4);
+        if (end < 0) { comment = 'block'; continue; }
+        read = line.slice(end + 3);
+        if (read.trim() === '') continue;
+        unsure = true;
+        if (leftOpen(read)) comment = 'inline';
+      } else if (at >= 0) {
+        unsure = true;
+        if (leftOpen(line)) comment = 'inline';
+      }
+    }
+    if (marker && !unsure && GENERATED_STATUS.test(line)) continue;
+    for (const piece of read.split(OTHER_BREAKS)) if (looksLikeUat(piece)) candidates.push({ line: line.trimEnd(), unsure });
   }
   if (candidates.length === 0) return verdict('absent');
   if (candidates.length > 1) return verdict('invalid', null, `the body has more than one UAT line (${candidates.length}); keep exactly one`);
-  const line = candidates[0];
+  const { line, unsure } = candidates[0];
+  if (unsure) return verdict('invalid', null, 'the UAT line sits beside or inside an HTML comment that starts in the middle of a line; put the line on its own, outside any comment');
+  // Invisible, control and odd space characters could hide a second line or redraw this report.
+  if (/[\p{C}\p{Zl}\p{Zp}]/u.test(line) || /[^\S ]/.test(line)) return verdict('invalid', null, `the line holds an invisible character, a tab or an unusual space; retype it with plain characters as ${UAT_FORMAT}`);
   if (!line.startsWith('UAT: ')) return verdict('invalid', null, `write it at the start of a line, with no bullet or bold, as ${UAT_FORMAT}`);
   const parts = /^UAT: (\S+)(.*)$/.exec(line);
   if (!parts || !UAT_STATES.includes(parts[1])) return verdict('invalid', null, 'the verdict must be NOT_REQUIRED, OWNER_TEST_NEEDED or PASSED, in capitals');
   const detail = /^ \((.*)\)$/.exec(parts[2]);
-  const text = detail ? detail[1].trim() : '';
-  // Control characters could redraw this check's own report on a terminal.
-  if (!text || text.length > MAX_UAT_DETAIL || /[\u0000-\u001f\u007f-\u009f]/.test(line)) return verdict('invalid', null, `give the reason in brackets right after the verdict, up to ${MAX_UAT_DETAIL} plain characters and nothing after it: ${UAT_FORMAT}`);
-  return verdict(parts[1], text);
+  const reason = detail ? detail[1].trim() : '';
+  if (!reason || reason.length > MAX_UAT_DETAIL) return verdict('invalid', null, `give the reason in brackets right after the verdict, up to ${MAX_UAT_DETAIL} characters and nothing after it: ${UAT_FORMAT}`);
+  return verdict(parts[1], reason);
 }
 
-// The pull request body from a file, or from standard input for "-"; null when it cannot be read or
-// is too long to be one.
+// Text from the bytes of a saved pull request body, or null when they are not text this check
+// reads. UTF-8 with or without a byte order mark, and UTF-16 with one (what Windows PowerShell 5.1
+// writes for `> file`), are read. UTF-32, UTF-16 with no mark, NUL bytes and bytes that are not
+// valid UTF-8 are refused, so a wrongly saved body is never reported as a missing line.
+function decodeBody(raw) {
+  if (!Buffer.isBuffer(raw) || raw.length > MAX_BODY_BYTES) return null;
+  const starts = (...bytes) => bytes.every((byte, index) => raw[index] === byte);
+  let text;
+  try {
+    if (starts(0xff, 0xfe, 0x00, 0x00) || starts(0x00, 0x00, 0xfe, 0xff)) return null;
+    if (starts(0xff, 0xfe) || starts(0xfe, 0xff)) {
+      if (raw.length % 2 !== 0) return null;
+      text = new TextDecoder(starts(0xff, 0xfe) ? 'utf-16le' : 'utf-16be', { fatal: true, ignoreBOM: true }).decode(raw);
+    } else {
+      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(raw);
+    }
+  } catch { return null; }
+  return text.includes('\u0000') ? null : text;
+}
+
+// The pull request body from a file, or from standard input for "-"; null when it cannot be read.
 function readBody(file, cwd, stdin) {
   try {
-    const raw = file === '-' ? (typeof stdin === 'string' ? Buffer.from(stdin, 'utf8') : fs.readFileSync(0)) : fs.readFileSync(path.resolve(cwd, file));
-    return raw.length > MAX_BODY_BYTES ? null : raw.toString('utf8');
+    return decodeBody(file === '-' ? (typeof stdin === 'string' ? Buffer.from(stdin, 'utf8') : Buffer.isBuffer(stdin) ? stdin : fs.readFileSync(0)) : fs.readFileSync(path.resolve(cwd, file)));
   } catch { return null; }
 }
 
 const USAGE = 'Usage: node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> --body-file <file|-> [--json]\n'
   + '   or: node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> --scope-only [--json]\n'
-  + '--body-file is the pull request body, read for its UAT line. --scope-only reads the merge scope alone and grants no merge readiness.\n';
+  + '--body-file is the pull request body, read for its UAT line. --scope-only reads the merge scope alone and grants no merge readiness.\n'
+  + 'With --json, "ready" is the answer; "eligible" is the merge scope alone.\n';
 const SCOPE_WAITS = 'Waits for the owner\'s typed merge: this pull request changes the merge rules.';
 
 // The lines for a verdict that is not ready, or [] when it is.
 function uatLines(uat) {
-  if (uat.state === 'absent') return [`Missing UAT verdict: the pull request body has no UAT line. The gate that owns this pull request adds exactly one: ${UAT_FORMAT}. This is not a question for the owner.`];
+  if (uat.state === 'absent') return [`Missing UAT verdict: ${uat.problem || 'the pull request body has no UAT line'}. The gate that owns this pull request adds exactly one: ${UAT_FORMAT}. This is not a question for the owner.`];
   if (uat.state === 'invalid') return [`UAT verdict invalid: ${uat.problem}. The gate that owns this pull request corrects the line. This is not a question for the owner.`];
   if (uat.state === 'OWNER_TEST_NEEDED') return [`Owner test needed: ${uat.detail}. It waits for the owner's test; after their OK the controller changes the line to UAT: PASSED (their OK).`];
   return [];
@@ -278,7 +373,7 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
     return scope.eligible ? 0 : 1;
   }
   const body = readBody(bodyFile, cwd, stdin);
-  if (body === null) { stderr.write('The pull request body could not be read, so its UAT verdict is unknown. Save the body as GitHub has it now and run the check again.\n'); return 2; }
+  if (body === null) { stderr.write('The pull request body could not be read as text, so its UAT verdict is unknown: the file is missing, too long, or not UTF-8 (UTF-16 is read only with its byte order mark). Pipe the body straight in with --body-file -, or save it as UTF-8, and run the check again.\n'); return 2; }
   const uat = uatVerdict(body);
   const ready = scope.eligible && uat.ready;
   if (json) stdout.write(`${JSON.stringify({ ...scope, uat, ready }, null, 2)}\n`);
