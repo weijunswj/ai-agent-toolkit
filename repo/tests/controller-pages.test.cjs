@@ -35,9 +35,10 @@ function copyOfControllerSet(t) {
   }
   return root;
 }
+// Edits see LF text whatever the checkout's line endings are, so the same edit works on Windows.
 const edit = (root, rel, change) => {
   const file = path.join(root, ...rel.split('/'));
-  fs.writeFileSync(file, change(fs.readFileSync(file, 'utf8')));
+  fs.writeFileSync(file, change(fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n')));
 };
 const run = (root, ...flags) => spawnSync(process.execPath, [SCRIPT, '--root', root, ...flags], { encoding: 'utf8' });
 
