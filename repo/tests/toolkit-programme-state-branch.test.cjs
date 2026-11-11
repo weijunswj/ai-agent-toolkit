@@ -608,6 +608,7 @@ for (const interruption of ['conflict', 'accepted without reply']) {
     assert.equal(partial.code, 1);
     assert.equal(partial.result.outcome, 'HELD');
     assert.equal(attempted, 1);
+    assert.equal(JSON.parse(fs.readFileSync(lockFile + '.resume', 'utf8')).full_first, true);
     const pending = fx.github.readAt(REPO, BRANCH, publicFile('issue-12'));
     assert.equal(pending.lifecycle, interruption === 'conflict' ? 'PLANNED' : 'DONE');
 
@@ -622,3 +623,40 @@ for (const interruption of ['conflict', 'accepted without reply']) {
       && item.message.includes(`issue-12 r${final.revision}`)).length, 1, 'one verified public state revision');
   });
 }
+
+test('sweep branch: a public child read without its version id requests no sidecar and no public write', () => {
+  const fx = fixture();
+  const lockFile = path.join(fx.dir, 'sweep.lock');
+  const issue = fx.github.issues.get(12);
+  issue.state = 'closed'; issue.state_reason = 'completed'; issue.closed_at = fx.now();
+  let elapsed = 0;
+  const at = Date.parse(fx.now());
+  fx.github.intercept(() => { elapsed += 1800; });
+  assert.equal(fx.run(['refresh'], { lockFile, passClock: () => at + elapsed, refreshBudgetMs: 80000 }).code, 1);
+  assert.ok(fs.existsSync(lockFile + '.resume'));
+
+  const endpoint = `repos/${REPO}/contents/${publicFile('issue-12')}`;
+  const sidecars = `repos/${STORE_REPO}/contents/${sidecarDir('issue-12')}/`;
+  const requested = [];
+  fx.github.hooks = [];
+  fx.github.intercept(call => {
+    if (call.method === 'PUT' && (call.path === endpoint || call.path.startsWith(sidecars))) requested.push(call.path);
+    if (call.method !== 'GET' || call.path.split('?')[0] !== endpoint) return;
+    const actual = fx.github.route(call.method, call.path, call.body);
+    const { sha, ...rest } = actual.json;
+    assert.equal(typeof sha, 'string');
+    return { status: actual.status, json: rest };
+  });
+  const held = fx.run(['refresh'], { lockFile, passClock: () => at });
+  assert.equal(held.error, null, held.error?.message);
+  assert.equal(held.code, 1);
+  assert.deepEqual(held.result.left_to_full_refresh.map(entry => entry.code), ['STATE_TOKEN_MISSING']);
+  assert.ok(held.result.holds.some(hold => hold.code === 'STATE_TOKEN_MISSING'), 'the full refresh refuses the same read itself');
+  assert.deepEqual(requested, [], 'neither path asked for a sidecar or an unconditional public write');
+  assert.equal(fx.github.readAt(REPO, BRANCH, publicFile('issue-12')).lifecycle, 'PLANNED');
+
+  fx.github.hooks = [];
+  const later = fx.run(['refresh'], { lockFile, passClock: () => at });
+  assert.equal(later.code, 0);
+  assert.equal(fx.store().read('child', 12).doc.lifecycle, 'DONE');
+});

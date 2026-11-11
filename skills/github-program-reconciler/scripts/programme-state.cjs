@@ -2100,6 +2100,13 @@ function ghFailure(response, what) {
 
 // Reads and compare-and-swap writes of state documents in a private GitHub repository (store kind
 // `github`), through the Contents API.
+// An existing document is replaced only against the exact version that was read. A read that
+// came back without a usable blob id cannot prove that version, so nothing is requested.
+function requireVersionToken(sha, docPath) {
+  if (typeof sha === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) return;
+  throw new ProgrammeError('STATE_TOKEN_MISSING', `${docPath} was read without its version id, so it was not replaced. Nothing was written; run refresh again.`);
+}
+
 class StateStore {
   constructor({ transport, store, now = () => new Date().toISOString(), toolkitVersion = null }) {
     this.transport = transport;
@@ -2230,6 +2237,7 @@ class StateStore {
   // content changes. Rejected compare-and-swap surfaces as STATE_CONFLICT; every write is read back.
   write(kind, number, next, { sha, previous }) {
     if (previous && sameState(previous, next)) return { outcome: 'NOOP', doc: previous, sha };
+    if (previous) requireVersionToken(sha, this.docPath(kind, number));
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
@@ -2743,6 +2751,8 @@ class BranchStateStore extends StateStore {
   // then the public file (compare-and-swap, read back), then the checkpoint.
   write(kind, number, next, { sha, previous }) {
     if (previous && sameState(previous, next)) return { outcome: 'NOOP', doc: previous, sha };
+    // Before the sidecar: a sidecar is never written for a public write that cannot be conditional.
+    if (previous) requireVersionToken(sha, this.docPath(kind, number));
     const branch = this.ensureBranch();
     if (!branch.exists) {
       throw new ProgrammeError('STATE_BRANCH_MISSING', `The state branch ${STATE_BRANCH} was never created, so nothing was written. Only programme.cjs migrate-state --apply creates it.`);
@@ -3513,36 +3523,42 @@ class Reconciler {
     return fresh;
   }
 
+  // Confirms one child's facts. Returns null when there is nothing for this turn to copy, else
+  // the write step. A refusal thrown here happens before any write is requested, so the caller
+  // can leave the child to the full pass. A refusal from the returned step is a write outcome.
   resumeChildLifecycle(number, expectedParent) {
     const outcome = expectedParent.outcomes.find(entry => entry.issue === number);
     if (!outcome || outcome.parent !== expectedParent.parent_issue) {
       throw new ProgrammeError('SWEEP_SCOPE_CHANGED', 'The selected child is no longer catalogued directly under this parent.');
     }
     const { doc, sha } = this.store.read('child', number);
-    if (!doc) return; // Creation stays with the full plan and its catalogue and PR guards.
+    if (!doc) return null; // Creation stays with the full plan and its catalogue and PR guards.
     if (doc.issue !== number || doc.repository.toLowerCase() !== this.binding.repository.toLowerCase()) {
       throw new ProgrammeError('STATE_INVALID', 'The child state document does not match the selected issue.');
     }
     // Leave earlier intents and this child's state for the full reconciler's guarded readback.
     // An intent already on disk is not a failed or uncertain write from this batch.
-    if (doc.pending_effects.length) return;
+    if (doc.pending_effects.length) return null;
+    requireVersionToken(sha, this.store.docPath('child', number));
     const observed = this.reader.issue(number);
     if (observed?.complete !== true || observed.is_pull_request || observed.parent !== (outcome.parent ?? null)) {
       throw new ProgrammeError('GRAPH_FACT_STALE', 'The child’s issue identity or native parent could not be verified.');
     }
     // Reopening carries a one-time finding. The full pass owns that finding and its projection.
-    if (observed.state === 'open' && doc.closed_by_sweep) return;
+    if (observed.state === 'open' && doc.closed_by_sweep) return null;
     const next = copyIssueLifecycle(doc, observed);
-    if (sameState(doc, next)) return;
+    if (sameState(doc, next)) return null;
     const fresh = this.reader.issue(number);
     checkLifecycleObservation(observed, fresh);
     if (fresh.parent !== observed.parent) throw new ProgrammeError('GRAPH_FACT_STALE', 'The child’s native parent changed after observation.');
-    this.store.verify();
-    const parent = this.sweepParent(expectedParent);
-    authoriseWrite('child', doc, parent, this.writer);
-    // One exact CAS. A concurrent child change (including its fence) is a hold. The store's
-    // independent readback must succeed; a later turn derives the idempotent copy from fresh facts.
-    this.store.write('child', number, next, { sha, previous: doc });
+    return () => {
+      this.store.verify();
+      const parent = this.sweepParent(expectedParent);
+      authoriseWrite('child', doc, parent, this.writer);
+      // One exact CAS. A concurrent child change (including its fence) is a hold. The store's
+      // independent readback must succeed; a later turn derives the idempotent copy from fresh facts.
+      this.store.write('child', number, next, { sha, previous: doc });
+    };
   }
 
   loadParent(parentOverride) {

@@ -715,13 +715,14 @@ for (const change of ['holder epoch', 'catalogue', 'binding']) {
   });
 }
 
-for (const failure of ['malformed', 'foreign cursor', 'oversized']) {
+for (const failure of ['malformed', 'foreign cursor', 'oversized', 'bad marker']) {
   test(`sweep: ${failure} checkpoint holds refresh while preview stays read-only`, t => {
     const f = slowRefresh(t);
     f.close(100);
     assert.equal(f.run().code, 1);
     const file = `${f.file}.resume`;
-    const text = failure === 'malformed' ? '{' : failure === 'oversized' ? 'x'.repeat(1025) : JSON.stringify({ ...sweepCursor(f), after: 999999 });
+    const text = failure === 'malformed' ? '{' : failure === 'oversized' ? 'x'.repeat(1025)
+      : JSON.stringify({ ...sweepCursor(f), ...(failure === 'bad marker' ? { full_first: false } : { after: 999999 }) });
     fs.writeFileSync(file, text);
     const before = [f.github.commits, f.github.mutations()];
     f.run({ slow: false, argv: ['reconcile', '--json'] });
@@ -770,6 +771,7 @@ for (const interruption of ['CAS conflict', 'lost write reply', 'lost readback']
     assert.deepEqual(f.parent(), parent, 'no watermark, parent state or attention settlement');
     assert.deepEqual(target().pending_effects, pending);
     assert.equal(sweepCursor(f).after, 103);
+    assert.equal(sweepCursor(f).full_first, true, 'the next refresh runs the full path first');
     if (interruption === 'CAS conflict') assert.equal(target().next_action, 'Concurrent controller change');
     const accepted = ['lost write reply', 'lost readback'].includes(interruption);
     if (accepted) {
@@ -811,7 +813,16 @@ test('sweep: provider refusal stops the batch and its full follow-on', t => {
   assert.equal(result.report.holds[0].code, 'SWEEP_SLICE_PROVIDER_HELD');
   assert.equal(f.github.calls.slice(at).filter(call => sweepIssue(call, 100)).length, 1);
   assert.ok(f.github.calls.slice(at).every(call => call.method === 'GET'), 'no full plan or effect after the refusal');
-  assert.equal(sweepCursor(f).after, 100);
+  assert.deepEqual([sweepCursor(f).after, sweepCursor(f).full_first], [100, true]);
+  // The refusal cannot repeat without a full refresh in between: the next run has no batch.
+  const next = f.run();
+  assert.notEqual(next.report.outcome, 'HELD');
+  assert.ok(next.report.holds.some(hold => hold.code === 'PASS_STOPPED'), 'the full path ran and reported its own stop');
+  assert.equal(JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8')).phases.resume, undefined);
+  assert.deepEqual(sweepCursor(f), { schema: 'toolkit.programme-sweep-rotation.v1', scope: sweepCursor(f).scope, after: 100 }, 'the rotation keeps its place and the marker is spent');
+  const third = f.run();
+  assert.ok(JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8')).phases.resume, 'the bounded turn resumes after the full attempt');
+  assert.equal(third.code, 1);
 });
 
 test('sweep: healthy refresh keeps the existing full path and writes only private aggregate metrics', t => {
@@ -845,24 +856,30 @@ test('sweep: a slow call uses the bounded request timeout and no CAS starts afte
   } });
   assert.equal(result.code, 1);
   assert.equal(result.report.holds[0].code, 'SWEEP_SLICE_LIMIT');
+  assert.equal(sweepCursor(f).full_first, true);
   assert.deepEqual(optionsSeen, [10000]);
   assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT').length, 0);
   assert.equal(f.read(100).lifecycle, 'PLANNED');
 });
 
-test('sweep: a changed source lifecycle holds its write while the next child still progresses', t => {
+test('sweep: a changed source lifecycle leaves its child to the full refresh while the next child still progresses', t => {
   const f = slowRefresh(t);
   f.close(100);
   assert.equal(f.run().code, 1);
   f.close(101);
   let read = 0;
-  const result = f.run({ fault: call => {
-    if (sweepIssue(call, 100) && ++read === 2) Object.assign(f.issues.get(100), { state: 'open', closed_at: null, state_reason: null });
+  const at = f.github.calls.length;
+  const result = f.run({ fault: (call, phase) => {
+    if (phase === 'entry' && sweepIssue(call, 100) && ++read === 2) Object.assign(f.issues.get(100), { state: 'open', closed_at: null, state_reason: null });
   } });
   assert.equal(result.code, 1);
-  assert.deepEqual(result.report.holds.map(hold => hold.code), ['GRAPH_FACT_STALE']);
+  assert.notEqual(result.report.outcome, 'HELD');
+  assert.deepEqual(result.report.left_to_full_refresh.map(entry => [entry.code, entry.target]), [['GRAPH_FACT_STALE', '#100']]);
+  assert.ok(result.report.holds.some(hold => hold.code === 'PASS_STOPPED'), 'the full refresh had its turn and reported its own stop');
+  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 0, 'no bounded write on unconfirmed facts');
   assert.equal(f.read(100).lifecycle, 'PLANNED');
   assert.equal(f.read(101).lifecycle, 'DONE');
+  assert.equal(sweepCursor(f).full_first, undefined);
 });
 
 test('sweep: losing private-store access during source confirmation refuses the child CAS', t => {
@@ -962,4 +979,210 @@ test('sweep: a provider stop still defers full readback of an earlier intent', t
   assert.deepEqual(report.recovered, []);
   assert.deepEqual(f.read(100).pending_effects, [intent]);
   assert.ok(f.github.calls.slice(at).every(call => call.method === 'GET'));
+});
+
+// Closure matrix for the bounded turn. A child whose facts cannot be confirmed is left to the full
+// refresh in the same pass. Only a write outcome or a batch-wide stop holds the pass, and then
+// the next refresh runs the full path first.
+const SUBS = 'repos/example.test/app/issues/12/sub_issues';
+const sweepAttaches = (f, at) => f.github.calls.slice(at).filter(call => call.method === 'POST' && call.path === SUBS).length;
+const sweepBodyWrites = (f, at, n) => f.github.calls.slice(at).filter(call => call.method === 'PATCH' && sweepIssue(call, n) && typeof call.body?.body === 'string').length;
+const sweepMetrics = f => JSON.parse(fs.readFileSync(`${f.file}.metrics`, 'utf8')).phases;
+const sweepLeft = report => (report.left_to_full_refresh || []).map(entry => [entry.code, entry.target]);
+
+function settledSweep(t, count) {
+  const f = slowRefresh(t, { count, discussion: 0, extraIssues: 0, prs: 0 });
+  assert.equal(f.run({ slow: false }).code, 0);
+  return f;
+}
+
+function unlinkSweepChild(f, number) {
+  const parent = f.github.issues.get(12);
+  parent.subs = parent.subs.filter(entry => entry !== number);
+  f.issues.get(number).parent = null;
+}
+
+function acceptedSweepIntent(f, number) {
+  const block = state.findStateBlock(f.issues.get(number).body).block;
+  assert.ok(block, 'the managed body is really present');
+  return seedSweepIntent(f, number, state.blockDigest(block.body));
+}
+
+for (const count of [1, 2, 3, 4]) {
+  test(`sweep matrix: with ${count} direct children a missing native link is repaired and an accepted intent settled in one refresh`, t => {
+    const f = settledSweep(t, count);
+    // With one child both conditions sit on it. Otherwise the accepted intent is on another child.
+    const holder = count === 1 ? 100 : 101;
+    const body = f.issues.get(holder).body;
+    const intent = acceptedSweepIntent(f, holder);
+    unlinkSweepChild(f, 100);
+    if (count > 2) f.close(102);
+    seedSweepRotation(f);
+    const at = f.github.calls.length;
+    const { report, code } = f.run({ slow: false });
+    assert.equal(code, 0, JSON.stringify(report.holds));
+    assert.equal(report.outcome, undefined, 'the report is the full refresh\'s own');
+    assert.equal(report.inventory.complete, true);
+    assert.ok(report.findings.some(finding => finding.code === 'NATIVE_PARENT_MISSING' && finding.issue === 100));
+    assert.equal(f.issues.get(100).parent, 12);
+    assert.equal(sweepAttaches(f, at), 1);
+    assert.deepEqual(report.recovered, [{ kind: 'child', number: holder, intent_id: intent.intent_id, outcome: 'DONE' }]);
+    assert.deepEqual(f.read(holder).pending_effects, []);
+    assert.equal(sweepBodyWrites(f, at, holder), 0, 'the accepted body was not written again');
+    assert.equal(f.issues.get(holder).body, body);
+    assert.deepEqual(sweepLeft(report), count === 1 ? [] : [['GRAPH_FACT_STALE', '#100']]);
+    if (count > 2) assert.equal(f.read(102).lifecycle, 'DONE');
+    assert.ok(sweepMetrics(f).resume, 'the bounded turn ran first');
+    assert.equal(fs.existsSync(`${f.file}.resume`), false);
+    const again = f.github.calls.length;
+    assert.equal(f.run({ slow: false }).code, 0);
+    assert.deepEqual([sweepAttaches(f, again), sweepBodyWrites(f, again, holder)], [0, 0]);
+  });
+}
+
+test('sweep matrix: a lone child with only a missing native link is left to the full refresh and repaired', t => {
+  const f = settledSweep(t, 1);
+  unlinkSweepChild(f, 100);
+  seedSweepRotation(f);
+  const at = f.github.calls.length;
+  const { report, code } = f.run({ slow: false });
+  assert.equal(code, 0, JSON.stringify(report.holds));
+  assert.deepEqual(sweepLeft(report), [['GRAPH_FACT_STALE', '#100']]);
+  assert.deepEqual([f.issues.get(100).parent, sweepAttaches(f, at)], [12, 1]);
+});
+
+test('sweep matrix: a stable missing link never keeps a slow full refresh from its turn', t => {
+  const f = slowRefresh(t);
+  unlinkSweepChild(f, 100);
+  assert.equal(f.run().code, 1);
+  for (let turn = 0; turn < 3; turn++) {
+    const { report, code } = f.run();
+    assert.equal(code, 1);
+    assert.notEqual(report.outcome, 'HELD', 'never the early held report');
+    assert.ok(report.holds.some(hold => hold.code === 'PASS_STOPPED'), 'the full refresh ran and reported its own stop');
+    assert.ok(report.inventory.reason !== 'Full inventory deferred');
+    assert.equal(sweepCursor(f).full_first, undefined);
+  }
+});
+
+test('sweep matrix: a wrong native parent is left to the full refresh, which reports it', t => {
+  const f = settledSweep(t, 2);
+  f.github.addIssue(900);
+  f.github.link(900, 100);
+  f.close(101);
+  seedSweepRotation(f);
+  const at = f.github.calls.length;
+  const { report } = f.run({ slow: false });
+  assert.notEqual(report.outcome, 'HELD');
+  assert.deepEqual(sweepLeft(report), [['GRAPH_FACT_STALE', '#100']]);
+  assert.ok(report.findings.some(finding => finding.code === 'NATIVE_PARENT_WRONG' && finding.issue === 100), 'the full refresh gives its own evidence');
+  assert.equal(f.read(101).lifecycle, 'DONE');
+  assert.equal(f.github.calls.slice(at).filter(call => call.method === 'PUT' && sweepDoc(call, 100)).length, 0);
+});
+
+for (const [fact, code] of [['incomplete', 'GRAPH_FACT_STALE'], ['unreadable', 'GH_FAILED']]) {
+  test(`sweep matrix: ${fact} issue facts are left to the full refresh, which copies the lifecycle from its own read`, t => {
+    const f = settledSweep(t, 2);
+    f.close(100); f.close(101);
+    seedSweepRotation(f);
+    let faulted = false;
+    const puts = [];
+    const { report, code: exit } = f.run({ slow: false, fault: (call, phase) => {
+      if (call.method === 'PUT' && sweepDoc(call, 100)) puts.push(phase);
+      if (faulted || phase !== 'entry' || !sweepIssue(call, 100)) return;
+      faulted = true;
+      if (fact === 'unreadable') return { status: 500, json: {} };
+      const { id, ...rest } = f.github.route(call.method, call.path, call.body).json;
+      return { status: 200, json: rest };
+    } });
+    assert.equal(faulted, true);
+    assert.equal(exit, 0, JSON.stringify(report.holds));
+    assert.deepEqual(sweepLeft(report), [[code, '#100']]);
+    assert.deepEqual(puts, ['apply'], 'the only write of that child is the full refresh\'s own');
+    assert.deepEqual([f.read(100).lifecycle, f.read(101).lifecycle], ['DONE', 'DONE']);
+  });
+}
+
+for (const omit of [false, true]) {
+  test(`sweep matrix: ${omit ? 'a state read without its version id never requests a write' : 'a healthy state read writes with its version id'}`, t => {
+    const f = settledSweep(t, 1);
+    f.close(100);
+    seedSweepRotation(f);
+    const puts = [];
+    const outcome = f.run({ slow: false, fault: call => {
+        if (!sweepDoc(call, 100)) return;
+        if (call.method === 'PUT') puts.push(typeof call.body.sha === 'string');
+        if (call.method === 'GET' && omit) {
+          const { sha, ...rest } = f.github.route(call.method, call.path, call.body).json;
+          assert.equal(typeof sha, 'string');
+          return { status: 200, json: rest };
+        }
+      } });
+    if (!omit) {
+      assert.equal(outcome.code, 0);
+      assert.deepEqual(puts, [true]);
+      assert.equal(f.read(100).lifecycle, 'DONE');
+      return;
+    }
+    // The bounded turn leaves the child alone, and the full refresh refuses the same read itself.
+    assert.deepEqual(puts, [], 'no request without the comparison token, from either path');
+    assert.equal(outcome.code, 1);
+    assert.deepEqual(sweepLeft(outcome.report), [['STATE_TOKEN_MISSING', '#100']]);
+    assert.deepEqual(outcome.report.holds.map(hold => [hold.code, hold.target]), [['STATE_TOKEN_MISSING', '#100']], 'the full refresh holds that child by its own check');
+    assert.equal(f.read(100).lifecycle, 'PLANNED');
+    assert.equal(f.run({ slow: false }).code, 0, 'a later healthy read completes the copy');
+    assert.equal(f.read(100).lifecycle, 'DONE');
+  });
+}
+
+test('sweep matrix: a write refused in every bounded turn cannot keep the full refresh away', t => {
+  const f = settledSweep(t, 2);
+  f.close(100);
+  unlinkSweepChild(f, 101);
+  seedSweepRotation(f);
+  // A competing writer wins only while the bounded turn is writing.
+  const fault = (call, phase) => (phase === 'entry' && call.method === 'PUT' && sweepDoc(call, 100) ? { status: 409, json: {} } : undefined);
+  const at = f.github.calls.length;
+  const first = f.run({ slow: false, fault });
+  assert.deepEqual([first.code, first.report.outcome], [1, 'HELD']);
+  assert.deepEqual(first.report.holds.map(hold => [hold.code, hold.target]), [['STATE_CONFLICT', '#100']]);
+  assert.deepEqual(sweepLeft(first.report), [['GRAPH_FACT_STALE', '#101']]);
+  assert.equal(sweepAttaches(f, at), 0);
+  assert.equal(sweepCursor(f).full_first, true);
+  const second = f.run({ slow: false, fault });
+  assert.equal(second.code, 0, JSON.stringify(second.report.holds));
+  assert.equal(sweepMetrics(f).resume, undefined, 'no bounded turn in front of this full refresh');
+  assert.deepEqual([f.issues.get(101).parent, sweepAttaches(f, at)], [12, 1]);
+  assert.equal(f.read(100).lifecycle, 'DONE');
+  assert.equal(fs.existsSync(`${f.file}.resume`), false);
+});
+
+test('sweep matrix: attention --refresh --json keeps HELD, the deferred inventory and the holds, beside done results', t => {
+  const f = settledSweep(t, 2);
+  const attention = ['attention', '--refresh', '--json'];
+  const done = f.run({ slow: false, argv: attention });
+  assert.deepEqual([done.code, done.report.refreshed], [0, { outcome: 'DONE', inventory_complete: true, holds: [] }]);
+  f.close(100);
+  seedSweepRotation(f);
+  const held = f.run({ slow: false, argv: attention, fault: call => sweepIssue(call, 100) ? { status: 429, json: {} } : undefined });
+  assert.equal(held.code, 1);
+  assert.deepEqual({ ...held.report.refreshed, holds: held.report.refreshed.holds.map(hold => hold.code) },
+    { outcome: 'HELD', inventory_complete: false, inventory_reason: 'Full inventory deferred', holds: ['SWEEP_SLICE_PROVIDER_HELD'] });
+  // A full refresh with its own holds keeps its existing status and exit.
+  unlinkSweepChild(f, 101);
+  const full = f.run({ slow: false, argv: attention, fault: call => call.method === 'POST' && call.path === SUBS ? { status: 500, json: {} } : undefined });
+  assert.equal(full.code, 1);
+  assert.equal(full.report.refreshed.outcome, 'DONE');
+  assert.ok(full.report.refreshed.holds.length);
+  // Plain text names the held refresh, not an unreadable inventory.
+  seedSweepRotation(f);
+  let text = '';
+  f.github.intercept(call => sweepIssue(call, 100) ? { status: 429, json: {} } : undefined);
+  const exit = cli.main(['attention', '--refresh'], { transport: f.github, binding: f.binding, originUrl: 'https://github.com/example.test/app.git', repoRoot: '.',
+    toolkitVersion: '3.59.1', now: () => f.NOW, passClock: () => Date.parse(f.NOW), lockFile: f.file, environment: {}, stdout: { write: chunk => { text += chunk; } } });
+  f.github.hooks = [];
+  assert.equal(exit, 1);
+  assert.match(text, /The refresh was held before the full scan/);
+  assert.match(text, /SWEEP_SLICE_PROVIDER_HELD/);
+  assert.doesNotMatch(text, /INVENTORY_INCOMPLETE/);
 });

@@ -1,7 +1,8 @@
 'use strict';
 
 // Private, per-computer notes beside the existing refresh lock. The cursor is a rotation
-// hint over the live catalogue. It contains no facts, effect payloads or completion proof.
+// hint over the live catalogue, with an optional marker that the full path runs first next time.
+// It contains no facts, effect payloads or completion proof.
 const fs = require('node:fs');
 const { ProgrammeError } = require('./resolve-executable.cjs');
 
@@ -127,8 +128,8 @@ class SweepNotes {
       const size = fs.readSync(fd, raw);
       if (size > MAX_BYTES) throw invalid();
       const value = JSON.parse(raw.toString('utf8', 0, size));
-      if (!value || Object.keys(value).sort().join(',') !== 'after,schema,scope'
-        || value.schema !== SCHEMA || typeof value.scope !== 'string' || !/^[a-f0-9]{64}$/.test(value.scope)
+      if (!value || !['after,schema,scope', 'after,full_first,schema,scope'].includes(Object.keys(value).sort().join(','))
+        || ('full_first' in value && value.full_first !== true) || value.schema !== SCHEMA || typeof value.scope !== 'string' || !/^[a-f0-9]{64}$/.test(value.scope)
         || !(value.after === null || Number.isSafeInteger(value.after) && value.after > 0)) throw invalid();
       if (value.scope !== scope) return null;
       if (value.after !== null && !issues.includes(value.after)) throw invalid();
@@ -156,7 +157,8 @@ class SweepNotes {
     }
   }
 
-  save(scope, after) { this.replace('.resume', { schema: SCHEMA, scope, after }); }
+  // fullFirst asks the next refresh to run the full path before any further batch.
+  save(scope, after, fullFirst = false) { this.replace('.resume', { schema: SCHEMA, scope, after, ...(fullFirst ? { full_first: true } : {}) }); }
 
   clear() {
     this.owned();
