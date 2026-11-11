@@ -19,6 +19,7 @@
     "CLAUDE.md",
     ".agents/rules/**",
     "repo/CONTROLLER.md",
+    "repo/controller/**",
     "repo/docs/agent-playbooks/controller-takeover.md",
     "repo/docs/TOOLKIT-DELIVERY.md",
     "repo/contracts/agent-rules/**",
