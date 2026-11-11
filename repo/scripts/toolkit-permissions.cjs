@@ -138,10 +138,12 @@ function githubSlug(remote) {
 // ---- the owner object ----------------------------------------------------------------------------
 
 class PermissionBlocks {
-  #fs; #home; #platform; #environment; #run; #cwd;
+  // #path follows the platform the lines are for, so a path is read the way that computer reads it.
+  #fs; #home; #platform; #environment; #run; #cwd; #path;
 
   constructor({ fs = nodeFs, home = os.homedir(), platform = process.platform, environment = process.env, run = spawnSync, cwd = process.cwd() } = {}) {
     this.#fs = fs; this.#home = home; this.#platform = platform; this.#environment = environment; this.#run = run; this.#cwd = cwd;
+    this.#path = platform === 'win32' ? path.win32 : path.posix;
   }
 
   #readJson(file) {
@@ -155,7 +157,7 @@ class PermissionBlocks {
     if (!recorded) throw new PermissionsError('this computer has no recorded Toolkit folder, so no line can be pinned to it.', 'run setup toolkit, then toolkit permissions again.');
     const safe = safePath(recorded, this.#platform);
     if (!safe) throw new PermissionsError('the Toolkit folder path holds a character a permission line cannot carry safely (only letters, digits, space, _ . - are printed).', 'move the Toolkit folder to a plain path with setup toolkit, then run toolkit permissions again.');
-    if (!this.#fs.existsSync(path.join(recorded, ...PROGRAMME.split('/')))) throw new PermissionsError('the recorded Toolkit folder does not hold the Toolkit scripts.', 'run setup toolkit to repair it, then toolkit permissions again.');
+    if (!this.#fs.existsSync(this.#path.join(recorded, ...PROGRAMME.split('/')))) throw new PermissionsError('the recorded Toolkit folder does not hold the Toolkit scripts.', 'run setup toolkit to repair it, then toolkit permissions again.');
     return { recorded, safe };
   }
 
@@ -167,12 +169,12 @@ class PermissionBlocks {
   // The repository the repo block is for: the main checkout of --repo-root or the current folder,
   // with a readable binding that says governance is enabled. Null with a reason otherwise.
   repository(repoRoot) {
-    const start = path.resolve(repoRoot || this.#cwd);
+    const start = this.#path.resolve(repoRoot || this.#cwd);
     const common = this.#git(start, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
     if (!common) return { ok: false, reason: 'this folder is not inside a Git repository.' };
-    const root = path.basename(common) === '.git' ? path.dirname(common) : this.#git(start, ['rev-parse', '--show-toplevel']);
+    const root = this.#path.basename(common) === '.git' ? this.#path.dirname(common) : this.#git(start, ['rev-parse', '--show-toplevel']);
     if (!root) return { ok: false, reason: 'the repository\'s main folder could not be found.' };
-    const binding = this.#readJson(path.join(root, '.github', 'toolkit-programme.json'));
+    const binding = this.#readJson(this.#path.join(root, '.github', 'toolkit-programme.json'));
     if (!binding || binding.governance !== 'enabled') return { ok: false, reason: 'this repository has no Toolkit programme file with governance enabled.' };
     return { ok: true, root, binding };
   }
@@ -183,7 +185,7 @@ class PermissionBlocks {
     if (!storePath) return { ok: false, reason: 'no evidence store folder was named (--store <folder>).' };
     const wanted = binding?.store?.kind === 'github' && typeof binding.store.repository === 'string' ? binding.store.repository.toLowerCase() : '';
     if (!wanted) return { ok: false, reason: 'the programme file names no GitHub evidence store.' };
-    const resolved = path.resolve(storePath);
+    const resolved = this.#path.resolve(storePath);
     const safe = safePath(resolved, this.#platform);
     if (!safe) return { ok: false, reason: 'the evidence store path holds a character a permission line cannot carry safely.' };
     const origin = this.#git(resolved, ['remote', 'get-url', 'origin']);
@@ -235,7 +237,7 @@ class PermissionBlocks {
         if (!store.ok) stops.push({ scope: 'repo', soft: !storePath, stopped: `the evidence store line is left out: ${store.reason}`, next: 'run toolkit permissions --store <the store\'s folder on this computer>.' });
         const made = emit(rows, { store: store.safe });
         blocks.push(this.#block({ host, scope: 'repo', made, excluded: [],
-          target: host === 'claude' ? path.join(repo.root, '.claude', 'settings.local.json') : path.join(repo.root, '.codex', 'rules', 'toolkit.rules') }));
+          target: host === 'claude' ? this.#path.join(repo.root, '.claude', 'settings.local.json') : this.#path.join(repo.root, '.codex', 'rules', 'toolkit.rules') }));
       }
     }
 

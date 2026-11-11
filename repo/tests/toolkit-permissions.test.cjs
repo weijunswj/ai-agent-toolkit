@@ -16,9 +16,15 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const source = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const listIn = (text, pattern) => JSON.parse(`[${pattern.exec(text)[1].replace(/'/g, '"').replace(/\s+/g, ' ')}]`);
 
+// The fake Linux computer keeps Toolkit here; reads under it are answered from this checkout, so the
+// tests behave the same on a Windows runner.
+const TK = '/opt/toolkit';
+const slashed = file => String(file).replace(/\\/g, '/');
+const hostFs = { ...fs, existsSync: file => (slashed(file).startsWith(`${TK}/`) ? fs.existsSync(path.join(ROOT, slashed(file).slice(TK.length + 1))) : fs.existsSync(file)) };
+
 // A fake computer: hub state naming a managed checkout, optionally with Claude Code running Toolkit
 // from it. Reads go to the real files under a temp home; nothing here is the owner's.
-function computer(t, { managed = ROOT, claude = true, platform = 'linux' } = {}) {
+function computer(t, { managed = TK, claude = true, platform = 'linux' } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-perm-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   fs.mkdirSync(path.join(home, '.ai-agent-toolkit', 'current'), { recursive: true });
@@ -28,7 +34,7 @@ function computer(t, { managed = ROOT, claude = true, platform = 'linux' } = {})
     fs.writeFileSync(path.join(home, '.claude', 'plugins', 'known_marketplaces.json'), JSON.stringify({ 'ai-agent-toolkit-local': { source: { source: 'directory', path: ROOT } } }));
     fs.writeFileSync(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { 'ai-agent-toolkit@ai-agent-toolkit-local': [{ scope: 'user' }] } }));
   }
-  return { home, platform, environment: {}, cwd: ROOT };
+  return { home, platform, environment: {}, cwd: '/work/repo', fs: hostFs };
 }
 // A fake Git that answers for one governed repository and one store checkout.
 function fakeGit({ root = '/work/repo', origin = 'https://github.com/owner/store.git' } = {}) {
@@ -40,8 +46,8 @@ function fakeGit({ root = '/work/repo', origin = 'https://github.com/owner/store
   };
 }
 const governedFs = (binding = { governance: 'enabled', store: { kind: 'github', repository: 'Owner/Store' } }) => ({
-  ...fs,
-  readFileSync: (file, ...rest) => (String(file).replace(/\\/g, '/').endsWith('/work/repo/.github/toolkit-programme.json') ? JSON.stringify(binding) : fs.readFileSync(file, ...rest)),
+  ...hostFs,
+  readFileSync: (file, ...rest) => (slashed(file).endsWith('/work/repo/.github/toolkit-programme.json') ? JSON.stringify(binding) : fs.readFileSync(file, ...rest)),
 });
 
 test('both blocks print from the table, parse as JSON and print the same bytes twice', t => {
@@ -53,7 +59,7 @@ test('both blocks print from the table, parse as JSON and print the same bytes t
   const built = new permissions.PermissionBlocks(deps).build({ storePath: '/work/store' });
   assert.deepEqual(built.blocks.map(block => [block.host, block.scope]), [['claude', 'computer'], ['claude', 'repo']]);
   for (const block of built.blocks) assert.deepEqual(JSON.parse(block.text).permissions.allow, block.allow);
-  const wanted = permissions.ROWS.filter(row => row.scope === 'computer' && !row.windowsOnly).map(row => `Bash(node "${ROOT.replace(/\\/g, '/')}/${row.script}"${row.sub ? ` ${row.sub}` : ''} *)`);
+  const wanted = permissions.ROWS.filter(row => row.scope === 'computer' && !row.windowsOnly).map(row => `Bash(node "${TK}/${row.script}"${row.sub ? ` ${row.sub}` : ''} *)`);
   assert.deepEqual(built.blocks[0].allow, wanted);
   assert.deepEqual(built.blocks[1].allow, ['Bash(gh pr comment *)', 'Bash(gh issue comment *)', 'Bash(git -C "/work/store" push *)']);
   assert.ok(built.blocks[1].ask.includes('Bash(git -C "/work/store" push *--force*)') && built.blocks.every(block => [...block.allow, ...block.ask].every(line => !/merge/.test(line))));
@@ -88,6 +94,7 @@ test('no printed line holds a never class, and the never list catches each class
   const built = new permissions.PermissionBlocks(deps).build({ storePath: 'C:\\store' });
   const lines = built.blocks.flatMap(block => block.allow);
   assert.ok(lines.length > 40);
+  assert.ok(lines.includes('Bash(git -C "C:/store" push *)') && lines.includes('PowerShell(git -C "C:/store" push *)'), 'the store line is printed for a Windows path');
   for (const line of lines) {
     assert.equal(permissions.NEVER.find(([, pattern]) => pattern.test(line)), undefined, line);
     assert.match(line, /^(?:Bash|PowerShell)\((?:node "C:\/tk\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs"(?: [a-z-]+)?|gh pr comment|gh issue comment|git -C "C:\/store" push) \*\)$/);
@@ -119,7 +126,7 @@ test('missing pieces stop with a plain line and leave only the safe part', t => 
   const none = computer(t); fs.rmSync(path.join(none.home, '.ai-agent-toolkit'), { recursive: true });
   assert.equal(permissions.main([], { ...none, stderr: text => errors.push(text) }), 1);
   assert.match(errors.pop(), /^Stopped: this computer has no recorded Toolkit folder.* Next: run setup toolkit/);
-  assert.equal(permissions.main([], { ...computer(t, { managed: os.tmpdir() }), stderr: text => errors.push(text) }), 1);
+  assert.equal(permissions.main([], { ...computer(t, { managed: '/opt/empty' }), stderr: text => errors.push(text) }), 1);
   assert.match(errors.pop(), /^Stopped: the recorded Toolkit folder does not hold the Toolkit scripts/);
 
   const noHold = new permissions.PermissionBlocks({ ...computer(t, { claude: false }), fs: governedFs(), run: fakeGit() }).build({ storePath: '/work/store' });
@@ -169,7 +176,7 @@ test('--check reads a settings file and reports missing and stale lines without 
 });
 
 test('the real script prints the allowed-tools form and refuses unknown arguments', t => {
-  const deps = computer(t);
+  const deps = computer(t, { managed: ROOT });
   const run = args => spawnSync(process.execPath, [path.join(ROOT, 'repo', 'scripts', 'toolkit-permissions.cjs'), ...args], { encoding: 'utf8', env: { ...process.env, HOME: deps.home, USERPROFILE: deps.home }, cwd: os.tmpdir() });
   const listed = run(['--scope', 'computer', '--format', 'allowed-tools']);
   assert.equal(listed.status, 0, listed.stderr);
