@@ -165,7 +165,7 @@
     },
     "archiveTrustDiagnostics": {
       "type": "object", "additionalProperties": false, "required": ["reason"],
-      "properties": { "reason": { "enum": ["changed", "foreign", "missing", "duplicate"] } }
+      "properties": { "reason": { "enum": ["changed", "foreign", "missing", "duplicate"] }, "copy": { "description": "For an archived note: the SHA-256 name of the saved page copy that still holds it.", "type": "string", "pattern": "^[0-9a-f]{64}$" } }
     },
     "bodySizeDiagnostics": {
       "description": "Disjoint UTF-16 span lengths matching the redraw limit, with fixed labels and hand-written section numbers only. No page text. The largest five spans plus remainder equal projected_total; required_reduction gets strictly below threshold.",

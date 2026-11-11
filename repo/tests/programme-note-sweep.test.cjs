@@ -436,28 +436,176 @@ test('an interrupted cut settles by read-back: no second post, no replay, link k
   assert.equal(f.page().includes('Keep every byte.'), false);
 });
 
-test('a moved note whose comment later changes or disappears keeps its link, raises a finding and is never reposted or edited', () => {
+const damage = (f, entry, mode) => {
+  if (mode === 'changed') f.github.comments.get(entry.comment_id).body += '\nEdited later.';
+  else if (mode === 'missing') f.github.comments.delete(entry.comment_id);
+  else f.github.comments.get(entry.comment_id).login = 'another-user';
+};
+const answer = (f, id, change) => { const { doc, sha } = f.store.read('parent', 12); f.store.write('parent', 12, state.answerFinding(doc, { id, now: f.NOW, ...change }), { previous: doc, sha }); };
+
+test('a moved note whose comment later changes or disappears keeps its link, raises one finding and is never reposted or edited', () => {
   for (const mode of ['changed', 'missing', 'foreign']) {
     const f = pageFixture(state, { count: 3, hand: HAND });
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
     const [entry] = noteEntries(f);
-    if (mode === 'changed') f.github.comments.get(entry.comment_id).body += '\nEdited later.';
-    else if (mode === 'missing') f.github.comments.delete(entry.comment_id);
-    else f.github.comments.get(entry.comment_id).login = 'another-user';
+    damage(f, entry, mode);
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(f.posts().length, 1); assert.equal(f.edits().length, 0);
+    // The link and id stay; the id is pinned as untrusted so the report is made once.
+    assert.deepEqual(noteEntries(f), [{ ...entry, untrusted_ids: [entry.comment_id] }]);
+    assert.ok(context(f).includes(`#issuecomment-${entry.comment_id}`));
+    assert.deepEqual(untrusted(f).map(found => found.diagnostics), [{ reason: mode, copy: entry.copy }]);
+    // The finding names the saved copy file, which holds the notes.
+    const text = state.findingText(untrusted(f)[0]);
+    assert.ok(text.includes(`page-copies/issue-12/${entry.copy}.md`), text);
+    assert.ok(f.github.files.get(`state/page-copies/issue-12/${entry.copy}.md`).text.includes(AREA));
+    // Runtime and schema agree on the finding's copy name, and both refuse anything else there.
+    const Ajv = require('ajv/dist/2020');
+    const validate = new Ajv({ strict: false }).compile(JSON.parse(fs.readFileSync(path.join(ROOT, 'repo/contracts/programme-state/parent-state-v1.schema.json'))));
+    const both = (value, valid) => { assert.equal(state.validateParent(value).length === 0, valid); assert.equal(validate(value), valid, JSON.stringify(validate.errors)); };
+    both(f.parent(), true);
+    for (const change of [d => { d.copy = 'short'; }, d => { d.text = 'note text'; }, d => { delete d.reason; }]) {
+      const bad = structuredClone(f.parent()); change(bad.attention.find(found => found.code === 'ARCHIVE_COMMENT_UNTRUSTED').diagnostics); both(bad, false);
+    }
+    // Unanswered, it stays open. One pass shows it in the CURRENT summary; then the programme
+    // goes quiet: no writes, nothing planned.
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    const first = untrusted(f)[0], writes = f.github.mutations();
+    for (let pass = 0; pass < 2; pass++) {
+      assert.deepEqual(f.make().run({ apply: false }).effects, [], 'a dry run plans nothing');
+      assert.deepEqual(f.make().run({ apply: true }).holds, []);
+      assert.equal(f.github.mutations(), writes, 'no state commit, page write or comment');
+    }
+    assert.deepEqual(untrusted(f), [first]);
     // An unrelated owner edit still redraws: the damaged note does not hold the page.
     f.github.issues.get(12).body = f.page().replace('Never marked.', 'Never marked. Later edit.');
     f.github.issues.get(12).updated_at = f.github.tick();
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
-    assert.equal(f.posts().length, 1); assert.equal(f.edits().length, 0);
-    assert.deepEqual(noteEntries(f), [entry]);
-    assert.ok(context(f).includes(`#issuecomment-${entry.comment_id}`));
-    assert.deepEqual(untrusted(f).map(found => found.diagnostics.reason), [mode]);
-    assert.match(state.FINDING_CODES.ARCHIVE_COMMENT_UNTRUSTED.next_action, /saved page copy in the private store \(page-copies\)/);
-    // Still open on a later complete pass, until the owner disposes of it.
+    assert.equal(f.posts().length, 1);
+    assert.deepEqual(untrusted(f), [first]);
+  }
+});
+
+test("the owner's answer to a damaged note finding stands on every later pass", () => {
+  for (const change of [{ state: 'acknowledged' }, { state: 'disposed', reason: 'Restored by hand.' }]) {
+    const f = pageFixture(state, { count: 3, hand: HAND });
     assert.deepEqual(f.make().run({ apply: true }).holds, []);
-    assert.equal(untrusted(f)[0].state, 'new');
+    damage(f, noteEntries(f)[0], 'changed');
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    answer(f, untrusted(f)[0].id, change);
+    const answered = untrusted(f)[0];
+    assert.equal(answered.state, change.state);
+    for (let pass = 0; pass < 3; pass++) {
+      assert.deepEqual(f.make().run({ apply: true }).holds, []);
+      assert.deepEqual(untrusted(f), [answered], 'the answer is not undone');
+    }
+    const writes = f.github.mutations();
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(f.github.mutations(), writes);
     assert.equal(f.posts().length, 1);
   }
+});
+
+test('putting the same notes back under the marker after the comment is damaged posts a fresh comment and never holds the page', () => {
+  for (const mode of ['changed', 'missing', 'foreign']) for (const reportedFirst of [true, false]) {
+    const f = pageFixture(state, { count: 3, hand: HAND });
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    const [entry] = noteEntries(f);
+    const retained = f.github.comments.get(entry.comment_id)?.body;
+    damage(f, entry, mode);
+    const damaged = f.github.comments.get(entry.comment_id)?.body;
+    if (reportedFirst) assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    // The owner restores the notes exactly as the saved page copy holds them.
+    assert.ok(f.github.files.get(`state/page-copies/issue-12/${entry.copy}.md`).text.includes(AREA));
+    f.github.issues.get(12).body = f.page().replace('## Current plan\n', AREA + '## Current plan\n');
+    f.github.issues.get(12).updated_at = f.github.tick();
+    assert.deepEqual(f.make().run({ apply: true }).holds, [], `${mode}: the page is not held`);
+    assert.equal(f.posts().length, 2); assert.equal(f.edits().length, 0);
+    const [fresh] = noteEntries(f);
+    assert.equal(noteEntries(f).length, 1);
+    assert.equal(fresh.key, entry.key); assert.equal(fresh.state, 'moved');
+    assert.notEqual(fresh.comment_id, entry.comment_id);
+    assert.ok(fresh.untrusted_ids.includes(entry.comment_id));
+    assert.equal(archive.noteText(f.github.comments.get(fresh.comment_id).body), AREA);
+    assert.equal(f.github.comments.get(entry.comment_id)?.body, damaged, 'the damaged comment is left as found');
+    if (mode !== 'missing') assert.notEqual(retained, undefined);
+    assert.equal(f.page().includes('Keep every byte.'), false);
+    assert.ok(context(f).includes(`#issuecomment-${fresh.comment_id}`));
+    assert.equal(context(f).includes(`#issuecomment-${entry.comment_id}`), false);
+    assert.equal(untrusted(f).length, 1, 'reported once');
+    assert.deepEqual(state.validateParent(f.parent()), []);
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(f.posts().length, 2);
+    const writes = f.github.mutations();
+    assert.deepEqual(f.make().run({ apply: false }).effects, []);
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(f.github.mutations(), writes);
+  }
+});
+
+test('a pass that stopped for time finishes its redraw but posts and cuts no notes; the next full pass moves them', () => {
+  for (const left of [170000, 90000]) {
+    const f = pageFixture(state, { count: 3, hand: HAND });
+    const start = Date.parse(f.NOW);
+    const stopped = f.make({ pass: new state.RefreshBudget({ nowMs: () => start, budgetMs: left }) }).run({ apply: true });
+    assert.ok(stopped.holds.some(hold => hold.code === 'PASS_STOPPED'), JSON.stringify(stopped.holds));
+    assert.ok(state.findStateBlock(f.page()).block, 'the page is still redrawn');
+    assert.equal(f.posts().length + copies(f).length, 0);
+    assert.ok(f.page().includes(AREA));
+    assert.deepEqual(noteEntries(f), []);
+    assert.deepEqual(f.make().run({ apply: true }).holds.filter(hold => hold.code !== 'PASS_STOPPED'), []);
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    assert.equal(f.posts().length, 1);
+    assert.equal(f.page().includes('Keep every byte.'), false);
+  }
+  // The projection itself: asked to keep notes, it names the area's parts and leaves the page whole.
+  const f = pageFixture(state, { count: 3, hand: HAND });
+  const kept = f.make().projectBody(12, f.page(), state.renderParentBlockBody(f.parent(), f.children, f.issues), [], '3.57.0', null,
+    state.renderCurrentBlockBody(f.parent(), f.children, f.issues, f.NOW), null, 5, { parent: f.parent(), only: false, keepNotes: true });
+  assert.equal(kept.noteCut, undefined); assert.equal(kept.noteKeys.length, 1);
+  assert.ok(kept.body.includes(AREA));
+  assert.equal(kept.archive.some(part => part.kind === 'note'), false);
+});
+
+test('the shared hostile variants never widen what the reader accepts, and reading stays linear', () => {
+  const hostile = require('./support/hostile-inputs.cjs');
+  const sound = (body, name) => {
+    const found = archive.noteArea(body);
+    assert.ok(['none', 'unsafe', 'area'].includes(found.kind), name);
+    if (found.kind !== 'area') return found;
+    assert.equal(found.parts.map(part => part.text).join(''), body.slice(found.start, found.end), name);
+    assert.ok(body.slice(found.start).startsWith('## Archive'), name);
+    assert.ok(found.start === 0 || body[found.start - 1] === '\n', name);
+    for (const part of found.parts) assert.equal(archive.noteText(part.body), part.text, name);
+    return found;
+  };
+  for (const [name, body, expected] of ACCEPTED) for (const variant of hostile.variants(body)) {
+    const found = sound(variant.text, `${name}/${variant.id}`);
+    // CRLF is an ordinary line ending: the same area, as found. Every other break GitHub may or may
+    // not honour, and a leading byte-order mark, must not yield an area.
+    if (variant.id === 'crlf' && body.includes('\r')) continue;
+    if (variant.id === 'crlf') assert.equal(found.kind === 'area' && variant.text.slice(found.start, found.end), hostile.variants(expected)[0].text, `${name}/crlf`);
+    else if (variant.id !== 'tabs') assert.notEqual(found.kind, 'area', `${name}/${variant.id}`);
+  }
+  for (const [reason, body] of REFUSED) for (const variant of hostile.variants(body)) {
+    assert.notEqual(sound(variant.text, `${reason}/${variant.id}`).kind, 'area', `${reason}/${variant.id}: ${JSON.stringify(variant.text)}`);
+  }
+  // Every shared hostile shape, dropped into the marked area and above it, keeps the reader sound.
+  for (const shape of hostile.shapes) for (const body of [`${HEAD}## Archive\n${shape.text}\n\n${TAIL}`, `${shape.text}\n\n${HEAD}${AREA}${TAIL}`]) sound(body, shape.id);
+  // A lone carriage return or a leading byte-order mark above the marker changes how GitHub reads
+  // the lines before it, so nothing moves.
+  assert.deepEqual(archive.noteArea('Text.\r```\n' + old + '```\n'), { kind: 'unsafe', reason: 'control_character' });
+  assert.deepEqual(archive.noteArea(String.fromCharCode(0xFEFF) + '```\n' + old + '```\n'), { kind: 'unsafe', reason: 'control_character' });
+  const build = size => `${HEAD}## Archive\n${'### Section\nword word word\n\n- [x] item `code`\n<!-- note -->\n\n'.repeat(Math.ceil(size / 60))}${TAIL}`;
+  const timed = hostile.timing(text => archive.noteArea(text), build);
+  assert.ok(timed.ok, timed.message);
+});
+
+test('a dry run says that notes leave the page', () => {
+  const f = pageFixture(state, { count: 3, hand: HAND });
+  const planned = f.make().run({ apply: false }).effects.find(effect => effect.kind === 'post_archive_comment');
+  assert.equal(state.describeEffect(planned), 'Move the notes marked under `## Archive` off #12\'s page into a verified comment');
+  assert.equal(state.describeEffect({ kind: 'post_archive_comment', target: { issue: 12, key: 'graph-now-1' } }), 'Archive programme content from #12 in a verified comment');
 });
 
 test('a second marked area later adds a new entry and keeps the first link', () => {

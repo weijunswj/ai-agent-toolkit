@@ -99,7 +99,7 @@ function usedLabels(lines) {
 
 function noteComment(id, part, total, text, definitions) {
   return [marker(`note-${id}-${part}`), `# Archived notes: part ${part} of ${total}`, '',
-    'Moved unchanged from the programme page. The text between the two marker lines below is exact.', '',
+    'Moved unchanged from the programme page. The text between the two marker lines below is exact. Do not edit or delete this comment: Toolkit checks it and reports any change.', '',
     `<!-- programme-note-begin sha256=${digest(text)} -->`, text, '<!-- programme-note-end -->',
     ...(definitions.length ? ['', '<!-- programme-note-links -->', ...definitions] : [])].join('\n');
 }
@@ -182,6 +182,9 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
   if (start !== -1 && end === -1) close(text.length);
   if (!markers) return { kind: 'none' };
   if (markers > 1) return { kind: 'unsafe', reason: 'two_markers' };
+  // GitHub ends a line at a lone carriage return and skips a leading byte-order mark; this reader
+  // does neither, so with either anywhere on the page its view of the blocks cannot be trusted.
+  if (text.charCodeAt(0) === 0xFEFF || /\r(?!\n)/.test(text)) return { kind: 'unsafe', reason: 'control_character' };
   if (nested || start === -1) return { kind: 'unsafe', reason: 'marker_nested' };
   if (reason) return { kind: 'unsafe', reason };
   const area = text.slice(start, end);
@@ -199,17 +202,24 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
     if (definition && !leaving.has(label(definition[1])) && !staying.some(entry => entry.name === label(definition[1]))) staying.push({ name: label(definition[1]), text: line.text });
   }
   const definitionsFor = (from, to) => {
+    if (!staying.length) return [];
     const used = usedLabels(lines.filter(line => line.start >= from && line.start < to));
     return staying.filter(entry => used.has(entry.name)).map(entry => entry.text);
   };
-  const fits = (from, to) => noteComment('0'.repeat(12), 99, 99, text.slice(from, to), definitionsFor(from, to)).length < limit;
+  // Splitting stays linear in the page size: a part is measured by arithmetic, counting every link
+  // definition that stays as if the part needed it (never fewer than it really gets).
+  const room = limit - noteComment('0'.repeat(12), 99, 99, '', staying.map(entry => entry.text)).length;
   const cuts = [start];
-  while (!fits(cuts.at(-1), end)) {
+  for (let next = 0; end - cuts.at(-1) >= room;) {
     const from = cuts.at(-1);
-    const candidates = seams.filter(seam => seam.at > from && seam.at < end && fits(from, seam.at));
-    const chosen = candidates.filter(seam => seam.heading).at(-1) || candidates.at(-1);
+    while (next < seams.length && seams[next].at <= from) next += 1;
+    let chosen = null, heading = null;
+    for (let index = next; index < seams.length && seams[index].at < end && seams[index].at - from < room; index += 1) {
+      chosen = seams[index];
+      if (chosen.heading) heading = chosen;
+    }
     if (!chosen) return { kind: 'unsafe', reason: 'part_too_large' };
-    cuts.push(chosen.at);
+    cuts.push((heading || chosen).at);
   }
   cuts.push(end);
   const pieces = cuts.slice(1).map((to, index) => ({ text: text.slice(cuts[index], to), definitions: definitionsFor(cuts[index], to) }));

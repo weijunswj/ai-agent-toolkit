@@ -504,8 +504,9 @@ function validateAttention(errors, attention) {
     check(errors, Boolean(known), `${at}.code is not a known finding code`);
     if (SIZE_CODES.includes(entry.code)) validateBodyDiagnostics(errors, entry.diagnostics, `${at}.diagnostics`);
     else if (entry.code === 'ARCHIVE_COMMENT_UNTRUSTED') {
-      checkShape(errors, entry.diagnostics, { all: ['reason'] }, `${at}.diagnostics`);
+      checkShape(errors, entry.diagnostics, { all: ['reason', 'copy'], optional: ['copy'] }, `${at}.diagnostics`);
       check(errors, isObject(entry.diagnostics) && ['changed', 'foreign', 'missing', 'duplicate'].includes(entry.diagnostics.reason), `${at}.diagnostics must name a fixed archive trust failure`);
+      if (isObject(entry.diagnostics) && entry.diagnostics.copy !== undefined) check(errors, /^[0-9a-f]{64}$/.test(String(entry.diagnostics.copy)), `${at}.diagnostics.copy must be the SHA-256 of a saved page copy`);
     }
     else if (entry.code === 'ARCHIVE_SECTION_UNSAFE') {
       checkShape(errors, entry.diagnostics, { all: ['reason'] }, `${at}.diagnostics`);
@@ -658,7 +659,7 @@ const NOTE_REASON_TEXT = Object.freeze({
   open_html: 'a folded section or raw HTML block under it is not closed, or is closed without being opened',
   ambiguous_markup: 'a heading under it sits in markup that can be read two ways',
   underlined_heading: 'a heading under it is written by underlining; write it with `#` marks, or put a blank line above the rule',
-  control_character: 'the text holds a character GitHub may change (a lone carriage return, a null or a line separator)',
+  control_character: 'the page holds a character GitHub reads differently (a lone carriage return, a leading byte-order mark, a null or a line separator)',
   link_definition_split: 'a link definition under it is still used by text that stays on the page',
   part_too_large: 'a stretch with no `###` heading or blank line is too long for one comment',
   secret_like: 'the page holds text shaped like a secret, so no copy was saved',
@@ -672,6 +673,9 @@ function findingText(entry) {
   }
   if (entry.code === 'ARCHIVE_SECTION_UNSAFE' && entry.diagnostics) {
     return `ARCHIVE_SECTION_UNSAFE #${entry.issue}: the notes under \`## Archive\` were not moved (${NOTE_REASON_TEXT[entry.diagnostics.reason] || entry.diagnostics.reason}); fix that or remove the line`;
+  }
+  if (entry.code === 'ARCHIVE_COMMENT_UNTRUSTED' && entry.diagnostics?.copy) {
+    return `ARCHIVE_COMMENT_UNTRUSTED #${entry.issue}: a comment holding archived notes is ${entry.diagnostics.reason === 'missing' ? 'missing' : 'no longer as written'}; the notes are in the private store at page-copies/issue-${entry.issue}/${entry.diagnostics.copy}.md. Put them back on the page under \`## Archive\` for a fresh comment, or dispose of this finding`;
   }
   return `${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${FINDING_CODES[entry.code]?.next_action || ''}`;
 }
@@ -3532,7 +3536,7 @@ const EFFECT_TEXT = {
   replace_pr_nav: effect => `Add the parent and task links at the top of PR #${effect.target.pr}`,
   update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,
   post_index_comment: effect => effect.target.directory ? `Move #${effect.target.issue}'s comment topics into index pages` : `Move #${effect.target.issue}'s "${effect.label || effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} link(s)) into a new index comment`,
-  post_archive_comment: effect => `Archive programme content from #${effect.target.issue} in a verified comment`,
+  post_archive_comment: effect => (/^note-/.test(String(effect.target.key)) ? `Move the notes marked under \`## Archive\` off #${effect.target.issue}'s page into a verified comment` : `Archive programme content from #${effect.target.issue} in a verified comment`),
   edit_archive_comment: effect => `Update a registered programme archive comment on #${effect.target.issue}`,
 };
 
@@ -4115,7 +4119,8 @@ class Reconciler {
     if (scan.kind === 'area' && (page?.parent?.page_archive || []).some(entry => entry.kind === 'note' && entry.state === 'withdrawn' && entry.comment_id
       && scan.parts.some(part => part.key === entry.key) && !(comments || []).some(comment => comment.id === entry.comment_id && archiveTools().digest(comment.body) === entry.digest))) scan = { kind: 'unsafe', reason: 'comment_not_exact' };
     const noteKeys = scan.kind === 'area' ? scan.parts.map(part => part.key) : [];
-    if (scan.kind === 'area') {
+    // A pass that stopped for time finishes its redraw but moves no notes: they wait for a full pass.
+    if (scan.kind === 'area' && !page?.keepNotes) {
       const cut = this.projectParentLayout(number, source, stateBody, comments, version, navBody, currentBody, topic, postBudget, page, scan);
       if (!cut.refused && cut.budgetFits && cut.body.length < this.threshold) return { ...cut, noteKeys, noteCut: true };
     }
@@ -4353,8 +4358,15 @@ class Reconciler {
       const activeArchives = number === parent.parent_issue ? (parent.page_archive || []).filter(entry => entry.comment_id && entry.state !== 'withdrawn') : [];
       const archiveNeedsRecovery = activeArchives.some(entry => {
         const comment = comments.find(comment => comment.id === entry.comment_id);
+        const damaged = !comment || comment.user?.login !== entry.login || archiveTools().digest(comment.body) !== entry.digest;
+        // A moved note's damaged comment is reported once and then left alone, unless the same
+        // notes are back under the marker: then a full pass posts a fresh comment for them.
+        if (entry.kind === 'note' && entry.state === 'moved') {
+          const reported = archiveUntrusted(entry, entry.comment_id);
+          return reported ? (projected.noteKeys || []).includes(entry.key) : damaged;
+        }
         if (archiveUntrusted(entry, entry.comment_id)) return true;
-        return !comment || comment.user?.login !== entry.login || archiveTools().digest(comment.body) !== entry.digest;
+        return damaged;
       });
       if (number === parent.parent_issue && projected.body === issue.body && !archiveEffects.length && !timeWillChange && !archiveNeedsRecovery) continue;
       for (const part of archiveEffects) effects.push({ kind: parent.page_archive?.some(entry => entry.key === part.key && entry.comment_id) ? 'edit_archive_comment' : 'post_archive_comment', target: { issue: number, key: part.key } });
@@ -4973,7 +4985,7 @@ class Reconciler {
         const newest = newestBlockVersion(before.body);
         if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', 'Update Toolkit before redrawing this newer page.');
         const comments = this.reader.comments(parentNumber);
-        const next = this.projectBody(parentNumber, before.body, body, comments, version, null, currentBody, null, postsLeft(parentNumber), { parent: parentDoc, only: plan.issueScoped });
+        const next = this.projectBody(parentNumber, before.body, body, comments, version, null, currentBody, null, postsLeft(parentNumber), { parent: parentDoc, only: plan.issueScoped, keepNotes: Boolean(this.pass.stopped) });
         if (next.refused || next.body.length >= this.threshold) {
           const error = new ProgrammeError('BODY_TOO_LARGE', 'The programme page cannot fit below the hard body limit; no archive comments were changed.');
           error.diagnostics = bodySizeDiagnostics(next.body, this.threshold); throw error;
@@ -4996,10 +5008,23 @@ class Reconciler {
         if (entry.kind === 'note' && entry.state === 'moved') {
           // The page no longer holds this text, so its link and id stay. A changed or missing
           // comment is reported; the saved page copy in the private store restores it by hand.
+          // It is reported once: the comment id is then pinned as untrusted, so later passes stay
+          // quiet and the owner's answer to the finding stands.
+          const reported = archiveUntrusted(entry, entry.comment_id);
           const listed = snapshot.comments.find(comment => comment.id === entry.comment_id);
-          if (listed && listed.user?.login === entry.login && archiveTools().digest(listed.body) === entry.digest) continue;
-          const result = this.archiveTrust(entry);
-          if (result.reason) notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', { reason: result.reason });
+          if (!reported && listed && listed.user?.login === entry.login && archiveTools().digest(listed.body) === entry.digest) continue;
+          const reason = reported ? null : this.archiveTrust(entry).reason;
+          if (!reported && !reason) continue;
+          const diagnostics = reason ? { reason, copy: entry.copy } : null;
+          if (snapshot.next.noteKeys.includes(entry.key)) {
+            // The owner put the same notes back under the marker (as the saved copy holds them):
+            // the damaged comment is let go and a fresh one is posted for them on this full pass.
+            if (diagnostics) notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', diagnostics);
+            detach(entry); registryChanged = true;
+          } else if (diagnostics) {
+            notePageFinding(parentNumber, 'ARCHIVE_COMMENT_UNTRUSTED', diagnostics);
+            mutateDoc('parent', parentNumber, { change: doc => { rejectArchiveIds(doc.page_archive.find(part => part.key === entry.key), [entry.comment_id]); return doc; } });
+          }
           continue;
         }
         if (archiveUntrusted(entry, entry.comment_id)) { detach(entry); registryChanged = true; continue; }
