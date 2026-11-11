@@ -1,11 +1,12 @@
 # Toolkit Changelog
 
-## 3.64.0 (Controller enforcement map)
+## 3.63.1 (Update lines only on edited posts)
 
-### Added
+### Changed
 
-- A map says, for every controller rule, what enforces it: a hook, a script, a CI check or the programme reconciler, each with the test that proves it and one line on which part of the rule they cover. A rule nothing can enforce is marked instruction-only, with one line on why. Of the 40 rules today, 17 are enforced and 23 are instruction-only. The map lives beside the rules, so the rules files gain no bytes.
-- A check fails when a controller rule has no row or two, when a row matches no rule or more than one, or when a row names an enforcer or test that does not exist or a test that never mentions its enforcer. It runs with the test suite, so a rule added, moved or reworded without updating the map fails CI.
+- **Projects posts:** The guidebook now says Update lines start with a post's first edit. A first or fresh post has no Update lines and lays its points out as clean bold-label bullets under the Now line, with a short good and bad example.
+- **Project instructions block:** The post layout line carries the same rule, and the problem, fix and skip lines are written as three one-line bullets.
+- **Task relays:** A scheduled task relay that has to go in a fresh post is a plain bullet there, not an Update line.
 
 ## 3.63.0 (Controller core plus pages, mixed stack removed, device-offline alert)
 

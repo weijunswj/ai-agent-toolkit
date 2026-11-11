@@ -646,8 +646,13 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(c) a coordinator post since the last run whose **ELI5:** line is not its last line, whose **Waiting on you** list is not just above that line, or whose Update stamps are not in the owner\'s profile time zone;'));
   assert.doesNotMatch(text + body, /Waiting on you \(n\):\*\*`? (as the very )?last|the ELI5 line ends the post/);
   // The owner's spacing: each Update line is its own paragraph with one blank line between, zone in the label, no spacer lines.
-  assert.ok(text.includes("one **[HH:MM] <zone> Update:** line per update (the owner's zone, e.g. SGT), each its own paragraph one blank line apart, no `&nbsp;` spacer,"));
-  assert.ok(body.includes('one-line `**[HH:MM] <zone> Update:**` entries, no questions;') && body.includes('a single blank line (no `&nbsp;`) between Update lines, questions and blocks.'));
+  assert.ok(text.includes("one **[HH:MM] <zone> Update:** line per edit, none in fresh posts (the owner's zone, e.g. SGT), each its own paragraph one blank line apart, no `&nbsp;` spacer,"));
+  // The owner's rule: Update lines belong to edits only; a first or fresh post is clean bold-label bullets, with a good-vs-bad example.
+  const asks = read('repo/contracts/claude-projects/web-controller-projects/reference/owner-asks.md');
+  for (const example of ['- **Fresh posts carry no Update lines.** Update lines start with a post\'s first edit. A first or fresh post has none, not even one per item', '  - Fresh post, good: ', '  - Fresh post, bad: each item stamped as its own `**[16:55] SGT Update:**` line, all with the same time.', '  - Edited post, good: every earlier line kept word for word, plus one new line']) assert.ok(asks.includes(example), example);
+  assert.ok(body.includes('`**If we skip it:**` as three one-line bullets.'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md').includes('(or, when you must post fresh under the posting rules, a plain bullet in that fresh post, never an Update line)'));
+  assert.ok(body.includes('one-line `**[HH:MM] <zone> Update:**` entries only on edits, no questions (fresh post: bold-label bullets);') && body.includes('a single blank line (no `&nbsp;`) between Update lines, questions and blocks.'));
   assert.doesNotMatch(text + body, /followed by a line holding only `&nbsp;`|take that spacer/);
   // The owner's board rules: blank lines between blocks, nested problem lines, title links, open asks carried forward.
   assert.ok(text.includes('One blank line separates each labelled block from the next: the Now line with its bullets, the update log, **Waiting on you** and the ELI5 line.'));
