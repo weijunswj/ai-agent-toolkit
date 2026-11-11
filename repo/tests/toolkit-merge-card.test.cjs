@@ -2,7 +2,8 @@
 
 // The merge card: a tap on Toolkit's exact AskUserQuestion card in place of a typed "merge N", for
 // one pull request at one full head SHA, counted only in a session that could record a typed
-// approval. Every case uses a temporary user-state folder and temporary git repositories.
+// approval, from a hook event the session's own shell could not have fed, as a plain answer with
+// nothing else attached. Every case uses a temporary user-state folder and temporary git repositories.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -55,13 +56,18 @@ const SESSIONS = {
 const card = (repository = 'owner/a', pr = 618, sha = SHA) => hold.mergeCard(repository, pr, sha);
 const clone = value => JSON.parse(JSON.stringify(value));
 let calls = 0;
-// Shows a card and answers it, as the hook events arrive. `response` may differ from what was shown.
-function tap(ctx, session, input, label, { ask = true, response = input, toolUseId = `toolu_${calls += 1}`, answers } = {}) {
+const plain = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+// Shows a card and answers it, as the hook events arrive: the host hands the asked input back with
+// the answers and empty annotations added, and reports the same in its response. `response` may
+// differ from what was shown; `back` and `extra` change what the host hands back and reports.
+function tap(ctx, session, input, label, { ask = true, response = input, toolUseId = `toolu_${calls += 1}`, answers, back, extra = {} } = {}) {
   const base = { cwd: ctx.repo, session_id: session.id, tool_name: 'AskUserQuestion', tool_use_id: toolUseId };
   const options = { ...ctx.options, environment: session.environment };
   const noted = ask ? hold.cardAsked({ ...base, tool_input: input }, options) : false;
   const question = response && Array.isArray(response.questions) && response.questions[0] ? response.questions[0].question : '';
-  const answered = hold.cardAnswered({ ...base, tool_input: input, tool_response: { questions: response && response.questions, answers: answers === undefined ? { [question]: label } : answers } }, options);
+  const given = answers === undefined ? { [question]: label } : answers;
+  const handedBack = back !== undefined ? back(input, given) : plain(input) ? { ...input, answers: given, annotations: {} } : input;
+  const answered = hold.cardAnswered({ ...base, ...(handedBack === null ? {} : { tool_input: handedBack }), tool_response: { questions: response && response.questions, answers: given, annotations: {}, ...extra } }, options);
   return { noted, answered, toolUseId };
 }
 const merge = (ctx, session, { pr = 618, sha = SHA, host = 'claude', repo = '' } = {}) => hold.decide(
@@ -127,7 +133,7 @@ test('a tap approves one pull request at one head; Not now approves nothing and 
 // Cards that are not exactly Toolkit's. Each is built from a good card by one change.
 const edit = change => { const input = clone(card()); change(input, input.questions[0]); return input; };
 const ALTERED = {
-  'an answer filled in by the caller': edit(input => { input.answers = { 'Merge owner/a#618 at 62405eb?': 'Merge' }; }),
+  'an idle marker on the input': edit(input => { input.afkTimeoutMs = 60000; }),
   'another top-level key': edit(input => { input.note = 'x'; }),
   'two questions': edit(input => { input.questions.push(clone(input.questions[0])); }),
   'no questions': edit(input => { input.questions = []; }),
@@ -189,12 +195,138 @@ test('a card that is not exactly Toolkit\'s records nothing, before or after it 
       assert.deepEqual(stored(ctx), []);
       const base = { cwd: ctx.repo, session_id: session.id, tool_name: 'AskUserQuestion', tool_use_id: 'toolu_asked' };
       assert.equal(hold.cardAsked({ ...base, tool_input: card() }, { ...ctx.options, environment: {} }), true);
-      const reported = hold.cardAnswered({ ...base, tool_input: input, tool_response: { questions: card().questions, answers: { 'Merge owner/a#618 at 62405eb?': 'Merge' } } }, { ...ctx.options, environment: {} });
+      const given = { 'Merge owner/a#618 at 62405eb?': 'Merge' };
+      const reported = hold.cardAnswered({ ...base, tool_input: plain(input) ? { ...input, answers: given, annotations: {} } : input, tool_response: { questions: card().questions, answers: given, annotations: {} } }, { ...ctx.options, environment: {} });
       assert.match(reported.context, /no merge approval was recorded/, 'asked altered, shown exact');
       assert.deepEqual(stored(ctx), []);
       assert.match(merge(ctx, session).deny, /no unused approval/);
     });
   }
+});
+
+test('what the host hands back after a tap: the card plus its answer counts, anything more does not', async t => {
+  const question = 'Merge owner/a#618 at 62405eb?';
+  const choice = () => edit((input, first) => { first.kind = 'choice'; });
+  const counted = {
+    'the input handed back with answers and empty annotations': {},
+    'the input handed back as it was asked': { back: input => input },
+    'no input handed back': { back: () => null },
+    'answers but no annotations on the input': { back: (input, answers) => ({ ...input, answers }) },
+    'the host adds its choice kind to the question it shows': { response: choice(), back: (input, answers) => ({ ...choice(), answers, annotations: {} }) },
+  };
+  for (const [name, options] of Object.entries(counted)) {
+    await t.test(name, t => {
+      const ctx = context(t);
+      const session = SESSIONS['a chat the user started'](ctx);
+      const result = tap(ctx, session, card(), 'Merge', options);
+      assert.equal(result.noted, true);
+      assert.match(result.answered.context, /recorded the user's tap on Merge/);
+      assert.equal(merge(ctx, session), null);
+    });
+  }
+  const note = { [question]: { notes: 'only after the Windows smoke passes' } };
+  const uncounted = {
+    'the host marks an idle auto-resolve': { extra: { afkTimeoutMs: 60000 } },
+    'an idle marker of zero': { extra: { afkTimeoutMs: 0 } },
+    'an idle marker on the input handed back': { back: (input, answers) => ({ ...input, answers, annotations: {}, afkTimeoutMs: 60000 }) },
+    'the host marks a follow-up': { extra: { followUp: true } },
+    'a follow-up marked false': { extra: { followUp: false } },
+    'typed text beside the answer': { extra: { response: 'wait, not yet' } },
+    'empty typed text': { extra: { response: '' } },
+    'a note on the answer': { extra: { annotations: note } },
+    'a note on the input handed back': { back: (input, answers) => ({ ...input, answers, annotations: note }) },
+    'an empty annotation for the question': { extra: { annotations: { [question]: {} } } },
+    'annotations that are not an object': { extra: { annotations: [] } },
+    'a field the reader does not know': { extra: { source: 'dialog' } },
+    'a field the reader does not know on the input': { back: (input, answers) => ({ ...input, answers, annotations: {}, source: 'dialog' }) },
+    'a second answer': { answers: { [question]: 'Merge', 'Merge owner/a#619 at 62405eb?': 'Merge' } },
+    'the input handed back answers Not now': { back: input => ({ ...input, answers: { [question]: 'Not now' }, annotations: {} }) },
+    'the input handed back answers another question': { back: input => ({ ...input, answers: { 'Merge owner/a#619 at 62405eb?': 'Merge' }, annotations: {} }) },
+    'the input handed back holds empty answers': { back: input => ({ ...input, answers: {}, annotations: {} }) },
+    'another kind on the question shown': { response: edit((input, first) => { first.kind = 'text'; }) },
+    'another kind on the question handed back': { back: (input, answers) => ({ ...edit((changed, first) => { first.kind = 'text'; }), answers, annotations: {} }) },
+  };
+  for (const [name, options] of Object.entries(uncounted)) {
+    await t.test(name, t => {
+      const ctx = context(t);
+      const session = SESSIONS['a chat the user started'](ctx);
+      const result = tap(ctx, session, card(), 'Merge', options);
+      assert.equal(result.noted, true);
+      assert.match(result.answered.context, /no merge approval was recorded/);
+      assert.deepEqual(stored(ctx), []);
+      assert.match(merge(ctx, session).deny, /no unused approval/);
+    });
+  }
+  await t.test('a card asked with its answer already filled in is never noted', t => {
+    const ctx = context(t);
+    const session = SESSIONS['a chat the user started'](ctx);
+    const filled = { ...card(), answers: { [question]: 'Merge' } };
+    assert.equal(hold.cardOf(filled), null);
+    assert.ok(hold.cardOf(filled, true), 'the same shape is what a host hands back after a real tap');
+    const result = tap(ctx, session, filled, 'Merge', { response: card() });
+    assert.equal(result.noted, false);
+    assert.match(result.answered.context, /no merge approval was recorded/);
+    assert.deepEqual(stored(ctx), []);
+  });
+  await t.test('Not now withdraws whatever else the answer carries', t => {
+    const ctx = context(t);
+    const session = SESSIONS['a chat the user started'](ctx);
+    for (const extra of [{ afkTimeoutMs: 60000 }, { response: 'later' }, { annotations: note }, { followUp: true }]) {
+      hold.recordPrompt({ cwd: ctx.repo, prompt: 'merge 618', session_id: session.id }, { environment: {}, ...ctx.options });
+      assert.equal(stored(ctx).length, 1);
+      assert.match(tap(ctx, session, card(), 'Not now', { extra }).answered.context, /tapped Not now/);
+      assert.deepEqual(stored(ctx), []);
+    }
+  });
+});
+
+test('nothing a session\'s own shell can run is read as a card shown or answered', async t => {
+  // The host's own hook process has no host-session variable; a command run from the session's
+  // shell carries it. Any presence of it, whatever the value, makes the event a feed.
+  for (const [name, value] of [['matching the session', 'user'], ['empty', ''], ['another session', 'parent']]) {
+    await t.test(`a card event whose environment holds the variable, ${name}`, t => {
+      const ctx = context(t);
+      const session = SESSIONS['a chat the user started'](ctx);
+      const fed = { id: session.id, environment: { [gate.HOST_SESSION_VARIABLE]: value } };
+      // Fed card and fed answer.
+      const both = tap(ctx, fed, card(), 'Merge');
+      assert.equal(both.noted, false);
+      assert.match(both.answered.context, /no merge approval was recorded/);
+      // A card the host really showed, with a fed answer.
+      const base = { cwd: ctx.repo, session_id: session.id, tool_name: 'AskUserQuestion', tool_use_id: 'toolu_real' };
+      assert.equal(hold.cardAsked({ ...base, tool_input: card() }, { ...ctx.options, environment: {} }), true);
+      assert.match(tap(ctx, fed, card(), 'Merge', { ask: false, toolUseId: 'toolu_real' }).answered.context, /no merge approval was recorded/);
+      // A fed Not now cannot withdraw the user's typed approval.
+      hold.recordPrompt({ cwd: ctx.repo, prompt: 'merge 618', session_id: session.id }, { environment: {}, ...ctx.options });
+      assert.match(tap(ctx, fed, card(), 'Not now').answered.context, /no merge approval was recorded/);
+      assert.equal(stored(ctx).length, 1);
+      assert.equal(merge(ctx, session), null, 'the typed approval still stands');
+      assert.deepEqual(stored(ctx), []);
+    });
+  }
+  await t.test('the direct feed commands are refused, and ordinary commands near them are not', t => {
+    const ctx = context(t);
+    const session = SESSIONS['a chat the user started'](ctx);
+    const run = command => hold.decide({ cwd: ctx.repo, session_id: session.id, tool_name: 'Bash', tool_input: { command } }, { ...ctx.options, closureGuard, environment: {}, host: 'claude' });
+    const hook = '~/.claude/plugins/cache/ai-agent-toolkit/ai-agent-toolkit/3.63.0/repo/scripts/toolkit-governance-hook.cjs';
+    const event = JSON.stringify({ session_id: session.id, cwd: ctx.repo, tool_name: 'AskUserQuestion', tool_use_id: 'toolu_fed', tool_input: card() });
+    for (const command of [
+      `printf '%s' '${event}' | node ${hook} --event PreToolUse`,
+      `printf '%s' '${event}' | node ${hook} --event PostToolUse`,
+      `node ${hook} --event=PostToolUse < answer.json`,
+      `cat answer.json | node repo/scripts/toolkit-governance-hook.cjs --event PostToolUse`,
+      'node -e "const hold = load(\'./repo/scripts/toolkit-merge-hold.cjs\'); hold.cardAnswered(event)"',
+      'node -p "load(\'./repo/scripts/toolkit-merge-hold.cjs\').cardAsked(event)"',
+    ]) assert.match(run(command).deny, /feed them a prompt, tool or session-start event are refused/, command);
+    for (const command of [
+      'node --test repo/tests/toolkit-governance-hook.test.cjs',
+      'node --test repo/tests/toolkit-merge-card.test.cjs repo/tests/toolkit-merge-hold.test.cjs',
+      'node repo/scripts/toolkit-merge-hold.cjs check',
+      'grep -n cardOffer repo/scripts/toolkit-merge-hold.cjs',
+      'git log --oneline -- repo/scripts/toolkit-governance-hook.cjs',
+      'grep -rn PostToolUse hooks/',
+    ]) assert.doesNotMatch(String((run(command) || {}).deny), /feed them|must come from the user/, command);
+  });
 });
 
 test('an answer counts once, from the noted call, as one of the two labels', t => {
