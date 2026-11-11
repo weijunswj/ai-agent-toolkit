@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { controllerText } = require('./support/controller-text.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const SKILL_REL = 'repo/contracts/claude-projects/web-controller-projects/SKILL.md';
@@ -267,7 +268,7 @@ test('Projects setup relay rejects narrowed triggers, premature writes and relay
   assert.ok(playbook.indexOf('before takeover writes') < playbook.indexOf('## Journey'));
   const skill = read(SKILL_REL);
   assert.ok(skill.includes('Follow for the whole session'));
-  assert.ok(read('repo/CONTROLLER.md').includes('Routines/executors ask the owner only when the owner must act'));
+  assert.ok(controllerText().includes('Routines/executors ask the owner only when the owner must act'));
   assert.doesNotMatch(surfaces.controller + surfaces.skill, /`start_thread`\/`read_project_chat`/);
   assert.doesNotMatch(surfaces.guide, /tools include `mcp__hearthbot__start_thread` and `mcp__hearthbot__read_project_chat`/);
 });
@@ -354,7 +355,7 @@ test('Projects correction: generic step 7 is an explicit exception on every rout
 });
 
 test('Projects correction restores every rule qualifier lost in the earlier trims', () => {
-  const controller = read('repo/CONTROLLER.md');
+  const controller = controllerText();
   const skill = read(SKILL_REL);
   for (const clause of ['owns agreed Core through integration', 'need their own authority',
     'publish concise authorised progress and screened private evidence directly',
@@ -387,7 +388,7 @@ test('Projects bootstrap loads the verified skill before setup and preserves gen
     'old writer stopped with proof', 'Read it back before continuing',
     'With DISABLED or Later, record in the verified evidence store',
     'same GitHub account that posted the record']) assert.ok(journey.includes(clause), clause);
-  assert.ok(read('repo/CONTROLLER.md').includes('Continue approved scope without reapproval'));
+  assert.ok(controllerText().includes('Continue approved scope without reapproval'));
   assert.doesNotMatch(bootstrap, /work from the managed block until|once the block that carries the guidebook line arrives/);
   assertProjectsEntry(projectsEntry(), ['failure hold', 'outside appointment']);
 });
@@ -1024,7 +1025,14 @@ const ctaRecoveryCases = [
   ['owner stopped the nudge', 'periodic', ['preserving its schedule, bound home thread, recorded raises and any `stopped by owner` entry']],
   ['recovery check without being asked', 'device', ['On the first successful wake after a recorded interruption', 'never wait for the owner to request the reminder']],
   ['no new ask or confirmed resumable lane', 'skill', ['a new owner ask', 'every confirmed resumable lane needing owner input']],
-  ['parked status is not proof of recovery', 'device', ['A gap or a parked status alone does not prove that a device or usage limit recovered']]
+  ['parked status is not proof of recovery', 'device', ['A gap or a parked status alone does not prove that a device or usage limit recovered']],
+  ['device goes offline mid-lane', 'device', ['## Offline alert', '**Offline first.** If a wake or status read shows a lane\'s device is not reachable, follow **Offline alert** above before this sweep', '**Ping in the turn you see it.**', 'post the ask under **Device offline is an owner ask** in `reference/owner-asks.md` in that same turn', 'Never wait for the owner to notice']],
+  ['offline is told apart from parked and from unknown', 'device', ['**Offline is not parked.**', 'typing in the thread does nothing until the device is back', 'say "could not be checked", never "offline"']],
+  ['same outage seen again', 'device', ['**One entry per outage.**', 'A repeated observation of the same outage posts nothing new', 'A lane that drops later in the same outage joins the entry']],
+  ['device comes back', 'device', ['add one "back online" line under **Update**, mark the entry done and run **Recovery sweep**', 'A gap in reports or a successful task run alone is not proof that the device is back']],
+  ['offline ask names the device, the threads and the step', 'skill', ['**Device offline is an owner ask.**', 'name the device, say what stopped, link each affected thread by its title', '"Bring Claude on <device> back online."', 'One post per outage, never one per lane', 'a reply or reaction does not complete it']],
+  ['nudge reports an offline device', 'nudge', ['A lane whose device is confirmed not reachable also goes under **Waiting on owner:**', 'the step "bring Claude on that device back online"', '"DEVICE OFFLINE: <n> | "', 'A failed status read is "could not be checked", never offline']],
+  ['coordinator acts on the offline prefix', 'periodic', ['**`DEVICE OFFLINE`:** follow **Offline alert** in `reference/device-work.md` in this turn', 'Ping when this outage has no entry in the promise list yet', 'with no second announcement']]
 ];
 for (const [name, surface, required] of ctaRecoveryCases) {
   test(`CTA and recovery source contract: ${name}`, () => {

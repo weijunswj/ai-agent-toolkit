@@ -8,13 +8,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { controllerText } = require('./support/controller-text.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 const flat = text => text.replace(/\s+/g, ' ');
 
 const GATE = flat(read('repo/contracts/agent-rules/gate-rules.md'));
-const CONTROLLER = flat(read('repo/CONTROLLER.md'));
+const CONTROLLER = flat(controllerText());
 const DELIVERY = flat(read('repo/docs/TOOLKIT-DELIVERY.md'));
 const SKILL = flat(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'));
 
