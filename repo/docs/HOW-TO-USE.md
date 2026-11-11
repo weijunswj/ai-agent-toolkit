@@ -63,6 +63,21 @@ Codex and Claude Code update Toolkit through their own native plugin systems:
 
 Detailed plugin verification and bridge command mechanics live in [Toolkit Local Bridge](TOOLKIT-LOCAL-BRIDGE.md).
 
+### Commands You Can Type
+
+Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup` and `toolkit show env` are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing. A phrase inside a longer message is ordinary text. Everything else is plain language: ask in your own words.
+
+- `toolkit cmd` or `toolkit command`: show this list.
+- `setup toolkit` or `toolkit setup`: set up Toolkit on this computer, or change your setup answers.
+- `refresh toolkit` or `toolkit refresh`: update Toolkit on this computer to the newest version.
+- `toolkit show env`: open your keys in your editor. Values stay on this computer and never pass through chat.
+- `toolkit update scheduled task`: review and update Toolkit's scheduled tasks on this computer.
+- `toolkit governance enable` or `toolkit governance disable`: turn Toolkit's GitHub governance on or off for this repository. It prepares a pull request for you to merge.
+- `remove toolkit`: list Toolkit's scheduled tasks and rules on this computer, then remove them after your OK. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
+- `merge N`: approve the merge of pull request N.
+
+`node repo/scripts/toolkit-commands.cjs` prints the same list.
+
 ### Manual Skill-Folder Copying
 
 Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder into one supported location. It is separate from native plugin setup.
