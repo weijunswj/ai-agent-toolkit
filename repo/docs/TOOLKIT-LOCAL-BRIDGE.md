@@ -552,6 +552,35 @@ The task registry keeps each repository's minute and local job owner. A random c
 
 Direct plan, reset guidance and removal hints print literal managed paths, including paths under the user profile; no shell variable expansion is needed. While governance is unanswered, the hold passes only literal managed-checkout task commands for the independent footer job: default-folder plan, apply, remove and list. It keeps governed enrolments, foreign script paths, extra flags and compound commands held. The planner and hold read the same independent-job list.
 
+## Remove Toolkit From This Computer
+
+Removing the plugin does not remove the scheduled tasks Toolkit registered, so `remove toolkit` has its own command. It works in two steps and removes nothing until the owner has seen the list.
+
+```powershell
+node "<Toolkit>\repo\scripts\toolkit-remove.cjs" plan
+node "<Toolkit>\repo\scripts\toolkit-remove.cjs" apply --confirm <plan code>
+```
+
+- **Plan:** read-only. It finds every task that carries Toolkit's marker in any Task Scheduler folder, including folders this computer has no record of, and prints what would go: the tasks, the folders that would be left empty, Toolkit's own task files under `~/.ai-agent-toolkit/user-state/`, and the Toolkit block in each app's global rules file. It ends with a plan code that stands for exactly that list.
+- **Apply:** needs `--confirm` with the plan code the owner was shown. The agent shows the list, asks for the owner's OK in the host's question UI, and only then runs apply. If anything changed since the plan, the code no longer matches and nothing is removed; run the plan again.
+- **Removed:** Toolkit's own unchanged tasks, tasks that carry the marker with a lost record, and tasks the launcher disabled after Toolkit went missing, when they still match their recorded definition exactly. Each task is read again just before removal; one that changed in between is left alone and reported. A folder goes only once it is empty. The Toolkit block leaves each global rules file through the rules owner, with a backup first, and the rest of the file stays.
+- **Kept:** a task changed by hand stays unless it is named with `--include <task id>` in both the plan and the apply. A task of the owner's own that Toolkit only lists is always kept. A global rules file with broken markers is left alone and reported.
+- **Never touched:** any repository, the env store and every key, each app's settings file, the managed checkout and the plugin itself. The command ends by printing the two plugin uninstall lines to run by hand.
+
+A second run finds nothing and changes nothing. On a system with no Windows Task Scheduler the plan says so and leaves the task records alone.
+
+## Leftover Toolkit Files In Repositories
+
+A repository that once had Toolkit's rules and now has governance off may still carry Toolkit files. This report lists them and changes nothing:
+
+```powershell
+node "<Toolkit>\repo\scripts\toolkit-leftover-files.cjs" scan
+```
+
+It looks at each GitHub checkout under the owner's GitHub folder (`--github-folder <folder>` names another one). A repository whose governance is on, or could not be checked, is not scanned. In the rest it lists only what is provably Toolkit's: a Toolkit block inside an instruction file, a check copy that carries Toolkit's first-line marker, or a file that is the same as Toolkit's shipped copy apart from line endings. The repository's programme file is its on/off decision and is always shown as kept. A same-named file that differs from the shipped copy is shown as not listed, because it may be the owner's. Symbolic links are never followed, and no file contents are printed.
+
+The scan reads each checkout as it is on this computer, on whatever branch is checked out. It has no removal mode. Removing a leftover is a separate, later step: one pull request in that repository, with the owner's OK.
+
 ## Hook Policy
 
 Hooks are optional automation. They must not contain unique critical policy.
