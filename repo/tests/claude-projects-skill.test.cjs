@@ -647,7 +647,12 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.doesNotMatch(text + body, /Waiting on you \(n\):\*\*`? (as the very )?last|the ELI5 line ends the post/);
   // The owner's spacing: each Update line is its own paragraph with one blank line between, zone in the label, no spacer lines.
   assert.ok(text.includes("one **[HH:MM] <zone> Update:** line per update (the owner's zone, e.g. SGT), each its own paragraph one blank line apart, no `&nbsp;` spacer,"));
-  assert.ok(body.includes('one-line `**[HH:MM] <zone> Update:**` entries, no questions;') && body.includes('a single blank line (no `&nbsp;`) between Update lines, questions and blocks.'));
+  // The owner's rule: Update lines belong to edits only; a first or fresh post is clean bold-label bullets, with a good-vs-bad example.
+  assert.ok(text.includes("The update log starts with a post's first edit: a first or fresh post has no Update lines at all, not even one per item, and lays its points out as bold-label bullets under **Now:** instead."));
+  for (const example of ['  - Fresh post, good: ', '  - Fresh post, bad: each item stamped as its own `**[16:55] SGT Update:**` line, all with the same time.', '  - Edited post, good: every earlier line kept word for word, plus one new line']) assert.ok(text.includes(example), example);
+  assert.ok(body.includes('`**If we skip it:**` as three one-line bullets.'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md').includes('(or, when you must post fresh under the posting rules, a plain bullet in that fresh post, never an Update line)'));
+  assert.ok(body.includes('one-line `**[HH:MM] <zone> Update:**` entries only on edits, no questions (fresh post: bold-label bullets);') && body.includes('a single blank line (no `&nbsp;`) between Update lines, questions and blocks.'));
   assert.doesNotMatch(text + body, /followed by a line holding only `&nbsp;`|take that spacer/);
   // The owner's board rules: blank lines between blocks, nested problem lines, title links, open asks carried forward.
   assert.ok(text.includes('One blank line separates each labelled block from the next: the Now line with its bullets, the update log, **Waiting on you** and the ELI5 line.'));
