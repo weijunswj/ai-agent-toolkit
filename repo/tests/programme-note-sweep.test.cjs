@@ -46,6 +46,17 @@ const ACCEPTED = [
   ['an HTML level three heading stays inside', old + '<h3>Detail</h3>\n\n## Next\n', old + '<h3>Detail</h3>\n\n'],
   ['a quoted level three heading stays inside', old + '> ### Quoted\n\n## Next\n', old + '> ### Quoted\n\n'],
   ['an HTML heading inside a code block stays inside', old + '```html\n<h2>Sample</h2>\n```\n\n## Next\n', old + '```html\n<h2>Sample</h2>\n```\n\n'],
+  // Route controls: a real fold whose tags are plain tag lines, a fold tag named inside a fenced code
+  // block (a whole example, since a lone tag there still counts), a list heading at content indent two (the plain form, so the area ends there), and level
+  // three headings behind containers.
+  ['C1: a real fold that starts in the area keeps its heading inside', old + '<details><summary>Old</summary>\n\n## Inside the fold\nOld folded note.\n\n</details>\n\n## Current plan\nNever marked.\n', old + '<details><summary>Old</summary>\n\n## Inside the fold\nOld folded note.\n\n</details>\n\n'],
+  ['C2: a list heading at content indent two ends it', old + '- Item\n\n  ## Current plan\n\n  Never marked.\n', old + '- Item\n\n'],
+  // GitHub reads `<!-->` and `<!--->` as whole comments, so what follows is not inside a comment.
+  ['an empty comment closes itself', old + '<!-->\n\n## Current plan\nNever marked.\n-->\n', old + '<!-->\n\n'],
+  ['a short empty comment closes itself', old + '<!--->\n\n## Current plan\n', old + '<!--->\n\n'],
+  ['a whole fold example inside a fenced code block stays inside', old + '```html\n<details>\nx\n</details>\n```\n\n## Next\n', old + '```html\n<details>\nx\n</details>\n```\n\n'],
+  ['a level three heading on a list continuation stays inside', old + '10. Item\n\n    ### Detail\n\n## Next\n', old + '10. Item\n\n    ### Detail\n\n'],
+  ['a thematic break of spaced dashes after a blank line stays inside', old + 'Text.\n\n- - -\n\n## Next\n', old + 'Text.\n\n- - -\n\n'],
 ];
 const REFUSED = [
   ['two_markers', old + '## Archive\nMore\n'],
@@ -90,6 +101,42 @@ const REFUSED = [
   ['ambiguous_markup', old + '- ## Current plan\n\n## Risks\n'],
   ['ambiguous_markup', old + '1. # Current plan\n\n## Risks\n'],
   ['ambiguous_markup', 'Close with `</details>`.\n\n' + old],
+  // Route A, any level one or two heading GitHub may draw behind indentation, quote or list markers.
+  ['ambiguous_markup', old + '10. Item ten\n\n    ## Current plan\n\n    Never marked.\n\n## Risks\n'],
+  ['ambiguous_markup', old + '- Topic\n  - Detail\n\n    ## Current plan\n\n    Never marked.\n\n## Risks\n'],
+  ['ambiguous_markup', old + '> Current plan\n> ---\n> Never marked.\n\n## Risks\n'],
+  ['ambiguous_markup', old + '1.  Current plan\n    ===\n\n    Never marked.\n\n## Risks\n'],
+  ['underlined_heading', old + '- Current plan\n  ---\n\n## Risks\n'],
+  ['ambiguous_markup', old + '- Current plan\n    ---\n\n## Risks\n'],
+  ['ambiguous_markup', old + '> - > ## Current plan\n\n## Risks\n'],
+  ['ambiguous_markup', old + '\t## Current plan\n\n## Risks\n'],
+  ['ambiguous_markup', old + '>\t# Current plan\n\n## Risks\n'],
+  ['ambiguous_markup', old + '<h2\nid="plan">Current plan</h2>\n\nNever marked.\n\n## Risks\n'],
+  // Route B, a fold or raw-text tag named anywhere but on a plain tag line.
+  ['ambiguous_markup', old + 'The folds use `the\nopen <details>\ntag` here.\n\n## Current plan\n\nNever marked.\n\nClose with `the\nclose </details>\ntag` there.\n\n## Risks\n'],
+  ['ambiguous_markup', old + 'Example:\n\n    <details>\n\n## Current plan\n\nNever marked.\n\nAnd:\n\n    </details>\n\n## Risks\n'],
+  ['ambiguous_markup', old + '<!-- fold this later with <details> -->\n\n## Current plan\n\nNever marked.\n\n<!-- and close it with </details> -->\n\n## Risks\n'],
+  ['ambiguous_markup', old + 'Fold with \\<details> sections.\n\n## Current plan\n\nNever marked.\n\nClose with \\</details>.\n\n## Risks\n'],
+  ['ambiguous_markup', old + '<span title="<details>">x</span>\n\n## Current plan\n\n<span title="</details>">y</span>\n\n## Risks\n'],
+  ['ambiguous_markup', old + 'See [a](<details>).\n\n## Current plan\n\nSee [b](</details>).\n\n## Risks\n'],
+  ['ambiguous_markup', old + '<details>\n\n## Inner\n\n</details\n>\n\n## Current plan\n\nNever marked.\n\n</details>\n\n## Risks\n'],
+  ['ambiguous_markup', old + '> <details>\n\n## Current plan\n\n> </details>\n\n## Risks\n'],
+  ['ambiguous_markup', old + '- <details>\n\n## Current plan\n\n- </details>\n\n## Risks\n'],
+  ['ambiguous_markup', old + 'Text <pre>x</pre> inline.\n\n## Next\n'],
+  ['ambiguous_markup', 'Mention <details> and </details> above.\n\n' + old],
+  // Route C, a code block or comment the readers open inside an HTML block, where GitHub opens none.
+  ['ambiguous_markup', old + '<h3>Detail</h3>\n```\n<h2>Current plan</h2>\n```\n\n## Risks\n'],
+  ['ambiguous_markup', '<div>\n```\n</div>\n\n```\n\n' + old],
+  // Route D, a processing instruction, declaration or CDATA section, read as a comment that ends at
+  // the first `>` by GitHub's HTML parser.
+  ['ambiguous_markup', old + '<?php\n> x\n<h2>Current plan</h2>\n?>\n\n## Risks\n'],
+  ['ambiguous_markup', old + '<![CDATA[\n> x\n## Current plan\n]]>\n\n## Risks\n'],
+  ['ambiguous_markup', old + '<!DOCTYPE x\n## Current plan\n>\n\n## Risks\n'],
+  // Route E, a code block or comment that opens behind indentation or a list or quote marker.
+  ['ambiguous_markup', '+ plus\n  ```\n##\n  ```\n> quote\n\n' + old],
+  ['marker_nested', '- a\n\n   <!--\n\nText.\n\n' + old + '\n-->\n'],
+  ['ambiguous_markup', old + '- a\n\n   <!--\n\n## Current plan\nNever marked.\n-->\n\n## Risks\n'],
+  ['ambiguous_markup', old + 'Text <!-- note\nstill a note -->\n\n## Next\n'],
   ['underlined_heading', old + 'Current plan\n===\nKeep.\n'],
   ['underlined_heading', old + 'Current plan\n---\nKeep.\n'],
   ['control_character', '## Archive\nA\rB\n'],
@@ -519,7 +566,7 @@ test('two damaged notes from different saved copies: the one finding points to t
     assert.equal(untrusted(f).length, 1);
     assert.equal(untrusted(f)[0].diagnostics.copy, undefined, 'no single copy is named for two notes');
     const text = state.findingText(untrusted(f)[0]);
-    assert.match(text, /page-copies/);
+    assert.match(text, /page-copies\/issue-12\/ and are restored by putting them back on the page under `## Archive`/);
     assert.equal(text.includes(first.copy) || text.includes(second.copy), false);
     for (const entry of [first, second]) assert.ok(f.github.files.has(`state/page-copies/issue-12/${entry.copy}.md`));
     assert.deepEqual(state.validateParent(f.parent()), []);
@@ -640,6 +687,11 @@ test('the shared hostile variants never widen what the reader accepts, and readi
   const build = size => `${HEAD}## Archive\n${'### Section\nword word word\n\n- [x] item `code`\n<!-- note -->\n\n'.repeat(Math.ceil(size / 60))}${TAIL}`;
   const timed = hostile.timing(text => archive.noteArea(text), build);
   assert.ok(timed.ok, timed.message);
+  // One long line of blanks or markers behind a list or quote marker reads in linear time too.
+  for (const line of [size => `- ${' '.repeat(size)}x`, size => `> ${' >'.repeat(size / 2)} ## x`, size => `${'- '.repeat(size / 2)}---`, size => `1. ${'\t'.repeat(size)}===`]) {
+    const long = hostile.timing(text => archive.noteArea(text), size => `${HEAD}## Archive\nText\n${line(size)}\n\n${TAIL}`);
+    assert.ok(long.ok, long.message);
+  }
 });
 
 test('a dry run says that notes leave the page', () => {

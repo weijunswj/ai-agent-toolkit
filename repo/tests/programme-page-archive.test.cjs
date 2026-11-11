@@ -43,7 +43,8 @@ test('archive trust guidance covers duplicates and keeps findings open until dis
   const text = state.FINDING_CODES.ARCHIVE_COMMENT_UNTRUSTED.next_action;
   assert.doesNotMatch(text, /detached/);
   assert.match(text, /inspect the archive comments on the page this finding names/);
-  assert.match(text, /an archived note is restored by hand from the saved page copy/);
+  assert.match(text, /archived notes are in the saved page copies in the private store under page-copies\/issue-<n>\/ and are restored by putting them back on the page under `## Archive`/);
+  assert.match(state.findingText({ code: 'ARCHIVE_COMMENT_UNTRUSTED', issue: 12, diagnostics: { reason: 'missing' } }), /page-copies\/issue-12\/ and are restored by putting them back/);
   assert.match(text, /finding stays open until disposed/);
 });
 

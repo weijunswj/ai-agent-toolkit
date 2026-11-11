@@ -37,13 +37,35 @@ const STRICT_FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const LOOSE_FENCE = /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t>]+)*(`{3,}|~{3,})(.*)$/;
 const RAW_TAGS = ['pre', 'script', 'style', 'textarea'];
 const DEFINITION = /^ {0,3}\[([^\]\n]+)\]:[ \t]*\S/;
-// Level one or two headings GitHub draws that this line reader does not model: an HTML heading tag,
-// and a `#` heading behind block quote or list markers.
-const HTML_HEADING = /<h[12](?=[\s>/])/i;
-const CONTAINED_HEADING = /^ {0,3}(?:(?:>[ \t]?)|(?:[-*+]|\d{1,9}[.)])[ \t]+)+[ \t]*#{1,2}(?:[ \t]|$)/;
-// A tag the reader counts, on a line that also holds inline code: the tag may be only a name in the
-// code, so the count, and every fold or raw-block decision built on it, is in doubt.
-const COUNTED_TAG = /<\/?(?:details|pre|script|style|textarea)(?=[\s>/])/i;
+// Level one or two headings GitHub draws that a plain line test does not see. An HTML heading tag
+// (its name may end the line, with the attributes on the next):
+const HTML_HEADING = /<h[12](?![\w-])/i;
+// ... and a `#` or underlined heading behind any mix of indentation, block quote markers and list
+// markers. `containerStops` lists every place such a heading could start, in one left-to-right scan.
+const LIST_MARKER = /(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$)/y;
+const ATX_AT = /#{1,2}(?:[ \t]|$)/y;
+const UNDERLINE_AT = /(?:=+|-+)[ \t]*$/y;
+const ANY_ATX_AT = /#{1,6}(?:[ \t]|$)/y;
+function containerStops(line) {
+  const stops = [0];
+  for (let at = 0; at < line.length;) {
+    let next = at;
+    while (next < line.length && (line[next] === ' ' || line[next] === '\t')) next += 1;
+    if (next === at && line[at] === '>') next = at + 1;
+    if (next === at) { LIST_MARKER.lastIndex = at; if (LIST_MARKER.test(line)) next = LIST_MARKER.lastIndex; }
+    if (next === at) break;
+    stops.push(next);
+    at = next;
+  }
+  return stops;
+}
+const matchesAt = (pattern, line, at) => { pattern.lastIndex = at; return pattern.test(line); };
+// What a line's content is once every container prefix is removed.
+const contentOf = line => line.slice(containerStops(line).at(-1));
+// A fold or raw-text tag name, wherever it is written (a tag, code, a comment, an escape, an attribute).
+const TAG_MENTION = /<\/?(?:details|pre|script|style|textarea)(?![\w-])/i;
+// The only lines whose tags the reader counts: a whole tag on its own line, outside any container.
+const PLAIN_TAG_LINE = /^ {0,3}(?:<details(?:[ \t][^<>`]*)?>(?:[ \t]*<summary>[^<>`]*<\/summary>)?|<\/details>|<\/?(?:pre|script|style|textarea)(?:[ \t][^<>`]*)?>)[ \t]*$/i;
 
 function sourceLines(text) {
   const lines = [];
@@ -56,19 +78,25 @@ function sourceLines(text) {
   return lines;
 }
 
-// Which span (an HTML comment or a CDATA section) is open after this line, or false. `kind` is the
-// span open before it.
-const SPANS = { comment: ['<!--', '-->'], cdata: ['<![CDATA[', ']]>'] };
+// Which span (an HTML comment, a CDATA section, a processing instruction or a declaration, the
+// HTML blocks GitHub runs past blank lines) is open after this line, or false. `kind` is the span
+// open before it.
+const SPANS = { comment: '-->', cdata: ']]>', pi: '?>', declaration: '>' };
+const SPAN_START = /<!--|<!\[CDATA\[|<\?|<![A-Za-z]/g;
+const SPAN_KIND = { '<!--': 'comment', '<![CDATA[': 'cdata', '<?': 'pi' };
 function spanAfter(line, open, kind) {
   for (let at = 0; ;) {
     if (open) {
-      const found = line.indexOf(SPANS[kind][1], at);
+      const found = line.indexOf(SPANS[kind], at);
       if (found === -1) return kind;
-      at = found + SPANS[kind][1].length; open = false;
+      at = found + SPANS[kind].length; open = false;
     } else {
-      const next = Object.entries(SPANS).map(([name, [start]]) => ({ name, found: line.indexOf(start, at), size: start.length })).filter(entry => entry.found !== -1).sort((a, b) => a.found - b.found)[0];
+      SPAN_START.lastIndex = at;
+      const next = SPAN_START.exec(line);
       if (!next) return false;
-      at = next.found + next.size; open = true; kind = next.name;
+      kind = SPAN_KIND[next[0]] || 'declaration';
+      // `<!-->` and `<!--->` are whole comments to GitHub, so the end may overlap the start.
+      at = next.index + (kind === 'comment' || kind === 'declaration' ? 2 : next[0].length); open = true;
     }
   }
 }
@@ -89,7 +117,7 @@ function advance(state, line, mode) {
   const open = pattern.exec(line);
   if (open && (open[1][0] !== '`' || !open[2].includes('`'))) { state.fence = { character: open[1][0], length: open[1].length, indent: line.indexOf(open[1]) }; return; }
   if (mode !== 'strict') state.comment = spanAfter(line, false, null);
-  else if (/^ {0,3}<!--/.test(line)) state.comment = spanAfter(line, false, null);
+  else if (/^ {0,3}(?:<!--|<!\[CDATA\[|<\?|<![A-Za-z])/.test(line)) state.comment = spanAfter(line, false, null);
 }
 
 const count = (line, pattern) => (line.match(pattern) || []).length;
@@ -136,7 +164,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
   const everywhere = () => readers.every(([state]) => inside(state));
   const nowhere = () => readers.every(([state]) => !inside(state));
   const neutral = () => nowhere() && depth.strict === 0 && depth.loose === 0 && raw === 0;
-  let markers = 0, nested = false, managed = false, start = -1, end = -1, reason = null, stray = false, previous = null, codeTag = false;
+  let markers = 0, nested = false, managed = false, start = -1, end = -1, reason = null, stray = false, previous = null, tagDoubt = false;
   const seams = [];
   const fail = why => { reason ||= why; };
   const close = at => {
@@ -165,11 +193,19 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
     } else if (open) {
       // Inside a code block or comment by every reading, or inside a folded section by both counts.
       const skipped = everywhere() || nowhere() && depth.strict > 0 && depth.loose > 0 && raw === 0;
-      if (!everywhere() && (HTML_HEADING.test(line.text) || CONTAINED_HEADING.test(line.text))) fail('ambiguous_markup');
-      if (/^ {0,3}#{1,2}(?:[ \t]|$)/.test(line.text)) {
+      // Route A: a level one or two heading anywhere but the plain top-level form ends nothing and
+      // moves nothing, because GitHub may draw it where this reader cannot follow.
+      const top = /^ {0,3}#{1,2}(?:[ \t]|$)/.test(line.text);
+      const underlined = /^ {0,3}(?:=+|-+)[ \t]*$/.test(line.text) && previous !== null && previous.trim() && !/^ {0,3}#{1,6}(?:[ \t]|$)/.test(previous);
+      const stops = containerStops(line.text);
+      const above = previous === null ? '' : contentOf(previous);
+      const anyHeading = stops.some(at => matchesAt(ATX_AT, line.text, at));
+      const anyUnderline = Boolean(above.trim()) && !matchesAt(ANY_ATX_AT, above, 0) && stops.some(at => matchesAt(UNDERLINE_AT, line.text, at));
+      if (!everywhere() && (HTML_HEADING.test(line.text) || anyHeading && !top || anyUnderline && !underlined)) fail('ambiguous_markup');
+      if (top) {
         if (plain) { close(line.start); }
         else if (!skipped) fail('ambiguous_markup');
-      } else if (/^ {0,3}(?:=+|-+)[ \t]*$/.test(line.text) && previous !== null && previous.trim() && !/^ {0,3}#{1,6}(?:[ \t]|$)/.test(previous)) {
+      } else if (underlined) {
         if (plain) fail('underlined_heading');
         else if (!skipped) fail('ambiguous_markup');
       } else if (plain && (/^ {0,3}#{3,6}(?:[ \t]|$)/.test(line.text) || previous !== null && !previous.trim())) {
@@ -177,8 +213,31 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
       }
     }
     const hidden = inside(strict);
-    if (end === -1 && !everywhere() && line.text.includes('`') && COUNTED_TAG.test(line.text)) codeTag = true;
+    const prior = readers.map(([state]) => ({ fence: Boolean(state.fence), comment: state.comment }));
+    const before = prior.map(entry => entry.fence || Boolean(entry.comment));
     for (const [state, mode] of readers) advance(state, line.text, mode);
+    // Route C: inside an HTML block GitHub opens no code block or comment, so a fence or comment the
+    // readers open there may be text to GitHub, and every later fence or comment pairs up differently.
+    const opened = readers.some(([state], index) => !before[index] && inside(state));
+    if (end === -1 && html && line.text.trim() && opened) tagDoubt = true;
+    // Route E: a code block or comment that opens behind indentation or a list or quote marker may
+    // belong to a list item or quote that GitHub ends sooner or later than these readers do, and then
+    // every later fence or comment pairs up differently. Only one that opens at the start of a line
+    // is followed.
+    if (end === -1 && opened && !/^(?:`{3}|~{3}|<!--)/.test(line.text)) tagDoubt = true;
+    // Route B: a fold or raw-text tag counts only on a plain tag line. Any other mention up to the
+    // end of the area (in code, a comment, an escape, an attribute, a list or a quote, or split over
+    // lines) moves nothing, unless every reader holds the whole line inside one code block or comment.
+    // Sealed: every reader holds the whole line inside one code block, or inside one comment-like span
+    // that this line does not end.
+    const sealed = readers.every(([state], index) => prior[index].fence && state.fence || prior[index].comment && state.comment && !line.text.includes(SPANS[prior[index].comment]));
+    if (end === -1 && TAG_MENTION.test(line.text)) {
+      if (!sealed && !(PLAIN_TAG_LINE.test(line.text) && before.every(state => !state) && nowhere())) tagDoubt = true;
+    }
+    // Route D: a processing instruction, declaration or CDATA section is raw text to GitHub's
+    // Markdown but a comment that ends at the first `>` to its HTML parser, so the two disagree on
+    // what is drawn. None of them is ordinary in notes: any one moves nothing.
+    if (end === -1 && !sealed && /<!\[CDATA\[|<\?|<![A-Za-z]/.test(line.text)) tagDoubt = true;
     const opens = count(line.text, /<details(?=[\s>])/gi), closes = count(line.text, /<\/details\s*>/gi);
     if (!hidden && !inside(strict)) depth.strict += opens - closes;
     depth.loose += opens - closes;
@@ -196,7 +255,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
   if (text.charCodeAt(0) === 0xFEFF || /\r(?!\n)/.test(text)) return { kind: 'unsafe', reason: 'control_character' };
   if (nested || start === -1) return { kind: 'unsafe', reason: 'marker_nested' };
   if (reason) return { kind: 'unsafe', reason };
-  if (codeTag) return { kind: 'unsafe', reason: 'ambiguous_markup' };
+  if (tagDoubt) return { kind: 'unsafe', reason: 'ambiguous_markup' };
   const area = text.slice(start, end);
   if (/\r(?!\n)|\u0000|\u2028|\u2029|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(area)) return { kind: 'unsafe', reason: 'control_character' };
   // Link definitions: one that leaves with the area must not be needed by what stays, and one that

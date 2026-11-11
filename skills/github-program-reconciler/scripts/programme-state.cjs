@@ -353,7 +353,7 @@ const FINDING_CODES = Object.freeze({
   MANAGED_BLOCK_BROKEN: { source: 'reconcile', next_action: 'Controller: repair the broken managed block in the issue body' },
   BODY_TOO_LARGE: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of the largest page sections, then refresh' },
   BODY_NEAR_LIMIT: { source: 'reconcile', next_action: 'Controller: arrange an approved reduction of retained page text to restore headroom, then refresh' },
-  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the archive comments on the page this finding names; redraw can publish a fresh verified graph part, an archived note is restored by hand from the saved page copy in the private store (page-copies), and the finding stays open until disposed' },
+  ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the archive comments on the page this finding names; redraw can publish a fresh verified graph part; archived notes are in the saved page copies in the private store under page-copies/issue-<n>/ and are restored by putting them back on the page under `## Archive` for a fresh comment; the finding stays open until disposed' },
   ARCHIVE_SECTION_UNSAFE: { source: 'reconcile', next_action: 'Controller: fix the text under the `## Archive` line as the reason says, or remove that line; nothing was moved' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
@@ -657,7 +657,7 @@ const NOTE_REASON_TEXT = Object.freeze({
   open_fence: 'a code block under it is not closed',
   open_comment: 'an HTML comment under it is not closed',
   open_html: 'a folded section or raw HTML block under it is not closed, or is closed without being opened',
-  ambiguous_markup: 'a heading under it sits in markup that can be read two ways, is an HTML heading tag, or sits in a quote or a list; or a folded-section tag is named in inline code',
+  ambiguous_markup: 'a heading under it sits in markup that can be read two ways, is an HTML heading tag, or sits behind indentation, a quote or a list marker; a folded-section or raw-block tag is named anywhere but on its own plain line; or a code block or comment opens behind indentation, a marker or inside HTML, or the page holds a processing instruction, declaration or CDATA section',
   underlined_heading: 'a heading under it is written by underlining; write it with `#` marks, or put a blank line above the rule',
   control_character: 'the page holds a character GitHub reads differently (a lone carriage return, a leading byte-order mark, a null or a line separator)',
   link_definition_split: 'a link definition under it is still used by text that stays on the page',
@@ -677,7 +677,8 @@ function findingText(entry) {
   if (entry.code === 'ARCHIVE_COMMENT_UNTRUSTED' && entry.diagnostics?.copy) {
     return `ARCHIVE_COMMENT_UNTRUSTED #${entry.issue}: a comment holding archived notes is ${entry.diagnostics.reason === 'missing' ? 'missing' : 'no longer as written'}; the notes are in the private store at page-copies/issue-${entry.issue}/${entry.diagnostics.copy}.md. Put them back on the page under \`## Archive\` for a fresh comment, or dispose of this finding`;
   }
-  return `${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${FINDING_CODES[entry.code]?.next_action || ''}`;
+  const next = FINDING_CODES[entry.code]?.next_action || '';
+  return `${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}: ${entry.issue ? next.replace('issue-<n>', `issue-${entry.issue}`) : next}`;
 }
 
 // A digest of the open findings and their states, to tell when the set changed.
