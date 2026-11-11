@@ -1,18 +1,23 @@
 # Toolkit Changelog
 
-## 3.64.0 (Merge by card in Claude Code)
+## 3.64.0 (One layout for task pages and task PRs)
 
 ### Added
 
-- In Claude Code on this computer, a tap can replace typed `merge N`. When the merge hold refuses a merge that names its full head SHA, it hands back one exact card: "Merge owner/name#N at <short SHA>?" with Merge and Not now. The owner's tap on Merge approves that pull request at that commit, once. Not now approves nothing and withdraws an unused approval for it.
-- The card counts only in a chat the owner started, shown exactly as given, as a plain tap. A changed card, a card asked with its answer filled in, words typed into Other, an answer the host marks as idle, a follow-up, typed text or noted, an answer with a field the reader does not know, and a launched, resumed or unmarked session record nothing. Nothing is refused for the card's sake, so ordinary questions are untouched.
-- A card event whose environment holds `TOOLKIT_HOST_SESSION` records nothing: the host's hook process carries none, and a session's shell commands do. Commands that run a hook script with a tool event (`PreToolUse`, `PostToolUse` or the card functions), or name a hook script with an emptied environment (`env -i`), are refused like a fed prompt. Searches, diffs and commit messages that name them are not.
-- Known limits: this is a tripwire, not a lock. An agent in the owner's own chat can still feed a card event from a saved script, as it can already feed typed `merge N`. A host that answers the card itself, with no tap, is not told apart either: a permission answer from an SDK callback, a permission hook (from any plugin or from settings), a permission-prompt tool or a launcher, a reply a connected client sends to a background session, and an automatic answer the host does not mark.
+- Open task pages follow one fixed order: PATH, STATUS and COMMENT TRACE, then PROBLEM, FIX, IF WE SKIP, DONE WHEN and NOT IN SCOPE, then More with every other hand-written word in its original order. Older label lines and headings become the matching capital sections; the words under them do not change.
+- A copy of a task page is saved to the private state store and read back before any write that moves its hand-written text. Without the copy the page is not written.
+- Every open or draft PR that names a task gets PATH and STATUS at the top, with the gate, review at the head, UAT and release of each task it names. The PR description stays as written, and merged or closed PRs are never edited.
+- A managed block shown as an example inside a code block, quote, list item, indented code, details section or other HTML block is hand-written text on every page: it is never updated, moved or cut.
+- Where a block goes is read from the same top-level view of the page as the block search, and every block is read back before a page is written. A page whose block would not be found again is held with `MANAGED_BLOCK_BROKEN` and nothing is written to it.
+- The plan says when a page's text will move ("Lay out #<n>'s page in the fixed order"), and the result names the saved copy.
+- The task status block lists every PR found for the task, open first.
+- A page that cannot be laid out safely keeps its text in place, still gets fresh blocks, and raises the new `PAGE_LAYOUT_HELD` finding with the reason. A pass re-lays at most ten pages.
+- The new `TASK_IDLE` finding flags a task shown in progress with no open PR, no live gate assignment, no holder and no change for six hours.
 
 ### Changed
 
-- The order for a merge that needs the owner is now: task auto-merge when it applies, then the card, then typed `merge N`. Codex keeps typed `merge N`. Cloud sessions run no hook, so a Projects card there still rests on the written rules and required CI.
-- Hook pack rows may use a placeholder in an object key, so a card answer can be keyed by its question.
+- The Programme Graph PR column shows one PR per row, the most recently opened one, with no count of other PRs.
+- The generated blocks on task pages carry capital headings, matching the programme page.
 
 ## 3.63.1 (Update lines only on edited posts)
 
