@@ -354,3 +354,149 @@ for (const [name, options] of [
 ]) test(`a task ${name} is not flagged as idle`, () => {
   assert.deepEqual(idle(options), []);
 });
+
+// Blocks that are only shown: an example of a block inside a code fence, a quote, a list item or
+// indented code is hand-written text, on every kind of page.
+
+const shownBlock = name => state.renderBlock(name === 'NAV' ? '# PATH\n<!-- programme-nav -->\n#1 > #2' : '<!-- programme-state child=2@1 -->\n# STATUS\n\nAn example.', '3.0.0', name);
+const QUOTED = [
+  'Before and after of a page block:', '',
+  '```md', shownBlock('STATE'), '```', '',
+  '~~~', shownBlock('NAV'), '~~~', '',
+  ...shownBlock('STATE').split('\n').map(line => `> ${line}`), '',
+  '- A list item that shows one:', '',
+  ...shownBlock('NAV').split('\n').map(line => `  ${line}`), '',
+  ...shownBlock('STATE').split('\n').map(line => `    ${line}`), '',
+  'After the examples.',
+].join('\n');
+
+test('a PR description that shows STATE and NAV blocks as examples keeps them byte for byte, and gets its own blocks on top', () => {
+  const f = setup();
+  f.reconciler().run({ apply: true });
+  const description = `${QUOTED}\n\nRefs #806`;
+  f.github.addPr(900, { head: SHA_A, branch: 'feature', body: description });
+  assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
+  const body = f.github.prs.get(900).body;
+  assert.ok(body.endsWith(`-->\n\n${description}`), 'the description, examples included, is exactly what was written');
+  const nav = state.findStateBlock(body, 'NAV').block, status = state.findStateBlock(body, 'STATE').block;
+  assert.match(nav.body, /#421 > #806 > PR #900/);
+  assert.match(status.body, /programme-pr-status pr=900/);
+  assert.ok(nav.start === 0 && status.end < body.indexOf('Before and after'), 'the real blocks sit above the description');
+  const pass = f.reconciler().run();
+  assert.equal(pass.effects.filter(effect => effect.kind === 'replace_pr_nav').length, 0, 'the PR page settles');
+  assert.equal(pass.findings.some(finding => finding.code === 'MANAGED_BLOCK_BROKEN'), false);
+});
+
+test('a PR page with real blocks is still updated in place, examples or not', () => {
+  const f = setup({ outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }] });
+  f.reconciler().run({ apply: true });
+  f.github.addPr(900, { head: SHA_A, branch: 'feature', body: `${QUOTED}\n\nRefs #806` });
+  f.reconciler().run({ apply: true });
+  const first = f.github.prs.get(900).body;
+  f.github.prs.get(900).body = `${first}\nRefs #807`;
+  assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
+  const body = f.github.prs.get(900).body;
+  assert.match(state.findStateBlock(body, 'NAV').block.body, /#421 > #807 > PR #900/);
+  assert.match(state.findStateBlock(body, 'STATE').block.body, /- Task #807: /);
+  assert.ok(body.endsWith(`-->\n\n${QUOTED}\n\nRefs #806\nRefs #807`), 'only the real blocks changed');
+  assert.equal(body.split(':BEGIN NAV ').length - 1, 3, 'one real PATH block and the two examples: no second real block was added');
+});
+
+for (const [name, options, relaid] of [
+  ['an open task (laid out)', {}, true],
+  ['a closed task (blocks in place)', { closed: [806] }, false],
+  ['a held page (blocks in place)', { tail: '\n\n<details>\nnever closed\n' }, false],
+]) test(`blocks shown as examples on ${name} stay as written, and the page settles`, () => {
+  const page = `# PROBLEM\n\n${QUOTED}${options.tail || '\n'}`;
+  const f = setup({ bodies: { 806: page }, closed: options.closed || [] });
+  const report = f.reconciler().run({ apply: true });
+  assert.deepEqual(report.holds.filter(hold => hold.code !== 'CLOSED_WITHOUT_ACCEPTANCE'), []);
+  const body = f.github.issues.get(806).body;
+  assert.ok(body.includes(QUOTED), 'every example is byte for byte what was written');
+  for (const block of ['NAV', 'STATE', 'TRACE']) {
+    const found = state.findStateBlock(body, block);
+    assert.equal(found.error, undefined, `${block}: ${found.error}`);
+    assert.ok(found.block && !QUOTED.includes(found.block.raw ?? body.slice(found.block.start, found.block.end)), `${block} is the page's own block, not an example`);
+  }
+  if (relaid) assert.equal(layout.inOrder(body), true);
+  else assert.equal(body.includes('# More'), false);
+  const again = f.reconciler().run();
+  assert.deepEqual(again.effects.filter(effect => effect.target.issue === 806), [], 'the page is not rewritten every pass');
+  assert.equal(again.findings.some(finding => finding.code === 'MANAGED_BLOCK_BROKEN'), false);
+  // A later change updates the real blocks only.
+  f.github.addComment(806, { body: 'A new comment' });
+  assert.deepEqual(f.reconciler().run({ apply: true }).holds.filter(hold => hold.code !== 'CLOSED_WITHOUT_ACCEPTANCE'), []);
+  assert.ok(f.github.issues.get(806).body.includes(QUOTED));
+  assert.equal(f.reconciler().run().findings.some(finding => finding.code === 'MANAGED_BLOCK_BROKEN'), false);
+});
+
+test('the block search reads only top-level blocks; the order check and the text check agree with it', () => {
+  const real = state.renderBlock('<!-- programme-state child=806@1 -->\n# STATUS\n\nReal.', VERSION);
+  const page = `${QUOTED}\n\n${real}\n`;
+  const found = state.findStateBlock(page).block;
+  assert.equal(page.slice(found.start, found.end), real, 'the real block is found, not the first example');
+  assert.equal(state.findStateBlock(QUOTED).block, null, 'examples alone are no block');
+  assert.equal(state.findStateBlock(QUOTED, 'NAV').block, null);
+  assert.ok(state.findStateBlock(QUOTED, 'STATE', { literal: true }).error || state.findStateBlock(QUOTED, 'STATE', { literal: true }).block, 'the literal search still sees the first example');
+  assert.equal(layout.withoutBlocks(page).trim(), QUOTED, 'only the real block is taken out of the text');
+  const laid = lay(`# PROBLEM\n\n${QUOTED}\n`).body;
+  assert.equal(layout.inOrder(laid), true);
+  assert.equal(lay(laid).body, laid);
+  assert.ok(laid.includes(QUOTED));
+  // Half an example (a BEGIN line alone) does not swallow the END line of the real block below it.
+  const half = `\`\`\`\n${shownBlock('STATE').split('\n')[0]}\n\`\`\`\n\n${real}\n`;
+  assert.equal(half.slice(state.findStateBlock(half).block.start, state.findStateBlock(half).block.end), real);
+  // A block written straight under a line of HTML is still the page's own block.
+  const under = `<p align="center">Logo</p>\n${real}\n\nText.\n`;
+  assert.equal(under.slice(state.findStateBlock(under).block.start, state.findStateBlock(under).block.end), real);
+  // A page whose code block never ends is read as before: a real block below it is still found, so
+  // no second one is added.
+  const open = `Intro.\n\n\`\`\`\nnever closed\n\n${real}\n`;
+  assert.ok(state.findStateBlock(open).block);
+  assert.equal(state.upsertStateBlock(open, state.renderBlock('New.', VERSION)).body.split(':BEGIN STATE ').length - 1, 1);
+});
+
+// What the plan and the result say about a page whose text moves.
+
+test('a page that will be laid out says so in the plan, and its result names the saved copy', () => {
+  const f = setup({ bodies: { 806: OLD_PAGE } });
+  const dry = f.reconciler().run();
+  const planned = dry.effects.find(effect => effect.kind === 'replace_block' && effect.target.issue === 806);
+  assert.equal(planned.text, "Lay out #806's page in the fixed order (PATH, STATUS, COMMENT TRACE, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first");
+  assert.ok(dry.findings.some(finding => finding.code === 'PROJECTION_STALE' && finding.issue === 806 && finding.detail === 'the page is not in the fixed section order'), 'the finding names the order on first contact too');
+  const report = f.reconciler().run({ apply: true });
+  const result = report.results.find(entry => entry.kind === 'replace_block' && entry.target.issue === 806);
+  assert.equal(result.outcome, 'DONE');
+  assert.match(result.text, /^Lay out #806's page in the fixed order/);
+  const copy = decodeURIComponent(f.copies()[0].path.split('/contents/')[1].split('?')[0]);
+  assert.equal(result.detail, `the page was laid out in the fixed order; the page as it was is saved at ${copy} in the state store`);
+
+  // A page already in order is an ordinary block update: no lay-out wording, no copy named.
+  f.github.addComment(806, { body: 'A new comment' });
+  const later = f.reconciler().run({ apply: true });
+  const update = later.results.find(entry => entry.kind === 'replace_block' && entry.target.issue === 806);
+  assert.doesNotMatch(update.text, /Lay out/);
+  assert.equal(update.detail, undefined);
+  assert.equal(later.findings.some(finding => /fixed section order/.test(finding.detail || '')), false);
+});
+
+test('a page whose text stays where it is never claims a lay-out: closed tasks and pages past the ten-page limit', () => {
+  const closed = setup({ bodies: { 806: OLD_PAGE }, closed: [806] });
+  const plan = closed.reconciler().run();
+  assert.doesNotMatch(plan.effects.find(effect => effect.kind === 'replace_block' && effect.target.issue === 806).text, /Lay out/);
+  assert.equal(plan.findings.some(finding => /fixed section order/.test(finding.detail || '')), false);
+
+  const outcomes = Array.from({ length: 12 }, (unused, index) => ({ issue: 500 + index, class: 'COMMITTED', order: index + 1 }));
+  const f = setup({ outcomes, bodies: Object.fromEntries(outcomes.map(outcome => [outcome.issue, OLD_PAGE])) });
+  const report = f.reconciler().run({ apply: true });
+  const pages = report.results.filter(entry => entry.kind === 'replace_block' && entry.target.issue !== 421);
+  const laid = pages.filter(entry => /^Lay out /.test(entry.text));
+  const waiting = pages.filter(entry => !/^Lay out /.test(entry.text));
+  assert.equal(laid.length, 10);
+  assert.equal(waiting.length, 2);
+  for (const entry of laid) assert.match(entry.detail, /saved at state\/acme\/app\/page-copies\/issue-\d+-[0-9a-f]{16}\.json in the state store$/);
+  for (const entry of waiting) {
+    assert.equal(layout.inOrder(f.github.issues.get(entry.target.issue).body), false);
+    assert.equal(entry.detail, 'the blocks were updated where they are; the page is laid out in a later pass (at most 10 pages are laid out per pass)');
+  }
+});

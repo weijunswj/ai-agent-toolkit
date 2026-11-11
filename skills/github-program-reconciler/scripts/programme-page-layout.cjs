@@ -33,9 +33,12 @@ const normalLabel = text => text.trim().replace(/[:.]$/, '').trim().toUpperCase(
 // An HTML comment ends at `-->`, and browsers also end it at `--!>`.
 const COMMENT_END = /--!?>/;
 
+const TOOLKIT_MARKER = /^<!-- AI-AGENT-TOOLKIT:[^\s]+:(?:BEGIN|END) [A-Z-]+\b[^\n]*-->[ \t]*$/;
+
 function markdownLines(source) {
   const result = [];
-  let fence = null, html = null, listIndent = 0;
+  // `fenceAt` and `htmlAt` are where the code block or HTML block now open began.
+  let fence = null, html = null, listIndent = 0, fenceAt = 0, htmlAt = 0;
   const fenceStart = text => {
     const opening = /^ {0,3}(~{3,}|`{3,})(.*)$/.exec(text);
     return opening && (opening[1][0] === '~' || !opening[2].includes('`')) ? opening[1] : null;
@@ -57,12 +60,16 @@ function markdownLines(source) {
     if (html) {
       if (html.details) {
         fence = fenceStart(text);
-        if (!fence) {
+        if (fence) fenceAt = start;
+        else {
           html.details += detailsDelta(text);
           if (html.details <= 0) html = null;
         }
       } else if (html.until?.test(text) || html.blank && !text.trim()) html = null;
-      continue;
+      // A Toolkit marker line ends an HTML block that only a blank line would end otherwise, so a
+      // block written straight under a line of HTML is still found.
+      if (!(html?.blank && TOOLKIT_MARKER.test(text))) continue;
+      html = null;
     }
     if (!text.trim()) continue;
     const indent = /^ */.exec(text)[0].length;
@@ -71,21 +78,23 @@ function markdownLines(source) {
     const list = /^( {0,3})(?:[-+*]|\d{1,9}[.)])([ \t]+)/.exec(text);
     if (list) listIndent = list[0].length;
     fence = fenceStart(text);
-    if (fence) continue;
+    if (fence) { fenceAt = start; continue; }
     line.top = true;
     if (/^ {0,3}<details\b/i.test(text)) {
       const details = detailsDelta(text);
-      if (details > 0) html = { details };
+      if (details > 0) { html = { details }; htmlAt = start; }
       continue;
     }
     const literal = /^ {0,3}<(script|pre|style|textarea)\b/i.exec(text);
     if (literal) {
       const until = new RegExp(`</${literal[1]}\\s*>`, 'i');
-      if (!until.test(text)) html = { until };
-    } else if (/^ {0,3}<!--/.test(text) && !COMMENT_END.test(text)) html = { until: COMMENT_END };
+      if (!until.test(text)) { html = { until }; htmlAt = start; }
+    } else if (/^ {0,3}<!--/.test(text) && !COMMENT_END.test(text)) { html = { until: COMMENT_END }; htmlAt = start; }
     else if (/^ {0,3}<(?:\/?[a-z][\w-]*(?:\s[^<>]*)?\/?>|[!?])/i.test(text) && !/^ {0,3}<!--.*--!?>[ \t]*$/.test(text)) html = { blank: true };
   }
-  return { lines: result, unfinished: Boolean(fence || html?.until || html?.details) };
+  // `unfinishedFrom` is where the block that never closes began: lines before it read as usual.
+  const unfinished = Boolean(fence || html?.until || html?.details);
+  return { lines: result, unfinished, unfinishedFrom: !unfinished ? null : html?.until || html?.details ? htmlAt : fenceAt };
 }
 
 // A task page split into its managed blocks (cut out), its spec sections and its other text.
@@ -105,7 +114,7 @@ function splitPage(source, names = TASK_BLOCKS) {
   }
   const cuts = [];
   for (const name of KNOWN_BLOCKS) {
-    const { block, error } = findStateBlock(masked, name);
+    const { block, error } = findStateBlock(masked, name, { literal: true });
     if (error) throw held(error);
     if (!block) continue;
     if (!names.includes(name)) throw held(`the page has a ${name} block, which belongs to another kind of page`);

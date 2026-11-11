@@ -152,21 +152,22 @@ for (const eol of ['\n', '\r\n']) for (const [name, example] of Object.entries(n
 }
 
 for (const eol of ['\n', '\r\n']) for (const context of ['comment', 'nested fence']) {
-  test(`B-T2 reader: existing CURRENT block inside ${context} keeps the adjacent hand line, ${JSON.stringify(eol)}`, () => {
+  test(`B-T2 reader: a CURRENT block shown inside a ${context} stays as written and the real one is added outside it, ${JSON.stringify(eol)}`, () => {
     const open = context === 'comment' ? '<!--' : '````\n```md';
     const close = context === 'comment' ? '-->' : '```\n````';
     const prefix = `# Programme\n\n${open}\n## CURRENT\n\n`.replace(/\n/g, eol);
     const current = state.renderBlock('old summary', '3.56.0', 'CURRENT').replace(/\n/g, eol);
     const suffix = `\n${close}\n\n## CURRENT\n\nReal hand notes.  \n`.replace(/\n/g, eol);
-    const f = pageFixture(state, { hand: prefix + current + suffix });
-    let retained = f.project().body;
-    for (const name of ['TRACE', 'CONTEXT', 'STATE']) {
-      const block = state.findStateBlock(retained, name).block;
-      retained = retained.slice(0, block.start - (name === 'TRACE' ? 1 : 2) * eol.length) + retained.slice(block.end + (name === 'TRACE' ? eol.length : 0));
-    }
-    const block = state.findStateBlock(retained, 'CURRENT').block;
-    retained = retained.slice(0, block.start) + retained.slice(block.end);
-    assert.equal(retained, prefix + suffix, 'no hand byte may migrate from inside a comment or fence');
+    const hand = prefix + current + suffix;
+    const f = pageFixture(state, { hand });
+    const body = f.project().body;
+    // The example is hand text: it is never read as the page's own block, so it is neither
+    // rewritten nor cut, and the real block lands outside the comment or fence.
+    assert.ok(body.includes(hand.slice(`# Programme${eol}${eol}`.length)), 'the example block and the text around it stay byte for byte');
+    const shown = body.indexOf(current);
+    const real = state.findStateBlock(body, 'CURRENT').block;
+    assert.ok(real.end <= shown || real.start >= shown + current.length, 'the real CURRENT block is not the example');
+    assert.equal(retainedParentHand(body, eol, 1), hand, 'no hand byte may migrate from inside a comment or fence');
   });
 }
 

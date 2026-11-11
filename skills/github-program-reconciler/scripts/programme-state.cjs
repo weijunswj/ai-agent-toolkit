@@ -1740,10 +1740,45 @@ const BLOCK_END = new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END ([A-Z]+
 // Only a line that starts as an HTML comment is a marker; rendered free text has `<` escaped.
 const BLOCK_ANY = new RegExp(`^\\s*<!--\\s*AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:`);
 
+// A body with every marker line that is only shown, not meant, blanked out: one inside a code
+// fence, indented code, a quote, a list item or a literal HTML block. Offsets and line endings are
+// unchanged, so a block found in the result sits at the same place in the body. Where a code block,
+// HTML block or details section is never closed, the lines from its start on are left as they
+// are: a real block down there would look quoted, and treating it as absent would add a second.
+const shownMarkerCache = new Map();
+function withoutShownMarkers(source) {
+  if (!source.includes('AI-AGENT-TOOLKIT:')) return source;
+  const known = shownMarkerCache.get(source);
+  if (known !== undefined) return known;
+  const { lines, unfinishedFrom } = pageLayout().markdownLines(source);
+  const shown = line => !line.top && (unfinishedFrom === null || line.start < unfinishedFrom);
+  let masked = source;
+  if (lines.some(line => shown(line) && BLOCK_ANY.test(line.text))) {
+    // A block is shown when its BEGIN line is: its END line goes with it wherever that sits (a
+    // BEGIN line inside an HTML comment closes the comment, so its END reads as top-level).
+    let closing = null;
+    masked = lines.map(line => {
+      const text = source.slice(line.start, line.end);
+      if (!BLOCK_ANY.test(line.text)) return text;
+      const marker = /:(BEGIN|END) ([A-Z]+)\b/.exec(line.text);
+      const ends = closing && marker?.[1] === 'END' && marker[2] === closing;
+      // A real BEGIN line means the example before it never showed its END: nothing is owed.
+      if (!shown(line) && !ends) { if (marker?.[1] === 'BEGIN') closing = null; return text; }
+      if (ends) closing = null;
+      else if (marker?.[1] === 'BEGIN') closing = marker[2];
+      return text.replace(/[^\r\n]/g, ' ');
+    }).join('');
+  }
+  if (shownMarkerCache.size >= 32) shownMarkerCache.delete(shownMarkerCache.keys().next().value);
+  shownMarkerCache.set(source, masked);
+  return masked;
+}
+
 // The one block with this name in a body, with offsets; `error` for broken, nested or duplicated
-// markers. Blocks with other names are skipped.
-function findStateBlock(text, name = BLOCK_NAME) {
-  const source = String(text || '');
+// markers. Blocks with other names are skipped, and so is a block that is only shown as an example
+// (see withoutShownMarkers). `literal` searches the text exactly as given.
+function findStateBlock(text, name = BLOCK_NAME, { literal = false } = {}) {
+  const source = literal ? String(text || '') : withoutShownMarkers(String(text || ''));
   const lines = [];
   for (let offset = 0; offset <= source.length;) {
     const next = source.indexOf('\n', offset);
@@ -3487,7 +3522,8 @@ const EFFECT_TEXT = {
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
-  replace_block: effect => (effect.state === false ? `Update the ${staleParts(effect)} in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
+  replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, STATUS, COMMENT TRACE, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first`
+    : effect.state === false ? `Update the ${staleParts(effect)} in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
   replace_pr_nav: effect => `Write the PATH and STATUS blocks at the top of PR #${effect.target.pr}`,
   update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,
   post_index_comment: effect => effect.target.directory ? `Move #${effect.target.issue}'s comment topics into index pages` : `Move #${effect.target.issue}'s "${effect.label || effect.target.tag || OTHER_COMMENTS}" comment trace (${effect.lines.length} link(s)) into a new index comment`,
@@ -4279,7 +4315,7 @@ class Reconciler {
         if (reason) findings.push({ code: 'PAGE_LAYOUT_HELD', issue: number, detail: `the page was not re-laid: ${reason}` });
       }
       if (number !== parent.parent_issue && current && !move && ordered && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
-      if (!ordered && current && traceCurrent && navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: 'the page is not in the fixed section order' });
+      if (!ordered) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: 'the page is not in the fixed section order' });
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
       if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
@@ -5190,14 +5226,20 @@ class Reconciler {
           const newest = newestBlockVersion(before.body);
           if (newest && versionNewer(newest, version)) { record(effect, 'HELD', `written by Toolkit ${newest}`); hold(effect, 'BLOCK_NEWER_TOOLKIT', `#${number} was written by Toolkit ${newest}, newer than this copy (${version}); update Toolkit on this computer, then run again`); continue; }
           let next;
+          let waits = false;
           comments.set(number, fresh ? fresh.comments : this.reader.comments(number));
           try {
             next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0, { relay: this.taskRelay(number, before).relay });
             // Past the per-pass limit a page that would have its text moved keeps its old layout
             // for now; its blocks are still updated where they are.
-            if (next.relaid && next.moves && relays >= MAX_RELAYS_PER_PASS) next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0, { relay: false });
+            if (next.relaid && next.moves && relays >= MAX_RELAYS_PER_PASS) { next = this.projectBody(number, before.body, body, comments.get(number), version, navBody, currentBody, topic, 0, { relay: false }); waits = true; }
           } catch (error) { if (!error.code) throw error; record(effect, 'HELD', error.message); hold(effect, error.code, error.message); continue; }
           effect = { ...effect, target: { ...effect.target, trace: blockDigest(next.traceBody), ...(navBody ? { nav: blockDigest(navBody) } : {}), ...(currentBody ? { current: blockDigest(currentBody) } : {}) } };
+          // The result says what was done to this page: a re-lay names its saved copy, and a page
+          // that keeps its old order for now says so.
+          const laidOut = Boolean(next.relaid && next.moves);
+          if (Boolean(effect.relay) !== laidOut) { effect = { ...effect, relay: laidOut }; effect.text = describeEffect(effect); }
+          let done = waits ? `the blocks were updated where they are; the page is laid out in a later pass (at most ${MAX_RELAYS_PER_PASS} pages are laid out per pass)` : null;
           if (next.overflow.length || next.body.length >= this.threshold) {
             record(effect, 'HELD', `the body would be ${next.body.length} characters`);
             hold(effect, 'BODY_TOO_LARGE', `Controller: the body would reach ${next.body.length} characters (threshold ${this.threshold}); shorten it first`, bodySizeDiagnostics(next.body, this.threshold));
@@ -5207,7 +5249,7 @@ class Reconciler {
           if (next.relaid && next.moves) {
             // Hand-written text is about to move: the page as it is now is saved and read back
             // first. Without that copy nothing is written.
-            try { guard(); this.store.savePageCopy(number, before); relays += 1; }
+            try { guard(); const copy = this.store.savePageCopy(number, before); relays += 1; done = `the page was laid out in the fixed order; the page as it was is saved at ${copy.path} in the state store`; }
             catch (error) {
               if (!error.code || STOPS_PASS.has(error.code)) throw error;
               record(effect, 'HELD', 'the copy of the page could not be saved');
@@ -5224,7 +5266,7 @@ class Reconciler {
             guard();
             const response = this.mutator.writeBody(number, next.body);
             const after = this.reader.issue(number);
-            if (after && after.body === next.body) { verifiedBodies.add(number); return { outcome: 'DONE' }; }
+            if (after && after.body === next.body) { verifiedBodies.add(number); return { outcome: 'DONE', ...(done ? { detail: done } : {}) }; }
             if (!okStatus(response.status) && after && after.body === before.body) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}` };
             return { outcome: 'UNKNOWN', detail: 'the body did not read back exactly as written' };
           });
