@@ -355,6 +355,17 @@ function evidenceStoreRepositories(options = {}, now = new Date()) {
 }
 
 // A name or shared owner supplies no exemption.
+// The repositories ("owner/name") whose cached merged binding has governance on, sorted. Only a hint
+// for the governance App removal steps; this computer may not know every governed repository.
+function enabledRepositories(options = {}, now = new Date()) {
+  const found = [];
+  for (const { identity, entry } of bindingCache.readAllBindingCaches(userStateDirectory(options))) {
+    const judged = judgeMerged(entry, identity, now);
+    if (judged.status === 'enabled') found.push(judged.binding.repository);
+  }
+  return found.sort();
+}
+
 function evidenceStoreOf(identity, scan) {
   const slug = remoteSlug(identity && identity.remote);
   if (!slug || !scan) return null;
@@ -586,6 +597,7 @@ module.exports = Object.freeze({
   TRACKING_HOST,
   localRepositoryId,
   evidenceStoreRepositories,
+  enabledRepositories,
   evidenceStoreOf,
   GOVERNED_BLOCK,
   LEGACY_GOVERNED_BLOCK,
