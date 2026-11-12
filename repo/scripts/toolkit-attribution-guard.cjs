@@ -14,6 +14,10 @@
 // GIT_CONFIG_* environment variables, remote.*.push or remote.*.mirror settings, git aliases, scripts and programs that run git themselves,
 // a cd that is not its own command in the same line, and commands nested more than two shells deep.
 //
+// It refuses any raw `git push` to an evidence store that an enabled merged binding cached on this
+// computer names (a delete included, a dry run excepted): store work goes through toolkit-store.cjs,
+// which checks the store itself. With no cached binding the push is not judged here.
+//
 // Last, a `git push` or `gh pr create` that passed those checks is refused when what it would send
 // carries a credential (toolkit-push-check.cjs), including what a `git commit`
 // earlier in the same command could add. A push whose folder cannot be found is refused. When the step
@@ -309,22 +313,28 @@ function governanceEnabled(root, registryOptions) {
 function repositoryKind(folder, cache, registryOptions = {}) {
   if (cache.has(folder)) return cache.get(folder);
   let answer = { checked: false, store: false };
+  const current = repositoryRoot(folder);
+  if (current) {
+    answer = {
+      checked: fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
+        || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md')))
+        || governanceEnabled(current, registryOptions),
+      store: [...gitConfigText(current).matchAll(/^\s*url\s*=\s*(.+)$/gim)].some((match) => storeUrl(match[1])),
+    };
+  }
+  cache.set(folder, answer);
+  return answer;
+}
+
+// The nearest folder at or above `folder` with a .git entry, or null.
+function repositoryRoot(folder) {
   for (let current = folder, depth = 0; depth < 64; depth += 1) {
-    if (fs.existsSync(path.join(current, '.git'))) {
-      answer = {
-        checked: fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
-          || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md')))
-          || governanceEnabled(current, registryOptions),
-        store: [...gitConfigText(current).matchAll(/^\s*url\s*=\s*(.+)$/gim)].some((match) => storeUrl(match[1])),
-      };
-      break;
-    }
+    if (fs.existsSync(path.join(current, '.git'))) return current;
     const parent = path.dirname(current);
     if (parent === current) break;
     current = parent;
   }
-  cache.set(folder, answer);
-  return answer;
+  return null;
 }
 
 // Returns the refusal reason, or '' when the command may run. A quoted command handed to a
@@ -332,12 +342,23 @@ function repositoryKind(folder, cache, registryOptions = {}) {
 // `registryOptions` is for tests (the governance decisions file to read).
 // `shell` is the shell the command runs in when the host says (shellOf), else null.
 function forceRefusal(command, cwd, depth = 0, registryOptions = {}, shell = null) {
+  const cache = new Map();
+  return eachGitCommand(command, cwd, depth, shell, (git) => {
+    if (!forcePush(git)) return '';
+    const kind = repositoryKind(git.base, cache, registryOptions);
+    const target = git.args.find((word) => !word.startsWith('-'));
+    return kind.checked || kind.store || storeUrl(target) ? FORCE_MESSAGE : '';
+  });
+}
+
+// Calls `judge(git)` for each git command in a shell command line, with the folder it runs in, and
+// returns the first refusal (a git -C limit refusal included), or ''. A cd earlier in the same line
+// moves the folder; a quoted command handed to a shell is read too, up to two levels deep.
+function eachGitCommand(command, cwd, depth, shell, judge) {
   const text = String(command || '');
   if (text.length > MAX_COMMAND_CHARS || !/\bgit\b/i.test(text)) return '';
   let root = cwd || process.cwd();
-  const cache = new Map();
   for (const current of withVariables(shellCommands(text), shell)) {
-    // A cd earlier in the same command line moves the folder later git commands run in.
     if (LOCATION_COMMAND.test(current.words[0])) {
       const target = locationTarget(current.words);
       if (target) root = shellPath(root, target);
@@ -345,21 +366,77 @@ function forceRefusal(command, cwd, depth = 0, registryOptions = {}, shell = nul
     }
     const git = gitCommand(current, root);
     if (git?.refusal) return git.refusal;
-    if (git && forcePush(git)) {
-      const kind = repositoryKind(git.base, cache, registryOptions);
-      const target = git.args.find((word) => !word.startsWith('-'));
-      if (kind.checked || kind.store || storeUrl(target)) return FORCE_MESSAGE;
-    }
+    const refused = git && git.sub ? judge(git) : '';
+    if (refused) return refused;
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
         if (/\s/.test(word) && /\bgit\b/i.test(word)) {
-          const nested = forceRefusal(word, root, depth + 1, registryOptions, null);
+          const nested = eachGitCommand(word, root, depth + 1, null, judge);
           if (nested) return nested;
         }
       }
     }
   }
   return '';
+}
+
+// ---- raw pushes to a bound evidence store ------------------------------------------------------
+
+const STORE_PUSH_MESSAGE = 'This is a raw git push to an evidence store this computer has bound. Store work goes through the store command, which checks the store, scans what it commits for secrets and pushes only the bound branch: node "<Toolkit folder>/repo/scripts/toolkit-store.cjs" save --path <file> --message <text> (run toolkit governance status first if it reports a stale binding). A push the owner wants by hand runs in their own terminal.';
+
+// owner/name, lower case, from a github.com remote URL; null for anything else.
+function githubSlug(url) {
+  const match = /^(?:https:\/\/(?:[^@/\s]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
+  return match ? match[1].toLowerCase() : null;
+}
+
+// The url and pushurl values of each remote in the repository's own config, by remote name.
+function remoteUrls(root) {
+  const remotes = new Map();
+  let name = null;
+  for (const line of gitConfigText(root).split(/\r?\n/)) {
+    const section = /^\s*\[\s*([^\s\]"]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]/.exec(line);
+    if (section) { name = section[1].toLowerCase() === 'remote' && section[2] !== undefined ? section[2] : null; continue; }
+    const value = name !== null && /^\s*(?:url|pushurl)\s*=\s*(.+?)\s*$/i.exec(line);
+    if (value) remotes.set(name, [...(remotes.get(name) || []), value[1].replace(/^"(.*)"$/, '$1')]);
+  }
+  return remotes;
+}
+
+// The first word after a push's options (the remote or URL), and whether it is a dry run.
+function pushRemoteWord(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index];
+    if (word === '--') return args[index + 1] || '';
+    if (PUSH_VALUE_OPTIONS.has(word) || word === '-o') { index += 1; continue; }
+    if (!word.startsWith('-')) return word;
+  }
+  return '';
+}
+const dryRunPush = (args) => args.some((word) => word === '--dry-run' || (/^-[A-Za-z]+$/.test(word) && word.includes('n') && !word.includes('o')));
+
+// The evidence stores (lower-case owner/name) named by an enabled merged binding cached on this
+// computer, at any freshness. None when the cache cannot be read: the push then runs as before.
+function boundStores(registryOptions = {}) {
+  try { return require('./toolkit-governance-state.cjs').evidenceStoreRepositories(registryOptions).stores; } catch { return new Set(); }
+}
+
+// Refuses a git push (a delete or a push of any branch included, a dry run excepted) whose target is
+// an evidence store bound on this computer: the named remote's url and pushurl, a URL given in its
+// place, or every remote of the repository when none is named. Only bound stores count, so a
+// computer or container with no cached binding behaves as before. Reads git config files only.
+function storePushRefusal(command, cwd, depth = 0, registryOptions = {}, shell = null) {
+  let stores = null;
+  return eachGitCommand(command, cwd, depth, shell, (git) => {
+    if (git.sub !== 'push' || dryRunPush(git.args)) return '';
+    stores ||= boundStores(registryOptions);
+    if (!stores.size) return '';
+    const word = pushRemoteWord(git.args);
+    const root = repositoryRoot(git.base);
+    const remotes = root ? remoteUrls(root) : new Map();
+    const urls = word ? (remotes.get(word) || [word]) : [...remotes.values()].flat();
+    return urls.some((url) => stores.has(githubSlug(url))) ? STORE_PUSH_MESSAGE : '';
+  });
 }
 
 // The value of a gh option given as `--name value`, `--name=value`, `-X value` or `-Xvalue`.
@@ -560,8 +637,8 @@ function attributionDecision(input, options = {}) {
   const folderConfirmed = !(options.sessionFolderOnly && !call.folders.length);
   // `options.host` is set by the hook entry point ('claude' or 'codex'), never read from the payload.
   const shell = shellOf(input, options.host);
-  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || shellReadings(shell).map((reading) => forceRefusal(command, call.folder, 0, {}, reading)).find(Boolean) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed, shell })));
+  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || shellReadings(shell).map((reading) => forceRefusal(command, call.folder, 0, {}, reading) || storePushRefusal(command, call.folder, 0, {}, reading)).find(Boolean) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed, shell })));
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 
-module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, forceRefusal, hasAttribution, outgoingChanges, outgoingRefusal, repositoryKind });
+module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, FORCE_MESSAGE, MESSAGE, STORE_PUSH_MESSAGE, storePushRefusal, attributionDecision, attributionRefusal, forceRefusal, hasAttribution, outgoingChanges, outgoingRefusal, repositoryKind });
