@@ -461,3 +461,41 @@ test('query variables require an executable literal assignment before the API ca
   assert.match(adapter.issueClosureDecision(shell("q='query { viewer { login } }'; gh api graphql -f query=\"$Q\""),{guard:setup().guard})?.deny,/query variable is unresolved/,'POSIX variables keep their case');
   for(const command of ["cat <<'EOF'\nQ='query { viewer { login } }'\nEOF\ngh api graphql -f query=\"$Q\"", "gh api graphql -f query=\"$Q\"; Q='query { viewer { login } }'", "if false; then Q='query { viewer { login } }'; fi; gh api graphql -f query=\"$Q\"", "function f {\nQ='query { viewer { login } }'\n}; gh api graphql -f query=\"$Q\"", "echo ready; Q='query { viewer { login } }'; gh api graphql -f query=\"$Q\""]) assert.match(adapter.issueClosureDecision(shell(command),{guard:setup().guard})?.deny,/query variable is unresolved/,command);
 });
+
+test('closing words wait for the owner while the PR UAT line is pending or invalid', () => {
+  const pending = 'UAT: OWNER_TEST_NEEDED (open the page and check it)';
+  const ref = (number, source = 'body') => [{ number, line: 3, source }];
+  assert.match(adapter.uatClosingDecision(`Change\n\n${pending}\n\nCloses #756.`, ref(756)), /body, line 3 closes #756, but this PR's UAT line is OWNER_TEST_NEEDED.*Use Refs #756/);
+  assert.match(adapter.uatClosingDecision('UAT: SKIP (x)\n\nFixes #9', ref(9)), /UAT line is invalid/);
+  for (const body of ['UAT: PASSED (owner OK 12 Nov)\n\nCloses #1', 'UAT: NOT_REQUIRED (docs only)\n\nCloses #1', 'Closes #1'])
+    assert.equal(adapter.uatClosingDecision(body, ref(1)), null, body);
+  assert.equal(adapter.uatClosingDecision(`${pending}\n\nRefs #1`, []), null);
+  const fail = { request() { assert.fail('the UAT check must not read GitHub'); } };
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'uat-closing-'));
+  const file = path.join(dir, 'body.md');
+  fs.writeFileSync(file, `${pending}\n\nresolves #5\n`);
+  for (const command of [
+    `gh pr create -R ${repo} --title Change --body-file "${file}"`,
+    `gh pr edit 7 -R ${repo} --body-file "${file}"`,
+  ]) assert.match(adapter.issueClosureDecision({ cwd: process.cwd(), tool_name: 'Bash', tool_input: { command } }, { transport: fail })?.deny ?? '', /Use Refs #5/, command);
+  const connector = (body, title = 'Change') => adapter.issueClosureDecision({ cwd: process.cwd(), tool_name: 'mcp__github__create_pull_request', tool_input: { owner: 'example.test', repo: 'app', title, body } }, { transport: fail });
+  assert.equal(connector(`${pending}\n\nCloses #5`).status, 'refused');
+  assert.match(connector(pending, 'Fix #5 now').deny, /title, line 1 closes #5/);
+  assert.equal(connector(`${pending}\n\nRefs #5`), null);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the CI check reads the live PR body and every closing reference', () => {
+  const pr = { number: 7, title: 'Change', body: 'UAT: OWNER_TEST_NEEDED (try it)\n\nRefs #2', head: { sha: SHA }, commits: 1 };
+  const responses = {
+    [`repos/${repo}/pulls/7`]: pr,
+    [`repos/${repo}/pulls/7/commits?per_page=100&page=1`]: [{ sha: SHA, commit: { message: 'Build it\n\nCloses #2' } }],
+    [`repos/${repo}/issues/2`]: { number: 2, state: 'open', sub_issues_summary: { total: 0 } },
+    [`repos/${repo}/issues/2/sub_issues?per_page=100&page=1`]: [],
+  };
+  const guard = new IssueClosureGuard({ repository: repo, transport: { request(method, apiPath) { if (!(apiPath in responses)) assert.fail(apiPath); return { status: 200, json: responses[apiPath] }; } } });
+  const result = guard.checkPullRequest(7, { head: SHA });
+  assert.equal(result.status, 'allowed');
+  assert.equal(result.pr.body, pr.body);
+  assert.match(adapter.uatClosingDecision(result.pr.body, result.references), /commit a{40}, line 3 closes #2/);
+});
