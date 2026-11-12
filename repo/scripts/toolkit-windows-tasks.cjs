@@ -19,6 +19,9 @@
 //   adopt   --folder <F> --task <name> --id <id> --purpose <text> [--repository <owner/name>]
 //           records a task you made yourself so `toolkit tasks` lists it as known; Toolkit never
 //           changes or removes an adopted task.
+//   start   --task <id> [--json]
+//           starts one of Toolkit's own recorded tasks now; refuses an adopted, owner-stopped,
+//           unrecorded or unmarked task.
 //   apply --repair-owned needs explicit approval naming the affected fixed tasks, paths and changes.
 //           It repairs owned same-repository enrolments and obsolete switch records towards fresh
 //           governance; never an unowned task, owner-choice answer or corrupt registry.
@@ -962,6 +965,26 @@ function firstRun(definition, { scheduler, home, now = () => new Date(), wait = 
   }
 }
 
+// Starts one task now, and only a task Toolkit itself owns: recorded in the registry as its own (not
+// adopted, not stopped by the owner) and still carrying that id's marker in Task Scheduler. Anything
+// else is refused, so a permission line that allows this command never starts a foreign task.
+function startTask(id, { scheduler, home, registry = tasks }) {
+  const read = registry.readRegistry(home);
+  if (read.status !== 'ok') throw new WindowsTasksError(`the task registry ${tasks.registryPath(home)} could not be read, so no task was started`, 1);
+  const entry = read.tasks.find(task => task.id === id);
+  if (!entry) throw new WindowsTasksError(`Stopped: ${id} is not a task Toolkit recorded on this computer. Next: run toolkit tasks to see the ids.`, 1);
+  if (entry.host !== 'windows' || entry.adopted) throw new WindowsTasksError(`Stopped: ${id} is not Toolkit's own Windows task, so Toolkit does not start it. Next: start it yourself in Task Scheduler.`, 1);
+  if (entry.stopped_by_owner) throw new WindowsTasksError(`Stopped: you turned ${id} off, and Toolkit never restarts a task you stopped. Next: turn it back on yourself if you want it.`, 1);
+  const live = scheduler.list(entry.folder).find(task => task.name === entry.name);
+  const marker = live ? parseMarker(live.description) : null;
+  if (!marker || marker.id !== entry.id) throw new WindowsTasksError(`Stopped: ${entry.name} in \\${entry.folder}\\ is missing or no longer carries Toolkit's marker. Next: run the plan command for its repository.`, 1);
+  if (live.state === 'Disabled') throw new WindowsTasksError(`Stopped: ${entry.name} is turned off in Task Scheduler, and Toolkit never restarts a task you stopped. Next: turn it back on yourself if you want it.`, 1);
+  // Start only what Toolkit enrolled: a task edited by hand since then may run another program.
+  if (!entry.enrolled || !sameDefinition(enrolledDefinition(live), entry.enrolled)) throw new WindowsTasksError(`Stopped: ${entry.name} no longer matches what Toolkit set up (it was edited, or its record is from an older Toolkit), so Toolkit does not start it. Next: run the plan command for its repository.`, 1);
+  scheduler.start(entry.folder, entry.name);
+  return { id: entry.id, name: entry.name, folder: entry.folder };
+}
+
 function applyTasks(desired, options) { return new WindowsTaskOwner(options).apply(desired); }
 
 function removeTasks(options) { return new WindowsTaskOwner(options).remove(options.folder, options.scope); }
@@ -1034,14 +1057,15 @@ function describePlan(plan, { command = null, applied = false } = {}) {
 
 // ---- command line ------------------------------------------------------------------------------
 
-const COMMANDS = Object.freeze(['plan', 'apply', 'remove', 'list', 'adopt']);
-const VALUE_FLAGS = Object.freeze({ list: ['--repo-root'], plan: ['--repo-root', '--folder'], apply: ['--repo-root', '--folder', '--task-choice', '--task', '--observed', '--answer-ref'], remove: ['--repo-root', '--folder'], adopt: ['--folder', '--task', '--id', '--purpose', '--repository'] });
+const COMMANDS = Object.freeze(['plan', 'apply', 'remove', 'list', 'adopt', 'start']);
+const VALUE_FLAGS = Object.freeze({ list: ['--repo-root'], plan: ['--repo-root', '--folder'], apply: ['--repo-root', '--folder', '--task-choice', '--task', '--observed', '--answer-ref'], remove: ['--repo-root', '--folder'], adopt: ['--folder', '--task', '--id', '--purpose', '--repository'], start: ['--task'] });
 const USAGE = 'Usage: node repo/scripts/toolkit-windows-tasks.cjs plan|apply [--repo-root <checkout>] [--folder <F>] [--no-first-run] [--repair-owned] [--json]\n'
   + '       node repo/scripts/toolkit-windows-tasks.cjs list [--repo-root <checkout>] [--json]\n'
   + '       --repair-owned needs explicit approval naming the affected fixed tasks, paths and changes; it grants no native permission.\n'
   + '       Owner answer: --task-choice keep|replace --task <id> --observed <fingerprint> --answer-ref <actual-owner-answer-reference>\n'
   + '       node repo/scripts/toolkit-windows-tasks.cjs remove [--repo-root <primary-checkout>] [--folder <F>] [--json]\n'
-  + '       node repo/scripts/toolkit-windows-tasks.cjs adopt --folder <F> --task <name> --id <id> --purpose <text> [--repository <owner/name>]\n';
+  + '       node repo/scripts/toolkit-windows-tasks.cjs adopt --folder <F> --task <name> --id <id> --purpose <text> [--repository <owner/name>]\n'
+  + '       node repo/scripts/toolkit-windows-tasks.cjs start --task <id> [--json]\n';
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -1069,6 +1093,7 @@ function parseArgs(argv) {
   }
   if (options.folder !== undefined && !FOLDER.test(options.folder)) throw new WindowsTasksError('--folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
   if (command === 'adopt') for (const key of ['folder', 'task', 'id', 'purpose']) if (!options[key]) throw new WindowsTasksError(`adopt needs --${key}`);
+  if (command === 'start' && !tasks.ID.test(options.task || '')) throw new WindowsTasksError('start needs --task <id>, the id that toolkit tasks lists');
   if (command === 'apply') {
     finishChoice();
     if (choices.length) {
@@ -1093,6 +1118,11 @@ function main(argv = process.argv.slice(2), deps = {}) {
     const scheduler = deps.scheduler || powerShellScheduler();
     const checkout = path.resolve(options.repo_root || deps.cwd || process.cwd());
     if (options.command === 'list') return tasks.main(options.json ? ['--json'] : [], { ...deps, cwd: checkout, home, scheduler });
+    if (options.command === 'start') {
+      const started = startTask(options.task, { scheduler, home, registry: deps.registry });
+      print({ started }, [`Started ${started.name} in \\${started.folder}\\. toolkit tasks shows its result when it ends.`]);
+      return 0;
+    }
     const desiredOptions = { checkout, home, folder: options.folder || null, deps: deps.checkoutDeps || {}, ...(deps.toolkitRoot ? { toolkitRoot: deps.toolkitRoot } : {}), ...(deps.nodePath ? { nodePath: deps.nodePath } : {}), ...(deps.systemRoot ? { systemRoot: deps.systemRoot } : {}) };
     if (options.command === 'plan') {
       const desired = desiredTasks(desiredOptions);
@@ -1140,7 +1170,7 @@ function installLauncher(home) {
   return file;
 }
 module.exports = { launcherPath, installLauncher,
-  WindowsTaskOwner, repositoryOf, readTaskObservation, readLocations, mainCheckout, samePath, enrolledDefinition, verifiedDefinition, JOBS, FOLDER, MARKER, STATUS_CONTROL_C_EXIT, WindowsTasksError, defaultFolder, nameProblem, taskName, taskId, parseMarker, readCheckout, folderForCheckout,
+  WindowsTaskOwner, startTask, repositoryOf, readTaskObservation, readLocations, mainCheckout, samePath, enrolledDefinition, verifiedDefinition, JOBS, FOLDER, MARKER, STATUS_CONTROL_C_EXIT, WindowsTasksError, defaultFolder, nameProblem, taskName, taskId, parseMarker, readCheckout, folderForCheckout,
   describeTriggers, describeResult, describeSchedule, desiredTasks, definitionDigest, powerShellScheduler, runPowerShell, SCRIPTS, planTasks, applyTasks, firstRun,
   removeTasks, adoptTask, applyCommand, powerShellPath, describePlan, parseArgs, main,
 };
