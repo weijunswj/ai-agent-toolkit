@@ -68,3 +68,49 @@ test('the branch\'s bump and validation scripts run with no token in their envir
   assert.match(validation.env.DIFF_BASE, /^[0-9a-f]{40}$/);
   for (const call of calls) for (const name of names) assert.equal(Object.hasOwn(call.env, name), false, `${name} reached ${call.script}`);
 });
+
+test('--installation is a plain switch and off by default', () => {
+  assert.equal(parseArgs([]).installation, false);
+  assert.equal(parseArgs(['--apply', '--installation', '--authors', 'owner-1']).installation, true);
+  assert.throws(() => parseArgs(['--installation=yes']), /usage/);
+});
+
+test('with an App installation token the sign-in check lists the token\'s repositories and never asks who is signed in', t => {
+  const f = fixture(t);
+  const remote = (cwd, args) => args[0] === 'remote' ? { status: 0, stdout: 'https://github.com/example/toolkit.git\n' } : f.raw(cwd, args);
+  const repository = full_name => ({ full_name });
+  const operation = (listed, calls) => {
+    const op = f.operation(false, { git: remote, github: args => {
+      calls.push(args.join(' '));
+      // GitHub refuses both for an installation token; a stand-in that answers would hide that.
+      if (args[0] === 'auth' || args[1] === 'user') throw new Error('GitHub read failed (exit 1)');
+      if (args[1].startsWith('installation/repositories')) return JSON.stringify(listed);
+      return JSON.stringify([]);
+    } });
+    op.installation = true;
+    return op;
+  };
+  const calls = [];
+  const report = operation({ total_count: 1, repositories: [repository('Example/Toolkit')] }, calls).run();
+  assert.equal(report.account, 'GitHub App installation');
+  assert.deepEqual(report.results, []);
+  assert.deepEqual(calls, ['api installation/repositories?per_page=100', 'api repos/example/toolkit/pulls?state=open&per_page=100&page=1']);
+  // A token that covers any other repository, or more than this one, stops the run before any read.
+  for (const listed of [
+    { total_count: 1, repositories: [repository('example/other')] },
+    { total_count: 2, repositories: [repository('example/toolkit'), repository('example/other')] },
+    { total_count: 2, repositories: [repository('example/toolkit')] },
+    { total_count: 0, repositories: [] },
+    { total_count: 1 },
+    {},
+  ]) {
+    const seen = [];
+    assert.throws(() => operation(listed, seen).run(), /cover this repository only/, JSON.stringify(listed));
+    assert.deepEqual(seen, ['api installation/repositories?per_page=100'], JSON.stringify(listed));
+  }
+  // Without the switch the hand command still checks the signed-in account, which an installation
+  // token cannot pass.
+  const hand = operation({ total_count: 1, repositories: [repository('example/toolkit')] }, []);
+  hand.installation = false;
+  assert.throws(() => hand.run(), /GitHub read failed/);
+});

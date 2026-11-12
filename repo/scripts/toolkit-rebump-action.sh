@@ -19,5 +19,5 @@ gh auth setup-git
 git config --global user.name "github-actions[bot]"
 git config --global user.email "github-actions[bot]@users.noreply.${GITHUB_SERVER_URL#https://}"
 echo "ran=true" >> "${GITHUB_OUTPUT:?}"
-node repo/scripts/toolkit-rebump-prs.cjs --apply --authors "${AUTHORS:?}" > "$report" || true
+node repo/scripts/toolkit-rebump-prs.cjs --apply --installation --authors "${AUTHORS:?}" > "$report" || true
 cat "$report"

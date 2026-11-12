@@ -51,7 +51,7 @@ test('permissions are read-only except pull request comments, and the App token 
 test('the step script never force-pushes, merges a pull request or names main as a push target', () => {
   const text = fs.readFileSync(step, 'utf8');
   assert.doesNotMatch(text, /--force|force-with-lease|\bpr\s+merge\b|git push|\brebase\b/);
-  assert.match(text, /toolkit-rebump-prs\.cjs --apply --authors "\$\{AUTHORS:\?\}"/);
+  assert.match(text, /toolkit-rebump-prs\.cjs --apply --installation --authors "\$\{AUTHORS:\?\}"/);
 });
 
 // The step script is bash on the Linux runner; Windows has no part in this workflow.
@@ -90,7 +90,7 @@ test('with a push token it signs in, runs the command for the listed authors and
     'gh auth setup-git key=fixture-key',
     'git config --global user.name github-actions[bot] key=fixture-key',
     'git config --global user.email github-actions[bot]@users.noreply.github.com key=fixture-key',
-    'node repo/scripts/toolkit-rebump-prs.cjs --apply --authors owner-1 key=fixture-key',
+    'node repo/scripts/toolkit-rebump-prs.cjs --apply --installation --authors owner-1 key=fixture-key',
   ]);
   assert.equal(fs.readFileSync(path.join(temp, 'rebump-report.json'), 'utf8'), '{"results":[]}\n');
   assert.doesNotMatch(result.stdout + result.stderr, /fixture-key/);

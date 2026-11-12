@@ -107,10 +107,13 @@ function checked(result, label) {
 }
 
 class PrRebumpOperation {
-  constructor({ workspace, apply = false, repo = '', authors = [] }, deps = {}) {
+  constructor({ workspace, apply = false, repo = '', authors = [], installation = false }, deps = {}) {
     this.workspace = path.resolve(workspace);
     this.apply = apply;
     this.repo = repo;
+    // The workflow signs in with a GitHub App installation token, which cannot read the signed-in
+    // account, so its sign-in check is the list of repositories the token covers instead.
+    this.installation = installation;
     // With a list, a pull request by anyone else is skipped before any of its code runs.
     this.authors = authors;
     this.start = deps.start || runProcess;
@@ -261,14 +264,26 @@ class PrRebumpOperation {
       return { number: pr.number, status: 'held', reason, ...(scratch ? { scratch } : {}) };
     }
   }
+  userAccount() {
+    this.github(['auth', 'status']);
+    const user = this.api('user');
+    if (!user.login) throw new Error('authenticated account could not be verified');
+    return user.login;
+  }
+  installationAccount() {
+    const listed = this.api('installation/repositories?per_page=100');
+    const names = Array.isArray(listed?.repositories) ? listed.repositories.map(item => String(item?.full_name || '').toLowerCase()) : [];
+    if (listed?.total_count !== 1 || names.length !== 1 || names[0] !== this.repo.toLowerCase()) {
+      throw new Error('the installation token must cover this repository only');
+    }
+    return 'GitHub App installation';
+  }
   run() {
     this.origin = this.g(this.workspace, ['remote', 'get-url', 'origin']);
     const repository = repositoryFromOrigin(this.origin);
     if (this.repo && this.repo !== repository) throw new Error('--repo differs from origin');
     this.repo = repository;
-    this.github(['auth', 'status']);
-    const user = this.api('user');
-    if (!user.login) throw new Error('authenticated account could not be verified');
+    const account = this.installation ? this.installationAccount() : this.userAccount();
     const prs = [];
     for (let page = 1; ; page += 1) {
       const batch = this.api(`repos/${this.repo}/pulls?state=open&per_page=100&page=${page}`);
@@ -276,17 +291,18 @@ class PrRebumpOperation {
       prs.push(...batch);
       if (batch.length < 100) break;
     }
-    return { mode: this.apply ? 'apply' : 'report', repository: this.repo, account: user.login,
+    return { mode: this.apply ? 'apply' : 'report', repository: this.repo, account,
       results: prs.sort((a, b) => a.number - b.number).map(pr => this.process(pr)) };
   }
 }
 function parseArgs(argv) {
-  const args = { workspace: path.resolve(__dirname, '../..'), apply: false, repo: '', authors: [] };
+  const args = { workspace: path.resolve(__dirname, '../..'), apply: false, repo: '', authors: [], installation: false };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--apply') args.apply = true;
+    else if (argv[i] === '--installation') args.installation = true;
     else if (['--workspace', '--repo'].includes(argv[i]) && argv[i + 1] && !argv[i + 1].startsWith('-')) args[argv[i].slice(2)] = argv[++i];
     else if (argv[i] === '--authors' && argv[i + 1] && !argv[i + 1].startsWith('-')) args.authors = authorList(argv[++i]);
-    else throw new Error('usage: node repo/scripts/toolkit-rebump-prs.cjs [--workspace <repo>] [--repo <owner/name>] [--authors <login,...>] [--apply]');
+    else throw new Error('usage: node repo/scripts/toolkit-rebump-prs.cjs [--workspace <repo>] [--repo <owner/name>] [--authors <login,...>] [--installation] [--apply]');
   }
   return args;
 }

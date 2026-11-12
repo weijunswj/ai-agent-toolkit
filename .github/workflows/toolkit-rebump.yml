@@ -10,10 +10,14 @@
 # The push uses a token minted for each run from the Toolkit governance GitHub App: the repository
 # variable TOOLKIT_GOVERNANCE_APP_CLIENT_ID and the repository secret
 # TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY, the one App every Toolkit governance workflow here shares. The
-# token lasts one hour, covers this repository only, and is narrowed to contents read and write
-# and pull requests read. GitHub starts no pull request checks for a push made with the built-in
-# token until a person approves them, and checks from a manually dispatched run do not count for a
-# pull request, so only a push with an App token gets the required checks running by themselves.
+# App needs the repository permissions contents read and write and pull requests read, no webhook,
+# and an installation on this repository (setup: repo/docs/changelog.d/README.md). The token lasts
+# one hour, covers this repository only, is narrowed to those two permissions and never has the
+# workflows permission, so a re-bump that would carry a changed workflow file is held. The job also
+# holds the App's private key, which never expires. GitHub starts no pull request checks for a push
+# made with the built-in token until a person approves them, and checks from a manually dispatched
+# run do not count for a pull request, so only a push with an App token gets the required checks
+# running by themselves.
 # With no client ID variable the run prints a note and ends green; the hand command stays the rule
 # then.
 #
