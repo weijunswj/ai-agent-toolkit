@@ -42,7 +42,9 @@ test('an explicitly excluded registered part reposts unchanged content and settl
 test('archive trust guidance covers duplicates and keeps findings open until disposed', () => {
   const text = state.FINDING_CODES.ARCHIVE_COMMENT_UNTRUSTED.next_action;
   assert.doesNotMatch(text, /detached/);
-  assert.match(text, /inspect the graph archive comments on the page this finding names/);
+  assert.match(text, /inspect the archive comments on the page this finding names/);
+  assert.match(text, /archived notes are in the saved page copies in the private store under page-copies\/issue-<n>\/ and are restored by putting them back on the page under `## Archive`/);
+  assert.match(state.findingText({ code: 'ARCHIVE_COMMENT_UNTRUSTED', issue: 12, diagnostics: { reason: 'missing' } }), /page-copies\/issue-12\/ and are restored by putting them back/);
   assert.match(text, /finding stays open until disposed/);
 });
 
@@ -85,18 +87,21 @@ for (const route of ['apply', 'recovery']) test(`D3: six changing graph parts ac
   assert.ok(replaced.every(id => f.parent().page_archive[0].untrusted_ids.includes(id)));
 });
 
-test('hand-written Archive sections and ambiguous Markdown are inert on full and issue-scoped redraws', () => {
-  const hands = ['## Archive\n### Notes\nKeep every byte.  \n\n## Current plan\nKeep this too.\n',
-    '- step\n  ```\n  code\nText.\n```\n\n## Archive\n### Hidden\nKeep.\n```\n- x\n  ```\n\nTail paragraph the owner never marked.\n\n## Risks\n<details><!-- folded -->\nKeep this too.\n'];
-  for (const hand of hands) for (const only of [false, true]) {
+test('a marked Archive area is inert on issue-scoped redraws, and ambiguous Markdown never moves on any redraw', () => {
+  // The plain marked area moves on a full pass (the note sweep tests cover that); the second page
+  // hides its marker inside a code block that a list item ended, so nothing may ever leave it.
+  const plain = '## Archive\n### Notes\nKeep every byte.  \n\n## Current plan\nKeep this too.\n';
+  const hidden = '- step\n  ```\n  code\nText.\n```\n\n## Archive\n### Hidden\nKeep.\n```\n- x\n  ```\n\nTail paragraph the owner never marked.\n\n## Risks\n<details><!-- folded -->\nKeep this too.\n';
+  for (const [hand, only] of [[plain, true], [hidden, true], [hidden, false]]) {
     const f = pageFixture(state, { count: 1, hand: '# Programme\n\n' + hand });
     assert.deepEqual(f.make().run({ apply: true, ...(only ? { issue: 100 } : {}) }).holds, []);
     assert.ok(f.page().includes(hand));
     assert.equal(f.posts().length + f.edits().length, 0);
     assert.equal(f.parent().page_archive, undefined);
-    assert.equal((f.parent().attention || []).some(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE'), false);
+    // Only a full pass reads the marker, and then it reports the doubt instead of moving anything.
+    assert.deepEqual((f.parent().attention || []).filter(entry => entry.code === 'ARCHIVE_SECTION_UNSAFE').map(entry => entry.diagnostics), only ? [] : [{ reason: 'marker_nested' }]);
     assert.ok(state.findStateBlock(f.page()).block);
-    assert.doesNotMatch(state.findStateBlock(f.page(), 'CONTEXT').block.body, /Archived notes|## Archive/);
+    assert.doesNotMatch(state.findStateBlock(f.page(), 'CONTEXT').block.body, /Archived notes|\]\(https/);
   }
 });
 
