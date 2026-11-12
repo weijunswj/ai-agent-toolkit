@@ -35,6 +35,7 @@ test('start refuses every task that is not provably Toolkit\'s own, and starts n
     ['a same-named task without the marker', { tasks: { DEMO: [live({ description: 'made by hand' })] } }, /is missing or no longer carries Toolkit's marker/],
     ['a same-named task with another id\'s marker', { tasks: { DEMO: [live({ description: '[toolkit-task v1 id=other-job def=0123456789ab]' })] } }, /is missing or no longer carries Toolkit's marker/],
     ['a marked task in a different folder', { tasks: { OTHER: [live()] } }, /is missing or no longer carries Toolkit's marker/],
+    ['a task turned off in Task Scheduler but not yet recorded as stopped', { tasks: { DEMO: [live({ state: 'Disabled' })] } }, /is turned off in Task Scheduler, and Toolkit never restarts a task you stopped/],
     ['an unreadable registry', { corrupt: true }, /could not be read, so no task was started/],
   ];
   for (const [label, world, message] of cases) {

@@ -8,8 +8,10 @@
 //                                               [--branch <name>]... [--store <evidence store checkout>] [--json]
 //   node repo/scripts/toolkit-cleanup.cjs apply (same options)
 //
-// plan is read-only. apply removes what plan would list as `remove`, after the evidence store
-// read-back passes; when the read-back fails, nothing is deleted and the line says why.
+// plan is read-only. apply removes what plan would list as `remove`, and only after the evidence
+// store read-back passes. With no store to read back (no governed repository, no binding, no
+// --store), or a failed read-back, nothing is deleted and the line says why. --repo-root may not
+// name a different repository from the one the session is in.
 //
 // Scratch roots (nothing else is ever in scope):
 //   <main checkout>/.tmp/                       including .tmp/worktrees/
@@ -20,6 +22,9 @@
 // A scrap is removed only when all of this holds; otherwise it is kept and reported:
 //   - its path is inside a scratch root, before and after every link is resolved;
 //   - it is not a link, and (for a folder) holds no link and no Git checkout of its own;
+//   - it is not inside a Git checkout (a worktree or a clone) and no part of its path is `.git`:
+//     a checkout goes only whole, as a worktree, never piece by piece;
+//   - its scratch root is a real folder, not a link;
 //   - inside a repository, Git ignores it and tracks nothing in it;
 //   - a worktree is registered, unlocked, clean including ignored files, and its commit is on a
 //     remote; it is removed with `git worktree remove` (never --force), then `git worktree prune`.
@@ -78,8 +83,8 @@ class ScratchCleaner {
 
   roots(main) {
     return [
-      ...(main ? [{ kind: 'repo', dir: path.join(main, '.tmp') }] : []),
-      { kind: 'state', dir: path.join(this.#home, '.ai-agent-toolkit', 'user-state', 'tmp') },
+      ...(main ? [{ kind: 'repo', base: main, dir: path.join(main, '.tmp') }] : []),
+      { kind: 'state', base: this.#home, dir: path.join(this.#home, '.ai-agent-toolkit', 'user-state', 'tmp') },
       { kind: 'temp', dir: path.resolve(this.#tmpdir) },
     ];
   }
@@ -91,6 +96,14 @@ class ScratchCleaner {
     if (root.kind === 'temp') {
       const first = path.relative(root.dir, target).split(path.sep)[0];
       if (!TEMP_NAME.test(first)) return { refuse: 'in the OS temp folder only a folder named ai-agent-toolkit-<name> is in scope' };
+    }
+    const parts = path.relative(root.dir, target).split(path.sep);
+    if (parts.some(part => part.toLowerCase() === '.git')) return { refuse: 'part of its path is a Git folder; Toolkit never deletes inside one' };
+    // A scratch root that is itself a link (or sits behind one) would send deletes somewhere else.
+    if (root.kind !== 'temp') {
+      const realBase = this.#real(root.base);
+      const rootReal = this.#real(root.dir);
+      if (rootReal && (!realBase || this.#lstat(root.dir)?.isSymbolicLink() || rootReal !== path.join(realBase, path.relative(root.base, root.dir)))) return { refuse: 'its scratch root is a link, not a real folder' };
     }
     const realRoot = this.#real(root.dir);
     const realParent = this.#real(path.dirname(target));
@@ -123,11 +136,24 @@ class ScratchCleaner {
   }
 
   #newest(target, stat) {
-    let newest = stat.mtimeMs;
-    if (!stat.isDirectory()) return newest;
-    let names = [];
-    try { names = this.#fs.readdirSync(target); } catch { return Infinity; }
-    for (const name of names.slice(0, 2000)) { const inner = this.#lstat(path.join(target, name)); if (!inner) return Infinity; newest = Math.max(newest, inner.mtimeMs); }
+    // The newest change anywhere inside, so live work nested deep down is never called stale.
+    // Anything unreadable or too large counts as fresh.
+    let newest = stat.mtimeMs, seen = 0;
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return newest;
+    const stack = [target];
+    while (stack.length) {
+      const current = stack.pop();
+      let names;
+      try { names = this.#fs.readdirSync(current); } catch { return Infinity; }
+      for (const name of names) {
+        if ((seen += 1) > WALK_LIMIT) return Infinity;
+        const full = path.join(current, name);
+        const inner = this.#lstat(full);
+        if (!inner) return Infinity;
+        newest = Math.max(newest, inner.mtimeMs);
+        if (inner.isDirectory() && !inner.isSymbolicLink()) stack.push(full);
+      }
+    }
     return newest;
   }
 
@@ -155,6 +181,11 @@ class ScratchCleaner {
     if (!stat) return { ...item, action: 'gone', reason: 'already gone' };
     if (stat.isSymbolicLink()) return { ...item, reason: 'it is a link; Toolkit never deletes through or around a link' };
     if (within(target, path.resolve(this.#cwd))) return { ...item, reason: 'this session is working inside it' };
+    // A scrap inside a worktree or a clone looks ignored and untracked from the main checkout, yet
+    // it can be that checkout's uncommitted work. Only a whole checkout is ever judged.
+    for (let dir = path.dirname(target); within(placed.root.dir, dir, { strict: true }); dir = path.dirname(dir)) {
+      if (this.#lstat(path.join(dir, '.git'))) return { ...item, reason: 'it is inside a Git checkout; Toolkit removes a whole clean worktree, never part of one' };
+    }
     if (placed.root.kind === 'repo') {
       const tracked = this.#git(main, ['ls-files', '--', target]);
       if (!tracked.ok || tracked.out.trim()) return { ...item, reason: 'Git tracks files in it' };
@@ -220,7 +251,8 @@ class ScratchCleaner {
     let binding = null;
     try { binding = main ? JSON.parse(this.#fs.readFileSync(path.join(main, '.github', 'toolkit-programme.json'), 'utf8').replace(/^﻿/, '')) : null; } catch { binding = null; }
     const store = binding?.store?.kind === 'github' && typeof binding.store.repository === 'string' ? binding.store : null;
-    if (!store) return { ok: true, note: 'no evidence store is bound here, so there was nothing to read back' };
+    if (!main) return { ok: false, reason: 'this folder is not inside a repository, so no evidence store could be read back' };
+    if (!store) return { ok: false, reason: 'this repository binds no evidence store, so nothing could be read back' };
     if (!storePath) return { ok: false, reason: 'this repository has an evidence store and no --store <folder> was given' };
     const dir = path.resolve(storePath);
     if (githubSlug(this.#git(dir, ['remote', 'get-url', 'origin']).out) !== store.repository.toLowerCase()) return { ok: false, reason: 'that folder is not a checkout of the bound evidence store' };
@@ -234,6 +266,8 @@ class ScratchCleaner {
 
   plan({ repoRoot = null, paths = [], stale = false, branches = [] } = {}) {
     const main = this.mainCheckout(repoRoot);
+    const here = repoRoot ? this.mainCheckout(null) : null;
+    if (repoRoot && here && this.#real(here) !== this.#real(main || '')) throw new CleanupError('--repo-root names a different repository from the one this session is in.', 'run cleanup from inside that repository, or drop --repo-root.');
     const roots = this.roots(main);
     const worktrees = main ? this.#worktrees(main) : null;
     const wanted = [...new Set([...paths.map(entry => path.resolve(entry)), ...(stale ? this.#staleCandidates(roots) : [])])];
@@ -315,7 +349,7 @@ function describe(result, applied) {
   if (applied) {
     const c = result.cleaned;
     const parts = [[c.worktrees, 'worktree'], [c.files, 'temp file'], [c.branches, 'merged branch']].filter(([count]) => count).map(([count, word]) => `${count} ${word}${count === 1 ? '' : word.endsWith('ch') ? 'es' : 's'}`);
-    if (result.read_back && !result.read_back.ok) lines.push(`Stopped: nothing was deleted, because ${result.read_back.reason}. Next: commit and push the evidence store, then run cleanup again with --store <its folder>.`);
+    if (result.read_back && !result.read_back.ok) lines.push(`Stopped: nothing was deleted, because ${result.read_back.reason}. Next: run cleanup inside the governed repository with --store <its evidence store folder>, after that store is committed and pushed; otherwise ask the owner.`);
     else lines.push(`cleaned: ${parts.length ? parts.join(', ') : 'nothing'}${result.read_back?.note ? ` (${result.read_back.note})` : ''}`);
   } else {
     lines.push(...every.filter(item => item.action === 'remove').map(item => `- would remove (${item.kind}): ${label(item)}`));
@@ -335,7 +369,9 @@ function main(argv = process.argv.slice(2), deps = {}) {
   catch (error) { err(`${error.message}\n${USAGE}`); return 2; }
   const cleaner = new ScratchCleaner(deps);
   const applied = options.command === 'apply';
-  const result = applied ? cleaner.apply(options) : cleaner.plan(options);
+  let result;
+  try { result = applied ? cleaner.apply(options) : cleaner.plan(options); }
+  catch (error) { if (!(error instanceof CleanupError)) throw error; err(`${error.message}\n`); return error.exitCode; }
   out(options.json ? `${JSON.stringify(result, null, 2)}\n` : `${describe(result, applied).join('\n')}\n`);
   return applied && (result.failed.length || (result.read_back && !result.read_back.ok)) ? 1 : 0;
 }

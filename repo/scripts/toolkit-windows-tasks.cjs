@@ -972,6 +972,7 @@ function startTask(id, { scheduler, home, registry = tasks }) {
   const live = scheduler.list(entry.folder).find(task => task.name === entry.name);
   const marker = live ? parseMarker(live.description) : null;
   if (!marker || marker.id !== entry.id) throw new WindowsTasksError(`Stopped: ${entry.name} in \\${entry.folder}\\ is missing or no longer carries Toolkit's marker. Next: run the plan command for its repository.`, 1);
+  if (live.state === 'Disabled') throw new WindowsTasksError(`Stopped: ${entry.name} is turned off in Task Scheduler, and Toolkit never restarts a task you stopped. Next: turn it back on yourself if you want it.`, 1);
   scheduler.start(entry.folder, entry.name);
   return { id: entry.id, name: entry.name, folder: entry.folder };
 }

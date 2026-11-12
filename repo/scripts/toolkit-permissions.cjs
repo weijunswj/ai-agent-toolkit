@@ -14,7 +14,12 @@
 //             commands, each pinned to the managed checkout's full path and one subcommand. It
 //             names no repository.
 //   repo      pasted once per governed repository into that repository's local settings, for its
-//             GitHub writes: comments and evidence store pushes. Merges are never in a block.
+//             GitHub writes: comments and one exact evidence store push. Merges are never in a block.
+//
+// A line ends in ` *` only where the script behind it checks its own arguments. Where a flag
+// would change what the command does, the line is exact (no wildcard) or an ask line names the
+// flag. Codex prefix rules allow anything after the prefix and cannot ask for a flag, so every
+// row that needs an exact form or an ask line is left out of the Codex block and prompts there.
 //
 // Every printed line comes from one row of ROWS below, and every row names the guard that still
 // checks the command after the host stops asking. A line the table does not hold is never printed.
@@ -42,9 +47,11 @@ const GUARDS = Object.freeze({
   tasks: "The script's marker and ownership checks: only Toolkit's own recorded tasks are created, changed or started, and a hand-edited task needs the owner's answer.",
   taskUpdate: 'Its saved approval and question flow: a new task kind or a hand-edited task returns a question for the owner.',
   readOnly: 'Read-only: it lists or prints and changes nothing.',
+  listOnly: 'Exact lines for the listing forms only. Recording or forgetting a task is not in a line, so it asks.',
+  updateOnly: 'Exact lines for the plan and apply forms only; a run that carries an answers file is not in a line, so it asks. Its saved approval and question flow return a new task kind or a hand-edited task to the owner.',
   cleanup: 'The script checks every path itself: inside a scratch root after links are resolved, a clean and fully pushed worktree, and the evidence store read back first. Anything else is reported, never deleted.',
-  comment: 'The footer hook and the footer sweep check every posted comment.',
-  store: 'The secret scan before upload, the store identity check when this line is printed, and the history guard hook, which refuses forced pushes.',
+  comment: 'The owner approved comment lines. Nothing checks the target or the words: the footer hook and the footer sweep check only the footer, so the repository rules on what to post still bind the agent.',
+  store: 'One exact line: a plain push to origin and the store branch, with no options, so no other destination, flag or program can ride on it. The secret scan before upload and the store identity check when this line is printed still apply.',
 });
 
 // Every subcommand of the two multi-command scripts is classified here. A test compares these
@@ -62,25 +69,36 @@ const TASKS_ASK = Object.freeze({
   adopt: 'Recording a hand-made task as known is the owner\'s choice.',
 });
 
+// Why a row is left out of the Codex block. A Codex prefix rule allows any arguments after its
+// prefix, so it cannot hold an exact line or ask for a flag that appears later in the command.
+const CODEX_OPEN = 'Codex would allow any flag after this command, including the ones that must ask.';
+
+// forms: what follows the command in an allow line. ' *' is any arguments; '' and ' --json' are
+// exact lines. Default: [' *'].
 const scriptRow = (id, script, sub, guard, extra = {}) => Object.freeze({ id, scope: 'computer', kind: 'script', script, sub, guard, windowsOnly: false, ...extra });
 
 const ROWS = Object.freeze([
   ...PROGRAMME_ALLOW.map(sub => scriptRow(`programme-${sub}`, PROGRAMME, sub, GUARDS.programme)),
-  ...TASKS_ALLOW.map(sub => scriptRow(`tasks-${sub}`, WINDOWS_TASKS, sub, sub === 'list' ? GUARDS.readOnly : GUARDS.tasks, { windowsOnly: true })),
-  scriptRow('tasks-list-all', 'repo/scripts/toolkit-tasks.cjs', null, GUARDS.readOnly),
-  scriptRow('task-update', 'repo/scripts/toolkit-update-scheduled-task.cjs', null, GUARDS.taskUpdate, { windowsOnly: true }),
+  ...TASKS_ALLOW.map(sub => scriptRow(`tasks-${sub}`, WINDOWS_TASKS, sub, sub === 'list' ? GUARDS.readOnly : GUARDS.tasks, { windowsOnly: true, ...(sub === 'apply' ? { codex: false } : {}) })),
+  scriptRow('tasks-list-all', 'repo/scripts/toolkit-tasks.cjs', null, GUARDS.listOnly, { forms: ['', ' --json'], codex: false }),
+  scriptRow('task-update', 'repo/scripts/toolkit-update-scheduled-task.cjs', null, GUARDS.updateOnly, { windowsOnly: true, forms: ['', ' --json', ' --apply', ' --apply --json'], codex: false }),
   scriptRow('permissions-print', 'repo/scripts/toolkit-permissions.cjs', null, GUARDS.readOnly),
   scriptRow('cleanup-plan', CLEANUP, 'plan', GUARDS.readOnly),
   scriptRow('cleanup-apply', CLEANUP, 'apply', GUARDS.cleanup),
-  Object.freeze({ id: 'gh-pr-comment', scope: 'repo', kind: 'command', command: 'gh pr comment', guard: GUARDS.comment }),
-  Object.freeze({ id: 'gh-issue-comment', scope: 'repo', kind: 'command', command: 'gh issue comment', guard: GUARDS.comment }),
-  Object.freeze({ id: 'store-push', scope: 'repo', kind: 'store-push', guard: GUARDS.store, needs: 'store' }),
+  Object.freeze({ id: 'gh-pr-comment', scope: 'repo', kind: 'command', command: 'gh pr comment', guard: GUARDS.comment, codex: false }),
+  Object.freeze({ id: 'gh-issue-comment', scope: 'repo', kind: 'command', command: 'gh issue comment', guard: GUARDS.comment, codex: false }),
+  Object.freeze({ id: 'store-push', scope: 'repo', kind: 'store-push', guard: GUARDS.store, needs: 'store', codex: false }),
 ]);
 
 // Ask lines: the host asks even when an allow line above matches, because ask beats allow.
 // `after` is appended to the row's command; each entry names why it still asks.
 const ASK_NETS = Object.freeze({
-  'tasks-apply': [{ after: '*--repair-owned*', why: 'A same-job repair needs approval naming the affected tasks.' }],
+  'tasks-apply': [
+    { after: '*--repair-owned*', why: 'A same-job repair needs approval naming the affected tasks.' },
+    { after: '*--folder*', why: 'A folder override needs the owner\'s approval.' },
+    { after: '*--no-first-run*', why: 'Skipping the first run needs the owner\'s approval.' },
+    { after: '*--task-choice*', why: 'A keep-or-replace answer is the owner\'s; a flag cannot prove who answered.' },
+  ],
   'gh-pr-comment': [{ after: '*--delete-last*', why: 'Deleting a comment is a delete.' }],
   'gh-issue-comment': [{ after: '*--delete-last*', why: 'Deleting a comment is a delete.' }],
   'store-push': [
@@ -128,6 +146,8 @@ function safePath(input, platform) {
 }
 // Toolkit's own convention for a path in a command: forward slashes inside double quotes.
 const quoted = text => `"${text}"`;
+
+const BRANCH = /^(?![-/.])[A-Za-z0-9._/-]{1,200}(?<![/.])$/;
 
 // owner/name from a github.com remote URL, lower case; null for anything else.
 function githubSlug(remote) {
@@ -190,7 +210,8 @@ class PermissionBlocks {
     if (!safe) return { ok: false, reason: 'the evidence store path holds a character a permission line cannot carry safely.' };
     const origin = this.#git(resolved, ['remote', 'get-url', 'origin']);
     if (githubSlug(origin) !== wanted) return { ok: false, reason: 'that folder is not a checkout of the evidence store the programme file names.' };
-    return { ok: true, safe };
+    const branch = typeof binding.store.branch === 'string' && BRANCH.test(binding.store.branch) && !binding.store.branch.includes('..') ? binding.store.branch : 'main';
+    return { ok: true, safe, branch };
   }
 
   // Builds the blocks. Returns { blocks: [...], stops: [...], coverage: [...] }.
@@ -203,19 +224,23 @@ class PermissionBlocks {
     const coverage = [];
     const commandOf = row => (row.kind === 'script' ? `node ${quoted(`${managed.safe}/${row.script}`)}${row.sub ? ` ${row.sub}` : ''}` : row.command);
     const emit = (rows, context = {}) => {
-      const allow = [], ask = [], entries = [];
+      const allow = [], ask = [], entries = [], prompts = [];
       for (const row of rows) {
         if (row.windowsOnly && !windows) continue;
         const command = row.kind === 'store-push' ? `git -C ${quoted(context.store)} push` : commandOf(row);
-        entries.push({ id: row.id, command, tokens: row.kind === 'script' ? ['node', `${managed.safe}/${row.script}`, ...(row.sub ? [row.sub] : [])] : command.split(' ').map(word => word.replace(/^"|"$/g, '')), guard: row.guard, nets: ASK_NETS[row.id] || [] });
-        coverage.push({ line: `${command} *`, guard: row.guard });
+        const forms = row.kind === 'store-push' ? [` origin ${context.branch}`] : row.forms || [' *'];
+        const tokens = row.kind === 'script' ? ['node', `${managed.safe}/${row.script}`, ...(row.sub ? [row.sub] : [])]
+          : row.kind === 'store-push' ? ['git', '-C', context.store, 'push'] : command.split(' ');
+        if (host === 'codex' && row.codex === false) { prompts.push({ command, tokens, why: CODEX_OPEN }); continue; }
+        entries.push({ id: row.id, command, tokens, guard: row.guard });
+        for (const form of forms) coverage.push({ line: `${command}${form}`, guard: row.guard });
         for (const tool of tools) {
           if (tool === 'codex') continue;
-          allow.push(`${tool}(${command} *)`);
+          for (const form of forms) allow.push(`${tool}(${command}${form})`);
           for (const net of ASK_NETS[row.id] || []) ask.push(`${tool}(${command} ${net.after})`);
         }
       }
-      return { allow, ask, entries };
+      return { allow, ask, entries, prompts };
     };
 
     if (scope === 'computer' || scope === 'all') {
@@ -224,7 +249,7 @@ class PermissionBlocks {
         ...Object.keys(PROGRAMME_ASK).map(sub => ({ command: `node ${quoted(`${managed.safe}/${PROGRAMME}`)} ${sub}`, tokens: ['node', `${managed.safe}/${PROGRAMME}`, sub], why: PROGRAMME_ASK[sub] })),
         ...(windows ? Object.keys(TASKS_ASK).map(sub => ({ command: `node ${quoted(`${managed.safe}/${WINDOWS_TASKS}`)} ${sub}`, tokens: ['node', `${managed.safe}/${WINDOWS_TASKS}`, sub], why: TASKS_ASK[sub] })) : []),
       ];
-      blocks.push(this.#block({ host, scope: 'computer', made, excluded,
+      blocks.push(this.#block({ host, scope: 'computer', made, excluded: [...excluded, ...made.prompts],
         target: host === 'claude' ? path.join(this.#environment.CLAUDE_CONFIG_DIR || path.join(this.#home, '.claude'), 'settings.json') : path.join(this.#environment.CODEX_HOME || path.join(this.#home, '.codex'), 'rules', 'toolkit.rules') }));
     }
 
@@ -235,8 +260,8 @@ class PermissionBlocks {
         const store = this.store(storePath, repo.binding);
         const rows = ROWS.filter(row => row.scope === 'repo' && (row.needs !== 'store' || store.ok));
         if (!store.ok) stops.push({ scope: 'repo', soft: !storePath, stopped: `the evidence store line is left out: ${store.reason}`, next: 'run toolkit permissions --store <the store\'s folder on this computer>.' });
-        const made = emit(rows, { store: store.safe });
-        blocks.push(this.#block({ host, scope: 'repo', made, excluded: [],
+        const made = emit(rows, { store: store.safe, branch: store.branch });
+        blocks.push(this.#block({ host, scope: 'repo', made, excluded: made.prompts,
           target: host === 'claude' ? this.#path.join(repo.root, '.claude', 'settings.local.json') : this.#path.join(repo.root, '.codex', 'rules', 'toolkit.rules') }));
       }
     }
@@ -254,7 +279,7 @@ class PermissionBlocks {
       const settings = { permissions: { allow: made.allow, ...(ask.length ? { ask } : {}) } };
       return { host, scope, target, allow: made.allow, ask, excluded, text: JSON.stringify(settings, null, 2) };
     }
-    const rule = (tokens, decision, why) => `prefix_rule(\n    pattern = ${JSON.stringify(tokens)},\n    decision = "${decision}",\n    justification = ${JSON.stringify(why)},\n    match = [${JSON.stringify(tokens.join(' '))}],\n)`;
+    const rule = (tokens, decision, why) => `prefix_rule(\n    pattern = ${JSON.stringify(tokens)},\n    decision = "${decision}",\n    justification = ${JSON.stringify(why)},\n    match = [${JSON.stringify(tokens)}],\n)`;
     const rules = [
       ...made.entries.map(entry => rule(entry.tokens, 'allow', entry.guard)),
       ...excluded.map(entry => rule(entry.tokens, 'prompt', entry.why)),
@@ -307,15 +332,15 @@ function describe(built, options) {
     lines.push(`Paste into: ${block.target}`);
     lines.push(block.host === 'claude'
       ? 'Add these lines to the "permissions" lists already in that file; keep every line that is there. Paste nothing else.'
-      : 'Add these rules to that file; keep every rule that is there. Check each with: codex execpolicy check --rules <that file> <the command>. These Codex rules are not yet proven on a real Windows install.');
+      : 'Add these rules to that file; keep every rule that is there. Check each with: codex execpolicy check --rules <that file> <the command>. These Codex rules are not yet proven on a real Windows install. A Codex rule allows anything after its prefix, so the commands that need an exact form or must ask for a flag are prompt rules here.');
     lines.push('', block.text.trimEnd(), '');
     if (block.excluded.length) lines.push('Left out on purpose, so they keep asking:', ...block.excluded.map(entry => `- ${entry.command}: ${entry.why}`), '');
   }
   for (const stop of built.stops) lines.push(`Stopped: ${stop.stopped} Next: ${stop.next}`);
   if (built.stops.length) lines.push('');
   lines.push('What still checks each line:', ...built.coverage.map(row => `- ${row.line}: ${row.guard}`), '');
-  lines.push('Never in a block: closes, deletes outside the cleanup command, forced pushes, history rewrites, settings edits, secrets and real keys. Those keep asking.');
-  lines.push(`Agents: write each command exactly as its line shows (node, then the full path in forward slashes inside double quotes), one command per call, so the line matches.`);
+  lines.push('Never in a block: merges, closes, deletes outside the cleanup command, forced, mirror or deleting pushes, a push anywhere but the store\'s own origin and branch, history rewrites, settings edits, secrets and real keys. Those keep asking.');
+  lines.push(`Agents: write each command exactly as its line shows (node, then the full path in forward slashes inside double quotes), one command per call, so the line matches. A line with no * matches only that exact command.`);
   if (options.host === 'claude') lines.push('To remove a block, delete its lines from the file. Run toolkit permissions again after the Toolkit folder moves.');
   return lines;
 }
