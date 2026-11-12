@@ -798,6 +798,120 @@ test('an approval is recorded only in a session the user started', (t) => {
   assert.equal(typed(ctx, 'merge owner/b#618', { cwd: ctx.root }), 1, 'a named repository outside one');
 });
 
+test('a launch that only mentions branch upkeep passes; any other merge wording still refuses it', (t) => {
+  const ctx = context(t);
+  const upkeep = [
+    'claude -p "git merge origin/main into the branch and run the tests"',
+    'codex exec "git merge origin/main into the branch and run the tests"',
+    'claude -p "Merge commits only, no force-push. Fix the merge conflicts in README.md."',
+    'codex exec "Use a merge commit; find the merge-base with git merge-base HEAD origin/main"',
+    'npx @anthropic-ai/claude-code -p "git merge --no-ff origin/main"',
+  ];
+  for (const command of upkeep) assert.equal(decide(ctx, bash(ctx.repo, command)), null, command);
+  const guarded = [
+    'claude -p "git merge origin/main then merge 618"',
+    'codex exec "git merge origin/main then gh pr merge 5"',
+    'claude -p "approve the merge"',
+    'claude -p "merge commits only; ok to merge #618"',
+    'codex exec "resolve the merge conflicts, then gh pr merge 5 --merge"',
+    'claude -p "merge the pull request"',
+  ];
+  for (const command of guarded) assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /must not approve a merge/, command);
+});
+
+// The closure table for the launch rule: a launch the hold lets through must never carry text
+// the approval reader counts. Both read merge wording through one definition (mergeWording).
+test('upkeep wording by pull request target: no launch that passes is read as an approval', (t) => {
+  const ctx = context(t);
+  const sha = '0123456789abcdef0123456789abcdef01234567';
+  const upkeep = ['git merge', 'git  merge', 'git\tmerge', 'Git Merge', 'git merge --no-ff', 'merge commit', 'merge commits', 'merge-commit', 'merge-commits',
+    'merge conflict', 'merge conflicts', 'merge-conflicts', 'merge base', 'merge-base', 'git merge-base'];
+  const targets = ['5', '#5', 'pr 5', 'pull request 5', 'owner/a#5', 'https://github.com/owner/a/pull/5', 'github.com/owner/a/pull/5/files',
+    '5 and 6', '601, 605 and 609', `5 at ${sha}`, '5 at 62405eb', '#5 at 7384901'];
+  const shapes = [
+    (u, x) => `${u} ${x}`, (u, x) => `${x} ${u}`, (u, x) => `Update ${x} using a ${u} only`, (u, x) => `Re-bump ${x} with ${u} only`,
+    (u, x) => `- ${u} ${x}`, (u, x) => `1. ${x} ${u}`, (u, x) => `\`${u} ${x}\``, (u, x) => `ok ${u} ${x}`, (u, x) => `${u}, ${x}`,
+    (u, x) => `${u} ${x}\n${u} ${x}`, (u, x) => `${u} origin/main\n${x} ${u}`,
+  ];
+  // Single quotes: the prompt reaches the hold as typed, line breaks included.
+  const hosts = [prompt => `claude -p '${prompt}'`, prompt => `codex exec '${prompt}'`, prompt => `npx @openai/codex exec '${prompt}'`];
+  let rows = 0;
+  for (const u of upkeep) for (const x of targets) for (const shape of shapes) {
+    const prompt = shape(u, x);
+    // Upkeep wording names no pull request merge, whatever stands next to it.
+    assert.deepEqual(hold.approvalsIn(prompt), [], `read as an approval: ${JSON.stringify(prompt)}`);
+    for (const host of hosts) { assert.equal(decide(ctx, bash(ctx.repo, host(prompt))), null, host(prompt)); rows += 1; }
+  }
+  assert.equal(rows, upkeep.length * targets.length * shapes.length * hosts.length);
+});
+
+test('merge wording beside upkeep still refuses the launch, and the reader still counts a real approval', (t) => {
+  const ctx = context(t);
+  const real = [
+    ['merge 5', [5]], ['merge #5', [5]], ['ok to merge #618', [618]], ['merge owner/a#5', [5]], ['5 merge', [5]],
+    ['git merge origin/main\nmerge 5', [5]], ['merge commits only\nmerge #618', [618]], ['- merge commits only\n- merge 5', [5]],
+    // An upkeep phrase never spans a line break, so each line is read on its own by both rules.
+    ['git\nmerge 5', [5]], ['git merge 5', [5]], ['git\u0085merge #5', [5]], ['git\vmerge 5', [5]], ['git\fmerge 5', [5]],
+    // Other spacing is not an upkeep phrase.
+    ['git merge 5', [5]], ['git-merge 5', [5]], ['gitmerge merge 5', [5]],
+    // Upkeep followed by a real merge on the same line.
+    ['merge commits only, merge 5', [5]], ['merge 5 with a merge commit', [5]],
+    // A hold word inside an upkeep phrase ("conflicts", "base") still holds the line: the reader
+    // reads hold words on the line as typed, so setting upkeep aside never makes a line count.
+    ['git merge-base and merge #5', []], ['merge-base merge 5', []], ['merge 5 with merge conflicts', []], ['merge 5 (merge conflicts gone)', []],
+    ['merge 5 despite merge conflicts', []], ['merge 5 even with merge-conflicts', []], ['merge 5 merge conflicts', []], ['merge conflicts merge 5', []],
+    ['merge #5, merge base is fine', []], ['merge 5 \u2014 merge conflicts', []],
+    // Hold words outside a phrase hold as they always did.
+    ['merge 5 if no merge conflicts', []], ['merge 5 has conflicts', []], ['merge 5 into base', []], ['merge 5 after merge conflicts are fixed', []],
+  ];
+  for (const [prompt, numbers] of real) {
+    assert.deepEqual(hold.approvalsIn(prompt).map(item => item.pr), numbers, JSON.stringify(prompt));
+    for (const host of ['claude -p', 'codex exec']) {
+      const command = `${host} '${prompt}'`;
+      assert.match(decide(ctx, bash(ctx.repo, command))?.deny || '', /must not approve a merge/, JSON.stringify(command));
+    }
+  }
+  // Merge wording that is no approval still refuses the launch: the launch rule reads any other "merge".
+  for (const prompt of ['approve the merge', 'merge the pull request', 'git merge origin/main then gh pr merge 5 --merge', 'merge commits only; do not merge 5', 'merged? then merge',
+    'merge\ncommit 5', 'merge  commit merge', 'mergecommit merge', 'merge commit merge']) {
+    assert.match(decide(ctx, bash(ctx.repo, `codex exec '${prompt}'`))?.deny || '', /must not approve a merge/, JSON.stringify(prompt));
+  }
+});
+
+test('one definition: every text the launch rule passes reads as no approval, line by line and at the length limit', (t) => {
+  const ctx = context(t);
+  const pieces = ['git merge', 'merge commit', 'merge-commits', 'merge conflicts', 'merge-base', 'merge', 'merged', 'Merge', '#5', '5', 'pr 5', 'owner/a#5', 'at 62405eb',
+    'origin/main', 'and', 'only', 'git', 'commit', 'ok', 'to', '\n', ' ', '\t', ' - ', '`', ', '];
+  // A fixed pseudo-random walk over the pieces: the same texts on every run.
+  let seed = 836; const next = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+  let passed = 0; let refused = 0;
+  for (let i = 0; i < 4000; i += 1) {
+    const words = Array.from({ length: 2 + (next() % 6) }, () => pieces[next() % pieces.length]);
+    const prompt = words.join(next() % 4 === 0 ? '' : ' ');
+    const launched = decide(ctx, bash(ctx.repo, `codex exec '${prompt}'`)) === null;
+    if (launched) { passed += 1; assert.deepEqual(hold.approvalsIn(prompt), [], `launch passes but reads as an approval: ${JSON.stringify(prompt)}`); }
+    else refused += 1;
+    assert.equal(hold.mergeWording(prompt), !launched, JSON.stringify(prompt));
+  }
+  assert.ok(passed > 300 && refused > 300, `${passed} passed, ${refused} refused`);
+  // The upkeep test reads each line as typed, before the length limit, so a cut never turns
+  // "merged" or "merge commits" into the bare word.
+  const filler = `${'x'.repeat(99)}\n`.repeat(79);
+  for (const tail of ['#5 merged', '#5 merge-base', '#5 merge commits', '5 merges']) {
+    for (let pad = 80; pad < 100; pad += 1) {
+      const prompt = `${filler}${'y'.repeat(pad)}\n${tail}`;
+      assert.deepEqual(hold.approvalsIn(prompt), [], `${tail} cut at ${pad}`);
+    }
+  }
+  // A real approval inside the limit still counts, and one cut off by it does not half-count.
+  assert.deepEqual(hold.approvalsIn(`${filler}merge 5`).map(item => item.pr), [5]);
+  // The limit is measured on the text as typed: upkeep lines take their full length, so setting
+  // them aside does not bring a later line inside the limit.
+  const upkeep = count => `${'git merge origin/main\n'.repeat(count)}merge 5`;
+  assert.deepEqual(hold.approvalsIn(upkeep(360)).map(item => item.pr), [5]);
+  for (const count of [364, 370, 400]) assert.deepEqual(hold.approvalsIn(upkeep(count)), [], `${count} upkeep lines`);
+});
+
 test('agent routes that could make an approval are refused', (t) => {
   const ctx = context(t);
   const forging = [

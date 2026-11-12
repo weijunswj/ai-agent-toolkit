@@ -1,17 +1,25 @@
 # Toolkit Changelog
 
-## 3.65.0 (typed commands and remove Toolkit)
+## 3.66.0 (automatic re-bump workflow and a narrower launch rule)
 
 ### Added
 
-- **Typed commands:** `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup` and `toolkit show env`, typed as the whole message on your own computer, are matched exactly by the Codex and Claude Code prompt hooks. The agent is told which action was asked for, so `toolkit show env` always opens the editor. A phrase inside a longer message, in a relayed message or in a cloud session stays plain text, and a governance hold is unchanged. `node repo/scripts/toolkit-commands.cjs` prints the command list.
-- **Remove Toolkit from this computer:** `remove toolkit` routes to `repo/scripts/toolkit-remove.cjs`. `plan` lists every scheduled task that carries Toolkit's marker in any Task Scheduler folder, Toolkit's own task files and the Toolkit block in each global rules file, with a plan code. `apply --confirm <plan code>` removes exactly that list after the owner's OK; a list that changed removes nothing. Tasks changed by hand stay unless named, the owner's own listed tasks always stay, and no repository, key, settings file or plugin is touched.
-- **Leftover file report:** `repo/scripts/toolkit-leftover-files.cjs scan` lists files that are provably Toolkit's in GitHub checkouts whose governance is off or undecided. It reports only and never deletes.
+- A re-bump workflow for this repository: after every push to `main` it runs the re-bump command for the owner's open pull requests and pushes with the repository secret `TOOLKIT_REBUMP_TOKEN`, so their checks start by themselves. With no secret it prints a note and does nothing. A pull request it cannot re-bump gets one comment that says why.
+- `toolkit-rebump-prs.cjs --authors <login,...>` skips other authors' pull requests before any of their code runs.
 
 ### Changed
 
-- **Setup covers the computer only:** setup no longer prints a task plan for the managed checkout and the folder it was started in. The computer-wide task update under the saved approval stays, and the direct task plan still gives one repository's details.
-- **Hook pack:** context checks now also read the context a prompt hook adds.
+- The re-bump command runs the pull request branch's own bump and validation scripts with every token variable and the Actions file-command paths removed from their environment.
+- The merge hold no longer refuses a command that starts Claude or Codex when its only merge wording is branch upkeep: `git merge`, merge commits, merge conflicts or merge-base. Any other merge wording still refuses the launch, and pull request merges stay guarded.
+- The merge hold's approval reader now skips a typed line whose only merge wording is the same branch upkeep, from one shared definition, so a launch the hold lets through carries no line the reader counts, as far as the hold can read the command (text the shell reshapes afterwards is not covered). A line such as `git merge 5` or `update #5 with a merge commit` no longer records an approval. This is one more reason to skip a line and nothing else in the reader changed: every line that was held before is still held, and `merge 5` and `merge owner/name#5` count as before.
+- A pull request that changes the re-bump scripts (`toolkit-rebump-prs.cjs`, `toolkit-rebump-report.cjs`, `toolkit-rebump-action.sh`) now waits for the owner's typed merge.
+
+## 3.65.0 (Controller enforcement map)
+
+### Added
+
+- A map says, for every controller rule, what enforces it: a hook, a script, a CI check or the programme reconciler, each with the test that proves it and one line on which part of the rule they cover. A rule nothing can enforce is marked instruction-only, with one line on why. Of the 40 rules today, 17 are enforced and 23 are instruction-only. The map lives beside the rules, so the rules files gain no bytes.
+- A check fails when a controller rule has no row or two, when a row matches no rule or more than one, or when a row names an enforcer or test that does not exist or a test that never mentions its enforcer. It runs with the test suite, so a rule added, moved or reworded without updating the map fails CI.
 
 ## 3.64.0 (One layout for task pages and task PRs)
 
