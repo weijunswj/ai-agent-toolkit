@@ -1,0 +1,194 @@
+'use strict';
+
+// toolkit permissions --apply: the owner's own one-command merge of the computer blocks. Agents
+// cannot run it (host ask lines, agent markers, a real terminal and a typed word), it backs up
+// before writing, keeps every other setting, and writes nothing on any stop.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const { spawnSync } = require('node:child_process');
+const permissions = require('../scripts/toolkit-permissions.cjs');
+const apply = require('../scripts/toolkit-permissions-apply.cjs');
+
+const ROOT = path.resolve(__dirname, '..', '..');
+const TK = '/opt/toolkit';
+const slashed = file => String(file).replace(/\\/g, '/');
+const hostFs = { ...fs, existsSync: file => (slashed(file).startsWith(`${TK}/`) ? fs.existsSync(path.join(ROOT, slashed(file).slice(TK.length + 1))) : fs.existsSync(file)) };
+
+// A fake computer with Toolkit at TK, the owner's terminal, and Codex set up unless told not to.
+function computer(t, { codex = true, answer = 'apply' } = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-perm-apply-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(home, '.ai-agent-toolkit', 'current'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.ai-agent-toolkit', 'current', 'state.json'), JSON.stringify({ repo_path: TK }));
+  if (codex) fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+  const out = [];
+  const err = [];
+  const asked = [];
+  return {
+    home, out, err, asked,
+    settings: path.join(home, '.claude', 'settings.json'),
+    rules: path.join(home, '.codex', 'rules', 'toolkit.rules'),
+    deps: {
+      home, platform: 'linux', environment: {}, cwd: '/work/repo', fs: hostFs, now: () => new Date('2026-11-12T11:00:00Z'),
+      tty: () => ({ stdin: true, stdout: true }), ask: question => { asked.push(question); return answer; },
+      stdout: text => out.push(text), stderr: text => err.push(text),
+    },
+  };
+}
+const blockFor = (deps, host) => new permissions.PermissionBlocks(deps).build({ host, scope: 'computer' }).blocks[0];
+const files = home => {
+  const list = [];
+  const walk = dir => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const full = path.join(dir, entry.name); if (entry.isDirectory()) walk(full); else list.push(path.relative(home, full).replace(/\\/g, '/')); } };
+  walk(home);
+  return list.sort();
+};
+
+test('merges the Claude block into the settings file, keeps every other setting, backs up first and reads back', async t => {
+  const pc = computer(t);
+  fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
+  const original = { model: 'x', env: { A: '1' }, permissions: { allow: ['Bash(npm test)'], deny: ['Bash(rm *)'], defaultMode: 'default' } };
+  fs.writeFileSync(pc.settings, JSON.stringify(original, null, 4));
+  const before = fs.readFileSync(pc.settings, 'utf8');
+  assert.equal(await permissions.main(['--apply'], pc.deps), 0, pc.err.join(''));
+  const block = blockFor(pc.deps, 'claude');
+  const after = JSON.parse(fs.readFileSync(pc.settings, 'utf8'));
+  assert.deepEqual(after.permissions.allow, ['Bash(npm test)', ...block.allow]);
+  assert.deepEqual(after.permissions.ask, block.ask);
+  assert.deepEqual(after.permissions.deny, ['Bash(rm *)']);
+  assert.equal(after.model, 'x');
+  assert.deepEqual(after.env, { A: '1' });
+  assert.equal(after.permissions.defaultMode, 'default');
+  const backup = `${pc.settings}.toolkit-backup-20261112T110000Z`;
+  assert.equal(fs.readFileSync(backup, 'utf8'), before, 'the backup is the file as it was');
+  assert.equal(fs.readFileSync(pc.rules, 'utf8'), blockFor(pc.deps, 'codex').text);
+  assert.equal(pc.asked.length, 1);
+  assert.match(pc.out.join(''), /\+ allow Bash\(node "\/opt\/toolkit\/repo\/scripts\/toolkit-store\.cjs" \*\)/);
+  assert.equal(permissions.main(['--check', pc.settings, '--scope', 'computer'], { ...pc.deps, stdout: () => {} }), 0);
+  assert.ok(files(pc.home).every(file => !/toolkit-tmp-/.test(file)), 'no temp file left');
+});
+
+test('a second run finds nothing to change, asks nothing and writes nothing', async t => {
+  const pc = computer(t);
+  assert.equal(await permissions.main(['--apply'], pc.deps), 0);
+  const listed = files(pc.home);
+  const text = fs.readFileSync(pc.settings, 'utf8');
+  pc.asked.length = 0;
+  pc.out.length = 0;
+  assert.equal(await permissions.main(['--apply'], pc.deps), 0);
+  assert.deepEqual(pc.asked, []);
+  assert.match(pc.out.join(''), /Nothing to change\. Nothing was written\./);
+  assert.deepEqual(files(pc.home), listed);
+  assert.equal(fs.readFileSync(pc.settings, 'utf8'), text);
+});
+
+test('an agent shell, a missing terminal or any answer but apply writes nothing', async t => {
+  for (const marker of apply.AGENT_MARKERS) {
+    const pc = computer(t);
+    const listed = files(pc.home);
+    assert.equal(await permissions.main(['--apply'], { ...pc.deps, environment: { [marker]: '1' } }), 1, marker);
+    assert.match(pc.err.join(''), new RegExp(`coding agent \\(${marker}\\)`));
+    assert.deepEqual(pc.asked, [], 'the question is never asked in an agent shell');
+    assert.deepEqual(files(pc.home), listed);
+  }
+  for (const tty of [{ stdin: false, stdout: true }, { stdin: true, stdout: false }]) {
+    const pc = computer(t);
+    const listed = files(pc.home);
+    assert.equal(await permissions.main(['--apply'], { ...pc.deps, tty: () => tty }), 1);
+    assert.match(pc.err.join(''), /needs a terminal you type into/);
+    assert.deepEqual(files(pc.home), listed);
+  }
+  for (const answer of ['', 'y', 'yes', 'apply now', null]) {
+    const pc = computer(t, { answer });
+    const listed = files(pc.home);
+    assert.equal(await permissions.main(['--apply'], pc.deps), 1, String(answer));
+    assert.match(pc.out.join(''), /Stopped\. Nothing was written\./);
+    assert.deepEqual(files(pc.home), listed);
+  }
+  // The real script, run the way an agent would (this test's own pipes, no terminal): refused.
+  const pc = computer(t);
+  const real = spawnSync(process.execPath, [path.join(ROOT, 'repo', 'scripts', 'toolkit-permissions.cjs'), '--apply'], { encoding: 'utf8', input: 'apply\n', env: { ...process.env, HOME: pc.home, USERPROFILE: pc.home, CLAUDECODE: '' }, cwd: os.tmpdir() });
+  assert.equal(real.status, 1, real.stderr);
+  assert.match(real.stderr, /coding agent|needs a terminal/);
+  assert.equal(fs.existsSync(pc.settings), false);
+});
+
+test('a settings file Toolkit cannot merge safely is refused untouched', async t => {
+  for (const text of ['{ not json', '[]', '"x"', JSON.stringify({ permissions: [] }), JSON.stringify({ permissions: { allow: 'Bash(x)' } }), JSON.stringify({ permissions: { ask: [1] } })]) {
+    const pc = computer(t);
+    fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
+    fs.writeFileSync(pc.settings, text);
+    const listed = files(pc.home);
+    assert.equal(await permissions.main(['--apply', '--host', 'claude'], pc.deps), 1, text);
+    assert.match(pc.err.join(''), /not a settings file Toolkit can merge into safely/);
+    assert.equal(fs.readFileSync(pc.settings, 'utf8'), text);
+    assert.deepEqual(files(pc.home), listed);
+    assert.deepEqual(pc.asked, []);
+  }
+});
+
+test('a file that changes after the preview stops before writing', async t => {
+  const pc = computer(t);
+  fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
+  fs.writeFileSync(pc.settings, '{}');
+  const ask = () => { fs.writeFileSync(pc.settings, '{"model":"changed"}'); return 'apply'; };
+  assert.equal(await permissions.main(['--apply', '--host', 'claude'], { ...pc.deps, ask }), 1);
+  assert.match(pc.err.join(''), /changed after the preview/);
+  assert.equal(fs.readFileSync(pc.settings, 'utf8'), '{"model":"changed"}');
+  assert.ok(files(pc.home).every(file => !/toolkit-backup-|toolkit-tmp-/.test(file)));
+});
+
+test('stale Toolkit lines are reported and kept; a symlinked settings file is written through', async t => {
+  const pc = computer(t, { codex: false });
+  const realDir = path.join(pc.home, 'dotfiles');
+  fs.mkdirSync(realDir, { recursive: true });
+  fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
+  const stale = 'Bash(node "/old/place/repo/scripts/toolkit-tasks.cjs" *)';
+  fs.writeFileSync(path.join(realDir, 'settings.json'), JSON.stringify({ permissions: { allow: [stale] } }));
+  try { fs.symlinkSync(path.join(realDir, 'settings.json'), pc.settings); } catch { t.skip('this computer cannot make a symlink'); return; }
+  assert.equal(await permissions.main(['--apply'], pc.deps), 0, pc.err.join(''));
+  assert.match(pc.out.join(''), /! stale, kept: Bash\(node "\/old\/place/);
+  assert.match(pc.out.join(''), /Codex: skipped\. Codex has no settings folder/);
+  assert.ok(fs.lstatSync(pc.settings).isSymbolicLink(), 'the link stays a link');
+  assert.ok(JSON.parse(fs.readFileSync(path.join(realDir, 'settings.json'), 'utf8')).permissions.allow.includes(stale));
+  assert.equal(fs.existsSync(pc.rules), false, 'no Codex file without a Codex folder');
+});
+
+test('the Codex rules file is replaced whole and the change is listed rule by rule', async t => {
+  const pc = computer(t);
+  fs.mkdirSync(path.dirname(pc.rules), { recursive: true });
+  fs.writeFileSync(pc.rules, 'prefix_rule(\n    pattern = ["old","thing"],\n    decision = "allow",\n)\n');
+  assert.equal(await permissions.main(['--apply', '--host', 'codex'], pc.deps), 0, pc.err.join(''));
+  assert.equal(fs.readFileSync(pc.rules, 'utf8'), blockFor(pc.deps, 'codex').text);
+  assert.match(pc.out.join(''), /- allow old thing/);
+  assert.match(pc.out.join(''), /\+ prompt node \/opt\/toolkit\/repo\/scripts\/toolkit-permissions\.cjs --apply/);
+  assert.ok(fs.existsSync(`${pc.rules}.toolkit-backup-20261112T110000Z`));
+  assert.equal(fs.existsSync(pc.settings), false, '--host codex leaves Claude Code alone');
+});
+
+test('--apply goes first and takes only --host', async t => {
+  const pc = computer(t);
+  const quiet = { ...pc.deps, stdout: () => {}, stderr: () => {} };
+  assert.equal(permissions.main(['--scope', 'computer', '--apply'], quiet), 2);
+  assert.equal(permissions.main(['--json', '--apply'], quiet), 2);
+  for (const args of [['--json'], ['--scope', 'repo'], ['--host', 'cursor'], ['--host'], ['--check', 'x']]) assert.equal(await permissions.main(['--apply', ...args], quiet), 2, args.join(' '));
+  assert.deepEqual(pc.asked, []);
+  assert.equal(fs.existsSync(pc.settings), false);
+});
+
+test('the blocks make --apply ask on Claude Code and prompt on Codex, anywhere on the line', t => {
+  const pc = computer(t);
+  const deps = { ...pc.deps, platform: 'win32', fs: { ...fs, existsSync: () => true } };
+  fs.writeFileSync(path.join(pc.home, '.ai-agent-toolkit', 'current', 'state.json'), JSON.stringify({ repo_path: 'C:\\tk' }));
+  const claude = new permissions.PermissionBlocks(deps).build({ scope: 'computer' }).blocks[0];
+  for (const tool of ['Bash', 'PowerShell']) assert.ok(claude.ask.includes(`${tool}(node "C:/tk/repo/scripts/toolkit-permissions.cjs" *--apply*)`), tool);
+  assert.ok(claude.allow.includes('Bash(node "C:/tk/repo/scripts/toolkit-permissions.cjs" *)'), 'printing stays allowed');
+  const codex = new permissions.PermissionBlocks(deps).build({ host: 'codex', scope: 'computer' }).blocks[0];
+  const rules = [...codex.text.matchAll(/pattern = (\[[^\n]+\]),\n {4}decision = "(\w+)"/g)].map(match => [JSON.parse(match[1]), match[2]]);
+  const decide = tokens => { const hits = rules.filter(([pattern]) => pattern.every((token, index) => tokens[index] === token)).map(([, decision]) => decision); return hits.includes('prompt') ? 'prompt' : hits.includes('allow') ? 'allow' : 'none'; };
+  assert.equal(decide(['node', 'C:/tk/repo/scripts/toolkit-permissions.cjs', '--apply']), 'prompt');
+  assert.equal(decide(['node', 'C:/tk/repo/scripts/toolkit-permissions.cjs', '--apply', '--host', 'codex']), 'prompt');
+  assert.equal(decide(['node', 'C:/tk/repo/scripts/toolkit-permissions.cjs', '--host', 'codex']), 'allow', 'printing stays allowed');
+});

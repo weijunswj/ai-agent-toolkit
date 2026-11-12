@@ -3,10 +3,13 @@
 
 // `toolkit permissions`: prints the paste-once permission blocks. It only reads and prints. It
 // never writes, creates or edits a settings or rules file: the owner pastes a block, no agent does.
+// `--apply` (first argument only) hands over to toolkit-permissions-apply.cjs, the owner's own
+// one-command merge, typed in their own terminal; agents never run it, and every block asks for it.
 //
 //   node repo/scripts/toolkit-permissions.cjs [--host claude|codex] [--scope computer|repo|all]
 //                                             [--repo-root <checkout>] [--format text|allowed-tools] [--json]
 //   node repo/scripts/toolkit-permissions.cjs --check <settings file> [--scope computer|repo]
+//   node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex]    (the owner only)
 //
 // Two blocks:
 //   computer  pasted once per computer into the app's user settings. Toolkit's own reversible
@@ -90,6 +93,9 @@ const ROWS = Object.freeze([
   Object.freeze({ id: 'gh-issue-comment', scope: 'repo', kind: 'command', command: 'gh issue comment', guard: GUARDS.comment, codex: false }),
 ]);
 
+// `--apply` writes the owner's own app settings: only the owner runs it, so every block asks for it.
+const APPLY_WHY = 'Writing the app\'s permission settings is the owner\'s own step, typed in their own terminal; agents never run it.';
+
 // Ask lines: the host asks even when an allow line above matches, because ask beats allow.
 // `after` is appended to the row's command; each entry names why it still asks.
 const ASK_NETS = Object.freeze({
@@ -99,6 +105,7 @@ const ASK_NETS = Object.freeze({
     { after: '*--no-first-run*', why: 'Skipping the first run needs the owner\'s approval.' },
     { after: '*--task-choice*', why: 'A keep-or-replace answer is the owner\'s; a flag cannot prove who answered.' },
   ],
+  'permissions-print': [{ after: '*--apply*', why: APPLY_WHY }],
   'gh-pr-comment': [{ after: '*--delete-last*', why: 'Deleting a comment is a delete.' }],
   'gh-issue-comment': [{ after: '*--delete-last*', why: 'Deleting a comment is a delete.' }],
 });
@@ -217,6 +224,8 @@ class PermissionBlocks {
       const made = emit(ROWS.filter(row => row.scope === 'computer'));
       const excluded = [
         ...Object.keys(PROGRAMME_ASK).map(sub => ({ command: `node ${quoted(`${managed.safe}/${PROGRAMME}`)} ${sub}`, tokens: ['node', `${managed.safe}/${PROGRAMME}`, sub], why: PROGRAMME_ASK[sub] })),
+        // Codex rules match from the start of the command, so --apply must be the first argument.
+        { command: `node ${quoted(`${managed.safe}/repo/scripts/toolkit-permissions.cjs`)} --apply`, tokens: ['node', `${managed.safe}/repo/scripts/toolkit-permissions.cjs`, '--apply'], why: APPLY_WHY },
         ...(windows ? Object.keys(TASKS_ASK).map(sub => ({ command: `node ${quoted(`${managed.safe}/${WINDOWS_TASKS}`)} ${sub}`, tokens: ['node', `${managed.safe}/${WINDOWS_TASKS}`, sub], why: TASKS_ASK[sub] })) : []),
       ];
       blocks.push(this.#block({ host, scope: 'computer', made, excluded: [...excluded, ...made.prompts],
@@ -274,13 +283,15 @@ class PermissionBlocks {
 // ---- command line --------------------------------------------------------------------------------
 
 const USAGE = 'Usage: node repo/scripts/toolkit-permissions.cjs [--host claude|codex] [--scope computer|repo|all] [--repo-root <checkout>] [--format text|allowed-tools] [--json]\n'
-  + '       node repo/scripts/toolkit-permissions.cjs --check <settings file> [--scope computer|repo]\n';
+  + '       node repo/scripts/toolkit-permissions.cjs --check <settings file> [--scope computer|repo]\n'
+  + '       node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex]   (the owner, in their own terminal)\n';
 
 function parseArgs(argv) {
   const options = { host: 'claude', scope: 'all', format: 'text', json: false, repoRoot: null, check: null };
   const values = { '--host': ['host', ['claude', 'codex']], '--scope': ['scope', ['computer', 'repo', 'all']], '--format': ['format', ['text', 'allowed-tools']], '--repo-root': ['repoRoot'], '--check': ['check'] };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === '--apply') throw new PermissionsError('--apply goes first, on its own or with --host only.', 'see the usage line.', 2);
     if (arg === '--json') { options.json = true; continue; }
     const spec = values[arg];
     const value = spec ? argv[index += 1] : undefined;
@@ -309,10 +320,12 @@ function describe(built, options) {
   lines.push('Never in a block: merges, closes, deletes outside the cleanup and store commands, raw git pushes, history rewrites, settings edits, secrets and real keys. Those keep asking. Evidence store work goes through the store command, which pushes only the bound store branch and never forces.');
   lines.push(`Agents: write each command exactly as its line shows (node, then the full path in forward slashes inside double quotes), one command per call, so the line matches. A line with no * matches only that exact command.`);
   if (options.host === 'claude') lines.push('To remove a block, delete its lines from the file. Run toolkit permissions again after the Toolkit folder moves.');
+  lines.push(`Owner shortcut: type node ${quoted(`${built.managed}/repo/scripts/toolkit-permissions.cjs`)} --apply in your own PowerShell or terminal. It shows the changes, waits for you to type apply, backs up each file and merges the computer blocks. Agents never run it.`);
   return lines;
 }
 
 function main(argv = process.argv.slice(2), deps = {}) {
+  if (argv[0] === '--apply') return require('./toolkit-permissions-apply.cjs').main(argv.slice(1), deps);
   const out = deps.stdout || (text => process.stdout.write(text));
   const err = deps.stderr || (text => process.stderr.write(text));
   let options;
@@ -339,6 +352,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
   }
 }
 
-if (require.main === module) process.exitCode = main();
+if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });
 
 module.exports = Object.freeze({ PermissionBlocks, PermissionsError, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, TASKS_ALLOW, TASKS_ASK, safePath, parseArgs, main });
