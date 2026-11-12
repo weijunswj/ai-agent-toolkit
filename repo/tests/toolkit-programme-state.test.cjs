@@ -541,6 +541,44 @@ test('gh and git resolve to a full .exe path, never from the working folder or a
   assert.throws(() => state.resolveExecutable('gh', { ...options, environment: { PATH: 'C:\\work;C:\\tools' } }), { code: 'EXECUTABLE_NOT_FOUND' });
 });
 
+test('the state store accepts an App installation read with no permissions only for the cloud sweep', () => {
+  const where = { repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' };
+  // An App installation token's repository read carries no `permissions` object.
+  const installationRead = permissions => {
+    const github = new FakeGitHub();
+    const request = github.request.bind(github);
+    github.request = (method, endpoint, ...rest) => {
+      const response = request(method, endpoint, ...rest);
+      if (method === 'GET' && endpoint === `repos/${where.repository}` && response.status === 200) {
+        const json = { ...response.json };
+        if (permissions === undefined) delete json.permissions; else json.permissions = permissions;
+        return { ...response, json };
+      }
+      return response;
+    };
+    return github;
+  };
+  const rows = [
+    // [repository read permissions, installationWrite, accepted]
+    [undefined, true, true],
+    [undefined, false, false],
+    [{ push: false }, true, false],
+    [{ push: true }, false, true],
+    [null, true, false],
+  ];
+  for (const [permissions, installationWrite, accepted] of rows) {
+    const store = new state.StateStore({ transport: installationRead(permissions), store: where, installationWrite });
+    if (accepted) assert.equal(store.verify(), true, JSON.stringify({ permissions, installationWrite }));
+    else assert.throws(() => store.verify(), { code: 'STATE_STORE_UNVERIFIED' }, JSON.stringify({ permissions, installationWrite }));
+  }
+  // openStore passes the flag through, and a computer pass never gets it.
+  const binding = { repository: 'acme/app', store: { kind: 'github', ...where } };
+  assert.equal(state.openStore({ transport: installationRead(undefined), binding, installationWrite: true }).verify(), true);
+  assert.throws(() => state.openStore({ transport: installationRead(undefined), binding }).verify(), { code: 'STATE_STORE_UNVERIFIED' });
+  // A non-boolean flag grants nothing.
+  assert.throws(() => new state.StateStore({ transport: installationRead(undefined), store: where, installationWrite: 'yes' }).verify(), { code: 'STATE_STORE_UNVERIFIED' });
+});
+
 test('the state store refuses a public or read-only store and never writes unchanged state', () => {
   for (const options of [{ storePrivate: false }, { storeWritable: false }]) {
     const github = new FakeGitHub(options);
