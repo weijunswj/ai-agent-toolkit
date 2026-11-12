@@ -11,8 +11,40 @@ const claudeHook = require('../scripts/toolkit-governance-hook.cjs');
 const SCRIPT = require.resolve('../scripts/toolkit-commands.cjs');
 const wake = (attributes, text) => `<wake reason="mention" current-time="2026-11-11T05:00:00Z"><project id="chan_example" type="project"><thread ts="cmsg_thread"><message trigger="true" ${attributes} id="cmsg_one" sent-at="2026-11-11T05:00:00Z">${text}</message></thread></project></wake>`;
 
-test('exactly five typed commands are recognised', () => {
-  assert.deepEqual([...commands.PHRASES].sort(), ['toolkit cmd', 'toolkit command', 'toolkit refresh', 'toolkit setup', 'toolkit show env']);
+test('exactly these typed commands are recognised', () => {
+  assert.deepEqual([...commands.PHRASES].sort(), ['toolkit cmd', 'toolkit command', 'toolkit governance catalogue', 'toolkit governance check', 'toolkit governance discover',
+    'toolkit governance migrate', 'toolkit governance security', 'toolkit governance status', 'toolkit refresh', 'toolkit setup', 'toolkit show env']);
+});
+
+test('a typed `toolkit governance check` runs the check subcommand, not status or the attention list', () => {
+  assert.deepEqual(commands.typedCommand('toolkit governance check'), { phrase: 'toolkit governance check', action: 'governance', subcommand: 'check' });
+  const context = commands.phraseContext('toolkit governance check');
+  const script = path.join(__dirname, '..', 'scripts', 'toolkit-governance.cjs');
+  assert.ok(context.startsWith(`Toolkit command: the user typed \`toolkit governance check\`. Run exactly \`node "${script}" check\` in this repository`), context);
+  assert.match(context, /Run no other command in its place: no other governance subcommand, and not the programme `attention` list\.$/);
+  assert.doesNotMatch(context, /toolkit-governance\.cjs" status/);
+  // The named script really takes `check` as its own subcommand.
+  assert.ok(/'check'/.test(fs.readFileSync(script, 'utf8').match(/const COMMANDS = Object\.freeze\(\[[^\]]*\]\)/)[0]));
+});
+
+test('each typed governance phrase names its own subcommand of toolkit-governance.cjs', () => {
+  const script = path.join(__dirname, '..', 'scripts', 'toolkit-governance.cjs');
+  for (const subcommand of ['status', 'check', 'discover', 'catalogue', 'security']) {
+    const typed = commands.typedCommand(`  Toolkit  Governance ${subcommand.toUpperCase()}. `);
+    assert.deepEqual(typed, { phrase: `toolkit governance ${subcommand}`, action: 'governance', subcommand }, subcommand);
+    const context = commands.phraseContext(`toolkit governance ${subcommand}`);
+    assert.ok(context.includes(`Run exactly \`node "${script}" ${subcommand}\``), subcommand);
+    for (const other of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate'].filter(word => word !== subcommand)) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${subcommand} names ${other}`);
+  }
+  const migrate = commands.phraseContext('toolkit governance migrate');
+  assert.match(migrate, /do not run it: give the user this exact command to run in their own terminal/);
+  assert.ok(migrate.endsWith(`\`node "${script}" migrate\``), migrate);
+});
+
+test('governance answers and other governance wording stay with the gate or plain text', () => {
+  const plain = ['toolkit governance enable', 'toolkit governance disable', 'toolkit governance decline', 'toolkit governance', 'toolkit governance check --offline',
+    'toolkit governance check --json', 'toolkit governance check please', 'run toolkit governance check', 'toolkit governance reopen', 'toolkit governance publish', 'governance check'];
+  for (const text of plain) assert.equal(commands.phraseContext(text), '', text);
 });
 
 test('each typed command maps to its own action, whatever the letter case, spacing or closing full stop', () => {
@@ -70,6 +102,7 @@ function prompt(decision, text, extra = {}) {
 
 test('Claude Code prompt hook: a typed command adds its line on an ordinary pass', () => {
   assert.match(prompt({ action: 'pass' }, 'toolkit show env').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit show env`\./);
+  assert.match(prompt({ action: 'pass' }, 'toolkit governance check').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit governance check`\. Run exactly `node "[^"]*toolkit-governance\.cjs" check`/);
   assert.deepEqual(prompt({ action: 'pass' }, 'toolkit set env'), {});
 });
 

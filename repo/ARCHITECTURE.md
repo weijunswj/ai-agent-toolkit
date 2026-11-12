@@ -30,7 +30,7 @@ Last reviewed against `main` `51c6bbe`.
 | Native plugin install | `repo/scripts/setup-claude-toolkit-plugin.cjs`, `repo/scripts/setup-codex-toolkit-plugin.cjs` |
 | Session-start hooks and bridge | `repo/scripts/toolkit-local-bridge.cjs`, `repo/scripts/toolkit-codex-session-start.cjs` |
 | Install check | `repo/scripts/toolkit-install-health.cjs`, `repo/scripts/toolkit-claude-account-copy.cjs` (the Claude app copy steps, shared with the session-start reminder and the daily check-in); Codex's Toolkit state and bundle fingerprint, read from the Codex files only, in `repo/scripts/toolkit-codex-install-state.cjs` (`--check` also asks the Codex the gate will run, named with `--codex`, once through its app-server, and holds gate launches until the files and that Codex agree every hook is on) |
-| Typed commands (`toolkit cmd` and the four other phrases both prompt hooks match exactly) and the command list | `repo/scripts/toolkit-commands.cjs` |
+| Typed commands (`toolkit cmd`, the other phrases both prompt hooks match exactly, and the `toolkit governance <subcommand>` phrases) and the command list | `repo/scripts/toolkit-commands.cjs` |
 | Report-only scan for Toolkit files left in repositories with governance off | `repo/scripts/toolkit-leftover-files.cjs` |
 | Keys and tokens (`toolkit env`) | `repo/scripts/toolkit-env.cjs`, `repo/scripts/toolkit-env-store.cjs`, `repo/scripts/toolkit-env-feeders.cjs`, `repo/scripts/toolkit-env-editor.cjs` |
 | Global rules installer | `repo/scripts/toolkit-global-rules.cjs` |
