@@ -1,5 +1,29 @@
 # Toolkit Changelog
 
+## 3.77.0 (holder orders and sweeps that finish)
+
+### Programme reconciler
+
+- **Holder orders:** a controller with no shell of its own (a web controller) writes its decisions into a holder order: the exact writes, for the parent's current holder and epoch, until an expiry at most a day ahead. The session it hands the order to runs `programme.cjs run-order --order <file> --session <id>`, which runs only those writes as the holder, stops at the first refusal and logs the order, its digest, the running session's hash and each outcome in the parent's private part. A rerun skips finished writes; `--dry-run` writes nothing. Claims, takeovers, `init-parent` and `migrate-state` never run from an order.
+- **Sweeps draw their pages:** a sweep pass now budgets each task page at its measured cost (about seven requests) for every task likely to need one, and counts the requests that opened the store. A large parent no longer reads every task, runs out of requests and draws no page at all, pass after pass; its pages now fill in over a few passes and the stopped-pass finding clears.
+- **A busy sweep says who holds it:** a refresh that meets another sweep's live lease prints the holder's host, start time and lease end, and its JSON carries them as `holder`.
+
+### Issue closure guard
+
+- **Merged owner-test PRs:** closing words for a task are refused while a merged PR in the same repository that references it still says `UAT: OWNER_TEST_NEEDED`, even if the task's page has not recorded the owed test.
+
+## 3.76.0 (owner's one-command permissions apply)
+
+### Added
+
+- **`toolkit permissions --apply`:** the owner types it in their own PowerShell or terminal. It lists what would change, waits for the typed word `apply`, backs each file up next to itself, merges the computer blocks into Claude Code's user settings (every other key and line kept, stale Toolkit lines reported, never removed) and replaces Codex's own `toolkit.rules`, then reads each file back. `--host claude` or `--host codex` does one app. The repo block is still pasted by hand.
+
+### Changed
+
+- **Permission blocks:** every computer block now makes `--apply` ask: an ask line on Claude Code and a prompt rule on Codex, with `--apply` required as the first argument so the Codex rule matches. Printing and `--check` stay allowed and still write nothing.
+- **Agents never run `--apply`:** the setup skill and safety playbooks tell agents to hand the owner the command instead. The app's ask for the exact command is the only hard block; the refusals in an agent's shell and without a terminal are speed bumps. Blocks pasted before this release allow `--apply` with no ask until `--apply` or a fresh paste adds the ask line.
+- **Merge authority:** changes to the apply command wait for a typed merge, like the permission, cleanup and store scripts.
+
 ## 3.75.0 (typed commands and remove Toolkit)
 
 ### Added

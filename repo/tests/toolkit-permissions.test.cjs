@@ -166,7 +166,7 @@ test('--check reads a settings file and reports missing and stale lines without 
   const before = fs.readFileSync(file, 'utf8');
   const out = [];
   assert.equal(permissions.main(['--check', file, '--scope', 'computer', '--json'], { ...deps, stdout: text => out.push(text) }), 1);
-  assert.deepEqual(JSON.parse(out.join('')).check, [{ scope: 'computer', missing: [built.blocks[0].allow[0]], stale: [stale] }]);
+  assert.deepEqual(JSON.parse(out.join('')).check, [{ scope: 'computer', missing: [built.blocks[0].allow[0], ...built.blocks[0].ask], stale: [stale] }]);
   assert.equal(fs.readFileSync(file, 'utf8'), before);
   fs.writeFileSync(file, built.blocks[0].text);
   assert.equal(permissions.main(['--check', file, '--scope', 'computer'], { ...deps, stdout: () => {} }), 0);
@@ -234,6 +234,8 @@ test('script lines allow only what their guard text says; approval-bearing flags
     [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" refresh --scheduled`, 'allow'],
     [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" refresh --scheduled --budget-ms 2880000 --json`, 'allow'],
     [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" claim --takeover`, 'prompt'],
+    // A holder order runs only the allowed writes it lists; the order itself refuses claims and takeovers.
+    [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" run-order --order C:/x/order.json --session s-1`, 'allow'],
   ];
   for (const tool of ['Bash', 'PowerShell']) for (const [command, expected] of rows) assert.equal(verdict(blocks, tool, command), expected, `${tool}: ${command}`);
   // Every flag of a script printed with exact lines is known here, so a new flag fails until someone decides.
@@ -253,7 +255,7 @@ test('script lines allow only what their guard text says; approval-bearing flags
   const taskSwitches = [...source('repo/scripts/toolkit-windows-tasks.cjs').matchAll(/arg === '(--[a-z-]+)'/g)].map(match => match[1]);
   assert.deepEqual([...new Set(taskSwitches)].sort(), ['--json', '--no-first-run', '--repair-owned', '--task-choice']);
   const programmeFlags = [...source('skills/github-program-reconciler/scripts/programme.cjs').matchAll(/'(--[a-z-]+)'/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(programmeFlags)].sort(), ['--apply', '--assignment', '--at-head', '--body-file', '--budget-ms', '--catalogue', '--consume', '--controller', '--deadline-ms', '--dry-run', '--effort', '--finding', '--force-another', '--include-private', '--issue', '--json', '--lane', '--message-file', '--model', '--parent', '--parent-file', '--patch', '--plan-digest', '--pr', '--prefix', '--reason', '--record', '--refresh', '--repo-root', '--role', '--route-read-back', '--scheduled', '--session', '--show-toplevel', '--supersede', '--takeover', '--takeover-record', '--verdict']);
+  assert.deepEqual([...new Set(programmeFlags)].sort(), ['--apply', '--assignment', '--at-head', '--body-file', '--budget-ms', '--catalogue', '--consume', '--controller', '--deadline-ms', '--dry-run', '--effort', '--finding', '--force-another', '--include-private', '--issue', '--json', '--lane', '--message-file', '--model', '--order', '--parent', '--parent-file', '--patch', '--plan-digest', '--pr', '--prefix', '--reason', '--record', '--refresh', '--repo-root', '--role', '--route-read-back', '--scheduled', '--session', '--show-toplevel', '--supersede', '--takeover', '--takeover-record', '--verdict']);
   // The refresh line's guard says what its time flags may change, and the script clamps them to that.
   const refreshGuard = permissions.ROWS.find(row => row.id === 'programme-refresh').guard;
   assert.match(refreshGuard, /--scheduled and --budget-ms set only how long one refresh pass may run, 10 to 50 minutes/);
@@ -262,6 +264,8 @@ test('script lines allow only what their guard text says; approval-bearing flags
   assert.equal(budget(['refresh', '--scheduled', '--budget-ms', String(10 * 60 * 60 * 1000)]), 50 * 60 * 1000, 'a huge budget is held to 50 minutes');
   assert.equal(budget(['refresh', '--scheduled', '--budget-ms', '1']), 10 * 60 * 1000, 'a tiny budget is held to 10 minutes');
   assert.throws(() => cli.parseArgs(['refresh', '--scheduled', '--controller']), /refresh takes no options/, 'the time flags open no other refresh option');
+  assert.throws(() => cli.parseArgs(['run-order', '--order', 'o.json', '--session', 's', '--takeover']), /run-order takes only/, 'an order line opens no other option');
+  assert.match(permissions.ROWS.find(row => row.id === 'programme-run-order').guard, /run-order runs only the writes listed here/);
   const wild = permissions.ROWS.filter(row => row.kind === 'script' && !row.sub && !row.forms).map(row => row.id);
   assert.deepEqual(wild, ['permissions-print', 'store'], 'only the print-only script and the self-checking store command keep a bare wildcard; the store flag table is pinned in its own test');
   assert.deepEqual([...source('repo/scripts/toolkit-permissions.cjs').matchAll(/'(--[a-z-]+)': \[/g)].map(match => match[1]).sort(), ['--check', '--format', '--host', '--repo-root', '--scope']);

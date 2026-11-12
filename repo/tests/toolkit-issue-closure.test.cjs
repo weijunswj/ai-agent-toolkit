@@ -522,3 +522,50 @@ test('closing words wait while the target issue records an owed UAT', () => {
   assert.equal(guardWith(issue('closed', block('PENDING'))).checkTexts(['Closes #2']).status, 'allowed');
   assert.equal(guardWith(issue('open', block('PENDING'))).checkTexts(['Refs #2']).status, 'allowed');
 });
+
+// A merged PR that references a task and still waits on the owner's test keeps the task open: a
+// later PR's closing words are refused even when the task's own page has not recorded the owed test.
+function ownerTestSetup(prBody, { merged = true, otherRepo = false } = {}) {
+  const github = new FakeGitHub({ repository: repo });
+  github.addIssue(1);
+  const source = { number: 77, body: prBody, repository_url: `https://api.github.com/repos/${otherRepo ? 'someone/else' : repo}`,
+    pull_request: { merged_at: merged ? '2026-11-12T10:00:00Z' : null } };
+  github.intercept(call => (call.method === 'GET' && /\/issues\/1\/timeline\?/.test(call.path)
+    ? { status: 200, json: [{ event: 'cross-referenced', source: { issue: source } }, { event: 'labeled' }] } : undefined));
+  const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
+  return new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state });
+}
+test('closing words are refused for a task a merged OWNER_TEST_NEEDED PR references', () => {
+  const guard = ownerTestSetup('Refs #1\n\nUAT: OWNER_TEST_NEEDED (open the board and check the new line)');
+  const result = guard.checkTexts(['Closes #1']);
+  assert.equal(result.status, 'refused');
+  assert.match(result.reason, /merged PR #77, whose UAT line is still OWNER_TEST_NEEDED/);
+});
+for (const [label, body, options] of [
+  ['the owner passed it', 'Refs #1\n\nUAT: PASSED (owner OK 12 Nov)', {}],
+  ['no owner test was needed', 'Refs #1\n\nUAT: NOT_REQUIRED (docs only)', {}],
+  ['the PR is not merged', 'Refs #1\n\nUAT: OWNER_TEST_NEEDED (try it)', { merged: false }],
+  ['the PR is in another repository', 'Refs #1\n\nUAT: OWNER_TEST_NEEDED (try it)', { otherRepo: true }],
+]) test(`closing words stay allowed when ${label}`, () => {
+  assert.equal(ownerTestSetup(body, options).checkTexts(['Closes #1']).status, 'allowed');
+});
+test('without a UAT reader (the skill copied alone) the merged-PR check is skipped', () => {
+  const github = new FakeGitHub({ repository: repo });
+  github.addIssue(1);
+  let timeline = 0;
+  github.intercept(call => { if (/\/timeline/.test(call.path)) timeline += 1; return undefined; });
+  assert.equal(new IssueClosureGuard({ transport: github, repository: repo }).checkTexts(['Closes #1']).status, 'allowed');
+  assert.equal(timeline, 0);
+});
+test('the hook guard passes the UAT reader', () => {
+  const adapter = require('../scripts/toolkit-issue-closure.cjs');
+  assert.equal(typeof adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath }).uatState, 'function');
+});
+test('an open native child is still a proven refusal when the timeline cannot be read', () => {
+  const github = new FakeGitHub({ repository: repo });
+  github.addIssue(1); github.addIssue(2, { parent: 1 });
+  github.intercept(call => (/\/timeline/.test(call.path) ? { status: 404, json: {} } : undefined));
+  const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
+  const result = new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state }).checkTexts(['Closes #1']);
+  assert.equal(result.status, 'refused', 'a cloud hook allows unknown, so a later failed read must not hide the open child');
+});
