@@ -193,7 +193,7 @@ class ToolkitGovernanceCli {
     if (result.default_branch_protection) lines.push(`Default-branch protection: ${result.default_branch_protection.status}`);
     if (result.dependency_security) lines.push(`Dependency and security settings: ${result.dependency_security.status}`);
     if (result.cloud_jobs) {
-      lines.push(...require('./toolkit-cloud-jobs.cjs').guideLines(result.cloud_jobs, result.cloud_jobs.setup), 'App setup: see Cloud jobs in the Toolkit Local Bridge guide.');
+      lines.push(...require('./toolkit-cloud-jobs.cjs').guideLines(result.cloud_jobs));
     }
     lines.push('Prompt-hold enforcement:');
     for (const [host, status] of Object.entries(result.enforcement)) lines.push(`- ${host}: ${status.status} (${status.reason})`);

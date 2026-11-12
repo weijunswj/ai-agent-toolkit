@@ -42,11 +42,11 @@ function fixture(t) {
   return { github, store, binding, dir, run, lease, record, stop, advance: ms => { clock += ms; } };
 }
 
-for (const host of ['laptop', 'cloud']) test(`lease: while the ${host} holds it, the other sweep writes nothing`, t => {
+for (const host of ['computer', 'cloud']) test(`lease: while the ${host} holds it, the other sweep writes nothing`, t => {
   const f = fixture(t);
   const held = f.lease(host);
   assert.equal(held.acquire(), true);
-  const other = f.lease(host === 'laptop' ? 'cloud' : 'laptop');
+  const other = f.lease(host === 'computer' ? 'cloud' : 'computer');
   assert.equal(other.acquire(), false);
   const commits = f.github.commits;
   const queued = f.run();
@@ -65,7 +65,7 @@ test('lease: a holder past its lease stops before its next request', t => {
   f.advance(TTL_MS);
   assert.throws(() => held.check(), { code: 'PASS_LOCK_LOST' });
   // An expired owner can neither renew nor release over a successor.
-  const successor = f.lease('laptop');
+  const successor = f.lease('computer');
   assert.equal(successor.acquire(), true);
   assert.equal(held.release({ complete: true }), false);
   assert.equal(f.record().holder.nonce, successor.nonce);
@@ -87,7 +87,7 @@ test('lease: expired lease reports the interrupted pass', t => {
 
 test('lease: local note wins for the same start', t => {
   const f = fixture(t);
-  const killed = f.lease('laptop');
+  const killed = f.lease('computer');
   killed.acquire();
   const started = killed.record.holder.progress.started_at;
   killed.progress({ phase: 'planning', done: 0, total: 0, started_at: started }, null);

@@ -18,7 +18,7 @@
         "cadence": "hourly",
         "cron": "17 * * * *"
       },
-      "replaces_laptop_job": "toolkit-programme-sweep",
+      "replaces_computer_job": "toolkit-programme-sweep",
       "tokens": [
         {
           "name": "governed",

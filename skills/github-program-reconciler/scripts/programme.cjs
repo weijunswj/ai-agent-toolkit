@@ -990,7 +990,7 @@ function runPasses(args, deps, out) {
   context.pass = pass;
   context.requests = requests;
   const environment = deps.environment || process.env;
-  const host = environment.GITHUB_ACTIONS === 'true' && environment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1' ? 'cloud' : 'laptop';
+  const host = environment.GITHUB_ACTIONS === 'true' && environment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1' ? 'cloud' : 'computer';
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
   let lock = takeLock(file, deps);
   if (!lock && args.command !== 'refresh') {

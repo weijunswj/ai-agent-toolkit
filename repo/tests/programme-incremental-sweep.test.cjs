@@ -224,10 +224,10 @@ test('stop phases: every sweep stop validates', t => {
   assert.ok(seen.size >= 1, 'at least one capped pass stopped');
 });
 
-test('103 tasks and 645 PRs: request counts per pass, cold and warm, laptop and cloud', t => {
+test('103 tasks and 645 PRs: request counts per pass, cold and warm, computer and cloud', t => {
   const counts = {};
-  for (const mode of ['laptop', 'cloud']) {
-    const f = fixture(t, { count: 103, prs: 645, discussion: 874, cached: mode === 'laptop' });
+  for (const mode of ['computer', 'cloud']) {
+    const f = fixture(t, { count: 103, prs: 645, discussion: 874, cached: mode === 'computer' });
     const before = f.page(421).length;
     const cold = []; let pass = 0;
     do { cold.push(f.run().requests); pass += 1; } while (f.parent().sweep.queue.length && pass < 5);
@@ -238,6 +238,6 @@ test('103 tasks and 645 PRs: request counts per pass, cold and warm, laptop and 
     assert.ok(f.page(421).length - before < 4096, 'the freshness line adds little');
   }
   t.diagnostic(JSON.stringify(counts));
-  assert.ok(counts.laptop.warm.every(count => count < 80), `laptop warm: ${counts.laptop.warm}`);
+  assert.ok(counts.computer.warm.every(count => count < 80), `computer warm: ${counts.computer.warm}`);
   assert.ok(counts.cloud.warm.every(count => count < 120), `cloud warm: ${counts.cloud.warm}`);
 });

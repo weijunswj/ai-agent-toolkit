@@ -156,7 +156,7 @@ function checkConformance(cwd, options = {}) {
   if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
   if (state.state === 'ENABLED' && state.materials.binding) findings.push(...appFindings(state, options));
   const drift = findings.some(entry => entry.severity === 'drift');
-  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot, options));
+  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot));
 }
 
 // The governance GitHub App: set up while governance is on, nothing left behind once it is off. Read
@@ -295,19 +295,10 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   return out;
 }
 
-// The cloud jobs guide: the governance App's permissions from the contract, and, online, whether its
-// variable and secret exist on this repository (metadata only; agents never create or set them).
-function cloudJobsGuide(state, toolkitRoot, options = {}) {
+// The cloud jobs guide from the contract: each job and the tokens it mints from the governance App.
+function cloudJobsGuide(state, toolkitRoot) {
   if (state?.state !== 'ENABLED' || !fs.existsSync(path.join(toolkitRoot, 'repo/contracts/cloud-jobs.json'))) return null;
-  const cloud = require('./toolkit-cloud-jobs.cjs');
-  const guide = cloud.buildCloudJobsGuide({ root: toolkitRoot });
-  let setup = null;
-  if (options.offline !== true) {
-    let slug = null;
-    try { const identity = governance.readIdentity(state.root); slug = identity.valid ? governance.remoteSlug(identity.remote) : null; } catch { slug = null; }
-    setup = cloud.checkAppSetup({ root: toolkitRoot, repository: slug, ...(options.cloudReader ? { readMetadata: options.cloudReader } : {}) });
-  }
-  return { ...guide, setup };
+  return require('./toolkit-cloud-jobs.cjs').buildCloudJobsGuide({ root: toolkitRoot });
 }
 
 function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null, cloudJobs = null) {

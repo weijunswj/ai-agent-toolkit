@@ -2294,7 +2294,7 @@ function validateSweepRecord(doc) {
   if (isObject(doc)) {
     checkShape(errors, doc, { all: ['schema', 'repository', 'holder', 'pass', 'changed_since', 'last_complete_at', 'stopped_passes', 'reason', 'unreported', 'streaks'] }, 'sweep record');
     check(errors, doc.schema === SWEEP_RECORD_SCHEMA && REPO.test(doc.repository || ''), 'the sweep record names its schema and repository');
-    check(errors, doc.holder === null || isObject(doc.holder) && /^[0-9a-f]{32}$/.test(doc.holder.nonce || '') && ['laptop', 'cloud'].includes(doc.holder.host)
+    check(errors, doc.holder === null || isObject(doc.holder) && /^[0-9a-f]{32}$/.test(doc.holder.nonce || '') && ['computer', 'cloud'].includes(doc.holder.host)
       && time(doc.holder.expires_at) && Object.keys(doc.holder).sort().join(',') === 'expires_at,host,nonce,progress', 'the sweep record holder is invalid');
     if (isObject(doc.holder)) diagnostics({ cause: 'interrupted', ...doc.holder.progress }, 'sweep record progress');
     check(errors, isInt(doc.pass) && isInt(doc.stopped_passes), 'the sweep record counts must be whole numbers');

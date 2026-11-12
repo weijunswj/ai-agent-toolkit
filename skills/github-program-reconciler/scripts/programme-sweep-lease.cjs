@@ -1,6 +1,6 @@
 'use strict';
 
-// The sweep lease: one record per programme in the private store, shared by the laptop and the
+// The sweep lease: one record per programme in the private store, shared by the computer's sweep and the
 // cloud runner. A sweep acquires it with compare-and-swap before any write and releases it at the
 // end; while one holds it, another prints "another sweep is running" and writes nothing.
 //
@@ -12,7 +12,7 @@
 const crypto = require('node:crypto');
 const state = require('./programme-state.cjs');
 
-// Longer than the cloud job's fifteen-minute timeout and the laptop pass's ten-minute budget, so a
+// Longer than the cloud job's fifteen-minute timeout and the computer pass's ten-minute budget, so a
 // live holder never loses its lease; a killed one frees it within this time.
 const TTL_MS = 20 * 60 * 1000;
 const STREAK_FINDING = 3;
