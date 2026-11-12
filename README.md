@@ -21,7 +21,7 @@ Setup keeps its own clean copy of this repository at `%USERPROFILE%\.ai-agent-to
 
 ## Update
 
-With automatic updates on (setup recommends it), Toolkit checks for a newer `main` when a Codex or Claude Code session starts and updates itself. To update now, say `refresh toolkit`: it keeps your current answers and asks nothing unless a question is new or different. Start a new session afterwards so the new version loads.
+With automatic updates on (setup recommends it), Toolkit checks for a newer `main` when a Codex or Claude Code session starts and updates itself. To update now, say `refresh toolkit`. Start a new session afterwards so the new version loads.
 
 ## Remove
 
@@ -75,7 +75,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.73.0 sha256=a57c3a0c239c -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.72.1 sha256=a57c3a0c239c -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

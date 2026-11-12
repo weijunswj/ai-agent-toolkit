@@ -1,13 +1,10 @@
 # Toolkit Changelog
 
-## 3.73.0 (refresh toolkit keeps your answers with no questions)
+## 3.72.1 (closing words wait for a task's recorded UAT)
 
-### Changed
+### Fixed
 
-- `refresh toolkit` (and `toolkit refresh` or plain `refresh`) now runs setup with `--refresh`: it updates Toolkit and, while the questions match the last bank answered on this computer, keeps every current answer (each row's `A. Keep current`) with no bank, in Codex and in Claude Code. An installed, turned-on plugin that the update left behind is refreshed.
-- A new or different question, no saved answers yet, or a missing or turned-off plugin shows the full bank as for `setup toolkit`, with a line naming each new or different row. A recommendation you already declined does not bring the bank back.
-- `setup toolkit` still shows the bank. An answered bank saves each row's question shape and the recommendation it showed under `~/.ai-agent-toolkit/user-state/setup-question-shapes.json`, one record per app, with no setting values, paths or keys.
-- A refresh never approves a Codex configuration proposal, a scheduled-task standing approval or a native trust step, and `--refresh` refuses choice flags, `--yes-recommended`, proposal approvals and `--plan`.
+- **Owed UAT on the target:** the issue closure check now also refuses a closing word for an open issue whose generated programme status records UAT as `PENDING`, `UAT_PARTIAL_REQUIRED` or `UAT_FULL_REQUIRED`, whatever the pull request's own UAT line says, and names the `Refs` link to use. Before, a pull request that needed no UAT of its own could close a task still waiting on the owner's test, even through quoted text.
 
 ## 3.72.0 (self-checking evidence store command)
 

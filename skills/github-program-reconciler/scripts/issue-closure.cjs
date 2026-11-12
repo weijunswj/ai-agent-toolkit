@@ -45,6 +45,17 @@ function closingReferences(text, repository) {
   return result;
 }
 
+// The UAT a task's generated programme STATE block records as still owed by the owner, or null.
+// Only the block's own `- UAT: <state>; review:` line counts; text elsewhere in the body does not.
+// A hand-made block can only add a refusal, never remove one.
+const STATE_BLOCK = /<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v\d+[^\r\n]*?-->([\s\S]*?)<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->/g;
+const OWED_UAT = /^- UAT: (PENDING|UAT_PARTIAL_REQUIRED|UAT_FULL_REQUIRED)\b[^\r\n]*; review: /m;
+function owedUat(body) {
+  if (typeof body !== 'string') return null;
+  for (const block of body.matchAll(STATE_BLOCK)) { const owed = OWED_UAT.exec(block[1]); if (owed) return owed[1]; }
+  return null;
+}
+
 const allowed = extra => ({ status: 'allowed', ...extra });
 const unknown = reason => ({ status: 'unknown', reason });
 class IssueClosureGuard {
@@ -128,7 +139,9 @@ class IssueClosureGuard {
         try {
           const issue = this.get(`repos/${target.repository}/issues/${target.number}`, budget, { missing: prRead && target.repository === this.repository });
           if (!issue || issue.number === target.number && issue.pull_request) continue;
-          result = this.assertClosable(target.number, target.repository, budget, { resolved: issue });
+          const owed = issue.state === 'open' ? owedUat(issue.body) : null;
+          result = owed ? { status: 'refused', reason: `Issue ${target.repository}#${target.number} records UAT ${owed}: the owner's test is still owed. Keep it open and use Refs until the controller records UAT PASSED.` }
+            : this.assertClosable(target.number, target.repository, budget, { resolved: issue });
         } catch (error) { result = unknown(`Closing target could not be read. ${error.message} Use Refs or retry when GitHub is readable.`); }
         const location = `${target.source}, line ${target.line}, ${target.pattern}, target ${target.repository}#${target.number}: `;
         if (result.status === 'refused') return { ...result, reason: location + result.reason };
@@ -174,4 +187,4 @@ class IssueClosureGuard {
     } catch (error) { return unknown(`PR metadata or commits could not be read completely. ${error.message} Retry with a current explicit PR and head.`); }
   }
 }
-module.exports = { closingReferences, IssueClosureGuard };
+module.exports = { closingReferences, owedUat, IssueClosureGuard };
