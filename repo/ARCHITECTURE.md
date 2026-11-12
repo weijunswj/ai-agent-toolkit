@@ -69,7 +69,7 @@ Host config writes reuse `repo/scripts/codex-app-server.cjs` and share `repo/scr
 
 | Subject | Source |
 |---|---|
-| Controller procedure | `repo/CONTROLLER.md` (the core) and the pages it lists under `repo/controller/`, kept in step by `repo/scripts/sync-controller-pages.cjs`; generic takeover, capability routes and relay formats: `repo/docs/agent-playbooks/controller-takeover.md` |
+| Controller procedure | `repo/CONTROLLER.md` (the core) and the pages it lists under `repo/controller/`, kept in step by `repo/scripts/sync-controller-pages.cjs`; what enforces each rule: `repo/contracts/agent-rules/controller-enforcement-map.json`, checked by `repo/scripts/check-controller-enforcement-map.cjs`; generic takeover, capability routes and relay formats: `repo/docs/agent-playbooks/controller-takeover.md` |
 | Programme direction | `repo/docs/TOOLKIT-DELIVERY.md` |
 | Global rules (every harness session) | `repo/contracts/agent-rules/global-rules.md` |
 | Gate rules (gate sessions and their controllers) | `repo/contracts/agent-rules/gate-rules.md` |
