@@ -266,3 +266,23 @@ test('request caps: a cloud pass with little of GitHub\'s hour left reads fewer 
   assert.ok(lowest >= 0, `GitHub's count went to ${lowest}`);
   assert.ok(lowest >= sweep.LOW_REMAINING - sweep.RESERVE, `ended at ${lowest}`);
 });
+
+test('request caps: GraphQL\'s separate count never stands in for the REST count that pages spend', () => {
+  const sweep = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-sweep.cjs'));
+  for (const host of ['cloud', 'computer']) {
+    const left = { core: 400, graphql: 4900 };
+    const transport = { request: (method, endpoint) => {
+      const resource = endpoint === 'graphql' ? 'graphql' : 'core';
+      left[resource] -= 1;
+      return { status: 200, json: { data: {} }, headers: { 'x-ratelimit-remaining': String(left[resource]), 'x-ratelimit-resource': resource } };
+    } };
+    const requests = new sweep.SweepRequests({ transport, cap: sweep.passCap({ host, scheduled: true }), nowMs: () => 0, wait: () => {} });
+    requests.request('GET', 'rate_limit');
+    let pages = 0;
+    // Each task: two REST reads, then its pull request over GraphQL, as the task reader does.
+    while (requests.canStartTask(pages)) { requests.request('GET', 'task'); requests.request('GET', 'task'); requests.request('POST', 'graphql'); pages += 1; }
+    requests.reading = false;
+    for (let i = 0; i < pages * sweep.PAGE_COST + requests.reserve; i += 1) requests.request('PATCH', 'page');
+    assert.ok(left.core >= sweep.LOW_REMAINING, `${host}: ${pages} pages left REST at ${left.core}`);
+  }
+});

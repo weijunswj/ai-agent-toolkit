@@ -43,7 +43,9 @@ class SweepRequests {
     this.reason = null;
     this.retryAt = 0;
     this.active = false;
-    // GitHub's last reported x-ratelimit-remaining, or null before any response carried one.
+    // GitHub's last reported x-ratelimit-remaining for the REST (core) limit, or null before any REST
+    // response carried one. GraphQL has its own limit, named by x-ratelimit-resource, and never
+    // stands in for it: pages are drawn over REST.
     this.remaining = null;
   }
 
@@ -77,8 +79,10 @@ class SweepRequests {
       // GitHub's own time at the start of the pass: the next pass reads what changed since then.
       if (!this.serverStart && Number.isFinite(Date.parse(headers.date))) this.serverStart = new Date(Date.parse(headers.date)).toISOString();
       if (headers['x-ratelimit-remaining'] !== undefined && Number.isFinite(Number(headers['x-ratelimit-remaining']))) {
-        this.remaining = Number(headers['x-ratelimit-remaining']);
-        if (this.remaining < LOW_REMAINING) this.reason = 'GitHub rate limit';
+        const remaining = Number(headers['x-ratelimit-remaining']);
+        const resource = headers['x-ratelimit-resource'];
+        if (resource === undefined || resource === 'core') this.remaining = remaining;
+        if (remaining < LOW_REMAINING) this.reason = 'GitHub rate limit';
       }
       if (headers['retry-after'] !== undefined) {
         const seconds = Number(headers['retry-after']);
