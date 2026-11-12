@@ -13,9 +13,13 @@
 //
 // Both refresh and check refuse takeover-named or identical playbook copies anywhere in the skill tree.
 // VERSION is one line: `Version: <skill Version> toolkit <x.y.z> main <commit7> copied <UTC>`.
+// BASE names the local Toolkit files the Projects controller inherits (its base), one
+// `<git blob SHA> <path>` line each, so the weekly base clash check can tell which base this copy
+// follows. The SHA is git's blob id of the file with CRLF read as LF, so it needs no git.
 // It is removed first and written last, so a copy cut short never looks current. Files a newer
 // skill dropped, and folders left empty, are removed from the folder, which only this script writes.
 const childProcess = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { ProjectsInstructions } = require('./toolkit-projects-instructions.cjs');
@@ -24,10 +28,37 @@ const SKILL_DIR = 'repo/contracts/claude-projects/web-controller-projects';
 const TAKEOVER_SOURCE = 'repo/docs/agent-playbooks/controller-takeover.md';
 const TAKEOVER_FILE = 'takeover.md';
 const BLOCK_FILE = 'instructions-block.md';
+const BASE_FILE = 'BASE';
+// The base the Projects controller follows as written: its rule layers, the controller file and its
+// pages, and the hook manifest whose cloud cover reference/cloud-hook-parity.md records.
+const BASE_PATHS = Object.freeze([
+  'repo/contracts/agent-rules/global-rules.md',
+  'repo/contracts/agent-rules/gate-rules.md',
+  'repo/contracts/agent-rules/toolkit-governed-rules.md',
+  'repo/CONTROLLER.md',
+  'repo/controller/roles-and-routes.md',
+  'repo/controller/gates.md',
+  'repo/controller/evidence-and-finish.md',
+  '.claude-plugin/hooks/hooks.json',
+]);
 const VERSION_FILE = 'VERSION';
 const SKILL_VERSION = /^Version: (\d{4}-\d{2}-\d{2}\.\d+)$/m;
 const BLOCK_MARKER = /^<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN PROJECT-INSTRUCTIONS v2 toolkit=\d+\.\d+\.\d+ sha256=[0-9a-f]{12} -->\n/;
 const VERSION_LINE =/^Version: (\d{4}-\d{2}-\d{2}\.\d+) toolkit (\d+\.\d+\.\d+) main ([0-9a-f]{7}) copied (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\n?$/;
+
+// git's blob id for a text file, CRLF read as LF.
+function blobSha(bytes) {
+  const text = Buffer.from(bytes.toString('utf8').replace(/\r\n/g, '\n'), 'utf8');
+  return crypto.createHash('sha1').update(`blob ${text.length}\0`).update(text).digest('hex');
+}
+
+function baseText(root) {
+  return BASE_PATHS.map(rel => {
+    let bytes;
+    try { bytes = fs.readFileSync(path.join(root, rel)); } catch { throw new GuidebookError('GUIDEBOOK_SOURCE'); }
+    return `${blobSha(bytes)} ${rel}\n`;
+  }).join('');
+}
 
 class GuidebookError extends Error {
   constructor(code) { super(code); this.code = code; }
@@ -74,8 +105,9 @@ class Guidebook {
     const dir = path.join(this.root, SKILL_DIR);
     const files = new Map(listFiles(dir).map(rel => [rel, fs.readFileSync(path.join(dir, rel))]));
     const match = SKILL_VERSION.exec((files.get('SKILL.md') || '').toString('utf8'));
-    if (!match || files.has(BLOCK_FILE) || files.has(VERSION_FILE) || [...files].some(([rel, bytes]) => isTakeoverCopy(rel, bytes, takeover))) throw new GuidebookError('GUIDEBOOK_SOURCE');
+    if (!match || files.has(BLOCK_FILE) || files.has(VERSION_FILE) || files.has(BASE_FILE) || [...files].some(([rel, bytes]) => isTakeoverCopy(rel, bytes, takeover))) throw new GuidebookError('GUIDEBOOK_SOURCE');
     files.set(TAKEOVER_FILE, takeover);
+    files.set(BASE_FILE, Buffer.from(baseText(this.root), 'utf8'));
     const instructions = new ProjectsInstructions({ root: this.root });
     const block = `${instructions.render()}\n`;
     return { files, block, version: match[1], toolkit: instructions.expectedBlock().version };
@@ -166,4 +198,4 @@ function main(args = process.argv.slice(2), guidebook = new Guidebook()) {
 }
 
 if (require.main === module) process.exitCode = main();
-module.exports = Object.freeze({ Guidebook, GuidebookError, parseArgs, main, VERSION_LINE });
+module.exports = Object.freeze({ Guidebook, GuidebookError, parseArgs, main, VERSION_LINE, BASE_PATHS, blobSha });

@@ -528,7 +528,7 @@ test('F: the Hooks lines for each host, with the portable path whenever a host h
     ['Claude Code, no install and no account copy', { claudeRegistry: absent, claudeAccountCopy: () => null }, {}, ['Hooks: Claude Code plugin absent'], true],
     ['Claude Code, hooks off in settings', { claudeRegistry: installed, claudeBlockers: () => ['Your Claude Code user settings set disableAllHooks.'] }, {}, ['Hooks: Claude Code disabled (Your Claude Code user settings set disableAllHooks.)'], true],
     ['Codex, plugin enabled', { claudeRegistry: absent, codexInspect: () => ({ status: 'enabled' }) }, { codex: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Codex present, trust unknown'], true],
-    ['Projects synced copy', { claudeRegistry: absent }, { synced: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Claude Projects no local hooks'], true],
+    ['Projects synced copy', { claudeRegistry: absent }, { synced: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Claude Projects hooks run in cloud threads from the account copy'], true],
     ['no plugin anywhere', { claudeRegistry: absent, codexInspect: () => ({ status: 'unprovable' }) }, { codex: true }, ['Hooks: Claude Code plugin absent', 'Hooks: Codex plugin absent'], true],
   ];
   for (const [name, readers, setup, expected, portable] of rows) {
