@@ -40,6 +40,9 @@ class FakeGitHub {
     this.commentSequence = 0;
     this.commentsMoveIssue = false;
     this.login = 'owner';
+    this.sweepHead = crypto.createHash('sha1').update('initial fake state').digest('hex');
+    this.sweepTrees = new Map(); this.sweepCommits = new Map(); this.sweepSequence = 0;
+    this.snapshots.set(this.sweepHead, new Map());
   }
 
   tick() { this.clock += 1000; return new Date(this.clock).toISOString(); }
@@ -86,7 +89,8 @@ class FakeGitHub {
   intercept(hook) { this.hooks.push(hook); }
 
   // Writes to the governed repository (issues and links), not to the state store.
-  mutations() { return this.calls.filter(call => call.method !== 'GET' && call.path !== 'graphql' && !call.path.includes('/contents/')).length; }
+  mutations() { return this.calls.filter(call => call.method !== 'GET' && call.path !== 'graphql' && !call.path.includes('/contents/')
+    && !call.path.toLowerCase().startsWith(`repos/${this.storeRepository.toLowerCase()}/`)).length; }
 
   issueJson(issue) {
     if (issue.state === 'closed' && !issue.closed_at) issue.closed_at = issue.updated_at;
@@ -108,7 +112,10 @@ class FakeGitHub {
       const answer = hook(call, this);
       if (answer) return answer;
     }
-    return this.route(method, path, call.body);
+    // Every GitHub response carries the server's time.
+    const answer = this.route(method, path, call.body);
+    if (answer && typeof answer === 'object' && !answer.headers) Object.defineProperty(answer, 'headers', { value: { date: new Date(this.clock).toUTCString() }, enumerable: false });
+    return answer;
   }
 
   graphql(query, variables) {
@@ -126,7 +133,38 @@ class FakeGitHub {
       return repo ? ok(200, repo) : ok(404, { message: 'Not Found' });
     }
     if ((match = /^repos\/([^/]+\/[^/]+)\/branches\/(.+)$/.exec(path))) {
-      return decodeURIComponent(match[2]) === this.branch ? ok(200, { name: this.branch }) : ok(404, { message: 'Branch not found' });
+      // In this fake a commit's tree has the commit's own id.
+      return decodeURIComponent(match[2]) === this.branch ? ok(200, { name: this.branch, commit: { sha: this.sweepHead, commit: { tree: { sha: this.sweepHead } } } }) : ok(404, { message: 'Branch not found' });
+    }
+    if (/^repos\/[^/]+\/[^/]+\/git\/trees$/.test(path) && method === 'POST') {
+      const files = new Map(this.snapshots.get(body.base_tree) || []);
+      for (const entry of body.tree) files.set(entry.path, { text: entry.content, sha: blobSha(entry.content) });
+      const sha = crypto.createHash('sha1').update(`tree-${++this.sweepSequence}`).digest('hex');
+      this.sweepTrees.set(sha, files);
+      return ok(201, { sha, tree: body.tree.map(entry => ({ path: entry.path, type: 'blob', sha: blobSha(entry.content) })) });
+    }
+    if (/^repos\/[^/]+\/[^/]+\/git\/commits$/.test(path) && method === 'POST') {
+      const sha = crypto.createHash('sha1').update(`commit-${++this.sweepSequence}`).digest('hex');
+      const files = this.sweepTrees.get(body.tree);
+      this.snapshots.set(sha, files); this.sweepCommits.set(sha, body);
+      return ok(201, { sha });
+    }
+    if (/^repos\/[^/]+\/[^/]+\/git\/refs\/heads\//.test(path) && method === 'PATCH') {
+      if (body.force || !this.sweepCommits.get(body.sha)?.parents.includes(this.sweepHead)) return ok(422, { message: 'Reference moved' });
+      this.files = new Map(this.snapshots.get(body.sha)); this.commits++;
+      this.snapshots.set(`c${this.commits}`, new Map(this.files)); this.sweepHead = body.sha;
+      return ok(200, { object: { sha: body.sha } });
+    }
+    if ((match = /^repos\/[^/]+\/[^/]+\/git\/blobs\/([0-9a-f]{40})$/.exec(path)) && method === 'GET') {
+      for (const files of [this.files, ...this.snapshots.values()]) for (const entry of files.values()) {
+        if (entry.sha === match[1]) return ok(200, { sha: entry.sha, encoding: 'base64', content: Buffer.from(entry.text, 'utf8').toString('base64') });
+      }
+      return ok(404, { message: 'Not Found' });
+    }
+    if ((match = /^repos\/[^/]+\/[^/]+\/compare\/([0-9a-f]{40})\.\.\.([0-9a-f]{40})$/.exec(path)) && method === 'GET') {
+      const ancestors = sha => { const seen = new Set(); const walk = at => { if (!at || seen.has(at)) return; seen.add(at); for (const parent of this.sweepCommits.get(at)?.parents || []) walk(parent); }; walk(sha); return seen; };
+      const [base, head] = [match[1], match[2]];
+      return ok(200, { status: base === head ? 'identical' : ancestors(head).has(base) ? 'ahead' : ancestors(base).has(head) ? 'behind' : 'diverged' });
     }
     if (path === 'user' && method === 'GET') return ok(200, { login: this.login });
     if ((match = /^repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(path))) return this.contents(method, decodeURIComponent(match[2]), body, params);
@@ -138,9 +176,15 @@ class FakeGitHub {
     const rest = match[2];
     if (rest === 'issues' && method === 'GET') {
       const page = Number(params.get('page') || 1);
-      const rows = [...this.issues.values()].filter(issue => issue.state === params.get('state'))
-        .sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at) || b.number-a.number);
-      return ok(200, rows.slice((page-1)*100,page*100).map(issue=>this.issueJson(issue)));
+      const since = params.get('since');
+      const rows = [...this.issues.values()].filter(issue => (params.get('state') === 'all' || issue.state === params.get('state')) && (!since || Date.parse(issue.updated_at) >= Date.parse(since)))
+        .map(issue => this.issueJson(issue));
+      // GitHub lists pull requests among the issues; a fixture PR shows once it has an update time.
+      if (params.get('state') === 'all') for (const pr of this.prs.values()) {
+        if (pr.updated_at && (!since || Date.parse(pr.updated_at) >= Date.parse(since))) rows.push({ number: pr.number, title: pr.title || `PR ${pr.number}`, body: pr.body || '', updated_at: pr.updated_at, pull_request: { url: '' } });
+      }
+      rows.sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at) || b.number-a.number);
+      return ok(200, rows.slice((page-1)*100,page*100));
     }
     if ((match = /^pulls\/(\d+)$/.exec(rest)) && method === 'GET') {
       const pr=this.prs.get(Number(match[1]));
@@ -260,6 +304,11 @@ class FakeGitHub {
       }
       return ok(200, { sha: found.sha, encoding: 'base64', content: Buffer.from(found.text, 'utf8').toString('base64') });
     }
+    if (method === 'DELETE') {
+      if (!file) return ok(404, {});
+      if (body.sha !== file.sha) return ok(409, {});
+      this.files.delete(filePath); this.commit(); return ok(200, {});
+    }
     if (method === 'PUT') {
       if (body.branch !== this.branch) return ok(404, { message: `Branch ${body.branch} not found` });
       if (file && !body.sha) return ok(422, { message: 'Invalid request.\n\n"sha" wasn\'t supplied.' });
@@ -285,6 +334,8 @@ class FakeGitHub {
   commit() {
     this.commits += 1;
     this.snapshots.set(`c${this.commits}`, new Map(this.files));
+    this.sweepHead = crypto.createHash('sha1').update(`contents-${this.commits}-${++this.sweepSequence}`).digest('hex');
+    this.snapshots.set(this.sweepHead, new Map(this.files));
   }
 
   readFile(filePath) {
@@ -309,6 +360,19 @@ class FakeGitHub {
   }
 
   graphqlRoute(body) {
+    if (body.query.includes('stateSnapshot')) {
+      const split = body.variables.directory.indexOf(':');
+      const files = this.snapshots.get(body.variables.directory.slice(0, split));
+      const prefix = body.variables.directory.slice(split + 1).replace(/\/$/, '') + '/';
+      const entries = [...(files || [])].filter(([file]) => file.startsWith(prefix) && !file.slice(prefix.length).includes('/'))
+        .map(([file, entry]) => ({ name: file.slice(prefix.length), oid: entry.sha, type: 'blob', object: { text: entry.text, isTruncated: false } }));
+      return ok(200, { data: { repository: { snapshot: entries.length ? { entries } : null } } });
+    }
+    if (/p\d+: pullRequest/.test(body.query)) {
+      const repository = { defaultBranchRef: { name: 'main' } };
+      for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) repository[`p${match[1]}`] = this.graphqlRoute({ query: 'pullRequest', variables: { number: Number(match[1]) } }).json.data.repository.pullRequest;
+      return ok(200, { data: { repository } });
+    }
     if (/issues\(states: OPEN/.test(body.query)) return this.inventoryRoute(body);
     if (/closedByPullRequestsReferences/.test(body.query)) {
       const repository = {};

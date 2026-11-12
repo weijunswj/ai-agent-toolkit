@@ -81,7 +81,7 @@ test('all status attempts and effects share the task time limit', t => {
   w.deps.monotonicNow = () => elapsed;
   w.deps.run = (file, args, opts) => {
     calls.push(args[0]);
-    if (file === s.GH) elapsed = 29 * 60000 - 2000;
+    if (file === s.GH) elapsed = job.WORK_BUDGET_MS - 2000;
     if (args[0] === job.SCRIPT.governance) {
       assert.ok(opts.timeout <= 2000, 'status fits the remaining overall task budget');
       elapsed += 2000;
