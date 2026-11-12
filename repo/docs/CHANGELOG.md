@@ -1,16 +1,13 @@
 # Toolkit Changelog
 
-## 3.73.0 (owner's one-command permissions apply)
-
-### Added
-
-- **`toolkit permissions --apply`:** the owner types it in their own PowerShell or terminal. It lists what would change, waits for the typed word `apply`, backs each file up next to itself, merges the computer blocks into Claude Code's user settings (every other key and line kept, stale Toolkit lines reported, never removed) and replaces Codex's own `toolkit.rules`, then reads each file back. `--host claude` or `--host codex` does one app. The repo block is still pasted by hand.
+## 3.73.0 (refresh toolkit keeps your answers with no questions)
 
 ### Changed
 
-- **Permission blocks:** every computer block now makes `--apply` ask: an ask line on Claude Code and a prompt rule on Codex, with `--apply` required as the first argument so the Codex rule matches. Printing and `--check` stay allowed and still write nothing.
-- **Agents never run `--apply`:** the setup skill and safety playbooks tell agents to hand the owner the command instead. The app's ask for the exact command is the only hard block; the refusals in an agent's shell and without a terminal are speed bumps. Blocks pasted before this release allow `--apply` with no ask until `--apply` or a fresh paste adds the ask line.
-- **Merge authority:** changes to the apply command wait for a typed merge, like the permission, cleanup and store scripts.
+- `refresh toolkit` (and `toolkit refresh` or plain `refresh`) now runs setup with `--refresh`: it updates Toolkit and, while the questions match the last bank answered on this computer, keeps every current answer (each row's `A. Keep current`) with no bank, in Codex and in Claude Code. An installed, turned-on plugin that the update left behind is refreshed.
+- A new or different question, no saved answers yet, or a missing or turned-off plugin shows the full bank as for `setup toolkit`, with a line naming each new or different row. A recommendation you already declined does not bring the bank back.
+- `setup toolkit` still shows the bank. An answered bank saves each row's question shape and the recommendation it showed under `~/.ai-agent-toolkit/user-state/setup-question-shapes.json`, one record per app, with no setting values, paths or keys.
+- A refresh never approves a Codex configuration proposal, a scheduled-task standing approval or a native trust step, and `--refresh` refuses choice flags, `--yes-recommended`, proposal approvals and `--plan`.
 
 ## 3.72.1 (closing words wait for a task's recorded UAT)
 

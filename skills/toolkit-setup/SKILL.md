@@ -56,13 +56,15 @@ Archive what must be kept first, then clean up at the end of the task and report
 ## Required Route
 
 1. Inspect the local repo context and read `repo/docs/TOOLKIT-LOCAL-BRIDGE.md` before changing bridge behavior or running write commands.
-2. For English prompts such as `setup toolkit`, `refresh toolkit`, or plain `refresh` in a Toolkit setup/update context, use the host-aware setup orchestrator from the managed checkout whenever it exists. Do not use the active repo worktree command as the canonical route.
+2. For English prompts such as `setup toolkit`, `refresh toolkit`, `toolkit refresh`, or plain `refresh` in a Toolkit setup/update context, use the host-aware setup orchestrator from the managed checkout whenever it exists. Do not use the active repo worktree command as the canonical route. `setup toolkit` shows the bank; `refresh toolkit`, `toolkit refresh` and plain `refresh` add `--refresh`.
 
 Resolve the home folder yourself and run the managed script by its full path, in forward slashes inside double quotes:
 
 ```text
 node "<home folder>/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main
 ```
+
+For a refresh, add `--refresh` to that line (with `--host claude-code` in Claude Code). A refresh updates Toolkit and keeps every current answer with no bank when the questions match the last bank answered on this computer: each row takes its displayed `A. Keep current`, and an installed, turned-on plugin left behind by the update is refreshed. Its output says `## Refresh` and lists the kept answers; report that and the install check, and do not ask the user anything. When a question is new or different (or no answers are saved yet, or a plugin is missing or turned off), the full bank appears exactly as for `setup toolkit`, with a line naming each new or different row: handle it as a setup bank, and send the reply by running the same refresh line with the reply piped in. A refresh never approves a Codex configuration proposal, a scheduled-task standing approval or a native trust step, and never takes a choice flag or `--yes-recommended`.
 
 Write `<home folder>` as the real resolved path, for example `C:/Users/Jo Smith`; a path with a space is fine inside the quotes. Never put `$env:...` or `%...%` in a command you run, never `cd` first, and leave the shell's working folder as the chat's own folder: setup uses that folder to fast-forward the user's own Toolkit clone and to measure the project's instructions. Hosts can launch commands through a shell other than the one you expect, and a PowerShell-only line fails in `cmd.exe` because `cmd.exe` does not expand `$env:`; this line starts the same way in PowerShell and `cmd.exe`.
 

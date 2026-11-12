@@ -27,6 +27,7 @@ const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferen
 const { taskAutoMerge } = require('./toolkit-governance-state.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
 const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
+const { userStateDirectory } = require('./toolkit-user-state.cjs');
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
@@ -165,6 +166,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     antigravityGlobalRules: false,
     explain: '',
     yesRecommended: false,
+    refresh: false,
     codexHelperCount: null,
     approveHighHelperCapacity: false,
     approveCodexConfigProposal: false,
@@ -234,6 +236,7 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.setupChoices.taskAutoMerge = choice;
     }
     else if (arg === '--yes-recommended') args.yesRecommended = true;
+    else if (arg === '--refresh') args.refresh = true;
     else if (arg === '--codex-helper-capacity') {
       const choice = next().toLowerCase();
       // Legacy Skip answers write nothing, exactly like Keep current.
@@ -349,6 +352,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     if (choice) args.setupChoices[claudeSettingKey(spec.id)] = choice;
   }
   if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
+  if (args.refresh) assertRefreshArgs(args);
   if (argv.some((arg) => arg === '--explain' || arg.startsWith('--explain=')) && !args.explain) throw new Error('--explain needs a question number, for example --explain 1.2');
   if (!args.plan && !args.execute && !args.help && !args.verifyClaudePlugin) args.plan = true;
   args.repoRoot = path.resolve(args.repoRoot);
@@ -571,6 +575,23 @@ function setupPlan(options = {}) {
   };
 }
 
+// refresh toolkit keeps every current answer, so it takes no answer of its own: a choice flag,
+// --yes-recommended, a proposal approval or a plan would give the run a second meaning.
+function assertRefreshArgs(args) {
+  const chosen = Object.entries(args.setupChoices).filter(([, value]) => value).map(([key]) => key);
+  const conflicts = [
+    ...(args.plan || args.explain ? ['--plan or --explain'] : []),
+    ...(args.yesRecommended ? ['--yes-recommended'] : []),
+    ...(args.approveCodexConfigProposal ? ['--approve-codex-config-proposal'] : []),
+    ...(args.approveHighHelperCapacity ? ['--approve-high-helper-capacity'] : []),
+    ...(args.codexHelperCount !== null ? ['--codex-helper-count'] : []),
+    ...(args.updateReportRetentionDaysExplicit ? ['--update-report-retention-days'] : []),
+    ...(chosen.length ? [`a setup choice flag (${chosen.join(', ')})`] : []),
+  ];
+  if (conflicts.length) throw new Error(`--refresh keeps every current answer and cannot be combined with ${conflicts.join(', ')}. Use setup toolkit to change an answer.`);
+  if (!args.execute) throw new Error('--refresh runs with --execute.');
+}
+
 function printHelp() {
   console.log([
     'AI Agent Toolkit setup orchestrator',
@@ -597,6 +618,8 @@ function printHelp() {
     '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
+    '  --refresh                   refresh toolkit: keep every current answer with no bank when the questions match',
+    '                               the last bank answered on this computer; any new or different question shows the bank',
     '  --scheduled-task-update keep|standing|no',
     '                               resolve the Windows task update approval without reading stdin',
     '  --codex-helper-capacity one-helper|root-only|keep|custom',
@@ -906,6 +929,8 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
     let timedOut = false;
     let earlyClassification = '';
     let settled = false;
+    let refreshKept = false;
+    const refreshRun = argv.includes('--refresh');
     let stdinBytes = 0;
     let stdinPausedForBackpressure = false;
     const stopStdinTransport = () => {
@@ -960,8 +985,28 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
       if (!forwarded) failEarly('child-failure');
     });
 
+    // A silent refresh shows no bank: the child reports the kept answers instead, and waits for this
+    // acknowledgement before any write, as it waits after a bank.
+    const acknowledgeRefreshIfKept = () => {
+      let receipt = null;
+      try { receipt = JSON.parse(control.toString('utf8').split('\n')[0]); } catch { return false; }
+      if (receipt?.event !== REFRESH_KEPT_EVENT) return false;
+      const markers = [QUESTION_BANK_BEGIN, QUESTION_BANK_COMPLETE].some((marker) => stdout.includes(marker) || stderr.includes(marker));
+      if (!refreshRun || markers || receipt.protocol !== MANAGED_QUESTION_BANK_PROTOCOL || receipt.stream !== 'stdout'
+          || !Number.isSafeInteger(receipt.question_count) || receipt.question_count < 1) {
+        failEarly('invalid-control-receipt');
+        return true;
+      }
+      if (stdout.length) fs.writeSync(1, stdout);
+      forwarded = true;
+      refreshKept = true;
+      forwardOffset = stdout.length;
+      child.stdio[4].end(`${REFRESH_KEPT_ACKNOWLEDGEMENT}\n`);
+      return true;
+    };
     const acknowledgeIfComplete = () => {
       if (forwarded || !control.includes(0x0a)) return;
+      if (acknowledgeRefreshIfKept()) return;
       const inspected = inspectManagedBankOutput(stdout, stderr, control);
       if (!inspected.ok) {
         if (!inspected.pending) failEarly(inspected.classification);
@@ -1010,6 +1055,14 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
       stopStdinTransport();
       if (settled) return;
       settled = true;
+      if (refreshKept) {
+        if (timedOut) return reject(new Error(managedFailureMessage('timeout')));
+        if (earlyClassification) return reject(new Error(managedFailureMessage(earlyClassification)));
+        if (signal) return reject(new Error(managedFailureMessage('signal')));
+        if (stdout.includes(QUESTION_BANK_BEGIN) || stdout.includes(QUESTION_BANK_COMPLETE)) return reject(new Error(managedFailureMessage('invalid-control-receipt')));
+        if (status !== 0 && status !== SETUP_ACTION_REQUIRED) return reject(new Error(managedFailureMessage('child-failure')));
+        return resolve(status);
+      }
       const inspected = inspectManagedBankOutput(stdout, stderr, control);
       if (!forwarded && inspected.ok) {
         fs.writeSync(1, inspected.bank);
@@ -3149,10 +3202,185 @@ function effectiveChoiceSummary(args, current, spec, value) {
   return value;
 }
 
+// refresh toolkit answers every row with its displayed A. Keep current, with no bank, when the questions
+// match the last bank answered on this computer. The saved record holds each row's question shape (a
+// hash of its id, title and choice names) and the recommendation it showed: no setting values, paths
+// or keys. A row is new or different when it has no saved shape, its shape changed, it has no Keep
+// current choice, or it now recommends a change it did not recommend when last answered. A changed
+// Current text alone (a version number) never counts, and a removed question never brings the bank back.
+const REFRESH_SHAPE_FILE = 'setup-question-shapes.json';
+const REFRESH_SHAPE_VERSION = 1;
+const KEEP_CURRENT_LABEL = 'Keep current';
+const REFRESH_KEPT_EVENT = 'refresh-kept-current';
+const REFRESH_KEPT_ACKNOWLEDGEMENT = 'refresh-kept-current-visible';
+
+function refreshShapePath(options = {}) {
+  return options.refreshShapePath || path.join(userStateDirectory(), REFRESH_SHAPE_FILE);
+}
+
+function keepCurrentChoice(spec) {
+  const first = spec.choices?.[0];
+  return first && first.label === KEEP_CURRENT_LABEL ? first : null;
+}
+
+// Keeping an installed, turned-on plugin current means keeping it installed at the update copy's
+// version, so after a Toolkit update its row is answered Install or refresh, as Keep current does
+// once the plugin matches the copy. A plugin that is missing or turned off is a real change: the bank asks.
+function pluginKeptInstalled(spec, current) {
+  if (spec.key === 'codexPluginBehavior') return current.codexInstall?.config === 'read' && current.codexInstall?.plugin === 'on';
+  if (spec.key === 'claudePluginBehavior') return current.claudePluginInstall?.installed === true && current.claudePluginInstall?.enabled === true;
+  return false;
+}
+
+function refreshRowAnswer(spec, current) {
+  const keep = keepCurrentChoice(spec);
+  if (!keep) return { value: '', recommendation: spec.recommended };
+  if (spec.recommended === keep.value) return { value: keep.value, recommendation: KEEP_CURRENT_LABEL };
+  if (spec.recommended === 'install' && pluginKeptInstalled(spec, current)) return { value: 'install', recommendation: KEEP_CURRENT_LABEL };
+  return { value: keep.value, recommendation: spec.recommended };
+}
+
+// Keep current's own presence and a folded twin change with the current state, so the shape leaves them out.
+function refreshRowShape(spec) {
+  const names = new Set(spec.choices.map((choice) => choice.value));
+  if (spec.folded_value) names.add(spec.folded_value);
+  names.delete('keep');
+  return crypto.createHash('sha256').update(JSON.stringify({ id: spec.id, title: spec.title, choices: [...names].sort() })).digest('hex');
+}
+
+function readRefreshShapes(host, options = {}) {
+  let text;
+  try { text = fs.readFileSync(refreshShapePath(options), 'utf8'); } catch (error) { return { status: error.code === 'ENOENT' ? 'missing' : 'unreadable', hosts: {} }; }
+  try {
+    const record = JSON.parse(text);
+    const hosts = record?.hosts;
+    if (record?.version !== REFRESH_SHAPE_VERSION || !hosts || typeof hosts !== 'object' || Array.isArray(hosts)) throw new Error('shape');
+    const rows = hosts[host]?.rows;
+    if (rows === undefined) return { status: 'missing', hosts };
+    if (!rows || typeof rows !== 'object' || Array.isArray(rows)) throw new Error('shape');
+    for (const row of Object.values(rows)) {
+      if (!/^[a-f0-9]{64}$/.test(String(row?.shape || '')) || typeof row.recommendation !== 'string') throw new Error('shape');
+    }
+    return { status: 'read', hosts, rows };
+  } catch { return { status: 'unreadable', hosts: {} }; }
+}
+
+function refreshDecision(specs, current, host, options = {}) {
+  const saved = readRefreshShapes(host, options);
+  const answers = [];
+  const differences = [];
+  for (const spec of answerable(specs)) {
+    const answer = refreshRowAnswer(spec, current);
+    const savedRow = saved.rows?.[spec.id];
+    answers.push({ spec, value: answer.value });
+    let reason = '';
+    if (!answer.value) reason = 'it has no Keep current choice';
+    else if (!savedRow) reason = 'it is new';
+    else if (savedRow.shape !== refreshRowShape(spec)) reason = 'its question or choices changed';
+    else if (answer.recommendation !== KEEP_CURRENT_LABEL && answer.recommendation !== savedRow.recommendation) reason = 'setup now recommends a change';
+    if (reason && saved.status === 'read') differences.push({ spec, reason });
+  }
+  return { silent: saved.status === 'read' && differences.length === 0, saved: saved.status, answers, differences };
+}
+
+function refreshShapeRows(specs, current) {
+  return Object.fromEntries(answerable(specs).map((spec) => [spec.id, {
+    shape: refreshRowShape(spec),
+    recommendation: refreshRowAnswer(spec, current).recommendation,
+  }]));
+}
+
+// Saved after an answered bank (setup or refresh), so the next refresh compares with what was answered.
+function saveRefreshShapes(rows, host, options = {}) {
+  const file = refreshShapePath(options);
+  const existing = readRefreshShapes(host, options);
+  if (existing.status === 'read' && JSON.stringify(existing.rows) === JSON.stringify(rows)) return false;
+  const record = { version: REFRESH_SHAPE_VERSION, hosts: { ...existing.hosts, [host]: { rows } } };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`);
+  fs.renameSync(temporary, file);
+  return true;
+}
+
+function refreshDifferenceNote(decision) {
+  if (decision.saved !== 'read') {
+    return [
+      '',
+      `Refresh: no saved answers to compare with on this computer (${decision.saved === 'unreadable' ? 'the saved record could not be read' : 'none saved yet'}), so the bank appears this once.`,
+      'Answer it as for setup toolkit. Later refreshes keep your current answers with no bank while the questions stay the same.',
+    ].join('\n');
+  }
+  return [
+    '',
+    'Refresh: the bank appears because these questions are new or different since you last answered:',
+    ...decision.differences.map(({ spec, reason }) => `- ${spec.presentation?.question_ref || ''} ${spec.title}: ${reason}.`.replace('-  ', '- ')),
+    'Answer it as for setup toolkit.',
+  ].join('\n');
+}
+
+function emitRefreshKeptNotice(text, questionCount, options = {}) {
+  const managed = process.env[MANAGED_PROTOCOL_ENV] === MANAGED_QUESTION_BANK_PROTOCOL;
+  if (options.write) options.write(text);
+  else if (managed) fs.writeSync(1, text);
+  else process.stdout.write(text);
+  if (!managed) return;
+  fs.writeSync(3, `${JSON.stringify({ protocol: MANAGED_QUESTION_BANK_PROTOCOL, event: REFRESH_KEPT_EVENT, stream: 'stdout', question_count: questionCount })}\n`);
+  if (fs.readFileSync(4, 'utf8').trim() !== REFRESH_KEPT_ACKNOWLEDGEMENT) {
+    throw new Error('Managed refresh acknowledgement was not received.');
+  }
+}
+
+// The silent refresh: every row takes the answer refreshDecision chose, the same choices a reply of
+// A on every row would make, and setup goes on exactly as after that reply.
+function keepCurrentAnswers(args, current, specs, decision, options = {}) {
+  for (const { spec, value } of decision.answers) assignChoice(args, spec.key, value);
+  const kept = decision.answers.length;
+  emitRefreshKeptNotice([
+    '',
+    '## Refresh',
+    `No questions changed since you last answered, so refresh kept your current answers on all ${kept} questions, with no bank.`,
+    'To change an answer, say setup toolkit.',
+    '',
+  ].join('\n'), kept, options);
+  if (args.host === 'claude-code') resolveClaudeTopology(args, current);
+  const confirmedSpecs = setupQuestionSpecs(args, current);
+  assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
+  const before = answerable(specs).map((spec) => `${spec.id}:${refreshRowShape(spec)}`).join('|');
+  const after = answerable(confirmedSpecs).map((spec) => `${spec.id}:${refreshRowShape(spec)}`).join('|');
+  if (before !== after) throw new Error('Setup questions changed during refresh; run refresh toolkit again.');
+  applySetupChoices(args, current);
+  console.log('Answers kept by refresh before writes:');
+  for (const spec of answerable(confirmedSpecs)) {
+    const value = choiceForKey(args, spec.key);
+    const choice = selectedChoice(spec, value);
+    if (!choice) throw new Error(`Refresh answer is unavailable for ${spec.id}.`);
+    console.log(`- ${spec.presentation.question_ref} ${spec.title}: ${choice.label} (canonical: ${choice.value}; effective: ${effectiveChoiceSummary(args, current, spec, value)})`);
+  }
+  return {
+    appeared: false,
+    answers_initially_required: false,
+    answers_supplied_by_complete_stdin: false,
+    answers_prompted_interactively: false,
+    stopped_for_answers: false,
+    answer_source: 'refresh kept current answers',
+    remaining_input: [],
+    render_attempts: 0,
+    refresh: 'kept-current',
+    refresh_shapes: refreshShapeRows(specs, current),
+  };
+}
+
 async function answerSetupQuestionBank(args, current, options = {}) {
   const isTTY = options.isTTY === undefined ? process.stdin.isTTY === true : options.isTTY === true;
   const initialSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, initialSpecs);
+  let refreshHeld = null;
+  if (args.refresh) {
+    const decision = refreshDecision(initialSpecs, current, args.host, options);
+    if (decision.silent) return keepCurrentAnswers(args, current, initialSpecs, decision, options);
+    refreshHeld = decision;
+  }
   const initialMissingCount = unanswered(initialSpecs, args).length;
   let answerSource = initialMissingCount ? (isTTY ? 'interactive' : 'stdin') : 'explicit flags';
   let completeStdinConsumed = false;
@@ -3195,6 +3423,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       }),
     ...(options.write ? { write: options.write } : {}),
   });
+  if (refreshHeld) console.log(refreshDifferenceNote(refreshHeld));
 
   const rawStdin = (needsPromptedAnswers || needsCodexProposalInput) && !isTTY
     ? await readNonInteractiveStdin()
@@ -3361,6 +3590,8 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     answer_source: answerSource || 'none',
     remaining_input: lines ? lines.filter((line) => String(line).trim()) : [],
     render_attempts: rendered.attempts,
+    ...(refreshHeld ? { refresh: 'bank-shown' } : {}),
+    refresh_shapes: refreshShapeRows(displayedSpecs, current),
   };
 }
 
@@ -3953,6 +4184,10 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log(`Question bank render attempts: ${unknown(questionBank?.render_attempts)}`);
+  if (questionBank?.refresh === 'kept-current') {
+    const versionAt = (commit) => (commit && commit !== 'unknown' ? toolkitVersionAt(args.repoRoot, commit) : '') || 'unknown';
+    console.log(`Refresh: kept every current answer with no bank; Toolkit ${versionAt(managed.commit_before || current?.managed?.commit)} to ${versionAt(managed.commit_after || managed.commit)}.`);
+  }
   console.log(`Helper-agent capacity questions shown: ${yesNo(args.host === 'codex')}`);
   console.log('Preference writes before answers: no');
   console.log('');
@@ -4113,6 +4348,7 @@ class ToolkitSetupExecution {
     this.#questionBank = await answerSetupQuestionBank(args, this.#current);
     if (args.host === 'codex') this.#current = await detectCodexRuntimeAfterApproval(args, this.#current);
     await confirmSelectedDelegationProposal(args, this.#current, this.#questionBank);
+    saveRefreshShapes(this.#questionBank.refresh_shapes, args.host);
     new TaskAutoMergePreferences({ host: args.host }).verify(this.#current.taskAutoMerge);
     if (this.#current.scheduledTasksSupported && JSON.stringify(require('./toolkit-update-scheduled-task.cjs').readApproval(os.homedir())) !== JSON.stringify(this.#current.scheduledTaskApproval)) throw new Error('Scheduled-task approval changed; show a fresh question bank.');
   }
@@ -4422,6 +4658,9 @@ module.exports = {
   parseConciseQuestionBankAnswer,
   assertQuestionBankAnswerBinding,
   answerSetupQuestionBank,
+  refreshDecision,
+  refreshShapeRows,
+  saveRefreshShapes,
   resolveDisplayedChoiceAnswer,
   renderSetupQuestionBank,
   renderQuestionRows,
