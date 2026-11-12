@@ -17,21 +17,30 @@
 //   - --store is the top of a Git checkout whose origin fetch and push addresses are all that store;
 //   - the checkout's own config (local and worktree) holds only plain keys from a short list, so no
 //     push rule, mirror, URL rewrite, proxy, credential helper, filter or program setting of its own
-//     can change what a step does; Git runs with no GIT_* environment variable except the ssh ones,
-//     with hooks pointed at an empty folder this run owns and with pathspec magic off;
-//   - the checkout is on the bound branch;
+//     can change what a step does, and the user's global or system config holds no setting that
+//     widens a push (remote.origin.* beyond its URLs, push.followTags and the like);
+//   - Git is found by its full path on PATH (never inside the store) and runs with no GIT_*
+//     environment variable except the ssh ones, with hooks pointed at an empty folder this run owns,
+//     pathspec magic off, and no grafts, replace refs or commit-graph file, so every ancestry answer
+//     comes from real commits;
+//   - the checkout is a full (not shallow) clone on the bound branch;
 //   - GitHub says the store is private, writable, and its default branch is the bound branch.
 //
 // status   read-only: the checks above, clean or not, ahead or behind the last fetch.
 // sync     fetches the bound branch and fast-forwards only.
 // save     stages only the named paths (adds and changes, never deletions) inside the binding's store
 //          path, archives/ or evidence/, secret-scans exactly the staged content, commits, pushes the
-//          bound branch with a plain push and reads it back with one fetch.
+//          bound branch with a plain push and reads it back with one fetch. A file the text scan
+//          cannot read (over 5 MB, binary, not UTF-8) is refused. Before each push the tip GitHub
+//          serves must be in the pushed commit, and after it GitHub must show that old tip inside
+//          the new one.
 // move     reorganises with `git mv` only, so content is kept; the target is inside the same folders.
 // merge-branch          merges a store branch into the bound branch with a merge commit, refusing a
-//                       merge that deletes or changes away any file, scanning what it brings in.
-// delete-merged-branch  deletes a remote store branch only when its tip is already in the bound
-//                       branch, never the bound branch; the delete holds only while the tip is unchanged.
+//                       merge that deletes or changes away any file or writes outside the same
+//                       folders, and scanning every blob in every commit it brings in.
+// delete-merged-branch  deletes a remote store branch only when GitHub shows its tip already in the
+//                       bound branch, never the bound branch (in any letter case); the delete holds
+//                       only while the tip is unchanged, and GitHub is asked again afterwards.
 //
 // It never force-pushes, mirrors, rebases or resets anything on the remote, never pushes a branch but
 // the bound one (except the checked branch delete), never deletes a file, never touches another
@@ -48,6 +57,7 @@ const { githubSlug } = require('./toolkit-permissions.cjs');
 const governanceState = require('./toolkit-governance-state.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
 const { scanText } = require('../../skills/secure-ci-cd/scripts/secret-patterns.cjs');
+const { resolveGit } = require('../../skills/secure-ci-cd/scripts/local-security-scan.cjs');
 
 class StoreError extends Error {
   constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); this.exitCode = exitCode; this.stopped = stopped; this.next = next; }
@@ -73,6 +83,16 @@ const PLAIN_CONFIG = /^(?:core\.(?:repositoryformatversion|filemode|bare|logallr
 // The GIT_* variables kept from the caller's environment: the user's own ssh setup. Every other one
 // (GIT_DIR, GIT_CONFIG_*, GIT_EXEC_PATH and the rest) could point Git at other data or programs.
 const KEPT_GIT_ENVIRONMENT = new Set(['GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_SSH_VARIANT']);
+// Keys in the user's global or system config that would widen what a push sends or where. The rest
+// of the user's own config (credential helper, ssh command, signing) is the user's and is trusted.
+const WIDENING_CONFIG = /^(?:remote\.origin\.(?!(?:url|pushurl|fetch)$)[^.]+|remote\.pushdefault|push\.(?:followtags|recursesubmodules|pushoption))$/;
+// Pinned on every call: the commit-graph file is ignored (grafts are pinned by environment and
+// replace refs by GIT_NO_REPLACE_OBJECTS), so ancestry and the fast-forward test read real commits.
+const PINNED_CONFIG = Object.freeze(['core.fsmonitor=false', 'core.commitGraph=false', 'push.followTags=false', 'push.recurseSubmodules=no', 'fetch.recurseSubmodules=false', 'gc.auto=0', 'maintenance.auto=false']);
+// Another branch is fetched into this private namespace, never beside the bound branch's tracking
+// ref, so a name that differs only by case cannot land on it on a case-insensitive disk.
+const OTHER_REFS = 'refs/toolkit-store';
+const UTF8 = new TextDecoder('utf-8', { fatal: true });
 
 // A store path as typed: relative, forward slashes, plain characters, no `.` or `..` part, no `.git`
 // part in any spelling. Null when refused.
@@ -106,25 +126,43 @@ function defaultReadGitHub(apiPath, { environment = process.env, cwd = process.c
 }
 
 class EvidenceStore {
-  #fs; #run; #environment; #cwd; #readBinding; #readGitHub; #tmpdir; #platform;
-  #dir = null; #hooks = null; #store = null; #branch = null; #allowed = [];
+  #fs; #run; #environment; #cwd; #readBinding; #readGitHub; #tmpdir; #platform; #findGit;
+  #dir = null; #hooks = null; #gitPath = null; #repository = null; #store = null; #branch = null; #allowed = [];
 
-  constructor({ fs = nodeFs, run = spawnSync, environment = process.env, cwd = process.cwd(), readBinding = mergedStoreBinding, readGitHub = defaultReadGitHub, tmpdir = os.tmpdir(), platform = process.platform } = {}) {
+  constructor({ fs = nodeFs, run = spawnSync, environment = process.env, cwd = process.cwd(), readBinding = mergedStoreBinding, readGitHub = defaultReadGitHub, tmpdir = os.tmpdir(), platform = process.platform, findGit = resolveGit } = {}) {
     this.#fs = fs; this.#run = run; this.#environment = environment; this.#cwd = cwd;
-    this.#readBinding = readBinding; this.#readGitHub = readGitHub; this.#tmpdir = tmpdir; this.#platform = platform;
+    this.#readBinding = readBinding; this.#readGitHub = readGitHub; this.#tmpdir = tmpdir; this.#platform = platform; this.#findGit = findGit;
   }
 
   #gitEnvironment() {
     const kept = {};
     for (const [key, value] of Object.entries(this.#environment)) if (!/^GIT_/i.test(key) || KEPT_GIT_ENVIRONMENT.has(key.toUpperCase())) kept[key] = value;
-    return { ...kept, GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1' };
+    // A graft file that never exists: `.git/info/grafts` could otherwise make unrelated commits look related.
+    return { ...kept, GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', GIT_GRAFT_FILE: path.join(this.#hooks, '..', `${path.basename(this.#hooks)}-no-grafts`) };
   }
 
-  // Every Git call: pathspec magic off, hooks pointed at this run's empty folder, no fsmonitor.
-  #git(args, { timeout = 60000 } = {}) {
-    const pinned = ['--literal-pathspecs', '-c', `core.hooksPath=${this.#hooks}`, '-c', 'core.fsmonitor=false', '-C', this.#dir];
-    const result = this.#run('git', [...pinned, ...args], { encoding: 'utf8', env: this.#gitEnvironment(), timeout, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
-    return { ok: Boolean(result) && !result.error && result.status === 0, out: String(result?.stdout || ''), err: String(result?.stderr || '') };
+  // Every Git call: git by its full path, pathspec magic off, hooks pointed at this run's empty
+  // folder, the settings in PINNED_CONFIG. `buffer` returns the raw bytes; `input` is written to stdin.
+  #git(args, { timeout = 60000, buffer = false, input } = {}) {
+    const pinned = ['--literal-pathspecs', '-c', `core.hooksPath=${this.#hooks}`, ...PINNED_CONFIG.flatMap(setting => ['-c', setting]), '-C', this.#dir];
+    const result = this.#run(this.#gitPath, [...pinned, ...args], { encoding: buffer ? 'buffer' : 'utf8', input, env: this.#gitEnvironment(), timeout, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+    const ok = Boolean(result) && !result.error && result.status === 0;
+    return { ok, out: buffer ? result?.stdout || Buffer.alloc(0) : String(result?.stdout || ''), err: String(result?.stderr || '') };
+  }
+
+  // GitHub's own answer to "how does `to` relate to `from`": identical, ahead, behind or diverged.
+  // The checkout's commit graph never decides whether a branch is merged or a push keeps history.
+  #compare(from, to) {
+    let answer;
+    try { answer = this.#readGitHub(`repos/${this.#repository}/compare/${from}...${to}`); } catch { answer = null; }
+    if (!answer || !['identical', 'ahead', 'behind', 'diverged'].includes(answer.status)) throw new StoreError('GitHub could not compare the store commits, so nothing was changed on trust.', 'check gh auth status and the network, then retry.');
+    return answer.status;
+  }
+
+  // The tip GitHub serves for a store branch, or null when the branch does not exist.
+  #remoteTip(branch) {
+    const listed = this.#must(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], 'the store branches could not be listed.', 'check the network, then retry.', { timeout: 120000 }).trim();
+    return (new RegExp(`^([0-9a-f]{40,64})\\trefs/heads/${branch.replace(/[.]/g, '\\.')}$`, 'm').exec(listed) || [])[1] || null;
   }
 
   #must(args, stopped, next, options) {
@@ -153,6 +191,9 @@ class EvidenceStore {
     try { dir = this.#fs.realpathSync.native(path.resolve(this.#cwd, store)); } catch { throw new StoreError('the --store folder does not exist.', 'clone the evidence store and name that folder.'); }
     this.#dir = dir;
     this.#hooks = this.#fs.mkdtempSync(path.join(this.#tmpdir, 'ai-agent-toolkit-store-hooks-'));
+    this.#repository = bound.store.repository;
+    try { this.#gitPath = this.#findGit({ env: this.#environment, platform: this.#platform, exclude: dir }); } catch { this.#gitPath = null; }
+    if (!this.#gitPath) throw new StoreError('git was not found in an absolute PATH folder outside the store.', 'install Git, then retry.');
 
     const top = this.#git(['rev-parse', '--show-toplevel']);
     let real = '';
@@ -163,8 +204,12 @@ class EvidenceStore {
     if (!pushTo.length || pushTo.some(url => githubSlug(url) !== wanted)) throw new StoreError('that folder pushes somewhere other than the evidence store (its push address differs).', 'remove the extra push address from the store checkout.');
     const config = this.#git(['config', '--list', '--show-scope', '--includes']);
     if (!config.ok) throw new StoreError('the store checkout\'s config could not be read.', 'check the store checkout with git status.');
-    const odd = config.out.split(/\r?\n/).filter(line => /^(?:local|worktree)\t/.test(line)).map(line => line.split('\t')[1].split('=')[0]).filter(key => !PLAIN_CONFIG.test(key.toLowerCase()));
+    const entries = config.out.split(/\r?\n/).map(line => line.split('\t')).filter(([, setting]) => setting).map(([scope, setting]) => [scope, setting.split('=')[0].toLowerCase()]);
+    const odd = entries.filter(([scope, key]) => ['local', 'worktree'].includes(scope) && !PLAIN_CONFIG.test(key)).map(([, key]) => key);
     if (odd.length) throw new StoreError(`the store checkout has its own config that could change a step (${[...new Set(odd)].slice(0, 5).join(', ')}).`, 'remove those settings from the store checkout, or use a fresh clone.');
+    const widening = entries.filter(([scope, key]) => ['global', 'system'].includes(scope) && WIDENING_CONFIG.test(key)).map(([, key]) => key);
+    if (widening.length) throw new StoreError(`this computer's Git config has a setting that could widen a store push (${[...new Set(widening)].slice(0, 5).join(', ')}).`, 'remove it from your global Git config, then retry.');
+    if (this.#git(['rev-parse', '--is-shallow-repository']).out.trim() !== 'false') throw new StoreError('the store checkout is shallow (or its history could not be read), so its history cannot be checked.', 'use a full clone of the store.');
     const head = this.#git(['symbolic-ref', '-q', 'HEAD']).out.trim();
     if (head !== `refs/heads/${this.#branch}`) throw new StoreError(`the store checkout is not on the bound branch ${this.#branch}.`, `switch the store checkout to ${this.#branch}.`);
 
@@ -188,7 +233,8 @@ class EvidenceStore {
   get #tracking() { return `refs/remotes/origin/${this.#branch}`; }
 
   #fetch(branch = this.#branch) {
-    this.#must(['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+    const into = branch === this.#branch ? this.#tracking : `${OTHER_REFS}/${branch}`;
+    this.#must(['fetch', '--quiet', '--no-tags', '--no-recurse-submodules', 'origin', `+refs/heads/${branch}:${into}`],
       `the store branch ${branch} could not be fetched.`, 'check the network and gh auth status, then retry.', { timeout: 120000 });
   }
 
@@ -236,29 +282,68 @@ class EvidenceStore {
       if (!/^1006(?:44|55)$/.test(entry.mode)) throw new StoreError(`${entry.file} is a link or a nested repository, which the store command never commits.`, 'copy the real file in instead.');
       if (prefixes && !this.#inside(entry.file)) throw new StoreError(`${entry.file} is outside the store folders this command writes (${this.#allowed.join(', ')}).`, 'write the file under one of those folders.');
       if (entry.status === 'R') continue; // the same blob already in the store, at a new name
-      const size = Number(this.#git(['cat-file', '-s', entry.sha]).out.trim());
-      if (!Number.isFinite(size) || size > MAX_BLOB_BYTES) { unread.push(entry.file); continue; }
-      const blob = this.#git(['cat-file', 'blob', entry.sha]);
-      if (!blob.ok) { unread.push(entry.file); continue; }
-      for (const hit of scanText(blob.out)) findings.push(`${entry.file}:${hit.line} (${hit.rule})`);
+      this.#scanBlob(entry.sha, entry.file, findings, unread);
     }
-    if (findings.length) return { stop: new StoreError(`the secret scan found ${findings.length} match(es): ${findings.slice(0, 10).join(', ')}.`, 'remove the secret, or mark a reviewed false match with "secret-scan: allow <reason>" on its line, then retry.') };
-    if (unread.length) return { stop: new StoreError(`these files could not be scanned (over 5 MB or unreadable): ${unread.slice(0, 10).join(', ')}.`, 'split or trim them, then retry.') };
-    return { stop: null };
+    return { stop: this.#scanStop(findings, unread) };
   }
 
-  // A plain push of the bound branch; on a race, one merge of the remote and one more push.
+  // Scans one blob as stored. A blob over 5 MB, with a NUL byte or not valid UTF-8 (a compressed
+  // file, UTF-16 text) cannot be read by the text scan, so it counts as unread and is refused.
+  #scanBlob(sha, file, findings, unread) {
+    const size = Number(this.#git(['cat-file', '-s', sha]).out.trim());
+    if (!Number.isFinite(size) || size > MAX_BLOB_BYTES) { unread.push(file); return; }
+    const blob = this.#git(['cat-file', 'blob', sha], { buffer: true });
+    let text = null;
+    try { text = blob.ok && !blob.out.includes(0) ? UTF8.decode(blob.out) : null; } catch { text = null; }
+    if (text === null) { unread.push(file); return; }
+    for (const hit of scanText(text)) findings.push(`${file}:${hit.line} (${hit.rule})`);
+  }
+
+  #scanStop(findings, unread) {
+    if (findings.length) return new StoreError(`the secret scan found ${findings.length} match(es): ${[...new Set(findings)].slice(0, 10).join(', ')}.`, 'remove the secret (from every commit that holds it), or mark a reviewed false match with "secret-scan: allow <reason>" on its line, then retry.');
+    if (unread.length) return new StoreError(`these files could not be scanned (over 5 MB, binary or not UTF-8): ${[...new Set(unread)].slice(0, 10).join(', ')}.`, 'store them as plain UTF-8 text under 5 MB, then retry.');
+    return null;
+  }
+
+  // Every blob the commits in `range` bring in, from every commit (not only the final tree), so a
+  // secret added and removed again inside a branch is still found.
+  #scanHistory(range) {
+    const listed = this.#must(['rev-list', '--objects', range], 'the branch history could not be listed.', 'retry.').split(/\r?\n/).filter(Boolean);
+    const named = new Map(listed.map(line => [line.slice(0, line.indexOf(' ') === -1 ? line.length : line.indexOf(' ')), line.includes(' ') ? line.slice(line.indexOf(' ') + 1) : '']));
+    const types = this.#must(['cat-file', '--batch-check=%(objecttype) %(objectname)'], 'the branch objects could not be read.', 'retry.', { input: `${[...named.keys()].join('\n')}\n` });
+    const findings = [];
+    const unread = [];
+    for (const line of types.split(/\r?\n/)) {
+      const [type, sha] = line.split(' ');
+      if (type === 'blob') this.#scanBlob(sha, named.get(sha) || sha, findings, unread);
+    }
+    return this.#scanStop(findings, unread);
+  }
+
+  // A plain push of the bound branch; on a race, one merge of the remote and one more push. Before
+  // each push, the tip GitHub serves must be in the commit being pushed (real commits only), and
+  // after it GitHub must show that old tip inside the new one: history is only ever added to.
   #push() {
-    const push = () => this.#git(['push', '--quiet', 'origin', `refs/heads/${this.#branch}:refs/heads/${this.#branch}`], { timeout: 180000 });
-    if (push().ok) return;
-    this.#fetch();
-    this.#must(['merge', '--no-ff', '--no-edit', '--quiet', this.#tracking], 'the store moved while saving and the merge with it conflicted; your commit is kept locally, not pushed.', 'resolve the merge in the store checkout, then push it.');
-    if (!push().ok) throw new StoreError('the push to the store was refused twice; your commit is kept locally, not pushed.', 'run status, then retry.');
+    const push = () => {
+      const before = this.#remoteTip(this.#branch);
+      if (!before || !this.#git(['merge-base', '--is-ancestor', before, 'HEAD']).ok) return { ok: false, before };
+      return { ok: this.#git(['push', '--quiet', 'origin', `refs/heads/${this.#branch}:refs/heads/${this.#branch}`], { timeout: 180000 }).ok, before };
+    };
+    let pushed = push();
+    if (!pushed.ok) {
+      this.#fetch();
+      this.#must(['merge', '--no-ff', '--no-edit', '--quiet', this.#tracking], 'the store moved while saving and the merge with it conflicted; your commit is kept locally, not pushed.', 'resolve the merge in the store checkout, then push it.');
+      pushed = push();
+      if (!pushed.ok) throw new StoreError('the push to the store was refused twice; your commit is kept locally, not pushed.', 'run status, then retry.');
+    }
+    return pushed.before;
   }
 
-  #readBack(commit) {
+  #readBack(commit, before = null) {
     this.#fetch();
-    if (!this.#git(['merge-base', '--is-ancestor', commit, this.#tracking]).ok) throw new StoreError(`the read-back did not find commit ${commit.slice(0, 7)} on the store branch.`, 'run status and check the store on GitHub before relying on it.');
+    const tip = this.#remoteTip(this.#branch);
+    if (tip !== commit && !this.#git(['merge-base', '--is-ancestor', commit, this.#tracking]).ok) throw new StoreError(`the read-back did not find commit ${commit.slice(0, 7)} on the store branch.`, 'run status and check the store on GitHub before relying on it.');
+    if (before && !['ahead', 'identical'].includes(this.#compare(before, tip))) throw new StoreError(`GitHub no longer shows the old store tip ${before.slice(0, 7)} inside ${this.#branch}: history was replaced.`, 'tell the owner now; the old commits may still be recoverable on GitHub.');
   }
 
   #commit(message) {
@@ -267,9 +352,9 @@ class EvidenceStore {
   }
 
   #finish(commit, extra = {}) {
-    this.#push();
+    const before = this.#push();
     const head = this.#must(['rev-parse', 'HEAD'], 'the pushed commit could not be read.', 'run status.').trim();
-    this.#readBack(head);
+    this.#readBack(head, before);
     return { store: this.#store, branch: this.#branch, commit: head, ...(head !== commit ? { merged_remote: true } : {}), read_back: true, ...extra };
   }
 
@@ -337,13 +422,16 @@ class EvidenceStore {
     this.#fetch();
     this.#fetch(branch);
     this.#ready({ cleanTree: true });
-    if (this.#git(['merge-base', '--is-ancestor', `refs/remotes/origin/${branch}`, 'HEAD']).ok) return { store: this.#store, branch: this.#branch, merged: branch, nothing_to_merge: true };
-    if (!this.#git(['merge', '--no-ff', '--no-commit', '--quiet', `refs/remotes/origin/${branch}`]).ok) {
+    const other = `${OTHER_REFS}/${branch}`;
+    if (this.#git(['merge-base', '--is-ancestor', other, 'HEAD']).ok) return { store: this.#store, branch: this.#branch, merged: branch, nothing_to_merge: true };
+    const history = this.#scanHistory(`HEAD..${other}`);
+    if (history) throw history;
+    if (!this.#git(['merge', '--no-ff', '--no-commit', '--quiet', other]).ok) {
       this.#git(['merge', '--abort']);
       throw new StoreError(`${branch} does not merge cleanly into ${this.#branch}.`, 'update that branch from the store branch first.');
     }
     let scan;
-    try { scan = this.#check(this.#staged(), { prefixes: false }).stop; } catch (error) { this.#git(['merge', '--abort']); throw error; }
+    try { scan = this.#check(this.#staged()).stop; } catch (error) { this.#git(['merge', '--abort']); throw error; }
     if (scan) { this.#git(['merge', '--abort']); throw scan; }
     const commit = this.#commit(message);
     return this.#finish(commit, { merged: branch });
@@ -351,25 +439,23 @@ class EvidenceStore {
 
   deleteMergedBranch({ branch }) {
     this.#checkBranch(branch);
-    this.#fetch();
-    const listed = this.#must(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], 'the store branches could not be listed.', 'check the network, then retry.').trim();
-    const tip = (/^([0-9a-f]{40,64})\trefs\/heads\/(.+)$/m.exec(listed) || [])[1];
+    const bound = this.#remoteTip(this.#branch);
+    const tip = this.#remoteTip(branch);
     if (!tip) throw new StoreError(`the store has no branch ${branch}.`, 'nothing to delete.');
-    this.#fetch(branch);
-    if (this.#must(['rev-parse', `refs/remotes/origin/${branch}`], 'the branch tip could not be read.', 'retry.').trim() !== tip) throw new StoreError(`${branch} moved while it was read.`, 'retry.');
-    if (!this.#git(['merge-base', '--is-ancestor', tip, this.#tracking]).ok) throw new StoreError(`${branch} has commits that are not in ${this.#branch}, so deleting it could lose the only copy.`, `merge it first with merge-branch --branch ${branch}.`);
+    // GitHub decides "already merged": the branch tip must be the bound tip or behind it.
+    if (!bound || !['identical', 'behind'].includes(this.#compare(bound, tip))) throw new StoreError(`${branch} has commits that are not in ${this.#branch}, so deleting it could lose the only copy.`, `merge it first with merge-branch --branch ${branch}.`);
     // The lease makes the delete hold only while the branch tip is still the one checked above; it
     // never forces an update.
     this.#must(['push', '--quiet', `--force-with-lease=refs/heads/${branch}:${tip}`, 'origin', '--delete', `refs/heads/${branch}`], `the store refused to delete ${branch} (it may have moved).`, 'run delete-merged-branch again.', { timeout: 120000 });
-    const after = this.#must(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], 'the read-back could not list the store branches.', 'check the store on GitHub.').trim();
-    if (after) throw new StoreError(`the read-back still lists ${branch} on the store.`, 'check the store on GitHub.');
-    this.#readBack(tip);
+    if (this.#remoteTip(branch)) throw new StoreError(`the read-back still lists ${branch} on the store.`, 'check the store on GitHub.');
+    const after = this.#remoteTip(this.#branch);
+    if (!after || !['identical', 'behind'].includes(this.#compare(after, tip))) throw new StoreError(`the read-back on GitHub does not show ${tip.slice(0, 7)} inside ${this.#branch}.`, 'tell the owner now; GitHub may still hold the commit.');
     return { store: this.#store, branch: this.#branch, deleted: branch, tip, read_back: true };
   }
 
   #checkBranch(branch) {
     if (typeof branch !== 'string' || !BRANCH.test(branch) || branch.includes('..') || branch.endsWith('.lock')) throw new StoreError('--branch is not a plain branch name.', 'name the store branch.', 2);
-    if (branch === this.#branch) throw new StoreError(`${branch} is the bound store branch itself.`, 'name another store branch.');
+    if (branch.toLowerCase() === this.#branch.toLowerCase()) throw new StoreError(`${branch} is the bound store branch itself.`, 'name another store branch.');
   }
 
   #exists(file) {

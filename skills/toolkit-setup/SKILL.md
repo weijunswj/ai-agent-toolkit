@@ -30,10 +30,10 @@ Write each allowed command exactly as its line shows, one command per call: `nod
 
 For `toolkit store`, run `node "<Toolkit>/repo/scripts/toolkit-store.cjs" <status|sync|save|move|merge-branch|delete-merged-branch> --store <store checkout>` from the governed repository (or name it with `--repo-root`). Every subcommand first checks that the folder is a checkout of the store the merged binding names, on the bound branch, with no push, rewrite or program setting of its own, and that GitHub shows the store private and writable; it writes nothing when a check fails.
 
-- **save:** `--path <store path>... --message <text>` stages only those paths (never a deletion) under the binding's store path, `archives/` or `evidence/`, secret-scans exactly what it stages (file, line and rule only; a file over 5 MB is refused), commits, pushes the bound branch with a plain push and reads it back with one fetch.
+- **save:** `--path <store path>... --message <text>` stages only those paths (never a deletion) under the binding's store path, `archives/` or `evidence/`, secret-scans exactly what it stages (file, line and rule only; a file over 5 MB, binary or not UTF-8 is refused), commits, pushes the bound branch with a plain push and reads it back with one fetch.
 - **move:** `--from <path> --to <path> --message <text>` reorganises with `git mv` only.
-- **merge-branch:** `--branch <name> --message <text>` merges a store branch with a merge commit, refusing any deletion and scanning what it brings in.
-- **delete-merged-branch:** `--branch <name>` deletes a remote store branch only when its tip is already in the bound branch.
+- **merge-branch:** `--branch <name> --message <text>` merges a store branch with a merge commit, refusing any deletion or file outside those folders and scanning every commit it brings in.
+- **delete-merged-branch:** `--branch <name>` deletes a remote store branch only when GitHub shows its tip already in the bound branch.
 - **status** and **sync:** read the state, or fast-forward only.
 
 Use it for every evidence store step on a computer, so one permission line covers them all. Raw `git` in the store still works but asks. It never force-pushes, rebases, deletes a file or pushes another branch.

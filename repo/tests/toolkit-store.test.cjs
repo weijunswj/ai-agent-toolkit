@@ -56,14 +56,28 @@ function world(t, { branch = 'main' } = {}) {
     calls.push(rest);
     if (rest[0] === 'remote' && rest[1] === 'get-url') return { status: 0, stdout: `${rest.includes('--push') ? reported.push : reported.origin}\n`, stderr: '' };
     if (rest[0] === 'push' && hooks.beforePush) { const once = hooks.beforePush; hooks.beforePush = null; once(); }
+    calls.env = options && options.env;
     return spawnSync(cmd, args, options);
   };
   const github = { full_name: 'Owner/Store', private: true, permissions: { push: true }, default_branch: branch };
+  // GitHub's compare answer, worked out on the bare "GitHub" repository itself, never the checkout.
+  const inRemote = (...args) => spawnSync('git', ['--git-dir', remote, ...args], { encoding: 'utf8' });
+  const compare = (from, to) => {
+    const [a, b] = [from, to].map(ref => inRemote('rev-parse', '--verify', '--quiet', `${ref}^{commit}`).stdout.trim());
+    if (!a || !b) throw new Error('404');
+    if (a === b) return { status: 'identical' };
+    if (inRemote('merge-base', '--is-ancestor', b, a).status === 0) return { status: 'behind' };
+    if (inRemote('merge-base', '--is-ancestor', a, b).status === 0) return { status: 'ahead' };
+    return { status: 'diverged' };
+  };
   const deps = {
     run, tmpdir: tmp, cwd: base,
     environment: { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: home, GIT_CONFIG_NOSYSTEM: '1' },
     readBinding: () => ({ ok: true, store: { kind: 'github', repository: 'Owner/Store', branch, path: 'state/owner/repo/' } }),
-    readGitHub: () => github,
+    readGitHub: apiPath => {
+      const compared = /^repos\/Owner\/Store\/compare\/([^.]+)\.\.\.(.+)$/.exec(apiPath);
+      return compared ? compare(decodeURIComponent(compared[1]), decodeURIComponent(compared[2])) : github;
+    },
   };
   const remoteHas = file => spawnSync('git', ['--git-dir', remote, 'cat-file', '-e', `${branch}:${file}`]).status === 0;
   const act = (argv, extra = {}) => {
@@ -72,7 +86,7 @@ function world(t, { branch = 'main' } = {}) {
     return { code, result: out.length ? JSON.parse(out.join('')) : null, err: err.join('') };
   };
   const write = (file, text) => { fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), text); };
-  return { base, tmp, remote, dir, other, calls, reported, hooks, github, deps, remoteHas, act, write, branch };
+  return { base, home, tmp, remote, dir, other, calls, reported, hooks, github, deps, remoteHas, act, write, branch };
 }
 
 const pushes = calls => calls.filter(args => args[0] === 'push');
@@ -104,7 +118,7 @@ test('a planted secret, an unreadable large file or a path outside the store fol
 
   w.write('evidence/big.log', 'a'.repeat(5 * 1024 * 1024 + 1));
   run = w.act(['save', '--path', 'evidence/big.log', '--message', 'big']);
-  assert.match(run.result.stopped, /could not be scanned \(over 5 MB or unreadable\): evidence\/big\.log/);
+  assert.match(run.result.stopped, /could not be scanned \(over 5 MB, binary or not UTF-8\): evidence\/big\.log/);
   fs.rmSync(path.join(w.dir, 'evidence'), { recursive: true });
 
   w.write('elsewhere/x.md', 'x\n');
@@ -306,7 +320,118 @@ test('the command line refuses unknown commands, flags and messages, and the fla
     'delete-merged-branch': ['--store', '--repo-root', '--branch'],
   });
   const flags = [...fs.readFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-store.cjs'), 'utf8').matchAll(/'(--[a-z-]+)'/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(flags)].filter(flag => !['--literal-pathspecs', '--show-toplevel', '--push', '--all', '--list', '--show-scope', '--includes', '--quiet', '--no-tags', '--no-recurse-submodules', '--left-right', '--count', '--cached', '--raw', '--no-abbrev', '--ignore-removal', '--ff-only', '--no-ff', '--no-edit', '--no-commit', '--abort', '--is-ancestor', '--heads', '--delete', '--porcelain', '--untracked-files=all'].includes(flag)).sort(),
+  assert.deepEqual([...new Set(flags)].filter(flag => !['--literal-pathspecs', '--show-toplevel', '--push', '--all', '--list', '--show-scope', '--includes', '--quiet', '--no-tags', '--no-recurse-submodules', '--left-right', '--count', '--cached', '--raw', '--no-abbrev', '--ignore-removal', '--ff-only', '--no-ff', '--no-edit', '--no-commit', '--abort', '--is-ancestor', '--heads', '--delete', '--porcelain', '--untracked-files=all', '--is-shallow-repository', '--objects', '--batch-check=%(objecttype) %(objectname)'].includes(flag)).sort(),
     ['--branch', '--from', '--json', '--message', '--path', '--repo-root', '--store', '--to'], 'every caller flag is in the pinned table');
   assert.equal(store.mergedStoreBinding(os.tmpdir()).ok, false);
+});
+
+// ---- G2 round 1 findings: each test below reproduces one finding and holds the fix ---------------
+
+const zlib = require('node:zlib');
+const commitIn = (dir, file, text, message) => {
+  fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+  fs.writeFileSync(path.join(dir, file), text);
+  git(dir, 'add', '-A'); git(dir, 'commit', '--quiet', '-m', message);
+};
+
+test('a graft in the store checkout cannot make an unmerged branch look merged, and the merged check is GitHub\'s', t => {
+  const w = world(t);
+  git(w.other, 'checkout', '--quiet', '-B', 'only-copy', 'origin/main');
+  commitIn(w.other, 'only.md', 'only copy\n', 'only');
+  git(w.other, 'push', '--quiet', 'origin', 'only-copy');
+  const tip = git(w.other, 'rev-parse', 'HEAD');
+  git(w.dir, 'fetch', '--quiet', 'origin', 'only-copy');
+  fs.writeFileSync(path.join(w.dir, '.git', 'info', 'grafts'), `${git(w.dir, 'rev-parse', 'origin/main')} ${tip}\n`);
+  const run = w.act(['delete-merged-branch', '--branch', 'only-copy']);
+  assert.equal(run.code, 1, JSON.stringify(run.result));
+  assert.match(run.result.stopped, /has commits that are not in main/);
+  assert.notEqual(git(w.remote, 'branch', '--list', 'only-copy'), '', 'the only copy is still on the store');
+  // Every Git call runs with grafts pointed at a missing file and the commit-graph off.
+  assert.ok(w.calls.env.GIT_GRAFT_FILE && !fs.existsSync(w.calls.env.GIT_GRAFT_FILE));
+});
+
+test('a graft cannot turn a save into a history rewrite, and the read-back checks the old tip on GitHub', t => {
+  const w = world(t);
+  const tip = git(w.dir, 'rev-parse', 'origin/main');
+  git(w.dir, 'checkout', '--quiet', '--orphan', 'tmpx');
+  git(w.dir, 'rm', '-rq', '--cached', '.');
+  fs.rmSync(path.join(w.dir, 'archives'), { recursive: true, force: true }); fs.rmSync(path.join(w.dir, 'loose.json'), { force: true });
+  commitIn(w.dir, 'archives/rewritten.md', 'history replaced\n', 'orphan');
+  const orphan = git(w.dir, 'rev-parse', 'HEAD');
+  git(w.dir, 'branch', '-f', 'main', orphan); git(w.dir, 'checkout', '--quiet', 'main'); git(w.dir, 'branch', '-D', 'tmpx');
+  fs.writeFileSync(path.join(w.dir, '.git', 'info', 'grafts'), `${orphan} ${tip}\n`);
+  w.write('archives/new.md', 'n\n');
+  const run = w.act(['save', '--path', 'archives/new.md', '--message', 'save']);
+  assert.equal(run.code, 1);
+  assert.deepEqual(pushes(w.calls), [], 'nothing is pushed');
+  assert.equal(spawnSync('git', ['--git-dir', w.remote, 'merge-base', '--is-ancestor', tip, 'main']).status, 0, 'the remote history is intact');
+});
+
+test('a shallow store checkout is refused', t => {
+  const w = world(t);
+  const shallow = path.join(w.base, 'shallow');
+  git(w.base, 'clone', '--quiet', '--depth', '1', `file://${w.remote}`, shallow);
+  git(shallow, 'config', 'user.name', 'Test'); git(shallow, 'config', 'user.email', 'test@example.invalid');
+  const out = [];
+  assert.equal(store.main(['status', '--store', shallow, '--json'], { ...w.deps, stdout: text => out.push(text) }), 1);
+  assert.match(JSON.parse(out.join('')).stopped, /shallow/);
+});
+
+test('a branch name that differs from the bound branch only by case is refused, and other branches never touch the bound tracking ref', t => {
+  const w = world(t);
+  for (const command of [['merge-branch', '--branch', 'Main', '--message', 'm'], ['delete-merged-branch', '--branch', 'MAIN']]) {
+    assert.match(w.act(command).result.stopped, /is the bound store branch itself/, command.join(' '));
+  }
+  git(w.other, 'checkout', '--quiet', '-B', 'cloud', 'origin/main');
+  commitIn(w.other, 'archives/cloud.md', 'cloud\n', 'cloud');
+  git(w.other, 'push', '--quiet', 'origin', 'cloud');
+  assert.equal(w.act(['merge-branch', '--branch', 'cloud', '--message', 'm']).code, 0);
+  for (const args of w.calls.filter(call => call[0] === 'fetch')) {
+    const spec = args.at(-1);
+    assert.ok(spec === '+refs/heads/main:refs/remotes/origin/main' || spec === '+refs/heads/cloud:refs/toolkit-store/cloud', spec);
+  }
+});
+
+test('a file the scan cannot read as text (gzip, UTF-16) is refused', t => {
+  const w = world(t);
+  fs.mkdirSync(path.join(w.dir, 'evidence'), { recursive: true });
+  fs.writeFileSync(path.join(w.dir, 'evidence', 'logs.gz'), zlib.gzipSync(`token = ${PLANTED}\n`));
+  assert.match(w.act(['save', '--path', 'evidence/logs.gz', '--message', 'gz']).result.stopped, /could not be scanned \(over 5 MB, binary or not UTF-8\): evidence\/logs\.gz/);
+  fs.rmSync(path.join(w.dir, 'evidence', 'logs.gz'));
+  fs.writeFileSync(path.join(w.dir, 'evidence', 'u16.txt'), Buffer.from(`token = ${PLANTED}\n`, 'utf16le'));
+  assert.match(w.act(['save', '--path', 'evidence/u16.txt', '--message', 'u16']).result.stopped, /evidence\/u16\.txt/);
+  assert.ok(!w.remoteHas('evidence/logs.gz') && !w.remoteHas('evidence/u16.txt'));
+  assert.deepEqual(pushes(w.calls), []);
+});
+
+test('merge-branch scans every commit the branch brings in, and keeps to the store folders', t => {
+  const w = world(t);
+  git(w.other, 'checkout', '--quiet', '-B', 'hist', 'origin/main');
+  commitIn(w.other, 'archives/tmp.md', `key ${PLANTED}\n`, 'leak');
+  fs.rmSync(path.join(w.other, 'archives', 'tmp.md'));
+  commitIn(w.other, 'archives/clean.md', 'clean\n', 'cleanup');
+  git(w.other, 'push', '--quiet', 'origin', 'hist');
+  assert.match(w.act(['merge-branch', '--branch', 'hist', '--message', 'm']).result.stopped, /archives\/tmp\.md:1 \(github-token\)/);
+  assert.ok(!spawnSync('git', ['--git-dir', w.remote, 'log', '--format=%s', 'main'], { encoding: 'utf8' }).stdout.split('\n').includes('leak'));
+  assert.ok(!fs.existsSync(path.join(w.dir, '.git', 'MERGE_HEAD')));
+
+  git(w.other, 'checkout', '--quiet', '-B', 'wf', 'origin/main');
+  commitIn(w.other, '.github/workflows/x.yml', 'on: push\n', 'wf');
+  git(w.other, 'push', '--quiet', 'origin', 'wf');
+  assert.match(w.act(['merge-branch', '--branch', 'wf', '--message', 'm']).result.stopped, /\.github\/workflows\/x\.yml is outside the store folders/);
+  assert.ok(!w.remoteHas('.github/workflows/x.yml'));
+});
+
+test('global push settings that could widen a push are refused, and git is found on PATH by full path', t => {
+  const w = world(t);
+  w.write('archives/g.md', 'g\n');
+  for (const [key, value] of [['remote.origin.mirror', 'true'], ['remote.origin.push', '+refs/heads/*:refs/heads/*'], ['push.followTags', 'true']]) {
+    fs.writeFileSync(path.join(w.home, '.gitconfig'), `[${key.split('.').slice(0, -1).join(' "').replace(/ "(.+)$/, ' "$1"')}]\n\t${key.split('.').at(-1)} = ${value}\n`);
+    const run = w.act(['save', '--path', 'archives/g.md', '--message', 'g']);
+    assert.match(run.result?.stopped || '', new RegExp(key.replace(/\./g, '\\.'), 'i'), key);
+  }
+  fs.rmSync(path.join(w.home, '.gitconfig'));
+  const seen = [];
+  assert.equal(w.act(['save', '--path', 'archives/g.md', '--message', 'g'], { run: (cmd, args, options) => { seen.push(cmd); return w.deps.run(cmd, args, options); } }).code, 0);
+  assert.ok(seen.every(cmd => path.isAbsolute(cmd)), 'git is run by its full path');
 });
