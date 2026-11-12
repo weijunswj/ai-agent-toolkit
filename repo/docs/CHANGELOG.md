@@ -1,23 +1,19 @@
 # Toolkit Changelog
 
-## 3.69.0 (programme sweep on a saved queue, and on GitHub)
-
-### Changed
-
-- The programme refresh now works through a saved queue on the one reconciler. Each pass reads the whole graph, then the tasks GitHub changed since the last pass, tasks whose page shows another revision than their state, open tracked PRs whose head or checks moved, and a rotating share, so every task is read at least once in twelve passes. It saves the state in one commit, keeps every recovery step it had, and a pass that changes nothing writes no state.
-- Requests run one at a time within a cap of 300 per pass, keep a reserve for saving and redrawing, and stop reading when GitHub's rate limit runs low or asks to wait. When GitHub refuses GraphQL, the state is read one document at a time instead.
-- CURRENT on the parent page starts with when the board was last updated, or how long it has been out of date, why, and how many tasks are still to check.
-- `reconcile --apply` saves its state phase in the same single commit.
-- The hourly sweep pass (`refresh --scheduled`) now works for up to 50 minutes instead of 10, is killed at 55 minutes and, on GitHub, has its job stopped at 58, so it always ends before the next hourly start. The refresh a session starts after its own GitHub write keeps 10 minutes and still leaves a flag for the scheduled pass while that holds the lock.
-- On a computer, the hourly task's budget rises to 55 minutes and its Windows stop-after limit to 56; the refresh in it takes what is left, less the attention step, and never less than 10 minutes. A task registered with the earlier 30-minute limit is updated in place by the next apply. A long pass renews its sweep lease.
-- `toolkit permissions` keeps allowing the programme refresh line with the sweep's `--scheduled` and `--budget-ms`, and its note now says they only set how long one pass may run, 10 to 50 minutes.
+## 3.69.0 (Projects follows local Toolkit as its base)
 
 ### Added
 
-- The hourly Toolkit Programme Sweep workflow runs the refresh on GitHub under the governance GitHub App, with one installation token for the governed repository and one for its evidence store, each with only its own permissions. Without the App it posts a notice and writes nothing; a repository whose state is on a public branch keeps the computer's sweep.
-- A shared lease in the evidence store lets one sweep write at a time across the computer and GitHub; a run stopped by its timeout is reported by the next one. The lease makes every write of its own record in turn: while the pass saves its state, the renewal rides that one commit, so a long pass never mistakes its own renewal for another sweep. A lease never outlasts its pass's kill time, a pass that defers to another sweep leaves no stop behind, and a pass that ends with an error records its stop where the next pass on either host reads it.
-- On GitHub, the sweep reads the binding merged on the default branch online, so a fresh runner with no saved copy runs its pass, and a run that started before main moved stops with a notice.
-- `repo/contracts/cloud-jobs.json` lists the jobs that run on GitHub and their tokens. Each token names only which of the governance App's permissions it takes, at the App's level unless marked read-only, so the App's permission list is kept in one place. `toolkit governance check` lists the jobs beside the App's setup, in the same words.
+- **Projects base rule:** the Projects controller skill now opens with the rule that local Toolkit (global, gate and governed rules and the controller file) is its base. Every place Projects differs is a row in the new overrides list with the owner's decision; any other difference is a clash for the owner.
+- **Projects task auto-merge switch:** the gate rules name Claude Projects as a third app. Its switch is the project line `- Task auto-merge: On`, and its one named merge thread stands in for a session the owner started. The skill's Approvals section gives the cloud merge route: eligibility check at the exact head, effects notice, head-pinned merge commit, or the owner's card tap at that head.
+- **Cloud hook table:** a new reference table says, for every hook in the plugin manifest, how its rule is covered in cloud sessions. A test fails when a hook has no row.
+- **Weekly base clash check:** a new task step compares the base files with the copy the guidebook names, and raises each new clash as an owner question. The daily check-in runs it when a week has passed and no weekly audit covers it.
+- **Guidebook BASE file:** the guidebook copy now carries `BASE`, the git blob SHA of each base file, so a coordinator can tell which base its copy follows.
+
+### Fixed
+
+- **Governance status in cloud sessions:** a Claude Code cloud container's own git rewrite (ssh spellings of github.com to canonical https, no credential prompts) no longer holds the binding read, so `toolkit governance status` reads the merged binding there. Any other command-scope config stays held.
+- **Hook status lines:** `toolkit governance status` no longer says cloud sessions and Claude Projects have no hooks; account copy hooks run there, with the merge and undecided-repository holds skipped in cloud sessions.
 
 ## 3.68.0 (one-time permission blocks and checked cleanup)
 
