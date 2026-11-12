@@ -13,7 +13,7 @@
 ### Fixed
 
 - **Governance status in cloud sessions:** a Claude Code cloud container's own git rewrite (ssh spellings of github.com to canonical https, no credential prompts) no longer holds the binding read, so `toolkit governance status` reads the merged binding there. Any other command-scope config stays held.
-- **Hook status lines:** `toolkit governance status` no longer says cloud sessions and Claude Projects have no hooks; account copy hooks run there, with the governance holds advisory.
+- **Hook status lines:** `toolkit governance status` no longer says cloud sessions and Claude Projects have no hooks; account copy hooks run there, with the merge and undecided-repository holds skipped in cloud sessions.
 
 ## 3.68.0 (one-time permission blocks and checked cleanup)
 

@@ -14,7 +14,7 @@
 //                   says which rules each hook covers there)
 //
 // A Claude Code cloud session runs the hooks synced from the claude.ai account copy too, but the
-// governance hook's cloud mode only advises on the merge and undecided-repository holds, and the
+// governance hook's cloud mode skips the merge and undecided-repository holds, and the
 // programme refresh cannot write without a signed-in gh, so the portable path still applies there.
 
 const fs = require('node:fs');
@@ -29,7 +29,7 @@ function isDir(folder) { try { return fs.statSync(folder).isDirectory(); } catch
 // The Claude Code line, or null when Claude Code is not on this computer.
 function claudeCodeHooks({ environment, homeDir, registry = null, blockers = null, accountCopy = null }) {
   const configDir = environment.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude');
-  if (environment.CLAUDE_CODE_REMOTE === 'true') return { host: 'Claude Code', state: 'account copy hooks run (cloud session; governance holds advisory)' };
+  if (environment.CLAUDE_CODE_REMOTE === 'true') return { host: 'Claude Code', state: 'account copy hooks run (cloud session; governance holds skipped)' };
   if (!isDir(configDir)) return null;
   let install;
   try {
