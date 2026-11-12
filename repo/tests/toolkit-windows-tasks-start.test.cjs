@@ -5,8 +5,8 @@
 const { assert, test, memoryRegistry, fakeScheduler, windowsTasks } = require('./toolkit-windows-tasks-support.cjs');
 
 const MARK = '[toolkit-task v1 id=demo-footer-sweep def=0123456789ab]';
-const entry = (extra = {}) => ({ id: 'demo-footer-sweep', name: 'DEMO - Footer sweep', host: 'windows', folder: 'DEMO', ...extra });
-const live = (extra = {}) => ({ name: 'DEMO - Footer sweep', description: `Toolkit job. ${MARK}`, ...extra });
+const entry = (extra = {}) => ({ id: 'demo-footer-sweep', name: 'DEMO - Footer sweep', host: 'windows', folder: 'DEMO', enrolled: windowsTasks.enrolledDefinition(live()), ...extra });
+const live = (extra = {}) => ({ name: 'DEMO - Footer sweep', description: `Toolkit job. ${MARK}`, state: 'Ready', execute: 'C:\\node\\node.exe', arguments: '"C:\\tk\\runner.cjs" --repo-root "C:\\repo"', working_directory: 'C:\\repo', triggers: [{ type: 'daily', at: '03:00' }], ...extra });
 function run(argv, { entries = [entry()], tasks = { DEMO: [live()] }, platform = 'win32', corrupt = false } = {}) {
   const scheduler = fakeScheduler(tasks);
   const started = [];
@@ -36,6 +36,10 @@ test('start refuses every task that is not provably Toolkit\'s own, and starts n
     ['a same-named task with another id\'s marker', { tasks: { DEMO: [live({ description: '[toolkit-task v1 id=other-job def=0123456789ab]' })] } }, /is missing or no longer carries Toolkit's marker/],
     ['a marked task in a different folder', { tasks: { OTHER: [live()] } }, /is missing or no longer carries Toolkit's marker/],
     ['a task turned off in Task Scheduler but not yet recorded as stopped', { tasks: { DEMO: [live({ state: 'Disabled' })] } }, /is turned off in Task Scheduler, and Toolkit never restarts a task you stopped/],
+    ['a task whose program was changed by hand', { tasks: { DEMO: [live({ execute: 'C:\\other\\tool.exe' })] } }, /no longer matches what Toolkit set up/],
+    ['a task whose arguments were changed by hand', { tasks: { DEMO: [live({ arguments: '"C:\\tk\\runner.cjs" --repo-root "C:\\elsewhere"' })] } }, /no longer matches what Toolkit set up/],
+    ['a task with an added action', { tasks: { DEMO: [live({ actions: [{ execute: 'C:\\other\\tool.exe' }] })] } }, /no longer matches what Toolkit set up/],
+    ['a record from before Toolkit kept the enrolled definition', { entries: [entry({ enrolled: undefined })] }, /no longer matches what Toolkit set up/],
     ['an unreadable registry', { corrupt: true }, /could not be read, so no task was started/],
   ];
   for (const [label, world, message] of cases) {

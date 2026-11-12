@@ -37,11 +37,13 @@ function computer(t, { managed = TK, claude = true, platform = 'linux' } = {}) {
   return { home, platform, environment: {}, cwd: '/work/repo', fs: hostFs };
 }
 // A fake Git that answers for one governed repository and one store checkout.
-function fakeGit({ root = '/work/repo', origin = 'https://github.com/owner/store.git' } = {}) {
+function fakeGit({ root = '/work/repo', origin = 'https://github.com/owner/store.git', pushUrl = null, config = {} } = {}) {
   return (cmd, args) => {
     const rest = args.slice(2).join(' ');
     if (rest === 'rev-parse --path-format=absolute --git-common-dir') return { status: 0, stdout: `${root}/.git\n` };
     if (rest === 'remote get-url origin') return { status: 0, stdout: `${origin}\n` };
+    if (rest === 'remote get-url --push --all origin') return { status: 0, stdout: `${pushUrl || origin}\n` };
+    if (rest.startsWith('config --get-all ')) return config[rest.slice(17)] ? { status: 0, stdout: `${config[rest.slice(17)]}\n` } : { status: 1, stdout: '' };
     return { status: 1, stdout: '' };
   };
 }
@@ -137,6 +139,19 @@ test('missing pieces stop with a plain line and leave only the safe part', t => 
   assert.ok(wrongStore.blocks[1].allow.every(line => !line.includes('push')));
   assert.match(wrongStore.stops[0].stopped, /that folder is not a checkout of the evidence store the programme file names/);
 
+  // A plain push follows the checkout's own push settings, so a checkout that would push elsewhere,
+  // force or mirror gets no store line.
+  for (const [label, world, said] of [
+    ['a push address that is another repository', { pushUrl: 'https://github.com/someone/else.git' }, /pushes somewhere other than the evidence store/],
+    ['a second push address', { pushUrl: 'https://github.com/owner/store.git\nhttps://github.com/someone/else.git' }, /pushes somewhere other than the evidence store/],
+    ['a forcing push rule', { config: { 'remote.origin.push': '+refs/heads/main:refs/heads/main' } }, /has its own push rule \(remote\.origin\.push\)/],
+    ['a mirror remote', { config: { 'remote.origin.mirror': 'true' } }, /has its own push rule \(remote\.origin\.mirror\)/],
+  ]) {
+    const odd = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(), run: fakeGit(world) }).build({ storePath: '/work/store' });
+    assert.ok(odd.blocks[1].allow.every(line => !line.includes('push')), label);
+    assert.match(odd.stops[0].stopped, said, label);
+  }
+
   for (const binding of [{ governance: 'disabled' }, null]) {
     const off = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(binding), run: fakeGit() }).build({});
     assert.deepEqual(off.blocks.map(block => block.scope), ['computer']);
@@ -157,7 +172,7 @@ test('the command cannot write: no write call in its source, and none attempted 
   const run = (cmd, args) => { runs.push(args.slice(2).join(' ')); return fakeGit()(cmd, args); };
   assert.equal(permissions.main(['--store', '/work/store', '--json'], { ...computer(t), fs: guarded, run, stdout: () => {} }), 0);
   assert.deepEqual(attempts, []);
-  assert.deepEqual([...new Set(runs)].sort(), ['remote get-url origin', 'rev-parse --path-format=absolute --git-common-dir']);
+  assert.deepEqual([...new Set(runs)].sort(), ['config --get-all remote.origin.mirror', 'config --get-all remote.origin.push', 'remote get-url --push --all origin', 'remote get-url origin', 'rev-parse --path-format=absolute --git-common-dir']);
 });
 
 test('--check reads a settings file and reports missing and stale lines without changing it', t => {
@@ -250,6 +265,11 @@ test('script lines allow only what their guard text says; approval-bearing flags
   assert.deepEqual([...new Set(updateFlags)].sort(), ['--answers', '--apply', '--json']);
   const applyFlags = listIn(source('repo/scripts/toolkit-windows-tasks.cjs'), /apply: \[([^\]]+)\]/);
   assert.deepEqual(applyFlags, ['--repo-root', '--folder', '--task-choice', '--task', '--observed', '--answer-ref']);
+  // Flags that take no value are pinned too: each is either harmless (--json) or has an ask line.
+  const taskSwitches = [...source('repo/scripts/toolkit-windows-tasks.cjs').matchAll(/arg === '(--[a-z-]+)'/g)].map(match => match[1]);
+  assert.deepEqual([...new Set(taskSwitches)].sort(), ['--json', '--no-first-run', '--repair-owned', '--task-choice']);
+  const programmeFlags = [...source('skills/github-program-reconciler/scripts/programme.cjs').matchAll(/'(--[a-z-]+)'/g)].map(match => match[1]);
+  assert.deepEqual([...new Set(programmeFlags)].sort(), ['--apply', '--assignment', '--at-head', '--body-file', '--catalogue', '--consume', '--controller', '--deadline-ms', '--dry-run', '--effort', '--finding', '--force-another', '--include-private', '--issue', '--json', '--lane', '--message-file', '--model', '--parent', '--parent-file', '--patch', '--plan-digest', '--pr', '--prefix', '--reason', '--record', '--refresh', '--repo-root', '--role', '--route-read-back', '--session', '--show-toplevel', '--supersede', '--takeover', '--takeover-record', '--verdict']);
   const wild = permissions.ROWS.filter(row => row.kind === 'script' && !row.sub && !row.forms).map(row => row.id);
   assert.deepEqual(wild, ['permissions-print'], 'only the print-only script keeps a bare wildcard');
   assert.deepEqual([...source('repo/scripts/toolkit-permissions.cjs').matchAll(/'(--[a-z-]+)': \[/g)].map(match => match[1]).sort(), ['--check', '--format', '--host', '--repo-root', '--scope', '--store']);

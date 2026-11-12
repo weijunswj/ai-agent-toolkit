@@ -297,3 +297,119 @@ test('--stale keeps a folder whose deep file changed recently', t => {
   for (const target of [folder, path.join(folder, 'a'), deep, path.join(idle, 'a', 'b', 'old.txt'), path.join(idle, 'a', 'b'), path.join(idle, 'a'), idle]) fs.utimesSync(target, past, past);
   assert.deepEqual(w.cleaner().plan({ stale: true }).items.map(item => path.basename(item.path)), ['idle']);
 });
+
+test('a path that goes through a link below the scratch root is refused, so no checkout behind it loses work', t => {
+  const w = world(t);
+  const link = 'part of its path is a link; Toolkit never deletes through a link';
+  // A clone with an uncommitted tracked edit and an untracked folder, reached through .tmp/alias.
+  const clone = path.join(w.main, '.tmp', 'clone'); spawnSync('git', ['clone', '--quiet', w.remote, clone]);
+  fs.writeFileSync(path.join(clone, 'src', 'keep.txt'), 'edited in the clone\n');
+  fs.symlinkSync(path.join(clone, 'src'), path.join(w.main, '.tmp', 'alias'), 'junction');
+  // A registered worktree with an uncommitted tracked edit, reached through .tmp/wt-lib.
+  const tree = w.worktree('dirty');
+  fs.mkdirSync(path.join(tree, 'lib')); fs.writeFileSync(path.join(tree, 'lib', 'code.js'), 'one\n');
+  git(tree, 'add', '.'); git(tree, 'commit', '--quiet', '-m', 'lib'); git(tree, 'push', '--quiet');
+  fs.writeFileSync(path.join(tree, 'lib', 'code.js'), 'edited, not committed\n');
+  fs.symlinkSync(path.join(tree, 'lib'), path.join(w.main, '.tmp', 'wt-lib'), 'junction');
+  // The same under the user-state root, with an untracked file in a folder.
+  const stateTmp = path.join(w.home, '.ai-agent-toolkit', 'user-state', 'tmp'); fs.mkdirSync(stateTmp, { recursive: true });
+  const stateClone = path.join(stateTmp, 'checkout'); spawnSync('git', ['clone', '--quiet', w.remote, stateClone]);
+  fs.writeFileSync(path.join(stateClone, 'src', 'keep.txt'), 'edited in the state clone\n');
+  fs.mkdirSync(path.join(stateClone, 'src', 'more')); fs.writeFileSync(path.join(stateClone, 'src', 'more', 'new.txt'), 'unsaved\n');
+  fs.symlinkSync(path.join(stateClone, 'src'), path.join(stateTmp, 'alias'), 'junction');
+  // A link two levels up, and a link to a plain folder: a link is refused whatever it points at.
+  const plain = path.join(w.main, '.tmp', 'plain', 'deep'); fs.mkdirSync(plain, { recursive: true }); fs.writeFileSync(path.join(plain, 'scrap.txt'), 'x');
+  fs.symlinkSync(path.join(w.main, '.tmp', 'plain'), path.join(w.main, '.tmp', 'plain-alias'), 'junction');
+  const cases = {
+    [path.join(w.main, '.tmp', 'alias', 'keep.txt')]: ['refuse', link],
+    [path.join(w.main, '.tmp', 'wt-lib', 'code.js')]: ['refuse', link],
+    [path.join(stateTmp, 'alias', 'keep.txt')]: ['refuse', link],
+    [path.join(stateTmp, 'alias', 'more')]: ['refuse', link],
+    [path.join(w.main, '.tmp', 'plain-alias', 'deep', 'scrap.txt')]: ['refuse', link],
+    [path.join(w.main, '.tmp', 'alias')]: ['keep', 'it is a link; Toolkit never deletes through or around a link'],
+    [path.join(tree, 'lib', 'code.js')]: ['keep', 'it is inside a Git checkout; Toolkit removes a whole clean worktree, never part of one'],
+  };
+  for (const round of [1, 2]) {
+    const result = w.apply({ paths: Object.keys(cases) });
+    for (const [target, expected] of Object.entries(cases)) assert.deepEqual([byPath(result, target).action, byPath(result, target).reason], expected, `run ${round}: ${target}`);
+    assert.deepEqual(result.cleaned, { worktrees: 0, files: 0, folders: 0, branches: 0 });
+  }
+  const said = w.cli(['apply', '--store', w.storeDir, '--path', path.join(w.main, '.tmp', 'alias', 'keep.txt')]);
+  assert.match(said.out, /^cleaned: nothing\n- refused: .*part of its path is a link/);
+  assert.equal(fs.readFileSync(path.join(clone, 'src', 'keep.txt'), 'utf8'), 'edited in the clone\n');
+  assert.equal(git(clone, 'status', '--porcelain'), 'M src/keep.txt');
+  assert.equal(git(tree, 'status', '--porcelain'), 'M lib/code.js');
+  assert.equal(git(stateClone, 'status', '--porcelain'), 'M src/keep.txt\n?? src/more/');
+  assert.equal(fs.readFileSync(path.join(plain, 'scrap.txt'), 'utf8'), 'x');
+});
+
+test('a registered worktree whose Git pointer file is missing keeps everything at, inside and around it', t => {
+  const w = world(t);
+  fs.mkdirSync(path.join(w.main, '.tmp', 'hold'));
+  const tree = path.join(w.main, '.tmp', 'hold', 'wt');
+  git(w.main, 'worktree', 'add', '--quiet', '-b', 'lane/lost', tree);
+  fs.mkdirSync(path.join(tree, 'notes')); fs.writeFileSync(path.join(tree, 'notes', 'unsaved.txt'), 'only copy\n');
+  fs.rmSync(path.join(tree, '.git'));
+  assert.match(git(w.main, 'worktree', 'list', '--porcelain'), /prunable/);
+  const cases = {
+    [tree]: ['keep', 'it is a registered worktree whose Git pointer file is missing, so its state cannot be read'],
+    [path.join(tree, 'notes')]: ['keep', 'it is inside a registered worktree; Toolkit removes a whole clean worktree, never part of one'],
+    [path.join(tree, 'notes', 'unsaved.txt')]: ['keep', 'it is inside a registered worktree; Toolkit removes a whole clean worktree, never part of one'],
+    [path.join(w.main, '.tmp', 'hold')]: ['keep', 'it holds a registered worktree, which may carry work that exists nowhere else'],
+  };
+  for (const round of [1, 2]) {
+    const result = w.apply({ paths: Object.keys(cases) });
+    for (const [target, expected] of Object.entries(cases)) assert.deepEqual([byPath(result, target).action, byPath(result, target).reason], expected, `run ${round}: ${target}`);
+    assert.deepEqual(result.cleaned, { worktrees: 0, files: 0, folders: 0, branches: 0 });
+  }
+  assert.equal(fs.readFileSync(path.join(tree, 'notes', 'unsaved.txt'), 'utf8'), 'only copy\n');
+  // When Git cannot list the worktrees at all, nothing is judged a scrap.
+  const scrap = path.join(w.main, '.tmp', 'scrap.txt'); fs.writeFileSync(scrap, 'x');
+  const blind = (cmd, args, options) => (args.slice(2).join(' ') === 'worktree list --porcelain' ? { status: 128, stdout: '', stderr: 'fatal' } : w.run(cmd, args, options));
+  const unknown = w.apply({ paths: [scrap] }, { run: blind });
+  assert.deepEqual([byPath(unknown, scrap).action, byPath(unknown, scrap).reason], ['keep', 'the list of worktrees could not be read, so it may be part of one']);
+  assert.equal(fs.existsSync(scrap), true);
+});
+
+test('a Git folder in any spelling and a bare repository are never scraps', t => {
+  const w = world(t);
+  // A clone whose Git folder is spelled .GIT, inside a holder folder.
+  const holder = path.join(w.main, '.tmp', 'holder'); fs.mkdirSync(holder);
+  spawnSync('git', ['clone', '--quiet', w.remote, path.join(holder, 'clone')]);
+  fs.renameSync(path.join(holder, 'clone', '.git'), path.join(holder, 'clone', '.GIT'));
+  fs.writeFileSync(path.join(holder, 'clone', 'src', 'keep.txt'), 'edited\n');
+  // A bare repository holding a commit that exists nowhere else, alone and inside a folder.
+  const bare = path.join(w.main, '.tmp', 'backup.git');
+  spawnSync('git', ['clone', '--quiet', '--bare', w.remote, bare]);
+  const maker = path.join(w.base, 'maker'); spawnSync('git', ['clone', '--quiet', bare, maker]);
+  fs.writeFileSync(path.join(maker, 'unique.txt'), 'only here\n'); git(maker, 'add', '.'); git(maker, 'commit', '--quiet', '-m', 'unique'); git(maker, 'push', '--quiet');
+  const unique = git(bare, 'rev-parse', 'HEAD');
+  const box = path.join(w.main, '.tmp', 'box'); fs.mkdirSync(box);
+  spawnSync('git', ['clone', '--quiet', '--bare', w.remote, path.join(box, 'inner.git')]);
+  const stateBare = path.join(w.home, '.ai-agent-toolkit', 'user-state', 'tmp', 'keep.git');
+  fs.mkdirSync(path.dirname(stateBare), { recursive: true }); spawnSync('git', ['clone', '--quiet', '--bare', w.remote, stateBare]);
+  const checkout = 'it holds a Git checkout, which may carry work that exists nowhere else';
+  const repository = 'it holds a Git repository, which may carry commits that exist nowhere else';
+  const cases = {
+    [holder]: ['keep', checkout],
+    [path.join(holder, 'clone')]: ['keep', 'it is a Git checkout that is not a registered worktree of this repository'],
+    [path.join(holder, 'clone', 'src', 'keep.txt')]: ['keep', 'it is inside a Git checkout; Toolkit removes a whole clean worktree, never part of one'],
+    [bare]: ['keep', repository],
+    [path.join(bare, 'objects')]: ['keep', 'it is inside a Git repository; Toolkit never deletes part of one'],
+    [path.join(bare, 'HEAD')]: ['keep', 'it is inside a Git repository; Toolkit never deletes part of one'],
+    [box]: ['keep', repository],
+    [stateBare]: ['keep', repository],
+  };
+  for (const round of [1, 2]) {
+    const result = w.apply({ paths: Object.keys(cases) });
+    for (const [target, expected] of Object.entries(cases)) assert.deepEqual([byPath(result, target).action, byPath(result, target).reason], expected, `run ${round}: ${target}`);
+    assert.deepEqual(result.cleaned, { worktrees: 0, files: 0, folders: 0, branches: 0 });
+  }
+  // Left untouched for longer than the stale limit, they are still kept.
+  const far = { now: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) };
+  const stale = w.apply({ stale: true }, far);
+  assert.deepEqual(stale.items.filter(item => item.action !== 'keep'), []);
+  assert.deepEqual(stale.cleaned, { worktrees: 0, files: 0, folders: 0, branches: 0 });
+  assert.equal(git(bare, 'cat-file', '-t', unique), 'commit');
+  assert.equal(fs.readFileSync(path.join(holder, 'clone', 'src', 'keep.txt'), 'utf8'), 'edited\n');
+});

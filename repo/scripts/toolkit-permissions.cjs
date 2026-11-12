@@ -51,7 +51,7 @@ const GUARDS = Object.freeze({
   updateOnly: 'Exact lines for the plan and apply forms only; a run that carries an answers file is not in a line, so it asks. Its saved approval and question flow return a new task kind or a hand-edited task to the owner.',
   cleanup: 'The script checks every path itself: inside a scratch root after links are resolved, a clean and fully pushed worktree, and the evidence store read back first. Anything else is reported, never deleted.',
   comment: 'The owner approved comment lines. Nothing checks the target or the words: the footer hook and the footer sweep check only the footer, so the repository rules on what to post still bind the agent.',
-  store: 'One exact line: a plain push to origin and the store branch, with no options, so no other destination, flag or program can ride on it. The secret scan before upload and the store identity check when this line is printed still apply.',
+  store: 'One exact line: a plain push to origin and the store branch, with no options, so no other destination, flag or program can ride on it. The line is printed only when the folder fetches from and pushes to the store and has no push rule of its own. Nothing scans at push time: the secret scan before upload stays the agent\'s own step.',
 });
 
 // Every subcommand of the two multi-command scripts is classified here. A test compares these
@@ -210,6 +210,12 @@ class PermissionBlocks {
     if (!safe) return { ok: false, reason: 'the evidence store path holds a character a permission line cannot carry safely.' };
     const origin = this.#git(resolved, ['remote', 'get-url', 'origin']);
     if (githubSlug(origin) !== wanted) return { ok: false, reason: 'that folder is not a checkout of the evidence store the programme file names.' };
+    // A plain push follows the checkout's own settings, so those must not send it elsewhere or force it.
+    const pushTo = (this.#git(resolved, ['remote', 'get-url', '--push', '--all', 'origin']) || '').split(/\r?\n/).filter(Boolean);
+    if (!pushTo.length || pushTo.some(url => githubSlug(url) !== wanted)) return { ok: false, reason: 'that folder pushes somewhere other than the evidence store (its push address differs).' };
+    for (const key of ['remote.origin.push', 'remote.origin.mirror']) {
+      if (this.#git(resolved, ['config', '--get-all', key])) return { ok: false, reason: `that folder has its own push rule (${key}), so a plain push there could force or mirror.` };
+    }
     const branch = typeof binding.store.branch === 'string' && BRANCH.test(binding.store.branch) && !binding.store.branch.includes('..') ? binding.store.branch : 'main';
     return { ok: true, safe, branch };
   }

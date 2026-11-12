@@ -20,10 +20,14 @@
 //
 // --path names your own scraps. --stale takes entries in the first two roots untouched for 7 days.
 // A scrap is removed only when all of this holds; otherwise it is kept and reported:
-//   - its path is inside a scratch root, before and after every link is resolved;
-//   - it is not a link, and (for a folder) holds no link and no Git checkout of its own;
-//   - it is not inside a Git checkout (a worktree or a clone) and no part of its path is `.git`:
-//     a checkout goes only whole, as a worktree, never piece by piece;
+//   - its path is inside a scratch root, and no part of the path below that root is a link
+//     (symlink or junction): the real path must be the typed path;
+//   - it is not a link, and (for a folder) holds no link, no Git checkout and no bare repository;
+//   - it is not inside a Git checkout (a worktree or a clone) or a bare repository, and no part of
+//     its path is `.git` in any spelling: a checkout goes only whole, as a worktree, never piece
+//     by piece;
+//   - it is not at, inside or around a path Git lists as a worktree of this repository, unless it
+//     is that whole worktree with its Git pointer file present;
 //   - its scratch root is a real folder, not a link;
 //   - inside a repository, Git ignores it and tracks nothing in it;
 //   - a worktree is registered, unlocked, clean including ignored files, and its commit is on a
@@ -56,6 +60,10 @@ function within(parent, child, { strict = false } = {}) {
   if (relative === '') return !strict;
   return !relative.startsWith('..') && !path.isAbsolute(relative);
 }
+
+// Windows paths ignore case; compare them the way the file system does.
+const fold = text => (path.sep === '\\' ? text.toLowerCase() : text);
+const isGitName = name => name.toLowerCase() === '.git';
 
 class ScratchCleaner {
   #fs; #run; #home; #tmpdir; #cwd; #now;
@@ -111,7 +119,30 @@ class ScratchCleaner {
     const realTarget = path.join(realParent, path.basename(target));
     if (!within(realRoot, realTarget, { strict: true })) return { refuse: 'a link in its path leads outside the scratch root' };
     if (root.kind === 'temp' && !TEMP_NAME.test(path.relative(realRoot, realTarget).split(path.sep)[0])) return { refuse: 'a link in its path leads outside the Toolkit temp folder' };
-    return { root };
+    // A link below the root can point into a worktree or a clone, where Git in the main checkout
+    // would call that checkout's unsaved work an ignored scrap. So the real path must be the typed one.
+    for (let dir = path.dirname(target); within(root.dir, dir, { strict: true }); dir = path.dirname(dir)) {
+      if (this.#lstat(dir)?.isSymbolicLink()) return { refuse: 'part of its path is a link; Toolkit never deletes through a link' };
+    }
+    if (fold(path.relative(realRoot, realTarget)) !== fold(path.relative(root.dir, target))) return { refuse: 'part of its path is a link; Toolkit never deletes through a link' };
+    return { root, real: realTarget };
+  }
+
+  // True when a folder is laid out as a Git repository (a bare one, or the inside of `.git`).
+  #repository(dir) {
+    let names;
+    try { names = this.#fs.readdirSync(dir).map(name => name.toLowerCase()); } catch { return false; }
+    if (!['head', 'objects', 'refs'].every(name => names.includes(name))) return false;
+    return Boolean(this.#lstat(path.join(dir, 'objects'))?.isDirectory() && this.#lstat(path.join(dir, 'refs'))?.isDirectory());
+  }
+
+  #holdsGit(dir) {
+    try { return this.#fs.readdirSync(dir).some(isGitName); } catch { return true; }
+  }
+
+  // The `.git` entry of a folder as it is spelled on disk, or null.
+  #gitName(dir) {
+    try { return this.#fs.readdirSync(dir).find(isGitName) || null; } catch { return null; }
   }
 
   // Walks a folder without following links. { files, reason } where reason, when set, is why it is kept.
@@ -122,12 +153,13 @@ class ScratchCleaner {
       const current = stack.pop();
       let names;
       try { names = this.#fs.readdirSync(current); } catch { return { files, reason: 'part of it could not be read' }; }
+      if (this.#repository(current)) return { files, reason: 'it holds a Git repository, which may carry commits that exist nowhere else' };
       for (const name of names) {
         if ((seen += 1) > WALK_LIMIT) return { files, reason: `it holds more than ${WALK_LIMIT} entries` };
         const full = path.join(current, name);
         const stat = this.#lstat(full);
         if (!stat) return { files, reason: 'part of it could not be read' };
-        if (name === '.git') return { files, reason: 'it holds a Git checkout, which may carry work that exists nowhere else' };
+        if (isGitName(name)) return { files, reason: 'it holds a Git checkout, which may carry work that exists nowhere else' };
         if (stat.isSymbolicLink()) return { files, reason: 'it holds a link, which could lead outside the scratch root' };
         if (stat.isDirectory()) stack.push(full); else files += 1;
       }
@@ -161,11 +193,12 @@ class ScratchCleaner {
     const listed = this.#git(main, ['worktree', 'list', '--porcelain']);
     if (!listed.ok) return null;
     return listed.out.split(/\r?\n\r?\n/).map(block => {
-      const entry = { path: null, branch: null, locked: false };
+      const entry = { path: null, branch: null, locked: false, prunable: false };
       for (const line of block.split(/\r?\n/)) {
         if (line.startsWith('worktree ')) entry.path = path.resolve(line.slice(9));
         else if (line.startsWith('branch ')) entry.branch = line.slice(7).replace(/^refs\/heads\//, '');
         else if (line === 'locked' || line.startsWith('locked ')) entry.locked = true;
+        else if (line === 'prunable' || line.startsWith('prunable ')) entry.prunable = true;
       }
       return entry;
     }).filter(entry => entry.path);
@@ -184,17 +217,35 @@ class ScratchCleaner {
     // A scrap inside a worktree or a clone looks ignored and untracked from the main checkout, yet
     // it can be that checkout's uncommitted work. Only a whole checkout is ever judged.
     for (let dir = path.dirname(target); within(placed.root.dir, dir, { strict: true }); dir = path.dirname(dir)) {
-      if (this.#lstat(path.join(dir, '.git'))) return { ...item, reason: 'it is inside a Git checkout; Toolkit removes a whole clean worktree, never part of one' };
+      if (this.#holdsGit(dir)) return { ...item, reason: 'it is inside a Git checkout; Toolkit removes a whole clean worktree, never part of one' };
+      if (this.#repository(dir)) return { ...item, reason: 'it is inside a Git repository; Toolkit never deletes part of one' };
+    }
+    // Git's own list of this repository's worktrees also counts, so a worktree whose pointer file
+    // is missing (Git calls it prunable) still keeps the work inside it.
+    let registered = null;
+    if (main) {
+      if (!worktrees) return { ...item, reason: 'the list of worktrees could not be read, so it may be part of one' };
+      const forms = [target, placed.real];
+      const same = (a, b) => within(a, b) && within(b, a);
+      for (const entry of worktrees) {
+        const places = [entry.path, this.#real(entry.path)].filter(Boolean);
+        if (places.some(place => same(place, main) || same(place, this.#real(main) || main))) continue;
+        if (places.some(place => forms.some(form => same(place, form)))) { registered = entry; continue; }
+        if (places.some(place => forms.some(form => within(place, form)))) return { ...item, reason: 'it is inside a registered worktree; Toolkit removes a whole clean worktree, never part of one' };
+        if (places.some(place => forms.some(form => within(form, place)))) return { ...item, reason: 'it holds a registered worktree, which may carry work that exists nowhere else' };
+      }
     }
     if (placed.root.kind === 'repo') {
       const tracked = this.#git(main, ['ls-files', '--', target]);
       if (!tracked.ok || tracked.out.trim()) return { ...item, reason: 'Git tracks files in it' };
       if (!this.#git(main, ['check-ignore', '-q', '--', target]).ok) return { ...item, reason: 'Git does not ignore it, so it may be real work' };
     }
-    const pointer = stat.isDirectory() ? this.#lstat(path.join(target, '.git')) : null;
+    const gitName = stat.isDirectory() ? this.#gitName(target) : null;
+    const pointer = gitName ? this.#lstat(path.join(target, gitName)) : null;
+    if (registered && !(pointer && pointer.isFile())) return { ...item, kind: 'worktree', reason: 'it is a registered worktree whose Git pointer file is missing, so its state cannot be read' };
     if (pointer) {
       item.kind = 'worktree';
-      const known = pointer.isFile() && main && (worktrees || []).find(entry => this.#real(entry.path) === this.#real(target));
+      const known = pointer.isFile() && registered;
       if (!known) return { ...item, reason: 'it is a Git checkout that is not a registered worktree of this repository' };
       if (known.locked) return { ...item, reason: 'the worktree is locked' };
       const status = this.#git(target, ['status', '--porcelain', '--ignored']);
