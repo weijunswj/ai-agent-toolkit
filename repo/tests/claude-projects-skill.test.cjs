@@ -622,7 +622,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('Link the chat thread that owns the work as much as possible, UAT asks included. A direct PR link appears only on a merge ask for a merge-ready PR (G2 PASS and green CI on its current head)'));
   assert.ok(text.includes('anywhere else, name the PR\'s work in plain words with no PR link.'));
   assert.ok(text.includes('- Relay CI in one line with the owning thread\'s link (a PR link only on a merge-ready merge ask).'));
-  assert.ok(body.includes('each linking the card or thread (by its title), a PR only on a merge-ready merge ask,'));
+  assert.ok(body.includes('each linking the card or thread (by its title), a PR only on a merge-ready merge ask;'));
   assert.doesNotMatch(text + body, /with the PR link|until then, link the chat thread|thread \(by its title\) or PR/);
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('with a **Waiting on you** item or relay that names its thread, file or artifact without its link, or that links a PR anywhere but a merge ask for a merge-ready PR;'));
   // Devices by their recorded name, every periodic report relayed, owed decision records kept as promises.
@@ -631,26 +631,28 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(text.includes('**Owed records are promises.** With GitHub governance ENABLED, each owner decision or plan OK owes its decision-trace record the same turn'));
   assert.ok(text.includes('the nudge lists it under **Overdue promise:** until then.'));
   // Links only where the owner acts, as the owner decided; a written rule, no hook checks it.
-  assert.ok(text.includes('**Link where the owner acts.** Every item under **Waiting on you** (each question and each merge ask included) carries the link to the card or chat thread where the owner acts.'));
+  assert.ok(text.includes('**Link where the owner acts.** Every question and item under **Waiting on you** (each merge ask included) carries the link to the card or chat thread where the owner acts.'));
   assert.ok(text.includes('A thread or file named elsewhere needs no link. This is a written rule: no hook checks it.'));
   assert.doesNotMatch(text, /Link everything worth opening|names "PR <n>" without a link|not from the link rule/);
   // The post layout and the merge summary.
-  assert.ok(text.includes('**Post layout.** A running post has four parts, in order: a **Now:** line'));
-  // The owner's call: Waiting on you sits second last, just above the ELI5 line, which ends every post.
-  assert.ok(text.includes('**Waiting on you (n):** second last, just above the ELI5 line'));
-  assert.ok(text.includes('one **ELI5:** line, matched to the Now line, as the very last line with nothing after it'));
-  assert.ok(body.includes('`**Waiting on you (n):**` second last, one numbered item per ask actionable now,'));
+  assert.ok(text.includes('**Post layout.** A running post has five parts, in order: a **Now:** line'));
+  // The owner's calls: Waiting on you sits just above the ELI5 line, and owner questions come last, below it (the card rule).
+  assert.ok(text.includes('**Waiting on you (n):** just above the ELI5 line, one numbered line per non-question item'));
+  assert.ok(text.includes('one **ELI5:** line, matched to the Now line; and any owner questions (**Questions**) last, with nothing after them.'));
+  assert.ok(text.includes('- **Text first, card last.** Explain before asking; put every host question card below its explanation, and written questions below the ELI5 line.'));
+  assert.ok(body.includes('`**Waiting on you (n):**` next, one numbered item per ask actionable now,'));
+  assert.ok(body.includes('one `**ELI5:**` line; questions last, each `1. **Question: <ask>?**` with its link and choices lettered (a., b.) under it'));
+  assert.doesNotMatch(text + body, /second last|as the very last line with nothing after it|numbered item under \*\*Waiting on you\*\*/);
   // Waiting on you holds only what the owner can act on now; work not ready for them stays off it.
-  assert.ok(text.includes('one numbered line per item the owner can act on right now (work still being built, reviewed or otherwise not ready for them stays off the list until it is;'));
+  assert.ok(text.includes('the owner can act on now (work still being built or reviewed stays off it until ready;'));
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(d) a **Waiting on you** item the owner cannot act on yet, such as work still being built or reviewed.'));
   assert.doesNotMatch(body, /one numbered item per owner ask/);
-  assert.ok(body.includes('one `**ELI5:**` line last;'));
   // Times shown to the owner use their profile time zone, never UTC.
   assert.ok(body.includes('add one Update line; all times in the owner\'s time zone.'));
   assert.doesNotMatch(text, /with its local time/);
   // The hourly nudge checks the same order and time zone, so every project's posts agree.
   for (const task of ['daily-check-in', 'hourly-nudge']) assert.ok(read(`repo/contracts/claude-projects/web-controller-projects/tasks/${task}.md`).includes("- Write every time in the report in the owner's profile time zone (from the project instructions or memory), never UTC; only the state file below keeps UTC."), task);
-  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(c) a coordinator post since the last run whose **ELI5:** line is not its last line, whose **Waiting on you** list is not just above that line, or whose Update stamps are not in the owner\'s profile time zone;'));
+  assert.ok(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md').includes('(c) a coordinator post since the last run whose **ELI5:** line is followed by anything but its questions, whose **Waiting on you** list is not just above that line, whose question sits above it, or whose Update stamps are not in the owner\'s profile time zone;'));
   assert.doesNotMatch(text + body, /Waiting on you \(n\):\*\*`? (as the very )?last|the ELI5 line ends the post/);
   // The owner's spacing: each Update line is its own paragraph with one blank line between, zone in the label, no spacer lines.
   assert.ok(text.includes("one **[HH:MM] <zone> Update:** line per edit, none in fresh posts (the owner's zone, e.g. SGT), each its own paragraph one blank line apart, no `&nbsp;` spacer,"));
@@ -662,7 +664,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.ok(body.includes('one-line `**[HH:MM] <zone> Update:**` entries only on edits, no questions (fresh post: bold-label bullets);') && body.includes('a single blank line (no `&nbsp;`) between Update lines, questions and blocks.'));
   assert.doesNotMatch(text + body, /followed by a line holding only `&nbsp;`|take that spacer/);
   // The owner's board rules: blank lines between blocks, nested problem lines, title links, open asks carried forward.
-  assert.ok(text.includes('One blank line separates each labelled block from the next: the Now line with its bullets, the update log, **Waiting on you** and the ELI5 line.'));
+  assert.ok(text.includes('One blank line separates each labelled block from the next: the Now line with its bullets, the update log, **Waiting on you**, the ELI5 line and the questions.'));
   assert.ok(text.includes('(**Problem, fix, skip first**) nested as bullets under it'));
   assert.ok(text.includes('answered items drop off, and a fresh post repeats every item still open'));
   assert.ok(text.includes('A thread link\'s text is the thread\'s title, never "here" or an id; an issue is linked by its URL.'));
@@ -670,9 +672,8 @@ test('Projects keeps its Toolkit base layer current without touching the project
   for (const phrase of ['its problem, fix and skip lines nested as bullets under it', 'thread (by its title)', 'a fresh post carries every open ask forward',
     'a single blank line (no `&nbsp;`) between Update lines, questions and blocks', 'Otherwise post fresh below the owner; never edit that older post.']) assert.ok(body.includes(phrase), phrase);
   // Questions: numbered items with indented choices and a "(my pick)" mark; no spacer after the last choice.
-  assert.ok(text.includes('Each owner question is one numbered item under **Waiting on you**, written `1. **Question: <the ask>?**`'));
+  assert.ok(text.includes('Each owner question is one numbered item below the ELI5 line, written `1. **Question: <the ask>?**`'));
   assert.ok(text.includes('lettered in order because the owner picks one, `    a. **<Choice> (my pick).** <one-line reason>`'));
-  assert.ok(body.includes('with its choices lettered (a., b.) under it'));
   assert.doesNotMatch(text, /`    - \*\*<Choice>|flatten its choices into plain bullets/);
   assert.ok(text.includes('The next numbered item follows the last choice directly, with no spacer line.'));
   // Plans, G0 plans, decision asks and explanations open with the problem, the fix and what skipping it costs.
@@ -1050,7 +1051,7 @@ const ctaRecoveryCases = [
   ['rediscovered relayed ask', 'periodic', ['Do not repeat an already confirmed ping; keep its unfinished owner step on the pending list']],
   ['older ask behind an unrelated post', 'nudge', ['also check older asks absent from later relays', 'A newer unrelated post or a thread-title link without the ask does not prove relay']],
   ['thread link without its ask', 'periodic', ['Reconcile the actual ask, not just the source thread or post times']],
-  ['unfinished build or review', 'skill', ['work still being built, reviewed or otherwise not ready for them stays off the list until it is']],
+  ['unfinished build or review', 'skill', ['work still being built or reviewed stays off it until ready']],
   ['failed or uncertain posting', 'skill', ['Read back a successful post before treating the ask as relayed', 'If posting or notification status is uncertain, inspect chat and the host response before retrying', 'Never claim the owner was notified merely because text was edited or a tool call was attempted']],
   ['missing notification metadata', 'nudge', ['"notification unverified"', 'do not infer notification from an edit timestamp']],
   ['two resumable lanes together', 'skill', ['Put every confirmed resumable lane needing owner input in one combined **Waiting on you** list', 'Link each thread by its title', 'Complete the sweep before posting where possible; never send one recovery announcement per lane']],
