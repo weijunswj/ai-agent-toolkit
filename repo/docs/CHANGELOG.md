@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## Unreleased (automatic re-bump workflow and a narrower launch rule)
+## 3.66.0 (automatic re-bump workflow and a narrower launch rule)
 
 ### Added
 
