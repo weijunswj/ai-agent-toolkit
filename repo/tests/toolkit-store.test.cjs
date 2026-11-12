@@ -425,10 +425,10 @@ test('merge-branch scans every commit the branch brings in, and keeps to the sto
 test('global push settings that could widen a push are refused, and git is found on PATH by full path', t => {
   const w = world(t);
   w.write('archives/g.md', 'g\n');
-  for (const [key, value] of [['remote.origin.mirror', 'true'], ['remote.origin.push', '+refs/heads/*:refs/heads/*'], ['push.followTags', 'true']]) {
-    fs.writeFileSync(path.join(w.home, '.gitconfig'), `[${key.split('.').slice(0, -1).join(' "').replace(/ "(.+)$/, ' "$1"')}]\n\t${key.split('.').at(-1)} = ${value}\n`);
+  for (const [key, section, name, value] of [['remote.origin.mirror', 'remote "origin"', 'mirror', 'true'], ['remote.origin.push', 'remote "origin"', 'push', '+refs/heads/*:refs/heads/*'], ['push.followtags', 'push', 'followTags', 'true']]) {
+    fs.writeFileSync(path.join(w.home, '.gitconfig'), `[${section}]\n\t${name} = ${value}\n`);
     const run = w.act(['save', '--path', 'archives/g.md', '--message', 'g']);
-    assert.match(run.result?.stopped || '', new RegExp(key.replace(/\./g, '\\.'), 'i'), key);
+    assert.ok((run.result?.stopped || '').includes(`could widen a store push (${key})`), key);
   }
   fs.rmSync(path.join(w.home, '.gitconfig'));
   const seen = [];

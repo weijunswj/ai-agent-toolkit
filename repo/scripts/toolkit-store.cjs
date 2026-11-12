@@ -162,7 +162,8 @@ class EvidenceStore {
   // The tip GitHub serves for a store branch, or null when the branch does not exist.
   #remoteTip(branch) {
     const listed = this.#must(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`], 'the store branches could not be listed.', 'check the network, then retry.', { timeout: 120000 }).trim();
-    return (new RegExp(`^([0-9a-f]{40,64})\\trefs/heads/${branch.replace(/[.]/g, '\\.')}$`, 'm').exec(listed) || [])[1] || null;
+    const line = listed.split(/\r?\n/).map(entry => entry.split('\t')).find(([sha, ref]) => ref === `refs/heads/${branch}` && /^[0-9a-f]{40,64}$/.test(sha));
+    return line ? line[0] : null;
   }
 
   #must(args, stopped, next, options) {
