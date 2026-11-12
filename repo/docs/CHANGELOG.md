@@ -1,18 +1,19 @@
 # Toolkit Changelog
 
-## 3.69.0 (Merge by card in Claude Code)
+## 3.69.0 (Projects follows local Toolkit as its base)
 
 ### Added
 
-- In Claude Code on this computer, a tap can replace typed `merge N`. When the merge hold refuses a merge that names its full head SHA, it hands back one exact card: "Merge owner/name#N at <short SHA>?" with Merge and Not now. The owner's tap on Merge approves that pull request at that commit, once. Not now approves nothing and withdraws an unused approval for it.
-- The card counts only in a chat the owner started, shown exactly as given, as a plain tap. A changed card, a card asked with its answer filled in, words typed into Other, an answer the host marks as idle, a follow-up, typed text or noted, an answer with a field the reader does not know, and a launched, resumed or unmarked session record nothing. Nothing is refused for the card's sake, so ordinary questions are untouched.
-- A card event whose environment holds `TOOLKIT_HOST_SESSION` records nothing: the host's hook process carries none, and a session's shell commands do. Two command-line shapes are refused like a fed prompt, read from the text alone: one that names a hook script (or a file named after one, such as its tests) and a tool event (`PreToolUse`, `PostToolUse` or the card functions) and also runs node, bun or deno anywhere, unless the word straight after it is `--test` or `test`; and one that names a hook script and has a command starting `env` whose leading words (dash options or NAME=value) include `-i`, `--ignore-environment` or `-` as a word of its own. Ordinary work of either shape is refused too, such as a search or commit message about the hooks chained with any node run; run those as separate commands.
-- Known limits: this is a tripwire, not a lock. Any command or script that starts a hook script without `TOOLKIT_HOST_SESSION` can still feed a card event in the owner's own chat, because the refusals catch only those two exact shapes (a wrapper before `env`, other `env` option spellings, clearing the variable another way, a node one-liner or a saved script all get through), as it can already feed typed `merge N`. A host that answers the card itself, with no tap, is not told apart either: a permission answer from an SDK callback, a permission hook (from any plugin or from settings), a permission-prompt tool or a launcher, a reply a connected client sends to a background session, and an automatic answer the host does not mark.
+- **Projects base rule:** the Projects controller skill now opens with the rule that local Toolkit (global, gate and governed rules and the controller file) is its base. Every place Projects differs is a row in the new overrides list with the owner's decision; any other difference is a clash for the owner.
+- **Projects task auto-merge switch:** the gate rules name Claude Projects as a third app. Its switch is the project line `- Task auto-merge: On`, and its one named merge thread stands in for a session the owner started. The skill's Approvals section gives the cloud merge route: eligibility check at the exact head, effects notice, head-pinned merge commit, or the owner's card tap at that head.
+- **Cloud hook table:** a new reference table says, for every hook in the plugin manifest, how its rule is covered in cloud sessions. A test fails when a hook has no row.
+- **Weekly base clash check:** a new task step compares the base files with the copy the guidebook names, and raises each new clash as an owner question. The daily check-in runs it when a week has passed and no weekly audit covers it.
+- **Guidebook BASE file:** the guidebook copy now carries `BASE`, the git blob SHA of each base file, so a coordinator can tell which base its copy follows.
 
-### Changed
+### Fixed
 
-- The order for a merge that needs the owner is now: task auto-merge when it applies, then the card, then typed `merge N`. Codex keeps typed `merge N`. In cloud sessions the governance hook runs in cloud mode, which skips the merge hold, so a Projects card there still rests on the written rules and required CI.
-- Hook pack rows may use a placeholder in an object key, so a card answer can be keyed by its question.
+- **Governance status in cloud sessions:** a Claude Code cloud container's own git rewrite (ssh spellings of github.com to canonical https, no credential prompts) no longer holds the binding read, so `toolkit governance status` reads the merged binding there. Any other command-scope config stays held.
+- **Hook status lines:** `toolkit governance status` no longer says cloud sessions and Claude Projects have no hooks; account copy hooks run there, with the merge and undecided-repository holds skipped in cloud sessions.
 
 ## 3.68.0 (one-time permission blocks and checked cleanup)
 

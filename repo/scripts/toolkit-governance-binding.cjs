@@ -53,6 +53,31 @@ const HELD_SCOPES = Object.freeze(['local', 'worktree', 'command']);
 // the ssh command (GIT_SSH and GIT_SSH_COMMAND do nothing for https, and Plink or TortoiseGit setups
 // set them for good). The rest of the user's environment is trusted.
 const HELD_CONFIG_ENVIRONMENT = Object.freeze(['GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT']);
+// A Claude Code cloud container (CLAUDE_CODE_REMOTE=true) sets command-scope config through
+// GIT_CONFIG_COUNT for every git call: ssh spellings of github.com rewritten to canonical https, and
+// no credential prompts. Only exactly these pairs are accepted there; any other key or value, any
+// GIT_CONFIG_PARAMETERS, or the same pairs outside a cloud session stay held. The effective-URL check
+// below still has to resolve to the same repository.
+const CLOUD_CONFIG_PAIRS = Object.freeze([
+  ['url.https://github.com/.insteadof', 'git@github.com:'],
+  ['url.https://github.com/.insteadof', 'ssh://git@github.com/'],
+  ['credential.interactive', 'false'],
+]);
+
+// Whether GIT_CONFIG_COUNT carries only the cloud container's own rewrite pairs, in a cloud session.
+function cloudContainerConfig(environment) {
+  if (!environment || environment.CLAUDE_CODE_REMOTE !== 'true') return false;
+  if (typeof environment.GIT_CONFIG_PARAMETERS === 'string' && environment.GIT_CONFIG_PARAMETERS !== '') return false;
+  const count = environment.GIT_CONFIG_COUNT;
+  if (typeof count !== 'string' || !/^[1-9]$/.test(count)) return false;
+  for (let index = 0; index < Number(count); index += 1) {
+    const key = environment[`GIT_CONFIG_KEY_${index}`];
+    const value = environment[`GIT_CONFIG_VALUE_${index}`];
+    if (typeof key !== 'string' || typeof value !== 'string') return false;
+    if (!CLOUD_CONFIG_PAIRS.some(([k, v]) => k === key.toLowerCase() && v === value)) return false;
+  }
+  return true;
+}
 const HELD_SSH_ENVIRONMENT = Object.freeze(['GIT_SSH', 'GIT_SSH_COMMAND']);
 const NO_HOOKS_DIR = 'no-hooks';
 
@@ -107,7 +132,7 @@ function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_
     } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
   };
   const set = name => typeof environment[name] === 'string' && environment[name] !== '' && !(name === 'GIT_CONFIG_COUNT' && environment[name] === '0');
-  if (HELD_CONFIG_ENVIRONMENT.some(set)) return { status: 'unknown', error: 'remote-redirected' };
+  if (HELD_CONFIG_ENVIRONMENT.some(set) && !cloudContainerConfig(environment)) return { status: 'unknown', error: 'remote-redirected' };
   if (!emptyFolder(hooksDir)) return { status: 'unknown', error: 'hooks-unguarded' };
   const effective = git(['ls-remote', '--get-url', 'origin']);
   if (effective.status !== 0) return { status: 'unknown', error: 'remote-unreachable' };
@@ -293,6 +318,8 @@ module.exports = Object.freeze({
   cacheFileFor,
   parseSymref,
   readDefaultBranchBinding,
+  cloudContainerConfig,
+  CLOUD_CONFIG_PAIRS,
   refreshBindingCache,
   readBindingCache,
   readAllBindingCaches,
