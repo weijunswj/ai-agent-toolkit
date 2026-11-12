@@ -54,8 +54,19 @@ test('raw pushes to a bound store are refused in every shape the shell walker re
     ['git push git@github.com:example-owner/evidence-store main', f.governed],
     ['git push backup main', f.other],
     ['git push', f.other],
+    [`git push --repo=${STORE} main`, f.governed],
+    [`git push --repo ${STORE} main`, f.governed],
+    [`git --git-dir="${f.store}/.git" push origin main`, f.governed],
+    [`git --git-dir "${f.store}/.git" --work-tree "${f.store}" push`, f.governed],
+    [`GIT_DIR="${f.store}/.git" git push origin main`, f.governed],
+    ['git push ssh://git@github.com:22/example-owner/evidence-store.git main', f.governed],
+    ['git push ssh://git@ssh.github.com:443/example-owner/evidence-store.git main', f.governed],
+    ['git push https://www.github.com/example-owner/evidence-store main', f.governed],
+    ['git push https://x-access-token:abc@github.com/example-owner/evidence-store.git main', f.governed],
   ]) assert.equal(refuse(f, command, cwd), guard.STORE_PUSH_MESSAGE, command);
-  assert.equal(refuse(f, `Set-Location "${f.store}"; git push origin main`, f.governed, 'powershell'), guard.STORE_PUSH_MESSAGE, 'PowerShell');
+  for (const command of [`Set-Location "${f.store}"; git push origin main`, `Push-Location "${f.store}"; git push origin main`, `pushd "${f.store}"; git push`]) {
+    assert.equal(refuse(f, command, f.governed, 'powershell'), guard.STORE_PUSH_MESSAGE, `PowerShell: ${command}`);
+  }
 });
 
 test('other pushes, dry runs and the store command itself are not judged here', (t) => {
@@ -71,6 +82,9 @@ test('other pushes, dry runs and the store command itself are not judged here', 
     ['git commit -m "fix push logic"', f.store],
     [`node "${f.dir}/tk/repo/scripts/toolkit-store.cjs" save --store "${f.store}" --path archives/x --message x`, f.store],
     ['git push https://github.com/example-owner/evidence-store-copy.git main', f.governed],
+    [`git push --repo=${STORE} feature`.replace('evidence-store', 'governed'), f.governed],
+    [`git --git-dir="${f.governed}/.git" push origin main`, f.store],
+    ['git push https://github.com.evil.example/example-owner/evidence-store main', f.governed],
   ]) assert.equal(refuse(f, command, cwd), '', command);
 });
 

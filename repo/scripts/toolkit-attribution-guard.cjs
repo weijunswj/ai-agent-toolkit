@@ -95,7 +95,7 @@ function withVariables(commands, shell = null) {
 
 // The force-push check reads location commands by their last non-option folder word. -Path and
 // -LiteralPath name the following word, while flags such as -P, -L, /d and -PassThru do not.
-const LOCATION_COMMAND = /^(?:cd|pushd|chdir|set-location|sl)$/i;
+const LOCATION_COMMAND = /^(?:cd|pushd|chdir|set-location|sl|push-location)$/i;
 function locationTarget(words) {
   return words.slice(1).filter((word) => !word.startsWith('-') && !/^\/d$/i.test(word)).pop() || '';
 }
@@ -237,9 +237,16 @@ function gitCommand({ words }, root) {
   let base = root;
   let absolute = false;
   let directories = 0;
+  // GIT_DIR= set for this one command, or --git-dir: the repository it runs on (read by the store check).
+  let gitDir = null;
+  for (const word of words.slice(0, start)) if (/^GIT_DIR=/.test(word)) gitDir = word.slice(8);
   for (let index = start + 1; index < words.length; index += 1) {
     const word = words[index];
-    if (word === '-c' || word === '--config-env') index += 1;
+    if (word === '--git-dir' || word.startsWith('--git-dir=')) {
+      const value = word === '--git-dir' ? words[++index] : word.slice(10);
+      if (value === undefined) return null;
+      gitDir = value;
+    } else if (word === '-c' || word === '--config-env') index += 1;
     else if (word.startsWith('--config-env=') || (word.startsWith('-c') && word.length > 2)) continue;
     else if (word === '-C' || word.startsWith('-C')) {
       const value = word === '-C' ? words[++index] : word.slice(2);
@@ -250,7 +257,7 @@ function gitCommand({ words }, root) {
       const value = word === '--work-tree' ? words[++index] : word.slice(12);
       if (value) { base = shellPath(base, value); absolute ||= absoluteShellPath(value); }
     } else if (GIT_VALUE_OPTIONS.has(word)) index += 1;
-    else if (!word.startsWith('-')) return { base, absolute, sub: word, args: words.slice(index + 1) };
+    else if (!word.startsWith('-')) return { base, absolute, sub: word, args: words.slice(index + 1), ...(gitDir ? { gitDir: shellPath(base, gitDir) } : {}) };
   }
   return { base, absolute, sub: null, args: [] };
 }
@@ -386,15 +393,15 @@ const STORE_PUSH_MESSAGE = 'This is a raw git push to an evidence store this com
 
 // owner/name, lower case, from a github.com remote URL; null for anything else.
 function githubSlug(url) {
-  const match = /^(?:https:\/\/(?:[^@/\s]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
+  const match = /^(?:(?:https?|git):\/\/(?:[^@/\s]+@)?(?:www\.)?github\.com(?::\d+)?\/|(?:[^@/\s:]+@)?(?:ssh\.)?github\.com:(?!\d+\/)|ssh:\/\/(?:[^@/\s]+@)?(?:ssh\.)?github\.com(?::\d+)?\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
   return match ? match[1].toLowerCase() : null;
 }
 
 // The url and pushurl values of each remote in the repository's own config, by remote name.
-function remoteUrls(root) {
+function remoteUrls(configText) {
   const remotes = new Map();
   let name = null;
-  for (const line of gitConfigText(root).split(/\r?\n/)) {
+  for (const line of configText.split(/\r?\n/)) {
     const section = /^\s*\[\s*([^\s\]"]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]/.exec(line);
     if (section) { name = section[1].toLowerCase() === 'remote' && section[2] !== undefined ? section[2] : null; continue; }
     const value = name !== null && /^\s*(?:url|pushurl)\s*=\s*(.+?)\s*$/i.exec(line);
@@ -403,15 +410,20 @@ function remoteUrls(root) {
   return remotes;
 }
 
-// The first word after a push's options (the remote or URL), and whether it is a dry run.
-function pushRemoteWord(args) {
+// Where a push may go: the first word after its options (a remote name or URL) and --repo's value.
+// git takes the word when both are given; both are judged, so either one naming a store refuses.
+function pushRemoteWords(args) {
+  const found = [];
+  let positional = false;
   for (let index = 0; index < args.length; index += 1) {
     const word = args[index];
-    if (word === '--') return args[index + 1] || '';
+    if (word === '--') { if (!positional && args[index + 1]) found.push(args[index + 1]); break; }
+    if (word === '--repo') { if (args[index + 1]) found.push(args[index + 1]); index += 1; continue; }
+    if (word.startsWith('--repo=')) { found.push(word.slice(7)); continue; }
     if (PUSH_VALUE_OPTIONS.has(word) || word === '-o') { index += 1; continue; }
-    if (!word.startsWith('-')) return word;
+    if (!word.startsWith('-') && !positional) { positional = true; found.push(word); }
   }
-  return '';
+  return found;
 }
 const dryRunPush = (args) => args.some((word) => word === '--dry-run' || (/^-[A-Za-z]+$/.test(word) && word.includes('n') && !word.includes('o')));
 
@@ -423,7 +435,8 @@ function boundStores(registryOptions = {}) {
 
 // Refuses a git push (a delete or a push of any branch included, a dry run excepted) whose target is
 // an evidence store bound on this computer: the named remote's url and pushurl, a URL given in its
-// place, or every remote of the repository when none is named. Only bound stores count, so a
+// place (--repo included), or every remote of the repository when none is named; --git-dir and a
+// GIT_DIR= prefix name the repository read. Only bound stores count, so a
 // computer or container with no cached binding behaves as before. Reads git config files only.
 function storePushRefusal(command, cwd, depth = 0, registryOptions = {}, shell = null) {
   let stores = null;
@@ -431,10 +444,13 @@ function storePushRefusal(command, cwd, depth = 0, registryOptions = {}, shell =
     if (git.sub !== 'push' || dryRunPush(git.args)) return '';
     stores ||= boundStores(registryOptions);
     if (!stores.size) return '';
-    const word = pushRemoteWord(git.args);
-    const root = repositoryRoot(git.base);
-    const remotes = root ? remoteUrls(root) : new Map();
-    const urls = word ? (remotes.get(word) || [word]) : [...remotes.values()].flat();
+    const words = pushRemoteWords(git.args);
+    // --git-dir or GIT_DIR names the repository itself: its config, else the working folder's.
+    let config = '';
+    if (git.gitDir) config = readSmallFile(path.join(git.gitDir, 'config')) || gitConfigText(git.gitDir) || gitConfigText(path.dirname(git.gitDir));
+    else { const root = repositoryRoot(git.base); config = root ? gitConfigText(root) : ''; }
+    const remotes = remoteUrls(config);
+    const urls = words.length ? words.flatMap((word) => remotes.get(word) || [word]) : [...remotes.values()].flat();
     return urls.some((url) => stores.has(githubSlug(url))) ? STORE_PUSH_MESSAGE : '';
   });
 }
