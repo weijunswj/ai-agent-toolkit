@@ -327,6 +327,8 @@ test('first yes goes from the owner prompt through discovery and real publicatio
   assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), binding);
   assert.equal(published.files['AGENTS.md'], rules.toString().replace(/\r\n/g, '\n'));
   assert.match(stdout.join(''), /Before pulling after merge.*untracked files/);
+  // The owner is shown the governance App setup with the decision, not asked for it; offline here.
+  assert.match(stdout.join(''), /Governance GitHub App: [^\n]*could not be checked \(offline\)[\s\S]*github\.com\/settings\/apps\/new\?[\s\S]*gh variable set TOOLKIT_GOVERNANCE_APP_CLIENT_ID/);
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'UNDECIDED');
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).programme_records_bind, false);
   const other = new GovernanceProposals({ registryOptions: { registryPath: path.join(f.root, 'other-home/state.json'), testOnly: true }, transport: github.transport });

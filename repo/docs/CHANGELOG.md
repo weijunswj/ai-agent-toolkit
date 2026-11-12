@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.67.0 (Merge by card in Claude Code)
+## 3.68.0 (Merge by card in Claude Code)
 
 ### Added
 
@@ -13,6 +13,13 @@
 
 - The order for a merge that needs the owner is now: task auto-merge when it applies, then the card, then typed `merge N`. Codex keeps typed `merge N`. In cloud sessions the governance hook runs in cloud mode, which skips the merge hold, so a Projects card there still rests on the written rules and required CI.
 - Hook pack rows may use a placeholder in an object key, so a card answer can be keyed by its question.
+
+## 3.67.0 (governance GitHub App setup and removal guidance)
+
+### Added
+
+- **Governance GitHub App guidance:** publishing a pull request that turns governance on now shows the owner the one-time App setup: a pre-filled "New GitHub App" link with the right permissions, the install on the repository and its evidence store, and the `gh` lines that save the client ID variable and the private key secret. Publishing one that turns governance off suggests the removal: deleting the variable and the secret, removing the repository from the installation, and deleting the App when nothing else uses it. Toolkit never creates or deletes any of these itself.
+- **`toolkit governance check` reports the App:** a missing App while governance is on, and a left-over variable or secret once it is off. It reads only the names, never changes the exit code, and reports anything it cannot read as unverified.
 
 ## 3.66.0 (automatic re-bump workflow and a narrower launch rule)
 
