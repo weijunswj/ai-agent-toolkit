@@ -68,30 +68,34 @@
           "then": { "properties": { "target": { "properties": { "comment_id": { "type": "null" }, "before": { "type": "null" } } } } }
         }, {
           "if": { "properties": { "kind": { "const": "edit_archive_comment" } } },
-          "then": { "properties": { "target": { "properties": { "comment_id": { "type": "integer" }, "before": { "type": "string" } } } } }
+          "then": { "properties": { "target": { "properties": { "key": { "pattern": "^graph-" }, "comment_id": { "type": "integer" }, "before": { "type": "string" } } } } }
         }]
       }
     },
     "page_archive": {
-      "description": "Public graph archive registry, outside the revision digest. Only comments posted under the authenticated login and read back exactly receive an id. Graph rows hide only after verification. Unchanged comments remain verified across logins, but only the current author can edit. Keep at most 32 excluded ids in untrusted_ids, retaining the registered id if rejected and the newest others. Superseded ids from another login are excluded quietly. untrusted_before permanently excludes unregistered candidates at or below the highest dropped id; verified registered ids remain trusted unless explicitly rejected. Older larger lists compact on exclusion. Changed, foreign or missing comments detach and receive fresh verified replacements. No comment is deleted.",
+      "description": "Public archive registry, outside the revision digest. A note entry (kind note, no group) is one never-edited comment holding hand-written text the owner marked under one `## Archive` line; it names the saved page copy, is listed under AGENT CONTEXT once moved, keeps its link if its comment later changes, and is withdrawn (never linked or reused) when the marked text changed before the cut. The rest describes graph entries. Only comments posted under the authenticated login and read back exactly receive an id. Graph rows hide only after verification. Unchanged comments remain verified across logins, but only the current author can edit. Keep at most 32 excluded ids in untrusted_ids, retaining the registered id if rejected and the newest others. Superseded ids from another login are excluded quietly. untrusted_before permanently excludes unregistered candidates at or below the highest dropped id; verified registered ids remain trusted unless explicitly rejected. Older larger lists compact on exclusion. Changed, foreign or missing comments detach and receive fresh verified replacements. No comment is deleted.",
       "type": "array",
       "items": {
         "type": "object", "additionalProperties": false,
         "required": ["key", "kind", "group", "title", "comment_id", "login", "digest", "state"],
         "properties": {
-          "key": { "type": "string", "pattern": "^graph-(retired|completed|optional|later|now)-[1-9][0-9]*$" },
-          "kind": { "const": "graph" },
-          "group": { "enum": ["RETIRED", "COMPLETED", "OPTIONAL", "LATER", "NOW"] },
+          "key": { "type": "string", "pattern": "^(graph-(retired|completed|optional|later|now)-[1-9][0-9]*|note-[0-9a-f]{12}-[1-9][0-9]*)$" },
+          "kind": { "enum": ["graph", "note"] },
+          "group": { "enum": ["RETIRED", "COMPLETED", "OPTIONAL", "LATER", "NOW", null] },
+          "copy": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Notes only: SHA-256 of the whole page saved to the private store (page-copies) before the marked text could move." },
           "title": { "type": "string", "minLength": 1, "maxLength": 200 },
           "comment_id": { "type": ["integer", "null"], "minimum": 1 },
           "login": { "type": ["string", "null"], "minLength": 1 },
           "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "state": { "enum": ["pending", "moved"] },
+          "state": { "enum": ["pending", "moved", "withdrawn"] },
           "untrusted_before": { "type": "integer", "minimum": 1 },
           "untrusted_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } }
         },
         "allOf": [
           { "if": { "properties": { "comment_id": { "type": "null" } } }, "then": { "properties": { "login": { "type": "null" }, "state": { "const": "pending" } } }, "else": { "properties": { "login": { "type": "string" } } } },
+          { "if": { "properties": { "kind": { "const": "note" } } },
+            "then": { "required": ["copy"], "properties": { "key": { "pattern": "^note-" }, "group": { "type": "null" } } },
+            "else": { "not": { "required": ["copy"] }, "properties": { "key": { "pattern": "^graph-" }, "group": { "type": "string" }, "state": { "enum": ["pending", "moved"] } } } },
           {"if": {"properties": {"group": {"const": "RETIRED"}}}, "then": {"properties": {"key": {"pattern": "^graph-retired-"}}}},
           {"if": {"properties": {"group": {"const": "COMPLETED"}}}, "then": {"properties": {"key": {"pattern": "^graph-completed-"}}}},
           {"if": {"properties": {"group": {"const": "OPTIONAL"}}}, "then": {"properties": {"key": {"pattern": "^graph-optional-"}}}},
@@ -111,14 +115,14 @@
         "properties": {
           "id": { "type": "string", "pattern": "^[0-9a-f]{12}$", "description": "First 12 hex characters of sha256 of source|code|issue|head, with |kind appended for closing findings." },
           "source": { "enum": ["reconcile", "inventory"] },
-          "code": { "enum": ["ISSUE_MISSING", "NATIVE_PARENT_UNEXPECTED", "NATIVE_CHILD_UNKNOWN", "DEPENDENCY_IMPLIES_PARENT", "PR_HEAD_MOVED", "CHECKS_RED", "READY_TO_CLOSE", "CHILD_STATE_CONFLICT", "CLOSED_WITHOUT_ACCEPTANCE", "CHILD_REOPENED", "CHILD_ADDED", "PR_WITHOUT_TASK", "CLOSING_COMMENT_MISSING", "MANAGED_BLOCK_BROKEN", "BODY_TOO_LARGE", "PAGE_LAYOUT_HELD", "BODY_NEAR_LIMIT", "ARCHIVE_COMMENT_UNTRUSTED", "PASS_STOPPED", "TRACE_UNLINKED", "TRACE_SUPERSEDED_UNMARKED", "TASK_IDLE", "PR_UNTRACKED", "COMPLETED_PR_MISSING", "PR_DISCOVERY_INCOMPLETE", "RETURN_CAPTURED", "STALE_ASSIGNMENT", "JOURNAL_ERROR", "JOURNAL_INVALID", "CLASS_LEGACY", "ORDER_TIE", "DUPLICATE_HIERARCHY", "NEEDS_PLACEMENT", "CLOSED_PARENT_OPEN_CHILD", "INVENTORY_INCOMPLETE", "ATTENTION_FULL", "SWEEP_TASK_UNREADABLE", "STATE_BRANCH_BUSY", "GRAPHQL_REFUSED"], "description": "The fixed runtime code table; older readers refuse new codes." },
+          "code": { "enum": ["ISSUE_MISSING", "NATIVE_PARENT_UNEXPECTED", "NATIVE_CHILD_UNKNOWN", "DEPENDENCY_IMPLIES_PARENT", "PR_HEAD_MOVED", "CHECKS_RED", "READY_TO_CLOSE", "CHILD_STATE_CONFLICT", "CLOSED_WITHOUT_ACCEPTANCE", "CHILD_REOPENED", "CHILD_ADDED", "PR_WITHOUT_TASK", "CLOSING_COMMENT_MISSING", "MANAGED_BLOCK_BROKEN", "BODY_TOO_LARGE", "PAGE_LAYOUT_HELD", "BODY_NEAR_LIMIT", "ARCHIVE_COMMENT_UNTRUSTED", "ARCHIVE_SECTION_UNSAFE", "PASS_STOPPED", "TRACE_UNLINKED", "TRACE_SUPERSEDED_UNMARKED", "TASK_IDLE", "PR_UNTRACKED", "COMPLETED_PR_MISSING", "PR_DISCOVERY_INCOMPLETE", "RETURN_CAPTURED", "STALE_ASSIGNMENT", "JOURNAL_ERROR", "JOURNAL_INVALID", "CLASS_LEGACY", "ORDER_TIE", "DUPLICATE_HIERARCHY", "NEEDS_PLACEMENT", "CLOSED_PARENT_OPEN_CHILD", "INVENTORY_INCOMPLETE", "ATTENTION_FULL", "SWEEP_TASK_UNREADABLE", "STATE_BRANCH_BUSY", "GRAPHQL_REFUSED"], "description": "The fixed runtime code table; older readers refuse new codes." },
           "issue": { "type": ["integer", "null"], "minimum": 1 },
           "head": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
           "kind": { "enum": ["pr", "issue"] },
           "state": { "enum": ["new", "acknowledged", "resolved", "disposed"] },
           "first_seen": { "type": "string", "minLength": 1 },
           "changed_at": { "type": "string", "minLength": 1 },
-          "diagnostics": { "oneOf": [{ "$ref": "#/$defs/bodySizeDiagnostics" }, { "$ref": "#/$defs/passStoppedDiagnostics" }, { "$ref": "#/$defs/archiveTrustDiagnostics" }] }
+          "diagnostics": { "oneOf": [{ "$ref": "#/$defs/bodySizeDiagnostics" }, { "$ref": "#/$defs/passStoppedDiagnostics" }, { "$ref": "#/$defs/archiveTrustDiagnostics" }, { "$ref": "#/$defs/archiveSectionDiagnostics" }] }
         },
         "allOf": [{"if":{"properties":{"code":{"const":"CLOSING_COMMENT_MISSING"}}},"then":{"required":["kind"]},"else":{"not":{"required":["kind"]}}}],
         "if": { "properties": { "code": { "enum": ["BODY_TOO_LARGE", "BODY_NEAR_LIMIT"] } } },
@@ -129,7 +133,11 @@
           "else": {
             "if": { "properties": { "code": { "const": "ARCHIVE_COMMENT_UNTRUSTED" } } },
             "then": { "required": ["diagnostics"], "properties": { "diagnostics": { "$ref": "#/$defs/archiveTrustDiagnostics" } } },
-            "else": { "not": { "required": ["diagnostics"] } }
+            "else": {
+              "if": { "properties": { "code": { "const": "ARCHIVE_SECTION_UNSAFE" } } },
+              "then": { "required": ["diagnostics"], "properties": { "diagnostics": { "$ref": "#/$defs/archiveSectionDiagnostics" } } },
+              "else": { "not": { "required": ["diagnostics"] } }
+            }
           }
         }
       }
@@ -151,16 +159,21 @@
       "required": ["issue", "key", "comment_id", "login", "before", "digest"],
       "properties": {
         "issue": { "type": "integer", "minimum": 1 },
-        "key": { "type": "string", "pattern": "^graph-(retired|completed|optional|later|now)-[1-9][0-9]*$" },
+        "key": { "type": "string", "pattern": "^(graph-(retired|completed|optional|later|now)-[1-9][0-9]*|note-[0-9a-f]{12}-[1-9][0-9]*)$" },
         "comment_id": { "type": ["integer", "null"], "minimum": 1 },
         "login": { "type": "string", "minLength": 1 },
         "before": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
         "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
+    "archiveSectionDiagnostics": {
+      "description": "Why the notes under the one `## Archive` line stayed on the page: a fixed reason, never note text.",
+      "type": "object", "additionalProperties": false, "required": ["reason"],
+      "properties": { "reason": { "enum": ["two_markers", "marker_nested", "open_fence", "open_comment", "open_html", "ambiguous_markup", "underlined_heading", "control_character", "link_definition_split", "part_too_large", "secret_like", "comment_not_exact"] } }
+    },
     "archiveTrustDiagnostics": {
       "type": "object", "additionalProperties": false, "required": ["reason"],
-      "properties": { "reason": { "enum": ["changed", "foreign", "missing", "duplicate"] } }
+      "properties": { "reason": { "enum": ["changed", "foreign", "missing", "duplicate"] }, "copy": { "description": "For an archived note: the SHA-256 name of the saved page copy that still holds it.", "type": "string", "pattern": "^[0-9a-f]{64}$" } }
     },
     "bodySizeDiagnostics": {
       "description": "Disjoint UTF-16 span lengths matching the redraw limit, with fixed labels and hand-written section numbers only. No page text. The largest five spans plus remainder equal projected_total; required_reduction gets strictly below threshold.",

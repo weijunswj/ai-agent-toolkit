@@ -1,23 +1,17 @@
 # Toolkit Changelog
 
-## 3.70.0 (programme sweep on a saved queue, and on GitHub)
-
-### Changed
-
-- The programme refresh now works through a saved queue on the one reconciler. Each pass reads the whole graph, then the tasks GitHub changed since the last pass, tasks whose page shows another revision than their state, open tracked PRs whose head or checks moved, and a rotating share, so every task is read at least once in twelve passes. It saves the state in one commit, keeps every recovery step it had, and a pass that changes nothing writes no state.
-- Requests run one at a time within a cap of 300 per pass, keep a reserve for saving and redrawing, and stop reading when GitHub's rate limit runs low or asks to wait. When GitHub refuses GraphQL, the state is read one document at a time instead.
-- CURRENT on the parent page starts with when the board was last updated, or how long it has been out of date, why, and how many tasks are still to check.
-- `reconcile --apply` saves its state phase in the same single commit.
-- The hourly sweep pass (`refresh --scheduled`) now works for up to 50 minutes instead of 10, is killed at 55 minutes and, on GitHub, has its job stopped at 58, so it always ends before the next hourly start. The refresh a session starts after its own GitHub write keeps 10 minutes and still leaves a flag for the scheduled pass while that holds the lock.
-- On a computer, the hourly task's budget rises to 55 minutes and its Windows stop-after limit to 56; the refresh in it takes what is left, less the attention step, and never less than 10 minutes. A task registered with the earlier 30-minute limit is updated in place by the next apply. A long pass renews its sweep lease.
-- `toolkit permissions` keeps allowing the programme refresh line with the sweep's `--scheduled` and `--budget-ms`, and its note now says they only set how long one pass may run, 10 to 50 minutes.
+## 3.70.0 (Marked notes move off large programme pages)
 
 ### Added
 
-- The hourly Toolkit Programme Sweep workflow runs the refresh on GitHub under the governance GitHub App, with one installation token for the governed repository and one for its evidence store, each with only its own permissions. Without the App it posts a notice and writes nothing; a repository whose state is on a public branch keeps the computer's sweep.
-- A shared lease in the evidence store lets one sweep write at a time across the computer and GitHub; a run stopped by its timeout is reported by the next one. The lease makes every write of its own record in turn: while the pass saves its state, the renewal rides that one commit, so a long pass never mistakes its own renewal for another sweep. A lease never outlasts its pass's kill time, a pass that defers to another sweep leaves no stop behind, and a pass that ends with an error records its stop where the next pass on either host reads it.
-- On GitHub, the sweep reads the binding merged on the default branch online, so a fresh runner with no saved copy runs its pass, and a run that started before main moved stops with a notice.
-- `repo/contracts/cloud-jobs.json` lists the jobs that run on GitHub and their tokens. Each token names only which of the governance App's permissions it takes, at the App's level unless marked read-only, so the App's permission list is kept in one place. `toolkit governance check` lists the jobs beside the App's setup, in the same words.
+- **Marked notes:** on a programme parent page, old hand-written notes under one line that reads exactly `## Archive` now move, byte for byte, into linked comments on a complete pass. The whole page is saved to the private store and read back first, each comment is read back exactly before one guarded page write removes the notes, and AGENT CONTEXT links every part. Note comments are never edited, reused for other text or deleted.
+- **New finding:** `ARCHIVE_SECTION_UNSAFE` reports, with one fixed reason and no page text, why marked notes stayed on the page. Any doubt about where the marked area starts or ends moves nothing, and the redraw carries on. The reader accepts only a written subset of Markdown up to the end of the marked area: blank lines, heading lines, code fences at the start of a line, `<details>` folds (attributes without quote marks) and comments on their own lines at the start of a line, and text lines with no HTML-like text and no level one or two heading or code fence behind indentation, a quote, a list marker or a footnote. Any other line, a Unicode space other than a plain space or tab, a lone carriage return or a leading byte-order mark moves nothing. Notes that use inline HTML, raw HTML blocks or indented code fences stay on the page with a finding; rewrite the line or move it outside the marked area.
+- **Stopped passes:** a pass that stops for time finishes its redraw but moves no notes; the next complete pass moves them.
+
+### Changed
+
+- **Archive registry:** `page_archive` now also records note parts (with the saved page copy they came from). A note comment that later changes or disappears keeps its link and raises `ARCHIVE_COMMENT_UNTRUSTED` once, naming the saved page copy that holds the notes; later passes stay quiet and the owner's answer to the finding stands. Putting the same notes back under `## Archive` posts a fresh comment for them and leaves the damaged one as found. Older Toolkit versions refuse the new entries and the new finding field; update Toolkit on every computer that runs the sweep before marking notes.
+- **AGENT CONTEXT:** the fixed line now says that only notes under one `## Archive` heading move.
 
 ## 3.69.1
 
