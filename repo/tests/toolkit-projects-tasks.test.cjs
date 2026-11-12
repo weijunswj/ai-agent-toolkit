@@ -294,8 +294,9 @@ test('templates hold no ids, owner names, project-only tasks or old resolve rule
   for (const name of fs.readdirSync(TASKS)) {
     const text = fs.readFileSync(path.join(TASKS, name), 'utf8');
     assert.doesNotMatch(text, /trig_|chan_|cmsg_|session_01|weijunswj|WJ_Lappy|TOOLKIT:|SWOO/, name);
-    // No real home folder: a Windows or Git Bash home path of any user name is caught here, so the test names none.
+    // No real home folder: a Windows, Git Bash, WSL, Cygwin, Linux or macOS home path of any user name is caught here, so the test names none.
     assert.doesNotMatch(text, /[a-z]:[\\/]+users[\\/]|\/(?:mnt\/|cygdrive\/)?[a-z]\/users\//i, name);
+    assert.doesNotMatch(text, /(?<![\w.~$\/-])\/(?:home|Users)\/[^\s\\\/]/, name);
     // No separate drift watch task: the guidebook steps keep the library copy of the skill current.
     assert.doesNotMatch(text, /drift watch|resolve window|idle window|default 2 days|IDLE-2D/i, name);
     assert.doesNotMatch(text, /AI-AGENT-TOOLKIT:/, name);
