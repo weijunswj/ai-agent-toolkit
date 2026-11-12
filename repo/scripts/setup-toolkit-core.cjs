@@ -4454,8 +4454,9 @@ function applyScheduledTasks(args, { home = os.homedir(), updater, platform = pr
       for (const line of reasons) log(`- ${line}`);
       if (result.questions) log('- Questions for the owner are listed above.');
     } else {
-      owner.saveCheck();
       log('Scheduled tasks updated and read back.');
+      // The update itself succeeded; a stamp that cannot be saved only means the next setup checks again.
+      try { owner.saveCheck(); } catch { log('The unchanged-check stamp could not be saved, so the next setup checks scheduled tasks again.'); }
     }
     if (Number.isFinite(result.timings_ms?.total)) log(`Scheduled tasks checked in ${Math.round(result.timings_ms.total / 1000)} s.`);
     return { held };

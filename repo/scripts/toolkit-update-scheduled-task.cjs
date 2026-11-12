@@ -67,8 +67,10 @@ function healthEntryProblem(entry, definition, computerId) {
 }
 class TaskUpdater {
   constructor({ home = os.homedir(), toolkitRoot = path.resolve(__dirname, '../..'), githubFolder, scheduler, now = () => new Date(), version,
-    checkoutDeps = {}, discover = discoverCheckouts, desired = windows.desiredTasks, healthOwner, question, nodePath = process.execPath } = {}) {
+    checkoutDeps = {}, discover = discoverCheckouts, desired = windows.desiredTasks, healthOwner, question, nodePath = process.execPath, readGovernance } = {}) {
     Object.assign(this, { home, toolkitRoot, githubFolder: githubFolder || path.join(home, 'GitHub'), scheduler: scheduler || windows.powerShellScheduler(), now, version: version || JSON.parse(fs.readFileSync(path.join(__dirname, '../contracts/toolkit-local-bridge/version.json'), 'utf8')).version, checkoutDeps, discover, desired, question, nodePath });
+    // Offline: the checkout's own files and this computer's governance cache, no network.
+    this.readGovernance = readGovernance || (root => windows.readCheckout(root, { ...this.checkoutDeps, home: this.home }));
     this.health = healthOwner || new health.TaskHealth({ home, scheduler: this.scheduler, platform: 'win32' });
   }
   registry() { const read = tasks.readRegistry(this.home); if (read.status !== 'ok') throw new Error('Task registry unreadable; update held'); return read.tasks; }
@@ -131,9 +133,15 @@ class TaskUpdater {
   }
   // What the last clean update depended on. Setup skips the update while this is unchanged and under
   // 24 hours old; the direct command always checks in full.
+  // Each checkout's governance read is part of it, because that read selects which tasks are wanted.
   fingerprint() {
-    const checkouts = this.discover(this.githubFolder).map(row => typeof row === 'string' ? row : `held:${row.root}`).sort();
-    return digest({ version: this.version, toolkitRoot: this.toolkitRoot, nodePath: this.nodePath, approval: readApproval(this.home), registry: this.registry(), checkouts });
+    const registry = this.registry(), found = this.discover(this.githubFolder);
+    const roots = [...new Set([...registry.filter(e => e.host === 'windows' && e.checkout).map(e => e.checkout), ...found.filter(row => typeof row === 'string')])].sort();
+    const governance = roots.map(root => {
+      try { const read = this.readGovernance(root); return { root, repository: read.repository || null, state: read.governanceState || null, certain: read.certain === true, enabled: read.enabled === true, revision: read.revision || null, binding: read.binding || null }; }
+      catch { return { root, unreadable: true }; }
+    });
+    return digest({ version: this.version, toolkitRoot: this.toolkitRoot, nodePath: this.nodePath, approval: readApproval(this.home), registry, held: found.filter(row => typeof row !== 'string').map(row => row.root).sort(), governance });
   }
   recentCheck() {
     try {

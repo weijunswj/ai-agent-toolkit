@@ -13,6 +13,15 @@ const { world } = require('./support/task-health-world.cjs');
 const s = require('./support/windows-task-switch-world.cjs');
 const approve = w => update.saveApproval(w.home, { decision: 'standing', answer_ref: 'host/standing' }, '3.52.0');
 const HOUR = 60 * 60 * 1000;
+// A governance reader whose state the test can switch, read through the updater's own default path.
+function switchableGovernance(root) {
+  const state = { enabled: false };
+  const binding = () => s.fixtureBinding('example/widget', 'WIDGET', state.enabled);
+  const governance = { readIdentity: () => ({ valid: true, root, remote: { host: 'github.com', path: '/example/widget.git' } }),
+    governanceState: () => state.enabled ? { state: 'ENABLED', merged: { fresh: true, status: 'enabled', commit: 'b' } } : { state: 'DISABLED', merged: { fresh: true, status: 'disabled', commit: 'a' } },
+    readObservation: () => state.enabled ? { status: 'enabled', fresh: true, commit: 'b', binding: binding() } : { status: 'disabled', fresh: true, commit: 'a', binding: binding() } };
+  return { state, checkoutDeps: { governance } };
+}
 
 function githubFolder(t) {
   const folder = path.join(s.tempHome(t), 'GitHub');
@@ -46,20 +55,23 @@ const CASES = [
   { name: 'task registry changed', change: w => tasks.updateRegistry(w.home, rows => rows.map(row => row.job === 'task-health' ? row : ({ ...row, stopped_by_owner: true, stopped_at: '2026-11-12T10:30:00.000Z' }))), skip: false },
   { name: 'a checkout appeared', change: () => {}, options: { discover: () => ['C:\\Users\\x\\GitHub\\new-repo'] }, skip: false },
   { name: 'approval changed', change: w => update.saveApproval(w.home, { decision: 'standing', answer_ref: 'host/standing-again' }, '3.52.0', new Date(0)), skip: false },
+  { name: 'a checkout\'s governance changed (DISABLED to ENABLED)', base: w => { const g = switchableGovernance(w.root); w.gov = g; return { checkoutDeps: g.checkoutDeps }; }, change: w => { w.gov.state.enabled = true; }, skip: false },
+  { name: 'governance read unchanged', base: w => { const g = switchableGovernance(w.root); return { checkoutDeps: g.checkoutDeps }; }, change: () => {}, skip: true },
   { name: 'stamp unreadable', change: w => fs.writeFileSync(path.join(tasks.userStateDir(w.home), 'scheduled-task-check.json'), '{'), skip: false },
 ];
 for (const row of CASES) {
   test(`setup skip matrix: ${row.name}`, t => {
     const w = world(t); approve(w);
+    const base = row.base ? row.base(w) : {};
     const c = clocked(w, Date.parse('2026-11-12T10:00:00Z'));
     const lines = [];
-    const first = applyScheduledTasks({}, { home: w.home, platform: 'win32', updater: c.updater(), log: line => lines.push(line) });
+    const first = applyScheduledTasks({}, { home: w.home, platform: 'win32', updater: c.updater(base), log: line => lines.push(line) });
     assert.equal(first.held, false, lines.join('\n'));
     assert.ok(lines.includes('Scheduled tasks updated and read back.'));
     assert.ok(lines.some(line => /^Scheduled tasks checked in \d+ s\.$/.test(line)));
     row.change(w, c); c.advance(HOUR);
     let ran = false;
-    const second = c.updater(row.options || {});
+    const second = c.updater({ ...base, ...(row.options || {}) });
     const run = second.run.bind(second); second.run = options => { ran = true; return run(options); };
     lines.length = 0;
     const result = applyScheduledTasks({}, { home: w.home, platform: 'win32', updater: second, log: line => lines.push(line) });
@@ -81,6 +93,17 @@ test('a held update names each held row in setup output and saves no stamp, so t
   assert.equal(lines.some(line => /inspect the direct update plan/.test(line)), false);
   assert.equal(fs.existsSync(path.join(tasks.userStateDir(w.home), 'scheduled-task-check.json')), false);
   assert.equal(updater().recentCheck(), null);
+});
+
+test('a stamp that cannot be saved still reports the clean update as done, and the next setup checks again', t => {
+  const w = world(t); approve(w);
+  const owner = w.updater(); owner.saveCheck = () => { throw new Error('disk full'); };
+  const lines = [];
+  const result = applyScheduledTasks({}, { home: w.home, platform: 'win32', updater: owner, log: line => lines.push(line) });
+  assert.equal(result.held, false, lines.join('\n'));
+  assert.ok(lines.includes('Scheduled tasks updated and read back.'));
+  assert.ok(lines.some(line => /stamp could not be saved/.test(line)));
+  assert.equal(w.updater().recentCheck(), null);
 });
 
 test('the direct command never skips: run() checks in full even with a fresh stamp', t => {
