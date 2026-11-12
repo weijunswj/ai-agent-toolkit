@@ -97,7 +97,13 @@ class HealthStore {
     if (JSON.stringify(readback.doc) !== JSON.stringify(doc)) throw new Error('Health store readback failed');
   }
 }
-function freshCheckout(root, home, timeout = 95000, { lockFactory = options => new ProgrammeJobLock(options).take(), run = spawnSync } = {}) {
+function freshCheckout(root, home, timeout = 95000, { lockFactory = options => new ProgrammeJobLock(options).take(), run = spawnSync, readCached = checkout => windowsTasks().readCheckout(checkout, { home }) } = {}) {
+  // A fresh (24 hours), certain ENABLED read from this computer's cache is the same standard the refresh
+  // below ends with, so it is used as it is: no network call and no wait for the refresh lock.
+  try {
+    const cached = readCached(root);
+    if (cached?.certain === true && cached.enabled === true && cached.governanceState === 'ENABLED') return cached;
+  } catch { /* An unreadable cache falls back to the refresh. */ }
   const until = performance.now() + timeout;
   const lock = lockFactory({ home, key: `checkout-refresh:${path.resolve(root)}`, waitMs: Math.min(65000, timeout) });
   if (!lock) throw new Error('Another checkout refresh is running');

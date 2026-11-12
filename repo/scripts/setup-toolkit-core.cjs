@@ -4433,18 +4433,43 @@ async function execute(args){return new ToolkitSetupExecution(args).execute();}
 // Setup uses the same standing approval and updater as the direct command. It
 // does not answer pending hand-edit or computer-ownership questions on behalf of
 // the owner; those return to the host question UI before any dependent effect.
+// While nothing the last clean update depended on has changed (Toolkit version, approval, task
+// registry, checkouts) and it is under 24 hours old, setup skips the update and says so. Held rows
+// are named here, so nobody needs to run the slow direct plan again to find them.
 function applyScheduledTasks(args, { home = os.homedir(), updater, platform = process.platform, log = console.log } = {}) {
   if (platform !== 'win32') return null;
   const api = require('./toolkit-update-scheduled-task.cjs');
   const approval = api.readApproval(home);
   if (approval?.decision !== 'standing') return null;
   try {
-    const result = (updater || new api.TaskUpdater({ home, toolkitRoot: args.repoRoot })).run({ apply: true });
+    const owner = updater || new api.TaskUpdater({ home, toolkitRoot: args.repoRoot });
+    const recent = owner.recentCheck();
+    if (recent) { log(`Scheduled tasks: unchanged since ${recent.checked_at}; not rechecked.`); return { held: false, skipped: true }; }
+    const result = owner.run({ apply: true });
     if (result.questions) log(JSON.stringify({ question_ui: 'host', questions: result.questions }));
-    const held = Boolean(result.questions || result.plans.some(row => row.held) || result.results?.some(row => row.refused || row.items?.some(item => item.done === false)));
-    log(held ? 'Scheduled task update needs an owner answer or a local repair; inspect the direct update plan.' : 'Scheduled tasks updated and read back.');
+    const reasons = scheduledTaskHeldReasons(result);
+    const held = Boolean(result.questions || reasons.length);
+    if (held) {
+      log('Scheduled task update needs an owner answer or a local repair:');
+      for (const line of reasons) log(`- ${line}`);
+      if (result.questions) log('- Questions for the owner are listed above.');
+    } else {
+      log('Scheduled tasks updated and read back.');
+      // The update itself succeeded; a stamp that cannot be saved only means the next setup checks again.
+      try { owner.saveCheck(); } catch { log('The unchanged-check stamp could not be saved, so the next setup checks scheduled tasks again.'); }
+    }
+    if (Number.isFinite(result.timings_ms?.total)) log(`Scheduled tasks checked in ${Math.round(result.timings_ms.total / 1000)} s.`);
     return { held };
   } catch { log('Scheduled task update held; inspect the direct update plan. Native permission blocks remain stops.'); return { held: true }; }
+}
+
+function scheduledTaskHeldReasons(result) {
+  const name = row => row.repository || row.task || row.root || 'Toolkit task';
+  return [
+    ...result.plans.filter(row => row.held).map(row => `${name(row)}: ${row.reason || 'held'}`),
+    ...(result.results || []).filter(row => row.refused).map(row => `${name(row)}: ${row.reason || row.action || 'refused'}`),
+    ...(result.results || []).filter(row => !row.refused && row.items?.some(item => item.done === false)).map(row => `${name(row)}: a task write did not complete`),
+  ];
 }
 
 // Toolkit supports Windows computers only. Linux stays a build machine: CI runners set CI=true, and the
