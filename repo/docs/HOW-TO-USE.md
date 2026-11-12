@@ -65,7 +65,7 @@ Detailed plugin verification and bridge command mechanics live in [Toolkit Local
 
 ### Commands You Can Type
 
-Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup`, `toolkit show env` and the `toolkit governance` status, check, discover, catalogue, security and migrate commands are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing; each `toolkit governance` command runs that same subcommand of `toolkit-governance.cjs` and nothing else. A phrase inside a longer message is ordinary text. Everything else is plain language: ask in your own words.
+Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup`, `toolkit show env` and the `toolkit governance` status, check, discover, catalogue, security and migrate commands are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing; each of those `toolkit governance` commands runs that same subcommand of `toolkit-governance.cjs` and nothing else, except `migrate`, which the agent hands to you to run in your own terminal. A phrase inside a longer message is ordinary text. Everything else is plain language: ask in your own words.
 
 - `toolkit cmd` or `toolkit command`: show this list.
 - `setup toolkit` or `toolkit setup`: set up Toolkit on this computer, or change your setup answers.
