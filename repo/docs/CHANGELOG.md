@@ -1,10 +1,46 @@
 # Toolkit Changelog
 
-## 3.70.2 (a governance GitHub App for the re-bump workflow)
+## Unreleased (a governance GitHub App for the re-bump workflow)
 
 ### Changed
 
 - The re-bump workflow now mints its push token on each run from the Toolkit governance GitHub App, the one App the Toolkit governance workflows share, instead of reading a personal token from `TOOLKIT_REBUMP_TOKEN`. It reads the repository variable `TOOLKIT_GOVERNANCE_APP_CLIENT_ID` and the repository secret `TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY`. The App needs the repository permissions Contents (read and write) and Pull requests (read); the token lasts one hour, covers this repository only and is narrowed to those two. The workflow runs the command with the new `--installation` switch, which checks that the token covers exactly this repository instead of reading the signed-in account, which an installation token cannot do. With no client ID variable the run still prints a note and does nothing.
+
+## 3.72.1 (closing words wait for a task's recorded UAT)
+
+### Fixed
+
+- **Owed UAT on the target:** the issue closure check now also refuses a closing word for an open issue whose generated programme status records UAT as `PENDING`, `UAT_PARTIAL_REQUIRED` or `UAT_FULL_REQUIRED`, whatever the pull request's own UAT line says, and names the `Refs` link to use. Before, a pull request that needed no UAT of its own could close a task still waiting on the owner's test, even through quoted text.
+
+## 3.72.0 (self-checking evidence store command)
+
+### Added
+
+- **`toolkit store`:** `repo/scripts/toolkit-store.cjs` does every evidence store step on a computer (`status`, `sync`, `save`, `move`, `merge-branch`, `delete-merged-branch`) and checks the store itself first: the merged binding's store and branch, a checkout whose fetch and push addresses are that store and whose own config holds no push, rewrite or program setting, and a private, writable store on GitHub. `save` stages only the named paths under the binding's store path, `archives/` or `evidence/`, secret-scans exactly what it stages (refusing a binary or non-UTF-8 file it cannot read), commits, pushes the bound branch with a plain push and reads it back on GitHub. Ancestry is read from real commits only (no grafts, replace refs or commit-graph), a merged branch's whole history is scanned, and "already merged" before a branch delete is GitHub's answer, not the checkout's. It never force-pushes, rebases, deletes a file or pushes another branch, and deletes a store branch only when it is already merged.
+
+### Changed
+
+- **Permission blocks:** the exact store push line and its ask lines are replaced by one store command line in the computer block. On Codex it is an allow rule and no store prompt rule is printed, so store steps stop asking there too. `toolkit permissions` no longer takes `--store`.
+- **Merge authority:** changes to the store command wait for a typed merge, like the permission and cleanup scripts.
+
+## 3.71.0 (programme sweep on a saved queue, and on GitHub)
+
+### Changed
+
+- The programme refresh now works through a saved queue on the one reconciler. Each pass reads the whole graph, then the tasks GitHub changed since the last pass, tasks whose page shows another revision than their state, open tracked PRs whose head or checks moved, and a rotating share, so every task is read at least once in twelve passes. It saves the state in one commit, keeps every recovery step it had, and a pass that changes nothing writes no state.
+- Requests run one at a time within a cap of 300 per pass, keep a reserve for saving and redrawing, and stop reading when GitHub's rate limit runs low or asks to wait. When GitHub refuses GraphQL, the state is read one document at a time instead.
+- CURRENT on the parent page starts with when the board was last updated, or how long it has been out of date, why, and how many tasks are still to check.
+- `reconcile --apply` saves its state phase in the same single commit.
+- The hourly sweep pass (`refresh --scheduled`) now works for up to 50 minutes instead of 10, is killed at 55 minutes and, on GitHub, has its job stopped at 58, so it always ends before the next hourly start. The refresh a session starts after its own GitHub write keeps 10 minutes and still leaves a flag for the scheduled pass while that holds the lock.
+- On a computer, the hourly task's budget rises to 55 minutes and its Windows stop-after limit to 56; the refresh in it takes what is left, less the attention step, and never less than 10 minutes. A task registered with the earlier 30-minute limit is updated in place by the next apply. A long pass renews its sweep lease.
+- `toolkit permissions` keeps allowing the programme refresh line with the sweep's `--scheduled` and `--budget-ms`, and its note now says they only set how long one pass may run, 10 to 50 minutes.
+
+### Added
+
+- The hourly Toolkit Programme Sweep workflow runs the refresh on GitHub under the governance GitHub App, with one installation token for the governed repository and one for its evidence store, each with only its own permissions. Without the App it posts a notice and writes nothing; a repository whose state is on a public branch keeps the computer's sweep.
+- A shared lease in the evidence store lets one sweep write at a time across the computer and GitHub; a run stopped by its timeout is reported by the next one. The lease makes every write of its own record in turn: while the pass saves its state, the renewal rides that one commit, so a long pass never mistakes its own renewal for another sweep. A lease never outlasts its pass's kill time, a pass that defers to another sweep leaves no stop behind, and a pass that ends with an error records its stop where the next pass on either host reads it.
+- On GitHub, the sweep reads the binding merged on the default branch online, so a fresh runner with no saved copy runs its pass, and a run that started before main moved stops with a notice.
+- `repo/contracts/cloud-jobs.json` lists the jobs that run on GitHub and their tokens. Each token names only which of the governance App's permissions it takes, at the App's level unless marked read-only, so the App's permission list is kept in one place. `toolkit governance check` lists the jobs beside the App's setup, in the same words.
 
 ## 3.70.1 (closing words wait for the owner's UAT)
 

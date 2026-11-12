@@ -100,9 +100,13 @@ test('refresh automatically backfills a completed task and the next sweep makes 
   assert.match(fx.github.issues.get(421).body, /\|#423\|#800\|-\|COMPLETED/);
   assert.match(fx.github.issues.get(423).body, /#800 MERGED .*aaaaaaa/);
   const before = { commits: fx.github.commits, mutations: fx.github.mutations(), calls: fx.github.calls.length };
+  const leaseWrites = () => fx.github.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/sweep-lease.json')).length;
+  const leaseBefore = leaseWrites();
   assert.equal(fx.run(['refresh']).result.summary, 'No changes');
-  assert.equal(fx.github.commits, before.commits);
+  assert.equal(leaseWrites() - leaseBefore, 2, 'the lease is taken and released');
+  assert.equal(fx.github.commits, before.commits + 2, 'no state commit: the only store commits are the lease');
   assert.equal(fx.github.mutations(), before.mutations);
+  assert.equal(fx.store.read('child', 423).doc.revision, saved.revision, 'unchanged task facts keep their revision');
   const discovery = fx.github.calls.slice(before.calls).filter(call => /pulls\?state=(?:open|closed)/.test(call.path) || call.body?.query?.includes('closedByPullRequestsReferences'));
   assert.ok(discovery.length > 0 && discovery.length <= 60, 'history and unrelated PRs are re-read within the discovery budget without writes');
 });
@@ -164,7 +168,7 @@ const firstWrite = (fx, act) => {
   let done = false;
   fx.github.hooks.push((call, github) => {
     // GraphQL calls here are reads (the inventory and PR queries).
-    if (done || call.method === 'GET' || call.path === 'graphql') return null;
+    if (done || call.method === 'GET' || call.path === 'graphql' || call.path.endsWith('/sweep-lease.json')) return null;
     done = true;
     act(call, github);
     return null;
@@ -260,7 +264,15 @@ test('a pass that loses its lock stops before its next GitHub request', () => {
     firstWrite(fx, () => { act(); at = fx.github.calls.length; });
     const run = own(fx);
     assert.equal(run.error?.code, 'PASS_LOCK_LOST', name);
-    assert.equal(writesAfter(fx, at), 0, `${name}: no GitHub request after the lock was lost`);
+    // After the lock was lost the only requests are the sweep lease's release, which records the
+    // stop, since this pass no longer owns the local note (lease commit model, row L12).
+    const after = fx.github.calls.slice(at);
+    assert.ok(after.length > 0 && after.every(call => call.path.includes('/sweep-lease.json')), `${name}: no GitHub request after the lock was lost but the lease release`);
+    const leaseFile = [...fx.github.files.keys()].find(key => key.endsWith('sweep-lease.json'));
+    const record = JSON.parse(fx.github.files.get(leaseFile).text);
+    assert.equal(record.holder, null, `${name}: the lease is released`);
+    assert.equal(record.unreported?.cause, 'interrupted', `${name}: the stop is in the lease`);
+    assert.equal(record.reason, 'another pass took over');
     assert.equal(fs.existsSync(fx.lockFile), true, `${name}: the other pass's lock is left in place`);
     assert.notEqual(JSON.parse(fs.readFileSync(fx.lockFile, 'utf8')).token, undefined);
   }
