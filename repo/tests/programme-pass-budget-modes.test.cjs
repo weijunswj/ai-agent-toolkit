@@ -169,3 +169,51 @@ test('a pass that reaches the request cap at minute 20 stops, saves its place an
   while (f.parent().sweep.queue.length && passes < 20) { f.run(['refresh', '--scheduled'], { requestCap: 100 }); passes += 1; }
   assert.deepEqual(f.parent().sweep.queue, [], 'every task is read in later hours');
 });
+
+test('request caps: a scheduled pass gets 1,500 on GitHub and 600 on a computer; an after-write refresh keeps 300 on both', () => {
+  const sweep = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-sweep.cjs'));
+  const table = [
+    [{ host: 'cloud', scheduled: true }, 1500],
+    [{ host: 'computer', scheduled: true }, 600],
+    [{ host: 'cloud', scheduled: false }, 300],
+    [{ host: 'computer', scheduled: false }, 300],
+    [{ host: 'computer' }, 300],
+    [{ host: 'unknown', scheduled: true }, 600],
+    [{ host: 'cloud', scheduled: 'yes' }, 300],
+  ];
+  for (const [input, cap] of table) assert.equal(sweep.passCap(input), cap, JSON.stringify(input));
+  assert.equal(sweep.CAP, 300);
+  assert.equal(sweep.RESERVE, 60, 'the reserve does not grow with the cap');
+  assert.equal(sweep.LOW_REMAINING, 200, 'the low-remaining guard is unchanged');
+  // A hundred stale tasks cost about a thousand requests to read and draw: the cloud cap covers them.
+  assert.ok(sweep.PASS_CAPS.cloud.scheduled >= 100 * (sweep.TASK_COST + sweep.PAGE_COST) + sweep.RESERVE);
+});
+
+test('request caps: 97 stale tasks finish in one scheduled cloud pass; an after-write refresh stops safely at 300', t => {
+  const sweep = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-sweep.cjs'));
+  const stale = f => { for (const outcome of f.parent().outcomes) Object.assign(f.github.issues.get(outcome.issue), { title: `Renamed ${outcome.issue}`, body: '', updated_at: f.tick() }); };
+  const cloud = fixture(t, { count: 97 });
+  stale(cloud);
+  const full = cloud.run(['refresh', '--scheduled'], { requestCap: sweep.passCap({ host: 'cloud', scheduled: true }) });
+  assert.equal(full.code, 0, JSON.stringify(full.report.holds));
+  assert.ok(full.requests <= 1500, `${full.requests} requests`);
+  assert.deepEqual(cloud.parent().sweep.queue, []);
+  assert.equal(cloud.stop(), undefined, 'no PASS_STOPPED');
+  assert.ok(cloud.parent().outcomes.every(outcome => /State revision \d+ \(issue-/.test(cloud.page(outcome.issue))), 'every page drawn');
+  assert.match(full.report.metrics, /^Sweep: requests=\d+, cap=1500, tasks read=97, queue left=0, complete=yes$/);
+
+  const small = fixture(t, { count: 97 });
+  stale(small);
+  const afterWrite = small.run(['refresh']);
+  assert.ok(afterWrite.requests <= 300, `${afterWrite.requests} requests`);
+  assert.ok(small.parent().sweep.queue.length > 0, 'tasks left for the next pass');
+  assert.match(afterWrite.report.metrics, /, cap=300, .*queue left=[1-9]\d*, complete=no$/);
+  assert.match(small.page(421), /^⚠️ Board out of date .*tasks still to check\.$/m);
+});
+
+test('request caps: a scheduled pass on a computer runs with 600 unless told otherwise', t => {
+  const f = fixture(t, { count: 3 });
+  const scheduled = f.run(['refresh', '--scheduled']);
+  assert.match(scheduled.report.metrics, /, cap=600, /);
+  assert.match(scheduled.report.metrics, /, complete=yes$/);
+});

@@ -65,7 +65,7 @@ const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
 const { SweepNotes, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
-const { SweepRequests } = require('./programme-sweep.cjs');
+const { SweepRequests, passCap } = require('./programme-sweep.cjs');
 const { SweepLease } = require('./programme-sweep-lease.cjs');
 // Issues changed up to this long before the predecessor started (by GitHub's clock) are read again.
 const SWEEP_OVERLAP_MS = 5 * 60 * 1000;
@@ -636,7 +636,7 @@ const commands = {
     if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
     if (report.sweep) context.sweepOutcome = { changedSince: report.sweep.changedComplete ? context.requests?.serverStart || null : null, completeAt: report.sweep.board_time,
       complete: report.sweep.complete && !report.holds.length, noWrite: report.sweep.noWrite, reason: report.sweep.reason };
-    if (context.requests) report.metrics = `Sweep: requests=${context.requests.count}, tasks read=${report.sweep?.read ?? 0}, queue left=${report.sweep?.left ?? 0}`;
+    if (context.requests) report.metrics = `Sweep: requests=${context.requests.count}, cap=${context.requests.cap}, tasks read=${report.sweep?.read ?? 0}, queue left=${report.sweep?.left ?? 0}, complete=${context.sweepOutcome?.complete ? 'yes' : 'no'}`;
     cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
     return report;
   },
@@ -1048,7 +1048,8 @@ function runPasses(args, deps, out) {
   // A refresh is a sweep: its requests are serial and budgeted, and it holds the shared lease.
   const cloudEnvironment = deps.environment || process.env;
   const cloudRun = cloudEnvironment.GITHUB_ACTIONS === 'true' && cloudEnvironment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1';
-  const requests = args.command === 'refresh' ? new SweepRequests({ transport: deps.transport || (cloudRun ? cloudTransport(cloudEnvironment) : new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') })), nowMs: pass.nowMs, ...(deps.requestCap ? { cap: deps.requestCap } : {}) }) : null;
+  const requests = args.command === 'refresh' ? new SweepRequests({ transport: deps.transport || (cloudRun ? cloudTransport(cloudEnvironment) : new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') })), nowMs: pass.nowMs,
+    cap: deps.requestCap || passCap({ host: cloudRun ? 'cloud' : 'computer', scheduled: args.scheduled === true }) }) : null;
   if (requests) {
     requests.reading = false;
     requests.onLimit = () => { if (!pass.stopped) { pass.stopped = pass.snapshot('time_limit'); pass.stopReason = 'request cap'; } };

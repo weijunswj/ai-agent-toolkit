@@ -6,6 +6,17 @@
 const state = require('./programme-state.cjs');
 
 const CAP = 300;
+// The cap per pass, by host and mode. A scheduled pass must be able to read and draw a whole board in
+// one go: about ten requests a task (TASK_COST plus PAGE_COST) for a hundred tasks is about a thousand.
+// On GitHub the pass runs under the App's own hourly rate limit, so it gets 1,500. On a computer it
+// shares the signed-in account's limit with everything else that account does, so it gets 600. A
+// refresh a session starts after its own write stays small, at CAP, so it never spends the hour's
+// budget. LOW_REMAINING still stops reading early whatever the cap.
+const PASS_CAPS = Object.freeze({
+  cloud: Object.freeze({ scheduled: 1500, 'after-write': CAP }),
+  computer: Object.freeze({ scheduled: 600, 'after-write': CAP }),
+});
+const passCap = ({ host, scheduled }) => (PASS_CAPS[host] || PASS_CAPS.computer)[scheduled === true ? 'scheduled' : 'after-write'];
 const RESERVE = 60;
 const LOW_REMAINING = 200;
 // What one task usually costs to read (comments, its PR, blockers), and what drawing its task page
@@ -83,4 +94,4 @@ class SweepRequests {
   }
 }
 
-module.exports = { SweepRequests, CAP, RESERVE, LOW_REMAINING, TASK_COST, PAGE_COST, SETTLE_FLOOR, LAST_REQUESTS };
+module.exports = { SweepRequests, CAP, PASS_CAPS, passCap, RESERVE, LOW_REMAINING, TASK_COST, PAGE_COST, SETTLE_FLOOR, LAST_REQUESTS };
