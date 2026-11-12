@@ -370,3 +370,20 @@ test('the sweep --json output is one machine-readable line and --any-author edit
   assert.ok(parsed.results.some((row) => row.url.endsWith('issuecomment-3') && row.status === 'FOUND'));
   assert.ok(!calls.some((call) => call.args[1] === 'user'), '--any-author does not need the signed-in login');
 });
+
+test('the sweep --author edits only that login\'s posts and never asks who is signed in', () => {
+  const state = sampleState();
+  const { gh, calls } = fakeGh(state);
+  let out = '';
+  assert.equal(sweep.main(['--repo', 'acme/app', '--json', '--author', 'someone'], { gh, stdout: (t) => { out += t; } }), 3);
+  const { results } = JSON.parse(out);
+  assert.ok(!calls.some((call) => call.args[1] === 'user'), 'an App sign-in has no user to ask about');
+  assert.ok(results.some((row) => row.url.endsWith('issuecomment-3') && row.status === 'FOUND'), 'the named author\'s post is found');
+  assert.ok(results.filter((row) => row.author === 'me').every((row) => row.status === 'SKIPPED_OTHER_AUTHOR'), 'everyone else is skipped');
+  let err = '';
+  for (const argv of [['--repo', 'a/b', '--author'], ['--repo', 'a/b', '--author', 'bad login'], ['--repo', 'a/b', '--author', 'app[bot]'], ['--repo', 'a/b', '--author', 'me', '--any-author']]) {
+    assert.equal(sweep.main(argv, { stderr: (t) => { err += t; } }), 2, argv.join(' '));
+  }
+  assert.match(err, /--author needs a GitHub login/);
+  assert.match(err, /use --author or --any-author, not both/);
+});
