@@ -23,7 +23,7 @@ function pageFixture(state, { count = 0, hand = '# Programme\n\nUnmarked notes.\
     store.write('child', outcome.issue, child, { previous: null, sha: null });
     children.set(outcome.issue, store.read('child', outcome.issue).doc); issues.set(outcome.issue, issue);
   }
-  const make = () => new state.Reconciler({ binding, store, writer, toolkitVersion: '3.57.0', now: () => NOW,
+  const make = (extra = {}) => new state.Reconciler({ binding, store, writer, toolkitVersion: '3.57.0', now: () => NOW, ...extra,
     reader: new state.ProgrammeGraphReader({ transport: github, repository: github.repository }),
     mutator: new state.GitHubMutator({ transport: github, repository: github.repository }) });
   const parent = () => store.read('parent', 12).doc;
