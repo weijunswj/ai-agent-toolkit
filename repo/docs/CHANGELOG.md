@@ -1,16 +1,12 @@
 # Toolkit Changelog
 
-## 3.74.0 (owner's one-command permissions apply)
-
-### Added
-
-- **`toolkit permissions --apply`:** the owner types it in their own PowerShell or terminal. It lists what would change, waits for the typed word `apply`, backs each file up next to itself, merges the computer blocks into Claude Code's user settings (every other key and line kept, stale Toolkit lines reported, never removed) and replaces Codex's own `toolkit.rules`, then reads each file back. `--host claude` or `--host codex` does one app. The repo block is still pasted by hand.
+## 3.74.0 (merge before owner tests, bump once at merge, one real-host round per release)
 
 ### Changed
 
-- **Permission blocks:** every computer block now makes `--apply` ask: an ask line on Claude Code and a prompt rule on Codex, with `--apply` required as the first argument so the Codex rule matches. Printing and `--check` stay allowed and still write nothing.
-- **Agents never run `--apply`:** the setup skill and safety playbooks tell agents to hand the owner the command instead. The app's ask for the exact command is the only hard block; the refusals in an agent's shell and without a terminal are speed bumps. Blocks pasted before this release allow `--apply` with no ask until `--apply` or a fresh paste adds the ask line.
-- **Merge authority:** changes to the apply command wait for a typed merge, like the permission, cleanup and store scripts.
+- Owner UAT no longer holds a merge. A pull request whose line is `UAT: OWNER_TEST_NEEDED` merges on its review and green CI; the owner tests the installed build afterwards, its tasks stay open on `Refs` until their OK, and a failed test gets a fix-forward or revert pull request. The task auto-merge check now exits 0 for an owner test once scope allows, and says the test follows the merge.
+- Pull requests hold `main`'s version and carry only a changelog fragment plus a `Bump: patch|minor|major` body line. The merging agent bumps once, at merge time, so a merge no longer forces a re-bump, new CI and a stale merge card on every other open pull request. Older pull requests that already carry a bump still go through the re-bump workflow.
+- Hook changes read the hook pack from CI's Linux and Windows runs. The real-host smoke and the qualification matrix run once per release batch, after its merges, on the installed build and before the owner tests.
 
 ## 3.73.0 (refresh toolkit keeps your answers with no questions)
 

@@ -64,8 +64,9 @@ test('each block stays inside its own budget', () => {
   // check-up clause in the G0 bullet (it had moved to TOOLKIT-DELIVERY.md while this file was full),
   // then to 13,760 for the controller's own eligibility run before a task auto-merge (the CI check
   // passes while auto-merge is off, and that green can outlive the off period), then to 14,000 for
-  // Claude Projects as the third app (its switch is a project line, and its one merge thread merges).
-  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 14000, 'gate rules');
+  // Claude Projects as the third app (its switch is a project line, and its one merge thread merges),
+  // then to 14,400 for merging before the owner's test and one real-host round per release batch.
+  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 14400, 'gate rules');
 });
 
 test('the Projects controller skill fits a claude.ai skill card, with room for lanes in flight', () => {

@@ -22,8 +22,8 @@
 // alone: only a yes that names the UAT verdict counts.
 //
 // Exit 0: auto-merge may go ahead once the other gate conditions hold. Exit 1: it waits, with every
-// reason named together (a missing, invalid or owner-test verdict; each merge-rule path). Exit 2: the
-// commits or the body could not be read, or the call names no mode (also waits).
+// reason named together (a missing or invalid verdict; each merge-rule path). Exit 2: the commits or
+// the body could not be read, or the call names no mode (also waits).
 //
 // The UAT verdict is exactly one hand-written line at the start of a line:
 //   UAT: NOT_REQUIRED (why the owner has nothing to try)
@@ -31,7 +31,9 @@
 //   UAT: PASSED (the owner's OK: a link or a date)
 // No line is never read as NOT_REQUIRED, and neither is a tier, a label or a green check. A missing
 // or invalid line goes back to the gate that owns the pull request; it is not a question for the
-// owner. Only the owner's own answer turns OWNER_TEST_NEEDED into PASSED. Lines in code fences,
+// owner. OWNER_TEST_NEEDED merges too: the owner tests the installed build after the merge, and the
+// task stays open, linked with Refs, until they pass it. Only the owner's own answer turns
+// OWNER_TEST_NEEDED into PASSED. Lines in code fences,
 // quotes and HTML comments that start a line are never read as the verdict (see uatVerdict for the
 // whole subset). The line is evidence for this check, never merge authority.
 //
@@ -202,10 +204,11 @@ function commitOf(cwd, ref) {
   return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
 }
 
-// The UAT verdict in a pull request body: { state, detail, problem, ready }. `state` is absent,
-// invalid, NOT_REQUIRED, OWNER_TEST_NEEDED or PASSED; `detail` is the text in brackets; `problem`
-// says what is wrong with an invalid line (or that an absent body was empty); `ready` is true only
-// for NOT_REQUIRED and PASSED.
+// The UAT verdict in a pull request body: { state, detail, problem, ready, mergeable }. `state` is
+// absent, invalid, NOT_REQUIRED, OWNER_TEST_NEEDED or PASSED; `detail` is the text in brackets;
+// `problem` says what is wrong with an invalid line (or that an absent body was empty); `ready` is
+// true only for NOT_REQUIRED and PASSED (nothing is owed by the owner); `mergeable` adds
+// OWNER_TEST_NEEDED, whose owner test runs after the merge.
 //
 // The reader is default-deny over a small subset of what GitHub draws. It reads lines the way
 // GitHub's Markdown does (LF, CRLF and a lone CR end a line; one leading byte order mark is
@@ -249,7 +252,10 @@ function looksLikeUat(piece) {
 }
 
 function uatVerdict(body) {
-  const verdict = (state, detail = null, problem = null) => ({ state, detail, problem, ready: state === 'NOT_REQUIRED' || state === 'PASSED' });
+  const verdict = (state, detail = null, problem = null) => {
+    const ready = state === 'NOT_REQUIRED' || state === 'PASSED';
+    return { state, detail, problem, ready, mergeable: ready || state === 'OWNER_TEST_NEEDED' };
+  };
   if (typeof body !== 'string') return verdict('absent');
   const text = body.startsWith('\ufeff') ? body.slice(1) : body;
   if (text.trim() === '') return verdict('absent', null, 'the pull request body is empty');
@@ -347,16 +353,20 @@ function readBody(file, cwd, stdin) {
 const USAGE = 'Usage: node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> --body-file <file|-> [--json]\n'
   + '   or: node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> --scope-only [--json]\n'
   + '--body-file is the pull request body, read for its UAT line. --scope-only reads the merge scope alone and grants no merge readiness.\n'
-  + 'With --json, "ready" is the answer; "eligible" is the merge scope alone.\n';
+  + 'With --json, "ready" is the answer; "eligible" is the merge scope alone; "uat.mergeable" says whether the UAT line lets it merge, and "uat.ready" whether the owner owes nothing (false for an owner test after the merge).\n';
 const SCOPE_WAITS = 'Waits for the owner\'s typed merge: this pull request changes the merge rules.';
 
-// The lines for a verdict that is not ready, or [] when it is.
+// The lines for a verdict that cannot merge, or [] when it can.
 function uatLines(uat) {
   if (uat.state === 'absent') return [`Missing UAT verdict: ${uat.problem || 'the pull request body has no UAT line'}. The gate that owns this pull request adds exactly one: ${UAT_FORMAT}. This is not a question for the owner.`];
   if (uat.state === 'invalid') return [`UAT verdict invalid: ${uat.problem}. The gate that owns this pull request corrects the line. This is not a question for the owner.`];
-  if (uat.state === 'OWNER_TEST_NEEDED') return [`Owner test needed: ${uat.detail}. It waits for the owner's test; after their OK the controller changes the line to UAT: PASSED (their OK).`];
   return [];
 }
+
+// What happens after the merge for an owner test, or '' when none is owed.
+const AFTER_MERGE = uat => (uat.state === 'OWNER_TEST_NEEDED'
+  ? ` Owner test after the merge: ${uat.detail}. The owner tests the installed build; at the merge the controller records UAT PENDING on every linked issue, kept on Refs and open until their OK; then it changes the line to UAT: PASSED (their OK).`
+  : '');
 
 function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = process.stderr, stdin } = {}) {
   const value = name => { const at = argv.indexOf(name); return at >= 0 ? argv[at + 1] : undefined; };
@@ -379,10 +389,10 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
   const body = readBody(bodyFile, cwd, stdin);
   if (body === null) { stderr.write('The pull request body could not be read as text, so its UAT verdict is unknown: the file is missing, too long, or not UTF-8 (UTF-16 is read only with its byte order mark). Pipe the body straight in with --body-file -, or save it as UTF-8, and run the check again.\n'); return 2; }
   const uat = uatVerdict(body);
-  const ready = scope.eligible && uat.ready;
+  const ready = scope.eligible && uat.mergeable;
   if (json) stdout.write(`${JSON.stringify({ ...scope, uat, ready }, null, 2)}\n`);
-  else if (ready) stdout.write(`Auto-merge: yes. Nothing here changes the merge rules and the UAT verdict is ${uat.state} (${uat.detail}), so it merges once the other gate conditions hold.\n`);
-  else stdout.write(`${[...uatLines(uat), ...scopeLines].join('\n')}\n`);
+  else if (ready) stdout.write(`Auto-merge: yes. Nothing here changes the merge rules and the UAT verdict is ${uat.state} (${uat.detail}), so it merges once the other gate conditions hold.${AFTER_MERGE(uat)}\n`);
+  else stdout.write(`${[...uatLines(uat), ...scopeLines, ...(scope.eligible ? [] : [AFTER_MERGE(uat).trim()].filter(Boolean))].join('\n')}\n`);
   return ready ? 0 : 1;
 }
 
