@@ -270,11 +270,17 @@ function requireGitHubGovernance(repoRoot, online = null) {
   try { governance = require('../../../repo/scripts/toolkit-governance-state.cjs'); } catch {
     throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The Toolkit governance state could not be read from this copy, so no programme command runs. Use a full Toolkit install.');
   }
-  const current = governance.governanceState(repoRoot, online ? { mergedReader: identity => online.read(identity) } : {});
+  // A cloud runner has no binding cache: it reads the merged binding online, at the checked-out
+  // commit. The state module reads a failed read as no binding, so the reader's own stop (main
+  // moved, the binding unreadable) is kept and reported instead.
+  let readStop = null;
+  const mergedReader = identity => { try { return online.read(identity); } catch (error) { readStop = error; throw error; } };
+  const current = online ? new governance.GovernanceState({ mergedReader }).evaluate(repoRoot) : governance.governanceState(repoRoot);
   if (current.state === 'ENABLED' && current.programme_records_bind) {
     const merged = online ? online.binding : governance.mergedBinding(repoRoot);
     if (merged) return merged;
   }
+  if (readStop?.code) throw readStop;
   throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? (current.governed_rules_bind ? 'ENABLED, but the binding merged on the default branch was last read over 24 hours ago or not at all (run toolkit governance status online)' : 'ENABLED but incomplete (the binding is not merged on the default branch yet)') : current.state} for this repository, so no programme command runs. Nothing changed.`);
 }
 
@@ -611,7 +617,8 @@ const commands = {
       queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: lease.findings(),
       canRead: started => context.requests.canStartTask(started) && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,
       settle: () => { context.requests.reading = false; },
-      progress: (diagnostics, store) => lease.progress(diagnostics, store),
+      // The lease's state commit window: it carries the progress and the renewed expiry.
+      lease: { open: () => lease.openBatch(context.store), entry: snapshot => lease.batchEntry(snapshot, context.pass.snapshot()), close: outcome => lease.closeBatch(outcome) },
     } : null;
     const report = commands.reconcile({ ...args, apply: true, inventory, queued }, context);
     if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
@@ -884,7 +891,7 @@ function formatReport(report) {
   if (report.recovered.length) lines.push('', 'Recovered from an earlier pass', ...report.recovered.map(entry => `- ${entry.outcome}: ${entry.kind} ${entry.number} intent ${entry.intent_id}`));
   if (report.holds.length) lines.push('', 'Holds', ...report.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`));
   if (report.inventory) lines.push('', `Inventory: ${report.inventory.complete ? 'complete' : `INCOMPLETE (${report.inventory.reason})`}; ${Object.entries(report.inventory.counts).map(([name, count]) => `${name} ${count}`).join(', ')}`);
-  if (report.reads) lines.push('', `Reads: ${report.reads.rows} child issue(s) read from the parent's list; ${report.reads.reused} settled child(ren) reused, ${report.reads.reread} read again; parent comments ${report.reads.bookmark === 'used' ? 'read from the bookmark' : report.reads.bookmark === 'full' ? 'read in full' : 'not read'}`);
+  if (report.reads) lines.push('', `Reads: ${report.reads.rows} child issue(s) read from the parent's list; ${report.reads.reused} task(s) left to their turn, ${report.reads.reread} read on rotation; parent comments ${report.reads.bookmark === 'used' ? 'read from the bookmark' : report.reads.bookmark === 'full' ? 'read in full' : 'not read'}`);
   if (report.closing && !report.closing.complete) lines.push('', `Closing scan: INCOMPLETE; ${report.closing.incomplete.length} item(s) remain unread for the next pass. ${report.closing.errors.join(' ')}`.trim());
   if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
   if (report.state_branch?.events.length) lines.push('', `State branch ${report.state_branch.branch}`, ...report.state_branch.events.map(event => `- ${event.code}: ${event.text}`));
@@ -1017,7 +1024,13 @@ function runPasses(args, deps, out) {
   while (lock) {
     const held = lock;
     let progress;
+    // Whether this run's note may record a stop: reconcile --apply from its start, a refresh only
+    // once it holds the lease (a pass that defers did no work and leaves no note).
+    let noteActive = false;
     beat.fn = () => {
+      // The lease release is guarded by its own compare-and-swap on the holder, so it still goes out
+      // after this computer's lock was lost: that is how such a stop is recorded.
+      if (context.releasing) return;
       if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', `Another pass took over the lock for ${context.binding.repository} while this one ran, so this pass stopped before its next GitHub request. The next refresh or the hourly sweep finishes the work.`);
       held.beat();
       const lease = context.lease;
@@ -1033,7 +1046,7 @@ function runPasses(args, deps, out) {
     try {
       progress = new PassProgress(file, held);
       pass.progress = progress;
-      progress.write(pass.snapshot());
+      if (!requests) { noteActive = true; progress.write(pass.snapshot()); }
       do {
         // A pass that lost its lock before its first request must not clear a flag left for the new owner.
         beat.fn();
@@ -1055,17 +1068,22 @@ function runPasses(args, deps, out) {
             passes += 1;
             break;
           }
+          if (!noteActive) { noteActive = true; progress.write(pass.snapshot()); }
         }
+        let failed = null;
         try { code = Math.max(code, finish(passArgs, deps, out, context)); }
+        catch (error) { failed = error; throw error; }
         finally {
           if (measure) notes.saveMetrics();
-          if (requests) releaseLease(context, pass);
+          // An error stop goes to the local note when this computer's lock still owns it; otherwise
+          // (the cloud, or a lock another process took) the lease release carries it.
+          if (requests) releaseLease(context, pass, { error: failed, noteHolds: Boolean(file) && host === 'computer' && held.owns() });
         }
         passes += 1;
         progress.finish();
       } while (flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
     } catch (error) {
-      if (held.owns()) progress?.write(pass.snapshot());
+      if (noteActive && held.owns()) progress?.write(pass.snapshot());
       throw error;
     } finally {
       lock.release();
@@ -1091,8 +1109,8 @@ function takeLease(context, host, pass, progress) {
   requests.count = 0; requests.reading = false; requests.reason = null; requests.limited = false; requests.exhausted = false; requests.serverStart = null;
   context.store.graphqlRefused = false;
   const store = typeof context.store.private === 'object' ? context.store.private : context.store;
-  const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs });
-  if (!lease.acquire()) return false;
+  const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs, endsBy: pass.endsBy });
+  if (!lease.acquire(pass.started_at)) return false;
   context.lease = lease;
   context.sweepOutcome = null;
   const stop = lease.unreported();
@@ -1104,21 +1122,31 @@ function takeLease(context, host, pass, progress) {
   return true;
 }
 
-// Releases the lease with what this pass leaves for the next one. A failed release only means the
-// lease expires on its own.
-function releaseLease(context, pass) {
+// Fixed reasons for a pass that ended with an error, by its code.
+function errorReason(error) {
+  if (error.code === 'PASS_LOCK_LOST') return 'another pass took over';
+  return /^GH_/.test(error.code || '') ? 'a GitHub request failed' : 'an error';
+}
+
+// Releases the lease with what this pass leaves for the next one: an error stop that no local note
+// holds is written here, so the next pass on either host reports it. A failed release only means
+// the lease expires on its own, by the pass's kill time.
+function releaseLease(context, pass, { error = null, noteHolds = false } = {}) {
   const lease = context.lease;
   context.lease = null;
   if (!lease) return;
   context.requests.reading = false;
   const outcome = context.sweepOutcome || {};
+  context.releasing = true;
   try {
-    lease.release({ changedSince: outcome.changedSince || null, completeAt: outcome.completeAt || null, complete: Boolean(outcome.complete && outcome.completeAt),
-      stop: outcome.noWrite && pass.stopped ? { ...pass.stopped, cause: 'time_limit' } : null, reason: outcome.reason || null,
+    const errorStop = error && !noteHolds ? pass.snapshot('interrupted') : null;
+    lease.release({ changedSince: error ? null : outcome.changedSince || null, completeAt: outcome.completeAt || null, complete: !error && Boolean(outcome.complete && outcome.completeAt),
+      stop: errorStop || (outcome.noWrite && pass.stopped ? { ...pass.stopped, cause: 'time_limit' } : null), reason: error ? errorReason(error) : outcome.reason || null,
       busy: outcome.reason === 'state branch busy', graphqlRefused: Boolean(context.store.graphqlRefused || context.store.private?.graphqlRefused) });
-  } catch (error) {
-    if (!error.code || ['STALE_WRITER', 'PASS_LOCK_LOST'].includes(error.code)) throw error;
-  }
+  } catch (releaseError) {
+    // The pass's own error is the one reported; a release that fails after it leaves the lease to expire.
+    if (!error && (!releaseError.code || ['STALE_WRITER', 'PASS_LOCK_LOST'].includes(releaseError.code))) throw releaseError;
+  } finally { context.releasing = false; }
 }
 
 function finish(args, deps, out, opened = null) {

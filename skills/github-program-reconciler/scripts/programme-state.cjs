@@ -436,13 +436,15 @@ function validatePassDiagnostics(errors, value, at) {
 }
 
 // One clock and deadline for all passes in a refresh process. Progress is supplied by the lock
-// owner; direct callers can inject the same clock without writing a local progress file.
+// owner; direct callers can inject the same clock without writing a local progress file. `endsBy`
+// is when the process is killed at the latest: the sweep lease never outlasts it.
 class RefreshBudget {
   constructor({ nowMs = Date.now, budgetMs = REFRESH_BUDGET_MS, progress = null } = {}) {
     this.nowMs = nowMs;
     this.start = nowMs();
     this.started_at = new Date(this.start).toISOString();
     this.deadline = this.start + budgetMs;
+    this.endsBy = this.deadline + KILL_SLACK_MS;
     this.progress = progress;
     this.phase = 'planning'; this.done = 0; this.total = 0;
     this.stopped = null;
@@ -2291,7 +2293,8 @@ function assertPageCopy(doc) {
 const DOCUMENT_FILE = /^(parent|issue)-([1-9][0-9]*)\.json$/;
 const SWEEP_RECORD_FILE = 'sweep-lease.json';
 const SWEEP_RECORD_SCHEMA = 'toolkit.programme-sweep-lease.v1';
-const SWEEP_STOP_REASONS = ['time limit', 'request cap', 'GitHub rate limit', 'state branch busy', 'GitHub GraphQL unavailable', 'tasks still to check', 'an incomplete read'];
+const SWEEP_STOP_REASONS = ['time limit', 'request cap', 'GitHub rate limit', 'state branch busy', 'GitHub GraphQL unavailable', 'tasks still to check', 'an incomplete read',
+  'another pass took over', 'a GitHub request failed', 'an error'];
 
 // The record both sweep routes share in the private store: who holds the sweep now (with its
 // progress, so a killed run is reported), the pass count the rotation runs on, when a pass last
@@ -2466,40 +2469,48 @@ class StateStore {
   // the staged changes on a fresh snapshot once (`rerun`); a second race stops the pass. A reply
   // lost after the ref update is settled by reading the branch head before anything else runs.
   commitBatch(batch, { message = 'programme state: pass' } = {}) {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const documents = batch.prepare(this);
-      if (!documents.length) return { written: [], head: batch.snapshot.head };
-      // The sweep's progress, once there is a state commit to carry it (or beside it).
-      if (batch.progress && !batch.progressed) { batch.progressed = true; const entry = batch.progress(); if (entry) batch.extra.push(entry); }
-      // A file carried beside the documents must still be the version its owner holds.
-      for (const extra of batch.extra) {
-        if (batch.snapshot.files?.get(extra.path.slice(this.store.path.length))?.sha !== extra.sha) {
-          throw new ProgrammeError('PASS_LOCK_LOST', 'The sweep lease changed hands before the state was saved; this pass stopped and wrote nothing.');
+    // The sweep lease's commit window: it closes when this returns or throws, with the lease entry
+    // that landed, or unsure when a write request went out and its outcome was not confirmed.
+    let committed = null;
+    let unsure = false;
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const documents = batch.prepare(this);
+        if (!documents.length) return { written: [], head: batch.snapshot.head };
+        // The sweep's progress and renewed expiry ride the commit (or are written beside it), rebuilt
+        // on every attempt from the version the lease holds.
+        const lease = batch.lease ? batch.lease.entry(batch.snapshot) : null;
+        const written = [...documents, ...(lease ? [{ ...lease, kind: 'lease' }] : [])];
+        this.beforeBatch(written);
+        const tree = this.transport.request('POST', `repos/${this.store.repository}/git/trees`, { base_tree: batch.snapshot.tree,
+          tree: written.map(entry => ({ path: entry.path, mode: '100644', type: 'blob', content: entry.text })) });
+        if (!okStatus(tree.status) || !isSha(tree.json?.sha)) throw ghFailure(tree, 'Writing the state tree');
+        const lines = documents.map(entry => `${documentName(entry.kind, entry.number)} r${entry.doc.revision}`);
+        const commit = this.transport.request('POST', `repos/${this.store.repository}/git/commits`, { message: `${message}: ${lines.join(', ')} [skip ci]`, tree: tree.json.sha, parents: [batch.snapshot.head] });
+        if (!okStatus(commit.status) || !isSha(commit.json?.sha)) throw ghFailure(commit, 'Writing the state commit');
+        // Only the ref update can land this commit: until it is confirmed, the outcome is unsure.
+        unsure = true;
+        const outcome = this.moveBranch(batch.snapshot.head, commit.json.sha);
+        if (outcome === 'MOVED') {
+          this.readBack(commit.json.sha, written, tree.json);
+          unsure = false;
+          committed = written.find(entry => entry.kind === 'lease')?.blob || null;
+          this.writes += documents.length;
+          this.lastCommit = commit.json.sha;
+          for (const entry of documents) this.ownWrites.set(entry.path, { replaced: entry.sha, doc: clone(entry.stored), sha: entry.blob });
+          this.afterBatch(documents, commit.json.sha);
+          batch.committed(documents, commit.json.sha);
+          return { written: documents, head: commit.json.sha };
         }
+        // RACED: another writer moved the branch, so this attempt changed nothing. Re-read and
+        // re-run every staged change once.
+        unsure = false;
+        if (attempt === 0) batch.rerun(this.readSnapshot(), this);
       }
-      const written = [...documents, ...batch.extra.map(extra => ({ ...extra, kind: 'extra' }))];
-      this.beforeBatch(written);
-      const tree = this.transport.request('POST', `repos/${this.store.repository}/git/trees`, { base_tree: batch.snapshot.tree,
-        tree: written.map(entry => ({ path: entry.path, mode: '100644', type: 'blob', content: entry.text })) });
-      if (!okStatus(tree.status) || !isSha(tree.json?.sha)) throw ghFailure(tree, 'Writing the state tree');
-      const lines = documents.map(entry => `${documentName(entry.kind, entry.number)} r${entry.doc.revision}`);
-      const commit = this.transport.request('POST', `repos/${this.store.repository}/git/commits`, { message: `${message}: ${lines.join(', ')} [skip ci]`, tree: tree.json.sha, parents: [batch.snapshot.head] });
-      if (!okStatus(commit.status) || !isSha(commit.json?.sha)) throw ghFailure(commit, 'Writing the state commit');
-      const outcome = this.moveBranch(batch.snapshot.head, commit.json.sha);
-      if (outcome === 'MOVED') {
-        this.readBack(commit.json.sha, written, tree.json);
-        this.writes += documents.length;
-        this.lastCommit = commit.json.sha;
-        for (const entry of documents) this.ownWrites.set(entry.path, { replaced: entry.sha, doc: clone(entry.stored), sha: entry.blob });
-        for (const entry of written.filter(item => item.kind === 'extra')) entry.committed?.(entry.blob);
-        this.afterBatch(documents, commit.json.sha);
-        batch.committed(documents, commit.json.sha);
-        return { written: documents, head: commit.json.sha };
-      }
-      // RACED: another writer moved the branch. Re-read and re-run every staged change once.
-      if (attempt === 0) batch.rerun(this.readSnapshot(), this);
+      throw Object.assign(new ProgrammeError('STATE_BRANCH_BUSY', 'The state branch moved twice while this pass was saving; nothing was written and the queue is unchanged.'), { reason: 'state branch busy' });
+    } finally {
+      batch.lease?.close({ committed, unsure });
     }
-    throw Object.assign(new ProgrammeError('STATE_BRANCH_BUSY', 'The state branch moved twice while this pass was saving; nothing was written and the queue is unchanged.'), { reason: 'state branch busy' });
   }
 
   // MOVED or RACED. A lost reply is decided from the branch head: ours is accepted, the old head is
@@ -2712,8 +2723,8 @@ class StateBatch {
     this.dropped = new Map();
     this.written = [];
     this.head = null;
-    // Files that ride in the same commit (the sweep's progress): { path, text, sha, committed }.
-    this.extra = [];
+    // The sweep lease's commit window, when a sweep holds one: { entry(snapshot), close(outcome) }.
+    this.lease = null;
   }
 
   read(kind, number) {
@@ -5477,6 +5488,18 @@ class Reconciler {
       && JSON.stringify(canonical(entry.diagnostics)) === JSON.stringify(canonical(interrupted)))) this.pass.progress.reported();
   }
 
+  // A state batch on the documents as they stand now. A sweep's lease opens its commit window
+  // first, so no separate lease write lands between this snapshot and the end of the commit.
+  openBatch(earlier, parentNumber) {
+    const lease = this.queued?.lease || null;
+    lease?.open();
+    try {
+      const batch = new StateBatch(this.store, this.store.currentSnapshot(earlier), parentNumber);
+      batch.lease = lease;
+      return batch;
+    } catch (error) { lease?.close({}); throw error; }
+  }
+
   // Saved states, parent page, queue, then completion. Every group shares the process deadline.
   apply(plan) {
     if (plan.override) throw new ProgrammeError('USAGE', 'A parent document read from a file can only be used for a dry run.');
@@ -5488,7 +5511,7 @@ class Reconciler {
     let docs = null;
     // The state phase is staged on the plan's snapshot and published in one commit before any page
     // or GitHub effect runs. Effect bookkeeping after it keeps the per-document compare-and-swap.
-    let batch = plan.snapshot?.head ? new StateBatch(this.store, this.store.currentSnapshot(plan.snapshot), parentNumber) : null;
+    let batch = plan.snapshot?.head ? this.openBatch(plan.snapshot, parentNumber) : null;
     const staged = [];
     const settledChildren = new Map([...plan.children].filter(([,entry])=>entry.doc).map(([number,entry])=>[number,entry.doc]));
     const writtenChildren = new Set();
@@ -5786,10 +5809,9 @@ class Reconciler {
 
     if (batch) {
       recordStopped();
-      // The queue this pass leaves rides the same commit, and so does the sweep's progress when its
-      // lease lives in the same store; otherwise the lease is written once at this boundary.
+      // The queue this pass leaves rides the same commit, and so does the sweep's lease (its progress
+      // and renewed expiry) when it lives in the same store; otherwise its progress is written once.
       if (this.sweepChange) mutateDoc('parent', parentNumber, { change: this.sweepChange });
-      if (this.queued?.progress) batch.progress = () => this.queued.progress(this.pass.snapshot(), this.store);
       try { this.store.commitBatch(batch); }
       catch (error) {
         if (error.code === 'STATE_READBACK_MISMATCH') {
@@ -6417,7 +6439,7 @@ class Reconciler {
       const finding = plan.findings[0];
       const writes = this.store.writes;
       // Planning expiry commits only the finding and the queue. No recovered intent or planned effect is applied.
-      const batch = new StateBatch(this.store, this.store.currentSnapshot(plan.snapshot), plan.parent.parent_issue);
+      const batch = this.openBatch(plan.snapshot, plan.parent.parent_issue);
       batch.mutate('parent', plan.parent.parent_issue, { writer: this.writer, change: doc => {
         doc.attention = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [finding], now: this.now() });
         return this.sweepChange ? this.sweepChange(doc) || doc : doc;
@@ -6434,7 +6456,10 @@ class Reconciler {
     } else if (apply && plan.parent && (this.pass.progress?.interrupted || plan.effects.length || this.sweepChange || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;
       const githubWrites = this.mutator.mutations;
-      const { results, holds, attention, noWrite } = this.apply(plan);
+      let applied;
+      // A state phase that ends before its commit still closes the lease's commit window.
+      try { applied = this.apply(plan); } finally { this.queued?.lease?.close({}); }
+      const { results, holds, attention, noWrite } = applied;
       if (noWrite) plan.noWrite = true;
       report.results = results;
       report.holds = holds;

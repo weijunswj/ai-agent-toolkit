@@ -264,7 +264,15 @@ test('a pass that loses its lock stops before its next GitHub request', () => {
     firstWrite(fx, () => { act(); at = fx.github.calls.length; });
     const run = own(fx);
     assert.equal(run.error?.code, 'PASS_LOCK_LOST', name);
-    assert.equal(writesAfter(fx, at), 0, `${name}: no GitHub request after the lock was lost`);
+    // After the lock was lost the only requests are the sweep lease's release, which records the
+    // stop, since this pass no longer owns the local note (lease commit model, row L12).
+    const after = fx.github.calls.slice(at);
+    assert.ok(after.length > 0 && after.every(call => call.path.includes('/sweep-lease.json')), `${name}: no GitHub request after the lock was lost but the lease release`);
+    const leaseFile = [...fx.github.files.keys()].find(key => key.endsWith('sweep-lease.json'));
+    const record = JSON.parse(fx.github.files.get(leaseFile).text);
+    assert.equal(record.holder, null, `${name}: the lease is released`);
+    assert.equal(record.unreported?.cause, 'interrupted', `${name}: the stop is in the lease`);
+    assert.equal(record.reason, 'another pass took over');
     assert.equal(fs.existsSync(fx.lockFile), true, `${name}: the other pass's lock is left in place`);
     assert.notEqual(JSON.parse(fs.readFileSync(fx.lockFile, 'utf8')).token, undefined);
   }

@@ -184,6 +184,71 @@ test('fresh runner binding: a head other than the checked-out commit stops with 
   assert.equal(calls.some(call => call.endpoint.includes('/contents/')), false);
 });
 
+// The cloud entry end to end on a fresh runner: the command line gets no origin URL, so it runs the
+// real governance check, and the home folder has no binding cache. Only the online reader can show
+// the repository is ENABLED (review finding H1).
+function freshRunner(t) {
+  const os = require('node:os');
+  const { execFileSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fresh-runner-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fresh-runner-home-'));
+  t.after(() => { for (const folder of [dir, home]) fs.rmSync(folder, { recursive: true, force: true }); });
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  Object.assign(process.env, { HOME: home, USERPROFILE: home });
+  t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=example', '-c', 'user.email=example@example.test', '-c', 'commit.gpgsign=false', ...args], { cwd: dir, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  git('remote', 'add', 'origin', 'https://github.com/owner/repository.git');
+  fs.mkdirSync(path.join(dir, '.github'));
+  fs.writeFileSync(path.join(dir, '.github', 'toolkit-programme.json'), JSON.stringify(binding(), null, 2));
+  git('add', '.');
+  git('commit', '-q', '-m', 'binding');
+  return { dir, home, head: git('rev-parse', 'HEAD') };
+}
+
+function freshRun(t, { file = JSON.stringify(binding()), head = null } = {}) {
+  const runner = freshRunner(t);
+  const calls = [];
+  const transport = {
+    verify() { calls.push('verify'); return true; },
+    request(method, endpoint) {
+      calls.push(`${method} ${endpoint}`);
+      if (endpoint === 'repos/owner/repository') return { status: 200, json: { full_name: 'owner/repository', default_branch: 'main' } };
+      if (endpoint === 'repos/owner/repository/branches/main') return { status: 200, json: { commit: { sha: head || runner.head } } };
+      if (endpoint.startsWith('repos/owner/repository/contents/.github/toolkit-programme.json')) {
+        return file === null ? { status: 404, json: { message: 'Not Found' } } : { status: 200, json: { encoding: 'base64', content: Buffer.from(file).toString('base64') } };
+      }
+      // Past the governance check: the store's own checks are not part of this test.
+      throw Object.assign(new Error(`past the governance check: ${endpoint}`), { code: 'PAST_GOVERNANCE' });
+    },
+  };
+  const environment = { GITHUB_ACTIONS: 'true', TOOLKIT_PROGRAMME_CLOUD_SWEEP: '1', GITHUB_SHA: runner.head, GITHUB_REPOSITORY: 'owner/repository',
+    STORE_REPOSITORY: 'owner/evidence', SWEEP_LOGIN: 'toolkit-governance[bot]', PATH: process.env.PATH };
+  let error = null;
+  try { cli.openContext(cli.parseArgs(['refresh', '--scheduled', '--json']), { environment, transport, repoRoot: runner.dir }); }
+  catch (thrown) { error = thrown; }
+  assert.deepEqual(fs.readdirSync(runner.home), [], 'no binding cache in the home folder');
+  return { calls, error, runner };
+}
+
+test('fresh runner: the command line reads the merged binding online and passes the governance check', t => {
+  const { calls, error, runner } = freshRun(t);
+  assert.equal(error?.code, 'PAST_GOVERNANCE', `${error?.code}: ${error?.message}`);
+  assert.deepEqual(calls.slice(0, 4), ['verify', 'GET repos/owner/repository', 'GET repos/owner/repository/branches/main',
+    `GET repos/owner/repository/contents/.github/toolkit-programme.json?ref=${runner.head}`], 'the binding was read at the checked-out commit');
+});
+
+test('fresh runner: a binding absent on the default branch refuses the sweep', t => {
+  const { error } = freshRun(t, { file: null });
+  assert.equal(error?.code, 'GITHUB_GOVERNANCE_OFF');
+});
+
+test('fresh runner: main moved since the checkout stops with nothing written', t => {
+  const { calls, error } = freshRun(t, { head: 'b'.repeat(40) });
+  assert.equal(error?.code, 'MAIN_MOVED');
+  assert.ok(calls.every(call => call === 'verify' || call.startsWith('GET ')), 'only reads');
+});
+
 test('fresh runner binding: an oversize binding is refused', () => {
   const { reader } = bindingReader({ text: JSON.stringify({ ...binding(), padding: 'x'.repeat(70 * 1024) }) });
   assert.throws(() => reader.read(identity), { code: 'BINDING_INVALID' });

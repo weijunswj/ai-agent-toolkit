@@ -686,3 +686,38 @@ test('batch public: crash after commit recomputes the checkpoint', () => {
   assert.ok(next.result.state_branch.events.some(event => event.code === 'STATE_CHECKPOINT_RECOMPUTED'));
   assert.equal(fx.github.readAt(STORE_REPO, 'main', checkpointFile).files['issue-12'].revision, final.revision);
 });
+
+// Lease commit model, row L6 in public mode: the sweep lease lives in the private store, so its
+// progress is written once beside the state branch commit. A renewal that comes due during that
+// write does not start inside it.
+test('lease public: a renewal due during the progress write does not nest', () => {
+  const fx = fixture();
+  let clock = Date.parse('2026-11-12T01:00:00.000Z');
+  const scheduled = () => fx.run(['refresh', '--scheduled'], { passClock: () => clock });
+  assert.equal(scheduled().error, null);
+  Object.assign(fx.github.issues.get(12), { state: 'closed', state_reason: 'completed', closed_at: fx.github.tick(), updated_at: fx.github.tick() });
+  clock += 60 * 60 * 1000;
+  const leaseCall = call => call.path.includes('sweep-lease.json');
+  let progressAt = null;
+  fx.github.intercept(call => {
+    if (progressAt === null && call.method === 'PUT' && leaseCall(call) && call.body?.message === 'programme sweep: progress') {
+      progressAt = fx.github.calls.length;
+      clock += 11 * 60 * 1000;
+    }
+  });
+  const from = fx.github.calls.length;
+  const second = scheduled();
+  assert.equal(second.error, null, second.error?.message);
+  assert.equal(second.code, 0);
+  assert.ok(progressAt !== null, 'the progress was written beside the state commit');
+  // The progress write's own read-back comes before any other lease write.
+  const next = fx.github.calls.slice(progressAt).find(leaseCall);
+  assert.equal(next.method, 'GET', 'no lease write started inside the progress write');
+  const messages = fx.github.calls.slice(from).filter(call => call.method === 'PUT' && leaseCall(call)).map(call => call.body.message);
+  assert.equal(messages.filter(message => message === 'programme sweep: progress').length, 1, 'progress written once');
+  assert.ok(messages.indexOf('programme sweep: keep the lease') > messages.indexOf('programme sweep: progress'), 'the renewal went out after it');
+  assert.equal(fx.store().read('child', 12).doc.lifecycle, 'DONE');
+  const record = fx.github.readAt(STORE_REPO, 'main', `${STORE.path}sweep-lease.json`);
+  assert.equal(record.holder, null, 'released');
+  assert.equal(record.stopped_passes, 0);
+});
