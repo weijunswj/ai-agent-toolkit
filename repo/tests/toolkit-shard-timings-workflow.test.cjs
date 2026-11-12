@@ -60,3 +60,17 @@ test('shard timings workflow: without the App it only reports; with it it opens 
   assert.match(refresh, /node repo\/scripts\/refresh-shard-timings\.cjs --open-pr\s*$/);
   assert.doesNotMatch(refresh, /echo "\$TOOLKIT_SHARD_PUBLISH_TOKEN"|set -x/, 'the token is never printed');
 });
+
+test('shard timings workflow: a configured App that cannot sign in fails the run instead of passing as report-only', () => {
+  const refresh = step('Refresh the shard timings');
+  assert.match(refresh, /MINT_OUTCOME: \$\{\{ steps\.app\.outcome \}\}/);
+  const failed = refresh.indexOf('if [ "$MINT_OUTCOME" = "failure" ]; then');
+  const empty = refresh.indexOf('if [ -z "$TOOLKIT_SHARD_PUBLISH_TOKEN" ]; then');
+  assert.ok(failed > 0 && failed < empty, 'the sign-in failure is checked before the no-App case');
+  const branch = refresh.slice(failed, empty);
+  assert.match(branch, /::error::.*TOOLKIT_GOVERNANCE_APP_CLIENT_ID.*TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY/);
+  assert.match(branch, /exit 1/);
+  assert.doesNotMatch(branch, /--open-pr/);
+  // The git header carrying the App token is masked before anything can print it.
+  assert.ok(refresh.indexOf('::add-mask::') > empty && refresh.indexOf('::add-mask::') < refresh.indexOf('--open-pr'));
+});

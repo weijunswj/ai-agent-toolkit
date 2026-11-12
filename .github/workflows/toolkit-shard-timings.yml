@@ -9,7 +9,8 @@
 # governance GitHub App's token, minted for this repository with only contents and pull requests
 # write, is used for the push and the pull request alone, so the pull request's own checks start.
 # The checkout keeps no credentials and no token or key is printed. With no App configured the run
-# only reports what it would change. It never runs for pull requests or forks.
+# only reports what it would change; a configured App that cannot sign in fails the run. It never
+# runs for pull requests or forks.
 name: Toolkit Shard Timings
 
 on:
@@ -61,12 +62,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TOOLKIT_SHARD_PUBLISH_TOKEN: ${{ steps.app.outputs.token }}
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          MINT_OUTCOME: ${{ steps.app.outcome }}
         run: |
+          if [ "$MINT_OUTCOME" = "failure" ]; then
+            echo "::error::The governance GitHub App could not sign in, so no pull request was opened. Check the TOOLKIT_GOVERNANCE_APP_CLIENT_ID variable, the TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY secret and that the App is installed on this repository."
+            exit 1
+          fi
           if [ -z "$TOOLKIT_SHARD_PUBLISH_TOKEN" ]; then
-            echo "::notice::No governance App token, so this run only reports what it would change."
+            echo "::notice::No governance App is configured, so this run only reports what it would change."
             node repo/scripts/refresh-shard-timings.cjs
             exit $?
           fi
+          echo "::add-mask::$(printf 'x-access-token:%s' "$TOOLKIT_SHARD_PUBLISH_TOKEN" | base64 -w0)"
           bot_id=$(GH_TOKEN="$TOOLKIT_SHARD_PUBLISH_TOKEN" gh api "users/${APP_SLUG}%5Bbot%5D" --jq .id)
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
