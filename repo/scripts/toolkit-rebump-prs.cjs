@@ -88,22 +88,38 @@ function runProcess(command, args, cwd, env = process.env) {
   if (result.error) throw new Error(`${command} could not run: ${result.error.code || 'process error'}`);
   return result;
 }
+// The pull request branch's own bump and validation scripts run without any sign-in in their
+// environment: every token variable is removed, and so are the Actions file-command paths, so a
+// branch script cannot set a step output, a later step's variables or its path. This is not a
+// sandbox: on the runner such a script could still read the push key from the parent process.
+const TOKEN_VARIABLE = /(?:^|_)(?:TOKEN|PAT|SECRET|PASSWORD|KEY)$|^ACTIONS_|^GITHUB_(?:OUTPUT|ENV|PATH|STATE|STEP_SUMMARY)$/i;
+function scrubbedEnv(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !TOKEN_VARIABLE.test(name)));
+}
+function authorList(value) {
+  const names = String(value).split(',').map(name => name.trim().toLowerCase()).filter(Boolean);
+  if (!names.length || names.some(name => !/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\[bot\])?$/.test(name))) throw new Error('--authors needs GitHub logins separated by commas');
+  return names;
+}
 function checked(result, label) {
   if (result.status !== 0) throw new Error(`${label} failed (exit ${result.status})`);
   return result.stdout.trim();
 }
 
 class PrRebumpOperation {
-  constructor({ workspace, apply = false, repo = '' }, deps = {}) {
+  constructor({ workspace, apply = false, repo = '', authors = [] }, deps = {}) {
     this.workspace = path.resolve(workspace);
     this.apply = apply;
     this.repo = repo;
+    // With a list, a pull request by anyone else is skipped before any of its code runs.
+    this.authors = authors;
+    this.start = deps.start || runProcess;
     this.git = deps.git || ((cwd, args) => runProcess('git', args, cwd));
     this.github = deps.github || ((args) => checked(runProcess('gh', args, this.workspace), 'GitHub read'));
-    this.generate = deps.generate || ((cwd, args) => checked(runProcess(process.execPath,
-      [path.join(cwd, 'repo/scripts/bump-version.cjs'), ...args], cwd), 'version generation'));
+    this.generate = deps.generate || ((cwd, args) => checked(this.start(process.execPath,
+      [path.join(cwd, 'repo/scripts/bump-version.cjs'), ...args], cwd, scrubbedEnv()), 'version generation'));
     this.validate = deps.validate || ((cwd, base) => {
-      checked(runProcess(process.execPath, ['repo/scripts/validate-toolkit.cjs'], cwd, { ...process.env, DIFF_BASE: base }), 'Toolkit validation');
+      checked(this.start(process.execPath, ['repo/scripts/validate-toolkit.cjs'], cwd, { ...scrubbedEnv(), DIFF_BASE: base }), 'Toolkit validation');
       checked(this.git(cwd, ['diff', '--check']), 'whitespace check');
     });
   }
@@ -120,6 +136,7 @@ class PrRebumpOperation {
   eligible(pr) {
     if (!Number.isSafeInteger(pr.number) || pr.number < 1) throw new Error('invalid pull request number');
     if (pr.state !== 'open' || pr.draft || pr.base?.ref !== 'main' || pr.head?.repo?.full_name !== this.repo || pr.base?.repo?.full_name !== this.repo) return 'draft, fork, closed or non-main target';
+    if (this.authors.length && !this.authors.includes(String(pr.user?.login || '').toLowerCase())) return 'author not listed';
     safeRef(pr.head.ref);
     if (pr.head.ref === 'main' || !SHA.test(pr.head.sha)) throw new Error('invalid PR head');
     if (pr.auto_merge) throw new Error('queued auto-merge must be removed before updating this branch');
@@ -264,11 +281,12 @@ class PrRebumpOperation {
   }
 }
 function parseArgs(argv) {
-  const args = { workspace: path.resolve(__dirname, '../..'), apply: false, repo: '' };
+  const args = { workspace: path.resolve(__dirname, '../..'), apply: false, repo: '', authors: [] };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--apply') args.apply = true;
     else if (['--workspace', '--repo'].includes(argv[i]) && argv[i + 1] && !argv[i + 1].startsWith('-')) args[argv[i].slice(2)] = argv[++i];
-    else throw new Error('usage: node repo/scripts/toolkit-rebump-prs.cjs [--workspace <repo>] [--repo <owner/name>] [--apply]');
+    else if (argv[i] === '--authors' && argv[i + 1] && !argv[i + 1].startsWith('-')) args.authors = authorList(argv[++i]);
+    else throw new Error('usage: node repo/scripts/toolkit-rebump-prs.cjs [--workspace <repo>] [--repo <owner/name>] [--authors <login,...>] [--apply]');
   }
   return args;
 }
@@ -279,4 +297,4 @@ if (require.main === module) {
     if (report.results.some(result => result.status === 'held')) process.exitCode = 1;
   } catch (error) { console.error(`toolkit-rebump-prs: ${error.message}`); process.exitCode = 1; }
 }
-module.exports = { PrRebumpOperation, detectIntent, recoverNotes, mergeJson, safeRef, repositoryFromOrigin, parseArgs };
+module.exports = { PrRebumpOperation, detectIntent, recoverNotes, mergeJson, safeRef, repositoryFromOrigin, parseArgs, scrubbedEnv };
