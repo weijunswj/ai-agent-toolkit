@@ -561,3 +561,11 @@ test('the hook guard passes the UAT reader', () => {
   const adapter = require('../scripts/toolkit-issue-closure.cjs');
   assert.equal(typeof adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath }).uatState, 'function');
 });
+test('an open native child is still a proven refusal when the timeline cannot be read', () => {
+  const github = new FakeGitHub({ repository: repo });
+  github.addIssue(1); github.addIssue(2, { parent: 1 });
+  github.intercept(call => (/\/timeline/.test(call.path) ? { status: 404, json: {} } : undefined));
+  const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
+  const result = new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state }).checkTexts(['Closes #1']);
+  assert.equal(result.status, 'refused', 'a cloud hook allows unknown, so a later failed read must not hide the open child');
+});

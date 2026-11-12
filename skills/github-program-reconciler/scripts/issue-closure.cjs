@@ -161,10 +161,14 @@ class IssueClosureGuard {
           const issue = this.get(`repos/${target.repository}/issues/${target.number}`, budget, { missing: prRead && target.repository === this.repository });
           if (!issue || issue.number === target.number && issue.pull_request) continue;
           const owed = issue.state === 'open' ? owedUat(issue.body) : null;
-          const waiting = !owed && issue.state === 'open' ? this.ownerTestPrs(target.repository, target.number, budget) : [];
           result = owed ? { status: 'refused', reason: `Issue ${target.repository}#${target.number} records UAT ${owed}: the owner's test is still owed. Keep it open and use Refs until the controller records UAT PASSED.` }
-            : waiting.length ? { status: 'refused', reason: `Issue ${target.repository}#${target.number} is referenced by merged PR ${waiting.map(pr => `#${pr}`).join(', ')}, whose UAT line is still OWNER_TEST_NEEDED: the owner's test is still owed. Keep it open and use Refs until the owner's OK makes that line UAT: PASSED.` }
             : this.assertClosable(target.number, target.repository, budget, { resolved: issue });
+          // Only a target the native tree allows is checked for merged owner-test PRs, so a proven
+          // refusal is never turned into an unknown by a later read.
+          if (result.status === 'allowed' && issue.state === 'open') {
+            const waiting = this.ownerTestPrs(target.repository, target.number, budget);
+            if (waiting.length) result = { status: 'refused', reason: `Issue ${target.repository}#${target.number} is referenced by merged PR ${waiting.map(pr => `#${pr}`).join(', ')}, whose UAT line is still OWNER_TEST_NEEDED: the owner's test is still owed. Keep it open and use Refs until the owner's OK makes that line UAT: PASSED.` };
+          }
         } catch (error) { result = unknown(`Closing target could not be read. ${error.message} Use Refs or retry when GitHub is readable.`); }
         const location = `${target.source}, line ${target.line}, ${target.pattern}, target ${target.repository}#${target.number}: `;
         if (result.status === 'refused') return { ...result, reason: location + result.reason };
