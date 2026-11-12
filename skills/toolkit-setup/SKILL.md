@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit update scheduled task` for fixed scheduled tasks on this computer, `toolkit permissions` for the paste-once permission blocks, `toolkit store` for evidence store steps and `toolkit cleanup` for rebuildable scraps. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
+description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit update scheduled task` for fixed scheduled tasks on this computer, `toolkit permissions` for the paste-once permission blocks, `toolkit store` for evidence store steps, `toolkit cleanup` for rebuildable scraps, and `remove toolkit` to list and remove Toolkit's scheduled tasks and rules from this computer after the user's OK. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
 ---
 
 
@@ -17,6 +17,12 @@ Bridge setup, repo auto-update, sync, audit, disable, and troubleshooting are To
 For `toolkit update scheduled task`, resolve the managed Toolkit checkout and run `node <Toolkit>/repo/scripts/toolkit-update-scheduled-task.cjs` for the plan, then `--apply` within the requested scope. The updater reuses the existing task planner and approved repair path. It lists recorded cloud and Projects tasks for the coordinator and never changes cloud triggers.
 
 Exit 23 returns questions for the host's question UI: Codex's picker, Claude Code's `AskUserQuestion`, or the Projects decision card. Ask the displayed approval, hand-edit or computer-ownership question with its choices and scope; never supply your own answer. Resume with `--answers <file>` containing the actual answers keyed by question id, each with its original `answer_ref` and the supplied observation where present. A typed question is a last fallback when the host has no question UI. The setup bank's Windows scheduled task row uses this same UI-first route and saves the same dated approval. New task kinds and hand-edited tasks ask again. Saved approval never clears a native permission block, includes no cloud triggers and never reactivates an owner stop.
+
+## Remove Toolkit from this computer
+
+For `remove toolkit`, resolve the managed Toolkit checkout and run `node <Toolkit>/repo/scripts/toolkit-remove.cjs plan`. Show the user the printed list exactly, then ask for their OK with the host's question UI. Only after a yes, run `apply --confirm <plan code>` with the code from the plan they saw. Never run apply without that answer, never invent or reuse a code, and never add `--include` unless the user names that task. If apply says the list changed, run the plan again and ask again. The command removes Toolkit's scheduled tasks, its own task files and the Toolkit block in the global rules files, and puts back Codex's `project_doc_max_bytes` in `config.toml` when setup raised it (the plan lists it); it never touches a repository, the env store or any key, any other app setting or the plugin. Finish by showing the plugin uninstall lines it prints.
+
+For leftover Toolkit files in repositories with governance off, run `node <Toolkit>/repo/scripts/toolkit-leftover-files.cjs scan` and show the report. It is report-only; removal is one pull request per repository with the user's OK.
 
 ## Permission blocks
 

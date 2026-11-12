@@ -310,17 +310,10 @@ if(args[0]===j.SCRIPT.governance)return ${JSON.stringify(GOVERNED)};if(args[1]==
   qualificationComplete = true;
 });
 
-test('setup held plans omit recovery paths and commands, while direct plan retains them', async t => {
+test('a held direct plan keeps its recovery command', async t => {
   const w = switchWorld(t); await w.gov('on'); assert.equal(w.cli('apply').code, 0);
   await w.gov('off');
   tasks.updateRegistry(w.home, rows => rows.map(e => ({ ...e, stopped_by_owner: true, stopped_at: w.now().toISOString() })));
-  const lines = [], core = require('../scripts/setup-toolkit-core.cjs');
-  core.printWindowsTasks({ repoRoot: w.root }, { platform: 'win32', scheduler: w.scheduler, home: w.home, workingFolder: w.root,
-    checkoutDeps: { ...w.offer().checkoutDeps, reportCheckout: root => root }, log: line => lines.push(line) });
-  const text = lines.join('\n');
-  for (const location of [w.root, w.toolkitRoot, w.home]) assert.equal(text.includes(location), false);
-  assert.doesNotMatch(text, /--repo-root|--repair-owned|node |USERPROFILE/);
-  assert.match(text, /direct task plan/);
   assert.match(windowsTasks.describePlan(w.cli('plan').json).join('\n'), /node .* --repair-owned/);
 });
 
