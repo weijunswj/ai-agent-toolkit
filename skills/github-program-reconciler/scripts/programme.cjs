@@ -226,14 +226,41 @@ function runGit(gitPath, cwd, args) {
 // only it names the store, parent, prefixes and required checks, never a working-tree copy an agent
 // can edit. The state module ships with the plugin; without it nothing can show the repository is
 // ENABLED, so the command refuses.
-function requireGitHubGovernance(repoRoot) {
+class MergedSweepBindingReader {
+  constructor({ transport, repository, now = () => new Date() }) {
+    Object.assign(this, { transport, repository, now }); this.binding = null;
+  }
+  read(identity) {
+    const repo = this.transport.request('GET', `repos/${this.repository}`);
+    if (repo.status !== 200 || repo.json?.full_name?.toLowerCase() !== this.repository.toLowerCase() || typeof repo.json.default_branch !== 'string') throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The repository default branch could not be verified.');
+    const branch = repo.json.default_branch;
+    const current = this.transport.request('GET', `repos/${this.repository}/branches/${encodeURIComponent(branch)}`);
+    const head = current.json?.commit?.sha;
+    if (current.status !== 200 || !/^[0-9a-f]{40}$/.test(head || '')) throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The default branch head could not be verified.');
+    const file = this.transport.request('GET', `repos/${this.repository}/contents/.github/toolkit-programme.json?ref=${head}`);
+    if (![200, 404].includes(file.status) || file.status === 200 && file.json?.encoding !== 'base64') throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The merged binding could not be read.');
+    const text = file.status === 404 ? null : Buffer.from(file.json.content, 'base64').toString('utf8');
+    if (text && Buffer.byteLength(text) > 65536) throw new ProgrammeError('BINDING_INVALID', 'The merged binding exceeds its size limit.');
+    if (text) {
+      try {
+        const binding = state.validateBinding(JSON.parse(text));
+        if (binding.governance === 'enabled' && binding.repository.toLowerCase() === this.repository.toLowerCase()) this.binding = binding;
+      } catch { /* The governance rule table receives the exact invalid bytes and refuses them. */ }
+    }
+    return { schema: 'toolkit.governance-binding-cache.v1', repository_id: identity.repository_id, remote: identity.remote.canonical,
+      default_branch: branch, commit: head, fetched_at: this.now().toISOString(), status: text === null ? 'absent' : 'present',
+      bytes_sha256: text === null ? null : crypto.createHash('sha256').update(text).digest('hex'), text, problem: null };
+  }
+}
+
+function requireGitHubGovernance(repoRoot, online = null) {
   let governance;
   try { governance = require('../../../repo/scripts/toolkit-governance-state.cjs'); } catch {
     throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The Toolkit governance state could not be read from this copy, so no programme command runs. Use a full Toolkit install.');
   }
-  const current = governance.governanceState(repoRoot);
+  const current = governance.governanceState(repoRoot, online ? { mergedReader: identity => online.read(identity) } : {});
   if (current.state === 'ENABLED' && current.programme_records_bind) {
-    const merged = governance.mergedBinding(repoRoot);
+    const merged = online ? online.binding : governance.mergedBinding(repoRoot);
     if (merged) return merged;
   }
   throw new ProgrammeError('GITHUB_GOVERNANCE_OFF', `Toolkit's GitHub governance is ${current.state === 'ENABLED' ? (current.governed_rules_bind ? 'ENABLED, but the binding merged on the default branch was last read over 24 hours ago or not at all (run toolkit governance status online)' : 'ENABLED but incomplete (the binding is not merged on the default branch yet)') : current.state} for this repository, so no programme command runs. Nothing changed.`);
@@ -252,9 +279,12 @@ function openContext(args, deps = {}) {
   // GitHub governance must be ENABLED with its materials in place; a DISABLED or undecided repository
   // never runs programme commands, whatever files it carries. Tests that supply the origin own the state.
   // Tests that supply the origin own the state and the binding.
-  const merged = deps.originUrl ? null : requireGitHubGovernance(repoRoot);
-  const binding = deps.binding || merged || state.loadBinding(repoRoot);
   const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
+  const environment = deps.environment || process.env;
+  const online = environment.GITHUB_ACTIONS === 'true' && environment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1'
+    ? new MergedSweepBindingReader({ transport: base, repository: state.originSlug(originUrl) }) : null;
+  const merged = deps.originUrl ? null : requireGitHubGovernance(repoRoot, online);
+  const binding = deps.binding || merged || state.loadBinding(repoRoot);
   // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
   const privateRepo = `repos/${binding.store.repository.toLowerCase()}`;
   const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (method, endpoint, body, options) => {
@@ -536,7 +566,17 @@ const commands = {
       throw new ProgrammeError('PARENT_UNHELD', `The parent document of #${context.binding.parent_issue} has no controller holding it, so there is no one to refresh for. Nothing changed; report this to the controller.`);
     }
     // Only the hash of the holder's session: enough to write as it, never to decide for it.
-    context.writer = state.refreshWriter(parentDoc);
+    if (context.writer?.by_hash && !state.isHolder(parentDoc, context.writer)) throw new ProgrammeError('STALE_WRITER', state.parentRefusal(parentDoc));
+    context.writer = context.writer || state.refreshWriter(parentDoc);
+    if (context.requests) {
+      context.requests.observePhase = phase => context.pass.phaseAt(({ discovery: 'inventory', tasks: 'planning', pages: 'page', finished: 'page' })[phase] || phase);
+      const { LiveProgrammeSweep } = require('./programme-sweep-live.cjs');
+      const report = new LiveProgrammeSweep({ store: context.store, transport: context.transport, binding: context.binding,
+        writer: context.writer, version: context.version, now: context.now, requests: context.requests, readCache: context.readCache, pass: context.pass }).run();
+      if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
+      cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, report.holds.length === 0, deps);
+      return report;
+    }
     context.sweepNotes?.phaseAt('inventory');
     const inventory = runInventory(context, parentDoc, deps, args['deadline-ms']);
     const report = commands.reconcile({ ...args, apply: true, inventory }, context);
@@ -812,6 +852,7 @@ function formatReport(report) {
   if (report.attention) lines.push('', `${report.attention} (programme.cjs attention lists them)`);
   if (report.state_branch?.events.length) lines.push('', `State branch ${report.state_branch.branch}`, ...report.state_branch.events.map(event => `- ${event.code}: ${event.text}`));
   if (report.mode === 'apply') lines.push('', `Writes: ${report.writes.state} state, ${report.writes.github} GitHub`);
+  if (report.metrics) lines.push(report.metrics);
   lines.push('', `Next action: ${report.next_action}`);
   return `${lines.join('\n')}\n`;
 }
@@ -903,9 +944,15 @@ function runPasses(args, deps, out) {
   const pass = new state.RefreshBudget({ nowMs: deps.passClock || Date.now, ...(deps.refreshBudgetMs === undefined ? {} : { budgetMs: deps.refreshBudgetMs }) });
   const beat = { fn: () => {} };
   const notes = new SweepNotes({ clock: pass.nowMs });
-  const passDeps = { ...deps, heartbeat: () => beat.fn(), sweepNotes: notes };
+  const { SweepRequests } = require('./programme-sweep.cjs');
+  const requests = args.command === 'refresh' ? new SweepRequests({ transport: deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') }),
+    nowMs: pass.nowMs, deadline: pass.deadline }) : null;
+  if (requests) requests.settling = true;
+  if (requests) requests.observeStop = () => { if (!pass.stopped) pass.stopped = pass.snapshot('time_limit'); };
+  const passDeps = { ...deps, ...(requests ? { transport: requests } : {}), heartbeat: () => beat.fn(), sweepNotes: notes };
   const context = openContext(args, passDeps);
   context.pass = pass;
+  context.requests = requests;
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
   let lock = takeLock(file, deps);
   if (!lock && args.command !== 'refresh') {
@@ -925,22 +972,46 @@ function runPasses(args, deps, out) {
   let passes = 0;
   while (lock) {
     const held = lock;
+    const heldOutput = [];
+    const passOutput = { write: value => { heldOutput.push(value); } };
+    let sharedLease = null;
     let progress;
     beat.fn = () => {
       if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', `Another pass took over the lock for ${context.binding.repository} while this one ran, so this pass stopped before its next GitHub request. The next refresh or the hourly sweep finishes the work.`);
       held.beat();
+      sharedLease?.check();
     };
     try {
+      beat.fn();
+      clearAgain(file);
+      if (requests) {
+        const parent = readParent(context);
+        if (!parent.fence.holder_session || parent.fence.holder_prefix !== context.binding.writer_prefix) throw new ProgrammeError('PARENT_UNHELD', 'The parent has no controller holding it. Nothing was refreshed.');
+        context.writer = state.refreshWriter(parent);
+        const { SweepLease } = require('./programme-sweep-lease.cjs');
+        const leaseTransport = { request: (...parameters) => {
+          if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', 'Another pass owns the local lock.');
+          held.beat(); return requests.request(...parameters);
+        } };
+        const store = new state.StateStore({ transport: leaseTransport, store: context.binding.store, now: context.now, toolkitVersion: context.version });
+        const lease = new SweepLease({ store, repository: context.binding.repository, nowMs: pass.nowMs });
+        if (!lease.acquire()) {
+          const result = { outcome: 'QUEUED', reason: 'another sweep is running', metrics: `Sweep: requests=${requests.count}; queue left=unchanged` };
+          out.write(args.json ? `${JSON.stringify(result)}\n` : 'Another sweep is running.\n');
+          return 0;
+        }
+        sharedLease = lease;
+      }
       progress = new PassProgress(file, held);
       pass.progress = progress;
       progress.write(pass.snapshot());
       do {
         // A pass that lost its lock before its first request must not clear a flag left for the new owner.
         beat.fn();
-        clearAgain(file);
+        if (passes > 0) clearAgain(file);
         const passArgs = passes === 0 ? args : { command: 'refresh', json: args.json, 'repo-root': args['repo-root'] };
         // Later passes reuse the same store, which remembers its own writes through GitHub's read lag.
-        if (passes > 0 && !args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
+        if (passes > 0 && !args.json) passOutput.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
         const measure = Boolean(file && passArgs.command === 'refresh');
         if (passes) notes.begin();
         notes.file = file;
@@ -948,7 +1019,7 @@ function runPasses(args, deps, out) {
         context.sweepNotes = pass.metrics = measure ? notes : null;
         // The read copy belongs to the lock's owner, like the notes beside it.
         context.readCache = measure ? new ReadCache({ file, lock: held, repository: context.binding.repository, parent: context.binding.parent_issue }) : null;
-        try { code = Math.max(code, finish(passArgs, deps, out, context)); }
+        try { code = Math.max(code, finish(passArgs, deps, passOutput, context)); }
         finally { if (measure) notes.saveMetrics(); }
         passes += 1;
         progress.finish();
@@ -957,7 +1028,20 @@ function runPasses(args, deps, out) {
       if (held.owns()) progress?.write(pass.snapshot());
       throw error;
     } finally {
-      lock.release();
+      try {
+        if (sharedLease && held.owns() && requests.count < requests.cap - 2) {
+          requests.settling = true;
+          sharedLease.release();
+        }
+      } finally {
+        lock.release();
+        let text = heldOutput.join('');
+        if (requests && text) {
+          const at = text.lastIndexOf('requests=');
+          if (at >= 0) text = text.slice(0, at) + text.slice(at).replace(/^requests=\d+/, `requests=${requests.count}`);
+        }
+        if (text) out.write(text);
+      }
     }
     // A change can be flagged between the last check and the release: take the lock back for it.
     lock = flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS ? takeLock(file, deps) : null;
@@ -997,4 +1081,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ parseArgs, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord });
+module.exports = Object.freeze({ parseArgs, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord, MergedSweepBindingReader });

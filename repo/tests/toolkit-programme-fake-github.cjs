@@ -40,6 +40,9 @@ class FakeGitHub {
     this.commentSequence = 0;
     this.commentsMoveIssue = false;
     this.login = 'owner';
+    this.sweepHead = crypto.createHash('sha1').update('initial fake state').digest('hex');
+    this.sweepTrees = new Map(); this.sweepCommits = new Map(); this.sweepSequence = 0;
+    this.snapshots.set(this.sweepHead, new Map());
   }
 
   tick() { this.clock += 1000; return new Date(this.clock).toISOString(); }
@@ -126,7 +129,25 @@ class FakeGitHub {
       return repo ? ok(200, repo) : ok(404, { message: 'Not Found' });
     }
     if ((match = /^repos\/([^/]+\/[^/]+)\/branches\/(.+)$/.exec(path))) {
-      return decodeURIComponent(match[2]) === this.branch ? ok(200, { name: this.branch }) : ok(404, { message: 'Branch not found' });
+      return decodeURIComponent(match[2]) === this.branch ? ok(200, { name: this.branch, commit: { sha: this.sweepHead } }) : ok(404, { message: 'Branch not found' });
+    }
+    if (/^repos\/[^/]+\/[^/]+\/git\/trees$/.test(path) && method === 'POST') {
+      const files = new Map(this.snapshots.get(body.base_tree) || []);
+      for (const entry of body.tree) files.set(entry.path, { text: entry.content, sha: blobSha(entry.content) });
+      const sha = crypto.createHash('sha1').update(`tree-${++this.sweepSequence}`).digest('hex');
+      this.sweepTrees.set(sha, files); return ok(201, { sha });
+    }
+    if (/^repos\/[^/]+\/[^/]+\/git\/commits$/.test(path) && method === 'POST') {
+      const sha = crypto.createHash('sha1').update(`commit-${++this.sweepSequence}`).digest('hex');
+      const files = this.sweepTrees.get(body.tree);
+      this.snapshots.set(sha, files); this.sweepCommits.set(sha, body);
+      return ok(201, { sha });
+    }
+    if (/^repos\/[^/]+\/[^/]+\/git\/refs\/heads\//.test(path) && method === 'PATCH') {
+      if (body.force || !this.sweepCommits.get(body.sha)?.parents.includes(this.sweepHead)) return ok(422, { message: 'Reference moved' });
+      this.files = new Map(this.snapshots.get(body.sha)); this.commits++;
+      this.snapshots.set(`c${this.commits}`, new Map(this.files)); this.sweepHead = body.sha;
+      return ok(200, { object: { sha: body.sha } });
     }
     if (path === 'user' && method === 'GET') return ok(200, { login: this.login });
     if ((match = /^repos\/([^/]+\/[^/]+)\/contents\/(.+)$/.exec(path))) return this.contents(method, decodeURIComponent(match[2]), body, params);
@@ -138,7 +159,7 @@ class FakeGitHub {
     const rest = match[2];
     if (rest === 'issues' && method === 'GET') {
       const page = Number(params.get('page') || 1);
-      const rows = [...this.issues.values()].filter(issue => issue.state === params.get('state'))
+      const rows = [...this.issues.values()].filter(issue => (params.get('state') === 'all' || issue.state === params.get('state')) && (!params.get('since') || Date.parse(issue.updated_at) >= Date.parse(params.get('since'))))
         .sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at) || b.number-a.number);
       return ok(200, rows.slice((page-1)*100,page*100).map(issue=>this.issueJson(issue)));
     }
@@ -260,6 +281,11 @@ class FakeGitHub {
       }
       return ok(200, { sha: found.sha, encoding: 'base64', content: Buffer.from(found.text, 'utf8').toString('base64') });
     }
+    if (method === 'DELETE') {
+      if (!file) return ok(404, {});
+      if (body.sha !== file.sha) return ok(409, {});
+      this.files.delete(filePath); this.commit(); return ok(200, {});
+    }
     if (method === 'PUT') {
       if (body.branch !== this.branch) return ok(404, { message: `Branch ${body.branch} not found` });
       if (file && !body.sha) return ok(422, { message: 'Invalid request.\n\n"sha" wasn\'t supplied.' });
@@ -285,6 +311,8 @@ class FakeGitHub {
   commit() {
     this.commits += 1;
     this.snapshots.set(`c${this.commits}`, new Map(this.files));
+    this.sweepHead = crypto.createHash('sha1').update(`contents-${this.commits}-${++this.sweepSequence}`).digest('hex');
+    this.snapshots.set(this.sweepHead, new Map(this.files));
   }
 
   readFile(filePath) {
@@ -309,6 +337,26 @@ class FakeGitHub {
   }
 
   graphqlRoute(body) {
+    if (body.query.includes('sweepArtifacts')) {
+      const repository = {};
+      for (const [key, expression] of Object.entries(body.variables).filter(([key]) => /^p\d+$/.test(key))) {
+        const split = expression.indexOf(':');
+        const ref = expression.slice(0, split), file = expression.slice(split + 1);
+        const entry = (ref === this.branch ? this.files : this.snapshots.get(ref))?.get(file);
+        repository[`f${key.slice(1)}`] = entry ? { oid: entry.sha, text: entry.text, isTruncated: false } : null;
+      }
+      return ok(200, { data: { repository } });
+    }
+    if (body.query.includes('sweepStateSnapshot')) {
+      const files = this.snapshots.get(body.variables.ref);
+      const prefix = body.variables.directory.replace(/^.*?:/, '').replace(/\/$/, '') + '/';
+      return ok(200, { data: { repository: { commit: { oid: body.variables.ref, tree: { oid: body.variables.ref } }, snapshot: { entries: [...(files || [])].filter(([file]) => file.startsWith(prefix) && !file.slice(prefix.length).includes('/')).map(([file, entry]) => ({ name: file.slice(prefix.length), oid: entry.sha, type: 'blob', object: { text: entry.text, isTruncated: false } })) } } } });
+    }
+    if (/p\d+: pullRequest/.test(body.query)) {
+      const repository = { defaultBranchRef: { name: 'main' } };
+      for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) repository[`p${match[1]}`] = this.graphqlRoute({ query: 'pullRequest', variables: { number: Number(match[1]) } }).json.data.repository.pullRequest;
+      return ok(200, { data: { repository } });
+    }
     if (/issues\(states: OPEN/.test(body.query)) return this.inventoryRoute(body);
     if (/closedByPullRequestsReferences/.test(body.query)) {
       const repository = {};

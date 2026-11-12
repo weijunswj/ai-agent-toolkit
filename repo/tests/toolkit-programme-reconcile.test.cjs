@@ -1453,7 +1453,7 @@ test('a failed body write is not replayed blindly; an interrupted pass is resolv
     }
     return undefined;
   });
-  assert.throws(() => reconciler().run({ apply: true }), /connection reset/);
+  assert.throws(() => reconciler().run({ apply: true }), error => error.code === 'GH_FAILED' && error.details.status === 500 && !error.message.includes('connection reset'));
   assert.equal(store.read('parent', 421).doc.pending_effects[0].state, 'IN_FLIGHT');
   const patchesBefore = patchCount(github, 421);
   const recovered = reconciler().run({ apply: true });

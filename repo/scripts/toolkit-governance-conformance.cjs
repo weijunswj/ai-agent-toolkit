@@ -280,6 +280,10 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
 }
 
 function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null) {
+  let cloudJobs = null;
+  if (state?.state === 'ENABLED' && fs.existsSync(path.join(toolkitRoot, 'repo/contracts/cloud-jobs.json'))) {
+    cloudJobs = require('./toolkit-cloud-jobs.cjs').createCloudJobsGuide({ root: toolkitRoot }).list();
+  }
   let catalogueProblems = [];
   try { catalogueProblems = catalogue.catalogueProblems(toolkitRoot); } catch { catalogueProblems = ['the skill catalogue could not be checked']; }
   const all = [...findings, ...catalogueProblems.map(message => finding('CATALOGUE_DRIFT', 'drift', message))];
@@ -293,6 +297,7 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
     no_force_push_ruleset: rulesetResult,
     default_branch_protection: protectionResult,
     dependency_security: securityResult,
+    cloud_jobs: cloudJobs,
     enforcement: enforcementStatus(toolkitRoot),
   });
 }

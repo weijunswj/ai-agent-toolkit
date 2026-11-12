@@ -135,7 +135,22 @@
       }
     },
     "private": { "type": "object" },
-    "volatile": { "type": "object" }
+    "volatile": { "type": "object" },
+    "sweep": {
+      "type": "object", "additionalProperties": false,
+      "required": ["pass", "queue", "checked", "failures", "last_started_at", "pages_pending", "stopped_passes", "reason"],
+      "properties": {
+        "pass": { "type": "integer", "minimum": 0 },
+        "queue": { "type": "array", "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } },
+        "page_queue": { "type": "array", "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } },
+        "checked": { "type": "object", "propertyNames": { "pattern": "^[1-9][0-9]*$" }, "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "failures": { "type": "object", "propertyNames": { "pattern": "^[1-9][0-9]*$" }, "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "last_started_at": { "type": ["string", "null"], "format": "date-time" },
+        "pages_pending": { "type": "boolean" },
+        "stopped_passes": { "type": "integer", "minimum": 0 },
+        "reason": { "enum": [null, "first sweep", "time limit", "request cap", "GitHub rate limit", "GitHub inventory could not be read", "task read failed", "pass limit", "state conflict", "pages still to draw"] }
+      }
+    }
   },
   "$defs": {
     "archiveTarget": {

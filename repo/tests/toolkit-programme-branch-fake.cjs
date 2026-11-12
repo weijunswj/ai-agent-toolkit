@@ -54,6 +54,22 @@ class BranchFakeGitHub extends FakeGitHub {
   }
 
   route(method, fullPath, body) {
+    if (fullPath === 'graphql' && /sweepStateSnapshot|sweepArtifacts/.test(body.query)) {
+      const { owner, name, ref, directory } = body.variables;
+      const slug = `${owner}/${name}`;
+      if (body.query.includes('sweepArtifacts')) {
+        const repository = {};
+        for (const [key, expression] of Object.entries(body.variables).filter(([key]) => /^p\d+$/.test(key))) {
+          const split = expression.indexOf(':');
+          const text = this.textAt(slug, expression.slice(0, split), expression.slice(split + 1));
+          repository[`f${key.slice(1)}`] = text === null ? null : { oid: blobSha(text), text, isTruncated: false };
+        }
+        return ok(200, { data: { repository } });
+      }
+      const files = this.filesAt(slug, ref);
+      const prefix = directory.slice(directory.indexOf(':') + 1).replace(/\/$/, '') + '/';
+      return ok(200, { data: { repository: { commit: { oid: ref, tree: { oid: ref } }, snapshot: { entries: [...(files || [])].filter(([file]) => file.startsWith(prefix) && !file.slice(prefix.length).includes('/')).map(([file, text]) => ({ name: file.slice(prefix.length), oid: blobSha(text), type: 'blob', object: { text, isTruncated: false } })) } } } });
+    }
     const [path, query = ''] = fullPath.split('?');
     const params = new URLSearchParams(query);
     const match = /^repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path);
@@ -70,7 +86,7 @@ class BranchFakeGitHub extends FakeGitHub {
       return git.commits.has(found[1]) ? ok(200, { sha: found[1], message: git.commits.get(found[1]).message }) : ok(404, { message: 'Not Found' });
     }
     if (rest === 'git/trees' && method === 'POST') {
-      const tree = new Map();
+      const tree = new Map(body.base_tree ? this.filesAt(match[1], body.base_tree) || git.trees.get(body.base_tree) || [] : []);
       for (const entry of body.tree) {
         if (entry.type !== 'blob' || typeof entry.content !== 'string') return ok(422, { message: 'Invalid tree entry' });
         tree.set(entry.path, entry.content);
