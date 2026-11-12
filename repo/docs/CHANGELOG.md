@@ -1,5 +1,16 @@
 # Toolkit Changelog
 
+## 3.69.0 (self-checking evidence store command)
+
+### Added
+
+- **`toolkit store`:** `repo/scripts/toolkit-store.cjs` does every evidence store step on a computer (`status`, `sync`, `save`, `move`, `merge-branch`, `delete-merged-branch`) and checks the store itself first: the merged binding's store and branch, a checkout whose fetch and push addresses are that store and whose own config holds no push, rewrite or program setting, and a private, writable store on GitHub. `save` stages only the named paths under the binding's store path, `archives/` or `evidence/`, secret-scans exactly what it stages, commits, pushes the bound branch with a plain push and reads it back. It never force-pushes, rebases, deletes a file or pushes another branch, and deletes a store branch only when it is already merged.
+
+### Changed
+
+- **Permission blocks:** the exact store push line and its ask lines are replaced by one store command line in the computer block. On Codex it is an allow rule and no store prompt rule is printed, so store steps stop asking there too. `toolkit permissions` no longer takes `--store`.
+- **Merge authority:** changes to the store command wait for a typed merge, like the permission and cleanup scripts.
+
 ## 3.68.0 (one-time permission blocks and checked cleanup)
 
 ### Added
