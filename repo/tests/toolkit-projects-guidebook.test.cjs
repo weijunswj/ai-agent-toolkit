@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { Guidebook, parseArgs, main, VERSION_LINE } = require('../scripts/toolkit-projects-guidebook.cjs');
+const { Guidebook, parseArgs, main, VERSION_LINE, BASE_PATHS, blobSha } = require('../scripts/toolkit-projects-guidebook.cjs');
 const { ProjectsInstructions } = require('../scripts/toolkit-projects-instructions.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -34,7 +34,7 @@ test('a refresh copies every skill file byte for byte, writes main\'s rendered b
   const out = path.join(tmp(t), 'web-controller-projects');
   const result = guidebook().refresh(out);
   const source = filesIn(SKILL_DIR);
-  assert.deepEqual(filesIn(out), [...source, 'VERSION', 'instructions-block.md', 'takeover.md'].sort());
+  assert.deepEqual(filesIn(out), [...source, 'BASE', 'VERSION', 'instructions-block.md', 'takeover.md'].sort());
   for (const rel of source) assert.ok(fs.readFileSync(path.join(out, rel)).equals(fs.readFileSync(path.join(SKILL_DIR, rel))), rel);
   // The block file is exactly what the instructions renderer prints for main, real marker included.
   const rendered = new ProjectsInstructions({ root: ROOT }).render();
@@ -168,6 +168,10 @@ for (const [rel, contents] of [
     const canonical = path.join(root, 'repo/docs/agent-playbooks/controller-takeover.md');
     fs.mkdirSync(path.dirname(canonical), { recursive: true });
     fs.copyFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/controller-takeover.md'), canonical);
+    for (const rel of BASE_PATHS) {
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.copyFileSync(path.join(ROOT, rel), path.join(root, rel));
+    }
     const playbook = fs.readFileSync(canonical, 'utf8').replace(/\r\n/g, '\n');
     const target = path.join(dir, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -249,4 +253,22 @@ test('the command line prints one result per line and exits 0 only when done or 
   ]);
   assert.throws(() => parseArgs(['--out', '--check']), { code: 'GUIDEBOOK_ARGUMENTS' });
   assert.throws(() => parseArgs(['--check', out, 'extra']), { code: 'GUIDEBOOK_ARGUMENTS' });
+});
+
+test('BASE names the git blob of every base file the Projects controller inherits, CRLF read as LF', t => {
+  const out = path.join(tmp(t), 'copy');
+  guidebook().refresh(out);
+  const lines = fs.readFileSync(path.join(out, 'BASE'), 'utf8').trimEnd().split('\n');
+  assert.deepEqual(lines.map(line => line.split(' ')[1]), [...BASE_PATHS]);
+  for (const line of lines) {
+    const [sha, rel] = line.split(' ');
+    assert.match(sha, /^[0-9a-f]{40}$/);
+    assert.equal(sha, blobSha(fs.readFileSync(path.join(ROOT, rel))), rel);
+  }
+  // git's own blob id for "hello\n", and the same text with a CRLF ending.
+  assert.equal(blobSha(Buffer.from('hello\n')), 'ce013625030ba8dba906f756967f9e9ca394464a');
+  assert.equal(blobSha(Buffer.from('hello\r\n')), 'ce013625030ba8dba906f756967f9e9ca394464a');
+  // A copy whose BASE was edited reads as stale, so a coordinator never trusts a hand-made base list.
+  fs.writeFileSync(path.join(out, 'BASE'), 'edited\n');
+  assert.equal(guidebook().check(out).state, 'stale');
 });
