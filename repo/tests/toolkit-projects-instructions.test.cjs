@@ -232,6 +232,18 @@ test('source body, measured without the two marker lines, stays under 6200 CRLF 
   assert.doesNotMatch(text, /[^\x00-\x7f]/);
 });
 
+test('rendered instructions run cloud first and leave device facts and review caps to project lines', () => {
+  const source = fs.readFileSync(BODY, 'utf8');
+  const rendered = owner().render();
+  for (const text of [source, rendered]) {
+    const lanes = text.split(/\r?\n/).find(line => line.startsWith('- Lanes:'));
+    assert.ok(lanes.includes('cloud first, the device only for work that needs it, and owner usage limits apply.'));
+    assert.doesNotMatch(text, /Hybrid by default|serial review|one gate device/);
+    assert.ok(text.includes('devices, folders, device-only work, review caps, transport store'));
+    assert.ok(text.includes('below this block.'));
+  }
+});
+
 test('rendered instructions carry the CTA exception and retain ordinary post safeguards', () => {
   const text = owner().render();
   for (const phrase of ['- Posts: read the newest page where you post, never memory.',
