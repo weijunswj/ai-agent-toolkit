@@ -12,8 +12,10 @@
 //   apply   needs --confirm <plan code> from the plan the owner was shown. A list that changed since
 //           then gives a different code, and nothing is removed.
 //
-// It never touches a repository, the env store or any key, an app's settings file, the managed
-// checkout or the plugin. A task the owner changed by hand is kept unless it is named with
+// It never touches a repository, the env store or any key, the managed checkout or the plugin. The
+// one app settings file it may change is Codex's config.toml: when setup raised its
+// project_doc_max_bytes, the plan lists that line and apply puts the earlier value back (a backup
+// first, then Codex is asked to load the file). Every other app settings file is left alone. A task the owner changed by hand is kept unless it is named with
 // --include; a task of the owner's own that Toolkit only lists (adopted) is always kept.
 //
 // Usage: node repo/scripts/toolkit-remove.cjs plan [--include <task id>[,<task id>...]] [--json]
@@ -40,6 +42,8 @@ const KINDS = Object.freeze({
 });
 const RULE_STATES_WITH_BLOCK = Object.freeze(['current', 'stale', 'tampered']);
 const RULE_STATES_HELD = Object.freeze(['broken', 'not-utf8']);
+// The Codex settings actions that write config.toml.
+const CODEX_WRITES = Object.freeze(['restore', 'delete-file']);
 
 class RemovalError extends Error {
   constructor(message, exitCode = 1) { super(message); this.name = 'RemovalError'; this.exitCode = exitCode; }
@@ -98,11 +102,17 @@ class ToolkitRemoval {
     // The shared runner and the standing task approval go only when no marked task is kept.
     const shared = Boolean(this.#scheduler) && !listed.some(item => item.action === 'keep' && item.kind === 'changed');
     const state = this.#statePaths(records, shared);
-    const rules = this.#rules ? this.#rules().check().files.map(file => ({ harness: file.harness, file: file.display || file.file, state: file.state,
+    const owner = this.#rules ? this.#rules() : null;
+    const rules = owner ? owner.check().files.map(file => ({ harness: file.harness, file: file.display || file.file, state: file.state,
       action: RULE_STATES_WITH_BLOCK.includes(file.state) ? 'remove' : RULE_STATES_HELD.includes(file.state) ? 'held' : 'none', ...(file.detail ? { detail: file.detail } : {}) })) : [];
+    // Codex's config.toml: Toolkit's raised project_doc_max_bytes line, when there is one. It is in
+    // the plan code, so a line that appears or changes after the plan removes nothing.
+    const limit = owner && typeof owner.docLimitOnRemove === 'function' ? owner.docLimitOnRemove() : null;
+    const codexSettings = limit && limit.action !== 'none' ? { file: limit.file, action: limit.action,
+      ...(limit.previous !== undefined ? { previous: limit.previous } : {}), ...(limit.detail ? { detail: limit.detail } : {}) } : null;
     const tasksOut = listed.map(({ tasks_in_folder: ignored, ...item }) => item);
-    const body = { tasks: tasksOut, stale_records: stale, folders, state: state.map(item => item.display), rules, include: this.#include };
-    return { shared, plan: { schema: SCHEMA, ...body, scheduler: this.#scheduler ? 'read' : 'not available on this system', nothing: !going.length && !stale.length && !state.length && !rules.some(file => file.action === 'remove'), code: sha(body) } };
+    const body = { tasks: tasksOut, stale_records: stale, folders, state: state.map(item => item.display), rules, codex_settings: codexSettings, include: this.#include };
+    return { shared, plan: { schema: SCHEMA, ...body, scheduler: this.#scheduler ? 'read' : 'not available on this system', nothing: !going.length && !stale.length && !state.length && !rules.some(file => file.action === 'remove') && !CODEX_WRITES.includes(codexSettings?.action), code: sha(body) } };
   }
 
   // One live task as the list shows it, or null for a task that is not Toolkit's and not listed by it.
@@ -171,17 +181,28 @@ class ToolkitRemoval {
       return 'removed';
     });
     let rules = [];
-    if (this.#rules && plan.rules.some(file => file.action === 'remove')) {
-      try { rules = this.#rules().remove().files.map(file => ({ harness: file.harness, file: file.display || file.file, result: file.action, ...(file.backup ? { backup: 'saved' } : {}) })); }
-      catch (error) { rules = [{ result: 'failed', reason: tasks.safeText(error.message) }]; }
+    let codex = null;
+    // The rules remover also puts Codex's limit back, so it runs when either is in the plan.
+    if (this.#rules && (plan.rules.some(file => file.action === 'remove') || CODEX_WRITES.includes(plan.codex_settings?.action))) {
+      try {
+        const removed = this.#rules().remove();
+        rules = removed.files.map(file => ({ harness: file.harness, file: file.display || file.file, result: file.action, ...(file.backup ? { backup: 'saved' } : {}) }));
+        const limit = removed.doc_limit;
+        if (limit && !['reported', 'unchanged'].includes(limit.action)) {
+          codex = { file: limit.display || plan.codex_settings?.file || null, result: limit.action === 'held' ? 'failed' : limit.action,
+            ...(limit.action === 'held' ? { reason: tasks.safeText(limit.detail || 'left alone') } : {}), ...(limit.backup ? { backup: 'saved' } : {}),
+            ...(limit.load_check?.status ? { load_check: limit.load_check.status } : {}) };
+        }
+      } catch (error) { rules = [{ result: 'failed', reason: tasks.safeText(error.message) }]; }
     }
-    const ok = !results.some(item => item.result === 'failed') && !steps.some(item => item.result === 'failed') && !folders.some(item => item.result === 'failed') && !rules.some(item => item.result === 'failed');
-    return { schema: 'toolkit.remove-result.v1', ok, tasks: results, kept: plan.tasks.filter(task => task.action === 'keep'), folders, steps, rules, held_rules: plan.rules.filter(file => file.action === 'held') };
+    const ok = !results.some(item => item.result === 'failed') && !steps.some(item => item.result === 'failed') && !folders.some(item => item.result === 'failed') && !rules.some(item => item.result === 'failed') && codex?.result !== 'failed';
+    return { schema: 'toolkit.remove-result.v1', ok, tasks: results, kept: plan.tasks.filter(task => task.action === 'keep'), folders, steps, rules, codex_settings: codex,
+      held_rules: plan.rules.filter(file => file.action === 'held'), held_codex_settings: plan.codex_settings?.action === 'held' ? plan.codex_settings : null };
   }
 }
 
 const NEXT_STEPS = Object.freeze([
-  'Not touched: your repositories, your keys, app settings files, the Toolkit checkout and the plugin itself.',
+  'Not touched: your repositories, your keys, the Toolkit checkout and the plugin itself. App settings files are left alone, apart from the Codex settings line listed above, if any.',
   'To finish removing Toolkit, uninstall the plugin in each app: `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local` for Claude Code and `codex plugin remove ai-agent-toolkit@ai-agent-toolkit-local` for Codex.',
 ]);
 
@@ -202,10 +223,22 @@ function describePlan(plan) {
   if (plan.stale_records.length) lines.push(`Records of tasks that are already gone: ${plan.stale_records.join(', ')}`);
   if (plan.state.length) lines.push("Toolkit's own task files:", ...plan.state.map(file => `- ${file}`));
   const rules = plan.rules.filter(file => file.action !== 'none');
+  const codex = plan.codex_settings;
+  if (codex) lines.push('Codex settings:', `- ${codex.file}: ${codexPlanLine(codex)}`);
   if (rules.length) lines.push('Toolkit global rules:', ...rules.map(file => `- ${file.file}: ${file.action === 'remove' ? 'the Toolkit block is removed (a backup is saved first; the rest of the file stays)' : `left alone, ${file.detail || file.state}; fix or remove the Toolkit lines by hand`}`));
   lines.push('', ...NEXT_STEPS);
   if (!plan.nothing) lines.push('', `Plan code: ${plan.code}`, 'Show the owner this list. After their OK, run apply with --confirm and this code. A list that changed gets a new code and removes nothing.');
   return lines;
+}
+
+// What the plan says about Codex's config.toml.
+function codexPlanLine(codex) {
+  if (codex.action === 'held') return `left alone, ${codex.detail || 'its Toolkit lines are damaged'}; fix or remove the Toolkit lines by hand`;
+  const earlier = codex.previous === 'none' ? "Codex's own default (Toolkit added the line)" : `the earlier value ${codex.previous}`;
+  const what = codex.action === 'delete-file'
+    ? `the file is deleted, because Toolkit created it for its project_doc_max_bytes line and nothing else is in it`
+    : `Toolkit's project_doc_max_bytes line is taken out and ${earlier} comes back; the rest of the file stays`;
+  return `${what} (a backup is saved first, then Codex is asked to load the file)`;
 }
 
 function describeResult(result) {
@@ -216,7 +249,9 @@ function describeResult(result) {
   for (const item of result.steps) lines.push(`- ${item.step}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
   for (const item of result.rules) lines.push(`- Global rules ${item.file || ''}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
   for (const item of result.held_rules) lines.push(`- Global rules ${item.file}: left alone, ${item.detail || item.state}`);
-  if (!result.tasks.length && !result.steps.length && !result.rules.length) lines.push("Nothing of Toolkit's was left to remove.");
+  if (result.codex_settings) lines.push(`- Codex settings ${result.codex_settings.file || ''}: ${result.codex_settings.result}${result.codex_settings.reason ? ` (${result.codex_settings.reason})` : ''}${result.codex_settings.load_check ? `; Codex load check: ${result.codex_settings.load_check}` : ''}`);
+  if (result.held_codex_settings) lines.push(`- Codex settings ${result.held_codex_settings.file}: left alone, ${result.held_codex_settings.detail || 'its Toolkit lines are damaged'}`);
+  if (!result.tasks.length && !result.steps.length && !result.rules.length && !result.codex_settings) lines.push("Nothing of Toolkit's was left to remove.");
   lines.push('', result.ok ? 'Done.' : 'Some steps failed. Nothing else was changed; run plan again to see what is left.', ...NEXT_STEPS);
   return lines;
 }

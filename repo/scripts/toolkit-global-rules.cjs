@@ -375,6 +375,19 @@ class CodexDocLimit {
     return { state: 'managed', limit: DOC_LIMIT_TARGET, previous: before.previous, action: 'raised', backup, load_check: this.#lastLoadCheck };
   }
 
+  // What restore() would do, read-only, so a plan can show it before anything is written:
+  // 'restore' (the replaced line, or nothing, comes back), 'delete-file' (Toolkit created the file
+  // and nothing else is in it), 'held' (damaged markers; left alone) or 'none' (no Toolkit lines).
+  restorePlan() {
+    const read = readUserFile(this.#file);
+    if (read === null || read.text === null) return { action: 'none' };
+    const block = CodexDocLimit.#block(read.text);
+    if (!block) return { action: 'none' };
+    if (block.error) return { action: 'held', detail: block.error };
+    const updated = read.text.slice(0, block.start) + block.original + read.text.slice(block.end);
+    return { action: block.created && updated === '' ? 'delete-file' : 'restore', previous: block.previous };
+  }
+
   // Puts back the exact bytes Toolkit replaced (or nothing), and deletes the file when Toolkit
   // created it and nothing else is left.
   restore() {
@@ -466,6 +479,12 @@ class GlobalRules {
       }
       return [files, limit];
     });
+  }
+
+  // What remove() would do to Codex's config.toml, read-only, with the file as shown to the owner;
+  // null when Codex is not one of this run's harnesses.
+  docLimitOnRemove() {
+    return this.#docLimit ? { ...this.#docLimit.restorePlan(), file: this.#display(this.#docLimit.file) } : null;
   }
 
   remove() {

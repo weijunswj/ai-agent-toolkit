@@ -262,3 +262,73 @@ test('the real scheduler removes a launcher-disabled task only with its exact re
   assert.deepEqual(scheduler.unregisterDisabled('WIDGET', 'WIDGET - Footer sweep', { definition_xml: '<x/>' }), { removed: true });
   assert.deepEqual(payloads[0], { folder: 'WIDGET', name: 'WIDGET - Footer sweep', marker: launcher.DISABLED_DESCRIPTION, expected_xml: '<x/>' });
 });
+
+// The real global rules owner, in a throwaway home, with Codex's load check stubbed so no Codex starts.
+function realRules(w, probes) {
+  const { GlobalRules } = require('../scripts/toolkit-global-rules.cjs');
+  const environment = { HOME: w.home, USERPROFILE: w.home, CLAUDE_CONFIG_DIR: path.join(w.home, '.claude'), CODEX_HOME: path.join(w.home, '.codex') };
+  const make = () => new GlobalRules({ environment, harnesses: ['claude-code', 'codex'], backupRoot: path.join(w.home, 'backups'),
+    loadCheckOptions: { probe: file => { probes.push(file); return { status: 'verified' }; } } });
+  make().refresh();
+  return { factory: make, codex: path.join(environment.CODEX_HOME, 'config.toml'), claude: path.join(environment.CLAUDE_CONFIG_DIR, 'settings.json') };
+}
+const limitBlock = (previous, line = '') => [`# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=${previous}${line ? ` line=${Buffer.from(line).toString('base64')}` : ''}${previous === 'none' && !line ? ' created=yes' : ''}`,
+  'project_doc_max_bytes = 65536', '# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES'].join('\n');
+
+test('Codex settings: the plan lists the raised project_doc_max_bytes line, its code covers it, and apply puts the earlier value back', t => {
+  const w = world(t); enrol(t, w, 'widget');
+  const probes = [];
+  const rules = realRules(w, probes);
+  const original = 'model = "example"\nproject_doc_max_bytes = 32768\n[tools]\nweb_search = true\n';
+  fs.writeFileSync(rules.codex, original.replace('project_doc_max_bytes = 32768', limitBlock('32768', 'project_doc_max_bytes = 32768\n')));
+  fs.mkdirSync(path.dirname(rules.claude), { recursive: true }); fs.writeFileSync(rules.claude, '{"permissions":{}}\n');
+  const settings = fs.readFileSync(rules.claude);
+  const plan = owner(w, { rules: rules.factory }).plan();
+  assert.deepEqual(plan.codex_settings, { file: '~/.codex/config.toml', action: 'restore', previous: '32768' });
+  const text = removal.describePlan(plan).join('\n');
+  assert.match(text, /Codex settings:\n- ~\/\.codex\/config\.toml: Toolkit's project_doc_max_bytes line is taken out and the earlier value 32768 comes back; the rest of the file stays \(a backup is saved first, then Codex is asked to load the file\)/);
+  assert.doesNotMatch(text, /Not touched:[^\n]*app settings files,/);
+  assert.match(text, /App settings files are left alone, apart from the Codex settings line listed above/);
+  // The line is in the plan code: a list read without it removes nothing.
+  const raised = fs.readFileSync(rules.codex);
+  fs.writeFileSync(rules.codex, original);
+  const without = owner(w, { rules: rules.factory }).plan();
+  assert.equal(without.codex_settings, null);
+  assert.notEqual(without.code, plan.code);
+  fs.writeFileSync(rules.codex, raised);
+  assert.throws(() => owner(w, { rules: rules.factory }).apply(without.code), /nothing was removed/);
+  assert.deepEqual(fs.readFileSync(rules.codex), raised);
+  assert.equal(probes.length, 0, 'a refused apply starts no Codex load check');
+  const result = owner(w, { rules: rules.factory }).apply(plan.code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(fs.readFileSync(rules.codex, 'utf8'), original);
+  assert.deepEqual(result.codex_settings, { file: '~/.codex/config.toml', result: 'restored-previous', backup: 'saved', load_check: 'verified' });
+  assert.deepEqual(probes, [rules.codex]);
+  assert.match(removal.describeResult(result).join('\n'), /Codex settings ~\/\.codex\/config\.toml: restored-previous; Codex load check: verified/);
+  assert.deepEqual(fs.readFileSync(rules.claude), settings, 'other app settings stay byte for byte');
+  assert.equal(owner(w, { rules: rules.factory }).plan().nothing, true);
+});
+
+test('Codex settings: a config.toml Toolkit created for the line is deleted, and damaged markers are listed and left alone', t => {
+  const w = world(t);
+  const probes = [];
+  const rules = realRules(w, probes);
+  fs.writeFileSync(rules.codex, `${limitBlock('none')}\n`);
+  const plan = owner(w, { rules: rules.factory }).plan();
+  assert.deepEqual(plan.codex_settings, { file: '~/.codex/config.toml', action: 'delete-file', previous: 'none' });
+  assert.match(removal.describePlan(plan).join('\n'), /the file is deleted, because Toolkit created it for its project_doc_max_bytes line and nothing else is in it/);
+  assert.equal(plan.nothing, false);
+  const result = owner(w, { rules: rules.factory }).apply(plan.code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(fs.existsSync(rules.codex), false);
+  assert.equal(result.codex_settings.result, 'deleted-file');
+  const damaged = `model = "example"\n${limitBlock('none')}\n# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES\n`;
+  fs.writeFileSync(rules.codex, damaged);
+  const held = owner(w, { rules: rules.factory }).plan();
+  assert.equal(held.codex_settings.action, 'held');
+  assert.match(removal.describePlan(held).join('\n'), /~\/\.codex\/config\.toml: left alone, the Toolkit markers are not one intact pair/);
+  const after = owner(w, { rules: rules.factory }).apply(held.code);
+  assert.equal(fs.readFileSync(rules.codex, 'utf8'), damaged);
+  assert.equal(after.codex_settings, null);
+  assert.equal(after.held_codex_settings.action, 'held');
+});
