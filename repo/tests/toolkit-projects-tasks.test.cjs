@@ -750,6 +750,8 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     'Every Toolkit scheduled task is bound to its own home thread (`<PROJECT>: <task name>`): start', '**Toolkit-made tasks** (the daily check-in and the hourly nudge) are rendered', 'Resolve candidates:',
     'When a recurring task replaces an older one, delete the older one',
     'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread', '2. Render the new prompt',
+    // Rows of the base overrides list and the cloud hook table: they name rules and hooks, not task paths.
+    'Task auto-merge switch is the project line', 'The hourly programme sweep refreshes programme pages', '`toolkit-governance-hook.cjs` (merge hold) |', '`toolkit-github-footer-hook.cjs` |', '`toolkit-programme-checkpoint-hook.cjs` |',
     // Lines about other things that happen to use one of the verbs: repos, setup, GitHub reads,
     // shared checkouts, Remote Control, the instructions sync and the repo map.
     // These endings create only a receipt for the current run, never a task or schedule.

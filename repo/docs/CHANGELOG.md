@@ -1,17 +1,19 @@
 # Toolkit Changelog
 
-## 3.69.0 (typed commands and remove Toolkit)
+## 3.69.0 (Projects follows local Toolkit as its base)
 
 ### Added
 
-- **Typed commands:** `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup` and `toolkit show env`, typed as the whole message on your own computer, are matched exactly by the Codex and Claude Code prompt hooks. The agent is told which action was asked for, so `toolkit show env` always opens the editor. A phrase inside a longer message, in a relayed message or in a cloud session stays plain text, and a governance hold is unchanged. `node repo/scripts/toolkit-commands.cjs` prints the command list.
-- **Remove Toolkit from this computer:** `remove toolkit` routes to `repo/scripts/toolkit-remove.cjs`. `plan` lists every scheduled task that carries Toolkit's marker in any Task Scheduler folder, Toolkit's own task files and the Toolkit block in each global rules file, with a plan code. `apply --confirm <plan code>` removes exactly that list after the owner's OK; a list that changed removes nothing. Tasks changed by hand stay unless named, the owner's own listed tasks always stay, and no repository, key, settings file or plugin is touched.
-- **Leftover file report:** `repo/scripts/toolkit-leftover-files.cjs scan` lists files that are provably Toolkit's in GitHub checkouts whose governance is off or undecided. It reports only and never deletes.
+- **Projects base rule:** the Projects controller skill now opens with the rule that local Toolkit (global, gate and governed rules and the controller file) is its base. Every place Projects differs is a row in the new overrides list with the owner's decision; any other difference is a clash for the owner.
+- **Projects task auto-merge switch:** the gate rules name Claude Projects as a third app. Its switch is the project line `- Task auto-merge: On`, and its one named merge thread stands in for a session the owner started. The skill's Approvals section gives the cloud merge route: eligibility check at the exact head, effects notice, head-pinned merge commit, or the owner's card tap at that head.
+- **Cloud hook table:** a new reference table says, for every hook in the plugin manifest, how its rule is covered in cloud sessions. A test fails when a hook has no row.
+- **Weekly base clash check:** a new task step compares the base files with the copy the guidebook names, and raises each new clash as an owner question. The daily check-in runs it when a week has passed and no weekly audit covers it.
+- **Guidebook BASE file:** the guidebook copy now carries `BASE`, the git blob SHA of each base file, so a coordinator can tell which base its copy follows.
 
-### Changed
+### Fixed
 
-- **Setup covers the computer only:** setup no longer prints a task plan for the managed checkout and the folder it was started in. The computer-wide task update under the saved approval stays, and the direct task plan still gives one repository's details.
-- **Hook pack:** context checks now also read the context a prompt hook adds.
+- **Governance status in cloud sessions:** a Claude Code cloud container's own git rewrite (ssh spellings of github.com to canonical https, no credential prompts) no longer holds the binding read, so `toolkit governance status` reads the merged binding there. Any other command-scope config stays held.
+- **Hook status lines:** `toolkit governance status` no longer says cloud sessions and Claude Projects have no hooks; account copy hooks run there, with the merge and undecided-repository holds skipped in cloud sessions.
 
 ## 3.68.0 (one-time permission blocks and checked cleanup)
 

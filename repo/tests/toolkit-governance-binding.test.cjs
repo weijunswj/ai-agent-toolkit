@@ -273,6 +273,28 @@ test('reader: default branch from the symref, then the binding at its tip; hosti
   assert.match(bindingCache.refreshReason('remote-unreachable'), /could not be reached/);
   assert.equal(bindingCache.refreshReason('not-applicable'), null);
   assert.notEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: { GIT_CONFIG_COUNT: '0' }, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).error, 'remote-redirected', 'a zero count sets nothing');
+  // A cloud container's own command-scope pairs (ssh spellings of github.com to canonical https, no
+  // credential prompts) are read, only in a cloud session and only exactly those pairs.
+  const cloudPairs = { GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_0: 'credential.interactive', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'url.https://github.com/.insteadOf', GIT_CONFIG_VALUE_1: 'git@github.com:', GIT_CONFIG_KEY_2: 'url.https://github.com/.insteadOf', GIT_CONFIG_VALUE_2: 'ssh://git@github.com/' };
+  const cloud = { ...cloudPairs, CLAUDE_CODE_REMOTE: 'true' };
+  assert.equal(bindingCache.cloudContainerConfig(cloud), true);
+  assert.equal(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: cloud, runGit: fakeGit({ ...base, 'ls-tree': ok('') }) }).status, 'absent', 'cloud container pairs are read');
+  const heldCloud = [
+    ['outside a cloud session', cloudPairs],
+    ['cloud flag not exactly true', { ...cloudPairs, CLAUDE_CODE_REMOTE: '1' }],
+    ['GIT_CONFIG_PARAMETERS too', { ...cloud, GIT_CONFIG_PARAMETERS: "'core.sshcommand=ssh -v'" }],
+    ['a rewrite to another host', { ...cloud, GIT_CONFIG_VALUE_1: 'git@gitlab.com:' }],
+    ['a rewrite target that is not canonical github https', { ...cloud, GIT_CONFIG_KEY_1: 'url.https://mirror.example.com/.insteadOf' }],
+    ['a proxy pair', { ...cloud, GIT_CONFIG_KEY_0: 'http.proxy', GIT_CONFIG_VALUE_0: 'http://proxy.example.com' }],
+    ['a missing pair', { ...cloud, GIT_CONFIG_COUNT: '4' }],
+    ['a count that is not a small number', { ...cloud, GIT_CONFIG_COUNT: '03' }],
+  ];
+  for (const [label, environment] of heldCloud) {
+    assert.equal(bindingCache.cloudContainerConfig(environment), false, label);
+    assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment, runGit: watching(base) }), { status: 'unknown', error: 'remote-redirected' }, label);
+  }
+  assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: cloud, runGit: watching({ ...base, 'get-url': ok('https://github.com/example-owner/other-repo.git\n') }) }), { status: 'unknown', error: 'remote-redirected' }, 'cloud pairs never accept another repository');
+  assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, environment: cloud, runGit: watching({ ...base, config: ok('command\tcore.sshcommand ssh -v\n') }) }), { status: 'unknown', error: 'remote-redirected' }, 'cloud pairs never accept a transport override');
   assert.deepEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: watching({ ...base, config: ok('command\tcore.sshcommand ssh -v\n') }) }), { status: 'unknown', error: 'remote-redirected' }, 'command scope');
   assert.notEqual(bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, runGit: fakeGit({ ...base, config: ok('global\tcore.sshcommand ssh -v\n'), 'ls-tree': ok('') }) }).error, 'remote-redirected', 'the user\'s global config is not held here');
   // N3: the fetch runs only with an owned, empty hooks folder, and the ref must be what the remote reported.

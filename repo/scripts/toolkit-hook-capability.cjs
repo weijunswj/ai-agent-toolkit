@@ -10,7 +10,12 @@
 //                   disabled (settings turn hooks off) | plugin present, no hooks declared |
 //                   plugin absent
 //   Codex           present, trust unknown | plugin absent
-//   Claude Projects no local hooks (a skill synced from claude.ai runs in the cloud)
+//   Claude Projects hooks run in cloud threads from the account copy (the skill's cloud hook table
+//                   says which rules each hook covers there)
+//
+// A Claude Code cloud session runs the hooks synced from the claude.ai account copy too, but the
+// governance hook's cloud mode skips the merge and undecided-repository holds, and the
+// programme refresh cannot write without a signed-in gh, so the portable path still applies there.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -24,7 +29,7 @@ function isDir(folder) { try { return fs.statSync(folder).isDirectory(); } catch
 // The Claude Code line, or null when Claude Code is not on this computer.
 function claudeCodeHooks({ environment, homeDir, registry = null, blockers = null, accountCopy = null }) {
   const configDir = environment.CLAUDE_CONFIG_DIR || path.join(homeDir, '.claude');
-  if (environment.CLAUDE_CODE_REMOTE === 'true') return { host: 'Claude Code', state: 'no local hooks (cloud session)' };
+  if (environment.CLAUDE_CODE_REMOTE === 'true') return { host: 'Claude Code', state: 'account copy hooks run (cloud session; governance holds skipped)' };
   if (!isDir(configDir)) return null;
   let install;
   try {
@@ -77,7 +82,7 @@ function projectsHooks({ environment, homeDir }) {
   let names = [];
   try { names = fs.readdirSync(synced); } catch { return null; }
   const found = names.some(name => fs.existsSync(path.join(synced, name, 'web-controller-projects', 'SKILL.md')));
-  return found ? { host: 'Claude Projects', state: 'no local hooks' } : null;
+  return found ? { host: 'Claude Projects', state: 'hooks run in cloud threads from the account copy' } : null;
 }
 
 // [{ host, state, detail? }] and whether the portable path applies.
