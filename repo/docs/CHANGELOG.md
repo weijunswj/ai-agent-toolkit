@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## Unreleased (closing words wait for a task's recorded UAT)
+## 3.71.1 (closing words wait for a task's recorded UAT)
 
 ### Fixed
 
