@@ -217,3 +217,52 @@ test('request caps: a scheduled pass on a computer runs with 600 unless told oth
   assert.match(scheduled.report.metrics, /, cap=600, /);
   assert.match(scheduled.report.metrics, /, complete=yes$/);
 });
+
+test('request caps: the host and mode pick the cap from the run environment', () => {
+  const cloud = { GITHUB_ACTIONS: 'true', TOOLKIT_PROGRAMME_CLOUD_SWEEP: '1' };
+  const cap = (argv, environment) => cli.sweepRequestCap(cli.parseArgs(argv), environment);
+  assert.equal(cap(['refresh', '--scheduled'], cloud), 1500);
+  assert.equal(cap(['refresh'], cloud), 300);
+  assert.equal(cap(['refresh', '--scheduled'], {}), 600);
+  assert.equal(cap(['refresh', '--scheduled'], { GITHUB_ACTIONS: 'true' }), 600, 'an Actions run that is not the cloud sweep is a computer');
+  assert.equal(cap(['refresh', '--scheduled'], { TOOLKIT_PROGRAMME_CLOUD_SWEEP: '1' }), 600, 'the flag alone is not the cloud');
+  assert.equal(cap(['refresh'], {}), 300);
+});
+
+test('request caps: GitHub\'s remaining count bounds task starts, so reserved pages never run past the hour', () => {
+  const sweep = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-sweep.cjs'));
+  for (const [host, start] of [['cloud', 400], ['computer', 400], ['cloud', 1200], ['computer', 5000]]) {
+    let remaining = start;
+    const transport = { request: () => { remaining -= 1; return { status: 200, json: {}, headers: { 'x-ratelimit-remaining': String(remaining) } }; } };
+    const requests = new sweep.SweepRequests({ transport, cap: sweep.passCap({ host, scheduled: true }), nowMs: () => 0, wait: () => {} });
+    requests.request('GET', 'rate_limit');
+    let pages = 0;
+    while (requests.canStartTask(pages)) { for (let i = 0; i < sweep.TASK_COST; i += 1) requests.request('GET', 'task'); pages += 1; }
+    requests.reading = false;
+    for (let i = 0; i < pages * sweep.PAGE_COST + requests.reserve; i += 1) requests.request('PATCH', 'page');
+    assert.ok(remaining >= sweep.LOW_REMAINING, `${host} from ${start}: ${pages} pages left ${remaining}`);
+    assert.ok(requests.count <= requests.cap, `${host} from ${start}: within the cap`);
+  }
+});
+
+test('request caps: a cloud pass with little of GitHub\'s hour left reads fewer tasks and stays above the low mark', t => {
+  const sweep = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-sweep.cjs'));
+  const f = fixture(t, { count: 97 });
+  for (const outcome of f.parent().outcomes) Object.assign(f.github.issues.get(outcome.issue), { title: `Renamed ${outcome.issue}`, body: '', updated_at: f.tick() });
+  let remaining = 700;
+  let lowest = remaining;
+  const transport = {
+    request(...input) {
+      const response = f.github.request(...input);
+      remaining -= 1; lowest = Math.min(lowest, remaining);
+      const out = Object.assign(Object.create(Object.getPrototypeOf(response)), response);
+      Object.defineProperty(out, 'headers', { value: { ...(response.headers || {}), 'x-ratelimit-remaining': String(remaining) }, enumerable: false });
+      return out;
+    },
+  };
+  const run = f.run(['refresh', '--scheduled'], { transport, requestCap: sweep.passCap({ host: 'cloud', scheduled: true }) });
+  assert.ok(f.parent().sweep.queue.length > 0, 'tasks left for the next pass');
+  assert.match(run.report.metrics, /, complete=no$/);
+  assert.ok(lowest >= 0, `GitHub's count went to ${lowest}`);
+  assert.ok(lowest >= sweep.LOW_REMAINING - sweep.RESERVE, `ended at ${lowest}`);
+});

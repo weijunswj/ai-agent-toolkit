@@ -43,13 +43,20 @@ class SweepRequests {
     this.reason = null;
     this.retryAt = 0;
     this.active = false;
+    // GitHub's last reported x-ratelimit-remaining, or null before any response carried one.
+    this.remaining = null;
   }
 
   left() { return this.cap - this.count; }
 
   // Whether another task may start: its reads, and the pages of the `pages` tasks read so far that
   // may need one (plus its own when `needsPage`), must fit before the reserve.
-  canStartTask(pages = 0, needsPage = true) { return !this.reason && this.left() >= this.reserve + TASK_COST + PAGE_COST * (pages + (needsPage ? 1 : 0)); }
+  // GitHub's own remaining count bounds it too: the reads and pages must also fit above LOW_REMAINING,
+  // so a cap larger than what the hour has left never draws pages past GitHub's limit.
+  canStartTask(pages = 0, needsPage = true) {
+    const need = this.reserve + TASK_COST + PAGE_COST * (pages + (needsPage ? 1 : 0));
+    return !this.reason && this.left() >= need && (this.remaining === null || this.remaining - LOW_REMAINING >= need);
+  }
 
   request(method, endpoint, body, options) {
     if (this.active) throw new state.ProgrammeError('SERIAL_REQUEST_REQUIRED', 'A sweep request is already running.');
@@ -69,7 +76,10 @@ class SweepRequests {
       const headers = response?.headers || {};
       // GitHub's own time at the start of the pass: the next pass reads what changed since then.
       if (!this.serverStart && Number.isFinite(Date.parse(headers.date))) this.serverStart = new Date(Date.parse(headers.date)).toISOString();
-      if (headers['x-ratelimit-remaining'] !== undefined && Number(headers['x-ratelimit-remaining']) < LOW_REMAINING) this.reason = 'GitHub rate limit';
+      if (headers['x-ratelimit-remaining'] !== undefined && Number.isFinite(Number(headers['x-ratelimit-remaining']))) {
+        this.remaining = Number(headers['x-ratelimit-remaining']);
+        if (this.remaining < LOW_REMAINING) this.reason = 'GitHub rate limit';
+      }
       if (headers['retry-after'] !== undefined) {
         const seconds = Number(headers['retry-after']);
         this.retryAt = Number.isFinite(seconds) ? this.nowMs() + Math.max(0, seconds) * 1000 : Date.parse(headers['retry-after']) || this.nowMs();
