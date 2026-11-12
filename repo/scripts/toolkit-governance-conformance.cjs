@@ -27,6 +27,7 @@ const catalogue = require('./toolkit-governance-catalogue.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
+const governanceApp = require('./toolkit-governance-app.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const GOVERNED_SOURCE_REL = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
@@ -109,6 +110,7 @@ function checkConformance(cwd, options = {}) {
   }
   if (state.state === 'DISABLED') {
     if (state.rule === 'M2') findings.push(finding('REPOSITORY_DISABLED', 'info', 'The binding merged on the default branch sets governance to disabled; only an owner-merged pull request turns it back on.'));
+    if (state.rule === 'M2') findings.push(...appFindings(state, options));
     if (state.rule === 'S1') findings.push(finding('EVIDENCE_STORE', 'info', 'This repository is an evidence store a programme binding names: agent-managed, never governed, and never asked about.'));
     if (state.rule === 'R1s') findings.push(finding('SCRATCH_CLONE', 'info', "This repository is a scratch clone in another repository's ignored .tmp folder: never governed, and never asked about."));
     if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', state.rule === 'M2' ? 'Governance is disabled for this repository, so the governed block in AGENTS.md is not followed.' : ['S1', 'R1s'].includes(state.rule) ? 'This repository is not governed, so the governed block in AGENTS.md is not followed.' : 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
@@ -152,8 +154,22 @@ function checkConformance(cwd, options = {}) {
     findings.push(...securityFindings(securityResult));
   }
   if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
+  if (state.state === 'ENABLED' && state.materials.binding) findings.push(...appFindings(state, options));
   const drift = findings.some(entry => entry.severity === 'drift');
   return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult);
+}
+
+// The governance GitHub App: set up while governance is on, nothing left behind once it is off. Read
+// only (names of the repository's variables and secrets); a missing App never counts as drift.
+function appFindings(state, options) {
+  let slug = null;
+  try { const identity = governance.readIdentity(state.root); slug = identity.valid ? governance.remoteSlug(identity.remote) : null; } catch { slug = null; }
+  if (!slug) return [];
+  const appState = governanceApp.presence(slug, { reader: options.appReader || governanceApp.ghReader,
+    offline: options.offline === true || (!options.appReader && (options.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1')) });
+  const others = governance.enabledRepositories(options).filter(name => name.toLowerCase() !== slug.toLowerCase());
+  const found = governanceApp.appFinding(state.state, slug, governance.bindingStoreRepository(state.root, options), appState, others);
+  return found ? [found] : [];
 }
 
 // Report the effective app-local setting; governance never asks or drafts an answer.
