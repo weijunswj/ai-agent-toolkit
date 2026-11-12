@@ -499,3 +499,26 @@ test('the CI check reads the live PR body and every closing reference', () => {
   assert.equal(result.pr.body, pr.body);
   assert.match(adapter.uatClosingDecision(result.pr.body, result.references), /commit a{40}, line 3 closes #2/);
 });
+
+test('closing words wait while the target issue records an owed UAT', () => {
+  const { owedUat } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  const block = state => `<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.70.1 sha256=0123456789ab -->\n<!-- programme-state child=2@4 -->\n- Status: ACTIVE\n- UAT: ${state}; review: PASSED\n<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\nTask text.`;
+  assert.equal(owedUat(block('PENDING')), 'PENDING');
+  assert.equal(owedUat(block('UAT_FULL_REQUIRED')), 'UAT_FULL_REQUIRED');
+  assert.equal(owedUat(block('UAT_PARTIAL_REQUIRED (STALE_HEAD, was abc1234)')), 'UAT_PARTIAL_REQUIRED');
+  for (const state of ['PASSED', 'NOT_REQUIRED', 'UAT_RETAINED', '-']) assert.equal(owedUat(block(state)), null, state);
+  assert.equal(owedUat('- UAT: PENDING; review: -\n'), null, 'only a generated STATE block counts');
+  assert.equal(owedUat(null), null);
+  const issue = (state, body) => ({ number: 2, state, body, sub_issues_summary: { total: 0 } });
+  const guardWith = target => new IssueClosureGuard({ repository: repo, transport: { request(method, apiPath) {
+    const rows = { [`repos/${repo}/issues/2`]: target, [`repos/${repo}/issues/2/sub_issues?per_page=100&page=1`]: [] };
+    if (!(apiPath in rows)) assert.fail(apiPath);
+    return { status: 200, json: rows[apiPath] };
+  } } });
+  const refused = guardWith(issue('open', block('PENDING'))).checkTexts(['UAT: NOT_REQUIRED (docs)\n\nCloses #2'], undefined, { sources: ['body'] });
+  assert.equal(refused.status, 'refused');
+  assert.match(refused.reason, /body, line 3.*records UAT PENDING.*use Refs/);
+  assert.equal(guardWith(issue('open', block('PASSED'))).checkTexts(['Closes #2']).status, 'allowed');
+  assert.equal(guardWith(issue('closed', block('PENDING'))).checkTexts(['Closes #2']).status, 'allowed');
+  assert.equal(guardWith(issue('open', block('PENDING'))).checkTexts(['Refs #2']).status, 'allowed');
+});
