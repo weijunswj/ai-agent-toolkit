@@ -353,7 +353,7 @@ function readBody(file, cwd, stdin) {
 const USAGE = 'Usage: node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> --body-file <file|-> [--json]\n'
   + '   or: node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> --scope-only [--json]\n'
   + '--body-file is the pull request body, read for its UAT line. --scope-only reads the merge scope alone and grants no merge readiness.\n'
-  + 'With --json, "ready" is the answer; "eligible" is the merge scope alone.\n';
+  + 'With --json, "ready" is the answer; "eligible" is the merge scope alone; "uat.mergeable" says whether the UAT line lets it merge, and "uat.ready" whether the owner owes nothing (false for an owner test after the merge).\n';
 const SCOPE_WAITS = 'Waits for the owner\'s typed merge: this pull request changes the merge rules.';
 
 // The lines for a verdict that cannot merge, or [] when it can.
@@ -365,7 +365,7 @@ function uatLines(uat) {
 
 // What happens after the merge for an owner test, or '' when none is owed.
 const AFTER_MERGE = uat => (uat.state === 'OWNER_TEST_NEEDED'
-  ? ` Owner test after the merge: ${uat.detail}. The owner tests the installed build; keep every linked issue on Refs and open until their OK, then the controller changes the line to UAT: PASSED (their OK).`
+  ? ` Owner test after the merge: ${uat.detail}. The owner tests the installed build; at the merge the controller records UAT PENDING on every linked issue, kept on Refs and open until their OK; then it changes the line to UAT: PASSED (their OK).`
   : '');
 
 function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = process.stderr, stdin } = {}) {

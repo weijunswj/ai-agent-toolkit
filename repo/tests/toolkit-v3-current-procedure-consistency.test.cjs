@@ -309,7 +309,7 @@ const GOVERNED = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
 function ownerUatScopeContract(texts) {
   assert.match(texts[GATE_RULES], /G2 starts after the working result \(owner UAT follows the merge\)/);
   // Owner UAT never holds a merge: it runs on the installed build and the task stays open until it passes.
-  assert.match(texts[GATE_RULES], /\*\*Owner test after merge:\*\* owner UAT never holds a merge\. An `OWNER_TEST_NEEDED` PR merges on G2 PASS and green CI; the owner then tests the installed build, its tasks stay open on `Refs` until their OK, and a failure gets a fix-forward or revert PR\./);
+  assert.match(texts[GATE_RULES], /\*\*Owner test after merge:\*\* owner UAT never holds a merge\. An `OWNER_TEST_NEEDED` PR merges on G2 PASS and green CI; the controller records UAT PENDING on each `Refs` task at merge, open until the owner's OK on the installed build; a failure gets a fix-forward or revert PR\./);
   assert.match(texts[GATE_RULES], /\*\*One real-host round per release:\*\* CI's Linux and Windows runs cover each PR; the qualification matrix and real-host smoke run once per release batch, after its merges, on the installed build, before the owner tests\./);
   assert.match(texts[GLOBAL], /Owner UAT tests only the final product, features the user runs \(hook setup, a quote or design run\), in plain words; CI, tests, G2 and agent UAT prove internals, each UAT list names the check covering every dropped item, and with none, UAT is NOT_REQUIRED\./);
   // The issue rules live in the governed block; closing waits for any owner UAT.
@@ -320,9 +320,9 @@ function ownerUatScopeContract(texts) {
   assert.match(texts['repo/CONTROLLER.md'], /irreversible actions \(force-push, other closes\) need owner OK/);
   assert.match(texts['repo/CONTROLLER.md'], /At admission split acceptance: owner UAT only for final-product steps \(global rules\), objective acceptance \(CI, G2\) for the rest; with no such step record NOT_REQUIRED\. Missing authority never waives a needed UAT;/);
   assert.match(texts['repo/CONTROLLER.md'], /G2 begins after builder readiness; owner UAT follows the merge \(gate rules\)/);
-  assert.match(texts['repo/CONTROLLER.md'], /Missing authority never waives a needed UAT; it runs after merge on the installed build, the task open until it passes \(gate rules\)\./);
+  assert.match(texts['repo/CONTROLLER.md'], /Missing authority never waives a needed UAT; it runs after merge on the installed build; at that merge record UAT PENDING on each `Refs` task, open until it passes \(gate rules\)\./);
   assert.match(texts[V3_DOC], /User acceptance covers only the final product: features the user runs and sees/);
-  assert.match(texts[GLOBAL], /G0, G1 with agent UAT on the real hosts and owner UAT for any final-product steps, full G2/);
+  assert.match(texts[GLOBAL], /G0, G1, full G2; after merge, real-host agent UAT and owner UAT for any final-product steps/);
   assert.match(texts[V3_DOC], /RISKY work gets agent UAT plus owner UAT for any final-product steps;/);
   assert.match(texts[V3_DOC], /listed beside the owner steps with the passing check that covers it; when no final-product step changed, UAT is recorded as not required/);
   assert.match(texts[GLOBAL], /Source-only checks, fixtures and CI do not prove user acceptance or an installed result: before acceptance, check the real installed or deployed result where one exists\./);
@@ -337,12 +337,13 @@ test('owner UAT is limited to final-product steps on every current surface', () 
   for (const [rel, before, after] of [
     [GLOBAL, 'Owner UAT tests only the final product', 'Owner UAT tests every step'],
     [GLOBAL, 'CI, tests, G2 and agent UAT prove internals', 'the owner proves internals'],
-    [GLOBAL, 'owner UAT for any final-product steps, full G2', 'owner UAT for any owner-hands steps, full G2'],
+    [GLOBAL, 'owner UAT for any final-product steps', 'owner UAT for any owner-hands steps'],
+    [GLOBAL, 'full G2; after merge, real-host', 'full G2; before merge, real-host'],
     [V3_DOC, 'owner UAT for any final-product steps;', 'owner UAT for any owner-hands steps;'],
     [GOVERNED, 'any owner UAT passed', "the owner's UAT passed"],
     [GATE_RULES, '(owner UAT follows the merge)', '(after owner UAT acceptance)'],
     [GATE_RULES, 'owner UAT never holds a merge', 'owner UAT holds the merge'],
-    [GATE_RULES, 'its tasks stay open on `Refs` until their OK', 'its tasks close at merge'],
+    [GATE_RULES, 'records UAT PENDING on each `Refs` task at merge', 'closes each task at merge'],
     [GATE_RULES, 'run once per release batch', 'run once per PR'],
     ['repo/CONTROLLER.md', 'with no such step record NOT_REQUIRED', 'always run owner UAT'],
     [V3_DOC, 'User acceptance covers only', 'User acceptance covers every step, not only'],
