@@ -1,10 +1,16 @@
 # Toolkit Changelog
 
-## 3.70.1 (a governance GitHub App for the re-bump workflow)
+## Unreleased (a governance GitHub App for the re-bump workflow)
 
 ### Changed
 
 - The re-bump workflow now mints its push token on each run from the Toolkit governance GitHub App, the one App the Toolkit governance workflows share, instead of reading a personal token from `TOOLKIT_REBUMP_TOKEN`. It reads the repository variable `TOOLKIT_GOVERNANCE_APP_CLIENT_ID` and the repository secret `TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY`. The App needs the repository permissions Contents (read and write) and Pull requests (read); the token lasts one hour, covers this repository only and is narrowed to those two. The workflow runs the command with the new `--installation` switch, which checks that the token covers exactly this repository instead of reading the signed-in account, which an installation token cannot do. With no client ID variable the run still prints a note and does nothing.
+
+## 3.70.1 (closing words wait for the owner's UAT)
+
+### Fixed
+
+- **Closing words wait for UAT:** the issue closure check (CI and the PreToolUse hook) now refuses `Closes`, `Fixes` or `Resolves` in a pull request's title, body or commits while its own UAT line is `OWNER_TEST_NEEDED` or invalid, and names the `Refs` link to use instead. Before, a merge could close a child issue before the owner tested it.
 
 ## 3.70.0 (Marked notes move off large programme pages)
 
