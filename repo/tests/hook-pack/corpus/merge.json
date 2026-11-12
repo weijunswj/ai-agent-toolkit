@@ -1212,6 +1212,182 @@
       "fixture": {"repo":{"governance":"enabled","branch":"feature"}},
       "expect": {"decision":"allow"},
       "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-git-merge-claude",
+      "source": "note 15b: a launch that mentions only branch upkeep is not a pull request merge",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"claude -p \"git merge origin/main into the branch and run the tests\""}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-git-merge-codex",
+      "source": "note 15b: a launch that mentions only branch upkeep is not a pull request merge",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"codex exec \"git merge origin/main into the branch and run the tests\""}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-commits-conflicts",
+      "source": "note 15b: a launch that mentions only branch upkeep is not a pull request merge",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"claude -p \"Merge commits only, no force-push. Fix the merge conflicts in README.md.\""}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-then-pr-merge",
+      "source": "note 15b: pull request merge wording next to branch upkeep still refuses the launch",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"codex exec \"git merge origin/main then gh pr merge 5\""}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-upkeep-then-approval",
+      "source": "note 15b: pull request merge wording next to branch upkeep still refuses the launch",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"claude -p \"merge commits only; ok to merge #618\""}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.launch-plain-merge",
+      "source": "note 15b: pull request merge wording next to branch upkeep still refuses the launch",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"claude -p \"merge 618\""}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.upkeep-prompt-git-merge-number-parent",
+      "source": "note 15b: branch upkeep wording in a second session's prompt records no merge approval",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"parent"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"child"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"parent"},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"git merge 5","session_id":"child"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"parent"},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.upkeep-prompt-git-merge-number-child",
+      "source": "note 15b: branch upkeep wording in a second session's prompt records no merge approval",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"parent"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"child"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"parent"},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"git merge 5","session_id":"child"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"child"},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.upkeep-prompt-git-merge-url",
+      "source": "note 15b: branch upkeep wording in a second session's prompt records no merge approval",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"parent"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"child"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"parent"},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"git merge https://github.com/toolkit-test-fixture/hook-pack-fixture/pull/5","session_id":"child"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"parent"},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.upkeep-prompt-merge-commit-brief",
+      "source": "note 15b: branch upkeep wording in a second session's prompt records no merge approval",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"parent"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"child"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"parent"},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Update #5 using a merge commit only","session_id":"child"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"parent"},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.upkeep-prompt-rebump-brief",
+      "source": "note 15b: branch upkeep wording in a second session's prompt records no merge approval",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"parent"},"expect":{"decision":"allow"}},
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"child"},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"parent"},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Re-bump #5 with merge commits only","session_id":"child"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"},"session_id":"child"},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.upkeep-hold-word-with-merge-conflicts",
+      "source": "note 15b: a hold word inside a branch upkeep phrase still holds the user's typed line",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5 with merge conflicts"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.upkeep-hold-word-merge-conflicts-note",
+      "source": "note 15b: a hold word inside a branch upkeep phrase still holds the user's typed line",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge 5 — merge conflicts"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.upkeep-hold-word-merge-base-then-merge",
+      "source": "note 15b: a hold word inside a branch upkeep phrase still holds the user's typed line",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"git merge-base and merge #5"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]}},
+      "expect": {"decision":"deny"},
+      "status": "pass"
     }
   ]
 }
