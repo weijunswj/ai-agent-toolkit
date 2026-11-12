@@ -615,7 +615,7 @@ const commands = {
     const queued = lease ? {
       since: parentDoc.sweep && lease.record.changed_since ? new Date(Date.parse(lease.record.changed_since) - SWEEP_OVERLAP_MS).toISOString() : null,
       queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: lease.findings(),
-      canRead: started => context.requests.canStartTask(started) && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,
+      canRead: (pages, needsPage) => context.requests.canStartTask(pages, needsPage) && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,
       settle: () => { context.requests.reading = false; },
       // The lease's state commit window: it carries the progress and the renewed expiry.
       lease: { open: () => lease.openBatch(context.store), entry: snapshot => lease.batchEntry(snapshot, context.pass.snapshot()), close: outcome => lease.closeBatch(outcome) },
@@ -1064,7 +1064,8 @@ function runPasses(args, deps, out) {
         if (requests) {
           const taken = takeLease(context, host, pass, progress);
           if (!taken) {
-            out.write(args.json ? `${JSON.stringify({ outcome: 'QUEUED', reason: 'another sweep is running' }, null, 2)}\n` : 'Another sweep is running, so this one wrote nothing. The running sweep or the next one brings the board up to date.\n');
+            const busy = context.busyLease || null;
+            out.write(args.json ? `${JSON.stringify({ outcome: 'QUEUED', reason: 'another sweep is running', ...(busy ? { holder: busy } : {}) }, null, 2)}\n` : `${busySweepText(busy)}\n`);
             passes += 1;
             break;
           }
@@ -1102,15 +1103,27 @@ function passBudgetMs(args) {
   return Math.max(afterWrite.budgetMs, Math.min(scheduled.budgetMs, args['budget-ms'] ?? scheduled.budgetMs));
 }
 
-// Takes the lease for one pass with a fresh request budget. The predecessor's stop the state does
+// The line a refresh prints when another live sweep holds the lease: which host runs it, since when,
+// and when its lease ends at the latest, so the caller knows it is not stuck and when to try again.
+function busySweepText(busy) {
+  const where = busy ? ` on ${busy.host === 'cloud' ? 'the cloud runner' : 'a computer'}${busy.started_at ? `, started ${busy.started_at}` : ''}, lease until ${busy.expires_at}` : '';
+  return `Another sweep is running${where}, so this one wrote nothing. That sweep or the next one brings the board up to date; run refresh again after the lease ends if the board still looks out of date.`;
+}
+
+// Takes the lease for one pass with its request budget. The predecessor's stop the state does
 // not hold yet comes from the lease, unless this computer's own note already reports it.
 function takeLease(context, host, pass, progress) {
   const requests = context.requests;
-  requests.count = 0; requests.reading = false; requests.reason = null; requests.limited = false; requests.exhausted = false; requests.serverStart = null;
+  // The first pass keeps the requests that opened the repository and the store, so the whole run stays
+  // under the cap; a later pass in the same run starts a fresh budget.
+  if (context.leaseTaken) requests.count = 0;
+  context.leaseTaken = true;
+  requests.reading = false; requests.reason = null; requests.limited = false; requests.exhausted = false; requests.serverStart = null;
   context.store.graphqlRefused = false;
   const store = typeof context.store.private === 'object' ? context.store.private : context.store;
   const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs, endsBy: pass.endsBy });
-  if (!lease.acquire(pass.started_at)) return false;
+  context.busyLease = null;
+  if (!lease.acquire(pass.started_at)) { context.busyLease = lease.busy; return false; }
   context.lease = lease;
   context.sweepOutcome = null;
   const stop = lease.unreported();

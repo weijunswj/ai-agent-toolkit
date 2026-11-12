@@ -48,7 +48,7 @@ function fixture(t) {
     } catch (thrown) { error = thrown; }
     let report = null;
     try { report = output ? JSON.parse(output) : null; } catch { report = null; }
-    return { code, error, report };
+    return { code, error, report, output };
   };
   const lease = (host, { endsBy = clock + 55 * MINUTE } = {}) => new SweepLease({ store, repository: github.repository, host, nowMs: () => clock, endsBy });
   const record = () => github.readFile(LEASE_FILE);
@@ -101,7 +101,15 @@ for (const host of ['computer', 'cloud']) test(`lease: while the ${host} holds i
   const commits = f.github.commits;
   const queued = f.run();
   assert.equal(queued.code, 0);
-  assert.deepEqual(queued.report, { outcome: 'QUEUED', reason: 'another sweep is running' });
+  // It names the live holder, so a caller can tell a running sweep from a stuck one.
+  assert.equal(queued.report.outcome, 'QUEUED');
+  assert.equal(queued.report.reason, 'another sweep is running');
+  assert.deepEqual(Object.keys(queued.report.holder).sort(), ['expires_at', 'host', 'started_at']);
+  assert.equal(queued.report.holder.host, host);
+  assert.equal(queued.report.holder.started_at, NOW);
+  assert.ok(Date.parse(queued.report.holder.expires_at) > Date.parse(NOW));
+  const text = f.run({ argv: ['refresh'] });
+  assert.match(text.output, new RegExp(`^Another sweep is running on ${host === 'cloud' ? 'the cloud runner' : 'a computer'}, started ${NOW}, lease until \\S+Z, so this one wrote nothing\\.`));
   assert.equal(f.github.commits, commits, 'another sweep is running: nothing written');
   // Row L18 (M1): a pass that defers did no work, so it leaves no note and the next pass reports no stop.
   assert.equal(fs.existsSync(f.note), false, 'the deferred pass left no progress note');

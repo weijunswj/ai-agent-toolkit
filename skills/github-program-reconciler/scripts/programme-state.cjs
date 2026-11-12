@@ -4456,8 +4456,13 @@ class Reconciler {
     this.pass.phaseAt('planning');
     const read = [], failed = [];
     const primed = { blockedBy: new Map(), tracked: new Map(), journals: new Map(), comments: new Map([[parent.parent_issue, discussion]]), prPages: new Map() };
+    // A task with a reason to read (a change, an intent, a gate, no facts yet, a queued one), or any
+    // task on a first pass, is likely to need its page drawn this pass, so its page is budgeted; a
+    // rotation-only read rarely is.
+    let pages = 0;
     for (const number of order) {
-      if (!queued.canRead(read.length)) break;
+      const needsPage = !queued.since || urgent.has(number);
+      if (!queued.canRead(pages, needsPage)) break;
       const doc = stored(number);
       const outcome = outcomes.find(entry => entry.issue === number);
       try {
@@ -4468,9 +4473,9 @@ class Reconciler {
         const pr = tracked ? (prCache.has(tracked) ? prCache.get(tracked) : this.reader.pullRequest(tracked)) : null;
         const journals = doc && (doc.gate.assignment || Object.keys(doc.journals_seen || {}).length) ? this.readJournals(doc) : null;
         const list = !issue ? null : issue.comments === 0 ? [] : this.reader.comments(number);
-        const pages = new Map();
+        const prPages = new Map();
         for (const page of [pr && ['OPEN', 'DRAFT'].includes(pr.state) ? pr.number : null, ...(graph.openReferences.get(number) || [])]) {
-          if (page && !pages.has(page)) pages.set(page, this.reader.issue(page));
+          if (page && !prPages.has(page)) prPages.set(page, this.reader.issue(page));
         }
         // The task is observed only once every read of it has succeeded.
         if (issue) { rows.set(number, issue); issues.set(number, issue); }
@@ -4479,8 +4484,9 @@ class Reconciler {
         if (tracked) prCache.set(tracked, pr);
         if (journals) primed.journals.set(number, journals);
         if (list) primed.comments.set(number, list);
-        for (const [page, facts] of pages) primed.prPages.set(page, facts);
+        for (const [page, facts] of prPages) primed.prPages.set(page, facts);
         read.push(number);
+        if (needsPage) pages += 1;
       } catch (error) {
         if (!error.code || STOPS_PASS.has(error.code) || ['GH_AUTH', 'PASS_STOPPED'].includes(error.code)) throw error;
         failed.push(number);

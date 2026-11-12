@@ -161,7 +161,11 @@ test('a pass that reaches the request cap at minute 20 stops, saves its place an
   const left = f.parent().sweep.queue;
   assert.ok(left.length > 0 && capped.report.sweep.read > 0, JSON.stringify(capped.report.sweep));
   assert.match(f.page(421), /^⚠️ Board out of date .*tasks still to check\.$/m);
+  // The capped pass draws the pages of what it read; a pass that only reads leaves the board as stale
+  // as before. Thirty changed tasks at about seven requests a page and a cap of 100 take about
+  // fifteen hourly passes (the old bound of six held only while pages were never drawn).
+  assert.ok(capped.report.holds.every(hold => !/\(0 of \d+ done\)/.test(hold.detail)), `the capped pass drew pages: ${JSON.stringify(capped.report.holds)}`);
   let passes = 0;
-  while (f.parent().sweep.queue.length && passes < 6) { f.run(['refresh', '--scheduled'], { requestCap: 100 }); passes += 1; }
+  while (f.parent().sweep.queue.length && passes < 20) { f.run(['refresh', '--scheduled'], { requestCap: 100 }); passes += 1; }
   assert.deepEqual(f.parent().sweep.queue, [], 'every task is read in later hours');
 });
