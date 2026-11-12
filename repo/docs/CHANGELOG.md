@@ -1,17 +1,21 @@
 # Toolkit Changelog
 
-## 3.68.0 (Marked notes move off large programme pages)
+## 3.68.0 (one-time permission blocks and checked cleanup)
 
 ### Added
 
-- **Marked notes:** on a programme parent page, old hand-written notes under one line that reads exactly `## Archive` now move, byte for byte, into linked comments on a complete pass. The whole page is saved to the private store and read back first, each comment is read back exactly before one guarded page write removes the notes, and AGENT CONTEXT links every part. Note comments are never edited, reused for other text or deleted.
-- **New finding:** `ARCHIVE_SECTION_UNSAFE` reports, with one fixed reason and no page text, why marked notes stayed on the page. Any doubt about where the marked area starts or ends moves nothing, and the redraw carries on. The reader accepts only a written subset of Markdown up to the end of the marked area: blank lines, heading lines, code fences at the start of a line, `<details>` folds (attributes without quote marks) and comments on their own lines at the start of a line, and text lines with no HTML-like text and no level one or two heading or code fence behind indentation, a quote, a list marker or a footnote. Any other line, a Unicode space other than a plain space or tab, a lone carriage return or a leading byte-order mark moves nothing. Notes that use inline HTML, raw HTML blocks or indented code fences stay on the page with a finding; rewrite the line or move it outside the marked area.
-- **Stopped passes:** a pass that stops for time finishes its redraw but moves no notes; the next complete pass moves them.
+- **`toolkit permissions`:** `repo/scripts/toolkit-permissions.cjs` prints two paste-once blocks so Toolkit's own reversible commands stop asking each time. The computer block covers the programme commands that keep records in step, the scheduled-task commands and the cleanup command. The repository block covers pull request and issue comments and one exact evidence store push to the store's own origin and branch; merges are never in a block. A line carries a wildcard only where the script behind it checks its own arguments, and ask lines cover a task repair, a folder override, a skipped first run, a keep-or-replace answer and a comment delete. Codex cannot ask for a flag, so those commands are prompt rules in the Codex block. It only prints and checks; the owner pastes. `--check <file>` reports missing and stale lines, and `--format allowed-tools` prints the same lines for a single launch.
+- **`toolkit cleanup`:** `repo/scripts/toolkit-cleanup.cjs plan|apply` removes Toolkit scratch only: finished worktrees, temp files under the scratch folders and local branches already merged into the default branch. It never removes part of a worktree or a clone, a bare repository, anything whose path goes through a link, or anything behind a linked scratch root, and it counts every untracked and ignored file whatever Git's settings say. It always reads the evidence store back first, deletes nothing when there is no store to read back, and prints one line saying what it cleaned and what it kept.
+- **Start a recorded scheduled task:** `repo/scripts/toolkit-windows-tasks.cjs start --task <id>` runs one Toolkit-owned task now, and refuses tasks Toolkit does not own, the owner stopped, Task Scheduler shows as turned off, or someone edited by hand.
 
 ### Changed
 
-- **Archive registry:** `page_archive` now also records note parts (with the saved page copy they came from). A note comment that later changes or disappears keeps its link and raises `ARCHIVE_COMMENT_UNTRUSTED` once, naming the saved page copy that holds the notes; later passes stay quiet and the owner's answer to the finding stands. Putting the same notes back under `## Archive` posts a fresh comment for them and leaves the damaged one as found. Older Toolkit versions refuse the new entries and the new finding field; update Toolkit on every computer that runs the sweep before marking notes.
-- **AGENT CONTEXT:** the fixed line now says that only notes under one `## Archive` heading move.
+- **Safety gates:** the hard stop on saved permission rules now names the printed blocks as the supported route. Agents still never write host settings or rule files.
+- **Merge authority:** changes to the permission and cleanup scripts wait for a typed merge.
+
+### Not included
+
+- Claiming a controller seat, removing or adopting tasks, repairs, closing issues, deleting remote branches, forced, mirror or deleting pushes, a push anywhere but the store's own origin and branch, settings edits and secrets stay outside every block and keep asking.
 
 ## 3.67.0 (governance GitHub App setup and removal guidance)
 
