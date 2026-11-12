@@ -59,9 +59,30 @@ function owedUat(body) {
 const allowed = extra => ({ status: 'allowed', ...extra });
 const unknown = reason => ({ status: 'unknown', reason });
 class IssueClosureGuard {
-  constructor({ transport, repository, maxRequests = 500, maxPages = 50, deadlineMs = 30000, deadline, now = () => performance.now() }) {
+  // `uatState`, when given, reads a PR body's UAT verdict (NOT_REQUIRED, OWNER_TEST_NEEDED, PASSED or
+  // invalid); with it, closing words are also refused for a task that a merged PR still waiting on
+  // the owner's test references. Without it that check is skipped (a copy of the skill alone).
+  constructor({ transport, repository, maxRequests = 500, maxPages = 50, deadlineMs = 30000, deadline, now = () => performance.now(), uatState = null }) {
     if (!REPOSITORY.test(repository)) throw new Error('Invalid repository.');
-    Object.assign(this, { transport, repository: repository.toLowerCase(), maxRequests, maxPages, deadlineMs, deadline, now });
+    Object.assign(this, { transport, repository: repository.toLowerCase(), maxRequests, maxPages, deadlineMs, deadline, now, uatState });
+  }
+
+  // Merged PRs in the same repository that reference the task and still say UAT: OWNER_TEST_NEEDED.
+  // The task stays open until the owner's OK turns that line into UAT: PASSED, even when the PR only
+  // said Refs and the task's own page has not recorded the owed test yet.
+  ownerTestPrs(repository, number, budget) {
+    if (typeof this.uatState !== 'function') return [];
+    const events = this.pages(`repos/${repository}/issues/${number}/timeline`, budget);
+    const found = new Set();
+    for (const event of events) {
+      if (event?.event !== 'cross-referenced') continue;
+      const source = event.source?.issue;
+      if (!source?.pull_request?.merged_at || !Number.isSafeInteger(source.number)) continue;
+      const from = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\//.exec(source.repository_url ? `${source.repository_url}/` : '')?.[1]?.toLowerCase();
+      if (from !== repository.toLowerCase()) continue;
+      if (this.uatState(typeof source.body === 'string' ? source.body : '') === 'OWNER_TEST_NEEDED') found.add(source.number);
+    }
+    return [...found].sort((a, b) => a - b);
   }
 
   budget() { return { requests: 0, deadline: Math.min(this.deadline ?? Infinity, this.now() + this.deadlineMs) }; }
@@ -142,6 +163,12 @@ class IssueClosureGuard {
           const owed = issue.state === 'open' ? owedUat(issue.body) : null;
           result = owed ? { status: 'refused', reason: `Issue ${target.repository}#${target.number} records UAT ${owed}: the owner's test is still owed. Keep it open and use Refs until the controller records UAT PASSED.` }
             : this.assertClosable(target.number, target.repository, budget, { resolved: issue });
+          // Only a target the native tree allows is checked for merged owner-test PRs, so a proven
+          // refusal is never turned into an unknown by a later read.
+          if (result.status === 'allowed' && issue.state === 'open') {
+            const waiting = this.ownerTestPrs(target.repository, target.number, budget);
+            if (waiting.length) result = { status: 'refused', reason: `Issue ${target.repository}#${target.number} is referenced by merged PR ${waiting.map(pr => `#${pr}`).join(', ')}, whose UAT line is still OWNER_TEST_NEEDED: the owner's test is still owed. Keep it open and use Refs until the owner's OK makes that line UAT: PASSED.` };
+          }
         } catch (error) { result = unknown(`Closing target could not be read. ${error.message} Use Refs or retry when GitHub is readable.`); }
         const location = `${target.source}, line ${target.line}, ${target.pattern}, target ${target.repository}#${target.number}: `;
         if (result.status === 'refused') return { ...result, reason: location + result.reason };

@@ -9,11 +9,13 @@ const CAP = 300;
 const RESERVE = 60;
 const LOW_REMAINING = 200;
 // What one task usually costs to read (comments, its PR, blockers), and what drawing its task page
-// may cost later in the same pass (a read, the write, its read-back and a re-read before writing).
-// A task is started only when its reads and the pages of every task read so far still fit before
-// the reserve, which the state commit, the parent page and the lease keep for themselves.
+// costs later in the same pass: measured at about seven requests (the page read, its comments, the
+// read before the write, the write, its read-back and the state checks around it). A task is started
+// only when its reads and the pages of every task read so far still fit before the reserve, which
+// the state commit, the parent page and the lease keep for themselves. An estimate below the real
+// cost lets a large parent read every task and then run out before its first page, every pass.
 const TASK_COST = 3;
-const PAGE_COST = 2;
+const PAGE_COST = 7;
 // Past reading: below SETTLE_FLOOR left the queue phases stop (the stop report and the parent's
 // redraw still run); below LAST_REQUESTS only bookkeeping runs (settling intents, the lease).
 const SETTLE_FLOOR = 30;
@@ -34,8 +36,9 @@ class SweepRequests {
 
   left() { return this.cap - this.count; }
 
-  // Whether another task may start after `started` tasks: its reads and every page must fit before the reserve.
-  canStartTask(started = 0) { return !this.reason && this.left() >= this.reserve + TASK_COST + PAGE_COST * (started + 1); }
+  // Whether another task may start: its reads, and the pages of the `pages` tasks read so far that
+  // may need one (plus its own when `needsPage`), must fit before the reserve.
+  canStartTask(pages = 0, needsPage = true) { return !this.reason && this.left() >= this.reserve + TASK_COST + PAGE_COST * (pages + (needsPage ? 1 : 0)); }
 
   request(method, endpoint, body, options) {
     if (this.active) throw new state.ProgrammeError('SERIAL_REQUEST_REQUIRED', 'A sweep request is already running.');

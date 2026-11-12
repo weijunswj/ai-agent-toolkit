@@ -152,8 +152,13 @@ test('cold-resume / I1: a capped pass saves what it read and its queue; the next
   assert.match(f.page(421), new RegExp(`^⚠️ Board out of date since .*SGT: 1 pass stopped early \\((tasks still to check|request cap)\\)\\. ${left.length} tasks still to check\\.$`, 'm'));
   const read = new Set(capped.report.sweep.tasks);
   assert.ok(left.every(number => !read.has(number)), 'the tasks it read are not queued again');
+  // Each capped pass also draws the pages of the changed tasks it read (about seven requests each),
+  // so at this small cap it reads only a few; the old bound of six passes held only because a capped
+  // pass read tasks and drew none of their pages. Thirty changed tasks at seven requests a page and a
+  // cap of 100 need about fifteen passes.
+  assert.ok(capped.report.holds.every(hold => !/\(0 of \d+ done\)/.test(hold.detail)), `the capped pass drew pages: ${JSON.stringify(capped.report.holds)}`);
   let passes = 1;
-  while (f.parent().sweep.queue.length && passes < 6) { f.run({ requestCap: 100 }); passes += 1; }
+  while (f.parent().sweep.queue.length && passes < 20) { f.run({ requestCap: 100 }); passes += 1; }
   assert.deepEqual(f.parent().sweep.queue, []);
   // Pages a capped pass could not draw follow on the next full pass.
   assert.equal(f.run().code, 0);
@@ -240,4 +245,40 @@ test('103 tasks and 645 PRs: request counts per pass, cold and warm, computer an
   t.diagnostic(JSON.stringify(counts));
   assert.ok(counts.computer.warm.every(count => count < 80), `computer warm: ${counts.computer.warm}`);
   assert.ok(counts.cloud.warm.every(count => count < 120), `cloud warm: ${counts.cloud.warm}`);
+});
+
+test('page budget: a capped first pass on a large parent draws pages and finishes within a few passes', t => {
+  // The parent never drew its task pages: every one is planned. Reading every task first and then
+  // drawing none, the same way every pass, is the failure this guards.
+  const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
+  github.commentsMoveIssue = true;
+  const binding = { schema: state.SCHEMA.binding, repository: github.repository, parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
+    store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: [] };
+  github.addIssue(421, { body: '# Programme\n' });
+  const outcomes = Array.from({ length: 117 }, (_, i) => ({ issue: 500 + i, class: 'COMMITTED', parent: 421, order: i + 1 }));
+  for (const outcome of outcomes) github.addIssue(outcome.issue, { parent: 421 });
+  let clock = Date.parse(NOW);
+  const now = () => new Date(clock).toISOString();
+  const store = new state.StateStore({ transport: github, store: binding.store, now, toolkitVersion: '3.66.0' });
+  store.write('parent', 421, state.claimDocument(state.newParent({ repository: github.repository, parentIssue: 421, outcomes }), controller), { sha: null, previous: null });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-pages-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const drawn = () => outcomes.filter(outcome => /programme-state child=/.test(github.issues.get(outcome.issue).body)).length;
+  const run = () => {
+    clock += HOUR; github.clock += HOUR;
+    const start = github.calls.length;
+    let output = '';
+    const code = cli.main(['refresh', '--json'], { transport: github, binding, originUrl: 'https://github.com/example.test/app.git', repoRoot: '.', toolkitVersion: '3.66.0',
+      now, passClock: () => clock, lockFile: path.join(dir, 'pass.lock'), environment: {}, stdout: { write: text => { output += text; } } });
+    return { code, requests: github.calls.length - start };
+  };
+  const first = run();
+  assert.ok(first.requests <= 300, `never more than the cap: ${first.requests}`);
+  assert.ok(drawn() >= 20, `the first capped pass draws pages, not only reads: ${drawn()} drawn`);
+  let passes = 1;
+  while (drawn() < outcomes.length && passes < 6) { run(); passes += 1; }
+  assert.equal(drawn(), outcomes.length, 'every page is drawn within six passes');
+  const stopped = () => (store.read('parent', 421).doc.attention || []).some(entry => entry.code === 'PASS_STOPPED' && entry.state === 'new');
+  while (stopped() && passes < 12) { run(); passes += 1; }
+  assert.equal(stopped(), false, 'a complete pass clears the stop');
 });

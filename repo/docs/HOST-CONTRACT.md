@@ -8,7 +8,7 @@ Both host entry points use the same repository decision and proposal service. Th
 
 ## Who writes what
 
-Only the appointed controller writes programme state (the parent and child documents). An executor the controller assigned to a gate writes only its own checkpoint journal in the private state store, through `bind` and its turn-end hook. The controller's `reconcile --apply --controller` reads journals into the child document. Gate acceptance, UAT, review and completion are written only by the controller. The [reconciler skill](../../skills/github-program-reconciler/SKILL.md) has the commands.
+Only the appointed controller writes programme state (the parent and child documents). An executor the controller assigned to a gate writes only its own checkpoint journal in the private state store, through `bind` and its turn-end hook. A controller with no shell of its own hands a chosen session a holder order, and that session runs exactly those writes as the holder with `run-order` (see the reconciler skill). The controller's `reconcile --apply --controller` reads journals into the child document. Gate acceptance, UAT, review and completion are written only by the controller. The [reconciler skill](../../skills/github-program-reconciler/SKILL.md) has the commands.
 
 ## 1. Session identity
 

@@ -41,6 +41,8 @@ class SweepLease {
     // The commit that carried this lease's last write could not be confirmed: re-read before the next write.
     this.unsure = false;
     this.reportedStop = false;
+    // The live holder an acquire found, or null.
+    this.busy = null;
   }
 
   now() { return new Date(this.nowMs()).toISOString(); }
@@ -67,7 +69,11 @@ class SweepLease {
   acquire(startedAt) {
     return this.writing(() => {
       const { doc, sha } = this.current();
-      if (doc.holder && Date.parse(doc.holder.expires_at) > this.nowMs()) return false;
+      // Who holds it, so the caller can say which sweep is running and when its lease ends.
+      if (doc.holder && Date.parse(doc.holder.expires_at) > this.nowMs()) {
+        this.busy = { host: doc.holder.host, started_at: doc.holder.progress?.started_at || null, expires_at: doc.holder.expires_at };
+        return false;
+      }
       const next = structuredClone(doc);
       // A holder that never released was killed: its last saved progress is the stop to report.
       if (doc.holder) {

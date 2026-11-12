@@ -44,7 +44,8 @@ function guardFor(repository, cwd, options = {}) {
     catch { throw Object.assign(new Error('gh is unavailable. Run setup toolkit, then gh auth login.'), { code: 'GH_MISSING' }); }
     return new GitHubTransport({ ghPath, timeoutMs: options.timeoutMs ?? 5000 }).request(...args);
   } };
-  return new IssueClosureGuard({ transport, repository, deadline: options.deadline, deadlineMs: options.deadlineMs ?? 120000, maxRequests: options.maxRequests ?? 500 });
+  return new IssueClosureGuard({ transport, repository, deadline: options.deadline, deadlineMs: options.deadlineMs ?? 120000, maxRequests: options.maxRequests ?? 500,
+    uatState: body => uatVerdict(body).state });
 }
 const TABLES = {
   create: { values: ['repo:R','assignee:a','base:B','body:b','body-file:F','head:H','label:l','milestone:m','project:p','recover','reviewer:r','template:T','title:t'], booleans: ['draft:d','dry-run','editor:e','fill:f','fill-first','fill-verbose','no-maintainer-edit','web:w'] },
