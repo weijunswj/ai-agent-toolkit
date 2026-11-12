@@ -1,10 +1,21 @@
 # Toolkit Changelog
 
-## 3.71.1 (closing words wait for a task's recorded UAT)
+## Unreleased (closing words wait for a task's recorded UAT)
 
 ### Fixed
 
 - **Owed UAT on the target:** the issue closure check now also refuses a closing word for an open issue whose generated programme status records UAT as `PENDING`, `UAT_PARTIAL_REQUIRED` or `UAT_FULL_REQUIRED`, whatever the pull request's own UAT line says, and names the `Refs` link to use. Before, a pull request that needed no UAT of its own could close a task still waiting on the owner's test, even through quoted text.
+
+## 3.72.0 (self-checking evidence store command)
+
+### Added
+
+- **`toolkit store`:** `repo/scripts/toolkit-store.cjs` does every evidence store step on a computer (`status`, `sync`, `save`, `move`, `merge-branch`, `delete-merged-branch`) and checks the store itself first: the merged binding's store and branch, a checkout whose fetch and push addresses are that store and whose own config holds no push, rewrite or program setting, and a private, writable store on GitHub. `save` stages only the named paths under the binding's store path, `archives/` or `evidence/`, secret-scans exactly what it stages (refusing a binary or non-UTF-8 file it cannot read), commits, pushes the bound branch with a plain push and reads it back on GitHub. Ancestry is read from real commits only (no grafts, replace refs or commit-graph), a merged branch's whole history is scanned, and "already merged" before a branch delete is GitHub's answer, not the checkout's. It never force-pushes, rebases, deletes a file or pushes another branch, and deletes a store branch only when it is already merged.
+
+### Changed
+
+- **Permission blocks:** the exact store push line and its ask lines are replaced by one store command line in the computer block. On Codex it is an allow rule and no store prompt rule is printed, so store steps stop asking there too. `toolkit permissions` no longer takes `--store`.
+- **Merge authority:** changes to the store command wait for a typed merge, like the permission and cleanup scripts.
 
 ## 3.71.0 (programme sweep on a saved queue, and on GitHub)
 
