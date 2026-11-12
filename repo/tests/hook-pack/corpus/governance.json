@@ -1014,6 +1014,18 @@
       "status": "pass"
     },
     {
+      "id": "CMD.toolkit-governance-check-runs-check",
+      "source": "owner repro 12 Nov 2026: a typed governance phrase runs its own toolkit-governance.cjs subcommand",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit governance check" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance check`. Run exactly `node \"", "toolkit-governance.cjs\" check`", "not the programme `attention` list"] },
+      "status": "pass",
+      "note": "Typing the phrase once ran status and the attention list instead of the check."
+    },
+    {
       "id": "CMD.toolkit-set-env-is-not-a-command",
       "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
       "kind": "benign",

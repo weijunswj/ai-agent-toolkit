@@ -65,7 +65,7 @@ Detailed plugin verification and bridge command mechanics live in [Toolkit Local
 
 ### Commands You Can Type
 
-Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup` and `toolkit show env` are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing. A phrase inside a longer message is ordinary text. Everything else is plain language: ask in your own words.
+Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup`, `toolkit show env` and the `toolkit governance` status, check, discover, catalogue, security and migrate commands are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing; each of those `toolkit governance` commands runs that same subcommand of `toolkit-governance.cjs` and nothing else, except `migrate`, which the agent hands to you to run in your own terminal. A phrase inside a longer message is ordinary text. Everything else is plain language: ask in your own words.
 
 - `toolkit cmd` or `toolkit command`: show this list.
 - `setup toolkit` or `toolkit setup`: set up Toolkit on this computer, or change your setup answers.
@@ -73,6 +73,12 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 - `toolkit show env`: open your keys in your editor. Values stay on this computer and never pass through chat.
 - `toolkit update scheduled task`: review and update Toolkit's scheduled tasks on this computer.
 - `toolkit governance enable` or `toolkit governance disable`: turn Toolkit's GitHub governance on or off for this repository. It prepares a pull request for you to merge.
+- `toolkit governance status`: show whether Toolkit's GitHub governance is on for this repository, and refresh this computer's copy of the merged binding.
+- `toolkit governance check`: check this repository against Toolkit's governance rules and GitHub settings. It changes nothing.
+- `toolkit governance discover`: list what Toolkit finds for a governance setup here (parent issue, evidence store, checks). It changes nothing.
+- `toolkit governance catalogue`: list the skills offered in this repository under its governance state. It changes nothing.
+- `toolkit governance security`: turn on GitHub's free dependency and security settings for a governed repository.
+- `toolkit governance migrate`: get the command that offers protection and security fixes; you run it in your own terminal and answer its question there.
 - `remove toolkit`: list Toolkit's scheduled tasks and rules on this computer, then remove them after your OK. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
 - `merge N`: approve the merge of pull request N.
 
