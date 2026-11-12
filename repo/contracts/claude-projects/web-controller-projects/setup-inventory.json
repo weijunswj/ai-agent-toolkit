@@ -19,6 +19,8 @@
     {"id": "repos", "artefact": "Repos and transport store attached", "setup_steps": ["generic-2"], "source": "takeover.md generic step 2", "check": "**PRs:**", "resync": "report"},
     {"id": "device", "artefact": "Device, folder, Toolkit on the device and keep-awake", "setup_steps": ["P2"], "source": "reference/setup.md P2", "check": "**Setup:**", "resync": "report"},
     {"id": "goal", "artefact": "Project goal", "setup_steps": ["P4"], "source": "parent programme in memory", "check": "**Setup:**", "resync": "report"},
+    {"id": "auto-merge-switch", "artefact": "Task auto-merge project line outside the managed block (- Task auto-merge: On; else Off), set only on the owner's card answer", "setup_steps": [], "source": "repo/contracts/agent-rules/gate-rules.md Task auto-merge; reference/base-overrides.md", "check": "rule: repo/contracts/claude-projects/web-controller-projects/SKILL.md", "resync": "owner"},
+    {"id": "base-check", "artefact": "Base check date and BASE lines in the check-in's state.md", "setup_steps": [], "source": "repo/contracts/claude-projects/web-controller-projects/tasks/base-clash-check.md; BASE written by repo/scripts/toolkit-projects-guidebook.cjs", "check": "BASE CLASH", "resync": "report"},
     {"id": "programme-sweep", "artefact": "Programme sweep task on the device (GitHub governance ENABLED and a device named)", "setup_steps": ["P4"], "source": "repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md", "check": "local, advice", "resync": "report"}
   ],
   "steps_without_artefacts": {

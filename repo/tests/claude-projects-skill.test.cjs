@@ -1116,3 +1116,30 @@ test('merged governance routes immediately from Projects to the device; session 
   assert.match(nudge, /else if fresh status confirms disabled or absent governance, report "programme refresh is not selected; coordinator: relay the merged decision to the device lane/);
   assert.match(read('repo/docs/agent-playbooks/INDEX.md'), /Triggers: governance decision merges, reading task-sync guidance, task-shape mismatches/);
 });
+
+test('local Toolkit is the Projects base: every hook has a cloud row and every override names its base clause', () => {
+  const dir = 'repo/contracts/claude-projects/web-controller-projects';
+  const skill = read(`${dir}/SKILL.md`);
+  assert.match(skill, /## Base rule\n- \*\*Local Toolkit is the base\.\*\* The global, gate and governed rules and `CONTROLLER\.md` apply as written/);
+  assert.match(skill, /differs from them only by a row in `reference\/base-overrides\.md` with the owner's decision\. Any other difference is a clash: ask the owner by card\./);
+  // Every hook script the plugin manifest runs has a row saying how its rule is covered in the cloud.
+  const manifest = read('.claude-plugin/hooks/hooks.json');
+  const scripts = [...new Set([...manifest.matchAll(/repo\/scripts\/([a-z0-9-]+\.cjs)/g)].map(match => match[1]))];
+  assert.ok(scripts.length >= 6, scripts.join(', '));
+  const table = read(`${dir}/reference/cloud-hook-parity.md`);
+  const rows = table.split('\n').filter(line => line.startsWith('| `'));
+  for (const script of scripts) assert.ok(rows.some(row => row.startsWith(`| \`${script}\``)), `${script} has no cloud row`);
+  for (const row of rows) assert.equal(row.split(' | ').length, 4, row.slice(0, 80));
+  // Each override names the base clause it changes, why, the owner's decision and when it ends.
+  const overrides = read(`${dir}/reference/base-overrides.md`).split('\n').filter(line => line.startsWith('| ') && !/^\| (?:Override|---)/.test(line));
+  assert.ok(overrides.length >= 6);
+  for (const row of overrides) {
+    const cells = row.split(' | ');
+    assert.equal(cells.length, 5, row.slice(0, 80));
+    assert.ok(cells.every(cell => cell.replace(/^\| |\s*\|$/g, '').trim() !== ''), row.slice(0, 80));
+    assert.match(cells[3], /^\d{1,2} \w{3} \d{4}: /, row.slice(0, 80));
+  }
+  assert.match(read(`${dir}/tasks/base-clash-check.md`), /Never edit the skill, the overrides list or the base to clear a clash/);
+  // The gate rules name Projects' switch, so the base itself says where cloud auto-merge comes from.
+  assert.match(read('repo/contracts/agent-rules/gate-rules.md'), /Claude Projects has no setup bank: its switch is the project line `- Task auto-merge: On` \(else Off\)/);
+});
