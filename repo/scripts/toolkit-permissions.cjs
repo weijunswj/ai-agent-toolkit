@@ -43,7 +43,7 @@ const WINDOWS_TASKS = 'repo/scripts/toolkit-windows-tasks.cjs';
 const CLEANUP = 'repo/scripts/toolkit-cleanup.cjs';
 
 const GUARDS = Object.freeze({
-  programme: "The script's own controller-holder check, programme lock and merged binding read. A parent lifecycle write needs the merged binding's permission and the closure guard.",
+  programme: "The script's own controller-holder check, programme lock and merged binding read. A parent lifecycle write needs the merged binding's permission and the closure guard. refresh --scheduled and --budget-ms set only how long one refresh pass may run, 10 to 50 minutes, under the same checks and request cap.",
   tasks: "The script's marker and ownership checks: only Toolkit's own recorded tasks are created, changed or started, and a hand-edited task needs the owner's answer.",
   taskUpdate: 'Its saved approval and question flow: a new task kind or a hand-edited task returns a question for the owner.',
   readOnly: 'Read-only: it lists or prints and changes nothing.',

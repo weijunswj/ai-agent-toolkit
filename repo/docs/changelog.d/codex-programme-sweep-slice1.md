@@ -8,6 +8,7 @@ Title: programme sweep on a saved queue, and on GitHub
 - `reconcile --apply` saves its state phase in the same single commit.
 - The hourly sweep pass (`refresh --scheduled`) now works for up to 50 minutes instead of 10, is killed at 55 minutes and, on GitHub, has its job stopped at 58, so it always ends before the next hourly start. The refresh a session starts after its own GitHub write keeps 10 minutes and still leaves a flag for the scheduled pass while that holds the lock.
 - On a computer, the hourly task's budget rises to 55 minutes and its Windows stop-after limit to 56; the refresh in it takes what is left, less the attention step, and never less than 10 minutes. A task registered with the earlier 30-minute limit is updated in place by the next apply. A long pass renews its sweep lease.
+- `toolkit permissions` keeps allowing the programme refresh line with the sweep's `--scheduled` and `--budget-ms`, and its note now says they only set how long one pass may run, 10 to 50 minutes.
 
 ### Added
 

@@ -1153,4 +1153,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ parseArgs, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord, MergedSweepBindingReader });
+module.exports = Object.freeze({ parseArgs, passBudgetMs, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord, MergedSweepBindingReader });

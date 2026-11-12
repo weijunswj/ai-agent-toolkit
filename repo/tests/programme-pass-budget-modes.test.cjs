@@ -50,7 +50,7 @@ test('budget modes: the workflow, its kill and the computer task take their limi
   assert.ok(windows.TASK_TIME_LIMIT_MINUTES * MINUTE > job.WORK_BUDGET_MS && windows.TASK_TIME_LIMIT_MINUTES * MINUTE < HOUR, 'the task stop-after leaves the bookkeeping minute and ends before the next hour');
 });
 
-test('budget modes: the computer refresh gets what is left before 55 minutes, less the attention step, never under 10', () => {
+test('budget modes: the computer refresh gets what is left before 55 minutes, less the attention step, never under 10', t => {
   const job = require(path.join(ROOT, 'repo/scripts/toolkit-scheduled-job.cjs'));
   const { budgetMs, killMs } = job.computerRefreshBudget(54 * MINUTE);
   assert.equal(budgetMs, 47 * MINUTE, '54 left, less 2 for attention and 5 for the kill slack');
@@ -59,7 +59,7 @@ test('budget modes: the computer refresh gets what is left before 55 minutes, le
   assert.equal(job.computerRefreshBudget(14 * MINUTE).budgetMs, 10 * MINUTE, 'never less than the after-write budget');
   // The hourly task passes that budget to the scheduled mode.
   const s = require('./support/windows-task-switch-world.cjs');
-  const home = s.tempHome({ after() {} }), root = s.checkout({ after() {} });
+  const home = s.tempHome(t), root = s.checkout(t);
   const fake = s.fakeRun({ 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { status: 'enabled', fresh: true } }) }, 'programme.cjs': { status: 0, stdout: '{"holds":[]}' } });
   const calls = [];
   let clock = 0;
