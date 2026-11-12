@@ -1,18 +1,21 @@
 # Toolkit Changelog
 
-## 3.68.0 (Merge by card in Claude Code)
+## 3.68.0 (one-time permission blocks and checked cleanup)
 
 ### Added
 
-- In Claude Code on this computer, a tap can replace typed `merge N`. When the merge hold refuses a merge that names its full head SHA, it hands back one exact card: "Merge owner/name#N at <short SHA>?" with Merge and Not now. The owner's tap on Merge approves that pull request at that commit, once. Not now approves nothing and withdraws an unused approval for it.
-- The card counts only in a chat the owner started, shown exactly as given, as a plain tap. A changed card, a card asked with its answer filled in, words typed into Other, an answer the host marks as idle, a follow-up, typed text or noted, an answer with a field the reader does not know, and a launched, resumed or unmarked session record nothing. Nothing is refused for the card's sake, so ordinary questions are untouched.
-- A card event whose environment holds `TOOLKIT_HOST_SESSION` records nothing: the host's hook process carries none, and a session's shell commands do. Two command-line shapes are refused like a fed prompt, read from the text alone: one that names a hook script (or a file named after one, such as its tests) and a tool event (`PreToolUse`, `PostToolUse` or the card functions) and also runs node, bun or deno anywhere, unless the word straight after it is `--test` or `test`; and one that names a hook script and has a command starting `env` whose leading words (dash options or NAME=value) include `-i`, `--ignore-environment` or `-` as a word of its own. Ordinary work of either shape is refused too, such as a search or commit message about the hooks chained with any node run; run those as separate commands.
-- Known limits: this is a tripwire, not a lock. Any command or script that starts a hook script without `TOOLKIT_HOST_SESSION` can still feed a card event in the owner's own chat, because the refusals catch only those two exact shapes (a wrapper before `env`, other `env` option spellings, clearing the variable another way, a node one-liner or a saved script all get through), as it can already feed typed `merge N`. A host that answers the card itself, with no tap, is not told apart either: a permission answer from an SDK callback, a permission hook (from any plugin or from settings), a permission-prompt tool or a launcher, a reply a connected client sends to a background session, and an automatic answer the host does not mark.
+- **`toolkit permissions`:** `repo/scripts/toolkit-permissions.cjs` prints two paste-once blocks so Toolkit's own reversible commands stop asking each time. The computer block covers the programme commands that keep records in step, the scheduled-task commands and the cleanup command. The repository block covers pull request and issue comments and one exact evidence store push to the store's own origin and branch; merges are never in a block. A line carries a wildcard only where the script behind it checks its own arguments, and ask lines cover a task repair, a folder override, a skipped first run, a keep-or-replace answer and a comment delete. Codex cannot ask for a flag, so those commands are prompt rules in the Codex block. It only prints and checks; the owner pastes. `--check <file>` reports missing and stale lines, and `--format allowed-tools` prints the same lines for a single launch.
+- **`toolkit cleanup`:** `repo/scripts/toolkit-cleanup.cjs plan|apply` removes Toolkit scratch only: finished worktrees, temp files under the scratch folders and local branches already merged into the default branch. It never removes part of a worktree or a clone, a bare repository, anything whose path goes through a link, or anything behind a linked scratch root, and it counts every untracked and ignored file whatever Git's settings say. It always reads the evidence store back first, deletes nothing when there is no store to read back, and prints one line saying what it cleaned and what it kept.
+- **Start a recorded scheduled task:** `repo/scripts/toolkit-windows-tasks.cjs start --task <id>` runs one Toolkit-owned task now, and refuses tasks Toolkit does not own, the owner stopped, Task Scheduler shows as turned off, or someone edited by hand.
 
 ### Changed
 
-- The order for a merge that needs the owner is now: task auto-merge when it applies, then the card, then typed `merge N`. Codex keeps typed `merge N`. In cloud sessions the governance hook runs in cloud mode, which skips the merge hold, so a Projects card there still rests on the written rules and required CI.
-- Hook pack rows may use a placeholder in an object key, so a card answer can be keyed by its question.
+- **Safety gates:** the hard stop on saved permission rules now names the printed blocks as the supported route. Agents still never write host settings or rule files.
+- **Merge authority:** changes to the permission and cleanup scripts wait for a typed merge.
+
+### Not included
+
+- Claiming a controller seat, removing or adopting tasks, repairs, closing issues, deleting remote branches, forced, mirror or deleting pushes, a push anywhere but the store's own origin and branch, settings edits and secrets stay outside every block and keep asking.
 
 ## 3.67.0 (governance GitHub App setup and removal guidance)
 
