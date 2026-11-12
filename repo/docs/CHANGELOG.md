@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.72.3 (a governance GitHub App for the re-bump workflow)
+## 3.72.2 (a governance GitHub App for the re-bump workflow)
 
 ### Changed
 
