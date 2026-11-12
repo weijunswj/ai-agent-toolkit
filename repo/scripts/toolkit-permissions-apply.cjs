@@ -7,11 +7,13 @@
 //
 // The owner types this in their own terminal. It shows what would change, waits for the typed word
 // `apply`, backs each file up, merges the computer block into it, reads it back and lists what
-// changed. Agents never run it:
-//   - the computer block itself holds an ask line (Claude Code) and a prompt rule (Codex) for it,
-//     so the app always asks, and `--apply` must be the first argument so the Codex rule matches;
+// changed. Agents never run it. The only hard block is the app's own: the computer block holds an
+// ask line (Claude Code) and a prompt rule (Codex) for this exact command, and `--apply` must be the
+// first argument so the Codex rule matches. A command written another way (another interpreter
+// form, or a script that loads this file) matches neither. The two checks below are speed bumps,
+// not locks: a process that clears the markers and fakes a terminal gets past both.
 //   - it refuses in a shell a coding agent started (the exact markers `toolkit env show` refuses on);
-//   - it needs a real terminal on stdin and stdout and the typed word; a pipe or file never answers.
+//   - it needs a terminal on stdin and stdout and the typed word; a pipe or file never answers.
 //
 // Claude Code: the user settings file. Missing lines are added; every other key and line is kept;
 // stale Toolkit lines are reported, never removed. Codex: Toolkit's own rules file, replaced whole.
@@ -47,18 +49,25 @@ function parseApplyArgs(argv) {
 function terminalAsk(question) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    rl.question(question, (answer) => { rl.close(); resolve(answer); });
-    rl.on('close', () => resolve(''));
+    let answered = false;
+    // The answer resolves before close does: close (Ctrl+C, Ctrl+D or end of input) means no answer.
+    rl.question(question, (answer) => { answered = true; resolve(answer); rl.close(); });
+    rl.on('close', () => { if (!answered) resolve(''); });
   });
 }
 
 const ruleKeys = text => [...String(text || '').matchAll(/pattern = (\[[^\n]+\]),\n {4}decision = "(\w+)"/g)].map(match => `${match[2]} ${JSON.parse(match[1]).join(' ')}`);
 
 class PermissionsApply {
-  #fs; #environment; #home; #now; #pid;
+  #fs; #environment; #home; #now; #pid; #platform;
 
-  constructor({ fs = nodeFs, environment = process.env, home = require('node:os').homedir(), now = () => new Date(), pid = process.pid } = {}) {
-    this.#fs = fs; this.#environment = environment; this.#home = home; this.#now = now; this.#pid = pid;
+  constructor({ fs = nodeFs, environment = process.env, home = require('node:os').homedir(), now = () => new Date(), pid = process.pid, platform = process.platform } = {}) {
+    this.#fs = fs; this.#environment = environment; this.#home = home; this.#now = now; this.#pid = pid; this.#platform = platform;
+  }
+
+  // A link whose target is missing would be swapped for a plain file, so it stops instead.
+  #danglingLink(file) {
+    try { return this.#fs.lstatSync(file).isSymbolicLink() && !this.#fs.existsSync(file); } catch { return false; }
   }
 
   #read(file) {
@@ -71,6 +80,7 @@ class PermissionsApply {
   // What one block would change. Reads only.
   plan(block, check) {
     const before = this.#read(block.target);
+    if (before === null && this.#danglingLink(block.target)) throw new ApplyStop(`${block.target} is a link to a file that does not exist.`, 'fix or remove the link, then run it again. Nothing was written.');
     if (block.host === 'codex') {
       const codexHome = this.#environment.CODEX_HOME || path.join(this.#home, '.codex');
       if (!this.#fs.existsSync(codexHome)) return { host: 'codex', target: block.target, skip: `Codex has no settings folder on this computer (${codexHome}).` };
@@ -96,10 +106,24 @@ class PermissionsApply {
     const merged = { ...settings, permissions: { ...permissions } };
     for (const key of ['allow', 'ask']) if (missing[key].length) merged.permissions[key] = [...(permissions[key] || []), ...missing[key]];
     const current = !missing.allow.length && !missing.ask.length;
-    return { host: 'claude', target: block.target, before, after: `${JSON.stringify(merged, null, 2)}\n`, current, missing, stale: before !== null ? check(block.target) : [] };
+    // Keep the file's own layout: its indent, line endings and byte order mark.
+    const indent = (before && /^\uFEFF?\{\r?\n([ \t]+)\S/.exec(before)) ? /^\uFEFF?\{\r?\n([ \t]+)\S/.exec(before)[1] : 2;
+    const eol = before && before.includes('\r\n') ? '\r\n' : '\n';
+    const after = `${before && before.startsWith('\uFEFF') ? '\uFEFF' : ''}${JSON.stringify(merged, null, indent).replace(/\n/g, eol)}${eol}`;
+    return { host: 'claude', target: block.target, before, after, current, missing, stale: before !== null ? check(block.target) : [] };
   }
 
-  #stamp() { return this.#now().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z'); }
+  #stamp() { return this.#now().toISOString().replace(/[-:]/g, '').replace(/\./, ''); }
+
+  // A new backup next to the file; never overwrites an older one.
+  #backup(real) {
+    const stamp = this.#stamp();
+    for (let attempt = 1; attempt <= 20; attempt += 1) {
+      const name = `${real}.toolkit-backup-${stamp}${attempt > 1 ? `-${attempt}` : ''}`;
+      try { this.#fs.copyFileSync(real, name, this.#fs.constants.COPYFILE_EXCL); return name; } catch (error) { if (!error || error.code !== 'EEXIST') throw error; }
+    }
+    throw Object.assign(new Error('no free backup name'), { code: 'EEXIST' });
+  }
 
   // Writes one planned change: backup, temp file, rename, read back.
   write(plan) {
@@ -108,13 +132,14 @@ class PermissionsApply {
     if (now !== plan.before) throw new ApplyStop(`${plan.target} changed after the preview.`, 'run toolkit permissions --apply again. Nothing more was written.');
     const real = plan.before !== null ? fs.realpathSync(plan.target) : plan.target;
     let backup = null;
-    if (plan.before !== null) {
-      backup = `${real}.toolkit-backup-${this.#stamp()}`;
-      fs.copyFileSync(real, backup, fs.constants.COPYFILE_EXCL);
-    } else fs.mkdirSync(path.dirname(real), { recursive: true });
     const temp = `${real}.toolkit-tmp-${this.#pid}`;
     try {
-      fs.writeFileSync(temp, plan.after, { flag: 'wx' });
+      // The new file keeps the old one's permission bits (a 0600 settings file stays 0600).
+      const mode = plan.before !== null ? fs.statSync(real).mode & 0o777 : null;
+      if (plan.before !== null) backup = this.#backup(real);
+      else fs.mkdirSync(path.dirname(real), { recursive: true });
+      fs.writeFileSync(temp, plan.after, { flag: 'wx', ...(mode !== null ? { mode } : {}) });
+      if (mode !== null && this.#platform !== 'win32') fs.chmodSync(temp, mode);
       fs.renameSync(temp, real);
     } catch (error) {
       try { fs.rmSync(temp, { force: true }); } catch { /* the temp file may not exist */ }
@@ -157,7 +182,7 @@ async function main(argv, deps = {}) {
     const tty = (deps.tty || (() => ({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) })))();
     if (!tty.stdin || !tty.stdout) throw new ApplyStop('--apply needs a terminal you type into; it does not read answers from a pipe or print into a file.', 'run it yourself in PowerShell or a terminal window. Nothing was written.');
 
-    const { PermissionBlocks } = require('./toolkit-permissions.cjs');
+    const PermissionBlocks = deps.PermissionBlocks || require('./toolkit-permissions.cjs').PermissionBlocks;
     const blocks = new PermissionBlocks(deps);
     const applier = new PermissionsApply(deps);
     const plans = options.hosts.map((host) => {

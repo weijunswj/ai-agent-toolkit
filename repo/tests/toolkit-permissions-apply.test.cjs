@@ -61,7 +61,7 @@ test('merges the Claude block into the settings file, keeps every other setting,
   assert.equal(after.model, 'x');
   assert.deepEqual(after.env, { A: '1' });
   assert.equal(after.permissions.defaultMode, 'default');
-  const backup = `${pc.settings}.toolkit-backup-20261112T110000Z`;
+  const backup = `${pc.settings}.toolkit-backup-20261112T110000000Z`;
   assert.equal(fs.readFileSync(backup, 'utf8'), before, 'the backup is the file as it was');
   assert.equal(fs.readFileSync(pc.rules, 'utf8'), blockFor(pc.deps, 'codex').text);
   assert.equal(pc.asked.length, 1);
@@ -164,7 +164,7 @@ test('the Codex rules file is replaced whole and the change is listed rule by ru
   assert.equal(fs.readFileSync(pc.rules, 'utf8'), blockFor(pc.deps, 'codex').text);
   assert.match(pc.out.join(''), /- allow old thing/);
   assert.match(pc.out.join(''), /\+ prompt node \/opt\/toolkit\/repo\/scripts\/toolkit-permissions\.cjs --apply/);
-  assert.ok(fs.existsSync(`${pc.rules}.toolkit-backup-20261112T110000Z`));
+  assert.ok(fs.existsSync(`${pc.rules}.toolkit-backup-20261112T110000000Z`));
   assert.equal(fs.existsSync(pc.settings), false, '--host codex leaves Claude Code alone');
 });
 
@@ -191,4 +191,85 @@ test('the blocks make --apply ask on Claude Code and prompt on Codex, anywhere o
   assert.equal(decide(['node', 'C:/tk/repo/scripts/toolkit-permissions.cjs', '--apply']), 'prompt');
   assert.equal(decide(['node', 'C:/tk/repo/scripts/toolkit-permissions.cjs', '--apply', '--host', 'codex']), 'prompt');
   assert.equal(decide(['node', 'C:/tk/repo/scripts/toolkit-permissions.cjs', '--host', 'codex']), 'allow', 'printing stays allowed');
+});
+
+// ---- G2 round 1 findings: each test below reproduces one finding and holds the fix --------------
+
+test('H1: run as a script, the --apply handoff gets the blocks class without requiring the loading script back', t => {
+  const text = fs.readFileSync(path.join(ROOT, 'repo', 'scripts', 'toolkit-permissions.cjs'), 'utf8');
+  assert.ok(text.indexOf('module.exports =') < text.indexOf('if (require.main === module)'), 'exports come before the entry point');
+  // Node throws "not extensible" on a require of a still-loading module with frozen exports, so the
+  // class travels in the deps. The terminal test below runs the real script end to end.
+  assert.match(text, /toolkit-permissions-apply\.cjs'\)\.main\(argv\.slice\(1\), \{ \.\.\.deps, PermissionBlocks \}\)/);
+  let seen = null;
+  const pc = computer(t);
+  return Promise.resolve(permissions.main(['--apply'], { ...pc.deps, ask: () => 'no', tty: () => { seen = 'reached'; return { stdin: true, stdout: true }; } })).then(code => {
+    assert.equal(code, 1);
+    assert.equal(seen, 'reached');
+  });
+});
+
+test('M1 and L4: a rewrite keeps the file mode, indent, line endings and byte order mark', { skip: process.platform === 'win32' && 'file modes are POSIX only' }, async t => {
+  const pc = computer(t, { codex: false });
+  fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
+  fs.writeFileSync(pc.settings, `﻿${JSON.stringify({ model: 'x', permissions: { allow: ['Bash(npm test)'] } }, null, '\t').replace(/\n/g, '\r\n')}\r\n`, { mode: 0o600 });
+  fs.chmodSync(pc.settings, 0o600);
+  assert.equal(await permissions.main(['--apply'], pc.deps), 0, pc.err.join(''));
+  assert.equal(fs.statSync(pc.settings).mode & 0o777, 0o600);
+  const text = fs.readFileSync(pc.settings, 'utf8');
+  assert.ok(text.startsWith('﻿{\r\n\t"model"'), 'BOM, CRLF and tab indent kept');
+  assert.ok(!/[^\r]\n/.test(text), 'every line ends in CRLF');
+  assert.ok(JSON.parse(text.slice(1)).permissions.allow.includes('Bash(npm test)'));
+});
+
+test('L1: two runs in the same millisecond keep both backups and never crash', async t => {
+  const pc = computer(t, { codex: false });
+  fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
+  fs.writeFileSync(pc.settings, '{}');
+  assert.equal(await permissions.main(['--apply'], pc.deps), 0);
+  const settings = JSON.parse(fs.readFileSync(pc.settings, 'utf8'));
+  settings.permissions.allow.shift();
+  fs.writeFileSync(pc.settings, JSON.stringify(settings));
+  assert.equal(await permissions.main(['--apply'], pc.deps), 0, pc.err.join(''));
+  assert.deepEqual(files(pc.home).filter(file => /toolkit-backup-/.test(file)), ['.claude/settings.json.toolkit-backup-20261112T110000000Z', '.claude/settings.json.toolkit-backup-20261112T110000000Z-2']);
+  assert.equal(fs.readFileSync(`${pc.settings}.toolkit-backup-20261112T110000000Z`, 'utf8'), '{}', 'the first backup is untouched');
+});
+
+test('L2: a settings link to a missing file stops and stays a link', async t => {
+  const pc = computer(t, { codex: false });
+  fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
+  try { fs.symlinkSync(path.join(pc.home, 'nowhere', 'settings.json'), pc.settings); } catch { t.skip('this computer cannot make a symlink'); return; }
+  assert.equal(await permissions.main(['--apply'], pc.deps), 1);
+  assert.match(pc.err.join(''), /link to a file that does not exist/);
+  assert.ok(fs.lstatSync(pc.settings).isSymbolicLink());
+  assert.deepEqual(pc.asked, []);
+});
+
+// H1 and H2 end to end: the real script in a real pseudo-terminal, with the typed word. The child
+// gets a clean environment (no agent markers) and a temp home, so it touches nothing of anyone's.
+test('H1 and H2: the real script in a terminal takes the typed apply and writes the block', { skip: (process.platform !== 'linux' || spawnSync('script', ['--version']).status !== 0) && 'needs util-linux script on Linux' }, async t => {
+  const pc = computer(t, { codex: false });
+  fs.writeFileSync(path.join(pc.home, '.ai-agent-toolkit', 'current', 'state.json'), JSON.stringify({ repo_path: ROOT }));
+  fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
+  fs.writeFileSync(pc.settings, '{"model":"m"}');
+  const env = { PATH: process.env.PATH, HOME: pc.home, TERM: 'dumb', LANG: 'C.UTF-8' };
+  const command = `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(ROOT, 'repo', 'scripts', 'toolkit-permissions.cjs'))} --apply`;
+  const child = require('node:child_process').spawn('script', ['-qec', command, '/dev/null'], { env, cwd: os.tmpdir(), stdio: ['pipe', 'pipe', 'pipe'] });
+  let output = '';
+  let typed = false;
+  const done = new Promise(resolve => child.on('close', code => resolve(code)));
+  const timer = setTimeout(() => child.kill('SIGKILL'), 30000);
+  child.stdout.on('data', chunk => {
+    output += chunk;
+    if (!typed && /Type apply/.test(output)) { typed = true; child.stdin.write('apply\r'); }
+  });
+  child.stderr.on('data', chunk => { output += chunk; });
+  const code = await done;
+  clearTimeout(timer);
+  child.stdin.destroy();
+  assert.equal(code, 0, output);
+  assert.match(output, /Claude Code: added \d+ allow and \d+ ask lines/);
+  const after = JSON.parse(fs.readFileSync(pc.settings, 'utf8'));
+  assert.equal(after.model, 'm');
+  assert.ok(after.permissions.ask.some(line => /toolkit-permissions\.cjs" \*--apply\*/.test(line)));
 });

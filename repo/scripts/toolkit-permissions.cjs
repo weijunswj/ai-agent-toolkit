@@ -325,7 +325,9 @@ function describe(built, options) {
 }
 
 function main(argv = process.argv.slice(2), deps = {}) {
-  if (argv[0] === '--apply') return require('./toolkit-permissions-apply.cjs').main(argv.slice(1), deps);
+  // The class is handed over, not required back: run as a script, this file is still loading here,
+  // and a require of a loading module with frozen exports throws.
+  if (argv[0] === '--apply') return require('./toolkit-permissions-apply.cjs').main(argv.slice(1), { ...deps, PermissionBlocks });
   const out = deps.stdout || (text => process.stdout.write(text));
   const err = deps.stderr || (text => process.stderr.write(text));
   let options;
@@ -352,6 +354,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
   }
 }
 
-if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });
-
+// Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.
 module.exports = Object.freeze({ PermissionBlocks, PermissionsError, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, TASKS_ALLOW, TASKS_ASK, safePath, parseArgs, main });
+
+if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });

@@ -9,7 +9,7 @@
 ### Changed
 
 - **Permission blocks:** every computer block now makes `--apply` ask: an ask line on Claude Code and a prompt rule on Codex, with `--apply` required as the first argument so the Codex rule matches. Printing and `--check` stay allowed and still write nothing.
-- **Agents never run `--apply`:** it refuses in a shell a coding agent started and without a terminal on both ends, and the setup skill and safety playbooks tell agents to hand the owner the command instead.
+- **Agents never run `--apply`:** the setup skill and safety playbooks tell agents to hand the owner the command instead. The app's ask for the exact command is the only hard block; the refusals in an agent's shell and without a terminal are speed bumps. Blocks pasted before this release allow `--apply` with no ask until `--apply` or a fresh paste adds the ask line.
 - **Merge authority:** changes to the apply command wait for a typed merge, like the permission, cleanup and store scripts.
 
 ## 3.72.1 (closing words wait for a task's recorded UAT)
