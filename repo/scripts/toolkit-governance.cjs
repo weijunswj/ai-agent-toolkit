@@ -20,6 +20,7 @@ const bindingCache = require('./toolkit-governance-binding.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
 const hookCapability = require('./toolkit-hook-capability.cjs');
+const governanceApp = require('./toolkit-governance-app.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
@@ -54,15 +55,16 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader;
+  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
   // `rulesetCreator`, `stateRulesetCreator`, `protectionReader`, `protectionWriter`, `securityReader`, `securityWriter` and
   // `securityFileWriter` are only for tests, as are `discoveryGh` (discovery's GitHub reader) and
   // `refresh` (the merged-binding refresh `status` runs first), `hookReader` (the Hooks: lines) and
-  // `queueReader` (the offline queue count for a repository root).
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null } = {}) {
+  // `queueReader` (the offline queue count for a repository root) and `appReader` (the governance App
+  // presence reads).
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null } = {}) {
     this.#proposals = new GovernanceProposals({ registryOptions, transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
     this.#stdout = stdout;
     this.#stderr = stderr;
@@ -81,6 +83,7 @@ class ToolkitGovernanceCli {
     this.#securityWriter = securityWriter;
     this.#securityFileWriter = securityFileWriter;
     this.#hookReader = hookReader || (() => hookCapability.hookCapability());
+    this.#appReader = appReader;
     this.#queueReader = queueReader || (root => require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').queueSummary(root));
   }
 
@@ -274,8 +277,18 @@ class ToolkitGovernanceCli {
     let binding = null;
     try { binding = JSON.parse(fs.readFileSync(path.join(this.#cwd, governance.BINDING_FILE), 'utf8')); } catch { /* prepare explains missing adoption */ }
     const result = this.#proposals.publish(this.#cwd, run, binding);
-    this.#print(json, result, [result.text]);
+    this.#print(json, result, [result.text, ...this.#appLines(result.proposal, binding)]);
     return 0;
+  }
+
+  // The governance App steps that follow a published decision: setup for yes, removal for no.
+  #appLines(proposal, binding) {
+    const slug = proposal.repository;
+    const state = governanceApp.presence(slug, { reader: this.#appReader || governanceApp.ghReader,
+      offline: !this.#appReader && (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1') });
+    if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state);
+    const others = governance.enabledRepositories(this.#registryOptions).filter(name => name.toLowerCase() !== slug.toLowerCase());
+    return governanceApp.removalLines(slug, state, others);
   }
 
   async #decide(command, json) {
