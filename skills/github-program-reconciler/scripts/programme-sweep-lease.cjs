@@ -68,6 +68,21 @@ class SweepLease {
     }
   }
 
+  // The holder's progress at the state boundary, so a run killed after it is reported precisely.
+  // When the lease lives in the state store itself it rides the state commit (no request of its
+  // own); otherwise it is written here, once.
+  progress(diagnostics, stateStore) {
+    if (!this.held) return null;
+    const next = structuredClone(this.held.doc);
+    next.holder.progress = { phase: diagnostics.phase, done: diagnostics.done, total: diagnostics.total, started_at: next.holder.progress.started_at };
+    const text = state.canonicalText(state.validateSweepRecord(next));
+    if (stateStore === this.store) {
+      return { path: this.file, text, sha: this.held.sha, committed: blob => { this.held = { doc: next, sha: blob }; } };
+    }
+    if (!this.put(next, this.held.sha, 'programme sweep: progress')) throw new state.ProgrammeError('PASS_LOCK_LOST', 'The sweep lease changed hands; this pass stopped.');
+    return null;
+  }
+
   // Before every request: a sweep that outlived its lease stops at once.
   check() {
     if (this.held && this.nowMs() >= Date.parse(this.held.doc.holder.expires_at)) {
@@ -84,11 +99,12 @@ class SweepLease {
     return [...(streaks.busy >= STREAK_FINDING ? ['STATE_BRANCH_BUSY'] : []), ...(streaks.graphql >= STREAK_FINDING ? ['GRAPHQL_REFUSED'] : [])];
   }
 
-  // Release with what this pass leaves for the next. Only the holder releases, with compare-and-swap.
+  // Release with what this pass leaves for the next. Only the holder releases, with compare-and-swap
+  // on the version it reads now: its own state commit may have carried its progress since.
   release({ changedSince = null, completeAt = null, complete, stop = null, reason = null, busy = false, graphqlRefused = false }) {
     if (!this.held) return false;
     const { doc, sha } = this.current();
-    if (doc.holder?.nonce !== this.nonce || sha !== this.held.sha) { this.held = null; return false; }
+    if (doc.holder?.nonce !== this.nonce) { this.held = null; return false; }
     const next = structuredClone(doc);
     next.holder = null;
     if (changedSince) next.changed_since = changedSince;

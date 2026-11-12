@@ -1,6 +1,9 @@
 {
   "schema": "toolkit.cloud-jobs.v1",
-  "secret_name": "TOOLKIT_GOVERNANCE_TOKEN",
+  "app": {
+    "client_id_variable": "TOOLKIT_GOVERNANCE_APP_CLIENT_ID",
+    "private_key_secret": "TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY"
+  },
   "never_granted": [
     "administration",
     "secrets",
@@ -16,17 +19,26 @@
         "cron": "17 * * * *"
       },
       "replaces_laptop_job": "toolkit-programme-sweep",
-      "permissions": {
-        "governed_repository": {
-          "issues": ["read", "write"],
-          "pull_requests": ["read"],
-          "metadata": ["read"]
+      "tokens": [
+        {
+          "name": "governed",
+          "repository": "governed_repository",
+          "permissions": {
+            "issues": "write",
+            "pull_requests": "write",
+            "contents": "read",
+            "checks": "read",
+            "statuses": "read"
+          }
         },
-        "evidence_store": {
-          "contents": ["read", "write"],
-          "metadata": ["read"]
+        {
+          "name": "store",
+          "repository": "evidence_store",
+          "permissions": {
+            "contents": "write"
+          }
         }
-      }
+      ]
     }
   ]
 }

@@ -1,119 +1,77 @@
 'use strict';
 
+// The cloud jobs contract (App shape): one governance App, each row's tokens with exact
+// permissions, the App's one-time permission union, and a setup check that reads metadata only.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
-const { test } = require('node:test');
+const test = require('node:test');
 
-const root = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
-const contractPath = path.join(root, 'repo/contracts/cloud-jobs.json');
-const fakeSecret = 'example-test-token-not-a-credential';
+const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
+const jobs = () => require(path.join(ROOT, 'repo/scripts/toolkit-cloud-jobs.cjs'));
+const contract = () => structuredClone(jobs().readCloudJobsContract({ root: ROOT }));
 
-function api() {
-  return require(path.join(root, 'repo/scripts/toolkit-cloud-jobs.cjs'));
-}
+test('contract: the programme sweep row has two narrow tokens and no personal token', () => {
+  const source = contract();
+  assert.deepEqual(source.app, { client_id_variable: 'TOOLKIT_GOVERNANCE_APP_CLIENT_ID', private_key_secret: 'TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY' });
+  assert.deepEqual(source.never_granted, ['administration', 'secrets', 'workflows', 'account']);
+  const row = source.jobs.find(job => job.id === 'programme-sweep');
+  assert.deepEqual(row.tokens, [
+    { name: 'governed', repository: 'governed_repository', permissions: { issues: 'write', pull_requests: 'write', contents: 'read', checks: 'read', statuses: 'read' } },
+    { name: 'store', repository: 'evidence_store', permissions: { contents: 'write' } },
+  ]);
+  assert.doesNotMatch(JSON.stringify(source), /TOOLKIT_GOVERNANCE_TOKEN|secret_name/);
+});
 
-test('cloud jobs contract defines the programme sweep with only its approved permissions', () => {
-  const contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
-  const jobs = api().validateCloudJobsContract(contract);
-
-  assert.equal(contract.secret_name, 'TOOLKIT_GOVERNANCE_TOKEN');
-  assert.deepEqual(contract.never_granted, ['administration', 'secrets', 'workflows', 'account']);
-  assert.deepEqual(jobs.map(job => job.id), ['programme-sweep']);
-  assert.equal(jobs[0].workflow, '.github/workflows/toolkit-programme-sweep.yml');
-  assert.equal(jobs[0].schedule.cadence, 'hourly');
-  assert.equal(jobs[0].replaces_laptop_job, 'toolkit-programme-sweep');
-  assert.deepEqual(jobs[0].permissions, {
-    governed_repository: {
-      issues: ['read', 'write'],
-      pull_requests: ['read'],
-      metadata: ['read'],
-    },
-    evidence_store: {
-      contents: ['read', 'write'],
-      metadata: ['read'],
-    },
+test('guide: the App permission union and the lines the check prints', () => {
+  const guide = jobs().buildCloudJobsGuide({ root: ROOT });
+  assert.deepEqual(guide.app_permissions, {
+    governed_repository: { contents: 'read', issues: 'write', pull_requests: 'write', checks: 'read', statuses: 'read' },
+    evidence_store: { contents: 'write' },
   });
+  // A second row widens the union to the highest level each asks for, per repository.
+  const wider = contract();
+  wider.jobs.push({ id: 'rebump', workflow: '.github/workflows/toolkit-rebump.yml', schedule: { cadence: 'on-merge', cron: '0 0 * * *' }, replaces_laptop_job: 'toolkit-rebump',
+    tokens: [{ name: 'push', repository: 'governed_repository', permissions: { contents: 'write', pull_requests: 'read' } }] });
+  assert.deepEqual(jobs().buildCloudJobsGuide({ contract: wider }).app_permissions.governed_repository, { contents: 'write', issues: 'write', pull_requests: 'write', checks: 'read', statuses: 'read' });
+  const lines = jobs().guideLines(guide, { variable: 'present', secret: 'missing' });
+  assert.ok(lines.includes('- Governed repository: Contents: read, Issues: read and write, Pull requests: read and write, Checks: read, Commit statuses: read'));
+  assert.ok(lines.includes('- Evidence store: Contents: read and write'));
+  assert.ok(lines.includes('App variable TOOLKIT_GOVERNANCE_APP_CLIENT_ID: present. App secret TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY: missing.'));
+  assert.ok(lines.some(line => /could not be checked here; the first scheduled run proves it/.test(line)));
 });
 
-test('guide reader lists every row and combines permissions by repository role', () => {
-  const guide = api().buildCloudJobsGuide({ root });
-
-  assert.deepEqual(guide.jobs.map(job => job.id), ['programme-sweep']);
-  assert.deepEqual(guide.combined_permissions, {
-    governed_repository: {
-      issues: ['read', 'write'],
-      pull_requests: ['read'],
-      metadata: ['read'],
-    },
-    evidence_store: {
-      contents: ['read', 'write'],
-      metadata: ['read'],
-    },
-  });
-  assert.deepEqual(guide.never_granted, ['administration', 'secrets', 'workflows', 'account']);
+for (const [label, change] of [
+  ['a never-granted permission', source => { source.jobs[0].tokens[0].permissions.administration = 'read'; }],
+  ['an unknown permission', source => { source.jobs[0].tokens[0].permissions.actions = 'write'; }],
+  ['an unknown level', source => { source.jobs[0].tokens[1].permissions.contents = 'admin'; }],
+  ['two tokens for one repository', source => { source.jobs[0].tokens[1].repository = 'governed_repository'; }],
+  ['another App variable', source => { source.app.client_id_variable = 'OTHER_CLIENT_ID'; }],
+  ['a personal token field', source => { source.secret_name = 'TOOLKIT_GOVERNANCE_TOKEN'; }],
+  ['a duplicate row', source => { source.jobs.push(structuredClone(source.jobs[0])); }],
+  ['a changed never-granted list', source => { source.never_granted.pop(); }],
+]) test(`contract: ${label} is refused`, () => {
+  const source = contract();
+  change(source);
+  assert.throws(() => jobs().validateCloudJobsContract(source), jobs().CloudJobsContractError);
 });
 
-test('secret check asks only for metadata under the shared secret name', async () => {
-  const calls = [];
-  const result = await api().checkSecretMetadata({
-    root,
-    repository: 'owner/repository',
-    readSecretMetadata: async query => {
-      calls.push(query);
-      return { status: 200, name: 'TOOLKIT_GOVERNANCE_TOKEN', created_at: '2026-01-01T00:00:00Z' };
-    },
-  });
-
-  assert.deepEqual(calls, [{ repository: 'owner/repository', secret_name: 'TOOLKIT_GOVERNANCE_TOKEN' }]);
-  assert.deepEqual(result, { status: 'present', secret_name: 'TOOLKIT_GOVERNANCE_TOKEN' });
-  assert.equal(JSON.stringify(result).includes(fakeSecret), false);
+test('setup check: metadata only, present, missing or unavailable', () => {
+  const asked = [];
+  const answers = { variable: { status: 200 }, secret: { status: 404 } };
+  const result = jobs().checkAppSetup({ root: ROOT, repository: 'owner/repository', readMetadata: query => { asked.push(query); return answers[query.kind]; } });
+  assert.deepEqual(result, { variable: 'present', secret: 'missing' });
+  assert.deepEqual(asked, [{ repository: 'owner/repository', kind: 'variable', name: 'TOOLKIT_GOVERNANCE_APP_CLIENT_ID' }, { repository: 'owner/repository', kind: 'secret', name: 'TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY' }]);
+  assert.deepEqual(jobs().checkAppSetup({ root: ROOT, repository: 'owner/repository', readMetadata: () => { throw new Error('offline'); } }), { variable: 'unavailable', secret: 'unavailable' });
+  let called = false;
+  assert.deepEqual(jobs().checkAppSetup({ root: ROOT, repository: '../escape', readMetadata: () => { called = true; return { status: 200 }; } }), { variable: 'unavailable', secret: 'unavailable' });
+  assert.equal(called, false, 'a hostile repository name is refused before any read');
 });
 
-test('secret check distinguishes missing metadata from unavailable reads without exposing errors', async () => {
-  const apiModule = api();
-  const missing = await apiModule.checkSecretMetadata({
-    root,
-    repository: 'owner/repository',
-    readSecretMetadata: async () => ({ status: 404 }),
-  });
-  const unavailable = await apiModule.checkSecretMetadata({
-    root,
-    repository: 'owner/repository',
-    readSecretMetadata: async () => { throw new Error(`private response ${fakeSecret}`); },
-  });
-
-  assert.deepEqual(missing, { status: 'missing', secret_name: 'TOOLKIT_GOVERNANCE_TOKEN' });
-  assert.deepEqual(unavailable, { status: 'unavailable', secret_name: 'TOOLKIT_GOVERNANCE_TOKEN' });
-  assert.equal(JSON.stringify(unavailable).includes(fakeSecret), false);
+test('setup check: gh prints nothing, so no value ever reaches the check', () => {
+  const seen = [];
+  const spawn = (file, args, options) => { seen.push({ args, options }); return args.at(-1).includes('/secrets/') ? { status: 1, stderr: 'gh: Not Found (HTTP 404)' } : { status: 0, stdout: '' }; };
+  assert.deepEqual(jobs().ghActionsMetadata({ repository: 'owner/repository', kind: 'variable', name: 'TOOLKIT_GOVERNANCE_APP_CLIENT_ID' }, { spawn }), { status: 200 });
+  assert.deepEqual(jobs().ghActionsMetadata({ repository: 'owner/repository', kind: 'secret', name: 'TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY' }, { spawn }), { status: 404 });
+  assert.deepEqual(seen.map(call => call.args), [['api', '--silent', 'repos/owner/repository/actions/variables/TOOLKIT_GOVERNANCE_APP_CLIENT_ID'], ['api', '--silent', 'repos/owner/repository/actions/secrets/TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY']]);
+  assert.ok(seen.every(call => call.options.shell === false));
 });
-
-test('secret check refuses hostile repository identifiers before its injected reader runs', async () => {
-  const calls = [];
-  for (const repository of ['owner/repo\n--jq .value', 'owner/../other', 'owner/repo?ref=main', 'оwner/repo']) {
-    const result = await api().checkSecretMetadata({
-      root,
-      repository,
-      readSecretMetadata: async query => { calls.push(query); return { status: 200, name: 'TOOLKIT_GOVERNANCE_TOKEN' }; },
-    });
-    assert.deepEqual(result, { status: 'unavailable', secret_name: 'TOOLKIT_GOVERNANCE_TOKEN' });
-  }
-  assert.deepEqual(calls, []);
-});
-
-test('contract reader rejects duplicate rows and unapproved or secret-bearing fields', () => {
-  const cloudJobs = api();
-  const contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
-  const duplicate = structuredClone(contract);
-  duplicate.jobs.push(structuredClone(duplicate.jobs[0]));
-  assert.throws(() => cloudJobs.validateCloudJobsContract(duplicate), /invalid|duplicate/i);
-
-  const excessPermission = structuredClone(contract);
-  excessPermission.jobs[0].permissions.governed_repository.administration = ['read'];
-  assert.throws(() => cloudJobs.validateCloudJobsContract(excessPermission), /invalid|permission/i);
-
-  const leakedValue = structuredClone(contract);
-  leakedValue.jobs[0].secret_value = fakeSecret;
-  assert.throws(() => cloudJobs.validateCloudJobsContract(leakedValue), /invalid|field/i);
-});
-

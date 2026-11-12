@@ -231,8 +231,8 @@ function runGit(gitPath, cwd, args) {
 // can edit. The state module ships with the plugin; without it nothing can show the repository is
 // ENABLED, so the command refuses.
 class MergedSweepBindingReader {
-  constructor({ transport, repository, now = () => new Date() }) {
-    Object.assign(this, { transport, repository, now }); this.binding = null;
+  constructor({ transport, repository, checkedOut = null, now = () => new Date() }) {
+    Object.assign(this, { transport, repository, checkedOut, now }); this.binding = null;
   }
   read(identity) {
     const repo = this.transport.request('GET', `repos/${this.repository}`);
@@ -241,6 +241,8 @@ class MergedSweepBindingReader {
     const current = this.transport.request('GET', `repos/${this.repository}/branches/${encodeURIComponent(branch)}`);
     const head = current.json?.commit?.sha;
     if (current.status !== 200 || !/^[0-9a-f]{40}$/.test(head || '')) throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The default branch head could not be verified.');
+    // The code this run checked out must be the binding's own commit.
+    if (this.checkedOut !== null && head !== this.checkedOut) throw new ProgrammeError('MAIN_MOVED', 'The default branch moved while this run was starting; the next run picks it up. Nothing was written.');
     const file = this.transport.request('GET', `repos/${this.repository}/contents/.github/toolkit-programme.json?ref=${head}`);
     if (![200, 404].includes(file.status) || file.status === 200 && file.json?.encoding !== 'base64') throw new ProgrammeError('GOVERNANCE_STATE_UNAVAILABLE', 'The merged binding could not be read.');
     const text = file.status === 404 ? null : Buffer.from(file.json.content, 'base64').toString('utf8');
@@ -283,12 +285,20 @@ function openContext(args, deps = {}) {
   // GitHub governance must be ENABLED with its materials in place; a DISABLED or undecided repository
   // never runs programme commands, whatever files it carries. Tests that supply the origin own the state.
   // Tests that supply the origin own the state and the binding.
-  const base = deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') });
   const environment = deps.environment || process.env;
-  const online = environment.GITHUB_ACTIONS === 'true' && environment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1'
-    ? new MergedSweepBindingReader({ transport: base, repository: state.originSlug(originUrl) }) : null;
+  // The cloud sweep: refresh only, under two installation tokens, on the binding merged at the
+  // exact commit this run checked out.
+  const cloud = environment.GITHUB_ACTIONS === 'true' && environment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1';
+  if (cloud && args.command !== 'refresh') throw new ProgrammeError('ROLE_REFUSED', 'The cloud sweep runs refresh only.');
+  const base = deps.transport || (cloud ? cloudTransport(environment) : new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') }));
+  if (cloud && typeof base.verify === 'function') base.verify();
+  const online = cloud ? new MergedSweepBindingReader({ transport: base, repository: state.originSlug(originUrl), checkedOut: environment.GITHUB_SHA }) : null;
   const merged = deps.originUrl ? null : requireGitHubGovernance(repoRoot, online);
   const binding = deps.binding || merged || state.loadBinding(repoRoot);
+  if (cloud && binding.state) throw new ProgrammeError('CLOUD_PUBLIC_STATE', 'This repository keeps its state on a public branch; the cloud sweep does not run it yet.');
+  if (cloud && environment.STORE_REPOSITORY && environment.STORE_REPOSITORY.toLowerCase() !== binding.store.repository.toLowerCase()) {
+    throw new ProgrammeError('BINDING_INVALID', 'The evidence store the workflow signed in to is not the one the merged binding names.');
+  }
   // A pass that holds the lock checks it still does, and renews it, before every GitHub request.
   const privateRepo = `repos/${binding.store.repository.toLowerCase()}`;
   const transport = deps.heartbeat ? Object.assign(Object.create(base), { request: (method, endpoint, body, options) => {
@@ -302,7 +312,14 @@ function openContext(args, deps = {}) {
   store.verify();
   // The session comes from --session only; an inherited environment never makes a session a writer.
   const writer = args.session ? { session: args.session, prefix: args.prefix || binding.writer_prefix } : null;
-  return { binding, transport, repository, store, writer, version, repoRoot, now: deps.now };
+  return { binding, transport, repository, store, writer, version, repoRoot, now: deps.now, login: cloud ? environment.SWEEP_LOGIN : null };
+}
+
+// The two installation tokens the workflow minted, each for its own repository.
+function cloudTransport(environment) {
+  const { InstallationTransport } = require('./programme-installation.cjs');
+  return new InstallationTransport({ governed: environment.GITHUB_REPOSITORY, store: environment.STORE_REPOSITORY, governedToken: environment.GOVERNED_TOKEN,
+    storeToken: environment.STORE_TOKEN, login: environment.SWEEP_LOGIN, ghPath: state.resolveExecutable('gh'), environment });
 }
 
 function requireWriter(context) {
@@ -535,7 +552,7 @@ function liveHead(context, child) {
 function makeReconciler(context) {
   return new state.Reconciler({
     store: context.store,
-    reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository }),
+    reader: new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository, login: context.login || null }),
     mutator: new state.GitHubMutator({ transport: context.transport, repository: context.repository }),
     binding: context.binding, writer: context.writer, toolkitVersion: context.version,
     refreshFacts: context.writer?.by_hash === true, now: context.now,
@@ -572,15 +589,23 @@ const commands = {
     // Only the hash of the holder's session: enough to write as it, never to decide for it.
     context.writer = state.refreshWriter(parentDoc);
     context.sweepNotes?.phaseAt('inventory');
-    const inventory = runInventory(context, parentDoc, deps, args['deadline-ms']);
+    let inventory;
+    // A request budget spent before the inventory finished leaves it incomplete; the pass then stops
+    // in planning and records that.
+    try { inventory = runInventory(context, parentDoc, deps, args['deadline-ms']); }
+    catch (error) {
+      if (error.code !== 'PASS_STOPPED' || !error.reason) throw error;
+      inventory = { complete: false, reason: error.reason, issues: [], findings: [{ code: 'INVENTORY_INCOMPLETE', issue: null }] };
+    }
     // The pass reads what changed since its predecessor started, its saved queue and its rotation
     // share; a parent without a saved queue reads every task once.
     const lease = context.lease;
     const queued = lease ? {
       since: parentDoc.sweep && lease.record.changed_since ? new Date(Date.parse(lease.record.changed_since) - SWEEP_OVERLAP_MS).toISOString() : null,
       queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: lease.findings(),
-      canRead: () => context.requests.canStartTask() && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,
+      canRead: started => context.requests.canStartTask(started) && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,
       settle: () => { context.requests.reading = false; },
+      progress: (diagnostics, store) => lease.progress(diagnostics, store),
     } : null;
     const report = commands.reconcile({ ...args, apply: true, inventory, queued }, context);
     if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
@@ -951,8 +976,15 @@ function runPasses(args, deps, out) {
   const beat = { fn: () => {} };
   const notes = new SweepNotes({ clock: pass.nowMs });
   // A refresh is a sweep: its requests are serial and budgeted, and it holds the shared lease.
-  const requests = args.command === 'refresh' ? new SweepRequests({ transport: deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') }), nowMs: pass.nowMs, ...(deps.requestCap ? { cap: deps.requestCap } : {}) }) : null;
-  if (requests) { requests.reading = false; requests.onLimit = () => { if (!pass.stopped) pass.stopped = pass.snapshot('time_limit'); }; }
+  const cloudEnvironment = deps.environment || process.env;
+  const cloudRun = cloudEnvironment.GITHUB_ACTIONS === 'true' && cloudEnvironment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1';
+  const requests = args.command === 'refresh' ? new SweepRequests({ transport: deps.transport || (cloudRun ? cloudTransport(cloudEnvironment) : new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') })), nowMs: pass.nowMs, ...(deps.requestCap ? { cap: deps.requestCap } : {}) }) : null;
+  if (requests) {
+    requests.reading = false;
+    requests.onLimit = () => { if (!pass.stopped) { pass.stopped = pass.snapshot('time_limit'); pass.stopReason = 'request cap'; } };
+    // The last requests settle intents and release the lease: no more page work this process.
+    requests.onExhausted = () => { requests.onLimit(); pass.deadline = pass.nowMs(); };
+  }
   const passDeps = { ...deps, ...(requests ? { transport: requests } : {}), heartbeat: () => beat.fn(), sweepNotes: notes };
   const context = openContext(args, passDeps);
   context.pass = pass;
@@ -1034,7 +1066,7 @@ function runPasses(args, deps, out) {
 // not hold yet comes from the lease, unless this computer's own note already reports it.
 function takeLease(context, host, pass, progress) {
   const requests = context.requests;
-  requests.count = 0; requests.reading = false; requests.reason = null; requests.limited = false; requests.serverStart = null;
+  requests.count = 0; requests.reading = false; requests.reason = null; requests.limited = false; requests.exhausted = false; requests.serverStart = null;
   context.store.graphqlRefused = false;
   const store = typeof context.store.private === 'object' ? context.store.private : context.store;
   const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs });

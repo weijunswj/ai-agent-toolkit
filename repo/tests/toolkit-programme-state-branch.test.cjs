@@ -660,3 +660,29 @@ test('refresh branch: a public child read without its version id requests no sid
   assert.equal(later.code, 0);
   assert.equal(fx.store().read('child', 12).doc.lifecycle, 'DONE');
 });
+
+test('batch public: crash after commit recomputes the checkpoint', () => {
+  const fx = fixture();
+  const lockFile = path.join(fx.dir, 'sweep.lock');
+  const issue = fx.github.issues.get(12);
+  Object.assign(issue, { state: 'closed', state_reason: 'completed', closed_at: fx.now(), updated_at: fx.now() });
+  const at = Date.parse(fx.now());
+  const old = fx.github.readAt(REPO, BRANCH, publicFile('issue-12'));
+  // The sidecar, then the branch commit land; the process dies before the checkpoint is written.
+  let crashed = false;
+  fx.github.intercept(call => {
+    if (!crashed && call.method === 'PUT' && call.path.endsWith('checkpoint.json')) { crashed = true; throw Object.assign(new Error('fixture crash after the branch commit'), { code: 'PASS_LOCK_LOST' }); }
+  });
+  const killed = fx.run(['refresh'], { lockFile, passClock: () => at });
+  assert.equal(killed.error?.code, 'PASS_LOCK_LOST');
+  assert.equal(crashed, true);
+  assert.equal(fx.github.readAt(REPO, BRANCH, publicFile('issue-12')).lifecycle, 'DONE', 'the branch commit stands');
+  fx.github.hooks = [];
+  const next = fx.run(['refresh'], { lockFile, passClock: () => at + 21 * 60 * 1000, pidAlive: () => false });
+  assert.equal(next.error, null, next.error?.message);
+  const final = fx.store().read('child', 12).doc;
+  assert.equal(final.lifecycle, 'DONE');
+  assert.equal(final.revision, old.revision + 1, 'written once, not twice');
+  assert.ok(next.result.state_branch.events.some(event => event.code === 'STATE_CHECKPOINT_RECOMPUTED'));
+  assert.equal(fx.github.readAt(STORE_REPO, 'main', checkpointFile).files['issue-12'].revision, final.revision);
+});

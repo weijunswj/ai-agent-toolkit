@@ -153,7 +153,7 @@ function checkConformance(cwd, options = {}) {
   }
   if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
   const drift = findings.some(entry => entry.severity === 'drift');
-  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult);
+  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot, options));
 }
 
 // Report the effective app-local setting; governance never asks or drafts an answer.
@@ -279,11 +279,22 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   return out;
 }
 
-function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null) {
-  let cloudJobs = null;
-  if (state?.state === 'ENABLED' && fs.existsSync(path.join(toolkitRoot, 'repo/contracts/cloud-jobs.json'))) {
-    cloudJobs = require('./toolkit-cloud-jobs.cjs').createCloudJobsGuide({ root: toolkitRoot }).list();
+// The cloud jobs guide: the governance App's permissions from the contract, and, online, whether its
+// variable and secret exist on this repository (metadata only; agents never create or set them).
+function cloudJobsGuide(state, toolkitRoot, options = {}) {
+  if (state?.state !== 'ENABLED' || !fs.existsSync(path.join(toolkitRoot, 'repo/contracts/cloud-jobs.json'))) return null;
+  const cloud = require('./toolkit-cloud-jobs.cjs');
+  const guide = cloud.buildCloudJobsGuide({ root: toolkitRoot });
+  let setup = null;
+  if (options.offline !== true) {
+    let slug = null;
+    try { const identity = governance.readIdentity(state.root); slug = identity.valid ? governance.remoteSlug(identity.remote) : null; } catch { slug = null; }
+    setup = cloud.checkAppSetup({ root: toolkitRoot, repository: slug, ...(options.cloudReader ? { readMetadata: options.cloudReader } : {}) });
   }
+  return { ...guide, setup };
+}
+
+function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null, cloudJobs = null) {
   let catalogueProblems = [];
   try { catalogueProblems = catalogue.catalogueProblems(toolkitRoot); } catch { catalogueProblems = ['the skill catalogue could not be checked']; }
   const all = [...findings, ...catalogueProblems.map(message => finding('CATALOGUE_DRIFT', 'drift', message))];

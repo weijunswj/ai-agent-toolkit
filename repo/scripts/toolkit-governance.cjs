@@ -190,14 +190,7 @@ class ToolkitGovernanceCli {
     if (result.default_branch_protection) lines.push(`Default-branch protection: ${result.default_branch_protection.status}`);
     if (result.dependency_security) lines.push(`Dependency and security settings: ${result.dependency_security.status}`);
     if (result.cloud_jobs) {
-      lines.push(`Cloud jobs: shared secret ${result.cloud_jobs.secret_name}`);
-      for (const job of result.cloud_jobs.jobs) {
-        lines.push(`- ${job.id}: ${job.schedule.cadence} (${job.workflow})`);
-        for (const [role, permissions] of Object.entries(job.permissions)) {
-          lines.push(`  ${role === 'governed_repository' ? 'Governed repository' : 'Evidence store'}: ${Object.entries(permissions).map(([name, access]) => `${name.replace(/_/g, ' ')} ${access.join(' and ')}`).join(', ')}`);
-        }
-      }
-      lines.push(`Never grant: ${result.cloud_jobs.never_granted.join(', ')}.`, 'Key setup: see Cloud jobs in the Toolkit Local Bridge guide.');
+      lines.push(...require('./toolkit-cloud-jobs.cjs').guideLines(result.cloud_jobs, result.cloud_jobs.setup), 'App setup: see Cloud jobs in the Toolkit Local Bridge guide.');
     }
     lines.push('Prompt-hold enforcement:');
     for (const [host, status] of Object.entries(result.enforcement)) lines.push(`- ${host}: ${status.status} (${status.reason})`);

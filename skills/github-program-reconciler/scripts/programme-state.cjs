@@ -2206,11 +2206,13 @@ function upsertStateBlock(text, rendered, placement = {}) {
 const STOPS_PASS = new Set(['STALE_WRITER', 'PASS_LOCK_LOST', 'PASS_STOPPED', 'SWEEP_STOP']);
 
 class GitHubTransport {
-  constructor({ ghPath, run = spawnSync, timeoutMs = 120000 }) {
+  // `env`, when given, is the whole environment of every gh call (the cloud sweep's own token).
+  constructor({ ghPath, run = spawnSync, timeoutMs = 120000, env = null }) {
     if (!ghPath) throw new ProgrammeError('EXECUTABLE_NOT_FOUND', 'GitHubTransport needs the full path to gh.');
     this.ghPath = ghPath;
     this.run = run;
     this.timeoutMs = timeoutMs;
+    this.env = env;
   }
 
   request(method, apiPath, body, { timeoutMs = this.timeoutMs } = {}) {
@@ -2219,6 +2221,7 @@ class GitHubTransport {
     const result = this.run(this.ghPath, args, {
       encoding: 'utf8', input: body === undefined ? undefined : JSON.stringify(body),
       maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: Math.max(1, Math.floor(Math.min(this.timeoutMs, timeoutMs))),
+      ...(this.env ? { env: this.env } : {}),
     });
     if (result.error) throw new ProgrammeError('GH_FAILED', `gh could not run: ${result.error.message}`);
     // gh exits 4 when it is not signed in, before any request: a refusal, never "unreachable".
@@ -2381,11 +2384,12 @@ class StateStore {
     if (listing.status === 404) return { files: new Map(), mode: 'rest' };
     if (listing.status !== 200 || !Array.isArray(listing.json)) throw ghFailure(listing, `Listing ${dir}`);
     const wanted = listing.json.filter(entry => entry?.type === 'file' && DOCUMENT_FILE.test(String(entry.name)));
+    const others = listing.json.filter(entry => entry?.type === 'file' && !DOCUMENT_FILE.test(String(entry.name)));
     // Reading every blob must still leave the settlement reserve; otherwise stop before any write.
     if (typeof this.transport.left === 'function' && this.transport.left() < wanted.length + (this.transport.reserve || 0)) {
       throw Object.assign(new ProgrammeError('PASS_STOPPED', 'GitHub refused GraphQL and the state documents cannot be read one by one within this pass.'), { reason: 'GitHub GraphQL unavailable', noWrite: true });
     }
-    const files = new Map();
+    const files = new Map(others.map(entry => [entry.name, { text: null, sha: isSha(entry.sha) ? entry.sha : null }]));
     for (const entry of wanted) {
       if (!isSha(entry.sha)) { files.set(entry.name, { text: null, sha: null }); continue; }
       const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${entry.sha}`);
@@ -2453,24 +2457,34 @@ class StateStore {
   // lost after the ref update is settled by reading the branch head before anything else runs.
   commitBatch(batch, { message = 'programme state: pass' } = {}) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const written = batch.prepare(this);
-      if (!written.length) return { written: [], head: batch.snapshot.head };
+      const documents = batch.prepare(this);
+      if (!documents.length) return { written: [], head: batch.snapshot.head };
+      // The sweep's progress, once there is a state commit to carry it (or beside it).
+      if (batch.progress && !batch.progressed) { batch.progressed = true; const entry = batch.progress(); if (entry) batch.extra.push(entry); }
+      // A file carried beside the documents must still be the version its owner holds.
+      for (const extra of batch.extra) {
+        if (batch.snapshot.files?.get(extra.path.slice(this.store.path.length))?.sha !== extra.sha) {
+          throw new ProgrammeError('PASS_LOCK_LOST', 'The sweep lease changed hands before the state was saved; this pass stopped and wrote nothing.');
+        }
+      }
+      const written = [...documents, ...batch.extra.map(extra => ({ ...extra, kind: 'extra' }))];
       this.beforeBatch(written);
       const tree = this.transport.request('POST', `repos/${this.store.repository}/git/trees`, { base_tree: batch.snapshot.tree,
         tree: written.map(entry => ({ path: entry.path, mode: '100644', type: 'blob', content: entry.text })) });
       if (!okStatus(tree.status) || !isSha(tree.json?.sha)) throw ghFailure(tree, 'Writing the state tree');
-      const lines = written.map(entry => `${documentName(entry.kind, entry.number)} r${entry.doc.revision}`);
+      const lines = documents.map(entry => `${documentName(entry.kind, entry.number)} r${entry.doc.revision}`);
       const commit = this.transport.request('POST', `repos/${this.store.repository}/git/commits`, { message: `${message}: ${lines.join(', ')} [skip ci]`, tree: tree.json.sha, parents: [batch.snapshot.head] });
       if (!okStatus(commit.status) || !isSha(commit.json?.sha)) throw ghFailure(commit, 'Writing the state commit');
       const outcome = this.moveBranch(batch.snapshot.head, commit.json.sha);
       if (outcome === 'MOVED') {
         this.readBack(commit.json.sha, written, tree.json);
-        this.writes += written.length;
+        this.writes += documents.length;
         this.lastCommit = commit.json.sha;
-        for (const entry of written) this.ownWrites.set(entry.path, { replaced: entry.sha, doc: clone(entry.stored), sha: entry.blob });
-        this.afterBatch(written, commit.json.sha);
-        batch.committed(written, commit.json.sha);
-        return { written, head: commit.json.sha };
+        for (const entry of documents) this.ownWrites.set(entry.path, { replaced: entry.sha, doc: clone(entry.stored), sha: entry.blob });
+        for (const entry of written.filter(item => item.kind === 'extra')) entry.committed?.(entry.blob);
+        this.afterBatch(documents, commit.json.sha);
+        batch.committed(documents, commit.json.sha);
+        return { written: documents, head: commit.json.sha };
       }
       // RACED: another writer moved the branch. Re-read and re-run every staged change once.
       if (attempt === 0) batch.rerun(this.readSnapshot(), this);
@@ -2688,6 +2702,8 @@ class StateBatch {
     this.dropped = new Map();
     this.written = [];
     this.head = null;
+    // Files that ride in the same commit (the sweep's progress): { path, text, sha, committed }.
+    this.extra = [];
   }
 
   read(kind, number) {
@@ -3471,7 +3487,10 @@ class ProgrammeGraphReader {
         ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: context.state, required: false }))] };
   }
 
+  // The login archive comments are written under. The cloud sweep is given its App's login and
+  // never asks GitHub for the signed-in user.
   viewer() {
+    if (this.login) return this.login;
     const response = this.transport.request('GET', 'user');
     if (response.status !== 200 || !isText(response.json?.login)) throw ghFailure(response, 'Reading the authenticated login');
     return response.json.login;
@@ -3494,9 +3513,10 @@ class ProgrammeGraphReader {
     return events;
   }
 
-  constructor({ transport, repository }) {
+  constructor({ transport, repository, login = null }) {
     this.transport = transport;
     this.repository = repository;
+    this.login = login;
   }
 
   issue(number) {
@@ -4195,6 +4215,8 @@ class Reconciler {
     const all = outcomes;
     // A queued pass observes only the tasks it read; the graph reads above cover the rest.
     if (sweep) outcomes = sweep.read.map(number => all.find(outcome => outcome.issue === number));
+    // Every task the lists showed keeps its current facts on the parent page, read or not.
+    if (sweep) for (const [number, facts] of rows) if (!issues.has(number)) issues.set(number, facts);
     for (const outcome of outcomes) read(outcome.issue);
     const parents = new Set([parent.parent_issue, ...all.map(outcome => outcome.parent).filter(Boolean),
       ...(this.refreshFacts && !only ? (sweep ? [...sweep.lists.keys()] : all.map(outcome => outcome.issue)) : [])]);
@@ -4341,7 +4363,7 @@ class Reconciler {
     const read = [], failed = [];
     const primed = { blockedBy: new Map(), tracked: new Map(), journals: new Map(), comments: new Map([[parent.parent_issue, discussion]]), prPages: new Map() };
     for (const number of order) {
-      if (!queued.canRead()) break;
+      if (!queued.canRead(read.length)) break;
       const doc = stored(number);
       const outcome = outcomes.find(entry => entry.issue === number);
       try {
@@ -4464,6 +4486,9 @@ class Reconciler {
     for (let start=0; start<all.length; start+=20) {
       const batch=all.slice(start,start+20);
       try {
+        // Tasks added in this pass were not in the early read: their links are read now.
+        const missing=pre ? batch.filter(number=>!pre.links.has(number)) : [];
+        if (missing.length) for (const [number,link] of this.reader.issuePullRequestLinks(missing,spend)) pre.links.set(number,link);
         const links=pre ? pre.links : this.reader.issuePullRequestLinks(batch,spend);
         for (const number of batch) {
           const link=links.get(number);
@@ -5429,7 +5454,7 @@ class Reconciler {
     const sgt = time => `${new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Singapore', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(time))} SGT`;
     if (board.complete && !this.pass.stopped) return `Board updated: ${sgt(board.time)} (state revision ${parent.revision})`;
     const stopped = (record.stopped_passes || 0) + 1;
-    const reason = this.stopReason || (this.pass.stopped ? 'time limit' : board.left ? 'tasks still to check' : record.reason || 'an incomplete read');
+    const reason = this.stopReason || this.pass.stopReason || (this.pass.stopped ? 'time limit' : board.left ? 'tasks still to check' : record.reason || 'an incomplete read');
     const since = record.last_complete_at ? `since ${sgt(record.last_complete_at)}` : 'since before the first finished pass';
     return `⚠️ Board out of date ${since}: ${stopped} pass${stopped === 1 ? '' : 'es'} stopped early (${reason}). ${board.left} task${board.left === 1 ? '' : 's'} still to check.`;
   }
@@ -5751,8 +5776,10 @@ class Reconciler {
 
     if (batch) {
       recordStopped();
-      // The queue this pass leaves rides the same commit.
+      // The queue this pass leaves rides the same commit, and so does the sweep's progress when its
+      // lease lives in the same store; otherwise the lease is written once at this boundary.
       if (this.sweepChange) mutateDoc('parent', parentNumber, { change: this.sweepChange });
+      if (this.queued?.progress) batch.progress = () => this.queued.progress(this.pass.snapshot(), this.store);
       try { this.store.commitBatch(batch); }
       catch (error) {
         if (error.code === 'STATE_READBACK_MISMATCH') {
@@ -6424,7 +6451,7 @@ class Reconciler {
       report.sweep = { complete: Boolean(plan.complete && !plan.stopped && !this.pass.stopped), changedComplete: Boolean(sweep?.changedComplete),
         board_time: this.board?.time || null,
         read: sweep?.read.length ?? 0, tasks: sweep?.read || [], why: sweep?.why || {}, left: sweep ? sweep.left.length + sweep.failed.length : (this.sweepOrder?.length ?? plan.parent?.sweep?.queue.length ?? 0),
-        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : null) };
+        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : null) };
     }
     return report;
   }
@@ -6474,5 +6501,5 @@ module.exports = Object.freeze({
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
   SAFE_LIMIT, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS,
-  contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, ROTATION_PASSES,
+  contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, ROTATION_PASSES, PASS_PHASES,
 });
