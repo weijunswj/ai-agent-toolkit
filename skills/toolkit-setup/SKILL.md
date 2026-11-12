@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit update scheduled task` for fixed scheduled tasks on this computer, `toolkit permissions` for the paste-once permission blocks and `toolkit cleanup` for rebuildable scraps. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
+description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit update scheduled task` for fixed scheduled tasks on this computer, `toolkit permissions` for the paste-once permission blocks, `toolkit store` for evidence store steps and `toolkit cleanup` for rebuildable scraps. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
 ---
 
 
@@ -20,11 +20,23 @@ Exit 23 returns questions for the host's question UI: Codex's picker, Claude Cod
 
 ## Permission blocks
 
-For `toolkit permissions`, resolve the managed Toolkit checkout and run `node "<Toolkit>/repo/scripts/toolkit-permissions.cjs"`. It prints two blocks and writes nothing: a computer block for the app's user settings (Toolkit's own reversible commands, each pinned to the managed checkout's full path and one subcommand, naming no repository) and, inside a repository with Toolkit governance on, a repo block for that repository's local settings (comments, and one exact evidence store push, `git -C "<store>" push origin <branch>`, when `--store <folder>` names its checkout, that checkout pushes only to the store and has no push rule of its own; never a merge). A line with no `*` matches only that exact command, so any other push, flag or destination still asks. `--host codex` prints the Codex rule files instead; Codex cannot ask for a flag, so the store push, comments, task apply, the task list and the task update command are prompt rules there. `--check <settings file>` lists missing and stale lines and changes nothing.
+For `toolkit permissions`, resolve the managed Toolkit checkout and run `node "<Toolkit>/repo/scripts/toolkit-permissions.cjs"`. It prints two blocks and writes nothing: a computer block for the app's user settings (Toolkit's own reversible commands, each pinned to the managed checkout's full path and one subcommand, plus the self-checking store command, naming no repository) and, inside a repository with Toolkit governance on, a repo block for that repository's local settings (comments; never a merge). A line with no `*` matches only that exact command. No block holds a raw `git push`. `--host codex` prints the Codex rule files instead; Codex cannot ask for a flag, so comments, task apply, the task list and the task update command are prompt rules there, and the store command is an allow rule (no store prompt rule, which would win over it). `--check <settings file>` lists missing and stale lines and changes nothing.
 
 Show the printed text to the owner and stop there. The owner pastes a block; you never write, merge or edit it into a settings or rules file, by any route (safety-gates playbook). A `Stopped: ... Next: ...` line says which part was left out and why. After the managed checkout moves, the owner pastes a fresh block.
 
 Write each allowed command exactly as its line shows, one command per call: `node`, then the script's full path in forward slashes inside double quotes, then the subcommand. A different spelling, a `cd` in front or two commands joined together does not match a line, so the app asks again.
+
+## Evidence store
+
+For `toolkit store`, run `node "<Toolkit>/repo/scripts/toolkit-store.cjs" <status|sync|save|move|merge-branch|delete-merged-branch> --store <store checkout>` from the governed repository (or name it with `--repo-root`). Every subcommand first checks that the folder is a checkout of the store the merged binding names, on the bound branch, with no push, rewrite or program setting of its own, and that GitHub shows the store private and writable; it writes nothing when a check fails.
+
+- **save:** `--path <store path>... --message <text>` stages only those paths (never a deletion) under the binding's store path, `archives/` or `evidence/`, secret-scans exactly what it stages (file, line and rule only; a file over 5 MB, binary or not UTF-8 is refused), commits, pushes the bound branch with a plain push and reads it back with one fetch.
+- **move:** `--from <path> --to <path> --message <text>` reorganises with `git mv` only.
+- **merge-branch:** `--branch <name> --message <text>` merges a store branch with a merge commit, refusing any deletion or file outside those folders and scanning every commit it brings in.
+- **delete-merged-branch:** `--branch <name>` deletes a remote store branch only when GitHub shows its tip already in the bound branch.
+- **status** and **sync:** read the state, or fast-forward only.
+
+Use it for every evidence store step on a computer, so one permission line covers them all. Raw `git` in the store still works but asks. It never force-pushes, rebases, deletes a file or pushes another branch.
 
 ## Cleanup
 
