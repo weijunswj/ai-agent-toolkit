@@ -1,4 +1,11 @@
 {
   "schema": "ci-checkup/v1",
-  "status_doc": "repo/docs/VALIDATION-STRATEGY.md"
+  "status_doc": "repo/docs/VALIDATION-STRATEGY.md",
+  "ignore": [
+    {
+      "check": "hygiene.masked",
+      "path": ".github/workflows/toolkit-programme-sweep.yml",
+      "reason": "The two App token mint steps may fail so the next step can print the fixed sign-in message naming the App's variable and secret instead of GitHub's own text; that step reads both outcomes and fails the job itself."
+    }
+  ]
 }

@@ -51,9 +51,18 @@ const MINUTE = 60 * 1000;
 // leaving a minute for local bookkeeping and teardown before the native limit.
 const STATUS_READ_MS = 30000;
 const REFRESH_WAIT_MS = 2 * STATUS_READ_MS + 5000;
-const WORK_BUDGET_MS = 29 * MINUTE;
+const WORK_BUDGET_MS = 55 * MINUTE;
 const REFRESH_RETRY = new Set(['fetch-failed', 'cache-unwritable', 'ref-moved']);
-const TIMEOUT = Object.freeze({ check: 2 * MINUTE, reach: 15 * 1000, refresh: 12 * MINUTE, attention: 2 * MINUTE, sweep: 12 * MINUTE, shards: 25 * MINUTE });
+const TIMEOUT = Object.freeze({ check: 2 * MINUTE, reach: 15 * 1000, attention: 2 * MINUTE, sweep: 12 * MINUTE, shards: 25 * MINUTE });
+// The programme refresh on this computer runs in the scheduled mode with what is left of the task's
+// budget once the attention step after it and the kill slack are kept back: never more than the
+// scheduled budget, never less than the after-write one. It is killed that slack after its budget.
+function computerRefreshBudget(remainingMs) {
+  const { scheduled, 'after-write': afterWrite } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs').PASS_BUDGETS;
+  const slack = scheduled.killMs - scheduled.budgetMs;
+  const budgetMs = Math.max(afterWrite.budgetMs, Math.min(scheduled.budgetMs, remainingMs - TIMEOUT.attention - slack));
+  return { budgetMs, killMs: budgetMs + slack };
+}
 // Exits 0 when a TCP connection to github.com:443 opens within 8 seconds, else 3. Sends nothing.
 const REACH_GITHUB = "const s=require('node:net').connect({host:'github.com',port:443,timeout:8000});"
   + "s.on('connect',()=>{s.destroy();process.exit(0)});s.on('timeout',()=>process.exit(3));s.on('error',()=>process.exit(3));";
@@ -359,7 +368,8 @@ class Job {
 
 // Refresh status: ok|held|skipped|failed.
 function refreshStep(job) {
-  const run = job.node(SCRIPT.programme, ['refresh', '--repo-root', job.options.repoRoot, '--json'], TIMEOUT.refresh);
+  const { budgetMs, killMs } = computerRefreshBudget(job.remainingMs());
+  const run = job.node(SCRIPT.programme, ['refresh', '--repo-root', job.options.repoRoot, '--scheduled', '--budget-ms', String(budgetMs), '--json'], killMs);
   const report = lastJson(run.stdout);
   if (run.status === 2 && /^PARENT_STATE_MISSING: /.test(String(run.stderr || ''))
     || run.status === 1 && report?.holds?.length && report.holds.every(hold => hold.code === 'PARENT_STATE_MISSING')) {
@@ -666,6 +676,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
   return record.exit;
 }
 
-module.exports = { JOBS, SCRIPT, SWEEP_OK, parseArgs, runJob, main, lastJson, localRepository, footerCursor, footerLockPath, HISTORY_NOTE };
+module.exports = { JOBS, SCRIPT, SWEEP_OK, WORK_BUDGET_MS, computerRefreshBudget, parseArgs, runJob, main, lastJson, localRepository, footerCursor, footerLockPath, HISTORY_NOTE };
 
 if (require.main === module) process.exitCode = main();

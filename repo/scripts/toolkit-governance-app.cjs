@@ -8,7 +8,9 @@
 const childProcess = require('node:child_process');
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
-// Every workflow narrows its own token to a part of this list (a test holds the workflows to it).
+// The App's one permission list, with its display names and levels. Every workflow narrows its own
+// token to a part of it (a test holds the workflows to it), and the cloud jobs contract names only
+// which of these each token takes.
 const APP = Object.freeze({
   variable: 'TOOLKIT_GOVERNANCE_APP_CLIENT_ID',
   secret: 'TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY',
@@ -25,8 +27,11 @@ function creationLink(slug) {
   return `https://github.com/settings/apps/new?${params}`;
 }
 
+// How a permission reads in GitHub's App settings: "Issues read and write".
+const permissionLabel = (name, level) => `${LABELS[name]} ${LEVELS[level]}`;
+
 function permissionText() {
-  return Object.entries(APP.permissions).map(([name, level]) => `${LABELS[name]} ${LEVELS[level]}`).join(', ');
+  return Object.entries(APP.permissions).map(([name, level]) => permissionLabel(name, level)).join(', ');
 }
 
 // One read-only `gh api` call; `spawn` is for tests.
@@ -107,4 +112,4 @@ function appFinding(stateName, slug, store, state, others) {
   return null;
 }
 
-module.exports = Object.freeze({ APP, creationLink, ghReader, presence, setupLines, removalLines, appFinding });
+module.exports = Object.freeze({ APP, permissionLabel, creationLink, ghReader, presence, setupLines, removalLines, appFinding });
