@@ -1,0 +1,86 @@
+# Toolkit Programme Sweep: the hourly programme refresh, run on GitHub instead of a computer.
+#
+# Every hour (and when started by hand) it refreshes the programme board of this repository: it
+# reads what changed on GitHub, saves the programme state and redraws the parent and task pages.
+# It runs `programme.cjs refresh` from the commit it checked out, under the governance GitHub App:
+# two installation tokens, one for this repository (issues, pull requests, checks) and one for the
+# evidence store (contents), each minted with only its own permissions. The built-in token is
+# contents read only, the checkout keeps no credentials, and no token or key is printed.
+#
+# With no App configured it ends with a notice and writes nothing. A repository whose state lives
+# on a public branch is skipped with a notice too. Runs never overlap: one at a time, none
+# cancelled, and the sweep's lease in the evidence store keeps it from writing while the
+# computer's sweep is running. A pass works for up to 50 minutes, is killed at 55 and the job is
+# stopped at 58, so it ends before the next hourly start; the next run reports a stopped one.
+name: Toolkit Programme Sweep
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolkit-programme-sweep-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Refresh the programme
+    runs-on: ubuntu-latest
+    timeout-minutes: 58
+    permissions:
+      contents: read
+    steps:
+      - name: Check out this run's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Read the evidence store from the binding
+        id: binding
+        run: node repo/scripts/toolkit-programme-sweep-action.cjs store
+
+      - name: Mint the governed repository token
+        id: governed
+        if: ${{ vars.TOOLKIT_GOVERNANCE_APP_CLIENT_ID != '' && steps.binding.outputs.store != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TOOLKIT_GOVERNANCE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY }}
+          permission-issues: write
+          permission-pull-requests: write
+          permission-contents: read
+          permission-checks: read
+          permission-statuses: read
+
+      - name: Mint the evidence store token
+        id: store
+        if: ${{ vars.TOOLKIT_GOVERNANCE_APP_CLIENT_ID != '' && steps.binding.outputs.store != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TOOLKIT_GOVERNANCE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.binding.outputs.store }}
+          permission-contents: write
+
+      - name: Refresh the programme
+        env:
+          STORE_REPOSITORY: ${{ steps.binding.outputs.store_repository }}
+          APP_CLIENT_ID_SET: ${{ vars.TOOLKIT_GOVERNANCE_APP_CLIENT_ID != '' }}
+          MINT_OUTCOME: ${{ steps.governed.outcome }}/${{ steps.store.outcome }}
+          GOVERNED_TOKEN: ${{ steps.governed.outputs.token }}
+          STORE_TOKEN: ${{ steps.store.outputs.token }}
+          SWEEP_LOGIN: ${{ steps.governed.outputs.app-slug }}[bot]
+        run: node repo/scripts/toolkit-programme-sweep-action.cjs refresh

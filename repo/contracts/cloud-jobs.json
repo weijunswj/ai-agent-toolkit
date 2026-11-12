@@ -1,0 +1,43 @@
+{
+  "schema": "toolkit.cloud-jobs.v1",
+  "never_granted": [
+    "administration",
+    "secrets",
+    "workflows",
+    "account"
+  ],
+  "jobs": [
+    {
+      "id": "programme-sweep",
+      "workflow": ".github/workflows/toolkit-programme-sweep.yml",
+      "schedule": {
+        "cadence": "hourly",
+        "cron": "17 * * * *"
+      },
+      "replaces_computer_job": "toolkit-programme-sweep",
+      "tokens": [
+        {
+          "name": "governed",
+          "repository": "governed_repository",
+          "takes": [
+            "contents",
+            "issues",
+            "pull_requests",
+            "checks",
+            "statuses"
+          ],
+          "read_only": [
+            "contents"
+          ]
+        },
+        {
+          "name": "store",
+          "repository": "evidence_store",
+          "takes": [
+            "contents"
+          ]
+        }
+      ]
+    }
+  ]
+}

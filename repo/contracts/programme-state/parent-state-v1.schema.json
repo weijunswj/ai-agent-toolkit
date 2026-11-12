@@ -115,7 +115,7 @@
         "properties": {
           "id": { "type": "string", "pattern": "^[0-9a-f]{12}$", "description": "First 12 hex characters of sha256 of source|code|issue|head, with |kind appended for closing findings." },
           "source": { "enum": ["reconcile", "inventory"] },
-          "code": { "enum": ["ISSUE_MISSING", "NATIVE_PARENT_UNEXPECTED", "NATIVE_CHILD_UNKNOWN", "DEPENDENCY_IMPLIES_PARENT", "PR_HEAD_MOVED", "CHECKS_RED", "READY_TO_CLOSE", "CHILD_STATE_CONFLICT", "CLOSED_WITHOUT_ACCEPTANCE", "CHILD_REOPENED", "CHILD_ADDED", "PR_WITHOUT_TASK", "CLOSING_COMMENT_MISSING", "MANAGED_BLOCK_BROKEN", "BODY_TOO_LARGE", "PAGE_LAYOUT_HELD", "BODY_NEAR_LIMIT", "ARCHIVE_COMMENT_UNTRUSTED", "ARCHIVE_SECTION_UNSAFE", "PASS_STOPPED", "TRACE_UNLINKED", "TRACE_SUPERSEDED_UNMARKED", "TASK_IDLE", "PR_UNTRACKED", "COMPLETED_PR_MISSING", "PR_DISCOVERY_INCOMPLETE", "RETURN_CAPTURED", "STALE_ASSIGNMENT", "JOURNAL_ERROR", "JOURNAL_INVALID", "CLASS_LEGACY", "ORDER_TIE", "DUPLICATE_HIERARCHY", "NEEDS_PLACEMENT", "CLOSED_PARENT_OPEN_CHILD", "INVENTORY_INCOMPLETE", "ATTENTION_FULL"], "description": "The fixed runtime code table; older readers refuse new codes." },
+          "code": { "enum": ["ISSUE_MISSING", "NATIVE_PARENT_UNEXPECTED", "NATIVE_CHILD_UNKNOWN", "DEPENDENCY_IMPLIES_PARENT", "PR_HEAD_MOVED", "CHECKS_RED", "READY_TO_CLOSE", "CHILD_STATE_CONFLICT", "CLOSED_WITHOUT_ACCEPTANCE", "CHILD_REOPENED", "CHILD_ADDED", "PR_WITHOUT_TASK", "CLOSING_COMMENT_MISSING", "MANAGED_BLOCK_BROKEN", "BODY_TOO_LARGE", "PAGE_LAYOUT_HELD", "BODY_NEAR_LIMIT", "ARCHIVE_COMMENT_UNTRUSTED", "ARCHIVE_SECTION_UNSAFE", "PASS_STOPPED", "TRACE_UNLINKED", "TRACE_SUPERSEDED_UNMARKED", "TASK_IDLE", "PR_UNTRACKED", "COMPLETED_PR_MISSING", "PR_DISCOVERY_INCOMPLETE", "RETURN_CAPTURED", "STALE_ASSIGNMENT", "JOURNAL_ERROR", "JOURNAL_INVALID", "CLASS_LEGACY", "ORDER_TIE", "DUPLICATE_HIERARCHY", "NEEDS_PLACEMENT", "CLOSED_PARENT_OPEN_CHILD", "INVENTORY_INCOMPLETE", "ATTENTION_FULL", "SWEEP_TASK_UNREADABLE", "STATE_BRANCH_BUSY", "GRAPHQL_REFUSED"], "description": "The fixed runtime code table; older readers refuse new codes." },
           "issue": { "type": ["integer", "null"], "minimum": 1 },
           "head": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
           "kind": { "enum": ["pr", "issue"] },
@@ -143,7 +143,15 @@
       }
     },
     "private": { "type": "object" },
-    "volatile": { "type": "object" }
+    "volatile": { "type": "object" },
+    "sweep": {
+      "type": "object", "additionalProperties": false, "required": ["queue", "failures"],
+      "description": "The programme sweep's saved queue: tasks still to read, in order, and consecutive read failures per task.",
+      "properties": {
+        "queue": { "type": "array", "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } },
+        "failures": { "type": "object", "propertyNames": { "pattern": "^[1-9][0-9]*$" }, "additionalProperties": { "type": "integer", "minimum": 1 } }
+      }
+    }
   },
   "$defs": {
     "archiveTarget": {
