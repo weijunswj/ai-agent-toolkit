@@ -21,7 +21,7 @@ Setup keeps its own clean copy of this repository at `%USERPROFILE%\.ai-agent-to
 
 ## Update
 
-With automatic updates on (setup recommends it), Toolkit checks for a newer `main` when a Codex or Claude Code session starts and updates itself. To update now, say `refresh toolkit`. Start a new session afterwards so the new version loads.
+With automatic updates on (setup recommends it), Toolkit checks for a newer `main` when a Codex or Claude Code session starts and updates itself. To update now, say `refresh toolkit`: it keeps your current answers and asks nothing unless a question is new or different. Start a new session afterwards so the new version loads.
 
 ## Remove
 
