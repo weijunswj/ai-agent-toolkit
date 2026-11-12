@@ -1,14 +1,14 @@
 # Changelog Fragments
 
-A branch writes its notes here before preparing its own Toolkit version bump. Use one file named after the branch with `/` replaced by `-`, for example `claude-fix-setup.md`.
+A branch writes its notes here and keeps `main`'s version; the Toolkit version bump happens once, at merge time. Use one file named after the branch with `/` replaced by `-`, for example `claude-fix-setup.md`. The pull request body names the level in one line, `Bump: patch`, `Bump: minor` or `Bump: major`.
 
 A fragment holds what a version entry in [CHANGELOG.md](../CHANGELOG.md) holds: `###` section headings and bullets, starting with the first `###` heading. An optional first line `Title: <words>` adds words to the version heading. Leave the `##` version heading out; the bump command adds it.
 
 A branch with one `## Unreleased` section on top of the CHANGELOG may fold it like a fragment. Use `###` sections and bullets, with optional title words in `## Unreleased (<words>)`. Keep any notes main already holds there. New work uses fragments.
 
-## Prepare the branch bump
+## Bump at merge time
 
-After merging main, one command sets the next version, folds every fragment and any `## Unreleased` section under its heading, deletes the fragments, refreshes every copy of the version and bumps the Projects skill Version line if the branch changed that skill:
+The merging agent bumps just before the merge, never the builder. On the pull request branch, after merging main, one command sets the next version, folds every fragment and any `## Unreleased` section under its heading, deletes the fragments, refreshes every copy of the version and bumps the Projects skill Version line if the branch changed that skill:
 
 ```text
 node repo/scripts/bump-version.cjs --next patch
@@ -17,12 +17,14 @@ node repo/scripts/bump-version.cjs --next major
 ```
 
 - **Patch or minor:** `minor` when the branch adds a feature, a skill, a command or a new rule; `patch` for fixes and wording.
-- **Then:** commit that as the branch's last commit, push it and wait for green CI before the merge.
+- **Then:** commit that as the branch's last commit, push it, wait for green CI and merge that head. A clean main merge and the version-only commit need no new review; a source conflict gets a delta review. An owner merge card goes up at the bumped head.
+- **Batches:** a combined integration branch for several pull requests bumps once, for all of them.
+- **Why at merge:** a version taken by an earlier merge would otherwise force a re-bump, new CI and a stale merge card on every other open pull request.
 - **Major releases:** use `--next major` for an owner-chosen major release.
 - **Projects skill Version date:** the date is today's date in UTC, so a merge in the early morning east of UTC may carry the previous day's date.
 ## When main moves
 
-After each merge in this repository, the merging agent runs the apply command below, or asks a computer lane to run it if it has no computer:
+A pull request that holds main's version needs nothing when main moves. Only an older pull request that already carries its own bump falls behind; for those, the re-bump workflow below runs after each merge, and the hand command is its fallback:
 
 ```text
 node repo/scripts/toolkit-rebump-prs.cjs

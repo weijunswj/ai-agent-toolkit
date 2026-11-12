@@ -314,6 +314,7 @@ test('the UAT verdict is exactly one hand-written line; anything else is absent 
     const verdict = eligible.uatVerdict(body);
     assert.equal(verdict.state, state, name);
     assert.equal(verdict.ready, state === 'NOT_REQUIRED' || state === 'PASSED', name);
+    assert.equal(verdict.mergeable, ['NOT_REQUIRED', 'PASSED', 'OWNER_TEST_NEEDED'].includes(state), name);
     if (problem) assert.match(verdict.problem, problem, name); else assert.equal(verdict.problem, null, name);
   }
   assert.equal(eligible.uatVerdict('UAT: OWNER_TEST_NEEDED (try the export)').detail, 'try the export');
@@ -343,6 +344,12 @@ test('the UAT reader refuses the shared hostile-input set, with every exception 
     assert.ok(/\n$/.test(text) || text === cp(0xfeff), `${id} ends its own line or is one byte order mark`);
   }
   hostile.expectDefaultDeny(assert, ready, prefixed, { allow: PREFIX_LEAVES_THE_LINE.map(id => `prefix:${id}`) });
+  // Merging on an owner test after the merge widens nothing else: a line that is not a verdict,
+  // followed by any shape and a good line, never reads as mergeable.
+  const mergeable = text => eligible.uatVerdict(text).mergeable;
+  hostile.expectDefaultDeny(assert, mergeable, hostile.variants('Intro\nUAT: SKIP (b)\n\nUAT: NOT_REQUIRED (a)\n'));
+  hostile.expectDefaultDeny(assert, mergeable, hostile.shapes.map(shape => ({ id: `glued:${shape.id}`, text: `UAT: SKIP (b)${shape.text}UAT: NOT_REQUIRED (a)` })));
+  hostile.expectDefaultDeny(assert, mergeable, hostile.shapes.map(shape => ({ id: `between:${shape.id}`, text: `UAT: SKIP (b)\n${shape.text}\nUAT: OWNER_TEST_NEEDED (a)` })));
   // Large inputs stay linear.
   const builders = {
     'many comment starts': size => `${'<!-- a --> '.repeat(Math.ceil(size / 11))}\nUAT: NOT_REQUIRED (a)`,
@@ -394,10 +401,10 @@ test('the CLI with a pull request body: every waiting reason is named together, 
     ['eligible', 'Body\n', 1, [/^Missing UAT verdict/m, /not a question for the owner/], [/typed merge/, /Auto-merge: yes/]],
     ['protected', 'Body\n', 1, [/^Missing UAT verdict/m, /^Waits for the owner's typed merge/m, /ci\.yml: a CI workflow/], [/Auto-merge: yes/]],
     ['eligible', 'UAT: NOT_REQUIRED (docs only)\n', 0, [/^Auto-merge: yes/, /NOT_REQUIRED \(docs only\)/], [/Missing/, /typed merge/]],
-    ['protected', 'UAT: NOT_REQUIRED (docs only)\n', 1, [/^Waits for the owner's typed merge/m], [/Missing/, /UAT verdict invalid/, /Owner test needed/, /Auto-merge: yes/]],
+    ['protected', 'UAT: NOT_REQUIRED (docs only)\n', 1, [/^Waits for the owner's typed merge/m], [/Missing/, /UAT verdict invalid/, /Owner test after the merge/, /Auto-merge: yes/]],
     ['eligible', 'UAT: NOT_REQUIRED\n', 1, [/^UAT verdict invalid/m, /reason/], [/Auto-merge: yes/, /typed merge/]],
-    ['eligible', 'UAT: OWNER_TEST_NEEDED (open the report)\n', 1, [/^Owner test needed: open the report/m], [/Auto-merge: yes/, /typed merge/]],
-    ['protected', 'UAT: OWNER_TEST_NEEDED (open the report)\n', 1, [/^Owner test needed: open the report/m, /^Waits for the owner's typed merge/m], [/Auto-merge: yes/]],
+    ['eligible', 'UAT: OWNER_TEST_NEEDED (open the report)\n', 0, [/^Auto-merge: yes/, /OWNER_TEST_NEEDED \(open the report\)/, /Owner test after the merge: open the report/, /Refs and open until their OK/], [/typed merge/, /Missing/]],
+    ['protected', 'UAT: OWNER_TEST_NEEDED (open the report)\n', 1, [/^Waits for the owner's typed merge/m, /^Owner test after the merge: open the report/m], [/Auto-merge: yes/]],
     ['eligible', 'UAT: PASSED (owner OK, https://example.com/t/1)\n', 0, [/^Auto-merge: yes/, /PASSED/], []],
     ['eligible', 'UAT: PASSED\n', 1, [/^UAT verdict invalid/m], [/Auto-merge: yes/]],
     ['eligible', 'UAT: NOT_REQUIRED (a)\nUAT: PASSED (b)\n', 1, [/^UAT verdict invalid/m, /more than one/], [/Auto-merge: yes/]],
@@ -421,7 +428,9 @@ test('the CLI with a pull request body: every waiting reason is named together, 
   assert.equal(report.uat.state, 'absent');
   assert.deepEqual(report.reasons, [{ path: '.github/workflows/ci.yml', why: 'a CI workflow' }]);
   assert.equal(check('eligible', 'UAT: NOT_REQUIRED (a)\n', ['--json']), 0);
-  assert.deepEqual(JSON.parse(said()), { eligible: true, reasons: [], uat: { state: 'NOT_REQUIRED', detail: 'a', problem: null, ready: true }, ready: true });
+  assert.deepEqual(JSON.parse(said()), { eligible: true, reasons: [], uat: { state: 'NOT_REQUIRED', detail: 'a', problem: null, ready: true, mergeable: true }, ready: true });
+  assert.equal(check('eligible', 'UAT: OWNER_TEST_NEEDED (b)\n', ['--json']), 0);
+  assert.deepEqual(JSON.parse(said()), { eligible: true, reasons: [], uat: { state: 'OWNER_TEST_NEEDED', detail: 'b', problem: null, ready: false, mergeable: true }, ready: true });
   // The body from standard input.
   out.length = 0;
   assert.equal(eligible.main(['--base', base, '--head', docs, '--body-file', '-'], { ...io, stdin: 'UAT: NOT_REQUIRED (a)\n' }), 0);
@@ -455,13 +464,13 @@ test('the CLI with a pull request body: every waiting reason is named together, 
     // [name, bytes, exit, expected text patterns]
     ['UTF-16 with a mark, as PowerShell 5.1 redirection saves it', utf16(good), 0, [/^Auto-merge: yes/, /NOT_REQUIRED \(docs only\)/]],
     ['UTF-16 with a mark, text before the line', utf16(`Intro\r\n\r\n${good}`), 0, [/^Auto-merge: yes/]],
-    ['UTF-16 with a mark, an owner test', utf16('UAT: OWNER_TEST_NEEDED (open the report)\r\n'), 1, [/^Owner test needed: open the report/m]],
+    ['UTF-16 with a mark, an owner test', utf16('UAT: OWNER_TEST_NEEDED (open the report)\r\n'), 0, [/^Auto-merge: yes/, /Owner test after the merge: open the report/]],
     ['UTF-16 with a mark, an owner test then a second line', utf16(two), 1, [/^UAT verdict invalid/m, /more than one/]],
     ['UTF-16 with a mark, no line', utf16('Body\r\n'), 1, [/^Missing UAT verdict/m]],
     ['UTF-16 big-endian with a mark', utf16(good, true), 0, [/^Auto-merge: yes/]],
     ['UTF-8 with a mark, the line first', utf8Bom(good), 0, [/^Auto-merge: yes/]],
     ['UTF-8 with a mark, an owner test first then a second line', utf8Bom(two), 1, [/^UAT verdict invalid/m, /more than one/]],
-    ['UTF-8 with a mark, an owner test first', utf8Bom('UAT: OWNER_TEST_NEEDED (open the report)\r\nMore\r\n'), 1, [/^Owner test needed: open the report/m]],
+    ['UTF-8 with a mark, an owner test first', utf8Bom('UAT: OWNER_TEST_NEEDED (open the report)\r\nMore\r\n'), 0, [/^Auto-merge: yes/, /Owner test after the merge: open the report/]],
     ['UTF-8 with two marks', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), utf8Bom(good)]), 1, [/^UAT verdict invalid/m, /invisible/]],
     ['UTF-16 with no mark', Buffer.from(good, 'utf16le'), 2, [/could not be read as text/, /UTF-8/]],
     ['UTF-16 with a mark and an odd byte count', Buffer.concat([utf16(good), Buffer.from([0x0a])]), 2, [/could not be read as text/]],
