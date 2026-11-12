@@ -7,13 +7,13 @@
 set -euo pipefail
 
 report="${RUNNER_TEMP:?}/rebump-report.json"
-if [ -z "${TOOLKIT_REBUMP_TOKEN:-}" ]; then
-  echo "::notice title=Toolkit re-bump::No push key is set (repository secret TOOLKIT_REBUMP_TOKEN), so nothing was re-bumped. Run the re-bump command by hand."
+if [ -z "${TOOLKIT_GOVERNANCE_TOKEN:-}" ]; then
+  echo "::notice title=Toolkit re-bump::No push key is set (repository secret TOOLKIT_GOVERNANCE_TOKEN), so nothing was re-bumped. Run the re-bump command by hand."
   echo "ran=false" >> "${GITHUB_OUTPUT:?}"
   exit 0
 fi
 
-export GH_TOKEN="$TOOLKIT_REBUMP_TOKEN"
+export GH_TOKEN="$TOOLKIT_GOVERNANCE_TOKEN"
 gh auth setup-git
 git config --global user.name "github-actions[bot]"
 git config --global user.email "github-actions[bot]@users.noreply.${GITHUB_SERVER_URL#https://}"

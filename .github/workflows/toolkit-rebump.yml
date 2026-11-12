@@ -7,8 +7,9 @@
 # commit, prepares the next version, validates, and pushes to that pull request's own branch. It
 # never force-pushes, never pushes to main, and skips drafts, forks and other authors.
 #
-# The push uses the repository secret TOOLKIT_REBUMP_TOKEN, a token for this repository alone with
-# contents read and write. GitHub starts no pull request checks for a push made with the built-in
+# The push uses the repository secret TOOLKIT_GOVERNANCE_TOKEN, the one key every Toolkit governance
+# workflow here shares; this workflow needs only its contents read and write and pull requests
+# read. GitHub starts no pull request checks for a push made with the built-in
 # token until a person approves them, and checks from a manually dispatched run do not count for a
 # pull request, so only a push with such a token gets the required checks running by themselves.
 # With no secret the run prints a note and ends green; the hand command stays the rule then.
@@ -56,7 +57,7 @@ jobs:
       - name: Re-bump
         id: rebump
         env:
-          TOOLKIT_REBUMP_TOKEN: ${{ secrets.TOOLKIT_REBUMP_TOKEN }}
+          TOOLKIT_GOVERNANCE_TOKEN: ${{ secrets.TOOLKIT_GOVERNANCE_TOKEN }}
           AUTHORS: ${{ github.repository_owner }}
         run: bash repo/scripts/toolkit-rebump-action.sh
 

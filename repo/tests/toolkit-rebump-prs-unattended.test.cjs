@@ -9,7 +9,7 @@ const { parseArgs, scrubbedEnv } = require('../scripts/toolkit-rebump-prs.cjs');
 const { fixture } = require('./support/toolkit-rebump-fixture.cjs');
 
 test('token variables are removed from the environment and ordinary ones kept', () => {
-  const env = scrubbedEnv({ PATH: '/bin', HOME: '/home/x', GH_TOKEN: 'a', GITHUB_TOKEN: 'b', TOOLKIT_REBUMP_TOKEN: 'c', GH_ENTERPRISE_TOKEN: 'd',
+  const env = scrubbedEnv({ PATH: '/bin', HOME: '/home/x', GH_TOKEN: 'a', GITHUB_TOKEN: 'b', TOOLKIT_GOVERNANCE_TOKEN: 'c', GH_ENTERPRISE_TOKEN: 'd',
     ACTIONS_RUNTIME_TOKEN: 'e', ACTIONS_ID_TOKEN_REQUEST_URL: 'f', NPM_TOKEN: 'g', MY_PAT: 'h', DEPLOY_KEY: 'i', DB_PASSWORD: 'j', CLIENT_SECRET: 'k', DIFF_BASE: 'main',
     GITHUB_OUTPUT: 'l', GITHUB_ENV: 'm', GITHUB_PATH: 'n', GITHUB_STATE: 'o', GITHUB_STEP_SUMMARY: 'p', GITHUB_SHA: 'q' });
   // The Actions file-command paths go too; plain run facts such as the commit stay.
@@ -48,7 +48,7 @@ test('a pull request by an unlisted author is skipped before any of its code run
 
 test('the branch\'s bump and validation scripts run with no token in their environment', t => {
   const f = fixture(t);
-  const names = ['GH_TOKEN', 'GITHUB_TOKEN', 'TOOLKIT_REBUMP_TOKEN', 'GITHUB_OUTPUT', 'GITHUB_ENV', 'GITHUB_PATH', 'GITHUB_STEP_SUMMARY'];
+  const names = ['GH_TOKEN', 'GITHUB_TOKEN', 'TOOLKIT_GOVERNANCE_TOKEN', 'GITHUB_OUTPUT', 'GITHUB_ENV', 'GITHUB_PATH', 'GITHUB_STEP_SUMMARY'];
   const before = names.map(name => process.env[name]);
   t.after(() => names.forEach((name, i) => { if (before[i] === undefined) delete process.env[name]; else process.env[name] = before[i]; }));
   for (const name of names) process.env[name] = 'fixture-value';

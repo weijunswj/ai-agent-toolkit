@@ -37,7 +37,7 @@ test('permissions are read-only except pull request comments, and the key reache
   assert.match(code, /\n    permissions:\n      contents: read\n      pull-requests: write\n    steps:/);
   assert.equal([...code.matchAll(/^\s*[a-z-]+: write$/gm)].length, 1);
   assert.equal([...code.matchAll(/secrets\./g)].length, 1);
-  assert.match(code, /        env:\n          TOOLKIT_REBUMP_TOKEN: \$\{\{ secrets\.TOOLKIT_REBUMP_TOKEN \}\}\n          AUTHORS: \$\{\{ github\.repository_owner \}\}\n        run: bash repo\/scripts\/toolkit-rebump-action\.sh\n/);
+  assert.match(code, /        env:\n          TOOLKIT_GOVERNANCE_TOKEN: \$\{\{ secrets\.TOOLKIT_GOVERNANCE_TOKEN \}\}\n          AUTHORS: \$\{\{ github\.repository_owner \}\}\n        run: bash repo\/scripts\/toolkit-rebump-action\.sh\n/);
   // The comment step uses the built-in token and runs only after a real run.
   assert.match(code, /        if: \$\{\{ steps\.rebump\.outputs\.ran == 'true' \}\}\n        env:\n          GH_TOKEN: \$\{\{ github\.token \}\}\n        run: node repo\/scripts\/toolkit-rebump-report\.cjs /);
 });
@@ -66,7 +66,7 @@ function runStep(t, env) {
 }
 
 test('with no push key the step prints a note, calls nothing and ends green', linuxOnly, t => {
-  for (const env of [{}, { TOOLKIT_REBUMP_TOKEN: '' }]) {
+  for (const env of [{}, { TOOLKIT_GOVERNANCE_TOKEN: '' }]) {
     const { result, calls, output, temp } = runStep(t, env);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /^::notice title=Toolkit re-bump::No push key is set/);
@@ -77,7 +77,7 @@ test('with no push key the step prints a note, calls nothing and ends green', li
 });
 
 test('with a push key it signs in, runs the command for the listed authors and keeps the report even when a pull request is held', linuxOnly, t => {
-  const { result, calls, output, temp } = runStep(t, { TOOLKIT_REBUMP_TOKEN: 'fixture-key' });
+  const { result, calls, output, temp } = runStep(t, { TOOLKIT_GOVERNANCE_TOKEN: 'fixture-key' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(output, 'ran=true\n');
   assert.deepEqual(calls, [
