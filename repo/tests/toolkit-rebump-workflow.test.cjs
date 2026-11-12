@@ -1,7 +1,7 @@
 'use strict';
 
-// The re-bump workflow holds a push key, so its shape is pinned: when it runs, what it checks out,
-// what it may write, and that it does nothing without the key.
+// The re-bump workflow mints a push token from the governance GitHub App, so its shape is pinned:
+// when it runs, what it checks out, what it may write, and that it does nothing without the App.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -25,19 +25,25 @@ test('it runs only on a push to main, one run at a time', () => {
 
 test('it checks out the pushed main commit without saved credentials and pins every action', () => {
   const uses = [...code.matchAll(/^\s*uses: (\S+)/gm)].map(match => match[1]);
-  assert.equal(uses.length, 2);
-  for (const action of uses) assert.match(action, /^actions\/(?:checkout|setup-node)@[0-9a-f]{40}$/, action);
+  assert.equal(uses.length, 3);
+  for (const action of uses) assert.match(action, /^actions\/(?:checkout|setup-node|create-github-app-token)@[0-9a-f]{40}$/, action);
   assert.match(code, /uses: actions\/checkout@[0-9a-f]{40}[^\n]*\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          fetch-depth: 0\n          persist-credentials: false\n/);
   // No expression reaches a shell line: values arrive through env only.
   for (const line of code.split('\n').filter(text => /^\s*run:/.test(text))) assert.doesNotMatch(line, /\$\{\{/, line);
 });
 
-test('permissions are read-only except pull request comments, and the key reaches one step only', () => {
+test('permissions are read-only except pull request comments, and the App token reaches one step only', () => {
   assert.match(code, /\npermissions:\n  contents: read\n\n/);
   assert.match(code, /\n    permissions:\n      contents: read\n      pull-requests: write\n    steps:/);
-  assert.equal([...code.matchAll(/^\s*[a-z-]+: write$/gm)].length, 1);
+  // The built-in token writes only pull request comments; the App token may write contents only.
+  assert.deepEqual([...code.matchAll(/^\s*([a-z-]+): write$/gm)].map(match => match[1]), ['pull-requests', 'permission-contents']);
   assert.equal([...code.matchAll(/secrets\./g)].length, 1);
-  assert.match(code, /        env:\n          TOOLKIT_GOVERNANCE_TOKEN: \$\{\{ secrets\.TOOLKIT_GOVERNANCE_TOKEN \}\}\n          AUTHORS: \$\{\{ github\.repository_owner \}\}\n        run: bash repo\/scripts\/toolkit-rebump-action\.sh\n/);
+  // The token is minted only when the App is set up, for this repository only, narrowed to what the
+  // re-bump needs.
+  assert.match(code, /      - name: Mint the push token\n        id: app-token\n        if: \$\{\{ vars\.TOOLKIT_GOVERNANCE_APP_CLIENT_ID != '' \}\}\n        uses: actions\/create-github-app-token@[0-9a-f]{40}[^\n]*\n        with:\n          client-id: \$\{\{ vars\.TOOLKIT_GOVERNANCE_APP_CLIENT_ID \}\}\n          private-key: \$\{\{ secrets\.TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY \}\}\n          permission-contents: write\n          permission-pull-requests: read\n\n/);
+  assert.doesNotMatch(code, /\b(?:owner|repositories|skip-token-revoke):/);
+  assert.equal([...code.matchAll(/steps\.app-token\.outputs\.token/g)].length, 1);
+  assert.match(code, /        env:\n          PUSH_TOKEN: \$\{\{ steps\.app-token\.outputs\.token \}\}\n          AUTHORS: \$\{\{ github\.repository_owner \}\}\n        run: bash repo\/scripts\/toolkit-rebump-action\.sh\n/);
   // The comment step uses the built-in token and runs only after a real run.
   assert.match(code, /        if: \$\{\{ steps\.rebump\.outputs\.ran == 'true' \}\}\n        env:\n          GH_TOKEN: \$\{\{ github\.token \}\}\n        run: node repo\/scripts\/toolkit-rebump-report\.cjs /);
 });
@@ -65,19 +71,19 @@ function runStep(t, env) {
   return { result, temp, calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [], output: fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : '' };
 }
 
-test('with no push key the step prints a note, calls nothing and ends green', linuxOnly, t => {
-  for (const env of [{}, { TOOLKIT_GOVERNANCE_TOKEN: '' }]) {
+test('with no push token the step prints a note, calls nothing and ends green', linuxOnly, t => {
+  for (const env of [{}, { PUSH_TOKEN: '' }]) {
     const { result, calls, output, temp } = runStep(t, env);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /^::notice title=Toolkit re-bump::No push key is set/);
+    assert.match(result.stdout, /^::notice title=Toolkit re-bump::No governance GitHub App is set/);
     assert.deepEqual(calls, []);
     assert.equal(output, 'ran=false\n');
     assert.equal(fs.existsSync(path.join(temp, 'rebump-report.json')), false);
   }
 });
 
-test('with a push key it signs in, runs the command for the listed authors and keeps the report even when a pull request is held', linuxOnly, t => {
-  const { result, calls, output, temp } = runStep(t, { TOOLKIT_GOVERNANCE_TOKEN: 'fixture-key' });
+test('with a push token it signs in, runs the command for the listed authors and keeps the report even when a pull request is held', linuxOnly, t => {
+  const { result, calls, output, temp } = runStep(t, { PUSH_TOKEN: 'fixture-key' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(output, 'ran=true\n');
   assert.deepEqual(calls, [

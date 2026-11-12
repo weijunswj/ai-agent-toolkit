@@ -1,10 +1,10 @@
 # Toolkit Changelog
 
-## 3.66.1 (one shared governance key for the re-bump workflow)
+## 3.66.1 (a governance GitHub App for the re-bump workflow)
 
 ### Changed
 
-- The re-bump workflow now reads the repository secret `TOOLKIT_GOVERNANCE_TOKEN`, the one key the Toolkit governance workflows share, instead of `TOOLKIT_REBUMP_TOKEN`. The re-bump uses only its Contents (read and write) and Pull requests (read) permissions. With no secret the run still prints a note and does nothing.
+- The re-bump workflow now mints its push token on each run from the Toolkit governance GitHub App, the one App the Toolkit governance workflows share, instead of reading a personal token from `TOOLKIT_REBUMP_TOKEN`. It reads the repository variable `TOOLKIT_GOVERNANCE_APP_CLIENT_ID` and the repository secret `TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY`. The token lasts one hour, covers this repository only and is narrowed to Contents (read and write) and Pull requests (read). With no client ID variable the run still prints a note and does nothing.
 
 ## 3.66.0 (automatic re-bump workflow and a narrower launch rule)
 
