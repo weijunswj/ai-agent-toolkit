@@ -45,7 +45,9 @@ const TOP_HEADING = /^ {0,3}(#{1,6})(?:[ \t]|$)/;
 const TOP_UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
 const FENCE_OPEN = /^(`{3,}|~{3,})(.*)$/;
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
-const FOLD_OPEN = /^<details(?:[ \t][^<>`]*)?>(?:[ \t]*<summary>[^<>`]*<\/summary>)?[ \t]*$/i;
+// A fold open line's attributes hold no quote: an open quote would run on past the line end in
+// GitHub's HTML parser, through the next lines of rendered output.
+const FOLD_OPEN = /^<details(?:[ \t][^<>`"']*)?>(?:[ \t]*<summary>[^<>`]*<\/summary>)?[ \t]*$/i;
 const FOLD_SUMMARY = /^<summary>[^<>`]*<\/summary>[ \t]*$/i;
 const FOLD_CLOSE = /^<\/details>[ \t]*$/i;
 // HTML-like text: `<` then a letter, `/`, `!` or `?`. Only plain autolinks are let through: each
@@ -167,7 +169,11 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
     if (managed) {
       if (raw === NOTE_MARKER_LINE) { markers += 1; nested = true; }
       const block = MANAGED_LINE.exec(raw);
-      if (block && block[2] === 'END' && block[1] === managed.source && block[3] === managed.name) managed = null;
+      if (block && block[2] === 'END' && block[1] === managed.source && block[3] === managed.name) {
+        // A marker line counts only as one whole comment that ends with its only `-->`.
+        if (reading && !oneLineComment(raw)) fail('ambiguous_markup');
+        managed = null;
+      }
       // A generated block is trusted only while nothing in it can run past its END line: up to the
       // area end, each line in it is blank, a one-line comment or a text line with no HTML-like text,
       // no fence and no other marker shape.
@@ -197,7 +203,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
     }
     const block = MANAGED_LINE.exec(raw);
     if (block) {
-      if (block[2] === 'BEGIN' && neutral()) {
+      if (block[2] === 'BEGIN' && neutral() && oneLineComment(raw)) {
         if (open) close(line.start);
         managed = { source: block[1], name: block[3] };
       } else if (reading) fail('ambiguous_markup');
