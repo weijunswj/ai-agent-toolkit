@@ -541,9 +541,9 @@ test('gh and git resolve to a full .exe path, never from the working folder or a
   assert.throws(() => state.resolveExecutable('gh', { ...options, environment: { PATH: 'C:\\work;C:\\tools' } }), { code: 'EXECUTABLE_NOT_FOUND' });
 });
 
-test('the state store accepts an App installation read with no permissions only for the cloud sweep', () => {
+test('the state store skips the push check only for the cloud sweep, whatever an installation read shows', () => {
   const where = { repository: 'acme/state-store', branch: 'main', path: 'state/acme/app/' };
-  // An App installation token's repository read carries no `permissions` object.
+  // An App installation token's repository read may omit `permissions` or report every value false.
   const installationRead = permissions => {
     const github = new FakeGitHub();
     const request = github.request.bind(github);
@@ -561,16 +561,21 @@ test('the state store accepts an App installation read with no permissions only 
   const rows = [
     // [repository read permissions, installationWrite, accepted]
     [undefined, true, true],
+    [{ admin: false, maintain: false, push: false, triage: false, pull: false }, true, true],
+    [null, true, true],
     [undefined, false, false],
-    [{ push: false }, true, false],
+    [{ push: false }, false, false],
     [{ push: true }, false, true],
-    [null, true, false],
   ];
   for (const [permissions, installationWrite, accepted] of rows) {
     const store = new state.StateStore({ transport: installationRead(permissions), store: where, installationWrite });
     if (accepted) assert.equal(store.verify(), true, JSON.stringify({ permissions, installationWrite }));
     else assert.throws(() => store.verify(), { code: 'STATE_STORE_UNVERIFIED' }, JSON.stringify({ permissions, installationWrite }));
   }
+  // The private and branch checks still apply to the cloud sweep.
+  const publicStore = new FakeGitHub({ storePrivate: false });
+  assert.throws(() => new state.StateStore({ transport: publicStore, store: where, installationWrite: true }).verify(), { code: 'STATE_STORE_UNVERIFIED' });
+  assert.throws(() => new state.StateStore({ transport: new FakeGitHub(), store: { ...where, branch: 'missing' }, installationWrite: true }).verify(), { code: 'STATE_STORE_UNVERIFIED' });
   // openStore passes the flag through, and a computer pass never gets it.
   const binding = { repository: 'acme/app', store: { kind: 'github', ...where } };
   assert.equal(state.openStore({ transport: installationRead(undefined), binding, installationWrite: true }).verify(), true);

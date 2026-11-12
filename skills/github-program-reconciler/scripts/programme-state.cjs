@@ -2398,12 +2398,13 @@ class StateStore {
   journalPath(issue, name) { return `${this.journalDir(issue)}/${name}`; }
 
   // The store must exist, be private and be writable, and the branch must exist. No fallback store.
-  // A signed-in account's read carries `permissions`; an App installation token's read carries none,
-  // so for the cloud sweep its minted Contents write stands in, and a write it lacks still fails.
+  // A signed-in account's read shows its push access. An App installation token's read does not
+  // reliably show the token's own access (it may omit `permissions` or report every value false), so
+  // the cloud sweep skips that one check: its workflow minted the token with Contents write for this
+  // one store, and the sweep lease's write, which comes before any state is saved, proves it.
   verify() {
     const repo = this.transport.request('GET', `repos/${this.store.repository}`);
-    const permissions = repo.json?.permissions;
-    const writable = permissions === undefined ? this.installationWrite : permissions?.push === true;
+    const writable = this.installationWrite || repo.json?.permissions?.push === true;
     const reason = repo.status !== 200 ? `it could not be read (${repo.status})`
       : repo.json.private !== true ? 'it is not private'
         : !writable ? 'this account cannot write to it' : null;
