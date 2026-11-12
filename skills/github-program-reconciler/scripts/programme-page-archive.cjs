@@ -48,9 +48,19 @@ const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const FOLD_OPEN = /^<details(?:[ \t][^<>`]*)?>(?:[ \t]*<summary>[^<>`]*<\/summary>)?[ \t]*$/i;
 const FOLD_SUMMARY = /^<summary>[^<>`]*<\/summary>[ \t]*$/i;
 const FOLD_CLOSE = /^<\/details>[ \t]*$/i;
-// HTML-like text: `<` then a letter, `/`, `!` or `?`. Only plain autolinks are let through.
-const HTML_LIKE = /<[A-Za-z/!?]/;
-const AUTOLINK = /<(?:https?|mailto):[^\s<>]*>/gi;
+// HTML-like text: `<` then a letter, `/`, `!` or `?`. Only plain autolinks are let through: each
+// `<` is checked where it stands, and the line is never rewritten.
+const HTML_START = /<[A-Za-z/!?]/g;
+const AUTOLINK_AT = /<(?:https?|mailto):[^\s<>]*>/iy;
+function htmlLike(line) {
+  HTML_START.lastIndex = 0;
+  for (let found = HTML_START.exec(line); found; found = HTML_START.exec(line)) {
+    AUTOLINK_AT.lastIndex = found.index;
+    if (!AUTOLINK_AT.test(line)) return true;
+    HTML_START.lastIndex = AUTOLINK_AT.lastIndex;
+  }
+  return false;
+}
 // Spaces GitHub does not treat as blank, and breaks it may read as line ends.
 const ODD_SPACE = /[   -   　﻿\u000B\u000C\u0085]/;
 // Where a heading or fence could start behind indentation, block quote markers, list markers or a
@@ -163,7 +173,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
       // no fence and no other marker shape.
       else if (reading && ODD_SPACE.test(raw)) fail('control_character');
       else if (reading && (MANAGED_SHAPE.test(raw) || !BLANK.test(raw) && !oneLineComment(raw)
-        && (HTML_LIKE.test(raw.replace(AUTOLINK, '')) || containerStops(raw).some(at => matchesAt(FENCE_AT, raw, at))))) fail('ambiguous_markup');
+        && (htmlLike(raw) || containerStops(raw).some(at => matchesAt(FENCE_AT, raw, at))))) fail('ambiguous_markup');
       previous = null;
       continue;
     }
@@ -248,7 +258,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
     }
     // A text line (a heading line is one too).
     if (reading) {
-      if (HTML_LIKE.test(raw.replace(AUTOLINK, ''))) fail('ambiguous_markup');
+      if (htmlLike(raw)) fail('ambiguous_markup');
       const stops = containerStops(raw);
       if (stops.some(at => matchesAt(FENCE_AT, raw, at))) fail('ambiguous_markup');
     }
