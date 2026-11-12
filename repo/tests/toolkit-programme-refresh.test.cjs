@@ -100,9 +100,12 @@ test('refresh automatically backfills a completed task and the next sweep makes 
   assert.match(fx.github.issues.get(421).body, /\|#423\|#800\|-\|COMPLETED/);
   assert.match(fx.github.issues.get(423).body, /#800 MERGED .*aaaaaaa/);
   const before = { commits: fx.github.commits, mutations: fx.github.mutations(), calls: fx.github.calls.length };
+  const leaseWrites = () => fx.github.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/sweep-lease.json')).length;
+  const leaseBefore = leaseWrites();
   assert.equal(fx.run(['refresh']).result.summary, 'No changes');
-  assert.equal(fx.github.commits, before.commits + 3, 'one queue checkpoint and the lease acquisition and release');
-  assert.equal(fx.github.mutations(), before.mutations + 5, 'one tree, commit and ref update, plus both parent freshness redraws');
+  assert.equal(leaseWrites() - leaseBefore, 2, 'the lease is taken and released');
+  assert.equal(fx.github.commits, before.commits + 2, 'no state commit: the only store commits are the lease');
+  assert.equal(fx.github.mutations(), before.mutations);
   assert.equal(fx.store.read('child', 423).doc.revision, saved.revision, 'unchanged task facts keep their revision');
   const discovery = fx.github.calls.slice(before.calls).filter(call => /pulls\?state=(?:open|closed)/.test(call.path) || call.body?.query?.includes('closedByPullRequestsReferences'));
   assert.ok(discovery.length > 0 && discovery.length <= 60, 'history and unrelated PRs are re-read within the discovery budget without writes');
@@ -165,7 +168,7 @@ const firstWrite = (fx, act) => {
   let done = false;
   fx.github.hooks.push((call, github) => {
     // GraphQL calls here are reads (the inventory and PR queries).
-    if (done || call.method === 'GET' || call.path === 'graphql') return null;
+    if (done || call.method === 'GET' || call.path === 'graphql' || call.path.endsWith('/sweep-lease.json')) return null;
     done = true;
     act(call, github);
     return null;

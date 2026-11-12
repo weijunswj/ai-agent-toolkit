@@ -58,6 +58,10 @@ const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
 const { SweepNotes, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
+const { SweepRequests } = require('./programme-sweep.cjs');
+const { SweepLease } = require('./programme-sweep-lease.cjs');
+// Issues changed up to this long before the predecessor started (by GitHub's clock) are read again.
+const SWEEP_OVERLAP_MS = 5 * 60 * 1000;
 const { ReadCache } = require('./programme-read-cache.cjs');
 const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = require('./programme-lock.cjs');
 
@@ -204,7 +208,7 @@ class PassProgress {
     fs.writeFileSync(draft, `${JSON.stringify(note)}\n`, { mode: 0o600 });
     replaceOwnedNote(draft, this.file, this.lock);
   }
-  reported() { this.interrupted = null; if (this.last) this.write(this.last); }
+  reported() { this.interrupted = null; this.onReported?.(); if (this.last) this.write(this.last); }
   finish() {
     if (this.file && this.lock.owns() && !this.interrupted) fs.rmSync(this.file, { force: true });
   }
@@ -550,7 +554,7 @@ const commands = {
     if (args.apply && args['parent-file']) throw usage('--parent-file is for dry runs only.');
     const reconciler = makeReconciler(context);
     const parentOverride = args['parent-file'] ? readJsonFile(args['parent-file'], 'parent') : null;
-    return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride, inventory: args.inventory || null });
+    return reconciler.run({ apply: Boolean(args.apply), issue: args.issue ?? null, parentOverride, inventory: args.inventory || null, queued: args.queued || null });
   },
 
   // The same full pass as `reconcile --apply`, for any session in a governed checkout. It takes no
@@ -566,21 +570,23 @@ const commands = {
       throw new ProgrammeError('PARENT_UNHELD', `The parent document of #${context.binding.parent_issue} has no controller holding it, so there is no one to refresh for. Nothing changed; report this to the controller.`);
     }
     // Only the hash of the holder's session: enough to write as it, never to decide for it.
-    if (context.writer?.by_hash && !state.isHolder(parentDoc, context.writer)) throw new ProgrammeError('STALE_WRITER', state.parentRefusal(parentDoc));
-    context.writer = context.writer || state.refreshWriter(parentDoc);
-    if (context.requests) {
-      context.requests.observePhase = phase => context.pass.phaseAt(({ discovery: 'inventory', tasks: 'planning', pages: 'page', finished: 'page' })[phase] || phase);
-      const { LiveProgrammeSweep } = require('./programme-sweep-live.cjs');
-      const report = new LiveProgrammeSweep({ store: context.store, transport: context.transport, binding: context.binding,
-        writer: context.writer, version: context.version, now: context.now, requests: context.requests, readCache: context.readCache, pass: context.pass }).run();
-      if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
-      cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, report.holds.length === 0, deps);
-      return report;
-    }
+    context.writer = state.refreshWriter(parentDoc);
     context.sweepNotes?.phaseAt('inventory');
     const inventory = runInventory(context, parentDoc, deps, args['deadline-ms']);
-    const report = commands.reconcile({ ...args, apply: true, inventory }, context);
+    // The pass reads what changed since its predecessor started, its saved queue and its rotation
+    // share; a parent without a saved queue reads every task once.
+    const lease = context.lease;
+    const queued = lease ? {
+      since: parentDoc.sweep && lease.record.changed_since ? new Date(Date.parse(lease.record.changed_since) - SWEEP_OVERLAP_MS).toISOString() : null,
+      queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: lease.findings(),
+      canRead: () => context.requests.canStartTask() && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,
+      settle: () => { context.requests.reading = false; },
+    } : null;
+    const report = commands.reconcile({ ...args, apply: true, inventory, queued }, context);
     if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
+    if (report.sweep) context.sweepOutcome = { changedSince: report.sweep.changedComplete ? context.requests?.serverStart || null : null, completeAt: report.sweep.board_time,
+      complete: report.sweep.complete && !report.holds.length, noWrite: report.sweep.noWrite, reason: report.sweep.reason };
+    if (context.requests) report.metrics = `Sweep: requests=${context.requests.count}, tasks read=${report.sweep?.read ?? 0}, queue left=${report.sweep?.left ?? 0}`;
     cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
     return report;
   },
@@ -944,15 +950,15 @@ function runPasses(args, deps, out) {
   const pass = new state.RefreshBudget({ nowMs: deps.passClock || Date.now, ...(deps.refreshBudgetMs === undefined ? {} : { budgetMs: deps.refreshBudgetMs }) });
   const beat = { fn: () => {} };
   const notes = new SweepNotes({ clock: pass.nowMs });
-  const { SweepRequests } = require('./programme-sweep.cjs');
-  const requests = args.command === 'refresh' ? new SweepRequests({ transport: deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') }),
-    nowMs: pass.nowMs, deadline: pass.deadline }) : null;
-  if (requests) requests.settling = true;
-  if (requests) requests.observeStop = () => { if (!pass.stopped) pass.stopped = pass.snapshot('time_limit'); };
+  // A refresh is a sweep: its requests are serial and budgeted, and it holds the shared lease.
+  const requests = args.command === 'refresh' ? new SweepRequests({ transport: deps.transport || new state.GitHubTransport({ ghPath: state.resolveExecutable('gh') }), nowMs: pass.nowMs, ...(deps.requestCap ? { cap: deps.requestCap } : {}) }) : null;
+  if (requests) { requests.reading = false; requests.onLimit = () => { if (!pass.stopped) pass.stopped = pass.snapshot('time_limit'); }; }
   const passDeps = { ...deps, ...(requests ? { transport: requests } : {}), heartbeat: () => beat.fn(), sweepNotes: notes };
   const context = openContext(args, passDeps);
   context.pass = pass;
   context.requests = requests;
+  const environment = deps.environment || process.env;
+  const host = environment.GITHUB_ACTIONS === 'true' && environment.TOOLKIT_PROGRAMME_CLOUD_SWEEP === '1' ? 'cloud' : 'laptop';
   const file = deps.lockFile !== undefined ? deps.lockFile : (deps.originUrl ? null : defaultLockFile(context.binding.repository));
   let lock = takeLock(file, deps);
   if (!lock && args.command !== 'refresh') {
@@ -972,46 +978,23 @@ function runPasses(args, deps, out) {
   let passes = 0;
   while (lock) {
     const held = lock;
-    const heldOutput = [];
-    const passOutput = { write: value => { heldOutput.push(value); } };
-    let sharedLease = null;
     let progress;
     beat.fn = () => {
       if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', `Another pass took over the lock for ${context.binding.repository} while this one ran, so this pass stopped before its next GitHub request. The next refresh or the hourly sweep finishes the work.`);
       held.beat();
-      sharedLease?.check();
+      context.lease?.check();
     };
     try {
-      beat.fn();
-      clearAgain(file);
-      if (requests) {
-        const parent = readParent(context);
-        if (!parent.fence.holder_session || parent.fence.holder_prefix !== context.binding.writer_prefix) throw new ProgrammeError('PARENT_UNHELD', 'The parent has no controller holding it. Nothing was refreshed.');
-        context.writer = state.refreshWriter(parent);
-        const { SweepLease } = require('./programme-sweep-lease.cjs');
-        const leaseTransport = { request: (...parameters) => {
-          if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', 'Another pass owns the local lock.');
-          held.beat(); return requests.request(...parameters);
-        } };
-        const store = new state.StateStore({ transport: leaseTransport, store: context.binding.store, now: context.now, toolkitVersion: context.version });
-        const lease = new SweepLease({ store, repository: context.binding.repository, nowMs: pass.nowMs });
-        if (!lease.acquire()) {
-          const result = { outcome: 'QUEUED', reason: 'another sweep is running', metrics: `Sweep: requests=${requests.count}; queue left=unchanged` };
-          out.write(args.json ? `${JSON.stringify(result)}\n` : 'Another sweep is running.\n');
-          return 0;
-        }
-        sharedLease = lease;
-      }
       progress = new PassProgress(file, held);
       pass.progress = progress;
       progress.write(pass.snapshot());
       do {
         // A pass that lost its lock before its first request must not clear a flag left for the new owner.
         beat.fn();
-        if (passes > 0) clearAgain(file);
+        clearAgain(file);
         const passArgs = passes === 0 ? args : { command: 'refresh', json: args.json, 'repo-root': args['repo-root'] };
         // Later passes reuse the same store, which remembers its own writes through GitHub's read lag.
-        if (passes > 0 && !args.json) passOutput.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
+        if (passes > 0 && !args.json) out.write('\nA change came in during that pass, so the pages are refreshed once more.\n');
         const measure = Boolean(file && passArgs.command === 'refresh');
         if (passes) notes.begin();
         notes.file = file;
@@ -1019,8 +1002,19 @@ function runPasses(args, deps, out) {
         context.sweepNotes = pass.metrics = measure ? notes : null;
         // The read copy belongs to the lock's owner, like the notes beside it.
         context.readCache = measure ? new ReadCache({ file, lock: held, repository: context.binding.repository, parent: context.binding.parent_issue }) : null;
-        try { code = Math.max(code, finish(passArgs, deps, passOutput, context)); }
-        finally { if (measure) notes.saveMetrics(); }
+        if (requests) {
+          const taken = takeLease(context, host, pass, progress);
+          if (!taken) {
+            out.write(args.json ? `${JSON.stringify({ outcome: 'QUEUED', reason: 'another sweep is running' }, null, 2)}\n` : 'Another sweep is running, so this one wrote nothing. The running sweep or the next one brings the board up to date.\n');
+            passes += 1;
+            break;
+          }
+        }
+        try { code = Math.max(code, finish(passArgs, deps, out, context)); }
+        finally {
+          if (measure) notes.saveMetrics();
+          if (requests) releaseLease(context, pass);
+        }
         passes += 1;
         progress.finish();
       } while (flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS);
@@ -1028,25 +1022,49 @@ function runPasses(args, deps, out) {
       if (held.owns()) progress?.write(pass.snapshot());
       throw error;
     } finally {
-      try {
-        if (sharedLease && held.owns() && requests.count < requests.cap - 2) {
-          requests.settling = true;
-          sharedLease.release();
-        }
-      } finally {
-        lock.release();
-        let text = heldOutput.join('');
-        if (requests && text) {
-          const at = text.lastIndexOf('requests=');
-          if (at >= 0) text = text.slice(0, at) + text.slice(at).replace(/^requests=\d+/, `requests=${requests.count}`);
-        }
-        if (text) out.write(text);
-      }
+      lock.release();
     }
     // A change can be flagged between the last check and the release: take the lock back for it.
     lock = flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS ? takeLock(file, deps) : null;
   }
   return code;
+}
+
+// Takes the lease for one pass with a fresh request budget. The predecessor's stop the state does
+// not hold yet comes from the lease, unless this computer's own note already reports it.
+function takeLease(context, host, pass, progress) {
+  const requests = context.requests;
+  requests.count = 0; requests.reading = false; requests.reason = null; requests.limited = false; requests.serverStart = null;
+  context.store.graphqlRefused = false;
+  const store = typeof context.store.private === 'object' ? context.store.private : context.store;
+  const lease = new SweepLease({ store, repository: context.binding.repository, host, nowMs: pass.nowMs });
+  if (!lease.acquire()) return false;
+  context.lease = lease;
+  context.sweepOutcome = null;
+  const stop = lease.unreported();
+  if (stop && (!progress.interrupted || progress.interrupted.started_at === stop.started_at)) {
+    if (!progress.interrupted) progress.interrupted = stop;
+    progress.onReported = () => { lease.reportedStop = true; };
+  }
+  requests.reading = true;
+  return true;
+}
+
+// Releases the lease with what this pass leaves for the next one. A failed release only means the
+// lease expires on its own.
+function releaseLease(context, pass) {
+  const lease = context.lease;
+  context.lease = null;
+  if (!lease) return;
+  context.requests.reading = false;
+  const outcome = context.sweepOutcome || {};
+  try {
+    lease.release({ changedSince: outcome.changedSince || null, completeAt: outcome.completeAt || null, complete: Boolean(outcome.complete && outcome.completeAt),
+      stop: outcome.noWrite && pass.stopped ? { ...pass.stopped, cause: 'time_limit' } : null, reason: outcome.reason || null,
+      busy: outcome.reason === 'state branch busy', graphqlRefused: Boolean(context.store.graphqlRefused || context.store.private?.graphqlRefused) });
+  } catch (error) {
+    if (!error.code || ['STALE_WRITER', 'PASS_LOCK_LOST'].includes(error.code)) throw error;
+  }
 }
 
 function finish(args, deps, out, opened = null) {

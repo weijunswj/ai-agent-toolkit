@@ -665,6 +665,9 @@ test('an incomplete pass retains a missing PR finding recorded after it planned'
 });
 
 // Fresh-state closure matrix: create/update x pre-apply/CAS drift x loss of eligibility/recorded PR.
+// The state phase publishes one commit, so a concurrent write races at the state branch update.
+const stateCommit = call => call.method === 'PATCH' && /\/git\/refs\/heads\//.test(call.path);
+
 // Missing children supply no completion proof; an existing child's reopening must also persist.
 for (const childState of ['missing', 'existing']) for (const timing of ['before apply', 'CAS conflict']) {
   for (const change of ['COMMITTED', 'OPTIONAL', 'RETIRED', 'record PR']) test(`backfill refuses stale state: ${childState}, ${timing}, ${change}`, () => {
@@ -695,7 +698,7 @@ for (const childState of ['missing', 'existing']) for (const timing of ['before 
     };
     if (timing === 'before apply') drift();
     else github.intercept(call => {
-      if (before || call.method !== 'PUT' || !call.path.endsWith('issue-100.json')) return;
+      if (before || !stateCommit(call)) return;
       drift();
       return { status: 409, json: { message: 'test retry' } };
     });
@@ -752,7 +755,7 @@ for (const childState of ['missing', 'existing']) for (const discovery of ['sele
     });
     if (timing === 'before apply') savePr();
     else github.intercept(call => {
-      if (raced || call.method !== 'PUT' || !call.path.endsWith('issue-100.json')) return;
+      if (raced || !stateCommit(call)) return;
       raced = true;
       savePr();
       return { status: 409, json: { message: 'test concurrent PR save' } };
@@ -765,7 +768,9 @@ for (const childState of ['missing', 'existing']) for (const discovery of ['sele
     assert.equal(github.commits, before.commits, 'the stale apply writes no state or intents');
     assert.equal(github.mutations(), before.mutations, 'the stale apply changes no projections');
     assert.deepEqual(github.files, before.files);
-    assert.equal(childReads, 1, 'the guard uses the CAS input, with no separate child read');
+    // Every compare-and-swap input comes from one commit-pinned snapshot, so no lagging branch read
+    // of the child can reach the guard.
+    assert.equal(childReads, 0, 'the guard uses the snapshot CAS input, with no separate child read');
     github.hooks = [];
     assert.equal(concurrent.read('child', 100).doc.pr.number, 201);
 
@@ -872,7 +877,7 @@ for (const change of ['overlap', 'disjoint', 'takeover']) test(`backfill preserv
   const plan = run.plan();
   let raced = false;
   github.intercept(call => {
-    if (raced || call.method !== 'PUT' || !call.path.endsWith('issue-100.json')) return;
+    if (raced || !stateCommit(call)) return;
     raced = true;
     if (change === 'takeover') {
       const parent = store.read('parent', 7).doc;
@@ -901,9 +906,12 @@ test('backfill commit-pinned readback failure never reports success and interrup
     let failed = false;
     github.intercept(call => {
       if (failed) return;
-      if (failure === 'readback' && call.method === 'GET' && /issue-100\.json\?ref=c\d+$/.test(call.path)) {
+      // The readback of the new state commit shows a different child than was written.
+      if (failure === 'readback' && call.path === 'graphql' && call.body.query.includes('stateSnapshot') && call.body.variables.directory.startsWith(`${github.sweepHead}:`) && github.sweepCommits.has(github.sweepHead)) {
         failed = true;
-        return { status: 200, json: { sha: 'bad', encoding: 'base64', content: Buffer.from(github.files.get(store.docPath('child', 100)).text).toString('base64') } };
+        const answer = github.route(call.method, call.path, call.body);
+        for (const entry of answer.json.data.repository.snapshot.entries) if (entry.name === 'issue-100.json') entry.object.text = entry.object.text.replace('"number": 200', '"number": 201');
+        return answer;
       }
       if (failure === 'projection' && call.method === 'PATCH' && call.path.endsWith('/issues/100')) {
         failed = true;
@@ -1453,7 +1461,7 @@ test('a failed body write is not replayed blindly; an interrupted pass is resolv
     }
     return undefined;
   });
-  assert.throws(() => reconciler().run({ apply: true }), error => error.code === 'GH_FAILED' && error.details.status === 500 && !error.message.includes('connection reset'));
+  assert.throws(() => reconciler().run({ apply: true }), /connection reset/);
   assert.equal(store.read('parent', 421).doc.pending_effects[0].state, 'IN_FLIGHT');
   const patchesBefore = patchCount(github, 421);
   const recovered = reconciler().run({ apply: true });

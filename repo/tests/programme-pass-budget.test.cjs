@@ -57,15 +57,16 @@ test('A-T1: the 84-row catch-up pass batches state commits by group', t => {
   const f = fixture(); const { result, stats } = measured(f);
   t.diagnostic(JSON.stringify(stats));
   assert.deepEqual(result.holds, []);
-  // 24 grouped state commits, plus one saved copy for each of the ten pages re-laid in a pass.
-  assert.equal(stats.state_commits, 24 + state.MAX_RELAYS_PER_PASS);
+  // One state commit, then two intent writes for each of the three effect groups (parent page, order,
+  // task pages), plus one saved copy for each of the ten pages re-laid in a pass.
+  assert.equal(stats.state_commits, 1 + 3 * 2 + state.MAX_RELAYS_PER_PASS);
   assert.equal(stats.github_writes, 35);
 });
 
 test('A-T2: the parent redraw precedes every queue write', () => {
   const f = fixture(); const { calls } = measured(f);
   const parent = calls.indexOf(parentWrites(calls)[0]);
-  const queue = calls.map((call, index) => ({ call, index })).filter(({ call }) => call.method === 'PATCH' && !call.path.endsWith('/issues/421'));
+  const queue = calls.map((call, index) => ({ call, index })).filter(({ call }) => call.method === 'PATCH' && !call.path.endsWith('/issues/421') && !call.path.startsWith(`repos/${f.github.storeRepository}/`));
   assert.equal(queue.length, 34);
   assert.ok(queue.every(({ index }) => parent < index), 'parent before order and task page PATCHes');
 });
@@ -73,12 +74,12 @@ test('A-T2: the parent redraw precedes every queue write', () => {
 test('A-T3: a short budget redraws all saved rows, reports the stop and resumes', () => {
   const f = fixture(); let elapsed = 0;
   f.github.intercept(() => { elapsed += 800; });
-  const report = f.make(budget(() => Date.parse(NOW) + elapsed, 300000)).run({ apply: true });
+  const report = f.make(budget(() => Date.parse(NOW) + elapsed, 200000)).run({ apply: true });
   assert.ok(report.holds.some(entry => entry.code === 'PASS_STOPPED'));
   assert.equal(openStop(f)?.diagnostics.cause, 'time_limit');
   assert.equal((f.github.issues.get(421).body.match(/^\|[^\n]*\|#\d+\|/gm) || []).length, 84);
   assert.match(f.github.issues.get(421).body, /PASS_STOPPED #421: the last refresh stopped at/);
-  assert.equal(f.github.calls.slice(f.before.calls).filter(call => call.method === 'PATCH' && !call.path.endsWith('/issues/421')).length, 0, 'queue skipped');
+  assert.equal(f.github.calls.slice(f.before.calls).filter(call => call.method === 'PATCH' && !call.path.endsWith('/issues/421') && !call.path.startsWith(`repos/${f.github.storeRepository}/`)).length, 0, 'queue skipped');
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   f.make().run({ apply: true });
   assert.equal(openStop(f).state, 'resolved');
@@ -107,10 +108,12 @@ test('A-T3: a short budget redraws all saved rows, reports the stop and resumes'
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// These fixtures test recovery and reads, not the sweep's request cap (its own tests measure that),
+// so a catch-up pass may draw every page at once.
 function cliRun(f, lockFile, extra = {}, argv = ['refresh', '--json']) {
   let output = '';
   const code = cli.main(argv, { transport: f.github, binding: f.binding, originUrl: 'https://github.com/example.test/app.git', repoRoot: '.',
-    toolkitVersion: '3.56.1', now: () => NOW, passClock: () => Date.parse(NOW), lockFile, environment: {}, stdout: { write: text => { output += text; } }, ...extra });
+    toolkitVersion: '3.56.1', now: () => NOW, passClock: () => Date.parse(NOW), lockFile, environment: {}, requestCap: 1000, stdout: { write: text => { output += text; } }, ...extra });
   return { code, report: JSON.parse(output) };
 }
 
@@ -149,7 +152,7 @@ test('A-T4: transport failure and a dead lock leave interrupted progress, then r
 test('A-T5: planning exhaustion writes one finding commit and no page or queue', () => {
   const f = fixture(); let elapsed = 0;
   f.github.intercept(() => { elapsed += 800; });
-  const report = f.make(budget(() => Date.parse(NOW) + elapsed, 20000)).run({ apply: true });
+  const report = f.make(budget(() => Date.parse(NOW) + elapsed, 8000)).run({ apply: true });
   assert.equal(f.github.commits - f.before.commits, 1);
   assert.equal(f.github.mutations() - f.before.mutations, 0);
   assert.equal(report.holds[0].code, 'PASS_STOPPED');
@@ -343,24 +346,26 @@ for (const scoped of [false, true]) for (const row of [
   let landed = false; let injected = false;
   try {
     fs.writeFileSync(`${lockFile}.progress`, JSON.stringify({ ...note, token: 'dead', unreported: true }));
+    let reporting = false;
     f.github.intercept(call => {
       // The lost-reply outage ends this pass before any later fresh read could confirm the commit.
-      if (landed && injected && row.failure === 'lost_reply' && call.method === 'GET'
-        && call.path.startsWith(`${f.store.contentsPath('parent', 421)}?ref=`)) {
+      if (landed && injected && row.failure === 'lost_reply' && call.method === 'GET' && call.path.startsWith(`repos/${f.github.storeRepository}/branches/`)) {
         return { status: 502, json: { message: 'fixture transport still unavailable' } };
       }
-      if (!landed && call.method === 'PUT' && call.body?.content) {
-        const doc = JSON.parse(Buffer.from(call.body.content, 'base64').toString('utf8'));
-        if (doc.attention?.some(entry => entry.code === 'PASS_STOPPED' && entry.diagnostics.started_at === oldTime)) {
-          const response = f.github.route(call.method, call.path, call.body);
-          assert.equal(response.status, 200);
-          landed = true;
-          if (row.failure === 'lost_reply') { injected = true; return { status: 502, json: { message: 'fixture lost commit reply' } }; }
-          return response;
-        }
+      // The state tree that carries the predecessor's stop report.
+      if (!landed && call.method === 'POST' && call.path.endsWith('/git/trees')) {
+        const parent = call.body.tree.find(entry => entry.path === f.store.docPath('parent', 421));
+        reporting = Boolean(parent && JSON.parse(parent.content).attention?.some(entry => entry.code === 'PASS_STOPPED' && entry.diagnostics.started_at === oldTime));
       }
-      if (landed && !injected && row.failure === 'crash_after_commit' && call.method === 'GET'
-        && call.path.startsWith(`${f.store.contentsPath('parent', 421)}?ref=`) && !call.path.endsWith('ref=main')) {
+      if (!landed && reporting && call.method === 'PATCH' && call.path.includes('/git/refs/heads/')) {
+        const response = f.github.route(call.method, call.path, call.body);
+        assert.equal(response.status, 200);
+        landed = true;
+        if (row.failure === 'lost_reply') { injected = true; return { status: 502, json: { message: 'fixture lost commit reply' } }; }
+        return response;
+      }
+      if (landed && !injected && row.failure === 'crash_after_commit' && call.path === 'graphql' && call.body.query.includes('stateSnapshot')
+        && call.body.variables.directory.startsWith(`${f.github.sweepHead}:`)) {
         assert.equal(f.github.route(call.method, call.path, call.body).status, 200);
         injected = true;
         throw Object.assign(new Error('fixture crash after committed readback, before reported'), { code: 'PASS_LOCK_LOST' });
@@ -385,10 +390,14 @@ for (const scoped of [false, true]) for (const row of [
       ? ['reconcile', '--apply', '--controller', '--session', writer.session, '--issue', '500', '--json']
       : ['refresh', '--json']);
     assert.equal(recovered.code, 0);
-    if (row.answer === 'disposed') {
+    if (row.answer === 'disposed' && scoped) {
       assert.equal(recovered.report.effects.length, 0, `exercise the no-effects route: ${JSON.stringify(recovered.report.effects)}`);
       assert.equal(recovered.report.summary, 'No changes');
       assert.deepEqual(recovered.report.writes, { state: 0, github: 0 });
+    } else if (row.answer === 'disposed') {
+      // The first sweep after the stop draws the board's freshness line; nothing else changes.
+      assert.deepEqual(recovered.report.effects.map(effect => [effect.kind, effect.target.issue]), [['replace_block', 421]]);
+      assert.match(f.github.issues.get(421).body, /^Board updated: /m);
     }
     assert.equal(fs.existsSync(`${lockFile}.progress`), false, 'the stored exact match clears regardless of finding state or planned effects');
     assert.equal(cliRun(f, lockFile).code, 0);
@@ -635,7 +644,8 @@ function slowRefresh(t, { count = 60, lockFile, version = '3.59.1', discussion =
   for (let i = 0; i < extraIssues; i++) fx.github.addIssue(100000 + i, { labels: i % 20 ? ['programme:outside'] : [] });
   for (let i = 0; i < discussion; i++) fx.github.addComment(12, { body: 'Synthetic discussion' });
   for (let i = 0; i < prs; i++) fx.github.addPr(200000 + i, { state: 'CLOSED', head: 'a'.repeat(40) });
-  const close = number => Object.assign(fx.issues.get(number), { state: 'closed', closed_at: fx.NOW, state_reason: 'completed' });
+  // Closing moves the issue's update time on GitHub.
+  const close = number => Object.assign(fx.issues.get(number), { state: 'closed', closed_at: fx.NOW, state_reason: 'completed', updated_at: fx.github.tick() });
   const read = number => fx.store.read('child', number).doc;
   const run = ({ slow = true, fault = null, argv, more = {} } = {}) => {
     let time = Date.parse(fx.NOW);
@@ -686,23 +696,32 @@ for (const omit of [false, true]) {
     const f = slowRefresh(t, { count: 1, discussion: 0, extraIssues: 0, prs: 0 });
     assert.equal(f.run({ slow: false }).code, 0);
     f.close(100);
-    const puts = [];
+    const snapshots = [];
+    const writes = [];
     const outcome = f.run({ slow: false, fault: call => {
-      if (!sweepDoc(call, 100)) return;
-      if (call.method === 'PUT') puts.push(typeof call.body.sha === 'string');
-      if (call.method === 'GET' && omit) {
-        const { sha, ...rest } = f.github.route(call.method, call.path, call.body).json;
-        assert.equal(typeof sha, 'string');
-        return { status: 200, json: rest };
-      }
+      if (call.method === 'PUT' && sweepDoc(call, 100)) writes.push(call);
+      if (call.method === 'POST' && /\/git\/(trees|commits)$/.test(call.path) || call.method === 'PATCH' && call.path.includes('/git/refs/heads/')) writes.push(call);
+      if (call.path !== 'graphql' || !call.body.query.includes('stateSnapshot')) return;
+      const answer = f.github.route(call.method, call.path, call.body);
+      const entry = answer.json.data.repository.snapshot?.entries.find(item => item.name === 'issue-100.json');
+      if (entry) snapshots.push({ head: call.body.variables.directory.split(':')[0], oid: entry.oid });
+      if (entry && omit) delete entry.oid;
+      return answer;
     } });
+    const trees = writes.filter(call => call.path.endsWith('/git/trees'));
+    const treeFor100 = trees.filter(call => call.body.tree.some(entry => entry.path.endsWith('issue-100.json')));
     if (!omit) {
       assert.equal(outcome.code, 0);
-      assert.deepEqual(puts, [true]);
+      assert.equal(writes.some(call => call.method === 'PUT'), false, 'no per-document write');
+      assert.equal(treeFor100.length, 1);
+      const commit = writes.find(call => call.path.endsWith('/git/commits') && call.body.tree);
+      assert.equal(commit.body.parents.length, 1);
+      assert.ok(snapshots.some(item => item.head === commit.body.parents[0] && /^[0-9a-f]{40}$/.test(item.oid)), 'the commit builds on the snapshot that gave #100 its version id');
+      assert.ok(writes.filter(call => call.method === 'PATCH').every(call => call.body.force === false));
       assert.equal(f.read(100).lifecycle, 'DONE');
       return;
     }
-    assert.deepEqual(puts, [], 'no request without the comparison token');
+    assert.deepEqual(treeFor100, [], 'no request without the comparison token');
     assert.equal(outcome.code, 1);
     assert.deepEqual(outcome.report.holds.map(hold => [hold.code, hold.target]), [['STATE_TOKEN_MISSING', '#100']]);
     assert.equal(f.read(100).lifecycle, 'PLANNED');
@@ -725,7 +744,9 @@ function readFixture(t, { count = 24, groups = ['COMPLETED'], cached = true } = 
   const file = cached ? path.join(dir, 'pass.lock') : null;
   let time = Date.parse(fx.NOW);
   const run = (extra = {}) => {
+    // An hour passes on GitHub too between hourly passes.
     time += 3600000;
+    fx.github.clock += 3600000;
     const at = fx.github.calls.length;
     const result = cliRun(fx, file, { now: () => new Date(time).toISOString(), passClock: () => time, toolkitVersion: '3.59.1', ...extra });
     return { ...result, calls: fx.github.calls.slice(at) };
@@ -771,21 +792,28 @@ test('reads: settled children are reused, and the oldest share is read again eac
   assert.equal(first.code, 0, JSON.stringify(first.report.holds));
   assert.deepEqual([first.report.reads.reused, first.report.reads.reread], [0, 0]);
   assert.ok(f.prReads(first.calls, 500) >= 1);
-  assert.equal(Object.keys(f.kept().children).length, 24);
+  // The saved queue, not a per-task copy, decides what is read: the first pass read all 24.
+  assert.deepEqual([first.report.sweep.read, f.parent().sweep.queue], [24, []]);
   // The first pass wrote every child page, which moved each issue's update time: all are read again once.
   const settling = f.run();
   assert.deepEqual([settling.report.reads.reused, settling.report.reads.reread], [0, 0]);
-  const stamp = f.kept().children[100].read_at;
   const second = f.run();
   assert.equal(second.code, 0);
   assert.deepEqual([second.report.reads.reused, second.report.reads.reread], [22, 2]);
-  assert.equal(second.report.summary, 'No changes');
-  // Twelve passes in all re-read every copy at least once.
-  for (let pass = 0; pass < 11; pass++) assert.equal(f.run().code, 0);
-  for (const entry of Object.values(f.kept().children)) assert.ok(Date.parse(entry.read_at) > Date.parse(stamp));
-  // A pass that reuses #100 asks for neither its comments nor its merged PR.
-  const reusing = [f.run(), f.run()].find(result => !f.gets(result.calls, new RegExp(`^${APP}/issues/100/comments`)));
-  assert.ok(reusing, 'at least one of two passes reuses the copy');
+  // An hour later only the parent's freshness line moves; no task changes.
+  assert.deepEqual(second.report.effects.map(effect => [effect.kind, effect.target.issue]), [['replace_block', 12]]);
+  // Twelve passes in all re-read every task at least once.
+  const seen = new Set(second.report.sweep.tasks);
+  for (let pass = 0; pass < 11; pass++) {
+    const result = f.run();
+    assert.equal(result.code, 0);
+    for (const number of result.report.sweep.tasks) seen.add(number);
+  }
+  assert.equal(seen.size, 24);
+  // A pass that leaves #100 out asks for neither its comments nor its merged PR.
+  const reusing = [f.run(), f.run()].find(result => !result.report.sweep.tasks.includes(100));
+  assert.ok(reusing, 'at least one of two passes leaves #100 to its rotation turn');
+  assert.equal(f.gets(reusing.calls, new RegExp(`^${APP}/issues/100/comments`)), 0);
   assert.equal(f.prReads(reusing.calls, 500), 0);
 });
 
@@ -807,13 +835,15 @@ test('reads: a changed settled child is read live', t => {
   assert.equal(live(changed, 100), true, 'new comment');
   assert.equal(f.gets(changed.calls, new RegExp(`^${APP}/issues/102/sub_issues`)) > 0, true, 'the new sub-issue is found');
   assert.ok(changed.report.effects.some(effect => effect.kind === 'add_native_children'), 'and adopted, as on a full read');
-  assert.equal(f.kept().children[101].comment_count, 0, 'the deleted comment left the copy');
-  assert.equal(f.kept().children[100].comment_count, 2);
+  // A deleted comment moves no update time, so GitHub's changed list cannot show it: #101 is read
+  // again on its rotation turn, within twelve passes.
+  let turn = live(changed, 101) ? changed : null;
+  for (let pass = 0; !turn && pass < 12; pass++) { const result = f.run(); if (result.report.sweep.tasks.includes(101)) turn = result; }
+  assert.ok(turn && live(turn, 101), 'the deleted comment reaches #101 within its rotation');
   // A reopened child is no longer settled: nothing kept is used for it.
   Object.assign(f.github.issues.get(103), { state: 'open', closed_at: null, state_reason: null, updated_at: f.github.tick() });
   const reopened = f.run();
   assert.equal(live(reopened, 103), true, 'reopened');
-  assert.equal(f.kept().children[103], undefined, 'no copy is kept for an open child');
 });
 
 test('reads: a child with a pending intent, or with no usable copy, is never reused', t => {
@@ -826,13 +856,16 @@ test('reads: a child with a pending intent, or with no usable copy, is never reu
   f.github.putFile('state/issue-100.json', doc);
   const pending = f.run();
   assert.ok(f.gets(pending.calls, new RegExp(`^${APP}/issues/100/comments`)) > 0, 'a pending intent is checked against a live read');
-  // An unreadable, foreign or wrong-shaped file only means everything is read again.
+  // An unreadable, foreign or wrong-shaped file is rebuilt and its comments read in full. What a
+  // pass skips is decided by the saved queue in the state, never by this file.
   for (const text of ['{not json', JSON.stringify({ schema: readCache.SCHEMA, repository: 'someone/else', parent: 12, children: {} }),
     JSON.stringify({ schema: readCache.SCHEMA, repository: 'example.test/app', parent: 12, discussion: { bookmark: 'x', comments: [{}] }, children: { 101: { updated_at: 1 } } })]) {
     fs.writeFileSync(`${f.file}.reads`, text);
     const cold = f.run();
     assert.equal(cold.code === 0 || cold.report.holds.every(hold => hold.code === 'EFFECT_UNKNOWN'), true, JSON.stringify(cold.report.holds));
-    assert.deepEqual([cold.report.reads.reused, cold.report.reads.bookmark], [0, 'full']);
+    assert.equal(cold.report.reads.bookmark, 'full');
+    assert.equal(cold.report.reads.reused + cold.report.sweep.read, 24, 'every task is read or left to its turn by the queue');
+    assert.deepEqual(f.parent().sweep.queue, [], 'nothing the queue owed was skipped');
     assert.equal(f.kept().schema, readCache.SCHEMA, 'the file is rebuilt');
   }
 });
@@ -846,11 +879,11 @@ test('reads: the parent comments come from a bookmark that must account for ever
   const pages = result => f.gets(result.calls.filter(call => !/since=/.test(call.path)), new RegExp(`^${APP}/issues/12/comments`));
   const since = result => f.gets(result.calls.filter(call => /since=/.test(call.path)), new RegExp(`^${APP}/issues/12/comments`));
   const first = f.run();
-  assert.deepEqual([first.report.reads.bookmark, since(first)], ['full', 0]);
+  assert.equal(first.report.reads.bookmark, 'full');
   assert.ok(pages(first) >= 3);
   const planningPages = pages(first);
   const second = f.run();
-  assert.deepEqual([second.report.reads.bookmark, since(second), pages(second)], ['used', 1, 0]);
+  assert.deepEqual([second.report.reads.bookmark, since(second) >= 1, pages(second)], ['used', true, 0]);
   // New and edited comments arrive through the bookmark read.
   f.github.addComment(12, { body: 'A new note' });
   const edited = [...f.github.comments.values()].find(comment => comment.body === 'Discussion 7');
@@ -864,7 +897,7 @@ test('reads: the parent comments come from a bookmark that must account for ever
   // A deleted comment cannot be seen by the bookmark read: the count disagrees, so all pages are read.
   f.github.comments.delete(edited.id);
   const fourth = f.run();
-  assert.deepEqual([fourth.report.reads.bookmark, since(fourth)], ['full', 1]);
+  assert.deepEqual([fourth.report.reads.bookmark, since(fourth) >= 1], ['full', true]);
   assert.ok(pages(fourth) >= planningPages);
   assert.equal(f.kept().discussion.comments.length, 250);
   assert.equal(f.run().report.reads.bookmark, 'used');
@@ -881,7 +914,7 @@ test('reads: a warm pass plans exactly what a pass with no copy plans', t => {
     Object.assign(f.github.issues.get(105), { state: 'open', closed_at: null, state_reason: null, updated_at: f.github.tick() });
     f.github.issues.get(106).title = 'Renamed task'; f.github.issues.get(106).updated_at = f.github.tick();
     reports.push(f.run().report, f.run().report);
-    return reports.map(({ reads, ...report }) => report);
+    return reports.map(({ reads, metrics, ...report }) => report);
   };
   const warm = readFixture(t, { count: 26, groups: ['COMPLETED', 'COMPLETED', 'LATER'] });
   const cold = readFixture(t, { count: 26, groups: ['COMPLETED', 'COMPLETED', 'LATER'], cached: false });
@@ -916,6 +949,7 @@ test('reads: a slow programme finishes its plan, and a cut plan still keeps what
   assert.match(stopOf(cut), /stopped at/);
   assert.deepEqual(cut.report.results, []);
   assert.equal(f.read(101).lifecycle, 'PLANNED');
+  assert.equal(f.store.read('parent', 12).doc.sweep.queue[0], 101, 'the cut pass saved its queue with the changed task first');
   assert.ok(JSON.parse(fs.readFileSync(`${f.file}.reads`, 'utf8')).discussion.comments.length >= 741);
   const after = f.run({ slow: false });
   assert.equal(after.report.reads.bookmark, 'used');

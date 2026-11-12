@@ -523,8 +523,8 @@ test('order moves reach the catalogue order and leave other sub-issues alone', (
 
 test('gh output with headers and redirects parses to the last status and its body', () => {
   const raw = 'HTTP/2.0 301 Moved\r\nLocation: x\r\n\r\nHTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n{"a":1}';
-  assert.deepEqual(state.GitHubTransport.parse(raw), { status: 200, json: { a: 1 }, headers: { 'content-type': 'application/json' } });
-  assert.deepEqual(state.GitHubTransport.parse('HTTP/2.0 404 Not Found\n\n{"message":"Not Found"}'), { status: 404, json: { message: 'Not Found' }, headers: {} });
+  assert.deepEqual(state.GitHubTransport.parse(raw), { status: 200, json: { a: 1 } });
+  assert.deepEqual(state.GitHubTransport.parse('HTTP/2.0 404 Not Found\n\n{"message":"Not Found"}'), { status: 404, json: { message: 'Not Found' } });
   assert.throws(() => state.GitHubTransport.parse('', 'boom'), { code: 'GH_FAILED' });
   const calls = [];
   const transport = new state.GitHubTransport({ ghPath: 'C:\\Program Files\\GitHub CLI\\gh.exe', run: (file, args, options) => { calls.push({ file, args, options }); return { status: 0, stdout: 'HTTP/2.0 201 Created\n\n{}' }; } });

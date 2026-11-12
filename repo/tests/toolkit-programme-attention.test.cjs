@@ -242,7 +242,8 @@ test('E2: findings are added, kept without writes, acknowledged, resolved, retur
   // Same condition: unchanged, and no store write.
   const commits = fx.github.commits;
   assert.equal(fx.run(['refresh']).result.summary, 'No changes');
-  assert.equal(fx.github.commits, commits, 'an unchanged run writes nothing');
+  // The sweep takes and releases its lease; no state is written.
+  assert.equal(fx.github.commits, commits + 2, 'an unchanged run writes no state');
   // ack by the holder: acknowledged, still listed and printed.
   assert.equal(fx.ctrl(['ack', '--finding', found.id]).result.state, 'acknowledged');
   const listed = fx.run(['attention'], {}, { json: false }).result;
