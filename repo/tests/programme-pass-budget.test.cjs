@@ -732,7 +732,7 @@ for (const omit of [false, true]) {
 
 // Reading only what changed. The parent's sub-issue list carries every native child's issue
 // facts, empty lists are not requested, the parent's comments are read from a bookmark, and a
-// settled child whose live row still matches its kept copy is not read again.
+// task is read in full only when the saved queue puts it in the pass's scope.
 const APP = 'repos/example.test/app';
 const readCache = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-read-cache.cjs'));
 
@@ -867,7 +867,10 @@ test('reads: a child with a pending intent, or with no usable copy, is never reu
     assert.equal(cold.report.reads.reused + cold.report.sweep.read, 24, 'every task is read or left to its turn by the queue');
     assert.deepEqual(f.parent().sweep.queue, [], 'nothing the queue owed was skipped');
     assert.equal(f.kept().schema, readCache.SCHEMA, 'the file is rebuilt');
+    assert.equal(Object.hasOwn(f.kept(), 'children'), false, 'the file keeps no per-task copies');
   }
+  // The saved queue decides what a pass reads, so the copy has no per-task reuse left.
+  for (const name of ['usable', 'setChild', 'dropChild', 'retain']) assert.equal(name in readCache.ReadCache.prototype, false, name);
 });
 
 test('reads: the parent comments come from a bookmark that must account for every comment', t => {
@@ -878,12 +881,14 @@ test('reads: the parent comments come from a bookmark that must account for ever
   for (let i = 245; i < 250; i++) f.github.addComment(12, { body: `Discussion ${i}` });
   const pages = result => f.gets(result.calls.filter(call => !/since=/.test(call.path)), new RegExp(`^${APP}/issues/12/comments`));
   const since = result => f.gets(result.calls.filter(call => /since=/.test(call.path)), new RegExp(`^${APP}/issues/12/comments`));
+  // Exact reads per pass: planning reads the discussion once (in full, or through the bookmark), and
+  // each of the pass's two parent page draws reads it again through the bookmark just before its
+  // body write, so the page never drops a comment posted during the pass.
   const first = f.run();
-  assert.equal(first.report.reads.bookmark, 'full');
-  assert.ok(pages(first) >= 3);
+  assert.deepEqual([first.report.reads.bookmark, since(first), pages(first)], ['full', 2, 3]);
   const planningPages = pages(first);
   const second = f.run();
-  assert.deepEqual([second.report.reads.bookmark, since(second) >= 1, pages(second)], ['used', true, 0]);
+  assert.deepEqual([second.report.reads.bookmark, since(second), pages(second)], ['used', 3, 0]);
   // New and edited comments arrive through the bookmark read.
   f.github.addComment(12, { body: 'A new note' });
   const edited = [...f.github.comments.values()].find(comment => comment.body === 'Discussion 7');
@@ -897,8 +902,7 @@ test('reads: the parent comments come from a bookmark that must account for ever
   // A deleted comment cannot be seen by the bookmark read: the count disagrees, so all pages are read.
   f.github.comments.delete(edited.id);
   const fourth = f.run();
-  assert.deepEqual([fourth.report.reads.bookmark, since(fourth) >= 1], ['full', true]);
-  assert.ok(pages(fourth) >= planningPages);
+  assert.deepEqual([fourth.report.reads.bookmark, since(fourth), pages(fourth)], ['full', 3, planningPages]);
   assert.equal(f.kept().discussion.comments.length, 250);
   assert.equal(f.run().report.reads.bookmark, 'used');
 });

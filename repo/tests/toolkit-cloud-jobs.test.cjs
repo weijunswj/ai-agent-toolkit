@@ -55,11 +55,11 @@ test('one permission list: names, display names and levels live only in the App 
       assert.equal(level, (token.read_only || []).includes(name) ? 'read' : app.APP.permissions[name], `${job.id} ${token.name} ${name}`);
     }
   }
-  // No second copy anywhere in the Toolkit's code or contracts: no "name: level" pair for an App
-  // permission, and no display-name map.
+  // No second copy anywhere in the Toolkit's code or contracts: no "name: level" or ['name', 'level']
+  // pair for an App permission, and no display-name map in either shape.
   const names = Object.keys(app.APP.permissions).join('|');
-  const levelPair = new RegExp(`["']?\\b(${names})\\b["']?\\s*:\\s*["'](read|write)["']`, 'g');
-  const labelPair = new RegExp(`["']?\\b(${names})\\b["']?\\s*:\\s*["']([A-Z][a-z]+(?: [a-z]+)?)["']`, 'g');
+  const levelPair = new RegExp(`["']?\\b(${names})\\b["']?\\s*[:,]\\s*["'](read|write)["']`, 'g');
+  const labelPair = new RegExp(`["']?\\b(${names})\\b["']?\\s*[:,]\\s*["']([A-Z][a-z]+(?: [a-z]+)?)["']`, 'g');
   const copies = [];
   const walk = dir => {
     for (const entry of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
