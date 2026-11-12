@@ -37,8 +37,9 @@ test('contract: mint permissions match the row', () => {
   assert.equal(row.workflow, '.github/workflows/toolkit-programme-sweep.yml');
   assert.equal(row.schedule.cron, '17 * * * *');
   const minted = name => Object.fromEntries([...step(name).matchAll(/permission-([a-z-]+): (read|write)/g)].map(([, permission, level]) => [permission.replace(/-/g, '_'), level]));
-  assert.deepEqual(minted('Mint the governed repository token'), row.tokens.find(token => token.repository === 'governed_repository').permissions);
-  assert.deepEqual(minted('Mint the evidence store token'), row.tokens.find(token => token.repository === 'evidence_store').permissions);
+  const wanted = repository => cloudJobs().tokenPermissions(row.tokens.find(token => token.repository === repository));
+  assert.deepEqual(minted('Mint the governed repository token'), wanted('governed_repository'));
+  assert.deepEqual(minted('Mint the evidence store token'), wanted('evidence_store'));
   assert.match(step('Mint the evidence store token'), /owner: \$\{\{ github\.repository_owner \}\}\r?\n\s+repositories: \$\{\{ steps\.binding\.outputs\.store \}\}/);
   assert.doesNotMatch(step('Mint the governed repository token'), /owner:|repositories:/, 'the governed token is for this repository alone');
 });

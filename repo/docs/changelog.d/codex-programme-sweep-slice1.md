@@ -13,4 +13,4 @@ Title: programme sweep on a saved queue, and on GitHub
 
 - The hourly Toolkit Programme Sweep workflow runs the refresh on GitHub under the governance GitHub App, with one installation token for the governed repository and one for its evidence store, each with only its own permissions. Without the App it posts a notice and writes nothing; a repository whose state is on a public branch keeps the computer's sweep.
 - A shared lease in the evidence store lets one sweep write at a time across the computer and GitHub; a run stopped by its timeout is reported by the next one.
-- `repo/contracts/cloud-jobs.json` lists the jobs that run on GitHub and their tokens, and `toolkit governance check` lists them beside the App's setup.
+- `repo/contracts/cloud-jobs.json` lists the jobs that run on GitHub and their tokens. Each token names only which of the governance App's permissions it takes, at the App's level unless marked read-only, so the App's permission list is kept in one place. `toolkit governance check` lists the jobs beside the App's setup, in the same words.

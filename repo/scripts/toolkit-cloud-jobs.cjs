@@ -2,21 +2,18 @@
 
 // The scheduled jobs that run on GitHub instead of on a computer. Each job row names its workflow,
 // its schedule, the computer job it replaces and the installation tokens it mints from the
-// governance GitHub App, one per repository, each with exactly its permissions. Every token stays
-// within the App's one permission list (toolkit-governance-app.cjs owns it, its names and the
-// owner's setup steps). Reading the contract is offline.
+// governance GitHub App, one per repository. A token names only which of the App's permissions it
+// takes; each gets the App's level unless the row marks it read-only. The App's permission list, its
+// display names, levels, variable and secret live once, in toolkit-governance-app.cjs. Reading the
+// contract is offline.
 const fs = require('node:fs');
 const path = require('node:path');
 const governanceApp = require('./toolkit-governance-app.cjs');
 
 const CONTRACT_PATH = Object.freeze(['repo', 'contracts', 'cloud-jobs.json']);
 const CONTRACT_SCHEMA = 'toolkit.cloud-jobs.v1';
-const APP = Object.freeze({ client_id_variable: governanceApp.APP.variable, private_key_secret: governanceApp.APP.secret });
 const NEVER_GRANTED = Object.freeze(['administration', 'secrets', 'workflows', 'account']);
 const REPOSITORY_ROLES = Object.freeze(['governed_repository', 'evidence_store']);
-// GitHub App repository permissions a row may name, with the names GitHub's App settings show.
-const PERMISSIONS = Object.freeze({ contents: 'Contents', issues: 'Issues', pull_requests: 'Pull requests', checks: 'Checks', statuses: 'Commit statuses' });
-const LEVELS = Object.freeze(['read', 'write']);
 const MAX_CONTRACT_BYTES = 128 * 1024;
 const CRON = /^[0-9*/,-]+(?: [0-9*/,-]+){4}$/;
 
@@ -26,26 +23,28 @@ function fail(reason) { throw new CloudJobsContractError(`Cloud jobs contract is
 const isRecord = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const hasExactKeys = (value, keys) => isRecord(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const validText = (value, pattern, maxLength = 180) => typeof value === 'string' && value.length > 0 && value.length <= maxLength && pattern.test(value);
+const uniqueList = value => Array.isArray(value) && value.length > 0 && new Set(value).size === value.length;
 
 function validateToken(token, jobId, names) {
-  if (!hasExactKeys(token, ['name', 'repository', 'permissions'])) fail(`job ${jobId} token fields`);
+  const keys = ['name', 'repository', 'takes'];
+  if (!hasExactKeys(token, keys) && !hasExactKeys(token, [...keys, 'read_only'])) fail(`job ${jobId} token fields`);
   if (!validText(token.name, /^[a-z][a-z0-9-]{0,31}$/) || names.has(token.name)) fail(`job ${jobId} duplicate or invalid token name`);
   names.add(token.name);
   if (!REPOSITORY_ROLES.includes(token.repository)) fail(`job ${jobId} token ${token.name} repository`);
-  if (!isRecord(token.permissions) || !Object.keys(token.permissions).length) fail(`job ${jobId} token ${token.name} permissions`);
-  for (const [permission, level] of Object.entries(token.permissions)) {
-    if (NEVER_GRANTED.includes(permission) || !Object.hasOwn(PERMISSIONS, permission)) fail(`job ${jobId} token ${token.name} asks for an unapproved permission`);
-    if (!LEVELS.includes(level)) fail(`job ${jobId} token ${token.name} permission level`);
-    const allowed = governanceApp.APP.permissions[permission];
-    if (!allowed || (level === 'write' && allowed !== 'write')) fail(`job ${jobId} token ${token.name} asks for more than the governance App's permissions`);
+  if (!uniqueList(token.takes)) fail(`job ${jobId} token ${token.name} permissions`);
+  for (const permission of token.takes) {
+    if (!Object.hasOwn(governanceApp.APP.permissions, permission)) fail(`job ${jobId} token ${token.name} asks for a permission the governance App does not have`);
+  }
+  if (!Object.hasOwn(token, 'read_only')) return;
+  if (!uniqueList(token.read_only)) fail(`job ${jobId} token ${token.name} read-only permissions`);
+  for (const permission of token.read_only) {
+    if (!token.takes.includes(permission) || governanceApp.APP.permissions[permission] !== 'write') fail(`job ${jobId} token ${token.name} read-only ${permission} narrows nothing`);
   }
 }
 
 function validateCloudJobsContract(contract) {
-  if (!hasExactKeys(contract, ['schema', 'app', 'never_granted', 'jobs'])) fail('top-level fields');
+  if (!hasExactKeys(contract, ['schema', 'never_granted', 'jobs'])) fail('top-level fields');
   if (contract.schema !== CONTRACT_SCHEMA) fail('schema');
-  if (!hasExactKeys(contract.app, ['client_id_variable', 'private_key_secret'])
-    || contract.app.client_id_variable !== APP.client_id_variable || contract.app.private_key_secret !== APP.private_key_secret) fail('governance App variable and secret names');
   if (!Array.isArray(contract.never_granted) || contract.never_granted.length !== NEVER_GRANTED.length
     || contract.never_granted.some((value, index) => value !== NEVER_GRANTED[index])) fail('never-granted permissions');
   if (!Array.isArray(contract.jobs) || contract.jobs.length < 1 || contract.jobs.length > 64) fail('job rows');
@@ -78,43 +77,31 @@ function readCloudJobsContract({ root = process.cwd(), readFile = fs.readFileSyn
   return contract;
 }
 
-// The App's one-time permission set: for each repository, the highest level any row asks for.
-function unionPermissions(jobs) {
-  const union = Object.fromEntries(REPOSITORY_ROLES.map(role => [role, {}]));
-  for (const job of jobs) for (const token of job.tokens) {
-    for (const [permission, level] of Object.entries(token.permissions)) {
-      const current = union[token.repository][permission];
-      union[token.repository][permission] = current === 'write' || level === 'write' ? 'write' : 'read';
-    }
-  }
-  for (const role of REPOSITORY_ROLES) {
-    union[role] = Object.fromEntries(Object.keys(PERMISSIONS).filter(name => union[role][name]).map(name => [name, union[role][name]]));
-  }
-  return union;
+// A validated token's permissions with their levels, read from the App: { issues: 'write', ... }.
+function tokenPermissions(token) {
+  return Object.fromEntries(token.takes.map(name => [name, (token.read_only || []).includes(name) ? 'read' : governanceApp.APP.permissions[name]]));
 }
-
-// How a permission reads in GitHub's App settings: "Issues: read and write".
-const permissionText = (name, level) => `${PERMISSIONS[name]}: ${level === 'write' ? 'read and write' : 'read'}`;
 
 function buildCloudJobsGuide({ root = process.cwd(), contract = null } = {}) {
   const source = contract || readCloudJobsContract({ root });
   const jobs = validateCloudJobsContract(source);
-  return { app: { ...source.app }, jobs: jobs.map(job => structuredClone(job)), app_permissions: unionPermissions(jobs), never_granted: [...source.never_granted] };
+  return { jobs: jobs.map(job => structuredClone(job)), never_granted: [...source.never_granted] };
 }
 
 // The guide as lines for `toolkit governance check`; the App's own setup steps print beside it.
 function guideLines(guide) {
   const roles = { governed_repository: 'Governed repository', evidence_store: 'Evidence store' };
-  const lines = [`Cloud jobs: one governance GitHub App, variable ${guide.app.client_id_variable} and secret ${guide.app.private_key_secret}`];
+  const lines = [`Cloud jobs: one governance GitHub App, variable ${governanceApp.APP.variable} and secret ${governanceApp.APP.secret}`];
   for (const job of guide.jobs) {
     lines.push(`- ${job.id}: ${job.schedule.cadence} (${job.workflow}), replaces the computer's ${job.replaces_computer_job}`);
-    for (const token of job.tokens) lines.push(`  ${roles[token.repository]} token: ${Object.entries(token.permissions).map(([name, level]) => permissionText(name, level)).join(', ')}`);
+    for (const token of job.tokens) {
+      lines.push(`  ${roles[token.repository]} token: ${Object.entries(tokenPermissions(token)).map(([name, level]) => governanceApp.permissionLabel(name, level)).join(', ')}`);
+    }
   }
   lines.push('Each job narrows its tokens to these; the App itself has the permissions its setup steps list.', `Never grant: ${guide.never_granted.join(', ')}.`);
   return lines;
 }
 
 module.exports = Object.freeze({
-  CONTRACT_PATH: CONTRACT_PATH.join('/'), CONTRACT_SCHEMA, APP, NEVER_GRANTED, PERMISSIONS,
-  CloudJobsContractError, validateCloudJobsContract, readCloudJobsContract, buildCloudJobsGuide, unionPermissions, guideLines,
+  CloudJobsContractError, validateCloudJobsContract, readCloudJobsContract, tokenPermissions, buildCloudJobsGuide, guideLines,
 });
