@@ -128,7 +128,10 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     run through another shell or expression runner (bash -c, pwsh -Command, cmd /c, eval) is
 //     refused whatever branch it names; encoded PowerShell commands are refused unread;
 //   - refused, as a tripwire against an agent approving for itself: a command that starts a Claude
-//     or Codex session and mentions merge, or that sets or clears TOOLKIT_HOST_SESSION (assignment,
+//     or Codex session and mentions merge (branch upkeep wording aside: `git merge`, merge commits,
+//     merge conflicts and merge-base; the approval reader skips, by the same definition, a line
+//     whose only merge wording is upkeep, such as "git merge 5" or "update #5 with a merge commit";
+//     that only ever removes a line), or that sets or clears TOOLKIT_HOST_SESSION (assignment,
 //     unset, env -u, Remove-Item Env:\, export -n, declare +x, SetEnvironmentVariable, or an empty
 //     environment on a host launch through env -i, --ignore-environment or a bare -), names
 //     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt,
@@ -139,6 +142,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //
 // Not covered: a fresh `codex exec` launch from a running Codex shell still keeps standing as it
 // did before, wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
+// launch text the shell reshapes before the new session reads it (variables, substitutions or
+// split quotes that spell merge wording, or turn upkeep wording into it, only after expansion),
 // pushes wrapped in a program that is not a shell (timeout, Start-Process, xargs and the like), a
 // prompt file fed to a hook script, other hook-feed wrappers or Node flags (including node -e
 // loading toolkit-governance-gate.cjs, direct toolkit-codex-session-start.ps1, env FOO=1 node,
@@ -343,6 +348,20 @@ function normalise(text) {
   return String(text || '').replace(/[‘’ʼ′]/g, "'").replace(/[“”«»‹›＂]/g, '"').replace(/＞/g, '>').replace(/：/g, ':');
 }
 
+// Branch upkeep, not a pull request merge: the `git merge` command (a branch merged in locally),
+// merge commits, merge conflicts and merge-base. A phrase never spans a line break (only spaces,
+// tabs or one hyphen join its words), so reading a text whole or line by line sets the same
+// phrases aside.
+const UPKEEP_MERGE = /\bgit[ \t]+merge(?:-base)?\b|\bmerge[- ](?:commits?|conflicts?|base)\b/gi;
+function withoutUpkeep(text) { return normalise(text).replace(UPKEEP_MERGE, ' '); }
+// The one definition of "this text talks about merging" for the launch rule and the approval
+// reader. The launch rule refuses a launch whose text has it. The reader reads every line exactly
+// as it did before this definition existed and then drops a line that lacks it, so the definition
+// can only take approvals away, never add one. Invariant: a launch the hold lets through carries
+// no text the reader counts, because none of its lines has merge wording.
+function mergeWording(text) { return /\bmerge\b/i.test(withoutUpkeep(text)); }
+const PROMPT_LINES = /\r\n|[\n\r\v\f\x1c-\x1e\u0085\u2028\u2029]/;
+
 // A fenced code block's opening or closing line (``` or ~~~, after any indent or list marker); a
 // backtick fence never has a backtick after its run, so ```merge 618``` is a code span, not a fence.
 const FENCE = /^(`{3,})[^`]*$|^(~{3,})/;
@@ -356,7 +375,11 @@ function approvalsIn(prompt) {
   // The fence that opened the code block the reading is in, or null. Lines inside one never count,
   // so pasted output in a fence carries no approval; one left open runs to the end of the message.
   let fence = null;
-  for (let raw of normalise(prompt).slice(0, MAX_PROMPT_CHARS).split(/\r\n|[\n\r\v\f\x1c-\x1e\u0085\u2028\u2029]/)) {
+  const whole = normalise(prompt);
+  // Each line as typed, before the length limit cuts the text: the upkeep test below reads these,
+  // so a cut can never turn upkeep wording ("merge commit", "merged") into the bare word.
+  const typed = whole.split(PROMPT_LINES);
+  for (let [index, raw] of whole.slice(0, MAX_PROMPT_CHARS).split(PROMPT_LINES).entries()) {
     let line = raw;
     for (let strip = 0; strip < 5 && LIST_MARKER.test(line); strip += 1) line = line.replace(LIST_MARKER, '');
     // A fence is looked for under every list marker, however many.
@@ -390,7 +413,10 @@ function approvalsIn(prompt) {
     // time, so "at <link>" is not a delay.
     // Hold words are read on the whole line, list marker included, so "17:00 merge 618" is a delay.
     const words = raw.replace(APPROVAL_LINK, ' x0 ').replace(SLUG_NAME, ' ');
-    if (line.length > MAX_APPROVAL_LINE || !/\bmerge\b/i.test(words) || HOLD_WORDS.test(words) || QUESTION.test(line) || QUOTED.test(raw.trim()) || QUOTED.test(line)) continue;
+    // A line whose only merge wording is branch upkeep is not an approval. This is one more reason
+    // to skip a line, tested where the other reasons are, so fences, hold words, the quote rule
+    // and the targets all read the line as typed and nothing that was held before counts now.
+    if (line.length > MAX_APPROVAL_LINE || !/\bmerge\b/i.test(words) || !mergeWording(typed[index]) || HOLD_WORDS.test(words) || QUESTION.test(line) || QUOTED.test(raw.trim()) || QUOTED.test(line)) continue;
     const items = [...line.matchAll(APPROVAL_URL)].map(match => ({ repository: match[1], pr: Number(match[2]) }));
     let rest = line.replace(APPROVAL_URL, ' # ');
     // Repository identifiers may contain dates, digits and SHA-like words. Remove the complete
@@ -878,7 +904,7 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   for (const words of parts) {
     let index = 0;
     while (index < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]) || /^(?:env|npx|bunx|pnpm|dlx|exec|nohup|start)$/i.test(words[index]) || (words[index].startsWith('-') && index > 0))) index += 1;
-    if (words.slice(0, index + 1).some(word => HOST_WORD.test(path.basename(word))) && /\bmerge\b/i.test(text)) {
+    if (words.slice(0, index + 1).some(word => HOST_WORD.test(path.basename(word))) && mergeWording(text)) {
       return refuse('a session an agent starts must not approve a merge, so starting Claude or Codex with a command that mentions merging is refused. Ask the user.');
     }
   }
@@ -1371,5 +1397,5 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = Object.freeze({
   APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, CONNECTOR_MERGE, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError,
-  approvalsIn, cardAnswered, cardAsked, cardOf, check, connectorMergeArgs, decide, main, mergeCard, mayMerge, recordPrompt, shellMerges, standingAnswer,
+  approvalsIn, cardAnswered, cardAsked, cardOf, check, connectorMergeArgs, decide, main, mergeCard, mayMerge, mergeWording, recordPrompt, shellMerges, standingAnswer,
 });
