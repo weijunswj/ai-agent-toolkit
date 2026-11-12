@@ -317,7 +317,7 @@ function describe(built, options) {
   for (const stop of built.stops) lines.push(`Stopped: ${stop.stopped} Next: ${stop.next}`);
   if (built.stops.length) lines.push('');
   lines.push('What still checks each line:', ...built.coverage.map(row => `- ${row.line}: ${row.guard}`), '');
-  lines.push('Never in a block: merges, closes, deletes outside the cleanup and store commands, raw git pushes, history rewrites, settings edits, secrets and real keys. Those keep asking. Evidence store work goes through the store command, which pushes only the bound store branch and never forces.');
+  lines.push('Never in a block: merges, closes, deletes outside the cleanup and store commands, raw git pushes, history rewrites, settings edits, secrets and real keys. Those keep asking. Evidence store work goes through the store command, which pushes only the bound store branch and never forces; the shell hook refuses a raw push to a store bound on this computer.');
   lines.push(`Agents: write each command exactly as its line shows (node, then the full path in forward slashes inside double quotes), one command per call, so the line matches. A line with no * matches only that exact command.`);
   if (options.host === 'claude') lines.push('To remove a block, delete its lines from the file. Run toolkit permissions again after the Toolkit folder moves.');
   lines.push(`Owner shortcut: type node ${quoted(`${built.managed}/repo/scripts/toolkit-permissions.cjs`)} --apply in your own PowerShell or terminal. It shows the changes, waits for you to type apply, backs up each file and merges the computer blocks. Agents never run it.`);
