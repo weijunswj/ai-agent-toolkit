@@ -1,17 +1,12 @@
 # Toolkit Changelog
 
-## 3.74.0 (typed commands and remove Toolkit)
-
-### Added
-
-- **Typed commands:** `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup` and `toolkit show env`, typed as the whole message on your own computer, are matched exactly by the Codex and Claude Code prompt hooks. The agent is told which action was asked for, so `toolkit show env` always opens the editor. A phrase inside a longer message, in a relayed message or in a cloud session stays plain text, and a governance hold is unchanged. `node repo/scripts/toolkit-commands.cjs` prints the command list.
-- **Remove Toolkit from this computer:** `remove toolkit` routes to `repo/scripts/toolkit-remove.cjs`. `plan` lists every scheduled task that carries Toolkit's marker in any Task Scheduler folder, Toolkit's own task files, the Toolkit block in each global rules file and Toolkit's raised `project_doc_max_bytes` line in Codex's `config.toml`, with a plan code. `apply --confirm <plan code>` removes exactly that list after the owner's OK; a list that changed removes nothing. Tasks changed by hand stay unless named, the owner's own listed tasks always stay, apply puts Codex's earlier `project_doc_max_bytes` back (a backup first, then a Codex load check), and no repository, key, other app setting or plugin is touched.
-- **Leftover file report:** `repo/scripts/toolkit-leftover-files.cjs scan` lists files that are provably Toolkit's in GitHub checkouts whose governance is off or undecided. It reports only and never deletes.
+## 3.74.0 (merge before owner tests, bump once at merge, one real-host round per release)
 
 ### Changed
 
-- **Setup covers the computer only:** setup no longer prints a task plan for the managed checkout and the folder it was started in. The computer-wide task update under the saved approval stays, and the direct task plan still gives one repository's details.
-- **Hook pack:** context checks now also read the context a prompt hook adds.
+- Owner UAT no longer holds a merge. A pull request whose line is `UAT: OWNER_TEST_NEEDED` merges on its review and green CI; the owner tests the installed build afterwards, its tasks stay open on `Refs` until their OK, and a failed test gets a fix-forward or revert pull request. The task auto-merge check now exits 0 for an owner test once scope allows, and says the test follows the merge.
+- Pull requests hold `main`'s version and carry only a changelog fragment plus a `Bump: patch|minor|major` body line. The merging agent bumps once, at merge time, so a merge no longer forces a re-bump, new CI and a stale merge card on every other open pull request. Older pull requests that already carry a bump still go through the re-bump workflow.
+- Hook changes read the hook pack from CI's Linux and Windows runs. The real-host smoke and the qualification matrix run once per release batch, after its merges, on the installed build and before the owner tests.
 
 ## 3.73.0 (refresh toolkit keeps your answers with no questions)
 

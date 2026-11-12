@@ -393,24 +393,31 @@ test('Projects bootstrap loads the verified skill before setup and preserves gen
   assertProjectsEntry(projectsEntry(), ['failure hold', 'outside appointment']);
 });
 
-test('merging agents reconcile release versions with a computer handoff and renewed review', () => {
+test('the merging agent bumps once at merge time; only older bumped PRs are reconciled, by the workflow or a computer lane', () => {
   const text = read(SKILL_REL);
   const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`);
   const root = read('AGENTS.md');
   const guide = read('repo/docs/changelog.d/README.md');
   const map = read('repo/ARCHITECTURE.md');
-  for (const surface of [text, periodic, root, guide]) {
-    assert.ok(surface.includes('node repo/scripts/toolkit-rebump-prs.cjs --apply'));
-    assert.match(surface, /computer lane/);
-  }
-  assert.match(root, /After merging any PR in this repository, the merging agent runs/);
-  assert.match(root, /after agreeing branch custody with the current builders; without a computer, it asks a computer lane to do so/);
-  assert.match(guide, /After each merge in this repository, the merging agent runs the apply command below, or asks a computer lane to run it if it has no computer/);
+  // An open PR holds main's version and names its level; the merger bumps once, at merge time.
+  assert.match(root, /holds `main`'s version, carries a \[changelog fragment\]\(repo\/docs\/changelog\.d\/README\.md\) and names its level in one body line, `Bump: patch\|minor\|major`/);
+  assert.match(root, /The merging agent bumps once, at merge time: on the PR branch it merges `main`, runs `node repo\/scripts\/bump-version\.cjs --next <level>`, pushes, waits for green CI and merges that head \(a batch branch bumps once for all its PRs\)/);
+  assert.match(root, /a source conflict gets a delta review/);
+  assert.match(guide, /The merging agent bumps just before the merge, never the builder/);
+  assert.match(guide, /`Bump: patch`, `Bump: minor` or `Bump: major`/);
+  assert.match(guide, /An owner merge card goes up at the bumped head/);
+  assert.match(text, /Toolkit PRs hold main's version: before the check and any card, the merge thread merges `main` in, runs `bump-version\.cjs --next <level>` \(body `Bump:` line\) and waits for green CI\./);
+  assert.match(periodic, /Open Toolkit PRs hold main's version and the merge thread bumps each one at merge/);
+  for (const surface of [text, root, guide]) assert.doesNotMatch(surface, /carry their own `bump-version|prepares its own Toolkit bump|## Prepare the branch bump/);
+  // Older PRs that already carry a bump still reconcile: the workflow, then the hand command.
+  for (const surface of [periodic, root, guide]) assert.ok(surface.includes('node repo/scripts/toolkit-rebump-prs.cjs --apply'));
+  assert.match(root, /A PR that already carries a bump is re-bumped by the re-bump workflow, or by `node repo\/scripts\/toolkit-rebump-prs\.cjs --apply` after agreeing branch custody with its builder/);
   assert.match(guide, /Agree branch custody with the current builders before applying/);
-  assert.match(periodic, /After each merge in the Toolkit repository,.*ask an available computer lane to run `node repo\/scripts\/toolkit-rebump-prs\.cjs --apply`/);
+  assert.match(periodic, /ask an available computer lane to run `node repo\/scripts\/toolkit-rebump-prs\.cjs --apply`/);
   assert.match(periodic, /Agree custody with the current builders before applying/);
   assert.match(periodic, /Default mode only reports/);
-  assert.match(map, /`repo\/scripts\/toolkit-rebump-prs\.cjs` \(merging agent or requested computer lane;/);
+  assert.match(map, /`repo\/scripts\/toolkit-rebump-prs\.cjs` \(re-bump workflow, merging agent or requested computer lane;/);
+  assert.match(map, /run by the merging agent at merge time/);
   assert.doesNotMatch(root + guide + map, /After each merge the coordinator|coordinator requests a computer lane/);
   // The skill points at the reference; holds, offline recovery and review live there.
   assert.match(periodic, /fresh G2|full delta G2/);
