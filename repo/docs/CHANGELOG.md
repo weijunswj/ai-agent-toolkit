@@ -1,6 +1,6 @@
 # Toolkit Changelog
 
-## 3.70.0 (Marked notes move off large programme pages)
+## Unreleased (Marked notes move off large programme pages)
 
 ### Added
 
@@ -12,6 +12,13 @@
 
 - **Archive registry:** `page_archive` now also records note parts (with the saved page copy they came from). A note comment that later changes or disappears keeps its link and raises `ARCHIVE_COMMENT_UNTRUSTED` once, naming the saved page copy that holds the notes; later passes stay quiet and the owner's answer to the finding stands. Putting the same notes back under `## Archive` posts a fresh comment for them and leaves the damaged one as found. Older Toolkit versions refuse the new entries and the new finding field; update Toolkit on every computer that runs the sweep before marking notes.
 - **AGENT CONTEXT:** the fixed line now says that only notes under one `## Archive` heading move.
+
+## 3.69.1
+
+### Changed
+
+- Projects controllers run cloud-capable work in the cloud by default and use the device only for work that needs it. Gate routes can place individual gates on the device while other gates run in the cloud.
+- Cloud reviews and rechecks count towards the work-lane cap unless the project's own review-lane line allows a separate number alongside it. The managed instructions block carries the same cloud-first rule.
 
 ## 3.69.0 (Projects follows local Toolkit as its base)
 
