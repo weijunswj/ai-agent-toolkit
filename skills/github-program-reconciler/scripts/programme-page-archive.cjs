@@ -97,7 +97,7 @@ function trimBlankEnd(line) {
 }
 function oneLineComment(line) {
   const text = trimBlankEnd(line);
-  return /^<!--(?!-?>)/.test(text) && text.length >= 7 && text.indexOf('-->', 4) === text.length - 3 && !text.includes('--!>');
+  return /^<!--(?!-?>)/.test(text) && text.length >= 7 && text.endsWith('-->') && !text.slice(4, -3).includes('-->') && !text.includes('--!>');
 }
 const commentOpen = line => /^<!--(?!-?>)/.test(line) && !line.slice(4).includes('-->') && !line.includes('--!>');
 
@@ -189,7 +189,7 @@ function noteArea(body, { limit = COMMENT_LIMIT } = {}) {
     if (comment) {
       if (raw === NOTE_MARKER_LINE) { markers += 1; nested = true; }
       const trimmed = trimBlankEnd(raw);
-      if (raw.includes('--!>') || raw.includes('-->') && trimmed.indexOf('-->') !== trimmed.length - 3) { if (reading) fail('ambiguous_markup'); }
+      if (raw.includes('--!>') || raw.includes('-->') && !(trimmed.endsWith('-->') && !trimmed.slice(0, -3).includes('-->'))) { if (reading) fail('ambiguous_markup'); }
       if (raw.includes('-->')) comment = false;
       else if (reading && MANAGED_SHAPE.test(raw)) fail('ambiguous_markup');
       previous = raw;
