@@ -30,8 +30,15 @@
 //     is that whole worktree with its Git pointer file present;
 //   - its scratch root is a real folder, not a link;
 //   - inside a repository, Git ignores it and tracks nothing in it;
-//   - a worktree is registered, unlocked, clean including ignored files, and its commit is on a
-//     remote; it is removed with `git worktree remove` (never --force), then `git worktree prune`.
+//   - its scratch root is not itself a Git checkout or repository, and when a repository above
+//     the root contains it (a home folder kept in Git), that repository ignores it and tracks
+//     nothing in it;
+//   - a worktree is registered, unlocked, clean including every untracked and ignored file
+//     (asked for by flag, so no Git setting can hide them), has no file marked assume-unchanged
+//     or skip-worktree, and its commit is on a remote; it is removed with `git worktree remove`
+//     (never --force), then `git worktree prune`.
+// Git is run without the GIT_DIR family of environment variables, so it reads the folder it is
+// pointed at and nothing else.
 // --branch deletes a local branch with `git branch -d`, only when it is fully in the default
 // branch on the remote, is not the default branch and no worktree has it checked out.
 // It never deletes a remote branch, a file outside the roots, a dirty or unpushed worktree, or a
@@ -49,6 +56,12 @@ const STALE_DAYS = 7;
 const WALK_LIMIT = 50000;
 const TEMP_NAME = /^ai-agent-toolkit-[A-Za-z0-9._-]+$/;
 const BRANCH = /^(?![-/.])[A-Za-z0-9._/-]{1,200}(?<![/.])$/;
+
+// How a checkout's state is read. Flags and -c beat any config, so a setting that hides untracked
+// files, skips submodules or serves a cached answer cannot make unsaved work look clean.
+const STATUS = Object.freeze(['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', 'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none']);
+// Environment variables that would point Git at another repository, index or work tree.
+const GIT_REDIRECTS = /^GIT_(?:DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|NAMESPACE|CONFIG_COUNT|CONFIG_PARAMETERS)$|^GIT_CONFIG_(?:KEY|VALUE)_\d+$/i;
 
 class CleanupError extends Error {
   constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); this.exitCode = exitCode; }
@@ -73,11 +86,13 @@ class ScratchCleaner {
   }
 
   #git(cwd, args, { timeout = 30000 } = {}) {
-    const result = this.#run('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout, windowsHide: true });
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !GIT_REDIRECTS.test(name)));
+    const result = this.#run('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout, windowsHide: true, env });
     return { ok: Boolean(result) && result.status === 0, status: result ? result.status : null, out: String(result?.stdout || ''), err: String(result?.stderr || '').trim().split(/\r?\n/)[0] };
   }
 
-  #real(target) { try { return this.#fs.realpathSync(target); } catch { return null; } }
+  // The operating system's own answer, which also expands Windows short (8.3) names.
+  #real(target) { try { return (this.#fs.realpathSync.native || this.#fs.realpathSync)(target); } catch { return null; } }
   #lstat(target) { try { return this.#fs.lstatSync(target); } catch { return null; } }
 
   // The main checkout of the repository the run is for, or null outside a repository.
@@ -111,12 +126,15 @@ class ScratchCleaner {
     if (root.kind !== 'temp') {
       const realBase = this.#real(root.base);
       const rootReal = this.#real(root.dir);
-      if (rootReal && (!realBase || this.#lstat(root.dir)?.isSymbolicLink() || rootReal !== path.join(realBase, path.relative(root.base, root.dir)))) return { refuse: 'its scratch root is a link, not a real folder' };
+      if (rootReal && (!realBase || this.#lstat(root.dir)?.isSymbolicLink() || fold(rootReal) !== fold(path.join(realBase, path.relative(root.base, root.dir))))) return { refuse: 'its scratch root is a link, not a real folder' };
     }
     const realRoot = this.#real(root.dir);
     const realParent = this.#real(path.dirname(target));
     if (!realRoot || !realParent) return { refuse: 'its folder could not be resolved' };
-    const realTarget = path.join(realParent, path.basename(target));
+    // The target's own name is resolved too (a short name is not its real name), unless it is a
+    // link, which is judged as a link later and never followed.
+    const own = this.#lstat(target);
+    const realTarget = (own && !own.isSymbolicLink() && this.#real(target)) || path.join(realParent, path.basename(target));
     if (!within(realRoot, realTarget, { strict: true })) return { refuse: 'a link in its path leads outside the scratch root' };
     if (root.kind === 'temp' && !TEMP_NAME.test(path.relative(realRoot, realTarget).split(path.sep)[0])) return { refuse: 'a link in its path leads outside the Toolkit temp folder' };
     // A link below the root can point into a worktree or a clone, where Git in the main checkout
@@ -124,7 +142,7 @@ class ScratchCleaner {
     for (let dir = path.dirname(target); within(root.dir, dir, { strict: true }); dir = path.dirname(dir)) {
       if (this.#lstat(dir)?.isSymbolicLink()) return { refuse: 'part of its path is a link; Toolkit never deletes through a link' };
     }
-    if (fold(path.relative(realRoot, realTarget)) !== fold(path.relative(root.dir, target))) return { refuse: 'part of its path is a link; Toolkit never deletes through a link' };
+    if (fold(path.relative(realRoot, realTarget)) !== fold(path.relative(root.dir, target))) return { refuse: 'its path is not its real path (a link or a short name is in it); name it by its real path' };
     return { root, real: realTarget };
   }
 
@@ -220,6 +238,25 @@ class ScratchCleaner {
       if (this.#holdsGit(dir)) return { ...item, reason: 'it is inside a Git checkout; Toolkit removes a whole clean worktree, never part of one' };
       if (this.#repository(dir)) return { ...item, reason: 'it is inside a Git repository; Toolkit never deletes part of one' };
     }
+    // The scratch root itself must not be a checkout or a repository, and a repository above it
+    // (a home folder kept in Git) must ignore the scrap and track nothing in it.
+    if (this.#holdsGit(placed.root.dir) || this.#repository(placed.root.dir)) return { ...item, reason: 'its scratch root is itself a Git checkout or repository; Toolkit never deletes part of one' };
+    if (placed.root.kind !== 'repo') {
+      let above = false;
+      const stop = placed.root.base || path.dirname(placed.root.dir);
+      for (let dir = path.dirname(placed.root.dir); within(stop, dir); dir = path.dirname(dir)) {
+        if (this.#holdsGit(dir) || this.#repository(dir)) above = true;
+        if (dir === path.dirname(dir)) break;
+      }
+      const top = this.#git(path.dirname(target), ['rev-parse', '--show-toplevel']);
+      const owner = top.ok && top.out.trim() ? path.resolve(top.out.trim()) : null;
+      if (above && !owner) return { ...item, reason: 'a Git repository above its scratch root could not be read, so it may be that repository\'s work' };
+      if (owner) {
+        const tracked = this.#git(owner, ['ls-files', '--', target]);
+        if (!tracked.ok || tracked.out.trim()) return { ...item, reason: 'a Git repository above its scratch root tracks files in it' };
+        if (!this.#git(owner, ['check-ignore', '-q', '--', target]).ok) return { ...item, reason: 'a Git repository above its scratch root does not ignore it, so it may be real work' };
+      }
+    }
     // Git's own list of this repository's worktrees also counts, so a worktree whose pointer file
     // is missing (Git calls it prunable) still keeps the work inside it.
     let registered = null;
@@ -248,8 +285,12 @@ class ScratchCleaner {
       const known = pointer.isFile() && registered;
       if (!known) return { ...item, reason: 'it is a Git checkout that is not a registered worktree of this repository' };
       if (known.locked) return { ...item, reason: 'the worktree is locked' };
-      const status = this.#git(target, ['status', '--porcelain', '--ignored']);
+      const status = this.#git(target, [...STATUS, '--ignored']);
       if (!status.ok) return { ...item, reason: 'its state could not be read' };
+      // An edit to a file marked assume-unchanged or skip-worktree never shows in the state.
+      const flags = this.#git(target, ['ls-files', '-v']);
+      if (!flags.ok) return { ...item, reason: 'its state could not be read' };
+      if (flags.out.split(/\r?\n/).some(line => /^[a-zS] /.test(line))) return { ...item, reason: 'it has files Git was told not to check (assume-unchanged or skip-worktree), so an edit could be hidden' };
       const lines = status.out.split(/\r?\n/).filter(Boolean);
       if (lines.some(line => !line.startsWith('!! '))) return { ...item, reason: 'it has uncommitted changes or untracked files' };
       if (lines.length) return { ...item, reason: 'it holds ignored files, which removal would delete' };
@@ -309,7 +350,7 @@ class ScratchCleaner {
     if (githubSlug(this.#git(dir, ['remote', 'get-url', 'origin']).out) !== store.repository.toLowerCase()) return { ok: false, reason: 'that folder is not a checkout of the bound evidence store' };
     const branch = typeof store.branch === 'string' && BRANCH.test(store.branch) ? store.branch : 'main';
     if (!this.#git(dir, ['fetch', '--quiet', 'origin', branch], { timeout: 120000 }).ok) return { ok: false, reason: 'the evidence store could not be fetched' };
-    const status = this.#git(dir, ['status', '--porcelain']);
+    const status = this.#git(dir, [...STATUS]);
     if (!status.ok || status.out.trim()) return { ok: false, reason: 'the evidence store checkout has changes that are not committed' };
     if (!this.#git(dir, ['merge-base', '--is-ancestor', 'HEAD', `refs/remotes/origin/${branch}`]).ok) return { ok: false, reason: 'the evidence store checkout has commits that are not on the remote' };
     return { ok: true, note: 'evidence store read back' };
@@ -429,4 +470,4 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ ScratchCleaner, CleanupError, within, parseArgs, main, STALE_DAYS, TEMP_NAME });
+module.exports = Object.freeze({ ScratchCleaner, CleanupError, within, parseArgs, main, STALE_DAYS, TEMP_NAME, STATUS, GIT_REDIRECTS });

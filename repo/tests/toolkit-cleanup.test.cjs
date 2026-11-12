@@ -46,7 +46,9 @@ function world(t, { store = true } = {}) {
     git(main, 'add', '.'); git(main, 'commit', '--quiet', '-m', 'binding'); git(main, 'push', '--quiet');
   }
   const run = (cmd, args, options) => (made.storeDir && args[1] === made.storeDir && args.slice(2).join(' ') === 'remote get-url origin'
-    ? { status: 0, stdout: `${made.originAnswer || 'https://github.com/owner/store.git'}\n`, stderr: '' } : spawnSync(cmd, args, options));
+    ? { status: 0, stdout: `${made.originAnswer || 'https://github.com/owner/store.git'}\n`, stderr: '' }
+    // Fenced, so a repository above the run's temp folder is never mistaken for part of the world.
+    : spawnSync(cmd, args, { ...options, env: { ...(options && options.env ? options.env : process.env), GIT_CEILING_DIRECTORIES: base, ...(made.gitEnv || {}) } }));
   made.run = run;
   made.cleaner = (extra = {}) => new cleanup.ScratchCleaner({ home, tmpdir: tmp, cwd: main, run, ...extra });
   // An apply with the store read-back satisfied, as a governed session runs it.
@@ -412,4 +414,132 @@ test('a Git folder in any spelling and a bare repository are never scraps', t =>
   assert.deepEqual(stale.cleaned, { worktrees: 0, files: 0, folders: 0, branches: 0 });
   assert.equal(git(bare, 'cat-file', '-t', unique), 'commit');
   assert.equal(fs.readFileSync(path.join(holder, 'clone', 'src', 'keep.txt'), 'utf8'), 'edited\n');
+});
+
+test('a Git setting that hides untracked files, or an index flag that hides an edit, never makes a worktree look clean', t => {
+  const w = world(t);
+  const dirty = 'it has uncommitted changes or untracked files';
+  const hidden = 'it has files Git was told not to check (assume-unchanged or skip-worktree), so an edit could be hidden';
+  const fresh = name => { const tree = w.worktree(name); fs.mkdirSync(path.join(tree, 'notes')); fs.writeFileSync(path.join(tree, 'notes', 'unsaved.txt'), 'only copy\n'); return tree; };
+  // The setting in the repository's own config hides untracked and ignored files from a plain status.
+  git(w.main, 'config', 'status.showUntrackedFiles', 'no');
+  const untracked = fresh('untracked');
+  const ignored = w.worktree('ignored'); fs.writeFileSync(path.join(ignored, 'build.log'), 'ignored but unsaved\n');
+  assert.equal(git(untracked, 'status', '--porcelain', '--ignored'), '', 'the plain status the old code ran shows nothing');
+  const assumed = w.worktree('assumed'); git(assumed, 'update-index', '--assume-unchanged', 'work.txt'); fs.writeFileSync(path.join(assumed, 'work.txt'), 'edited, hidden\n');
+  const skipped = w.worktree('skipped'); git(skipped, 'update-index', '--skip-worktree', 'work.txt'); fs.writeFileSync(path.join(skipped, 'work.txt'), 'edited, hidden\n');
+  const clean = w.worktree('clean');
+  const cases = { [untracked]: ['keep', dirty], [ignored]: ['keep', 'it holds ignored files, which removal would delete'], [assumed]: ['keep', hidden], [skipped]: ['keep', hidden] };
+  for (const round of [1, 2]) {
+    const result = w.apply({ paths: Object.keys(cases) });
+    for (const [target, expected] of Object.entries(cases)) assert.deepEqual([byPath(result, target).action, byPath(result, target).reason], expected, `run ${round}: ${target}`);
+    assert.deepEqual(result.cleaned, { worktrees: 0, files: 0, folders: 0, branches: 0 });
+  }
+  assert.equal(fs.readFileSync(path.join(untracked, 'notes', 'unsaved.txt'), 'utf8'), 'only copy\n');
+  assert.equal(fs.readFileSync(path.join(ignored, 'build.log'), 'utf8'), 'ignored but unsaved\n');
+  assert.equal(fs.readFileSync(path.join(assumed, 'work.txt'), 'utf8'), 'edited, hidden\n');
+  assert.equal(fs.readFileSync(path.join(skipped, 'work.txt'), 'utf8'), 'edited, hidden\n');
+  // The same setting in the user's global Git config.
+  git(w.main, 'config', '--unset', 'status.showUntrackedFiles');
+  const globalConfig = path.join(w.base, 'global.gitconfig'); fs.writeFileSync(globalConfig, '[status]\n\tshowUntrackedFiles = no\n');
+  w.gitEnv = { GIT_CONFIG_GLOBAL: globalConfig };
+  assert.deepEqual([byPath(w.cleaner().plan({ paths: [untracked] }), untracked).action, byPath(w.cleaner().plan({ paths: [untracked] }), untracked).reason], ['keep', dirty]);
+  // A worktree that really is clean still goes, with the setting on.
+  const done = w.apply({ paths: [clean] });
+  assert.deepEqual([byPath(done, clean).action, done.cleaned.worktrees], ['removed', 1]);
+  // The evidence store read-back does not trust a hidden untracked file either.
+  w.gitEnv = {};
+  git(w.storeDir, 'config', 'status.showUntrackedFiles', 'no'); fs.writeFileSync(path.join(w.storeDir, 'not-yet-added.md'), 'evidence not committed\n');
+  const scrap = path.join(w.main, '.tmp', 'scrap.txt'); fs.writeFileSync(scrap, 'x');
+  const held = w.apply({ paths: [scrap] });
+  assert.deepEqual([held.read_back.ok, held.read_back.reason, fs.existsSync(scrap)], [false, 'the evidence store checkout has changes that are not committed', true]);
+  // Every state read asks for all untracked files by flag, and Git never gets a redirecting variable.
+  assert.ok(cleanup.STATUS.includes('--untracked-files=all') && cleanup.STATUS.includes('--ignore-submodules=none'));
+  const seen = [];
+  process.env.GIT_DIR = path.join(w.base, 'elsewhere.git'); process.env.GIT_WORK_TREE = w.base; process.env.GIT_INDEX_FILE = path.join(w.base, 'index');
+  t.after(() => { delete process.env.GIT_DIR; delete process.env.GIT_WORK_TREE; delete process.env.GIT_INDEX_FILE; });
+  w.cleaner({ run: (cmd, args, options) => { seen.push(Object.keys(options.env).filter(name => /^GIT_(DIR|WORK_TREE|INDEX_FILE)$/.test(name))); return w.run(cmd, args, options); } }).plan({ paths: [scrap] });
+  assert.ok(seen.length > 0 && seen.every(names => names.length === 0));
+});
+
+test('a scratch root that is itself a checkout or a repository, or sits inside one, gives up nothing that repository owns', t => {
+  const root = 'its scratch root is itself a Git checkout or repository; Toolkit never deletes part of one';
+  // .tmp is itself a clone with an uncommitted tracked edit.
+  const a = world(t);
+  fs.rmSync(path.join(a.main, '.tmp'), { recursive: true }); spawnSync('git', ['clone', '--quiet', a.remote, path.join(a.main, '.tmp')]);
+  fs.writeFileSync(path.join(a.main, '.tmp', 'src', 'keep.txt'), 'edited\n');
+  // The user-state temp folder is itself a clone.
+  const stateTmp = path.join(a.home, '.ai-agent-toolkit', 'user-state', 'tmp'); fs.mkdirSync(path.dirname(stateTmp), { recursive: true });
+  spawnSync('git', ['clone', '--quiet', a.remote, stateTmp]); fs.writeFileSync(path.join(stateTmp, 'src', 'keep.txt'), 'edited\n');
+  const first = { [path.join(a.main, '.tmp', 'src', 'keep.txt')]: ['keep', root], [path.join(a.main, '.tmp', 'src')]: ['keep', root], [path.join(stateTmp, 'src', 'keep.txt')]: ['keep', root] };
+  const one = a.apply({ paths: Object.keys(first) });
+  for (const [target, expected] of Object.entries(first)) assert.deepEqual([byPath(one, target).action, byPath(one, target).reason], expected, target);
+  assert.equal(git(path.join(a.main, '.tmp'), 'status', '--porcelain'), 'M src/keep.txt');
+  assert.equal(git(stateTmp, 'status', '--porcelain'), 'M src/keep.txt');
+  // .tmp laid out as a bare repository.
+  const b = world(t);
+  fs.rmSync(path.join(b.main, '.tmp'), { recursive: true }); spawnSync('git', ['clone', '--quiet', '--bare', b.remote, path.join(b.main, '.tmp')]);
+  const bare = b.apply({ paths: [path.join(b.main, '.tmp', 'objects'), path.join(b.main, '.tmp', 'HEAD')] });
+  assert.deepEqual(bare.items.map(item => [item.action, item.reason]), [['keep', root], ['keep', root]]);
+  // The home folder is a repository: what it tracks or does not ignore under the state root is kept.
+  const c = world(t);
+  const state = path.join(c.home, '.ai-agent-toolkit', 'user-state', 'tmp'); fs.mkdirSync(state, { recursive: true });
+  spawnSync('git', ['init', '--quiet', '-b', 'main', c.home]);
+  const trackedFile = path.join(state, 'tracked.md'), loose = path.join(state, 'loose.md');
+  fs.writeFileSync(trackedFile, 'kept in the home repository\n'); fs.writeFileSync(loose, 'not ignored\n');
+  git(c.home, 'add', '-f', '.ai-agent-toolkit/user-state/tmp/tracked.md'); git(c.home, 'commit', '--quiet', '-m', 'dotfiles');
+  const homeRepo = c.apply({ paths: [trackedFile, loose] });
+  assert.deepEqual([byPath(homeRepo, trackedFile).reason, byPath(homeRepo, loose).reason], ['a Git repository above its scratch root tracks files in it', 'a Git repository above its scratch root does not ignore it, so it may be real work']);
+  assert.deepEqual([fs.existsSync(trackedFile), fs.existsSync(loose)], [true, true]);
+  // Once that repository ignores the scratch folder, an untracked scrap there goes as before.
+  fs.writeFileSync(path.join(c.home, '.gitignore'), '.ai-agent-toolkit/\n');
+  const gone = c.apply({ paths: [trackedFile, loose] });
+  assert.deepEqual([byPath(gone, trackedFile).action, byPath(gone, loose).action, fs.existsSync(trackedFile)], ['keep', 'removed', true]);
+  // When that repository cannot be read, nothing under it is a scrap.
+  const other = path.join(state, 'other.md'); fs.writeFileSync(other, 'x');
+  const blind = (cmd, args, options) => (args.slice(2).join(' ') === 'rev-parse --show-toplevel' ? { status: 128, stdout: '', stderr: 'fatal: detected dubious ownership' } : c.run(cmd, args, options));
+  const unread = c.apply({ paths: [other] }, { run: blind });
+  assert.deepEqual([byPath(unread, other).action, byPath(unread, other).reason], ['keep', 'a Git repository above its scratch root could not be read, so it may be that repository\'s work']);
+});
+
+test('a Windows short name cannot hide a worktree: paths are compared by the name the system reports', t => {
+  const w = world(t);
+  // A file system that also answers to a short name, the way Windows does for LOSTWO~1.
+  const alias = (short, long) => {
+    const expand = value => (typeof value === 'string' ? value.split(short).join(long) : value);
+    const fake = new Proxy(fs, { get: (target, key) => {
+      if (key === 'realpathSync') {
+        // Node's own resolver keeps the short name as typed; the system's resolver gives the real one.
+        const plain = value => { fs.realpathSync(expand(value)); return value; };
+        plain.native = value => fs.realpathSync.native(expand(value));
+        return plain;
+      }
+      return typeof target[key] === 'function' ? (first, ...rest) => target[key](expand(first), ...rest) : target[key];
+    } });
+    const run = (cmd, args, options) => w.run(cmd, args.map(expand), options);
+    return { fs: fake, run };
+  };
+  // A lost-pointer worktree under .tmp/worktrees, named through its short name.
+  const tree = path.join(w.main, '.tmp', 'worktrees', 'lostworktree');
+  git(w.main, 'worktree', 'add', '--quiet', '-b', 'lane/lostworktree', tree);
+  fs.mkdirSync(path.join(tree, 'notes')); fs.writeFileSync(path.join(tree, 'notes', 'unsaved.txt'), 'only copy\n');
+  fs.rmSync(path.join(tree, '.git'));
+  const shortTree = path.join(w.main, '.tmp', 'worktrees', 'LOSTWO~1');
+  const below = w.apply({ paths: [shortTree, path.join(shortTree, 'notes')] }, alias('LOSTWO~1', 'lostworktree'));
+  assert.deepEqual(below.items.map(item => [item.action, item.reason]), Array(2).fill(['refuse', 'its path is not its real path (a link or a short name is in it); name it by its real path']));
+  // The OS temp folder itself known by a short name, with a lost-pointer worktree in a Toolkit temp folder.
+  const lane = path.join(w.tmp, 'ai-agent-toolkit-lane'); fs.mkdirSync(lane);
+  const tempTree = path.join(lane, 'wt');
+  git(w.main, 'worktree', 'add', '--quiet', '-b', 'lane/temp', tempTree);
+  fs.writeFileSync(path.join(tempTree, 'unsaved.txt'), 'only copy\n'); fs.rmSync(path.join(tempTree, '.git'));
+  const shortTmp = path.join(w.base, 'OSTEMP~1');
+  const faked = alias('OSTEMP~1', 'ostemp');
+  const above = w.apply({ paths: [path.join(shortTmp, 'ai-agent-toolkit-lane', 'wt'), path.join(shortTmp, 'ai-agent-toolkit-lane')] }, { ...faked, tmpdir: shortTmp });
+  assert.deepEqual(above.items.map(item => [item.action, item.reason]), [
+    ['keep', 'it is a registered worktree whose Git pointer file is missing, so its state cannot be read'],
+    ['keep', 'it holds a registered worktree, which may carry work that exists nowhere else'],
+  ]);
+  assert.deepEqual([below.cleaned, above.cleaned], Array(2).fill({ worktrees: 0, files: 0, folders: 0, branches: 0 }));
+  assert.equal(fs.readFileSync(path.join(tree, 'notes', 'unsaved.txt'), 'utf8'), 'only copy\n');
+  assert.equal(fs.readFileSync(path.join(tempTree, 'unsaved.txt'), 'utf8'), 'only copy\n');
 });

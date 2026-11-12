@@ -265,6 +265,12 @@ test('script lines allow only what their guard text says; approval-bearing flags
   assert.deepEqual([...new Set(updateFlags)].sort(), ['--answers', '--apply', '--json']);
   const applyFlags = listIn(source('repo/scripts/toolkit-windows-tasks.cjs'), /apply: \[([^\]]+)\]/);
   assert.deepEqual(applyFlags, ['--repo-root', '--folder', '--task-choice', '--task', '--observed', '--answer-ref']);
+  // The whole value-flag table is pinned, so a new flag on plan, list or start (wildcard lines) fails here first.
+  const valueFlags = /const VALUE_FLAGS = Object\.freeze\((\{[^\n]+\})\);/.exec(source('repo/scripts/toolkit-windows-tasks.cjs'))[1];
+  assert.deepEqual(JSON.parse(valueFlags.replace(/'/g, '"').replace(/(\w+):/g, '"$1":')), {
+    list: ['--repo-root'], plan: ['--repo-root', '--folder'], apply: ['--repo-root', '--folder', '--task-choice', '--task', '--observed', '--answer-ref'],
+    remove: ['--repo-root', '--folder'], adopt: ['--folder', '--task', '--id', '--purpose', '--repository'], start: ['--task'],
+  });
   // Flags that take no value are pinned too: each is either harmless (--json) or has an ask line.
   const taskSwitches = [...source('repo/scripts/toolkit-windows-tasks.cjs').matchAll(/arg === '(--[a-z-]+)'/g)].map(match => match[1]);
   assert.deepEqual([...new Set(taskSwitches)].sort(), ['--json', '--no-first-run', '--repair-owned', '--task-choice']);
