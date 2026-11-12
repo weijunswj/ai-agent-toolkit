@@ -345,6 +345,14 @@ test('nothing a session\'s own shell can run is read as a card shown or answered
       'Select-String -Path repo/scripts/toolkit-governance-hook.cjs -Pattern PreToolUse',
       'env -i PATH="$PATH" node --version',
     ]) assert.doesNotMatch(String((run(command) || {}).deny), /feed them|must come from the user/, command);
+    // The documented cost: the shapes are read from the whole text, so ordinary work of either
+    // shape is refused too. The Bridge page and changelog say so; run such work as separate commands.
+    for (const command of [
+      'node --check repo/scripts/toolkit-merge-hold.cjs && grep -n cardAnswered repo/scripts/toolkit-merge-hold.cjs',
+      'git commit -m "Note PreToolUse in toolkit-merge-hold" && node repo/scripts/toolkit-hook-pack.cjs validate',
+      'node --test-name-pattern=PreToolUse --test repo/tests/toolkit-governance-hook.test.cjs',
+      'env -i PATH="$PATH" grep -n PreToolUse repo/scripts/toolkit-governance-hook.cjs',
+    ]) assert.match(String((run(command) || {}).deny), /must come from the user/, command);
   });
 });
 

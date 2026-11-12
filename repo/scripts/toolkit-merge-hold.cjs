@@ -85,9 +85,10 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // commands carry TOOLKIT_HOST_SESSION, so a card event whose environment holds that variable at all
 // (matching, different or empty) is a shell feed and is neither noted nor counted. The typed route
 // cannot use this test, because a typed line may arrive where the variable matches. The tripwire
-// below refuses the direct feed and a hook script named with an emptied environment. This is a
-// tripwire, not a lock: an agent in the user's own chat can still feed a card event from a saved
-// script, as it can feed a typed line, so the card adds no route the typed line lacks.
+// below refuses two command-line shapes, read from the text alone (see the refused list). This is
+// a tripwire, not a lock: any command or script that starts a hook script without the variable can
+// still feed a card event in the user's own chat, as it can feed a typed line, so the card adds no
+// route the typed line lacks.
 // It prevents no new failure; the failure it must not cause is an approval the owner did not give,
 // so it trusts only what the typed route already trusts (the session's start marks) plus the host's
 // own report of the tap. Accepted gaps, where the host itself reports an answer nobody tapped:
@@ -99,10 +100,11 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     host-session variable. A PermissionRequest hook installed on this computer reaches every chat;
 //   - a background session, where a reply sent by a connected client answers the open question;
 //   - a host that auto-resolves the card without marking it (the marked idle path records nothing);
-//   - a shell feed that hides the variable in a way the tripwire does not read: a saved script
-//     that runs the hook or calls the card functions, an event name read from a file without an
-//     emptied environment where the variable was cleared indirectly, a session whose shell export
-//     failed, and the wrapped feeds the typed route also lists as not covered.
+//   - any shell feed outside the two refused shapes: a wrapper before env (timeout, nice, nohup and
+//     the like), other env option spellings (combined, after an option with an argument, long
+//     prefixes, -C dir), the variable cleared another way (unset or Remove-Item by pattern, exec -c,
+//     Start-Process -UseNewEnvironment), a node one-liner that starts the hook, a saved script, a
+//     session whose shell export failed, and the wrapped feeds the typed route also lists.
 // Never click a card through a UI or computer use. Codex has no card and keeps the typed line. Cloud
 // sessions skip this hook, so a Projects card there is a written rule, not a recorded approval.
 //
@@ -135,10 +137,12 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     unset, env -u, Remove-Item Env:\, export -n, declare +x, SetEnvironmentVariable, or an empty
 //     environment on a host launch through env -i, --ignore-environment or a bare -), names
 //     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt,
-//     a SessionStart event, or (in a command that runs node, bun or deno, but not its test runner)
-//     a tool event (PreToolUse, PostToolUse or the card functions); also a command that names the
-//     hook scripts and empties its environment (env -i, --ignore-environment or a bare -). A search,
-//     a diff or a commit message that names a hook script and a tool event is not refused.
+//     a SessionStart event, or a tool event (PreToolUse, PostToolUse or the card functions) when
+//     any command in the text runs node, bun or deno and the word after it is not --test or test;
+//     also text that names the hook scripts with a command that starts env whose leading words
+//     (dash options or NAME=value) include -i, --ignore-environment or a bare - as its own word. Both read the whole text, so a search, diff
+//     or commit message about the hooks in the same text as a node run, or after such an env, is
+//     refused too; run it as a separate command.
 //
 // Not covered: a fresh `codex exec` launch from a running Codex shell still keeps standing as it
 // did before, wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
