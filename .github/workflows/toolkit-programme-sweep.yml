@@ -10,7 +10,8 @@
 # With no App configured it ends with a notice and writes nothing. A repository whose state lives
 # on a public branch is skipped with a notice too. Runs never overlap: one at a time, none
 # cancelled, and the sweep's lease in the evidence store keeps it from writing while the
-# computer's sweep is running. A run is stopped after fifteen minutes; the next one reports it.
+# computer's sweep is running. A pass works for up to 50 minutes, is killed at 55 and the job is
+# stopped at 58, so it ends before the next hourly start; the next run reports a stopped one.
 name: Toolkit Programme Sweep
 
 on:
@@ -29,7 +30,7 @@ jobs:
   sweep:
     name: Refresh the programme
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 58
     permissions:
       contents: read
     steps:

@@ -13,9 +13,10 @@
 //                                                      the refresh pass below
 //
 // Any session in a governed checkout, executors included, may bring the pages up to date:
-//   refresh                                            the full reconcile --apply pass with the inventory,
+//   refresh [--scheduled [--budget-ms <n>]]            the full reconcile --apply pass with the inventory,
 //                                                      written under the parent's current holder; it takes
-//                                                      no decision input
+//                                                      no decision input. Ten minutes after a write; the
+//                                                      hourly sweep passes --scheduled for up to 50
 //
 // An executor session the controller assigned writes only its own checkpoint journal:
 //   bind --issue <n> --assignment <id> --session <id> [--model <m> --effort <e> [--route-read-back]]
@@ -69,8 +70,8 @@ const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
   'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment'];
-const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another']);
-const VALUES = new Set(['--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
+const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled']);
+const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
   '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
@@ -95,8 +96,13 @@ function parseArgs(argv) {
     if (!Number.isSafeInteger(args.issue) || args.issue < 1) throw usage('--issue must be an issue number (1 or more).');
   }
   if (command === 'refresh') {
-    const extra = Object.keys(args).filter(key => !['command', 'json', 'repo-root'].includes(key));
-    if (extra.length) throw usage(`refresh takes no options but --json and --repo-root: it always runs the full pass as the parent's current holder (got --${extra[0]}).`);
+    const extra = Object.keys(args).filter(key => !['command', 'json', 'repo-root', 'scheduled', 'budget-ms'].includes(key));
+    if (extra.length) throw usage(`refresh takes no options but --json, --repo-root, --scheduled and --budget-ms: it always runs the full pass as the parent's current holder (got --${extra[0]}).`);
+    if (args['budget-ms'] !== undefined) {
+      if (!args.scheduled) throw usage('--budget-ms goes with refresh --scheduled.');
+      args['budget-ms'] = /^\d+$/.test(args['budget-ms']) ? Number(args['budget-ms']) : NaN;
+      if (!Number.isSafeInteger(args['budget-ms'])) throw usage('--budget-ms must be a whole number of milliseconds.');
+    }
   }
   if (args['deadline-ms'] !== undefined) {
     args['deadline-ms'] = /^\d+$/.test(args['deadline-ms']) ? Number(args['deadline-ms']) : NaN;
@@ -972,7 +978,7 @@ function formatInventory(result) {
 // reconcile --apply and refresh hold the repository's pass lock. The owner runs one more refresh pass
 // for each change that came in while it ran, then lets go.
 function runPasses(args, deps, out) {
-  const pass = new state.RefreshBudget({ nowMs: deps.passClock || Date.now, ...(deps.refreshBudgetMs === undefined ? {} : { budgetMs: deps.refreshBudgetMs }) });
+  const pass = new state.RefreshBudget({ nowMs: deps.passClock || Date.now, budgetMs: deps.refreshBudgetMs ?? passBudgetMs(args) });
   const beat = { fn: () => {} };
   const notes = new SweepNotes({ clock: pass.nowMs });
   // A refresh is a sweep: its requests are serial and budgeted, and it holds the shared lease.
@@ -1014,7 +1020,15 @@ function runPasses(args, deps, out) {
     beat.fn = () => {
       if (!held.owns()) throw new ProgrammeError('PASS_LOCK_LOST', `Another pass took over the lock for ${context.binding.repository} while this one ran, so this pass stopped before its next GitHub request. The next refresh or the hourly sweep finishes the work.`);
       held.beat();
-      context.lease?.check();
+      const lease = context.lease;
+      if (!lease) return;
+      lease.check();
+      // A long scheduled pass keeps its lease; the renewal is saving work, not reading.
+      if (lease.dueForRenewal()) {
+        const reading = requests.reading;
+        requests.reading = false;
+        try { lease.renew(); } finally { requests.reading = reading; }
+      }
     };
     try {
       progress = new PassProgress(file, held);
@@ -1060,6 +1074,14 @@ function runPasses(args, deps, out) {
     lock = flagged(file) && passes < MAX_PASSES && !pass.stop(0) && pass.left() >= state.AGAIN_RESERVE_MS ? takeLock(file, deps) : null;
   }
   return code;
+}
+
+// The scheduled sweep has the scheduled budget, or less when its caller has less time left (never
+// under the after-write budget); anything else runs on the after-write budget.
+function passBudgetMs(args) {
+  const { scheduled, 'after-write': afterWrite } = state.PASS_BUDGETS;
+  if (args.command !== 'refresh' || !args.scheduled) return afterWrite.budgetMs;
+  return Math.max(afterWrite.budgetMs, Math.min(scheduled.budgetMs, args['budget-ms'] ?? scheduled.budgetMs));
 }
 
 // Takes the lease for one pass with a fresh request budget. The predecessor's stop the state does

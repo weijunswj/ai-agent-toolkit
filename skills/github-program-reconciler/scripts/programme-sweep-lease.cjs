@@ -12,9 +12,10 @@
 const crypto = require('node:crypto');
 const state = require('./programme-state.cjs');
 
-// Longer than the cloud job's fifteen-minute timeout and the computer pass's ten-minute budget, so a
-// live holder never loses its lease; a killed one frees it within this time.
+// A holder renews its lease while it works, so a scheduled pass of up to an hour keeps it; a run
+// that is killed stops renewing, and its lease expires within TTL_MS for the next sweep.
 const TTL_MS = 20 * 60 * 1000;
+const RENEW_BEFORE_MS = 10 * 60 * 1000;
 const STREAK_FINDING = 3;
 
 const empty = repository => ({ schema: 'toolkit.programme-sweep-lease.v1', repository, holder: null, pass: 0, changed_since: null,
@@ -83,6 +84,23 @@ class SweepLease {
     return null;
   }
 
+  // Whether the lease has less than RENEW_BEFORE_MS left: the holder renews it before its next request.
+  dueForRenewal() {
+    return Boolean(this.held) && !this.renewing && this.nowMs() >= Date.parse(this.held.doc.holder.expires_at) - RENEW_BEFORE_MS;
+  }
+
+  renew() {
+    this.renewing = true;
+    try {
+      const next = structuredClone(this.held.doc);
+      next.holder.expires_at = new Date(this.nowMs() + TTL_MS).toISOString();
+      if (!this.put(next, this.held.sha, 'programme sweep: keep the lease')) {
+        this.held = null;
+        throw new state.ProgrammeError('PASS_LOCK_LOST', 'The sweep lease changed hands; this pass stopped.');
+      }
+    } finally { this.renewing = false; }
+  }
+
   // Before every request: a sweep that outlived its lease stops at once.
   check() {
     if (this.held && this.nowMs() >= Date.parse(this.held.doc.holder.expires_at)) {
@@ -120,4 +138,4 @@ class SweepLease {
   }
 }
 
-module.exports = { SweepLease, TTL_MS, STREAK_FINDING };
+module.exports = { SweepLease, TTL_MS, RENEW_BEFORE_MS, STREAK_FINDING };

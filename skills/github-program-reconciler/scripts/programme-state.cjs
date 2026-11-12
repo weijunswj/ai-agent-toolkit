@@ -398,12 +398,22 @@ const BODY_SECTION_KINDS = ['CURRENT', 'STATE', 'CONTEXT', 'TRACE', 'NAV', 'hand
 const SIZE_CODES = ['BODY_TOO_LARGE', 'BODY_NEAR_LIMIT'];
 const PAGE_CODES = SIZE_CODES;
 const BODY_SECTION_LIMIT = 5;
-const REFRESH_BUDGET_MS = 10 * 60 * 1000;
+// One pass budget per mode. A scheduled pass (the hourly sweep, on GitHub or on a computer) has
+// about an hour: it is killed KILL_SLACK_MS after its budget and its job stopped JOB_SLACK_MS later,
+// still before the next hourly start. The refresh a session starts after its own GitHub write keeps
+// ten minutes, so it never holds the programme lock for long.
+const KILL_SLACK_MS = 5 * 60 * 1000;
+const JOB_SLACK_MS = 3 * 60 * 1000;
+const PASS_BUDGETS = Object.freeze(Object.fromEntries(Object.entries({ scheduled: 50, 'after-write': 10 }).map(([mode, minutes]) => {
+  const budgetMs = minutes * 60 * 1000;
+  return [mode, Object.freeze({ budgetMs, killMs: budgetMs + KILL_SLACK_MS, jobTimeoutMs: budgetMs + KILL_SLACK_MS + JOB_SLACK_MS })];
+})));
+const REFRESH_BUDGET_MS = PASS_BUDGETS['after-write'].budgetMs;
 const PAGE_RESERVE_MS = 3 * 60 * 1000;
 const END_RESERVE_MS = 60 * 1000;
-// Stop the queue at minute 8 of the ten-minute budget: one minute to settle intents and
-// record the stop, then one for CURRENT. The scheduled twelve-minute kill still has two
-// minutes of slack for requests already in flight; checks cannot cancel such a request.
+// Stop the queue two minutes before the budget ends: one minute to settle intents and record the
+// stop, then one for CURRENT. The kill five minutes after the budget leaves slack for requests
+// already in flight; checks cannot cancel such a request.
 const QUEUE_RESERVE_MS = 2 * END_RESERVE_MS;
 const AGAIN_RESERVE_MS = 6 * 60 * 1000;
 // Task pages re-laid (hand-written text moved, with a saved copy each) in one pass.
@@ -6496,7 +6506,7 @@ module.exports = Object.freeze({
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
-  RefreshBudget, REFRESH_BUDGET_MS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
+  RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,

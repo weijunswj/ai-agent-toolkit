@@ -139,3 +139,20 @@ test('batch: STATE_BRANCH_BUSY after three', t => {
   assert.equal(f.stop().diagnostics.phase, 'state', 'the last busy stop is reported once the state can hold it');
   assert.equal(f.record().streaks.busy, 0);
 });
+
+test('lease: a long pass renews its lease; a killed one frees it within twenty minutes', t => {
+  const f = fixture(t);
+  const held = f.lease('cloud');
+  held.acquire();
+  f.advance(9 * 60 * 1000);
+  assert.equal(held.dueForRenewal(), false);
+  f.advance(2 * 60 * 1000);
+  assert.equal(held.dueForRenewal(), true);
+  held.renew();
+  f.advance(15 * 60 * 1000);
+  held.check();
+  assert.equal(f.lease('computer').acquire(), false, 'still held after 26 minutes of work');
+  // The holder dies here: it renews no more, and the lease is free once it expires.
+  f.advance(TTL_MS);
+  assert.equal(f.lease('computer').acquire(), true);
+});

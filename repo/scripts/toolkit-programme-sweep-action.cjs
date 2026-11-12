@@ -19,7 +19,8 @@ const CLIENT_ID_VARIABLE = 'TOOLKIT_GOVERNANCE_APP_CLIENT_ID';
 const PRIVATE_KEY_SECRET = 'TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY';
 const BINDING_PATH = Object.freeze(['.github', 'toolkit-programme.json']);
 const BINDING_LIMIT = 64 * 1024;
-const RUN_TIMEOUT_MS = 14 * 60 * 1000;
+// The scheduled pass's own kill; the workflow stops the job three minutes after it.
+const RUN_TIMEOUT_MS = require('../../skills/github-program-reconciler/scripts/programme-state.cjs').PASS_BUDGETS.scheduled.killMs;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const SAFE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BOT_LOGIN = /^[A-Za-z0-9-]{1,100}\[bot\]$/;
@@ -69,7 +70,7 @@ function runRefresh({ root, env, spawn = spawnSync }) {
   for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', PRIVATE_KEY_SECRET, 'TOOLKIT_GOVERNANCE_TOKEN']) delete child[name];
   let result;
   try {
-    result = spawn(process.execPath, [path.join(root, 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs'), 'refresh', '--json'],
+    result = spawn(process.execPath, [path.join(root, 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs'), 'refresh', '--scheduled', '--json'],
       { cwd: root, env: child, encoding: 'utf8', windowsHide: true, timeout: RUN_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, shell: false });
   } catch { return { code: 'EXEC_FAILED', report: null, status: 1 }; }
   if (!result || result.error) return { code: 'EXEC_FAILED', report: null, status: 1 };
@@ -130,4 +131,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, NOTICES, SIGN_IN_FAILURE, GENERAL_FAILURE, readCheckedOutBinding, lastReport, runRefresh, summaryLine, ProgrammeSweepAction });
+module.exports = Object.freeze({ CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SIGN_IN_FAILURE, GENERAL_FAILURE, readCheckedOutBinding, lastReport, runRefresh, summaryLine, ProgrammeSweepAction });

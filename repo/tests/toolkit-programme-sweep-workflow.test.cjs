@@ -19,7 +19,7 @@ const storeToken = ['example', 'store', 'token'].join('-');
 const workflow = () => fs.readFileSync(workflowPath, 'utf8');
 const step = name => { const text = workflow(); const at = text.indexOf(`- name: ${name}`); return text.slice(at, text.indexOf('\n      - name:', at + 1) === -1 ? undefined : text.indexOf('\n      - name:', at + 1)); };
 
-test('workflow: hourly and manual only, read-only built-in token, no saved credentials, one run at a time, fifteen minutes', () => {
+test('workflow: hourly and manual only, read-only built-in token, no saved credentials, one run at a time, stopped at 58 minutes', () => {
   const text = workflow();
   assert.match(text, /^on:\r?\n  schedule:\r?\n    - cron: '17 \* \* \* \*'\r?\n  workflow_dispatch:\s*$/m);
   assert.doesNotMatch(text, /^\s+(pull_request|pull_request_target|push):/m);
@@ -27,7 +27,7 @@ test('workflow: hourly and manual only, read-only built-in token, no saved crede
   assert.match(text, /^    permissions:\r?\n      contents: read\s*$/m);
   assert.match(text, /persist-credentials: false/);
   assert.match(text, /concurrency:\r?\n  group: toolkit-programme-sweep-\$\{\{ github\.repository \}\}\r?\n  cancel-in-progress: false/);
-  assert.match(text, /timeout-minutes: 15/);
+  assert.match(text, /timeout-minutes: 58/);
   for (const uses of text.match(/^\s+uses: \S+/gm)) assert.match(uses, /@[0-9a-f]{40}$/, `${uses.trim()} is pinned by commit`);
   assert.equal((text.match(/actions\/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510/g) || []).length, 2);
 });
@@ -145,7 +145,7 @@ test('action: the CLI runs without a shell and only with the two tokens, the log
   assert.equal(result.report.metrics, 'Sweep: requests=1');
   const { options, args } = seen[0];
   assert.equal(options.shell, false);
-  assert.deepEqual(args.slice(-2), ['refresh', '--json']);
+  assert.deepEqual(args.slice(-3), ['refresh', '--scheduled', '--json']);
   for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY']) assert.equal(options.env[name], undefined, name);
   assert.deepEqual([options.env.GOVERNED_TOKEN, options.env.STORE_TOKEN, options.env.SWEEP_LOGIN, options.env.TOOLKIT_PROGRAMME_CLOUD_SWEEP], [fakeToken, storeToken, 'toolkit-governance[bot]', '1']);
 });
