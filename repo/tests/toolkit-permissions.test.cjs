@@ -166,7 +166,7 @@ test('--check reads a settings file and reports missing and stale lines without 
   const before = fs.readFileSync(file, 'utf8');
   const out = [];
   assert.equal(permissions.main(['--check', file, '--scope', 'computer', '--json'], { ...deps, stdout: text => out.push(text) }), 1);
-  assert.deepEqual(JSON.parse(out.join('')).check, [{ scope: 'computer', missing: [built.blocks[0].allow[0]], stale: [stale] }]);
+  assert.deepEqual(JSON.parse(out.join('')).check, [{ scope: 'computer', missing: [built.blocks[0].allow[0], ...built.blocks[0].ask], stale: [stale] }]);
   assert.equal(fs.readFileSync(file, 'utf8'), before);
   fs.writeFileSync(file, built.blocks[0].text);
   assert.equal(permissions.main(['--check', file, '--scope', 'computer'], { ...deps, stdout: () => {} }), 0);

@@ -23,10 +23,6 @@ test('Low 6: unrelated folders list once per invocation, affected mutation guard
     for (let i = 0; i < 30; i++) assert.equal(scheduler.calls.filter(c => c[0] === 'list' && c[1] === 'OTHER-' + i).length, 1);
     assert.ok(scheduler.calls.filter(c => c[0] === 'list' && c[1] === 'TOOLKIT').length > 2);
   }
-  const core = require('../scripts/setup-toolkit-core.cjs'); scheduler.calls.length = 0;
-  core.printWindowsTasks({ repoRoot: TOOLKIT_ROOT }, { platform: 'win32', scheduler, home, workingFolder: root,
-    checkoutDeps: { identityReader, reportCheckout: r => r, governance: governance() }, log() {} });
-  for (let i = 0; i < 30; i++) assert.equal(scheduler.calls.filter(c => c[0] === 'list' && c[1] === 'OTHER-' + i).length, 1, 'setup shares unrelated discovery across reports');
   t.diagnostic('fake scheduler two-apply time: ' + (performance.now() - started).toFixed(1) + ' ms; real PowerShell timing is unverified');
 });
 

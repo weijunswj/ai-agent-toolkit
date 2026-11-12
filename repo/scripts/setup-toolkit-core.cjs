@@ -4422,7 +4422,6 @@ class ToolkitSetupExecution {
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const scheduledTaskUpdate = applyScheduledTasks(args);
-    printWindowsTasks(args);
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
     return scheduledTaskUpdate?.held || installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
@@ -4446,74 +4445,6 @@ function applyScheduledTasks(args, { home = os.homedir(), updater, platform = pr
     log(held ? 'Scheduled task update needs an owner answer or a local repair; inspect the direct update plan.' : 'Scheduled tasks updated and read back.');
     return { held };
   } catch { log('Scheduled task update held; inspect the direct update plan. Native permission blocks remain stops.'); return { held: true }; }
-}
-
-// Read-only task reporting for the managed repository and the original project. Cache only
-// this report's reads (including failures); plan/apply elsewhere always gets fresh dependencies.
-function printWindowsTasks(args, { platform = process.platform, scheduler = null, checkoutDeps = {}, home = os.homedir(), workingFolder = process.env[SETUP_START_FOLDER_ENV] || process.cwd(), log = console.log } = {}) {
-  if (platform !== 'win32') return null;
-  log('');
-  log('## Windows scheduled tasks');
-  const windowsTasks = require('./toolkit-windows-tasks.cjs');
-  const toolkitRoot = path.resolve(args.repoRoot);
-  const memoise = read => {
-    const results = new Map();
-    return (...args) => {
-      const key = JSON.stringify(args);
-      if (!results.has(key)) {
-        try { results.set(key, { value: read(...args) }); } catch (error) { results.set(key, { error }); }
-      }
-      const result = results.get(key);
-      if (result.error) throw result.error;
-      return result.value;
-    };
-  };
-  const plans = [], seen = new Set();
-  try {
-    const live = scheduler || windowsTasks.powerShellScheduler();
-    const reportScheduler = { list: memoise(folder => live.list(folder)), markedFolders: memoise(() => live.markedFolders()) };
-    const source = checkoutDeps.governance || require('./toolkit-governance-state.cjs');
-    const governance = { ...source, readIdentity: memoise(root => source.readIdentity(root)), governanceState: memoise(root => source.governanceState(root)) };
-    const observation = memoise(identity => (checkoutDeps.readObservation || source.readObservation || windowsTasks.readTaskObservation)(identity, home));
-    const primaryRead = memoise(root => windowsTasks.mainCheckout(root));
-    const gitRead = memoise((file, args, options) => spawnSync(file, args, options));
-    const locations = memoise(request => checkoutDeps.identityReader ? checkoutDeps.identityReader(request) : windowsTasks.readLocations(request, { mainCheckout: primaryRead, run: gitRead }));
-    const registry = { readRegistry: memoise(() => require('./toolkit-tasks.cjs').readRegistry(home)) };
-    const deps = { ...checkoutDeps, home, governance, readObservation: identity => observation(identity), identityReader: locations };
-    for (const checkout of [toolkitRoot, workingFolder]) {
-      const managed = windowsTasks.samePath(path.resolve(checkout), toolkitRoot);
-      const label = managed ? 'the managed Toolkit checkout' : 'this project';
-      const refusal = reason => log(`Windows scheduled tasks refused for ${label}: ${reason}.`);
-      try {
-        let read = windowsTasks.readCheckout(checkout, deps);
-        if (!read.root) {
-          if (!(managed && read.refusalCode === 'no-github-origin')) refusal(read.refusal || 'no usable github.com origin repository');
-          continue;
-        }
-        if (seen.has(read.repository.toLowerCase())) continue;
-        // Reporting may discover a worktree or subdirectory. Direct apply still refuses both.
-        const primary = checkoutDeps.reportCheckout || (root => {
-          const result = spawnSync('git', ['-C', root, 'worktree', 'list', '--porcelain', '-z'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
-          const first = /^worktree ([^\0]+)\0/.exec(String(result.stdout || ''));
-          if (result.error || result.status !== 0 || !first) throw new Error('primary checkout unreadable');
-          return primaryRead(first[1]);
-        });
-        const root = primary(read.root);
-        const resolved = windowsTasks.readCheckout(root, deps);
-        if (!resolved.repository || resolved.repository.toLowerCase() !== read.repository.toLowerCase()) throw new Error('primary origin mismatch');
-        read = resolved;
-        const desired = windowsTasks.desiredTasks({ checkout: root, checkoutRead: read, toolkitRoot, home, deps });
-        const plan = windowsTasks.planTasks(desired, { scheduler: reportScheduler, home, registry });
-        for (const line of windowsTasks.describePlan(plan, { summaryOnly: true })) log(line);
-        plans.push(plan);
-        seen.add(read.repository.toLowerCase());
-      } catch { refusal('checkout or task ownership could not be verified; run the direct task plan for details'); }
-    }
-    return plans;
-  } catch {
-    log('Windows scheduled tasks could not be checked; run the direct task plan for details.');
-    return null;
-  }
 }
 
 // Toolkit supports Windows computers only. Linux stays a build machine: CI runners set CI=true, and the
@@ -4619,7 +4550,7 @@ const {
 
 module.exports = {
   assertSupportedComputer,
-  applyScheduledTasks, printWindowsTasks,
+  applyScheduledTasks,
   gitFailureHint,
   nativePluginRebindFailure,
   installOfficialN8nSkills,

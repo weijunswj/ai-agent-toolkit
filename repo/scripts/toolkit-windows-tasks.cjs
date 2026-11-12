@@ -442,6 +442,12 @@ function powerShellScheduler(options = {}) {
       });
     },
     unregister: (folder, name, id, previous) => ps('unregister', { folder, name, marker: `[toolkit-task v1 id=${id} `, expected_xml: previous?.definition_xml || null }),
+    // A task the launcher disabled carries its fixed description instead of the marker; it is removed
+    // only while it is still exactly the recorded snapshot.
+    unregisterDisabled: (folder, name, previous) => {
+      if (!previous?.definition_xml) throw new WindowsTasksError('disabled task has no exact XML readback; left alone', 1);
+      return ps('unregister', { folder, name, marker: require('./toolkit-task-launcher.cjs').DISABLED_DESCRIPTION, expected_xml: previous.definition_xml });
+    },
     restore: (definition, previous, written) => ps('restore', { folder: definition.folder, name: definition.name, previous_xml: previous.definition_xml, expected_xml: written.definition_xml }),
     removeFolderIfEmpty: folder => ps('remove-folder', { folder }),
     start: (folder, name) => ps('start', { folder, name }),
@@ -1026,14 +1032,13 @@ function applyCommand(desired, { toolkitRoot = path.resolve(__dirname, '..', '..
 
 const ACTION_TEXT = Object.freeze({ create: 'to create', update: 'to update in place', retire: 'to retire after replacement', 'owner-choice-required': 'owner choice required', current: 'up to date', refused: 'refused' });
 
-function describePlan(plan, { command = null, applied = false, summaryOnly = false } = {}) {
+function describePlan(plan, { command = null, applied = false } = {}) {
   const lines = [`Windows scheduled tasks for ${plan.repository || 'this repository'} in \\${plan.folder}\\:`];
   if (plan.assignment?.collision) lines.push(`Minute ${String(plan.assignment.minute).padStart(2, '0')} is shared: more than nine repositories are enrolled on this computer.`);
   for (const item of plan.items) {
     const d = item.definition;
     const state = applied ? (['refused', 'owner-choice-required'].includes(item.action) ? ACTION_TEXT[item.action] : item.done === false ? `failed: ${item.error}` : item.action === 'current' ? 'up to date' : item.action === 'create' ? 'created' : item.action === 'retire' ? item.recovery ? 'reconciled by owner-authorised recovery' : 'retired by Toolkit' : 'updated') : ACTION_TEXT[item.action];
     lines.push(`- ${d.name} (${d.schedule_text}): ${state}. ${d.purpose}`);
-    if (summaryOnly) continue;
     if (item.reason) lines.push(`  ${item.reason}`);
     if (item.choice) {
       lines.push(`  Task ${item.choice.task}; operation: ${item.choice.operation}; changed: ${item.choice.changed.join(', ')}; observation: ${item.choice.fingerprint}. Use --task-choice keep|replace --task ${item.choice.task} --observed ${item.choice.fingerprint} --answer-ref <actual-owner-answer-reference>. Flags attest an actual owner answer; they cannot prove who answered.`);
@@ -1046,8 +1051,7 @@ function describePlan(plan, { command = null, applied = false, summaryOnly = fal
   }
   if (plan.coverage) lines.push(plan.coverage);
   if (plan.approval) lines.push(`Approval: ${plan.approval}.`);
-  if (summaryOnly) lines.push('Next step: Run the direct task plan for details and commands.');
-  else if (plan.next_step) lines.push(`Next step: ${plan.next_step}`);
+  if (plan.next_step) lines.push(`Next step: ${plan.next_step}`);
   for (const note of plan.history_notes || []) lines.push(note);
   for (const item of plan.skipped) lines.push(`- ${item.name}: not registered, because ${item.reason}.`);
   if (!applied && command && / --(?:folder|repair-owned)\b/.test(command)) lines.push('This folder override or repair is outside standing approval. Explicit approval must name the affected fixed tasks, paths and changes.');
