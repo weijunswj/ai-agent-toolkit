@@ -13,6 +13,8 @@ const health = require('./toolkit-task-health.cjs');
 const { ProgrammeJobLock } = require('./toolkit-programme-lock.cjs');
 const { takeLock } = require('../../skills/github-program-reconciler/scripts/programme-lock.cjs');
 const KINDS = Object.freeze(Object.keys(windows.JOBS).sort());
+const checkFile = home => path.join(tasks.userStateDir(home), 'scheduled-task-check.json');
+const CHECK_SCHEMA = 'toolkit.scheduled-task-check.v1', CHECK_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const approvalFile = home => path.join(tasks.userStateDir(home), 'scheduled-task-approval.json');
 const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const validRef = value => typeof value === 'string' && /^[A-Za-z0-9_.:/ -]{1,200}$/.test(value) && !tasks.looksSecret(value);
@@ -32,21 +34,26 @@ const approvalQuestion = () => ({ id: 'scheduled-task-approval', kind: 'approval
   title: 'May Toolkit update your scheduled tasks on this computer?',
   detail: 'Create, update and remove the listed fixed scheduled tasks on this computer across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.',
   options: ['standing', 'no'], kinds: [...KINDS] });
+// A main checkout has a `.git` folder. A `.git` file marks a linked worktree (or submodule): it belongs
+// to its main checkout, which discovery finds on its own, so it is neither planned nor held.
+function gitKind(root) {
+  try { return fs.lstatSync(path.join(root, '.git')).isDirectory() ? 'main' : 'linked'; } catch { return null; }
+}
 function discoverCheckouts(folder, { readDir = dir => fs.readdirSync(dir, { withFileTypes: true }) } = {}) {
   if (!fs.existsSync(folder)) return [];
   if (!fs.lstatSync(folder).isDirectory() || fs.lstatSync(folder).isSymbolicLink()) throw new Error('GitHub checkout folder is not a directory');
   const found = [];
   for (const item of readDir(folder)) {
     if (!item.isDirectory() || item.isSymbolicLink() || item.name.startsWith('.')) continue;
-    const root = path.join(folder, item.name);
-    if (fs.existsSync(path.join(root, '.git'))) found.push(root);
-    else {
+    const root = path.join(folder, item.name), kind = gitKind(root);
+    if (kind === 'main') found.push(root);
+    else if (!kind) {
       let children;
       try { children = readDir(root); } catch { found.push({ root, held: true, reason: 'Checkout folder could not be read; check local folder access, then retry.' }); continue; }
       for (const child of children) {
       if (!child.isDirectory() || child.isSymbolicLink() || child.name.startsWith('.')) continue;
       const candidate = path.join(root, child.name);
-      if (fs.existsSync(path.join(candidate, '.git'))) found.push(candidate);
+      if (gitKind(candidate) === 'main') found.push(candidate);
       }
     }
   }
@@ -68,14 +75,18 @@ class TaskUpdater {
   desiredAt(root) { return this.desired({ checkout: root, toolkitRoot: this.toolkitRoot, nodePath: this.nodePath, home: this.home, deps: this.checkoutDeps }); }
   owner(answers = []) { return new windows.WindowsTaskOwner({ home: this.home, scheduler: this.scheduler, now: this.now, repairOwned: true, preserveOwnerStops: true, allowIndependentChoice: true, taskChoice: answers }); }
   plan() {
+    const started = performance.now(), timings_ms = { discovery: 0, checkouts: [], stores: 0, ownership: 0, total: 0 };
+    const since = from => Math.round(performance.now() - from);
     const entries = this.registry();
     let discovered;
     try { discovered = this.discover(this.githubFolder); }
     catch { discovered = [{ root: this.githubFolder, held: true, reason: 'GitHub checkout folder could not be read; check local folder access, then retry.' }]; }
+    timings_ms.discovery = since(started);
     const roots = [...new Set([...entries.filter(e => e.host === 'windows' && e.job !== 'task-health' && !e.adopted && e.checkout).map(e => e.checkout), ...discovered.filter(row => typeof row === 'string')])];
     const plans = [], seen = new Set();
     plans.push(...discovered.filter(row => typeof row !== 'string'));
     for (const root of roots) {
+      const checkoutStarted = performance.now();
       try {
         const desired = this.desiredAt(root), key = desired.repository.toLowerCase();
         if (seen.has(key)) continue;
@@ -85,6 +96,7 @@ class TaskUpdater {
         const plan = stopped ? { repository: desired.repository, items: [], stopped: true, next_step: 'Stopped by owner; left alone.' } : this.owner().plan(desired);
         plans.push({ root, desired, plan });
       } catch { plans.push({ root, repository: entries.find(entry => entry.host === 'windows' && entry.checkout === root)?.repository || null, held: true, reason: 'Checkout or fresh ownership could not be verified; left alone.' }); }
+      finally { timings_ms.checkouts.push({ root, ms: since(checkoutStarted) }); }
     }
     const cloud = entries.filter(e => e.host !== 'windows').map(e => ({ name: e.name, repository: e.repository, host: e.host, schedule: e.schedule, source: 'from record, not checked live', change: e.toolkit_version && e.toolkit_version !== this.version ? 'Coordinator: check this recorded task against current Toolkit instructions.' : 'Coordinator: verify the recorded schedule and definition; never applied here.' }));
     const first = plans.find(row => row.desired);
@@ -97,21 +109,40 @@ class TaskUpdater {
     // recorded owner elsewhere is honoured before any job is created here.
     const enrolled = new Set(entries.filter(e => e.host === 'windows' && !e.adopted && e.job !== 'task-health').map(e => e.repository?.toLowerCase()));
     const found = plans.filter(row => row.desired && row.root && !enrolled.has(row.desired.repository.toLowerCase())).map(row => ({ checkout: row.root, repository: row.desired.repository }));
+    const storesStarted = performance.now();
     try { targets = this.health.stores(found); } catch (error) { hold(plans, error); }
+    timings_ms.stores = since(storesStarted);
     this.targets = targets;
+    const ownershipStarted = performance.now();
     for (const target of targets) {
       // Each store answers only for the repositories whose own binding names it.
       const rows = plans.filter(row => row.desired && target.repositories.includes(row.desired.repository.toLowerCase()));
       if (!rows.length) continue;
       try { ownership.remove.push(...this.ownership(target, { plans: rows }, { readOnly: true }).remove); } catch (error) { hold(rows, error); }
     }
+    timings_ms.ownership = since(ownershipStarted);
     for (const row of plans) if (row.desired && ownership.remove.includes(row.desired.repository.toLowerCase())) {
       row.plan = { ...row.plan, items: entries.filter(e => e.host === 'windows' && e.job !== 'task-health' && !e.adopted && !e.stopped_by_owner && e.repository?.toLowerCase() === row.desired.repository.toLowerCase()).map(entry => ({ definition: { ...entry }, action: 'remove' })) };
     }
     const changes = plans.flatMap(row => (row.plan?.items || []).map(item => ({ repository: row.plan.repository, task: item.definition.name, action: item.action === 'retire' ? 'remove' : item.action })));
     if (computer_task) changes.push({ repository: null, task: 'TASK HEALTH', action: computer_task.action });
-    return { plans, cloud, computer_task, changes, computer: tasks.computerIdentity(this.home) ? health.computerLabel(this.home) : 'This computer has not been initialised' };
+    timings_ms.total = since(started);
+    return { plans, cloud, computer_task, changes, computer: tasks.computerIdentity(this.home) ? health.computerLabel(this.home) : 'This computer has not been initialised', timings_ms };
   }
+  // What the last clean update depended on. Setup skips the update while this is unchanged and under
+  // 24 hours old; the direct command always checks in full.
+  fingerprint() {
+    const checkouts = this.discover(this.githubFolder).map(row => typeof row === 'string' ? row : `held:${row.root}`).sort();
+    return digest({ version: this.version, toolkitRoot: this.toolkitRoot, nodePath: this.nodePath, approval: readApproval(this.home), registry: this.registry(), checkouts });
+  }
+  recentCheck() {
+    try {
+      const saved = JSON.parse(fs.readFileSync(checkFile(this.home), 'utf8')), age = this.now() - Date.parse(saved.checked_at);
+      if (saved.schema !== CHECK_SCHEMA || !(age >= 0 && age <= CHECK_MAX_AGE_MS) || saved.fingerprint !== this.fingerprint()) return null;
+      return saved;
+    } catch { return null; }
+  }
+  saveCheck() { health.writeLocal(checkFile(this.home), { schema: CHECK_SCHEMA, fingerprint: this.fingerprint(), checked_at: this.now().toISOString() }); }
   ask(question) {
     const answer = this.question?.(question);
     if (!answer) return { pending: question };
@@ -269,7 +300,7 @@ class TaskUpdater {
     } finally { lock.release(); }
   }
   run({ apply = false } = {}) {
-    const local = this.plan();
+    const local = this.plan(), applyStarted = performance.now();
     if (!apply) return local;
     const approval = this.approval(); if (!approval.allowed) return { ...local, ...(approval.pending ? { questions: [approval.pending] } : { declined: true }) };
     tasks.computerIdentity(this.home, { create: true });
@@ -367,6 +398,7 @@ class TaskUpdater {
         else results.push(installed);
       } catch (error) { results.push({ task: 'task-health', refused: true, reason: tasks.safeText(error.message) }); }
     }
+    local.timings_ms.total = Math.round(performance.now() - applyStarted) + local.timings_ms.total;
     return { ...local, results, ...(questions.length ? { questions } : {}) };
   }
 }
@@ -382,5 +414,5 @@ function main(argv = process.argv.slice(2), deps = {}) {
     return result.questions ? 23 : result.declined || result.results?.some(row => row.refused || row.items?.some(item => item.done === false)) || result.plans.some(row => row.held) ? 1 : 0;
   } catch (error) { err(`Scheduled task update held: ${tasks.safeText(error.message)}\n`); return 1; }
 }
-module.exports = { TaskUpdater, KINDS, readApproval, saveApproval, approvalQuestion, discoverCheckouts, main };
+module.exports = { TaskUpdater, KINDS, CHECK_MAX_AGE_MS, readApproval, saveApproval, approvalQuestion, discoverCheckouts, main };
 if (require.main === module) process.exitCode = main();
