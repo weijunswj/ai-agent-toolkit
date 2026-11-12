@@ -966,7 +966,7 @@
       "event": "UserPromptSubmit",
       "payload": { "prompt": "toolkit cmd" },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit cmd`.", "- `toolkit show env`:"] },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit cmd`.", "**Keys**\n\n| Type this | What it does |\n| --- | --- |\n| `toolkit show env` | Open your keys"] },
       "status": "pass"
     },
     {

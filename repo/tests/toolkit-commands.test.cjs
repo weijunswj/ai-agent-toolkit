@@ -81,6 +81,32 @@ test('the list names every typed command and is what the script prints', () => {
   assert.equal(run.stdout, `${list}\n`);
 });
 
+test('the list is one two-column table per group, in group order, with every command in exactly one row', () => {
+  const list = commands.listText();
+  const lines = list.split('\n');
+  assert.equal(lines[0], 'Toolkit commands (type one as your whole message):');
+  assert.equal(lines.at(-1), 'Anything else: ask in your own words.');
+  const headings = lines.filter(line => /^\*\*[^*]+\*\*$/.test(line)).map(line => line.slice(2, -2));
+  assert.deepEqual(headings, [...commands.GROUPS]);
+  assert.deepEqual(commands.GROUPS, ['Setup', 'Keys', 'Governance', 'Merge']);
+  assert.equal(lines.filter(line => line === '| Type this | What it does |').length, commands.GROUPS.length);
+  for (const command of commands.COMMANDS) {
+    assert.ok(commands.GROUPS.includes(command.group), `${command.type[0]} has no known group`);
+    assert.ok(!`${command.type.join('')}${command.does}`.includes('|'), `${command.type[0]} would break the table`);
+    const row = `| ${command.type.map(text => `\`${text}\``).join(' or ')} | ${command.does} |`;
+    assert.equal(lines.filter(line => line === row).length, 1, row);
+    const section = lines.slice(0, lines.indexOf(row)).filter(line => /^\*\*[^*]+\*\*$/.test(line)).at(-1);
+    assert.equal(section, `**${command.group}**`, command.type[0]);
+  }
+  assert.equal(lines.filter(line => line.startsWith('| `')).length, commands.COMMANDS.length);
+});
+
+test('the toolkit-setup skill runs the list itself when no hook line came with the message', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
+  assert.match(skill.match(/^description: .*$/m)[0], /`toolkit cmd`/);
+  assert.match(skill, /If the whole message is `toolkit cmd` or `toolkit command` and no `Toolkit command:` hook line came with it[^\n]*run `node <Toolkit>\/repo\/scripts\/toolkit-commands\.cjs`[^\n]*show its output exactly/);
+});
+
 test('the how-to guide shows the same commands', () => {
   const guide = fs.readFileSync(path.join(__dirname, '..', 'docs', 'HOW-TO-USE.md'), 'utf8');
   for (const command of commands.COMMANDS) for (const text of command.type) assert.ok(guide.includes(`\`${text}\``), `${text} is missing from HOW-TO-USE.md`);

@@ -17,23 +17,24 @@
 
 const path = require('node:path');
 
-// Each command as the user types it, with what it does in one line. All are read as plain language
-// by their skill; the phrases in ACTIONS below are also matched exactly by the prompt hooks.
+// Each command as the user types it, its group in the printed list, and what it does in one line.
+// All are read as plain language by their skill; the phrases in ACTIONS below are also matched
+// exactly by the prompt hooks. Dropping a command is dropping its one entry here.
 const COMMANDS = Object.freeze([
-  Object.freeze({ type: ['toolkit cmd', 'toolkit command'], does: 'Show this list.' }),
-  Object.freeze({ type: ['setup toolkit', 'toolkit setup'], does: 'Set up Toolkit on this computer, or change your setup answers.' }),
-  Object.freeze({ type: ['refresh toolkit', 'toolkit refresh'], does: 'Update Toolkit on this computer to the newest version.' }),
-  Object.freeze({ type: ['toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
-  Object.freeze({ type: ['toolkit update scheduled task'], does: "Review and update Toolkit's scheduled tasks on this computer." }),
-  Object.freeze({ type: ['toolkit governance enable', 'toolkit governance disable'], does: "Turn Toolkit's GitHub governance on or off for this repository. It prepares a pull request for you to merge." }),
-  Object.freeze({ type: ['toolkit governance status'], does: "Show whether Toolkit's GitHub governance is on for this repository, and refresh this computer's copy of the merged binding." }),
-  Object.freeze({ type: ['toolkit governance check'], does: "Check this repository against Toolkit's governance rules and GitHub settings. It changes nothing." }),
-  Object.freeze({ type: ['toolkit governance discover'], does: 'List what Toolkit finds for a governance setup here (parent issue, evidence store, checks). It changes nothing.' }),
-  Object.freeze({ type: ['toolkit governance catalogue'], does: 'List the skills offered in this repository under its governance state. It changes nothing.' }),
-  Object.freeze({ type: ['toolkit governance security'], does: "Turn on GitHub's free dependency and security settings for a governed repository." }),
-  Object.freeze({ type: ['toolkit governance migrate'], does: 'Get the command that offers protection and security fixes; you run it in your own terminal and answer its question there.' }),
-  Object.freeze({ type: ['remove toolkit'], does: "List Toolkit's scheduled tasks and rules on this computer, then remove them after your OK." }),
-  Object.freeze({ type: ['merge N'], does: 'Approve the merge of pull request N.' }),
+  Object.freeze({ group: 'Setup', type: ['toolkit cmd', 'toolkit command'], does: 'Show this list.' }),
+  Object.freeze({ group: 'Setup', type: ['setup toolkit', 'toolkit setup'], does: 'Set up Toolkit on this computer, or change your setup answers.' }),
+  Object.freeze({ group: 'Setup', type: ['refresh toolkit', 'toolkit refresh'], does: 'Update Toolkit on this computer to the newest version.' }),
+  Object.freeze({ group: 'Keys', type: ['toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
+  Object.freeze({ group: 'Setup', type: ['toolkit update scheduled task'], does: "Review and update Toolkit's scheduled tasks on this computer." }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance enable', 'toolkit governance disable'], does: "Turn Toolkit's GitHub governance on or off for this repository. It prepares a pull request for you to merge." }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance status'], does: "Show whether Toolkit's GitHub governance is on for this repository, and refresh this computer's copy of the merged binding." }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance check'], does: "Check this repository against Toolkit's governance rules and GitHub settings. It changes nothing." }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance discover'], does: 'List what Toolkit finds for a governance setup here (parent issue, evidence store, checks). It changes nothing.' }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance catalogue'], does: 'List the skills offered in this repository under its governance state. It changes nothing.' }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance security'], does: "Turn on GitHub's free dependency and security settings for a governed repository." }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance migrate'], does: 'Get the command that offers protection and security fixes; you run it in your own terminal and answer its question there.' }),
+  Object.freeze({ group: 'Setup', type: ['remove toolkit'], does: "List Toolkit's scheduled tasks and rules on this computer, then remove them after your OK." }),
+  Object.freeze({ group: 'Merge', type: ['merge N'], does: 'Approve the merge of pull request N.' }),
 ]);
 
 const ACTIONS = {
@@ -51,9 +52,19 @@ for (const subcommand of Object.keys(GOVERNANCE)) ACTIONS[`toolkit governance ${
 Object.freeze(ACTIONS);
 const PHRASES = Object.freeze(Object.keys(ACTIONS));
 
+// The order the groups print in; a group with no commands is left out.
+const GROUPS = Object.freeze(['Setup', 'Keys', 'Governance', 'Merge']);
+
+// The command list as one small two-column Markdown table per group.
 function listText() {
-  return ['Toolkit commands (type one as your whole message):', ...COMMANDS.map(command => `- ${command.type.map(text => `\`${text}\``).join(' or ')}: ${command.does}`),
-    'Anything else: ask in your own words.'].join('\n');
+  const lines = ['Toolkit commands (type one as your whole message):'];
+  for (const group of GROUPS) {
+    const rows = COMMANDS.filter(command => command.group === group);
+    if (!rows.length) continue;
+    lines.push('', `**${group}**`, '', '| Type this | What it does |', '| --- | --- |',
+      ...rows.map(command => `| ${command.type.map(text => `\`${text}\``).join(' or ')} | ${command.does} |`));
+  }
+  return [...lines, '', 'Anything else: ask in your own words.'].join('\n');
 }
 
 // The typed command a message is, or null. The whole message must be the phrase: letter case, outer
@@ -85,6 +96,6 @@ function phraseContext(text) {
   return command ? `Toolkit command: the user typed \`${command.phrase}\`. ${CONTEXT[command.action](command.subcommand)}` : '';
 }
 
-module.exports = Object.freeze({ COMMANDS, PHRASES, listText, typedCommand, phraseContext });
+module.exports = Object.freeze({ COMMANDS, GROUPS, PHRASES, listText, typedCommand, phraseContext });
 
 if (require.main === module) process.stdout.write(`${listText()}\n`);

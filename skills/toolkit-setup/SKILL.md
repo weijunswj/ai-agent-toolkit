@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit update scheduled task` for fixed scheduled tasks on this computer, `toolkit permissions` for the paste-once permission blocks, `toolkit store` for evidence store steps, `toolkit cleanup` for rebuildable scraps, and `remove toolkit` to list and remove Toolkit's scheduled tasks and rules from this computer after the user's OK. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
+description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, Antigravity portable skills copying, native Codex or Claude Code plugin behavior, or bridge setup safety. Also routes `toolkit cmd` for the Toolkit command list, `toolkit update scheduled task` for fixed scheduled tasks on this computer, `toolkit permissions` for the paste-once permission blocks, `toolkit store` for evidence store steps, `toolkit cleanup` for rebuildable scraps, and `remove toolkit` to list and remove Toolkit's scheduled tasks and rules from this computer after the user's OK. Route only Toolkit setup and bridge requests to the Toolkit setup script and its bridge; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
 ---
 
 
@@ -11,6 +11,10 @@ Use this skill as a discoverability router for Toolkit plugin and local bridge s
 The lead owns the interactive setup decisions and integration. For adopted governed work, default-delegate suitable separable evidence gathering or independent implementation/validation; ordinary trivial or tightly coupled setup may proceed directly with a brief substantial-work exception where applicable. Helpers are leaves and never decide user preferences or create authority. Priority remains controller/launcher metadata and must not gate helper admission.
 
 Bridge setup, repo auto-update, sync, audit, disable, and troubleshooting are Toolkit setup infrastructure. The bridge implementation lives in `repo/scripts/toolkit-local-bridge.cjs`; Codex native plugin verification/install lives in `repo/scripts/setup-codex-toolkit-plugin.cjs`; Claude Code native plugin metadata lives under `.claude-plugin/`; detailed policy lives in `repo/docs/TOOLKIT-LOCAL-BRIDGE.md`, `repo/docs/HOW-TO-USE.md`, `AGENTS.md`, validators, and tests.
+
+## Command list
+
+If the whole message is `toolkit cmd` or `toolkit command` and no `Toolkit command:` hook line came with it (for example when Codex hooks are off after an update), run `node <Toolkit>/repo/scripts/toolkit-commands.cjs` from the managed Toolkit checkout and show its output exactly, then stop.
 
 ## Scheduled task updates
 
