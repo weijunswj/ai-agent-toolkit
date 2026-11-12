@@ -9,8 +9,9 @@
 //
 // `refresh` runs `programme.cjs refresh` with the two installation tokens the workflow minted. With
 // no App configured it prints a notice and exits 0. A failed sign-in fails the job with a fixed
-// message naming the App's variable and secret; GitHub's own error text, tokens and keys are never
-// printed. The job summary gets the pass's metrics line.
+// message naming the App's variable and secret. Any other failure names the CLI's stop code and the
+// HTTP status of a failed GitHub request, when there is one; GitHub's own error text, tokens and keys
+// are never printed. The job summary gets the pass's metrics line.
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -74,8 +75,20 @@ function runRefresh({ root, env, spawn = spawnSync }) {
       { cwd: root, env: child, encoding: 'utf8', windowsHide: true, timeout: RUN_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, shell: false });
   } catch { return { code: 'EXEC_FAILED', report: null, status: 1 }; }
   if (!result || result.error) return { code: 'EXEC_FAILED', report: null, status: 1 };
-  const code = /^([A-Z][A-Z0-9_]{0,63}):/.exec(String(result.stderr || '').trimStart())?.[1] || null;
-  return { code, report: lastReport(result.stdout), status: result.status };
+  const first = String(result.stderr || '').trimStart().split('\n')[0];
+  const code = /^([A-Z][A-Z0-9_]{0,63}):/.exec(first)?.[1] || null;
+  // Only the HTTP status number of a failed GitHub request is kept, never GitHub's own text.
+  const http = code ? /\(([1-5][0-9]{2})\)/.exec(first)?.[1] || null : null;
+  return { code, http, report: lastReport(result.stdout), status: result.status };
+}
+
+// The general failure, naming the stop code and HTTP status when the CLI gave them, so a failed run
+// shows its cause without GitHub's own text.
+function failureLine(result) {
+  const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(result?.code || '') ? result.code : null;
+  if (!code) return GENERAL_FAILURE;
+  const http = /^[1-5][0-9]{2}$/.test(result?.http || '') ? `, HTTP ${result.http}` : '';
+  return GENERAL_FAILURE.replace('Programme Sweep failed.', `Programme Sweep failed (${code}${http}).`);
 }
 
 function summaryLine(report) {
@@ -116,7 +129,7 @@ class ProgrammeSweepAction {
     if (result.code === 'GH_AUTH') { this.failure(SIGN_IN_FAILURE); return 1; }
     if (result.code === 'MAIN_MOVED' || result.code === 'CLOUD_PUBLIC_STATE') { this.notice(result.code === 'MAIN_MOVED' ? NOTICES.main_moved : NOTICES.public_state); return 0; }
     const held = result.status === 1 && Array.isArray(result.report?.holds) && result.report.holds.length > 0;
-    if (result.status !== 0 && !held) { this.failure(GENERAL_FAILURE); return 1; }
+    if (result.status !== 0 && !held) { this.failure(failureLine(result)); return 1; }
     const line = summaryLine(result.report);
     // A line that could carry a token is never written.
     if (!line || [env.GOVERNED_TOKEN, env.STORE_TOKEN].some(token => line.includes(token))) { this.failure(SUMMARY_FAILURE); return 1; }
@@ -131,4 +144,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SIGN_IN_FAILURE, GENERAL_FAILURE, readCheckedOutBinding, lastReport, runRefresh, summaryLine, ProgrammeSweepAction });
+module.exports = Object.freeze({ CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SIGN_IN_FAILURE, GENERAL_FAILURE, readCheckedOutBinding, lastReport, runRefresh, failureLine, summaryLine, ProgrammeSweepAction });

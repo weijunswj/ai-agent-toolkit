@@ -138,6 +138,22 @@ test('action: a healthy run writes the metrics line; a held pass is resumable; a
   assert.deepEqual(leaking.summaries, [], 'a line that carries a token is never written');
 });
 
+test('action: a failed pass names its stop code and HTTP status, never GitHub text or a token', () => {
+  const failed = runAction('run', { env: minted, refresh: () => ({ status: 2, code: 'GH_FAILED', http: '403', report: null }) });
+  assert.equal(failed.code, 1);
+  assert.deepEqual(failed.failures, ['Programme Sweep failed (GH_FAILED, HTTP 403). Open this workflow run and toolkit governance check for the cause.']);
+  const noStatus = runAction('run', { env: minted, refresh: () => ({ status: 1, code: 'PASS_LOCK_LOST', http: null, report: null }) });
+  assert.deepEqual(noStatus.failures, ['Programme Sweep failed (PASS_LOCK_LOST). Open this workflow run and toolkit governance check for the cause.']);
+  const unknown = runAction('run', { env: minted, refresh: () => ({ status: 1, code: null, report: null }) });
+  assert.deepEqual(unknown.failures, [action().GENERAL_FAILURE]);
+  const hostile = runAction('run', { env: minted, refresh: () => ({ status: 1, code: `X ${fakeToken}`, http: 'abc', report: null }) });
+  assert.deepEqual(hostile.failures, [action().GENERAL_FAILURE]);
+  const spawn = () => ({ status: 2, stdout: '', stderr: `GH_FAILED: Writing state/x/sweep-lease.json failed (403): Resource not accessible by integration ${fakeToken}\nmore` });
+  const parsed = action().runRefresh({ root: ROOT, env: minted, spawn });
+  assert.deepEqual([parsed.code, parsed.http], ['GH_FAILED', '403']);
+  assert.ok(!action().failureLine(parsed).includes('Resource') && !action().failureLine(parsed).includes(fakeToken));
+});
+
 test('action: the CLI runs without a shell and only with the two tokens, the login and the store', () => {
   const seen = [];
   const spawn = (file, args, options) => { seen.push({ file, args, options }); return { status: 0, stdout: '{\n  "metrics": "Sweep: requests=1"\n}\n', stderr: '' }; };
