@@ -170,7 +170,7 @@ class IssueClosureGuard {
       if (result.status !== 'allowed') return result;
       const after = this.pullRequest(number, budget);
       if (JSON.stringify([before.head.sha, before.title, before.body, before.commits]) !== JSON.stringify([after.head.sha, after.title, after.body, after.commits])) return unknown('PR head or text changed during inspection. Read it again and retry.');
-      return result;
+      return { ...result, pr: after };
     } catch (error) { return unknown(`PR metadata or commits could not be read completely. ${error.message} Retry with a current explicit PR and head.`); }
   }
 }
