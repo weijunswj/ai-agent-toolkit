@@ -39,6 +39,12 @@
 //   ack --finding <id>                                 acknowledge an attention finding (it stays listed)
 //   dispose --finding <id> --reason <text>             dispose of one; the reason stays in the private part
 //
+// A controller that cannot run commands itself hands a session a holder order: the exact writes
+// above (never claim, takeover, init-parent or migrate-state), for the parent at its current epoch,
+// until a near expiry. That session runs only those writes, as the holder, and the parent's private
+// part logs the order, its digest and each write's outcome:
+//   run-order --order <file> --session <this session's own id> [--dry-run]
+//
 // Moving the documents to the public state branch (once per repository, before the binding gains
 // `state`): anyone may run the dry run; the apply is the controller's and asks for the owner's typed yes
 // in a terminal, in that run:
@@ -64,15 +70,16 @@ const { SweepLease } = require('./programme-sweep-lease.cjs');
 // Issues changed up to this long before the predecessor started (by GitHub's clock) are read again.
 const SWEEP_OVERLAP_MS = 5 * 60 * 1000;
 const { ReadCache } = require('./programme-read-cache.cjs');
+const holderOrder = require('./programme-holder-order.cjs');
 const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = require('./programme-lock.cjs');
 
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
-  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment'];
+  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order'];
 const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -113,6 +120,11 @@ function parseArgs(argv) {
     if (extra.length) throw usage(`${name} takes only ${allowed.map(key => `--${key}`).join(', ')} (got --${extra[0]}).`);
   }
   if (command === 'attention' && args['deadline-ms'] !== undefined && !args.refresh) throw usage('--deadline-ms goes with attention --refresh.');
+  if (command === 'run-order') {
+    const extra = Object.keys(args).filter(key => !['command', 'order', 'session', 'dry-run', 'json', 'repo-root'].includes(key));
+    if (extra.length) throw usage(`run-order takes only --order, --session, --dry-run, --json and --repo-root (got --${extra[0]}): the order names every write and runs it as the parent's holder.`);
+    if (!args.order || !args.session) throw usage('run-order needs --order <file> and --session <this session\'s own id>.');
+  } else if (args.order !== undefined) throw usage('--order goes with run-order.');
   if (EXECUTOR_COMMANDS.includes(command) && args.controller) throw usage(`${command} is an executor command; the controller does not bind or checkpoint.`);
   if (isWrite(args) && !args.controller) {
     throw usage('Only the appointed controller writes programme state. Other sessions run reconcile (a dry run) or show and report to the controller; an executor the controller assigned records its work only in its own checkpoint journal (bind, then its turn-end hook).');
@@ -688,6 +700,51 @@ const commands = {
         : 'Owner: merge a pull request that adds this state block to .github/toolkit-programme.json, with the programme sweep stopped until it merges; until then every reader keeps the private store.' };
   },
 
+  // A holder order: the controller's own writes, named one by one, run as the parent's holder by the
+  // session the controller handed it to. The dry run checks it against the parent and writes nothing.
+  'run-order'(args, context, deps = {}) {
+    const order = holderOrder.validateOrder(readJsonFile(args.order, 'order'), { nowMs: deps.orderClock || Date.now });
+    const digest = holderOrder.orderDigest(order);
+    const prefix = context.binding.writer_prefix;
+    const parentDoc = readParent(context);
+    holderOrder.checkFence(order, parentDoc, prefix);
+    const logged = holderOrder.logEntry(parentDoc, order.order_id);
+    if (logged && logged.digest !== digest) throw new ProgrammeError('ORDER_CHANGED', `Holder order ${order.order_id} already ran with different contents (digest ${logged.digest.slice(0, 12)}). Nothing was written; a changed order needs a new order_id.`);
+    const done = new Set(logged?.done || []);
+    const planned = order.ops.map((op, at) => ({ at: at + 1, command: op.command, ...(op.issue ? { issue: op.issue } : {}), ...(op.finding ? { finding: op.finding } : {}), status: done.has(at) ? 'DONE_EARLIER' : 'PLANNED' }));
+    const summary = { order_id: order.order_id, digest, record: order.record, parent_issue: order.parent_issue, epoch: order.epoch, expires_at: order.expires_at };
+    if (args['dry-run']) return { mode: 'dry-run', ...summary, ops: planned };
+    const by = checkpoint.sessionHash(args.session);
+    const holder = { session: order.holder_session, prefix };
+    let entry = logged || { order_id: order.order_id, digest, record: order.record, by, started_at: nowText(deps), done: [], results: [] };
+    const log = next => {
+      entry = next;
+      context.writer = holder;
+      context.store.mutate('parent', context.binding.parent_issue, { writer: holder, change: doc => holderOrder.withLog(doc, entry) });
+    };
+    if (!logged) log(entry);
+    const results = [];
+    for (const [at, op] of order.ops.entries()) {
+      if (done.has(at)) { results.push({ at: at + 1, command: op.command, outcome: 'DONE_EARLIER' }); continue; }
+      // Each write runs as the holder, exactly as the controller would type it.
+      context.writer = holder;
+      let result;
+      try { result = commands[op.command](holderOrder.opArgs(op, holder.session, prefix), context, deps); }
+      catch (error) {
+        const failed = { at: at + 1, command: op.command, outcome: 'REFUSED', code: error.code || 'FAIL', detail: String(error.message).slice(0, 300) };
+        results.push(failed);
+        log({ ...entry, results: [...entry.results, failed].slice(-holderOrder.MAX_OPS), stopped_at: nowText(deps) });
+        return { mode: 'apply', ...summary, outcome: 'STOPPED', results, next_action: `Stopped at write ${at + 1} (${op.command}): ${failed.code}. Report this to the controller; a run of the same order continues from this write.` };
+      }
+      const ran = { at: at + 1, command: op.command, outcome: result?.outcome || 'DONE' };
+      results.push(ran);
+      done.add(at);
+      log({ ...entry, done: [...done].sort((a, b) => a - b), results: [...entry.results, ran].slice(-holderOrder.MAX_OPS), by });
+    }
+    log({ ...entry, finished_at: nowText(deps) });
+    return { mode: 'apply', ...summary, outcome: 'DONE', results, next_action: 'Run programme.cjs refresh so the pages show these writes, then report the digest and results to the controller.' };
+  },
+
   ack(args, context, deps = {}) { return answer(args, context, deps, 'acknowledged'); },
   dispose(args, context, deps = {}) { return answer(args, context, deps, 'disposed'); },
 
@@ -716,9 +773,9 @@ const commands = {
   },
 
   'update-parent'(args, context) {
-    if (!args.patch) throw usage('update-parent needs --patch <file>.');
+    if (!args.patch && args.patchValue === undefined) throw usage('update-parent needs --patch <file>.');
     const writer = requireParentHolder(context, readParent(context));
-    const patch = readJsonFile(args.patch, 'patch');
+    const patch = args.patchValue !== undefined ? args.patchValue : readJsonFile(args.patch, 'patch');
     const result = context.store.mutate('parent', context.binding.parent_issue, { writer, change: doc => state.applyPatch('parent', doc, patch) });
     return writeResult('parent', context.binding.parent_issue, result, writer);
   },
@@ -798,10 +855,10 @@ const commands = {
   },
 
   update(args, context, deps = {}) {
-    if (!args.issue || !args.patch) throw usage('update needs --issue <n> and --patch <file>.');
+    if (!args.issue || (!args.patch && args.patchValue === undefined)) throw usage('update needs --issue <n> and --patch <file>.');
     const parentDoc = readParent(context);
     const writer = requireParentHolder(context, parentDoc);
-    const patch = readJsonFile(args.patch, 'patch');
+    const patch = args.patchValue !== undefined ? args.patchValue : readJsonFile(args.patch, 'patch');
     const attention = TERMINAL.includes(patch?.lifecycle) ? showAttention(parentDoc, args, deps) : null;
     const result = context.store.mutate('child', args.issue, { writer, parentDoc, change: doc => state.applyPatch('child', doc, patch, { writer, parentDoc }) });
     return { ...writeResult('child', args.issue, result, writer), ...(attention ? { attention } : {}) };
@@ -924,7 +981,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
   }
   const environment = deps.environment || process.env;
   const marker = EXECUTOR_MARKERS.find(name => typeof environment[name] === 'string' && environment[name] !== '');
-  if (marker && isWrite(args)) {
+  if (marker && (isWrite(args) || (args.command === 'run-order' && !args['dry-run']))) {
     throw usage(`This session was started by a Toolkit launcher (${marker}), so it is an executor: it never writes programme state, even with --controller. Run reconcile (a dry run) or show and report to the controller.`);
   }
   if ((args.command === 'reconcile' && args.apply) || args.command === 'refresh') return runPasses(args, deps, out);

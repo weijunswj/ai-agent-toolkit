@@ -43,7 +43,7 @@ const CLEANUP = 'repo/scripts/toolkit-cleanup.cjs';
 const STORE = 'repo/scripts/toolkit-store.cjs';
 
 const GUARDS = Object.freeze({
-  programme: "The script's own controller-holder check, programme lock and merged binding read. A parent lifecycle write needs the merged binding's permission and the closure guard. refresh --scheduled and --budget-ms set only how long one refresh pass may run, 10 to 50 minutes, under the same checks and request cap.",
+  programme: "The script's own controller-holder check, programme lock and merged binding read. A parent lifecycle write needs the merged binding's permission and the closure guard. refresh --scheduled and --budget-ms set only how long one refresh pass may run, 10 to 50 minutes, under the same checks and request cap. run-order runs only the writes listed here, from an unexpired order for the parent's current holder and epoch, never a claim, takeover, init-parent or migrate-state.",
   tasks: "The script's marker and ownership checks: only Toolkit's own recorded tasks are created, changed or started, and a hand-edited task needs the owner's answer.",
   taskUpdate: 'Its saved approval and question flow: a new task kind or a hand-edited task returns a question for the owner.',
   readOnly: 'Read-only: it lists or prints and changes nothing.',
@@ -57,7 +57,7 @@ const GUARDS = Object.freeze({
 // Every subcommand of the two multi-command scripts is classified here. A test compares these
 // lists with the scripts' own command lists, so a new subcommand fails until someone decides.
 const PROGRAMME_ALLOW = Object.freeze(['reconcile', 'refresh', 'show', 'inventory', 'attention', 'update', 'update-parent', 'bind', 'checkpoint',
-  'assign', 'return', 'reopen', 'interrupt', 'ack', 'dispose', 'closing-comment']);
+  'assign', 'return', 'reopen', 'interrupt', 'ack', 'dispose', 'closing-comment', 'run-order']);
 const PROGRAMME_ASK = Object.freeze({
   claim: 'Taking or taking over the controller role is an authority change.',
   'init-parent': 'Creating a programme parent is a one-time owner decision.',
