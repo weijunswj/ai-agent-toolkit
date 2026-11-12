@@ -667,7 +667,7 @@ const NOTE_REASON_TEXT = Object.freeze({
   open_fence: 'a code block under it is not closed',
   open_comment: 'an HTML comment under it is not closed',
   open_html: 'a folded section or raw HTML block under it is not closed, or is closed without being opened',
-  ambiguous_markup: 'a heading under it sits in markup that can be read two ways, is an HTML heading tag, or sits behind indentation, a quote or a list marker; a folded-section or raw-block tag is named anywhere but on its own plain line; or a code block or comment opens behind indentation, a marker or inside HTML, or the page holds a processing instruction, declaration or CDATA section',
+  ambiguous_markup: 'a line above the end of the marked area is outside the plain Markdown the sweep reads: HTML other than a folded section or a one-line comment on its own line at the start of the line, a code block or comment that does not start at the start of a line, a level one or two heading behind indentation, a quote, a list marker or a footnote, a Toolkit marker line outside a real generated block, or a generated block holding HTML or a code block',
   underlined_heading: 'a heading under it is written by underlining; write it with `#` marks, or put a blank line above the rule',
   control_character: 'the page holds a character GitHub reads differently (a lone carriage return, a leading byte-order mark, a null or a line separator)',
   link_definition_split: 'a link definition under it is still used by text that stays on the page',

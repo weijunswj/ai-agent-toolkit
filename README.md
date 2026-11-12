@@ -48,7 +48,7 @@ Each skill is a folder under [skills/](skills/). Copy the whole folder, not just
 | [Skill Product Review](skills/skill-product-review/) | Review third-party agent skills before using or adapting them. |
 | [Local AI Safety](skills/local-ai-safety/) | Review local AI runtimes, model downloads and exposed endpoints. |
 | [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare managed services before building auth, databases or other foundations yourself. |
-| [GitHub Program Reconciler](skills/github-program-reconciler/) | Keep programme pages, task and review state in step, with verified graph archives across logins, recovery for changed comments and visible redraw warnings. Toolkit never moves hand-written sections. If the page nears its size limit, shorten them by hand. |
+| [GitHub Program Reconciler](skills/github-program-reconciler/) | Keep programme pages, task and review state in step, with verified graph archives across logins, recovery for changed comments and visible redraw warnings. Toolkit moves hand-written notes only when the owner marks them under one `## Archive` line; otherwise, if the page nears its size limit, shorten them by hand. |
 | [Release Readiness Audit](skills/release-readiness-audit/) | Run a guarded release-readiness audit and fix batches. |
 | [Codex SSH Hostinger Coolify Setup Maintainer](skills/codex-ssh-hostinger-coolify-setup-maintainer/) | Set up and maintain a Hostinger VPS with Coolify, with owner approval gates. |
 | [Agent Cost Control](skills/agent-cost-control/) | Pick the cheapest model and effort for scheduled tasks, automations, non-gate helpers and spawned threads, and keep long-running threads short. |
