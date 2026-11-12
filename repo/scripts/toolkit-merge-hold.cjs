@@ -106,7 +106,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     Start-Process -UseNewEnvironment), a node one-liner that starts the hook, a saved script, a
 //     session whose shell export failed, and the wrapped feeds the typed route also lists.
 // Never click a card through a UI or computer use. Codex has no card and keeps the typed line. Cloud
-// sessions skip this hook, so a Projects card there is a written rule, not a recorded approval.
+// sessions run the governance hook in cloud mode, which skips this hold, so a Projects card there
+// is a written rule, not a recorded approval.
 //
 // What one approval allows: one merge, of that pull request in that repository, within a day, by any
 // session on this computer. A typed SHA pins the head commit; without one the merge must still name
