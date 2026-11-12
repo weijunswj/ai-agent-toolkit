@@ -52,7 +52,7 @@ Coding work follows `G0 Discovery -> G1 Builder, including UAT -> G2 Review` unl
 
 **Match the checking to the risk.** Tag each change by what its diff touches, never by its size: `node <Toolkit>/repo/scripts/toolkit-risk-tier.cjs` matches the changed paths against the repository's RISKY list. A mixed diff takes its highest tier and an unsure call goes one tier up; the builder tags it, the controller checks the tag and any reviewer may raise it. A later edit takes the tier of what it touches.
 
-- **RISKY:** security or approval logic, hooks, setup and installers, files or settings outside the repository, credentials, governance and authority, data deletion or migration, anything that runs unattended on the user's machine. G0, G1 with agent UAT on the real hosts and owner UAT for any final-product steps, full G2, then delta G2s as the gate rules say.
+- **RISKY:** security or approval logic, hooks, setup and installers, files or settings outside the repository, credentials, governance and authority, data deletion or migration, anything that runs unattended on the user's machine. G0, G1, full G2; after merge, real-host agent UAT and owner UAT for any final-product steps, then delta G2s as the gate rules say.
 - **NORMAL:** any other code, tests and test tooling included. G0 when new, G1 with tests and CI, one independent review before merge.
 - **LIGHT:** no code that runs changes (docs, comments, wording, version bumps). The builder runs the tests and CI anyway and reads its own diff; no G0, G2 or UAT unless what the user sees or does changes.
 
