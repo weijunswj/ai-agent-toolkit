@@ -39,7 +39,7 @@ test('T5 Projects runs the shared journey first, then extras, with relay as last
 test('Projects P2 fills the gate route and runs the deferred device task check', () => {
   const setup = read(`${REFERENCE_DIR}/setup.md`);
   const note = 'Before a device is named, step 9b reports "not checked here" and P2 runs it when work runs on this device.';
-  const folder = 'When gates run on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named.';
+  const folder = 'When any gate runs on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named.';
   const tasks = 'If generic step 9b reported "not checked here" for want of a device, run it on this device now, under its own fresh ENABLED guard and standing approval.';
   const check = text => {
     assert.ok(text.split('## Projects notes on the generic steps')[1].split('## Projects extras')[0].includes(note), note);
@@ -774,7 +774,8 @@ test('nothing tells the owner to upload the Projects skill by hand', () => {
 test('device steps go to the Remote Control session, not the owner', () => {
   const text = read(SKILL_REL);
   // The owner was once asked to create a local scheduled task that a Remote Control session could create.
-  assert.match(text, /installs, setup checks and device tasks \(such as a local scheduled task\), which the Remote Control session on the user's computer does itself; hand the user a step on their computer only when its safety check blocks the session;/);
+  assert.match(text, /Use local rc on the user's device only when the step needs it:.*installs, setup and device tasks/);
+  assert.match(text, /Hand the user a device step only when its safety check blocks the session\./);
   assert.match(read('repo/contracts/agent-rules/global-rules.md'), /never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it\./);
 });
 
@@ -881,7 +882,7 @@ test('independent lanes run side by side under the owner\'s lane cap', () => {
     'Work waiting on the owner does not count (a G0 plan waiting for an OK, a thread waiting for an answer, a PR waiting for UAT or merge)',
     'so start the next queued item to keep that many actually working',
     'open one extra lane for it alone: that lane is always kept free, outside the count', 'Queued or coordinator-started work never takes that extra lane',
-    'any usage limit the owner records in project instructions', 'counts toward the cap']) {
+    'owner usage limits apply', 'count toward the cap']) {
     assert.ok(lanes.includes(phrase), phrase);
   }
   const block = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
@@ -896,6 +897,39 @@ test('independent lanes run side by side under the owner\'s lane cap', () => {
   // Setup records a number only when the owner gives one, and a sync that brings the default says so once.
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/setup.md').includes('Otherwise tell them once that the project runs 1 lane at a time, and that "lanes 3" changes it.'));
   assert.ok(read('repo/contracts/claude-projects/web-controller-projects/reference/instructions-sync.md').includes('the note adds: "This project now runs 1 lane at a time by default; say lanes N to change it."'));
+});
+
+test('Projects runs cloud first and names the work that needs a device', () => {
+  const text = read(SKILL_REL);
+  const where = text.split('## Where work runs\n')[1].split('\n## ')[0];
+  for (const phrase of ['**Cloud first.** Run every step a cloud thread can do in the cloud',
+    'G0, G2 and rechecks on their pinned routes', 'Use local rc on the user\'s device only when the step needs it',
+    'the Toolkit hooks must actually run there', 'Windows-sensitive or real-host checks and smokes',
+    'installs, setup and device tasks', 'the user\'s final-product UAT', 'files only on the device',
+    'a route only the device has', 'Hand the user a device step only when its safety check blocks the session',
+    'Project lines name the device, its folder and any exceptions']) assert.ok(where.includes(phrase), phrase);
+  assert.doesNotMatch(text, /Hybrid by default/);
+  const device = read(`${REFERENCE_DIR}/device-work.md`);
+  for (const phrase of ['**What needs the device.**', 'hook-behaviour smoke', 'Windows path review', 'Codex CLI G1']) {
+    assert.ok(device.includes(phrase), phrase);
+  }
+});
+
+test('cloud reviews count toward the work cap unless a project sets review lanes', () => {
+  const lanes = read(SKILL_REL).split('\n').find(line => line.startsWith('- **Run independent lanes side by side.**'));
+  for (const phrase of ['device-bound work shares one device', 'a serial review route runs one review at a time',
+    'Cloud work never waits for the device or a serial route',
+    'cloud reviews and rechecks count toward the cap unless a project line `- Review lanes: <n>` runs up to that many beside it']) {
+    assert.ok(lanes.includes(phrase), phrase);
+  }
+});
+
+test('gate route placement supports a cloud default and a device exception per gate', () => {
+  const route = read(SKILL_REL).split('\n').find(line => line.startsWith('- **Gate route line.**'));
+  for (const phrase of ['`GATE ROUTE: profile <profile> placement <remote_control|cloud|any> [folder <path>]`',
+    '`placement cloud G1=remote_control folder <path>`', 'per-gate placement', '`cloud` for new projects']) {
+    assert.ok(route.includes(phrase), phrase);
+  }
 });
 
 // Task runs were invisible when the coordinator recycled: the skill now relays every run from its
