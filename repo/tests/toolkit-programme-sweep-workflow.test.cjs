@@ -19,10 +19,12 @@ const storeToken = ['example', 'store', 'token'].join('-');
 const workflow = () => fs.readFileSync(workflowPath, 'utf8');
 const step = name => { const text = workflow(); const at = text.indexOf(`- name: ${name}`); return text.slice(at, text.indexOf('\n      - name:', at + 1) === -1 ? undefined : text.indexOf('\n      - name:', at + 1)); };
 
-test('workflow: hourly and manual only, read-only built-in token, no saved credentials, one run at a time, stopped at 58 minutes', () => {
+test('workflow: hourly off the top of the hour, after each push to main and by hand only, read-only built-in token, no saved credentials, one run at a time, stopped at 58 minutes', () => {
   const text = workflow();
-  assert.match(text, /^on:\r?\n  schedule:\r?\n    - cron: '17 \* \* \* \*'\r?\n  workflow_dispatch:\s*$/m);
-  assert.doesNotMatch(text, /^\s+(pull_request|pull_request_target|push):/m);
+  assert.match(text, /^on:\r?\n  schedule:\r?\n    - cron: '41 \* \* \* \*'\r?\n  push:\r?\n    branches: \[main\]\r?\n  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(text, /^\s+(pull_request|pull_request_target|workflow_run|repository_dispatch):/m, 'never started by pull requests, forks or other workflows');
+  assert.equal((text.match(/^\s+push:/gm) || []).length, 1, 'one push trigger');
+  assert.doesNotMatch(text, /tags:|branches-ignore:|'\*\*'/, 'pushes to main only');
   assert.match(text, /^permissions:\r?\n  contents: read\s*$/m);
   assert.match(text, /^    permissions:\r?\n      contents: read\s*$/m);
   assert.match(text, /persist-credentials: false/);
@@ -35,7 +37,7 @@ test('workflow: hourly and manual only, read-only built-in token, no saved crede
 test('contract: mint permissions match the row', () => {
   const row = cloudJobs().readCloudJobsContract({ root: ROOT }).jobs.find(job => job.id === 'programme-sweep');
   assert.equal(row.workflow, '.github/workflows/toolkit-programme-sweep.yml');
-  assert.equal(row.schedule.cron, '17 * * * *');
+  assert.equal(row.schedule.cron, '41 * * * *');
   const minted = name => Object.fromEntries([...step(name).matchAll(/permission-([a-z-]+): (read|write)/g)].map(([, permission, level]) => [permission.replace(/-/g, '_'), level]));
   const wanted = repository => cloudJobs().tokenPermissions(row.tokens.find(token => token.repository === repository));
   assert.deepEqual(minted('Mint the governed repository token'), wanted('governed_repository'));

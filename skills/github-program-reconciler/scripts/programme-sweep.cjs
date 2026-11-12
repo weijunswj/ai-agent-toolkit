@@ -6,6 +6,17 @@
 const state = require('./programme-state.cjs');
 
 const CAP = 300;
+// The cap per pass, by host and mode. A scheduled pass must be able to read and draw a whole board in
+// one go: about ten requests a task (TASK_COST plus PAGE_COST) for a hundred tasks is about a thousand.
+// On GitHub the pass runs under the App's own hourly rate limit, so it gets 1,500. On a computer it
+// shares the signed-in account's limit with everything else that account does, so it gets 600. A
+// refresh a session starts after its own write stays small, at CAP, so it never spends the hour's
+// budget. LOW_REMAINING still stops reading early whatever the cap.
+const PASS_CAPS = Object.freeze({
+  cloud: Object.freeze({ scheduled: 1500, 'after-write': CAP }),
+  computer: Object.freeze({ scheduled: 600, 'after-write': CAP }),
+});
+const passCap = ({ host, scheduled }) => (PASS_CAPS[host] || PASS_CAPS.computer)[scheduled === true ? 'scheduled' : 'after-write'];
 const RESERVE = 60;
 const LOW_REMAINING = 200;
 // What one task usually costs to read (comments, its PR, blockers), and what drawing its task page
@@ -32,13 +43,22 @@ class SweepRequests {
     this.reason = null;
     this.retryAt = 0;
     this.active = false;
+    // GitHub's last reported x-ratelimit-remaining for the REST (core) limit, or null before any REST
+    // response carried one. GraphQL has its own limit, named by x-ratelimit-resource, and never
+    // stands in for it: pages are drawn over REST.
+    this.remaining = null;
   }
 
   left() { return this.cap - this.count; }
 
   // Whether another task may start: its reads, and the pages of the `pages` tasks read so far that
   // may need one (plus its own when `needsPage`), must fit before the reserve.
-  canStartTask(pages = 0, needsPage = true) { return !this.reason && this.left() >= this.reserve + TASK_COST + PAGE_COST * (pages + (needsPage ? 1 : 0)); }
+  // GitHub's own remaining count bounds it too: the reads and pages must also fit above LOW_REMAINING,
+  // so a cap larger than what the hour has left never draws pages past GitHub's limit.
+  canStartTask(pages = 0, needsPage = true) {
+    const need = this.reserve + TASK_COST + PAGE_COST * (pages + (needsPage ? 1 : 0));
+    return !this.reason && this.left() >= need && (this.remaining === null || this.remaining - LOW_REMAINING >= need);
+  }
 
   request(method, endpoint, body, options) {
     if (this.active) throw new state.ProgrammeError('SERIAL_REQUEST_REQUIRED', 'A sweep request is already running.');
@@ -58,7 +78,12 @@ class SweepRequests {
       const headers = response?.headers || {};
       // GitHub's own time at the start of the pass: the next pass reads what changed since then.
       if (!this.serverStart && Number.isFinite(Date.parse(headers.date))) this.serverStart = new Date(Date.parse(headers.date)).toISOString();
-      if (headers['x-ratelimit-remaining'] !== undefined && Number(headers['x-ratelimit-remaining']) < LOW_REMAINING) this.reason = 'GitHub rate limit';
+      if (headers['x-ratelimit-remaining'] !== undefined && Number.isFinite(Number(headers['x-ratelimit-remaining']))) {
+        const remaining = Number(headers['x-ratelimit-remaining']);
+        const resource = headers['x-ratelimit-resource'];
+        if (resource === undefined || resource === 'core') this.remaining = remaining;
+        if (remaining < LOW_REMAINING) this.reason = 'GitHub rate limit';
+      }
       if (headers['retry-after'] !== undefined) {
         const seconds = Number(headers['retry-after']);
         this.retryAt = Number.isFinite(seconds) ? this.nowMs() + Math.max(0, seconds) * 1000 : Date.parse(headers['retry-after']) || this.nowMs();
@@ -83,4 +108,4 @@ class SweepRequests {
   }
 }
 
-module.exports = { SweepRequests, CAP, RESERVE, LOW_REMAINING, TASK_COST, PAGE_COST, SETTLE_FLOOR, LAST_REQUESTS };
+module.exports = { SweepRequests, CAP, PASS_CAPS, passCap, RESERVE, LOW_REMAINING, TASK_COST, PAGE_COST, SETTLE_FLOOR, LAST_REQUESTS };

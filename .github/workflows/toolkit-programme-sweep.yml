@@ -1,6 +1,7 @@
 # Toolkit Programme Sweep: the hourly programme refresh, run on GitHub instead of a computer.
 #
-# Every hour (and when started by hand) it refreshes the programme board of this repository: it
+# Every hour, after every push to main (a merged pull request) and when started by hand, it
+# refreshes the programme board of this repository: it
 # reads what changed on GitHub, saves the programme state and redraws the parent and task pages.
 # It runs `programme.cjs refresh` from the commit it checked out, under the governance GitHub App:
 # two installation tokens, one for this repository (issues, pull requests, checks) and one for the
@@ -12,11 +13,18 @@
 # cancelled, and the sweep's lease in the evidence store keeps it from writing while the
 # computer's sweep is running. A pass works for up to 50 minutes, is killed at 55 and the job is
 # stopped at 58, so it ends before the next hourly start; the next run reports a stopped one.
+#
+# The hourly start is at minute 41, away from the top of the hour: GitHub delays and can drop
+# scheduled runs at busy times, the start of every hour most of all. The run after each merge keeps
+# the board current even when GitHub drops an hourly start. It runs only for pushes to main, never
+# for pull requests or forks, so the App's secrets reach only code already merged.
 name: Toolkit Programme Sweep
 
 on:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '41 * * * *'
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
