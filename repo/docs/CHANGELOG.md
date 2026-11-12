@@ -1,17 +1,25 @@
 # Toolkit Changelog
 
-## 3.65.0 (Marked notes move off large programme pages)
+## 3.66.0 (automatic re-bump workflow and a narrower launch rule)
 
 ### Added
 
-- **Marked notes:** on a programme parent page, old hand-written notes under one line that reads exactly `## Archive` now move, byte for byte, into linked comments on a complete pass. The whole page is saved to the private store and read back first, each comment is read back exactly before one guarded page write removes the notes, and AGENT CONTEXT links every part. Note comments are never edited, reused for other text or deleted.
-- **New finding:** `ARCHIVE_SECTION_UNSAFE` reports, with one fixed reason and no page text, why marked notes stayed on the page. Any doubt about where the marked area starts or ends moves nothing, and the redraw carries on. The reader accepts only a written subset of Markdown up to the end of the marked area: blank lines, heading lines, code fences at the start of a line, `<details>` folds and comments on their own lines at the start of a line, and text lines with no HTML-like text and no level one or two heading or code fence behind indentation, a quote, a list marker or a footnote. Any other line, a Unicode space other than a plain space or tab, a lone carriage return or a leading byte-order mark moves nothing. Notes that use inline HTML, raw HTML blocks or indented code fences stay on the page with a finding; rewrite the line or move it outside the marked area.
-- **Stopped passes:** a pass that stops for time finishes its redraw but moves no notes; the next complete pass moves them.
+- A re-bump workflow for this repository: after every push to `main` it runs the re-bump command for the owner's open pull requests and pushes with the repository secret `TOOLKIT_REBUMP_TOKEN`, so their checks start by themselves. With no secret it prints a note and does nothing. A pull request it cannot re-bump gets one comment that says why.
+- `toolkit-rebump-prs.cjs --authors <login,...>` skips other authors' pull requests before any of their code runs.
 
 ### Changed
 
-- **Archive registry:** `page_archive` now also records note parts (with the saved page copy they came from). A note comment that later changes or disappears keeps its link and raises `ARCHIVE_COMMENT_UNTRUSTED` once, naming the saved page copy that holds the notes; later passes stay quiet and the owner's answer to the finding stands. Putting the same notes back under `## Archive` posts a fresh comment for them and leaves the damaged one as found. Older Toolkit versions refuse the new entries and the new finding field; update Toolkit on every computer that runs the sweep before marking notes.
-- **AGENT CONTEXT:** the fixed line now says that only notes under one `## Archive` heading move.
+- The re-bump command runs the pull request branch's own bump and validation scripts with every token variable and the Actions file-command paths removed from their environment.
+- The merge hold no longer refuses a command that starts Claude or Codex when its only merge wording is branch upkeep: `git merge`, merge commits, merge conflicts or merge-base. Any other merge wording still refuses the launch, and pull request merges stay guarded.
+- The merge hold's approval reader now skips a typed line whose only merge wording is the same branch upkeep, from one shared definition, so a launch the hold lets through carries no line the reader counts, as far as the hold can read the command (text the shell reshapes afterwards is not covered). A line such as `git merge 5` or `update #5 with a merge commit` no longer records an approval. This is one more reason to skip a line and nothing else in the reader changed: every line that was held before is still held, and `merge 5` and `merge owner/name#5` count as before.
+- A pull request that changes the re-bump scripts (`toolkit-rebump-prs.cjs`, `toolkit-rebump-report.cjs`, `toolkit-rebump-action.sh`) now waits for the owner's typed merge.
+
+## 3.65.0 (Controller enforcement map)
+
+### Added
+
+- A map says, for every controller rule, what enforces it: a hook, a script, a CI check or the programme reconciler, each with the test that proves it and one line on which part of the rule they cover. A rule nothing can enforce is marked instruction-only, with one line on why. Of the 40 rules today, 17 are enforced and 23 are instruction-only. The map lives beside the rules, so the rules files gain no bytes.
+- A check fails when a controller rule has no row or two, when a row matches no rule or more than one, or when a row names an enforcer or test that does not exist or a test that never mentions its enforcer. It runs with the test suite, so a rule added, moved or reworded without updating the map fails CI.
 
 ## 3.64.0 (One layout for task pages and task PRs)
 

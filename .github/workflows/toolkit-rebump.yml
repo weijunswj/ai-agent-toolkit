@@ -1,0 +1,67 @@
+# Toolkit re-bump. This repository only: setup never copies this file anywhere.
+#
+# After every push to main (a merged pull request), each open pull request that carries a Toolkit
+# version bump is behind: its version is taken and main is not merged in. This workflow runs the
+# same command the merging agent ran by hand (repo/scripts/toolkit-rebump-prs.cjs --apply): it
+# merges main into each of the repository owner's open same-repository pull requests with a merge
+# commit, prepares the next version, validates, and pushes to that pull request's own branch. It
+# never force-pushes, never pushes to main, and skips drafts, forks and other authors.
+#
+# The push uses the repository secret TOOLKIT_REBUMP_TOKEN, a token for this repository alone with
+# contents read and write. GitHub starts no pull request checks for a push made with the built-in
+# token until a person approves them, and checks from a manually dispatched run do not count for a
+# pull request, so only a push with such a token gets the required checks running by themselves.
+# With no secret the run prints a note and ends green; the hand command stays the rule then.
+#
+# It checks out main only, without saved credentials. The pull request branch's own bump and
+# validation scripts run with every token variable removed from their environment. A pull request
+# it cannot re-bump gets one comment saying why (written with the built-in token); that does not
+# fail the run. A run that cannot produce a report fails.
+name: Toolkit re-bump
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# One run at a time; a merge that lands meanwhile waits its turn and reads main fresh.
+concurrency:
+  group: toolkit-rebump
+  cancel-in-progress: false
+
+jobs:
+  rebump:
+    name: Re-bump open pull requests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Re-bump
+        id: rebump
+        env:
+          TOOLKIT_REBUMP_TOKEN: ${{ secrets.TOOLKIT_REBUMP_TOKEN }}
+          AUTHORS: ${{ github.repository_owner }}
+        run: bash repo/scripts/toolkit-rebump-action.sh
+
+      - name: Comment on held pull requests
+        if: ${{ steps.rebump.outputs.ran == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node repo/scripts/toolkit-rebump-report.cjs --report "$RUNNER_TEMP/rebump-report.json" --main "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
