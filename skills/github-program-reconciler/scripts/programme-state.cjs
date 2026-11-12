@@ -2366,9 +2366,12 @@ function requireVersionToken(sha, docPath) {
 }
 
 class StateStore {
-  constructor({ transport, store, now = () => new Date().toISOString(), toolkitVersion = null }) {
+  // `installationWrite` is true only for the cloud sweep, whose store token is a GitHub App
+  // installation token the workflow minted with Contents write for this one store.
+  constructor({ transport, store, now = () => new Date().toISOString(), toolkitVersion = null, installationWrite = false }) {
     this.transport = transport;
     this.store = store;
+    this.installationWrite = installationWrite === true;
     this.now = now;
     this.toolkitVersion = toolkitVersion;
     this.writes = 0;
@@ -2395,11 +2398,16 @@ class StateStore {
   journalPath(issue, name) { return `${this.journalDir(issue)}/${name}`; }
 
   // The store must exist, be private and be writable, and the branch must exist. No fallback store.
+  // A signed-in account's read shows its push access. An App installation token's read does not
+  // reliably show the token's own access (it may omit `permissions` or report every value false), so
+  // the cloud sweep skips that one check: its workflow minted the token with Contents write for this
+  // one store, and the sweep lease's write, which comes before any state is saved, proves it.
   verify() {
     const repo = this.transport.request('GET', `repos/${this.store.repository}`);
+    const writable = this.installationWrite || repo.json?.permissions?.push === true;
     const reason = repo.status !== 200 ? `it could not be read (${repo.status})`
       : repo.json.private !== true ? 'it is not private'
-        : repo.json.permissions?.push !== true ? 'this account cannot write to it' : null;
+        : !writable ? 'this account cannot write to it' : null;
     if (reason) throw new ProgrammeError('STATE_STORE_UNVERIFIED', `The state store ${this.store.repository} was not used because ${reason}. Choose a private repository you can write to in .github/toolkit-programme.json.`);
     const branch = this.transport.request('GET', `repos/${this.store.repository}/branches/${encodeURIComponent(this.store.branch)}`);
     if (branch.status !== 200) throw new ProgrammeError('STATE_STORE_UNVERIFIED', `The state store branch ${this.store.branch} could not be read (${branch.status}).`);
@@ -3501,9 +3509,9 @@ const STATE_BACKENDS = Object.freeze({ branch: BranchStateStore });
 
 // The store a merged binding names: the public state branch with the private store beside it when
 // the binding has `state`, else the private store alone. A disabled binding never reaches here.
-function openStore({ transport, binding, now, toolkitVersion = null, localCheckpoint = null }) {
+function openStore({ transport, binding, now, toolkitVersion = null, localCheckpoint = null, installationWrite = false }) {
   if (binding.state) return new STATE_BACKENDS[binding.state.kind]({ transport, binding, now, toolkitVersion, localCheckpoint });
-  return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion });
+  return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion, installationWrite });
 }
 
 const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
