@@ -290,10 +290,18 @@ test('B: refresh is accepted by the stored hash, writes nothing when nothing cha
   assert.equal(first.error, null, first.error?.message);
   const commits = fx.github.commitLog.length;
   const checkpointBefore = fx.github.textAt(STORE_REPO, 'main', checkpointFile);
+  const revisions = () => [fx.store().read('parent', 7).doc.revision, fx.store().read('child', 12).doc.revision];
+  const before = revisions();
   const second = fx.run(['refresh']);
   assert.equal(second.result.summary, 'No changes');
-  assert.equal(fx.github.commitLog.length, commits, 'no commit on the branch or the store');
+  // An unchanged pass changes no document revision, no checkpoint and no state branch commit. Its
+  // only store commits are the sweep lease being taken and released.
+  const added = fx.github.commitLog.slice(commits);
+  assert.equal(added.filter(item => item.repository === REPO).length, 0, 'no commit on the state branch');
+  assert.equal(added.length, 2, 'the lease is taken and released');
+  assert.ok(added.every(item => item.repository === STORE_REPO && /lease/.test(item.message)));
   assert.equal(fx.github.textAt(STORE_REPO, 'main', checkpointFile), checkpointBefore, 'no checkpoint edit');
+  assert.deepEqual(revisions(), before);
   // The refresh writer carries only the hash, and decisions refuse it.
   const parentDoc = fx.store().read('parent', 7).doc;
   const writer = state.refreshWriter(parentDoc);
@@ -605,20 +613,26 @@ for (const interruption of ['conflict', 'accepted without reply']) {
     const old = fx.github.readAt(REPO, BRANCH, publicFile('issue-12'));
     assert.equal(old.lifecycle, 'PLANNED');
 
-    const endpoint = `repos/${REPO}/contents/${publicFile('issue-12')}`;
+    const endpoint = `repos/${REPO}/git/refs/heads/${encodeURIComponent(BRANCH)}`;
     let attempted = 0;
     fx.github.intercept(call => {
-      if (call.method !== 'PUT' || call.path !== endpoint) return;
+      if (call.method !== 'PATCH' || call.path !== endpoint) return;
       attempted++;
-      assert.ok(call.body.sha, 'the copy uses the existing child CAS');
+      assert.equal(call.body.force, false, 'the branch only moves forward from the snapshot head');
+      // Every update races: the pass stops with the state branch busy and writes nothing public.
       if (interruption === 'conflict') return { status: 409, json: {} };
+      // The update lands but its reply is lost; the branch head shows it was ours.
       assert.equal(fx.github.route(call.method, call.path, call.body).status, 200);
       return { status: 502, json: {} };
     });
     const partial = fx.run(['refresh'], { lockFile, passClock: () => at });
     assert.equal(partial.error, null, partial.error?.message);
-    assert.equal(partial.code, 1);
-    assert.ok(attempted >= 1);
+    assert.equal(partial.code, interruption === 'conflict' ? 1 : 0);
+    assert.equal(attempted, interruption === 'conflict' ? 2 : 1);
+    if (interruption === 'conflict') {
+      assert.ok(partial.result.holds.some(hold => hold.code === 'PASS_STOPPED' && /state branch was busy/.test(hold.detail)));
+      assert.equal(fx.github.readAt(REPO, BRANCH, publicFile('issue-12')).lifecycle, 'PLANNED', 'nothing public changed');
+    } else assert.equal(fx.store().read('child', 12).doc.lifecycle, 'DONE', 'the same pass continued');
     assert.equal(fs.existsSync(lockFile + '.resume'), false, 'no rotation note exists any more');
 
     fx.github.hooks = [];
@@ -644,11 +658,14 @@ test('refresh branch: a public child read without its version id requests no sid
   const requested = [];
   fx.github.intercept(call => {
     if (call.method === 'PUT' && (call.path === endpoint || call.path.startsWith(sidecars))) requested.push(call.path);
-    if (call.method !== 'GET' || call.path.split('?')[0] !== endpoint) return;
+    if (call.method === 'POST' && call.path === `repos/${REPO}/git/trees` && call.body.tree.some(entry => entry.path === publicFile('issue-12'))) requested.push(call.path);
+    // The public branch snapshot gives issue-12 without its version id.
+    if (call.path !== 'graphql' || !call.body.query.includes('stateSnapshot') || `${call.body.variables.owner}/${call.body.variables.name}` !== REPO) return;
     const actual = fx.github.route(call.method, call.path, call.body);
-    const { sha, ...rest } = actual.json;
-    assert.equal(typeof sha, 'string');
-    return { status: actual.status, json: rest };
+    const entry = actual.json.data.repository.snapshot.entries.find(item => item.name === 'issue-12.json');
+    assert.equal(typeof entry.oid, 'string');
+    delete entry.oid;
+    return actual;
   });
   const held = fx.run(['refresh'], { lockFile, passClock: () => at });
   assert.equal(held.error, null, held.error?.message);
@@ -661,4 +678,65 @@ test('refresh branch: a public child read without its version id requests no sid
   const later = fx.run(['refresh'], { lockFile, passClock: () => at });
   assert.equal(later.code, 0);
   assert.equal(fx.store().read('child', 12).doc.lifecycle, 'DONE');
+});
+
+test('batch public: crash after commit recomputes the checkpoint', () => {
+  const fx = fixture();
+  const lockFile = path.join(fx.dir, 'sweep.lock');
+  const issue = fx.github.issues.get(12);
+  Object.assign(issue, { state: 'closed', state_reason: 'completed', closed_at: fx.now(), updated_at: fx.now() });
+  const at = Date.parse(fx.now());
+  const old = fx.github.readAt(REPO, BRANCH, publicFile('issue-12'));
+  // The sidecar, then the branch commit land; the process dies before the checkpoint is written.
+  let crashed = false;
+  fx.github.intercept(call => {
+    if (!crashed && call.method === 'PUT' && call.path.endsWith('checkpoint.json')) { crashed = true; throw Object.assign(new Error('fixture crash after the branch commit'), { code: 'PASS_LOCK_LOST' }); }
+  });
+  const killed = fx.run(['refresh'], { lockFile, passClock: () => at });
+  assert.equal(killed.error?.code, 'PASS_LOCK_LOST');
+  assert.equal(crashed, true);
+  assert.equal(fx.github.readAt(REPO, BRANCH, publicFile('issue-12')).lifecycle, 'DONE', 'the branch commit stands');
+  fx.github.hooks = [];
+  const next = fx.run(['refresh'], { lockFile, passClock: () => at + 21 * 60 * 1000, pidAlive: () => false });
+  assert.equal(next.error, null, next.error?.message);
+  const final = fx.store().read('child', 12).doc;
+  assert.equal(final.lifecycle, 'DONE');
+  assert.equal(final.revision, old.revision + 1, 'written once, not twice');
+  assert.ok(next.result.state_branch.events.some(event => event.code === 'STATE_CHECKPOINT_RECOMPUTED'));
+  assert.equal(fx.github.readAt(STORE_REPO, 'main', checkpointFile).files['issue-12'].revision, final.revision);
+});
+
+// Lease commit model, row L6 in public mode: the sweep lease lives in the private store, so its
+// progress is written once beside the state branch commit. A renewal that comes due during that
+// write does not start inside it.
+test('lease public: a renewal due during the progress write does not nest', () => {
+  const fx = fixture();
+  let clock = Date.parse('2026-11-12T01:00:00.000Z');
+  const scheduled = () => fx.run(['refresh', '--scheduled'], { passClock: () => clock });
+  assert.equal(scheduled().error, null);
+  Object.assign(fx.github.issues.get(12), { state: 'closed', state_reason: 'completed', closed_at: fx.github.tick(), updated_at: fx.github.tick() });
+  clock += 60 * 60 * 1000;
+  const leaseCall = call => call.path.includes('sweep-lease.json');
+  let progressAt = null;
+  fx.github.intercept(call => {
+    if (progressAt === null && call.method === 'PUT' && leaseCall(call) && call.body?.message === 'programme sweep: progress') {
+      progressAt = fx.github.calls.length;
+      clock += 11 * 60 * 1000;
+    }
+  });
+  const from = fx.github.calls.length;
+  const second = scheduled();
+  assert.equal(second.error, null, second.error?.message);
+  assert.equal(second.code, 0);
+  assert.ok(progressAt !== null, 'the progress was written beside the state commit');
+  // The progress write's own read-back comes before any other lease write.
+  const next = fx.github.calls.slice(progressAt).find(leaseCall);
+  assert.equal(next.method, 'GET', 'no lease write started inside the progress write');
+  const messages = fx.github.calls.slice(from).filter(call => call.method === 'PUT' && leaseCall(call)).map(call => call.body.message);
+  assert.equal(messages.filter(message => message === 'programme sweep: progress').length, 1, 'progress written once');
+  assert.ok(messages.indexOf('programme sweep: keep the lease') > messages.indexOf('programme sweep: progress'), 'the renewal went out after it');
+  assert.equal(fx.store().read('child', 12).doc.lifecycle, 'DONE');
+  const record = fx.github.readAt(STORE_REPO, 'main', `${STORE.path}sweep-lease.json`);
+  assert.equal(record.holder, null, 'released');
+  assert.equal(record.stopped_passes, 0);
 });

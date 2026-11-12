@@ -156,7 +156,7 @@ function checkConformance(cwd, options = {}) {
   if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
   if (state.state === 'ENABLED' && state.materials.binding) findings.push(...appFindings(state, options));
   const drift = findings.some(entry => entry.severity === 'drift');
-  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult);
+  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot));
 }
 
 // The governance GitHub App: set up while governance is on, nothing left behind once it is off. Read
@@ -295,7 +295,13 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   return out;
 }
 
-function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null) {
+// The cloud jobs guide from the contract: each job and the tokens it mints from the governance App.
+function cloudJobsGuide(state, toolkitRoot) {
+  if (state?.state !== 'ENABLED' || !fs.existsSync(path.join(toolkitRoot, 'repo/contracts/cloud-jobs.json'))) return null;
+  return require('./toolkit-cloud-jobs.cjs').buildCloudJobsGuide({ root: toolkitRoot });
+}
+
+function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null, cloudJobs = null) {
   let catalogueProblems = [];
   try { catalogueProblems = catalogue.catalogueProblems(toolkitRoot); } catch { catalogueProblems = ['the skill catalogue could not be checked']; }
   const all = [...findings, ...catalogueProblems.map(message => finding('CATALOGUE_DRIFT', 'drift', message))];
@@ -309,6 +315,7 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
     no_force_push_ruleset: rulesetResult,
     default_branch_protection: protectionResult,
     dependency_security: securityResult,
+    cloud_jobs: cloudJobs,
     enforcement: enforcementStatus(toolkitRoot),
   });
 }
