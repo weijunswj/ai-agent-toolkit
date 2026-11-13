@@ -33,7 +33,7 @@ function readInput(text) {
   } catch { return {}; }
 }
 
-const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the undecided-repository hold does not (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. A Claude Projects thread's task auto-merge switch is the project line read from its session context; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
+const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the governance question is not asked (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. A Claude Projects thread's task auto-merge switch is the project line read from its session context; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
 
 // Records this cloud session's Projects task auto-merge switch when the prompt starts with the
 // host's session context. Never throws; an unreadable or unwritable switch stays Off.
@@ -90,8 +90,8 @@ function respond(event, input, options = {}) {
         const count = (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now });
         if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s).`;
       } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
-      // Cloud override (Projects base-overrides list): the undecided-repository hold stays off in
-      // cloud sessions, which cannot keep the owner's answer, until the no-freeze question ships.
+      // Cloud override (Projects base-overrides list): the governance question is not asked in
+      // cloud sessions, which cannot keep the owner's answer; nothing is held either way.
       const decision = cloud ? { action: 'pass' } : new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: [decision.reason, approvalNote].filter(Boolean).join('\n') };
       const text = [decision.context, approvalNote, decision.question ? '' : typedCommandNote(gate, input.prompt)].filter(Boolean).join('\n');
