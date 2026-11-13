@@ -2,8 +2,8 @@
 require('./toolkit-test-temp-guard.cjs'); // private temp; fails if real update reports appear
 
 // The Codex reader reads files only. Each case builds a temporary Codex home (config.toml and the
-// installed plugin cache) and a managed copy, then checks the reader, the Claude Code session-start
-// line and the setup rows built from it.
+// installed plugin cache) and a managed copy, then checks the reader, that Claude's install check
+// never reports it, and the Codex setup rows built from it.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -12,7 +12,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { stopFakes } = require('./support/stop-fakes.cjs');
-const { CodexToolkitInstall, codexReminderLine, docLimitState, describeHookStates, readToolkitHookStates, pluginBundleFingerprint,
+const installState = require('../scripts/toolkit-codex-install-state.cjs');
+const { CodexToolkitInstall, docLimitState, describeHookStates, readToolkitHookStates, pluginBundleFingerprint,
   expectedToolkitHooks, launchCheck, CHECK_TIMEOUT_MS } = require('../scripts/toolkit-codex-install-state.cjs');
 const { ToolkitInstallHealthCheck, STATUS } = require('../scripts/toolkit-install-health.cjs');
 const core = require('../scripts/setup-toolkit-core.cjs');
@@ -110,34 +111,29 @@ test('the reader names the version, on/off state, marketplace, instruction limit
   assert.equal(state.journalPending, false);
   assert.deepEqual(state.docLimit, { value: 65536, toolkit: true });
   assert.deepEqual(state.hooks.entries.map((entry) => [entry.name, entry.state]), ALL_NAMES.split(', ').map((name) => [name, 'on']));
-  assert.equal(codexReminderLine(state), '');
   assert.deepEqual(describeHookStates(state.hooks), { status: 'on', message: 'All 6 Toolkit hooks are on in Codex.', execution: 'running' });
 });
 
-// The S2 matrix: what Claude Code's session start says for each Codex state.
-test('the session-start line covers an older Codex Toolkit, hooks off or not reviewed, and stays silent otherwise', (t) => {
+// The reader still sees each Codex state for Codex's own setup rows. Claude no longer turns any of
+// them into a session-start line (owner decision: no Codex notices anywhere in Claude).
+test('the reader reports an older Codex Toolkit and hook gaps, and no Claude reminder formatter exists', (t) => {
+  assert.equal(installState.codexReminderLine, undefined, 'the Claude session-start formatter is gone');
   const cases = [
-    ['older cache, hooks on', { versions: ['3.19.0'] }, 'Codex runs Toolkit 3.19.0; this PC has 3.19.3. In Codex say "refresh toolkit", then open /hooks and turn the Toolkit hooks on.'],
-    ['same version, hooks on', {}, ''],
-    ['all six off', { hooks: 'off' }, 'Codex: All 6 Toolkit hooks are off. Open /hooks in Codex and turn them on.'],
-    ['two off', { hooks: ['on', 'on', 'off', 'off', 'on', 'on'] }, 'Codex: Toolkit hooks off (Shell and agent check, File edit check). Open /hooks in Codex and turn them on.'],
-    ['one not reviewed', { hooks: ['on', 'on', 'on', 'none', 'on', 'on'] }, 'Codex: Toolkit hooks not reviewed (File edit check). Open /hooks in Codex and turn them on.'],
-    ['older and two off', { versions: ['3.19.0'], hooks: ['on', 'on', 'off', 'off', 'on', 'on'] },
-      'Codex runs Toolkit 3.19.0; this PC has 3.19.3, and Toolkit hooks off (Shell and agent check, File edit check). In Codex say "refresh toolkit", then open /hooks and turn the Toolkit hooks on.'],
-    ['plugin off', { hooks: 'off', plugin: 'false' }, ''],
-    ['no plugin entry', { hooks: 'off', plugin: null }, ''],
-    ['config unreadable', { config: 'unreadable' }, ''],
-    ['no config.toml', { config: false }, ''],
-    ['two cache versions, the highest is older', { versions: ['3.18.9', '3.19.0'] }, 'Codex runs Toolkit 3.19.0; this PC has 3.19.3. In Codex say "refresh toolkit", then open /hooks and turn the Toolkit hooks on.'],
-    // Codex writes trusted entries without `enabled` for hooks never switched; they run.
-    ['trusted without enabled', { hooks: 'trusted' }, ''],
+    ['older cache, hooks on', { versions: ['3.19.0'] }, true, 'on'],
+    ['same version, hooks on', {}, false, 'on'],
+    ['all six off', { hooks: 'off' }, false, 'off'],
+    ['two cache versions, the highest is older', { versions: ['3.18.9', '3.19.0'] }, true, 'on'],
+    ['trusted without enabled', { hooks: 'trusted' }, false, 'on'],
   ];
-  for (const [label, options, line] of cases) assert.equal(codexReminderLine(fixture(t, options).read()), line, label);
+  for (const [label, options, older, hooks] of cases) {
+    const state = fixture(t, options).read();
+    assert.equal(state.older, older, label);
+    assert.equal(describeHookStates(state.hooks).status, hooks, label);
+  }
   assert.deepEqual(fixture(t, { versions: ['3.18.9', '3.19.0'] }).read().versions, ['3.18.9', '3.19.0']);
 
   const absent = new CodexToolkitInstall({ codexHome: path.join(os.tmpdir(), 'toolkit-no-codex-home-here'), managedRoot: repoRoot }).read();
   assert.equal(absent.present, false);
-  assert.equal(codexReminderLine(absent), '');
   assert.equal(fixture(t, { config: 'unreadable' }).read().config, 'unreadable');
 });
 
@@ -176,14 +172,14 @@ test('AT17: the reader, session start and setup plan never load the app-server c
   const spy = spyPreload(root);
   const probe = path.join(root, 'probe.cjs');
   write(probe, [
-    `const { CodexToolkitInstall, codexReminderLine } = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'toolkit-codex-install-state.cjs'))});`,
+    `const { CodexToolkitInstall } = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'toolkit-codex-install-state.cjs'))});`,
     `const state = new CodexToolkitInstall({ codexHome: ${JSON.stringify(codexHome)}, managedRoot: ${JSON.stringify(managed)} }).read();`,
-    'process.stdout.write(codexReminderLine(state) + "\\n" + Object.keys(require.cache).some(k => k.endsWith("codex-app-server.cjs")));',
+    'process.stdout.write(`older=${state.older} hooks=${state.hooks.status}` + "\\n" + Object.keys(require.cache).some(k => k.endsWith("codex-app-server.cjs")));',
     '',
   ].join('\n'));
   const result = childProcess.spawnSync(process.execPath, ['--require', spy.file, probe], { encoding: 'utf8', windowsHide: true });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^Codex runs Toolkit 3\.19\.0; this PC has 3\.19\.3, and all 6 Toolkit hooks are off\./);
+  assert.match(result.stdout, /^older=true hooks=read\n/);
   assert.match(result.stdout, /\nfalse$/);
   assert.equal(fs.existsSync(spy.log), false, fs.existsSync(spy.log) ? fs.readFileSync(spy.log, 'utf8') : '');
   assert.ok(fs.readFileSync(config).equals(before), 'config.toml is never written');
@@ -273,22 +269,19 @@ test('hook states come from the cache hooks file and say unknown when it or conf
   assert.equal(off.message, 'Open `/hooks` in Codex and turn on: Shell and agent check, File edit check. Codex skips a Toolkit hook that is off or not reviewed.');
 });
 
-test('the install check shows the Codex line as a notice that never blocks', (t) => {
-  const check = (codexInstall) => new ToolkitInstallHealthCheck({ toolkitRoot: repoRoot, expectedVersion: '9.9.1', hubPath: path.join(os.tmpdir(), 'toolkit-no-hub-here'),
+test('Claude\'s install check never reports Codex, even with an older Codex Toolkit and its hooks off', (t) => {
+  const { codexHome, managed } = fixture(t, { versions: ['3.19.0'], hooks: 'off' });
+  const before = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = codexHome;
+  t.after(() => { if (before === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = before; });
+  const result = new ToolkitInstallHealthCheck({ toolkitRoot: managed, expectedVersion: '9.9.1', hubPath: path.join(os.tmpdir(), 'toolkit-no-hub-here'),
     helperDefinitions: { refresh: () => ({ status: 'current' }), check: () => ({ status: 'current', project_overrides: [], detail: '' }) },
     globalRules: { refresh: () => ({ status: 'current', files: [], covered: [], backup_dir: null, detail: '' }) },
-    depthSetting: { inspect: () => ({ state: 'toolkit-one-layer', value: '1' }) }, codexInstall }).run({ refreshHelpers: false });
-  const find = (result) => result.checks.find((entry) => entry.id === 'codex-toolkit');
-  const { codexHome, managed } = fixture(t, { versions: ['3.19.0'], hooks: 'off' });
-  const result = check(new CodexToolkitInstall({ codexHome, managedRoot: managed }));
-  assert.equal(result.status, STATUS.PASSED);
-  assert.equal(find(result).status, STATUS.PASSED);
-  assert.equal(find(result).notice, true);
-  assert.equal(find(result).summary, 'Codex runs Toolkit 3.19.0; this PC has 3.19.3, and all 6 Toolkit hooks are off. In Codex say "refresh toolkit", then open /hooks and turn the Toolkit hooks on.');
-  assert.equal(find(check(null)), undefined, 'skipped without a reader');
-  assert.equal(find(check({ read: () => { throw new Error('unreadable'); } })), undefined, 'a reader failure says nothing');
-  const current = fixture(t);
-  assert.equal(find(check(new CodexToolkitInstall({ codexHome: current.codexHome, managedRoot: current.managed }))), undefined);
+    depthSetting: { inspect: () => ({ state: 'toolkit-one-layer', value: '1' }) },
+    // An old caller passing the removed reader is ignored, not reported.
+    codexInstall: new CodexToolkitInstall({ codexHome, managedRoot: managed }) }).run({ refreshHelpers: false });
+  assert.equal(result.checks.find((entry) => entry.id === 'codex-toolkit'), undefined);
+  assert.doesNotMatch(JSON.stringify(result), /codex/i);
 });
 
 test('at setup time Keep current and Show instructions only run no Codex plugin command; Install or refresh does', (t) => {
@@ -405,12 +398,11 @@ test('AT4: absent content approval or fingerprint read failures are unverified w
   assert.equal(describeHookStates(f.read().hooks).execution, 'unknown');
 });
 
-test('AT5: session reminder and setup status explain changed and unverified approval', t => {
+test('AT5: Codex setup status explains changed and unverified approval', t => {
   const f = fixture(t);
   write(path.join(f.codexHome, 'plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/3.19.3/update.txt'), 'update');
   const state = f.read();
   const summary = describeHookStates(state.hooks);
-  assert.equal(codexReminderLine(state), `Codex: ${summary.message}`);
   const rows = codexRows(state);
   assert.equal(rows['codex-toolkit-plugin'].presentation.question_ref, '3.1');
   assert.equal(rows['codex-toolkit-hooks'].current_short, 'Changed since approval');
@@ -534,7 +526,7 @@ test('AT18: a trusted_hash that is not sha256 plus 64 hex characters is unverifi
     const state = f.read();
     assert.ok(state.hooks.entries.every(entry => entry.state === 'unverified'), hash);
     assert.equal(codexRows(state)['codex-toolkit-hooks'].current_short, 'Unverified');
-    assert.match(codexReminderLine(state), /unverified/);
+    assert.match(describeHookStates(state.hooks).message, /unverified/);
     const r = runCheck(f);
     assert.equal(r.status, 1); assert.deepEqual(r.calls, []);
   }

@@ -263,25 +263,6 @@ class CodexToolkitInstall {
   }
 }
 
-// One line for Claude Code's session start, or '' when there is nothing to say: Codex has the
-// Toolkit plugin on and runs an older Toolkit than this PC, or some Toolkit hooks are off, not
-// reviewed, changed since approval or unverified. Silent when Codex is absent, the plugin is off
-// or config.toml cannot be read.
-function codexReminderLine(state) {
-  if (!state?.present || state.config !== 'read' || state.plugin !== 'on' || !state.version) return '';
-  const older = state.older === true;
-  const gaps = state.hooks?.status === 'read' ? hookGaps(state.hooks) : { off: [], notReviewed: [], changed: [], unverified: [], total: 0 };
-  if (gaps.changed.length || gaps.unverified.length) return `Codex: ${describeHookStates(state.hooks).message}`;
-  const hooksOff = gaps.off.length || gaps.notReviewed.length;
-  if (older) {
-    const hooksNote = hooksOff ? `, and ${hookGapText(gaps)}` : '';
-    return `Codex runs Toolkit ${state.version}; this PC has ${state.sourceVersion}${hooksNote}. In Codex say "refresh toolkit", then open /hooks and turn the Toolkit hooks on.`;
-  }
-  if (!hooksOff) return '';
-  const text = hookGapText(gaps);
-  return `Codex: ${text.charAt(0).toUpperCase()}${text.slice(1)}. Open /hooks in Codex and turn them on.`;
-}
-
 // "all 6 Toolkit hooks are off", "Toolkit hooks off (A, B)", "Toolkit hooks not reviewed (C)", or both.
 function hookGapText({ off, notReviewed, changed = [], unverified = [], total }) {
   if (off.length === total && total) return `all ${total} Toolkit hooks are off`;
@@ -374,7 +355,6 @@ module.exports = Object.freeze({
   codexHookListGaps,
   launchCheck,
   CodexToolkitInstall,
-  codexReminderLine,
   describeHookStates,
   docLimitState,
   expectedToolkitHooks,
