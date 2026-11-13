@@ -185,16 +185,19 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
   }
 });
 
-test('Windows hook pack families cover every corpus host case exactly once', () => {
+test('Windows hook pack groups cover every corpus host case exactly once', () => {
   const pack = require('../scripts/toolkit-hook-pack.cjs');
   const corpus = pack.loadCorpus(ROOT);
   assert.deepEqual(corpus.errors, []);
   const job = WORKFLOW.split('\n  hook-pack-windows:\n')[1].split('\n  personal-data:\n')[0];
-  const families = /family: \[([^\]]+)\]/.exec(job)[1].split(', ');
-  assert.equal(new Set(families).size, families.length, 'no duplicate family');
+  const groups = /families: \[([^\]]+)\]/.exec(job)[1].split(', ').map(group => /^'([a-z,-]+)'$/.exec(group)[1]);
+  assert.equal(groups.length, 4, 'four Windows jobs');
+  const families = groups.flatMap(group => group.split(','));
+  assert.equal(new Set(families).size, families.length, 'no family in two groups');
   assert.deepEqual([...families].sort(), [...new Set(corpus.rows.map(row => row.family))].sort());
   const cases = rows => rows.flatMap(row => row.hosts.map(host => `${row.id}:${host}`)).sort();
-  const selected = families.flatMap(family => corpus.rows.filter(row => row.family === family));
+  // The rows each job actually selects, through the script's own --family parsing.
+  const selected = groups.flatMap(group => pack.selectRows(corpus.rows, pack.parseArgs(['run', '--family', group])));
   assert.deepEqual(cases(selected), cases(corpus.rows), 'same row and host pairs, with no duplicates or omissions');
 });
 
@@ -254,12 +257,14 @@ function assertDriftGuard(WORKFLOW) {
     ['the hook pack job removed', WORKFLOW.replace(/\n  hook-pack:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
     ['the hook pack dropped on Windows', WORKFLOW.replace('    runs-on: windows-latest\n    timeout-minutes: 15', '    runs-on: ubuntu-latest\n    timeout-minutes: 15')],
     ['the Windows pack job removed', WORKFLOW.replace(/\n  hook-pack-windows:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
-    ['the closure matrix family dropped', WORKFLOW.replace('attribution, closure-matrix, closure-shell, fault', 'attribution, closure-shell, fault')],
-    ['the closure shell family dropped', WORKFLOW.replace('closure-matrix, closure-shell, fault', 'closure-matrix, fault')],
-    ['a Windows family dropped', WORKFLOW.replace('issue-closure, merge, push, task-governance]', 'merge, push, task-governance]')],
-    ['a Windows family duplicated', WORKFLOW.replace('push, task-governance]', 'push, task-governance, push]')],
-    ['a Windows family filter removed', WORKFLOW.replace(' --family ${{ matrix.family }}', '')],
-    ['the Windows pack budget raised', WORKFLOW.replace(' --family ${{ matrix.family }} --budget-seconds 360', ' --family ${{ matrix.family }} --budget-seconds 400')],
+    ['the closure matrix family dropped', WORKFLOW.replace("'attribution,closure-matrix'", "'attribution'")],
+    ['the closure shell family dropped', WORKFLOW.replace("'closure-shell,push'", "'push'")],
+    ['a Windows family dropped', WORKFLOW.replace("'governance,issue-closure'", "'governance'")],
+    ['a Windows family duplicated', WORKFLOW.replace("'fault,merge,task-governance'", "'fault,merge,task-governance,push'")],
+    ['a Windows group dropped', WORKFLOW.replace(", 'fault,merge,task-governance']", ']')],
+    ['the Windows groups split back into one job per family', WORKFLOW.replace("'governance,issue-closure'", "governance, issue-closure")],
+    ['a Windows family filter removed', WORKFLOW.replace(' --family ${{ matrix.families }}', '')],
+    ['the Windows pack budget raised', WORKFLOW.replace(' --family ${{ matrix.families }} --budget-seconds 420', ' --family ${{ matrix.families }} --budget-seconds 480')],
     ['the Windows pack made optional', WORKFLOW.replace('  hook-pack-windows:\n', '  hook-pack-windows:\n    continue-on-error: true\n')],
     ['the aggregate not waiting for Windows families', WORKFLOW.replace('hook-pack, hook-pack-windows, personal-data, issue-closure]', 'hook-pack, personal-data, issue-closure]')],
     ['the hook pack budget removed', WORKFLOW.replace(' run --budget-seconds 360', ' run')],

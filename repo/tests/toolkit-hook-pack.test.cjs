@@ -224,6 +224,13 @@ test('an expectation that changes, a removed row or a row lowered to known-bad n
   assert.equal(pack.explainedRows('no heading\n- A1: x').size, 0);
 });
 
+test('--family takes a comma list and selects exactly those families', () => {
+  const corpus = pack.loadCorpus();
+  const picked = pack.selectRows(corpus.rows, pack.parseArgs(['run', '--family', 'push,fault']));
+  assert.deepEqual([...new Set(picked.map(row => row.family))].sort(), ['fault', 'push']);
+  assert.equal(picked.length, corpus.rows.filter(row => row.family === 'push' || row.family === 'fault').length);
+});
+
 test('command-line options are checked before anything runs', async () => {
   const lines = [];
   const out = { write: text => lines.push(text) };
@@ -234,6 +241,8 @@ test('command-line options are checked before anything runs', async () => {
     assert.equal(await pack.main(['run', '--against', value], out), 2, value);
     assert.equal(await pack.main(['check-expectations', '--base', value], out), 2, value);
   }
+  assert.equal(await pack.main(['run', '--family', 'push,no-such-family'], out), 2);
+  assert.match(lines.join(''), /No family no-such-family in the pack/);
   assert.doesNotThrow(() => pack.parseArgs(['run', '--against', 'HEAD~1']));
   assert.equal(await pack.main(['validate'], out), 0);
   assert.match(lines.join(''), /no problems/);
