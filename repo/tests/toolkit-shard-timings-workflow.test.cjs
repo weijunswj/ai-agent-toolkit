@@ -18,12 +18,33 @@ const step = name => {
   return text.slice(at, end === -1 ? undefined : end);
 };
 
-test('shard timings workflow: daily and by hand only, never for pull requests, forks or other workflows', () => {
+test('shard timings workflow: daily, by hand and on pushes to main, never for pull requests, forks or other workflows', () => {
   const text = workflow();
-  assert.match(text, /^on:\r?\n  schedule:\r?\n    - cron: '37 2 \* \* \*'\r?\n  workflow_dispatch:\s*$/m);
-  assert.doesNotMatch(text, /^\s+(pull_request|pull_request_target|push|workflow_run|repository_dispatch|issue_comment):/m);
+  assert.match(text, /^on:\r?\n  schedule:\r?\n    - cron: '37 2 \* \* \*'\r?\n  push:\r?\n    branches: \[main\]\r?\n  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(text, /^\s+(pull_request|pull_request_target|workflow_run|repository_dispatch|issue_comment):/m);
+  assert.equal((text.match(/^  push:/gm) || []).length, 1, 'one push trigger');
+  assert.doesNotMatch(text, /^\s+(tags|branches-ignore|paths):/m, 'the push trigger is main only');
   assert.match(text, /concurrency:\r?\n  group: toolkit-shard-timings-\$\{\{ github\.repository \}\}\r?\n  cancel-in-progress: false/);
   assert.match(text, /timeout-minutes: 15/);
+});
+
+test('shard timings workflow: a push run skips the refresh when one ran in the last 24 hours', () => {
+  const text = workflow();
+  const due = text.slice(text.indexOf('  due:'), text.indexOf('\n  refresh:'));
+  assert.match(due, /^    permissions:\r?\n      actions: read\r?\n    outputs:/m, 'the gate only reads Actions runs');
+  assert.match(due, /timeout-minutes: 5/);
+  assert.doesNotMatch(due, /uses:|secrets\.|steps\.app/, 'the gate has no checkout, secret or App token');
+  const check = step('Check for a refresh in the last 24 hours');
+  assert.match(check, /set -euo pipefail/, 'a failed lookup fails the gate instead of passing it');
+  assert.match(check, /if \[ "\$EVENT" != "push" \]; then\r?\n\s+echo "due=true" >> "\$GITHUB_OUTPUT"/, 'schedule and hand runs always refresh');
+  assert.match(check, /date -u -d '24 hours ago'/);
+  assert.match(check, /-f status=success -f created=">=\$\{since\}"/);
+  // A push run that skipped also ends green, so only a run whose refresh job succeeded counts.
+  assert.match(check, /select\(\.name == "Refresh the shard timings" and \.conclusion == "success"\)/);
+  assert.match(check, /\[ "\$id" = "\$RUN_ID" \] && continue/);
+  assert.match(check, /echo "due=false" >> "\$GITHUB_OUTPUT"\r?\n\s+exit 0/);
+  assert.match(text, /  refresh:\r?\n    name: Refresh the shard timings\r?\n    needs: due\r?\n    if: \$\{\{ needs\.due\.outputs\.due == 'true' \}\}/);
+  assert.match(text, /    name: Refresh the shard timings\r?\n/, 'the gate looks for this exact job name');
 });
 
 test('shard timings workflow: the built-in token only reads; the checkout keeps no credentials; actions are pinned', () => {
