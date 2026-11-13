@@ -21,8 +21,13 @@
 // the agent runs after the owner's OK. A task the owner changed by hand is kept unless it is named with
 // --include; a task of the owner's own that Toolkit only lists (adopted) is always kept.
 //
-// Usage: node repo/scripts/toolkit-remove.cjs plan [--include <task id>[,<task id>...]] [--json]
-//        node repo/scripts/toolkit-remove.cjs apply --confirm <plan code> [--include ...] [--json]
+// --app is required: the agent first asks the owner whether to remove Toolkit from only the app it
+// runs in or from every app, and never picks for them. With one app, that app's plugin, global rules, settings, helper files and skill copies go. What every app
+// shares (scheduled tasks and their files, Antigravity's rules and skill copies, and the Toolkit folder)
+// goes only once no other app still has the Toolkit plugin. --app all removes Toolkit from every app.
+//
+// Usage: node repo/scripts/toolkit-remove.cjs plan --app codex|claude-code|all [--include <task id>[,<task id>...]] [--json]
+//        node repo/scripts/toolkit-remove.cjs apply --confirm <plan code> --app ... [--include ...] [--json]
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -32,10 +37,15 @@ const tasks = require('./toolkit-tasks.cjs');
 const windows = require('./toolkit-windows-tasks.cjs');
 const { DISABLED_DESCRIPTION } = require('./toolkit-task-launcher.cjs');
 const parts = require('./toolkit-remove-parts.cjs');
+const { HOST_LABELS } = require('./agent-host-markers.cjs');
 
 const SCHEMA = 'toolkit.remove-plan.v1';
-const USAGE = 'Usage: node repo/scripts/toolkit-remove.cjs plan [--include <task id>,...] [--json]\n'
-  + '       node repo/scripts/toolkit-remove.cjs apply --confirm <plan code> [--include <task id>,...] [--json]';
+const USAGE = 'Usage: node repo/scripts/toolkit-remove.cjs plan --app codex|claude-code|all [--include <task id>,...] [--json]\n'
+  + '       node repo/scripts/toolkit-remove.cjs apply --confirm <plan code> --app codex|claude-code|all [--include <task id>,...] [--json]';
+const NEEDS_APP = 'remove needs --app: ask the owner first whether to remove Toolkit from only this app (--app codex or --app claude-code) or from every app (--app all). Nothing was planned or removed.';
+const APPS = Object.freeze(['codex', 'claude-code', 'all']);
+// The global rules file each app reads; Antigravity's is shared.
+const RULE_HARNESS = Object.freeze({ codex: 'codex', 'claude-code': 'claude-code' });
 // What each kind of task is called in the list, and whether it goes without being named.
 const KINDS = Object.freeze({
   toolkit: Object.freeze({ label: "Toolkit's own", removes: true }),
@@ -64,12 +74,16 @@ const sameName = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 // Owns the read of what Toolkit left on this computer and the removal of exactly that. Every
 // effect goes through an injected boundary: the scheduler, the task registry and the global rules.
 class ToolkitRemoval {
-  #home; #scheduler; #registry; #rules; #include; #parts; #plugins;
+  #home; #scheduler; #registry; #rules; #include; #parts; #plugins; #app;
   // scheduler: the Windows scheduler interface, or null where there is no Task Scheduler.
-  // rules: () => a GlobalRules-shaped object with check() and remove(), or null to leave rules out.
+  // rules: (harnesses) => a GlobalRules-shaped object with check() and remove() for those harnesses
+  //   (null for every harness setup manages), or null to leave rules out.
   // parts: the other removal parts (toolkit-remove-parts.cjs), in the order apply runs them.
   // plugins: () => { 'claude-code': bool, codex: bool }, whether the Toolkit plugin is installed.
-  constructor({ home = os.homedir(), scheduler = null, registry = tasks, rules = null, include = [], parts: extra = [], plugins = () => ({}) } = {}) {
+  // app: 'codex' or 'claude-code' removes Toolkit from that app; 'all' from every app.
+  constructor({ home = os.homedir(), scheduler = null, registry = tasks, rules = null, include = [], parts: extra = [], plugins = () => ({}), app = 'all' } = {}) {
+    if (!APPS.includes(app)) throw new RemovalError(`--app takes ${APPS.join(', ')}; ${JSON.stringify(app)} is not one`);
+    this.#app = app;
     for (const id of include) if (!tasks.ID.test(String(id))) throw new RemovalError(`--include takes task ids from the plan; ${JSON.stringify(id)} is not one`);
     this.#home = home; this.#scheduler = scheduler; this.#registry = registry; this.#rules = rules; this.#include = [...new Set(include)].sort();
     this.#parts = extra; this.#plugins = plugins;
@@ -78,15 +92,38 @@ class ToolkitRemoval {
   // Read-only. The list of what would go and what stays, with the code that stands for it.
   plan() { return this.#read().plan; }
 
+  // Whether the plugin is installed in each app, read once per plan or apply.
+  #installed() {
+    try { return this.#plugins() || {}; } catch { return {}; }
+  }
+
+  // The apps other than the one being removed that still have the Toolkit plugin: while there is one,
+  // what every app shares stays.
+  #othersKeeping(installed) {
+    if (this.#app === 'all') return [];
+    return Object.keys(parts.PLUGIN_STEPS).filter(host => host !== this.#app && installed[host] === true);
+  }
+
+  // Whether an item of `app` is in this removal.
+  #inScope(app, sharedGoes) {
+    if (this.#app === 'all' || app === 'any' || app === this.#app) return true;
+    return app === 'shared' && sharedGoes;
+  }
+
   #read() {
+    const installedBefore = this.#installed();
+    const othersKeeping = this.#othersKeeping(installedBefore);
+    const sharedGoes = othersKeeping.length === 0;
     const registry = this.#registry.readRegistry(this.#home);
     if (registry.status !== 'ok') throw new RemovalError(`The task record ${this.#registry.registryPath(this.#home)} could not be read (${registry.reason}), so nothing is planned. Repair it or move it aside, then run plan again.`);
     const recorded = registry.tasks.filter(entry => entry.host === 'windows');
     const found = [];
-    if (this.#scheduler) {
-      const folders = [...new Set([...recorded.map(entry => entry.folder), ...this.#scheduler.markedFolders()])].sort();
+    // Scheduled tasks serve every app, so they wait while another app keeps Toolkit.
+    const scheduler = sharedGoes ? this.#scheduler : null;
+    if (scheduler) {
+      const folders = [...new Set([...recorded.map(entry => entry.folder), ...scheduler.markedFolders()])].sort();
       for (const folder of folders) {
-        const live = this.#scheduler.list(folder);
+        const live = scheduler.list(folder);
         for (const task of live) {
           const item = this.#classify(folder, task, recorded);
           if (item) found.push({ ...item, tasks_in_folder: live.length });
@@ -102,14 +139,14 @@ class ToolkitRemoval {
     const going = listed.filter(item => item.action === 'remove');
     const liveIds = new Set(listed.map(item => item.record).filter(Boolean));
     // A record with no task behind it: Toolkit's own record of a task that is already gone.
-    const stale = this.#scheduler ? recorded.filter(entry => !entry.adopted && !liveIds.has(entry.id)).map(entry => entry.id).sort() : [];
+    const stale = scheduler ? recorded.filter(entry => !entry.adopted && !liveIds.has(entry.id)).map(entry => entry.id).sort() : [];
     const folders = [...new Set(going.map(item => item.folder))].sort().map(folder => ({ folder,
       expected: going.filter(item => item.folder === folder).length === listed.find(item => item.folder === folder).tasks_in_folder ? 'removed' : 'kept' }));
     const records = [...new Set([...going.map(item => item.record).filter(Boolean), ...stale])].sort();
     // The shared runner and the standing task approval go only when no marked task is kept.
-    const shared = Boolean(this.#scheduler) && !listed.some(item => item.action === 'keep' && item.kind === 'changed');
+    const shared = Boolean(scheduler) && !listed.some(item => item.action === 'keep' && item.kind === 'changed');
     const state = this.#statePaths(records, shared);
-    const owner = this.#rules ? this.#rules() : null;
+    const owner = this.#rulesOwner(sharedGoes);
     const rules = owner ? owner.check().files.map(file => ({ harness: file.harness, file: file.display || file.file, state: file.state,
       action: RULE_STATES_WITH_BLOCK.includes(file.state) ? 'remove' : RULE_STATES_HELD.includes(file.state) ? 'held' : 'none', ...(file.detail ? { detail: file.detail } : {}) })) : [];
     // Codex's config.toml: Toolkit's raised project_doc_max_bytes line, when there is one. It is in
@@ -119,19 +156,28 @@ class ToolkitRemoval {
       ...(limit.previous !== undefined ? { previous: limit.previous } : {}), ...(limit.detail ? { detail: limit.detail } : {}) } : null;
     const tasksOut = listed.map(({ tasks_in_folder: ignored, ...item }) => item);
     // A part that cannot be read is held, so the rest of the plan still shows.
+    // Only the items of the app being removed, and the shared ones once no other app keeps Toolkit.
     const others = this.#parts.map(part => {
       let items;
-      try { items = part.plan(); } catch (error) { items = [{ what: part.title, action: 'held', detail: `could not be read (${tasks.safeText(error.message)})` }]; }
+      try { items = part.plan(); } catch (error) { items = [{ what: part.title, action: 'held', detail: `could not be read (${tasks.safeText(error.message)})`, app: part.app }]; }
+      items = items.filter(item => this.#inScope(item.app || part.app || 'shared', sharedGoes)).map(({ app: ignored, ...item }) => item);
       return { key: part.key, title: part.title, items };
     });
-    const body = { tasks: tasksOut, stale_records: stale, folders, state: state.map(item => item.display), rules, codex_settings: codexSettings, parts: others, include: this.#include };
+    const body = { app: this.#app, tasks: tasksOut, stale_records: stale, folders, state: state.map(item => item.display), rules, codex_settings: codexSettings, parts: others, include: this.#include,
+      kept_for: othersKeeping };
     // Not in the plan code: the agent uninstalls the plugins between the plan and apply.
-    let installed = {};
-    try { installed = this.#plugins() || {}; } catch { installed = {}; }
-    const plugins = Object.keys(parts.PLUGIN_STEPS).filter(host => installed[host] === true);
+    const plugins = Object.keys(parts.PLUGIN_STEPS).filter(host => installedBefore[host] === true && (this.#app === 'all' || host === this.#app));
     const nothing = !going.length && !stale.length && !state.length && !rules.some(file => file.action === 'remove') && !CODEX_WRITES.includes(codexSettings?.action)
       && !others.some(part => part.items.some(item => item.action === 'remove'));
-    return { shared, plan: { schema: SCHEMA, ...body, plugins, scheduler: this.#scheduler ? 'read' : 'not available on this system', nothing, code: sha(body) } };
+    const schedulerState = !this.#scheduler ? 'not available on this system' : scheduler ? 'read' : 'kept for another app';
+    return { shared, plan: { schema: SCHEMA, ...body, plugins, scheduler: schedulerState, nothing, code: sha(body) } };
+  }
+
+  // The global rules owner for this removal: the app's own file, and Antigravity's once shared items go.
+  #rulesOwner(sharedGoes) {
+    if (!this.#rules) return null;
+    if (this.#app === 'all') return this.#rules(null);
+    return this.#rules([RULE_HARNESS[this.#app], ...(sharedGoes ? ['antigravity'] : [])]);
   }
 
   // One live task as the list shows it, or null for a task that is not Toolkit's and not listed by it.
@@ -170,6 +216,7 @@ class ToolkitRemoval {
   // Removes exactly the confirmed list. A list that no longer matches the code removes nothing.
   apply(confirm) {
     const { plan, shared } = this.#read();
+    const sharedGoes = plan.kept_for.length === 0;
     if (typeof confirm !== 'string' || confirm !== plan.code) throw new RemovalError('The list is not the one that was confirmed (it changed, or no plan code was given), so nothing was removed. Run plan again and show the owner the new list.');
     const results = [];
     for (const item of plan.tasks.filter(task => task.action === 'remove')) {
@@ -207,7 +254,7 @@ class ToolkitRemoval {
     // The rules remover also puts Codex's limit back, so it runs when either is in the plan.
     if (this.#rules && (plan.rules.some(file => file.action === 'remove') || CODEX_WRITES.includes(plan.codex_settings?.action))) {
       try {
-        const removed = this.#rules().remove();
+        const removed = this.#rulesOwner(sharedGoes).remove();
         rules = removed.files.map(file => ({ harness: file.harness, file: file.display || file.file, result: file.action, ...(file.backup ? { backup: 'saved' } : {}) }));
         const limit = removed.doc_limit;
         // A held line the plan already showed as left alone is the planned outcome, printed once below.
@@ -226,12 +273,11 @@ class ToolkitRemoval {
       try { done = part.apply(planned); } catch (error) { done = [{ what: part.title, result: 'failed', reason: tasks.safeText(error.message) }]; }
       return { key: part.key, title: part.title, results: done, held: planned.filter(item => !['remove', 'save'].includes(item.action)) };
     });
-    let installed = {};
-    try { installed = this.#plugins() || {}; } catch { installed = {}; }
-    const plugins = Object.keys(parts.PLUGIN_STEPS).filter(host => installed[host] === true);
+    const installed = this.#installed();
+    const plugins = Object.keys(parts.PLUGIN_STEPS).filter(host => installed[host] === true && (this.#app === 'all' || host === this.#app));
     const ok = !results.some(item => item.result === 'failed') && !steps.some(item => item.result === 'failed') && !folders.some(item => item.result === 'failed') && !rules.some(item => item.result === 'failed') && codex?.result !== 'failed'
       && !others.some(part => part.results.some(item => item.result === 'failed'));
-    return { schema: 'toolkit.remove-result.v1', ok, tasks: results, kept: plan.tasks.filter(task => task.action === 'keep'), folders, steps, rules, codex_settings: codex,
+    return { schema: 'toolkit.remove-result.v1', ok, app: plan.app, kept_for: plan.kept_for, tasks: results, kept: plan.tasks.filter(task => task.action === 'keep'), folders, steps, rules, codex_settings: codex,
       held_rules: plan.rules.filter(file => file.action === 'held'), held_codex_settings: plan.codex_settings?.action === 'held' ? plan.codex_settings : null, parts: others, plugins,
       folder_kept: others.some(part => part.key === 'toolkit_folder' && part.results.some(item => item.result === 'kept')) };
   }
@@ -264,11 +310,23 @@ function taskLine(item) {
   return `${where}${item.repository ? ` (${item.repository})` : ''}: ${KINDS[item.kind].label}; id ${item.id}`;
 }
 
+// Who the removal is for, and what happens to the parts every app shares.
+const SHARED = "the scheduled tasks and their files, Antigravity's rules and skill copies, and the Toolkit folder";
+function scopeLines(app, keptFor = []) {
+  if (app === 'all') return ['From: every app on this computer.'];
+  const others = Object.keys(HOST_LABELS).filter(host => host !== app).map(host => HOST_LABELS[host]).join(' and ');
+  const lines = [`From: ${HOST_LABELS[app]} only. ${others}'s own Toolkit files stay; run plan with --app all to remove them too.`];
+  lines.push(keptFor.length
+    ? `Kept, because ${keptFor.map(host => HOST_LABELS[host]).join(' and ')} still ${keptFor.length === 1 ? 'has' : 'have'} the Toolkit plugin: ${SHARED}.`
+    : `Also removed, because no other app has the Toolkit plugin: ${SHARED}.`);
+  return lines;
+}
+
 function describePlan(plan) {
-  const lines = ['# Remove Toolkit from this computer', ''];
+  const lines = ['# Remove Toolkit from this computer', '', ...scopeLines(plan.app, plan.kept_for), ''];
   const going = plan.tasks.filter(item => item.action === 'remove');
   const kept = plan.tasks.filter(item => item.action === 'keep');
-  if (plan.scheduler !== 'read') lines.push('Scheduled tasks: not checked, because this system has no Windows Task Scheduler.');
+  if (plan.scheduler === 'not available on this system') lines.push('Scheduled tasks: not checked, because this system has no Windows Task Scheduler.');
   if (plan.nothing) lines.push("Nothing of Toolkit's is left to remove.");
   if (going.length) lines.push('Scheduled tasks to stop and remove:', ...going.map(item => `- ${taskLine(item)}`));
   if (kept.length) lines.push('Scheduled tasks kept:', ...kept.map(item => `- ${taskLine(item)}${item.kind === 'changed' ? `. Add --include ${item.id} to remove it too` : '. Delete it in Task Scheduler yourself if you want it gone'}`));
@@ -299,7 +357,7 @@ function codexPlanLine(codex) {
 }
 
 function describeResult(result) {
-  const lines = ['# Remove Toolkit from this computer', ''];
+  const lines = ['# Remove Toolkit from this computer', '', ...scopeLines(result.app, result.kept_for), ''];
   for (const item of result.tasks) lines.push(`- ${taskLine(item)}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
   for (const item of result.kept) lines.push(`- ${taskLine(item)}: kept`);
   for (const item of result.folders) lines.push(`- Folder \\${item.folder}\\: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
@@ -318,7 +376,7 @@ function describeResult(result) {
   if (result.plugins?.length) lines.push('', ...pluginLines(result.plugins, { after: true }));
   // After the plugin goes, the remove toolkit skill may be gone too, so the exact line is printed.
   if (result.folder_kept) lines.push('', 'The Toolkit folder stays until the plugin is uninstalled. Then say `remove toolkit` again, or run this in PowerShell and follow it:',
-    `node "${path.resolve(__filename)}" plan`);
+    `node "${path.resolve(__filename)}" plan --app ${result.app || 'all'}`);
   if (!result.plugins?.length && !result.folder_kept) lines.push('', 'Start a new session in each app so nothing of Toolkit stays loaded.');
   lines.push(NOT_TOUCHED);
   return lines;
@@ -327,20 +385,26 @@ function describeResult(result) {
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (!['plan', 'apply'].includes(command)) throw new RemovalError(USAGE);
-  const args = { command, include: [], confirm: null, json: false };
+  const args = { command, include: [], confirm: null, json: false, app: null };
   for (let i = 0; i < rest.length; i += 1) {
     if (rest[i] === '--json') args.json = true;
+    else if (rest[i] === '--app' && rest[i + 1] && APPS.includes(rest[i + 1]) && !args.app) args.app = rest[++i];
     else if (rest[i] === '--include' && rest[i + 1]) args.include.push(...rest[++i].split(',').filter(Boolean));
     else if (rest[i] === '--confirm' && rest[i + 1] && command === 'apply') args.confirm = rest[++i];
     else throw new RemovalError(USAGE);
   }
   if (command === 'apply' && !/^[a-f0-9]{64}$/.test(args.confirm || '')) throw new RemovalError('apply needs --confirm <plan code> from the plan the owner was shown.');
+  if (!args.app) throw new RemovalError(NEEDS_APP);
   return args;
 }
 
+// The rules owner for the given harnesses, kept to the ones setup manages; null means all of those.
 function defaultRules(environment = process.env) {
   const { GlobalRules } = require('./toolkit-global-rules.cjs');
-  return () => new GlobalRules({ environment, harnesses: GlobalRules.setupHarnesses({ environment }) });
+  return (only = null) => {
+    const managed = GlobalRules.setupHarnesses({ environment });
+    return new GlobalRules({ environment, harnesses: only ? managed.filter(harness => only.includes(harness)) : managed });
+  };
 }
 
 function main(argv = process.argv.slice(2), deps = {}) {
@@ -350,7 +414,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
     const platform = deps.platform || process.platform;
     const home = deps.home || os.homedir();
     const environment = deps.environment || process.env;
-    const removal = new ToolkitRemoval({ home, include: args.include,
+    const removal = new ToolkitRemoval({ home, include: args.include, app: args.app,
       scheduler: deps.scheduler !== undefined ? deps.scheduler : platform === 'win32' ? windows.powerShellScheduler() : null,
       rules: deps.rules !== undefined ? deps.rules : defaultRules(environment),
       parts: deps.parts !== undefined ? deps.parts : parts.defaultParts({ environment, home }),

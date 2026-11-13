@@ -33,7 +33,7 @@ const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Governance', type: ['toolkit governance catalogue'], does: 'List the skills offered in this repository under its governance state. It changes nothing.' }),
   Object.freeze({ group: 'Governance', type: ['toolkit governance security'], does: "Turn on GitHub's free dependency and security settings for a governed repository." }),
   Object.freeze({ group: 'Governance', type: ['toolkit governance migrate'], does: 'Get the command that offers protection and security fixes; you run it in your own terminal and answer its question there.' }),
-  Object.freeze({ group: 'Setup', type: ['remove toolkit'], does: "List everything Toolkit put on this computer, then remove it after your OK." }),
+  Object.freeze({ group: 'Setup', type: ['remove toolkit'], does: "Choose this app or every app, list what Toolkit put there, then remove it after your OK." }),
   Object.freeze({ group: 'Merge', type: ['merge N'], does: 'Approve the merge of pull request N.' }),
 ]);
 
