@@ -128,4 +128,15 @@ test('the merge hold shows the store-command message, not the pull request advic
   // repository's own default branch keeps the pull request advice.
   assert.equal(decide('git push origin feature', f.governed), null);
   assert.match(decide('git push origin main', f.governed) || '', /push to another branch and open one/);
+  // A store reached by Push-Location is judged in the store's own folder, whose origin is the bound
+  // store: the merge hold lets it through as a store, and the guard alone refuses it with the store
+  // message. Before, the merge hold judged the starting folder and gave the pull request advice.
+  for (const command of [`Push-Location "${f.store}"; git push origin main`, `Push-Location -Path "${f.store}"; git push`]) {
+    assert.equal(decide(command, f.governed), null, command);
+    assert.equal(refuse(f, command, f.governed, 'powershell'), guard.STORE_PUSH_MESSAGE, command);
+  }
+  // One command pushing both the governed default branch and the store names both reasons.
+  const both = decide(`git push origin main; git push ${STORE} main`, f.governed) || '';
+  assert.match(both, /push to another branch and open one/);
+  assert.ok(both.includes(guard.STORE_PUSH_MESSAGE), both);
 });

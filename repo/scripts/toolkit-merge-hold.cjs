@@ -87,7 +87,7 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
 //     to the remote's default branch (evidence stores excepted, by name; a refused push whose remote is an
 //     evidence store bound on this computer shows the store-command message instead), a merge whose target is
-//     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
+//     moved by cd, pushd, Set-Location, Push-Location or GH_REPO, and a bare number in a folder with more than one
 //     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
 //     run through another shell or expression runner (bash -c, pwsh -Command, cmd /c, eval) is
 //     refused whatever branch it names; encoded PowerShell commands are refused unread;
@@ -752,14 +752,17 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   }
   let root = cwd;
   const variables = new Map();
+  // Every refused push is named, each reason once: a command that pushes both a default branch and
+  // a bound store gets the pull request advice and the store-command message.
+  const reasons = [];
   for (const words of parts) {
     const assigned = assignmentOf(words);
     if (assigned) { assignVariable(variables, assigned); continue; }
-    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
+    if (/^(?:cd|pushd|chdir|set-location|sl|push-location)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
     const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
-    if (reason) return refuse(reason);
+    if (reason && !reasons.includes(reason)) reasons.push(reason);
   }
-  return '';
+  return reasons.length ? refuse(reasons.join(' Also: ')) : '';
 }
 
 // Read command position with shell quoting intact: an env launch inside a message is just text.

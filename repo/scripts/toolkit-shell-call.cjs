@@ -349,7 +349,7 @@ function scriptContext(input, { host } = {}) {
   const tool = input?.tool_name || input?.toolName;
   return { powershell: tool === 'PowerShell', uncertainShell: tool !== 'PowerShell' && tool !== 'Bash', codexBash: host === 'codex' && tool === 'Bash' };
 }
-const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl)\s|\bGH_REPO\s*=/i;
+const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl|push-location)\s|\bGH_REPO\s*=/i;
 const NUMBER_FIELDS = Object.freeze(['pr_number', 'pull_number', 'pullNumber', 'pull_request_number', 'number']);
 const GRAPHQL_OPERATION = /(?:^|__)(?:graphql|graphql_query|execute_graphql)$/i;
 function connectorTarget(args, numberFields = NUMBER_FIELDS) {

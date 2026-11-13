@@ -1133,10 +1133,14 @@ test('a push to the default branch is refused; other branches and evidence store
     [feature, 'git push origin HEAD:main'], [feature, 'git push origin work:refs/heads/main'], [feature, 'git push origin main'],
     [feature, 'git push --all origin'], [feature, 'git merge work && git checkout main && git push origin main'],
     [ctx.root, 'cd feature && git push origin HEAD:main'], [ctx.root, `git -C ${feature} push origin +work:main`],
+    [ctx.root, `Push-Location ${feature}; git push origin HEAD:main`], [store, `Push-Location ${ctx.repo}; git push`],
   ];
   for (const [cwd, command] of refused) assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, command);
-  const allowed = [[feature, 'git push'], [feature, 'git push -u origin HEAD'], [feature, 'git push origin work'], [store, 'git push origin main'], [fresh, 'git push -u origin main']];
+  const allowed = [[feature, 'git push'], [feature, 'git push -u origin HEAD'], [feature, 'git push origin work'], [store, 'git push origin main'], [fresh, 'git push -u origin main'], [ctx.repo, `Push-Location ${store}; git push origin main`]];
   for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
+  // A merge after Push-Location cannot be placed in a repository, like one after cd.
+  typed(ctx, 'merge 618');
+  assert.match(decide(ctx, bash(ctx.root, `Push-Location ${ctx.repo}; gh pr merge 618 --merge --match-head-commit ${SHA}`))?.deny || '', /changes folder or GH_REPO first/);
 });
 
 test('shell argument lists allow plain feature pushes but refuse a shell nested in the script', (t) => {
