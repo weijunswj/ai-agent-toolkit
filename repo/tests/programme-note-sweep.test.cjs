@@ -554,7 +554,7 @@ const damage = (f, entry, mode) => {
   else if (mode === 'missing') f.github.comments.delete(entry.comment_id);
   else f.github.comments.get(entry.comment_id).login = 'another-user';
 };
-const answer = (f, id, change) => { const { doc, sha } = f.store.read('parent', 12); f.store.write('parent', 12, state.answerFinding(doc, { id, now: f.NOW, ...change }), { previous: doc, sha }); };
+const answer = (f, id, change) => { const { doc, sha } = f.store.read('parent', 12); f.store.write('parent', 12, state.answerFinding(doc, { next: 'Fixture next step', id, now: f.NOW, ...change }), { previous: doc, sha }); };
 
 test('a moved note whose comment later changes or disappears keeps its link, raises one finding and is never reposted or edited', () => {
   for (const mode of ['changed', 'missing', 'foreign']) {

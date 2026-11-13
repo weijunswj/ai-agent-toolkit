@@ -42,7 +42,7 @@ function setup(t) {
   const parentDoc = () => store.read('parent', 421).doc;
   const order = (extra = {}) => ({ schema: orders.SCHEMA, order_id: 'clear-backlog-1', parent_issue: 421, holder_session: HOLDER, epoch: parentDoc().fence.epoch,
     expires_at: new Date(NOW + 2 * 3600 * 1000).toISOString(), record: 'INT-TK421-900', ops: [
-      { command: 'ack', finding: ADDED },
+      { command: 'ack', finding: ADDED, next: 'Confirm #423 in the catalogue today.' },
       { command: 'dispose', finding: NO_TASK, reason: 'A docs-only PR with no task.' },
       { command: 'update', issue: 423, patch: { next_action: 'Controller: owner test after merge' } },
     ], ...extra });
@@ -102,14 +102,14 @@ test('a re-run skips finished writes; a changed order under the same id is refus
   const again = f.run(order);
   assert.equal(again.report.outcome, 'DONE');
   assert.deepEqual(again.report.results.map(entry => entry.outcome), ['DONE_EARLIER', 'DONE_EARLIER', 'DONE_EARLIER']);
-  const changed = f.run({ ...order, ops: [{ command: 'ack', finding: NO_TASK }] });
+  const changed = f.run({ ...order, ops: [{ command: 'ack', finding: NO_TASK, next: 'Link PR 851 to a task.' }] });
   assert.equal(changed.error?.code, 'ORDER_CHANGED');
 });
 
 test('a refused write stops the order there, and a later run continues from it', t => {
   const f = setup(t);
   const order = f.order({ ops: [
-    { command: 'ack', finding: ADDED },
+    { command: 'ack', finding: ADDED, next: 'Confirm #423 in the catalogue today.' },
     { command: 'update', issue: 423, patch: { gate: { state: 'ACCEPTED' } } },
     { command: 'dispose', finding: NO_TASK, reason: 'Never reached.' },
   ] });
@@ -133,7 +133,7 @@ for (const [label, change, code] of [
   ['an order for another parent', { parent_issue: 422 }, 'ORDER_INVALID'],
   ['a claim', { ops: [{ command: 'claim', parent: true }] }, 'ORDER_INVALID'],
   ['a takeover by migrate-state', { ops: [{ command: 'migrate-state' }] }, 'ORDER_INVALID'],
-  ['a write with an unknown field', { ops: [{ command: 'ack', finding: ADDED, takeover: true }] }, 'ORDER_INVALID'],
+  ['a write with an unknown field', { ops: [{ command: 'ack', finding: ADDED, next: 'x', takeover: true }] }, 'ORDER_INVALID'],
   ['an order without its record', { record: '' }, 'ORDER_INVALID'],
   ['an unknown top-level field', { controller: true }, 'ORDER_INVALID'],
 ]) test(`${label} is refused and writes nothing`, t => {
@@ -157,4 +157,42 @@ test('the command line takes only its own options; a launcher-started gate never
 
 test('the order digest ignores key order', () => {
   assert.equal(orders.orderDigest({ a: 1, b: { c: 2, d: 3 } }), orders.orderDigest({ b: { d: 3, c: 2 }, a: 1 }));
+});
+
+// The dry run must refuse what the apply refuses. On 13 Nov three writes passed a dry run and were
+// refused by the real run: a dispose reason over the limit, a candidate patch with no head, tree or
+// base, and an answer to a finding that was no longer new.
+test('a dry run reports each write the apply would refuse, with its code, and writes nothing', t => {
+  const f = setup(t);
+  const long = f.run(f.order({ ops: [{ command: 'dispose', finding: NO_TASK, reason: 'x'.repeat(201) }] }), ['--dry-run']);
+  assert.equal(long.error?.code, 'ORDER_INVALID', 'an over-long reason is refused before any write');
+  assert.match(long.error.message, /at most 200 characters/);
+  f.store.mutate('parent', 421, { writer: controller, change: doc => state.answerFinding(doc, { id: NO_TASK, state: 'disposed', reason: 'Docs-only PR.', now: new Date(NOW).toISOString() }) });
+  const before = f.github.commits;
+  const result = f.run(f.order({ ops: [
+    { command: 'ack', finding: ADDED, next: 'Confirm #423 in the catalogue today.' },
+    { command: 'update', issue: 423, patch: { candidate: { head: null, tree: null, base: null } } },
+    { command: 'ack', finding: NO_TASK, next: 'Link PR 851 to a task.' },
+  ] }), ['--dry-run']);
+  assert.equal(result.error, null, result.error?.message);
+  assert.equal(result.report.outcome, 'WOULD_STOP');
+  assert.deepEqual(result.report.ops.map(op => op.status), ['WOULD_RUN', 'REFUSED', 'REFUSED']);
+  assert.ok(['STATE_INVALID', 'PATCH_REFUSED'].includes(result.report.ops[1].code), result.report.ops[1].code);
+  assert.equal(result.report.ops[2].code, 'FINDING_STATE');
+  assert.match(result.report.next_action, /would stop at write 2/);
+  assert.equal(f.github.commits, before, 'nothing written');
+  assert.equal(finding(f.parentDoc(), ADDED).state, 'new');
+  const clean = f.run(f.order({ order_id: 'clean-1' }), ['--dry-run']);
+  assert.equal(clean.report.outcome, 'READY');
+});
+
+test('an ack in an order carries its next step, and a due time it gives must be a date', t => {
+  const f = setup(t);
+  assert.equal(f.run(f.order({ ops: [{ command: 'ack', finding: ADDED }] })).error?.code, 'ORDER_INVALID');
+  assert.equal(f.run(f.order({ ops: [{ command: 'ack', finding: ADDED, next: 'x', due: 'soon' }] })).error?.code, 'ORDER_INVALID');
+  const due = new Date(NOW + 6 * 3600 * 1000).toISOString();
+  const result = f.run(f.order({ ops: [{ command: 'ack', finding: ADDED, next: 'Confirm #423 today.', due }] }));
+  assert.equal(result.report.outcome, 'DONE');
+  assert.equal(finding(f.parentDoc(), ADDED).due, due);
+  assert.equal(f.parentDoc().private.attention_notes[ADDED], 'Confirm #423 today.');
 });
