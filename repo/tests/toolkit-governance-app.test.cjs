@@ -278,14 +278,15 @@ test('an organisation-owned repository gets the organisation App page; a persona
   assert.equal(app.creationLink(SLUG), app.creationLink(SLUG, 'User'), 'no owner type keeps the personal page');
   const orgText = app.setupLines('example-org/example-repo', STORE, missing, 'Organization').join('\n');
   assert.ok(orgText.includes(app.creationLink('example-org/example-repo', 'Organization')));
-  assert.ok(!orgText.includes('https://github.com/settings/apps/new'), 'an organisation never gets the personal page');
+  const pages = text => [...text.matchAll(/https:\/\/\S+/g)].map(([found]) => new URL(found)).filter(url => url.pathname.endsWith('/settings/apps/new')).map(url => `${url.origin}${url.pathname}`);
+  assert.deepEqual(pages(orgText), ['https://github.com/organizations/example-org/settings/apps/new'], 'an organisation never gets the personal page');
   const userText = app.setupLines(SLUG, STORE, missing, 'User').join('\n');
-  assert.ok(!userText.includes('/organizations/'), 'a personal account never gets the organisation page');
+  assert.deepEqual(pages(userText), ['https://github.com/settings/apps/new'], 'a personal account never gets the organisation page');
   const unknownText = app.setupLines(SLUG, STORE, missing, null).join('\n');
-  assert.ok(unknownText.includes(app.creationLink(SLUG, 'User')) && unknownText.includes(app.creationLink(SLUG, 'Organization')), 'unknown owner: both pages');
+  assert.deepEqual(pages(unknownText), ['https://github.com/settings/apps/new', 'https://github.com/organizations/example-owner/settings/apps/new'], 'unknown owner: both pages');
   assert.match(unknownText, /If example-owner is an organisation/);
   const finding = app.appFinding('ENABLED', 'example-org/example-repo', STORE, missing, [], 'Organization');
-  assert.ok(finding.message.includes('/organizations/example-org/settings/apps/new'));
+  assert.deepEqual(pages(finding.message), ['https://github.com/organizations/example-org/settings/apps/new']);
 });
 
 test('ownerType reads only the repository, with GET, and anything unreadable is null', () => {

@@ -83,16 +83,25 @@ function bindingV1() {
 }
 
 function runAction(mode, { env = {}, file = binding(), refresh = null } = {}) {
-  const notices = [], failures = [], outputs = [], summaries = [], refreshes = [];
+  const notices = [], failures = [], outputs = [], summaries = [], refreshes = [], warnings = [];
   const runner = new (action().ProgrammeSweepAction)({
     env: { GITHUB_REPOSITORY: 'owner/repository', ...env }, root: ROOT,
     readFile: () => { if (file === null) throw Object.assign(new Error('absent'), { code: 'ENOENT' }); return Buffer.from(typeof file === 'string' ? file : JSON.stringify(file)); },
     validateBinding: value => state.validateBinding(value),
     refresh: input => { refreshes.push(input); return refresh ? refresh(input) : { status: 0, code: null, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [] } }; },
     notice: message => notices.push(message), failure: message => failures.push(message), output: (name, value) => outputs.push([name, value]), summary: line => summaries.push(line),
+    warning: message => warnings.push(message),
   });
   const code = mode === 'store' ? runner.store() : runner.run();
-  return { code, notices, failures, outputs, summaries, refreshes };
+  return { code, notices, failures, outputs, summaries, refreshes, warnings };
+}
+// Record 808: every skip is a visible warning that names the repository, the reason and the fix.
+function assertSkipWarning(result, reason) {
+  assert.deepEqual(result.notices, [], 'a skip is a warning, not a quiet notice');
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /^Programme Sweep skipped on owner\/repository: /);
+  assert.match(result.warnings[0], reason);
+  assert.match(result.warnings[0], / Fix: \S/);
 }
 const minted = { STORE_REPOSITORY: 'owner/evidence', APP_CLIENT_ID_SET: 'true', MINT_OUTCOME: 'success/success', GOVERNED_TOKEN: fakeToken, STORE_TOKEN: storeToken, SWEEP_LOGIN: 'toolkit-governance[bot]' };
 
@@ -103,20 +112,22 @@ test('action: the store step names the evidence store from the checked-out bindi
   assert.deepEqual(result.notices, []);
 });
 
-test('cloud: public state branch is refused with a notice', () => {
+test('cloud: public state branch is refused with a warning', () => {
   const result = runAction('store', { file: binding({ publicState: true }) });
   assert.equal(result.code, 0);
   assert.deepEqual(result.outputs, [['store', '']]);
-  assert.match(result.notices[0], /public branch; the cloud sweep does not run it yet/);
+  assertSkipWarning(result, /public branch; the cloud sweep does not run it yet/);
 });
 
-for (const [label, file] of [['absent', null], ['disabled', binding({ governance: 'disabled' })], ['another repository', binding({ repository: 'owner/other' })],
-  ['a store of another owner', binding({ store: 'someone-else/evidence' })], ['invalid', '{"schema":'], ['oversize', ' '.repeat(65 * 1024)]]) {
-  test(`action: ${label} binding gives a notice and writes nothing`, () => {
+for (const [label, file, reason] of [['absent', null, /no programme file/], ['disabled', binding({ governance: 'disabled' }), /turns governance off/],
+  ['another repository', binding({ repository: 'owner/other' }), /names owner\/other/],
+  ['a store of another owner', binding({ store: 'someone-else/evidence' }), /someone-else\/evidence belongs to another owner/], ['invalid', '{"schema":', /not a valid programme file/],
+  ['oversize', ' '.repeat(65 * 1024), /larger than/]]) {
+  test(`action: ${label} binding gives a warning naming the repository, the reason and the fix, and writes nothing`, () => {
     const result = runAction('store', { file });
     assert.equal(result.code, 0);
     assert.deepEqual(result.outputs, [['store', '']]);
-    assert.equal(result.notices.length, 1);
+    assertSkipWarning(result, reason);
     assert.equal(result.refreshes.length, 0);
   });
 }
@@ -139,10 +150,10 @@ test('gate: a version 1 binding names its parent issue, as bindingEnabled says; 
   assert.equal(parentsOf(null), null);
 });
 
-test('action: no App configured gives a notice naming the variable, the secret and the check', () => {
+test('action: no App configured gives a warning naming the repository, the variable, the secret and the check', () => {
   const result = runAction('run', { env: { STORE_REPOSITORY: 'owner/evidence', APP_CLIENT_ID_SET: 'false', MINT_OUTCOME: 'skipped/skipped' } });
   assert.equal(result.code, 0);
-  assert.match(result.notices[0], /TOOLKIT_GOVERNANCE_APP_CLIENT_ID.*TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY.*toolkit governance check/);
+  assertSkipWarning(result, /TOOLKIT_GOVERNANCE_APP_CLIENT_ID.*TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY.*toolkit governance check/);
   assert.equal(result.refreshes.length, 0);
 });
 
@@ -506,6 +517,20 @@ test('gate: a quiet hour reads four small answers and starts nothing; a change s
   const off = fakeGitHub({ binding: JSON.stringify({ governance: 'disabled' }) });
   assert.equal((await gate({ env: gateEnv, fetchImpl: off.fetchImpl, now: T, log: () => {} })).start, false);
   assert.deepEqual(off.calls, ['GET contents/.github/toolkit-programme.json?ref=main'], 'governance off reads only the binding');
+});
+
+test('gate: a repository it skips gets one warning naming the repository, the reason and the fix (record 808)', async () => {
+  const { gate } = gateScript();
+  for (const [binding, reason] of [[JSON.stringify({ governance: 'disabled' }), /turns governance off/], ['{"schema":', /missing or unreadable/],
+    [JSON.stringify({ governance: 'enabled', parents: [] }), /names no parent issue/]]) {
+    const lines = [];
+    const off = fakeGitHub({ binding });
+    assert.equal((await gate({ env: gateEnv, fetchImpl: off.fetchImpl, now: T, log: line => lines.push(line) })).start, false);
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /^::warning::Programme Sweep gate skipped owner\/repository: /);
+    assert.match(lines[0], reason);
+    assert.match(lines[0], / Fix: \S/);
+  }
 });
 
 test('follow-up: waits for the given time, capped, then starts one run on main', async () => {
