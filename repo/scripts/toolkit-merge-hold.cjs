@@ -1107,6 +1107,10 @@ class EvidenceStoreMerges {
   // binding names this store, read the candidates' merged bindings now, with the same bounded git
   // read session start and `toolkit governance status` use, then let the usual checks run on the
   // result. This adds no authority: only a fresh merged binding on a parent's default branch counts.
+  // Whether the target is a store is only known after the read, so any cloud merge without a typed
+  // approval may pay for it once; the read is cached, so later merges in the session skip it. It
+  // fetches into the clones' tracking refs and writes the binding cache exactly as session start
+  // does. Clones beyond the folder cap are never read, which refuses rather than allows.
   refreshCloudParents(target, candidates) {
     const budgetMs = Math.min(this.shared - 2500, globalThis.performance.now() + 4500) - globalThis.performance.now();
     if (candidates.length === 0 || !(budgetMs > 0)) return false;
