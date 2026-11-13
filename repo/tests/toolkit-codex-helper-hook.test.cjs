@@ -484,7 +484,7 @@ function installedWindowsHelperHook(t) {
   return setup.windowsHelperHookCommand(setup.defaultWindowsPowerShellPath()).split('${PLUGIN_ROOT}').join(pluginRoot.split(path.sep).join('/'));
 }
 
-test('Windows: a held prompt and a refused tool call reach Codex as exit 2 under cmd.exe, Windows PowerShell and PowerShell 7', { skip: process.platform !== 'win32' }, t => {
+test('Windows: an undecided repository\'s prompt passes with the governance note and a refused tool call reaches Codex as exit 2 under cmd.exe, Windows PowerShell and PowerShell 7', { skip: process.platform !== 'win32' }, t => {
   const command = installedWindowsHelperHook(t);
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-codex-launcher-repos-'));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
@@ -510,16 +510,17 @@ test('Windows: a held prompt and a refused tool call reach Codex as exit 2 under
       return { status: r.status, stdout: r.stdout, stderr: r.stderr };
     };
 
-    const held = hook({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'list the files here' });
-    assert.equal(held.status, 2, `${name} prompt hold: ${held.stderr}`);
-    assert.equal(JSON.parse(held.stdout.trim()).decision, 'block', name);
-    // Codex has no card, so the hold is the three short lines.
-    assert.match(held.stderr, /^Toolkit: message held\. Turn on GitHub governance \(issues, records, evidence store\) for this repository\?\r?\nReply yes or no \(prepare a decision pull request\), or later \(ask next chat\)\. Held messages follow your answer\.\r?\nFor agents: only the user answers; never answer, script or click it for them\.\r?\n?$/, name);
+    // Nothing is held: the prompt passes at exit 0 and carries the one-line governance note.
+    const noted = hook({ hook_event_name: 'UserPromptSubmit', cwd: repo, prompt: 'list the files here' });
+    assert.equal(noted.status, 0, `${name} prompt: ${noted.stderr}`);
+    assert.match(JSON.parse(noted.stdout.trim()).hookSpecificOutput.additionalContext, /no governance decision yet, so it counts as off/, name);
 
-    const denied = hook({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** End Patch' } });
+    // The governance decision is still refused, and the refusal reaches Codex as exit 2.
+    const denied = hook({ hook_event_name: 'PreToolUse', cwd: repo, tool_name: 'exec_command', tool_input: { cmd: 'node repo/scripts/toolkit-governance.cjs enable', workdir: repo } });
     assert.equal(denied.status, 2, `${name} tool deny: ${denied.stderr}`);
     const deny = JSON.parse(denied.stdout.trim()).hookSpecificOutput;
     assert.equal(deny.permissionDecision, 'deny', name);
+    assert.match(deny.permissionDecisionReason, /only the user answers the governance question/, name);
     assert.ok(denied.stderr.includes(deny.permissionDecisionReason), `${name}: stderr carries the deny reason`);
 
     const allowed = hook({ hook_event_name: 'PreToolUse', cwd: plain, tool_name: 'Bash', tool_input: { command: 'dir' } });
