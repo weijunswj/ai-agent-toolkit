@@ -4490,13 +4490,16 @@ class Reconciler {
       const checks = evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: this.binding.required_checks });
       return pr.state !== doc.pr.state || pr.head !== doc.pr.head || checks.state !== doc.pr.checks?.state;
     };
+    const detachedFinished = number => TERMINAL_LIFECYCLES.includes(stored(number)?.lifecycle)
+      && isFinished(outcomes.find(outcome => outcome.issue === number), stored(number));
     const all = outcomes.map(outcome => outcome.issue);
     const share = new Set(all.filter(number => number % ROTATION_PASSES === queued.pass % ROTATION_PASSES));
     const reasons = [
       all.filter(number => stored(number)?.pending_effects?.length),
       all.filter(number => LIVE_GATE_STATES.includes(stored(number)?.gate?.state)),
-      // No document yet, or no complete facts from a list: nothing shows whether it changed.
-      all.filter(number => !stored(number) || !rows.has(number)),
+      // No document yet, or no complete facts from a list: nothing shows whether it changed. A
+      // finished task taken off the native list is the exception: its reopen shows as a change.
+      all.filter(number => !stored(number) || !rows.has(number) && !detachedFinished(number)),
       // Changed tasks newest change first (the list is read oldest first), then those changed through a PR.
       [...new Set([...[...(changed.order || changed.issues)].reverse().filter(number => tasks.has(number)), ...all.filter(touched)])], all.filter(drifted), all.filter(checksMoved),
       (queued.queue || []).filter(number => tasks.has(number)),
@@ -4854,8 +4857,11 @@ class Reconciler {
       if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
     }
     if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
-    // Native parent.
-    if (outcome.parent) {
+    // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
+    // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
+    // makes the parent required again.
+    const nativeOptional = issue.state === 'closed' && isFinished(outcome, desired);
+    if (outcome.parent && !nativeOptional) {
       if (issue.parent === null) {
         findings.push({ code: 'NATIVE_PARENT_MISSING', issue: issueNumber, detail: `expected under #${outcome.parent}` });
         effects.push({ kind: 'attach', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id });
@@ -4866,7 +4872,7 @@ class Reconciler {
         findings.push({ code: 'NATIVE_PARENT_WRONG', issue: issueNumber, detail: `under ${typeof issue.parent === 'number' ? `#${issue.parent}` : issue.parent}, expected #${outcome.parent}` });
         effects.push({ kind: 'reparent', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id, from: issue.parent });
       }
-    } else if (issue.parent !== null) {
+    } else if (!outcome.parent && issue.parent !== null) {
       findings.push({ code: 'NATIVE_PARENT_UNEXPECTED', issue: issueNumber, detail: `natively under #${issue.parent} but the catalogue names no parent; not changed` });
     }
     // Dependencies are read and shown; they never imply parentage.

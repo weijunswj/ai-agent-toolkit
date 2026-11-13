@@ -949,7 +949,8 @@ test('a dry run plans the native tree without writing; apply makes it agree and 
   assert.deepEqual(applied.results.filter(entry => !['DONE', 'NOOP'].includes(entry.outcome)), [], JSON.stringify(applied.holds));
   assert.deepEqual(applied.holds, []);
   // Native and canonical agree: every catalogued parent link, in catalogue order.
-  assert.deepEqual(github.issues.get(421).subs.filter(n => n !== 424 && n !== 425), [423, 467, 459, 422]);
+  // Closed COMPLETED (#459) and RETIRED (#422) tasks need no native parent, so none is attached.
+  assert.deepEqual(github.issues.get(421).subs.filter(n => n !== 424 && n !== 425), [423, 467]);
   assert.deepEqual(github.issues.get(467).subs, [469, 470]);
   assert.equal(github.issues.get(470).parent, 467);
   assert.equal(github.issues.get(424).parent, 421, 'an uncatalogued sub-issue is reported, never detached');
@@ -962,6 +963,32 @@ test('a dry run plans the native tree without writing; apply makes it agree and 
   }
   assert.equal(github.commits, before.commits, 'the second pass makes no store commit');
   assert.equal(github.mutations(), before.mutations, 'the second pass makes no GitHub write');
+});
+
+test('closed COMPLETED and RETIRED tasks need no native parent: never attached, never reordered, and detaching them settles', () => {
+  const { github, reconciler } = setup();
+  const dry = reconciler().run();
+  for (const closed of [459, 422]) {
+    assert.ok(!codes(dry).includes(`NATIVE_PARENT_MISSING #${closed}`), `no missing-parent finding for closed #${closed}`);
+    assert.ok(!kinds(dry).includes(`attach #${closed}`), `no attach for closed #${closed}`);
+  }
+  assert.ok(kinds(dry).includes('attach #423'), 'an open task still gets its native parent');
+  assert.deepEqual(reconciler().run({ apply: true }).holds, []);
+  assert.equal(github.issues.get(459).parent, null);
+  assert.equal(github.issues.get(422).parent, null);
+  assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
+  // A closed task still natively under the parent stays put; once the owner detaches it (to stay
+  // under GitHub's sub-issue cap) nothing re-attaches it and the native order needs no move.
+  github.link(421, 459);
+  assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
+  github.issues.get(421).subs = github.issues.get(421).subs.filter(n => n !== 459);
+  github.issues.get(459).parent = null;
+  const after = reconciler().run();
+  assert.ok(!codes(after).some(code => code.startsWith('NATIVE_') && (code.endsWith('#459') || code.endsWith('#421'))), JSON.stringify(after.findings));
+  assert.equal(after.summary, 'No changes', JSON.stringify(after.effects));
+  // A reopened task needs its native parent again.
+  github.issues.get(459).state = 'open';
+  assert.ok(kinds(reconciler().run()).includes('attach #459'));
 });
 
 test('apply shows state writes from the same pass on the parent without a second edit', () => {
