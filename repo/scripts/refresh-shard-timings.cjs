@@ -8,7 +8,7 @@
 // --repo-root selects another repository using the same shard manifest and Validate summary contract.
 //
 // Without a flag it only reports. Each shard job already uploads its run-tests.cjs summary (per-file
-// seconds) as a test-summary-<shard>-attempt-<n> artifact, so this reads those through read-only `gh` and changes
+// seconds) as a test-summary-<shard>-attempt-<n>-<commit> artifact, so this reads those through read-only `gh` and changes
 // nothing. --run <id> reads that finished Validate run instead, for example a pull request's run
 // that measured a new or split test file. It reports the refresh triggers it checks:
 //   - more than 10% of test files have no measured time;

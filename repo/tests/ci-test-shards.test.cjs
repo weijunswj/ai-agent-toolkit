@@ -134,13 +134,18 @@ function ciFixture() {
       summary('linux', 'linux-2', ['repo/tests/b.test.cjs', 'repo/tests/c.test.cjs']),
       summary('windows', 'windows-1', files),
     ],
-    needs: Object.fromEntries(['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'hook-pack-windows', 'personal-data', 'issue-closure'].map(job => [job, { result: 'success', outputs: {} }])),
+    // The gate job's legs (route left out); legsFor('validate') gives the validate job's needs.
+    needs: Object.fromEntries(shards.TEST_JOBS.map(job => [job, { result: 'success', outputs: {} }])),
   };
 }
 
+const legsFor = (set) => Object.fromEntries(shards.LEG_SETS[set].map(job => [job, { result: 'success', outputs: {} }]));
+const COMMIT = '0123456789abcdef0123456789abcdef01234567';
+const OTHER_COMMIT = 'fedcba9876543210fedcba9876543210fedcba98';
+
 test('the CI aggregate check passes only when every leg succeeded and covered every file once', () => {
   const good = ciFixture();
-  const ok = shards.verifyCiSummaries({ manifest: good.manifest, discovered: good.files, summaries: good.summaries, needs: good.needs });
+  const ok = shards.verifyCiSummaries({ manifest: good.manifest, discovered: good.files, summaries: good.summaries, needs: good.needs, requiredJobs: shards.TEST_JOBS });
   assert.deepEqual(ok.errors, []);
   assert.equal(ok.totals.linux.tests, 6);
   assert.equal(ok.totals.windows.files, 3);
@@ -175,14 +180,51 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
     failed.files[1].failed = 1;
     const passed = { ...clone(rerun.summaries[2]), run_attempt: 2 };
     rerun.summaries.splice(2, 1, ...order.map(at => [failed, passed][at]));
-    assert.deepEqual(shards.verifyCiSummaries({ manifest: rerun.manifest, discovered: rerun.files, summaries: rerun.summaries, needs: rerun.needs }).errors, [], `re-run order ${order}`);
+    assert.deepEqual(shards.verifyCiSummaries({ manifest: rerun.manifest, discovered: rerun.files, summaries: rerun.summaries, needs: rerun.needs, requiredJobs: shards.TEST_JOBS }).errors, [], `re-run order ${order}`);
   }
   for (const [label, mutate, pattern] of cases) {
     const fixture = ciFixture();
     mutate(fixture);
-    const { errors } = shards.verifyCiSummaries({ manifest: fixture.manifest, discovered: fixture.files, summaries: fixture.summaries, needs: fixture.needs });
+    const { errors } = shards.verifyCiSummaries({ manifest: fixture.manifest, discovered: fixture.files, summaries: fixture.summaries, needs: fixture.needs, requiredJobs: shards.TEST_JOBS });
     assert.match(errors.join('\n'), pattern, label);
   }
+});
+
+test('the validate check needs the gate and both pull request text jobs, and every summary of the tested commit', () => {
+  assert.deepEqual(shards.LEG_SETS.validate, ['gate', 'personal-data', 'issue-closure']);
+  assert.deepEqual(shards.LEG_SETS.gate, ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'hook-pack-windows']);
+  const check = (mutate, options = {}) => {
+    const fixture = ciFixture();
+    fixture.needs = legsFor('validate');
+    for (const summary of fixture.summaries) summary.commit = COMMIT;
+    mutate(fixture);
+    return shards.verifyCiSummaries({ manifest: fixture.manifest, discovered: fixture.files, summaries: fixture.summaries, needs: fixture.needs, commit: COMMIT, ...options }).errors.join('\n');
+  };
+  assert.equal(check(() => {}), '', 'the default set is the validate job\'s');
+  assert.equal(check(() => {}, { commit: null }), '', 'no commit given: outside CI the commit is not checked');
+  const cases = [
+    ['the gate failed', (f) => { f.needs.gate.result = 'failure'; }, /test job gate finished as failure/],
+    ['the gate skipped', (f) => { f.needs.gate.result = 'skipped'; }, /gate finished as skipped/],
+    ['the gate missing', (f) => { delete f.needs.gate; }, /required job gate is missing/],
+    ['personal-data failed (a bad body)', (f) => { f.needs['personal-data'].result = 'failure'; }, /personal-data finished as failure/],
+    ['issue-closure missing', (f) => { delete f.needs['issue-closure']; }, /required job issue-closure is missing/],
+    ['a summary of another commit', (f) => { f.summaries[1].commit = OTHER_COMMIT; }, /linux summary of shard linux-2 tested commit fedcba987654, not 0123456789ab[\s\S]*linux-2 has no summary/],
+    ['a summary with no commit', (f) => { delete f.summaries[2].commit; }, /windows summary of shard windows-1 tested commit unknown/],
+  ];
+  for (const [label, mutate, pattern] of cases) assert.match(check(mutate), pattern, label);
+  // The gate's legs never stand in for the validate job's needs, nor the other way round.
+  assert.match(check((f) => { f.needs = legsFor('gate'); }), /required job gate is missing/);
+  assert.match(check(() => {}, { requiredJobs: shards.LEG_SETS.gate }), /required job tests-linux is missing/);
+});
+
+test('in GitHub Actions a shard summary records the tested commit and --legs picks the job set', () => {
+  assert.equal(runner.testedCommit({ GITHUB_ACTIONS: 'true', GITHUB_SHA: COMMIT }), COMMIT);
+  assert.equal(runner.testedCommit({ GITHUB_SHA: COMMIT }), null, 'only inside GitHub Actions');
+  assert.equal(runner.testedCommit({ GITHUB_ACTIONS: 'true', GITHUB_SHA: 'main' }), null, 'only a full commit SHA');
+  assert.equal(runner.parseArgs(['--verify-ci', 'x', '--legs', 'gate']).legs, 'gate');
+  assert.equal(runner.parseArgs(['--verify-ci', 'x']).legs, undefined);
+  assert.throws(() => runner.parseArgs(['--verify-ci', 'x', '--legs', 'all']), /--legs is one of validate, gate/);
+  assert.throws(() => runner.parseArgs(['--all', '--legs', 'gate']), /--legs goes with --verify-ci/);
 });
 
 test('Windows hook pack families cover every corpus host case exactly once', () => {
@@ -220,7 +262,11 @@ function pinnedActions(workflow) {
 function assertDriftGuard(WORKFLOW) {
   assert.deepEqual(shards.workflowErrors(WORKFLOW, MANIFEST), []);
   const shardStep = 'node repo/scripts/run-tests.cjs --shard ${{ matrix.shard }} --os windows';
-  const verify = `          ${shards.VERIFY_COMMAND}`;
+  const verify = `          ${shards.GATE_VERIFY_COMMAND}`;
+  const finalVerify = `          ${shards.VERIFY_COMMAND}\n`;
+  const heavyIf = "    if: ${{ !cancelled() && needs.route.outputs.mode != 'light' }}\n";
+  const gateNeeds = 'needs: [route, tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows]';
+  const validateNeeds = 'needs: [gate, personal-data, issue-closure]';
   const mutations = [
     ['a narrowed file list', WORKFLOW.replace(shardStep, 'node repo/scripts/run-tests.cjs repo/tests/skill-routing.test.cjs')],
     ['the runner replaced by node --test', WORKFLOW.replace(shardStep, 'node --test repo/tests/a.test.cjs')],
@@ -242,20 +288,40 @@ function assertDriftGuard(WORKFLOW) {
     ['no new commit cancels the run in progress', WORKFLOW.replace("  cancel-in-progress: ${{ github.event.action != 'edited' }}\n", '  cancel-in-progress: false\n')],
     ['a body edit no longer runs the checks', WORKFLOW.replace('types: [opened, edited, reopened, synchronize]', 'types: [opened, reopened, synchronize]')],
     ['edit runs in their own group, racing the code run', WORKFLOW.replace("github.event_name == 'pull_request' && github.ref ||", "github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.action) ||")],
-    ['the aggregate not waiting for Windows', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows, personal-data, issue-closure]', 'needs: [tests-linux, tests-clock-ahead, hook-pack, personal-data]')],
-    ['the aggregate not waiting for the personal-data check', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows, personal-data, issue-closure]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack]')],
-    ['the aggregate not waiting for the clock-ahead run', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows, personal-data, issue-closure]', 'needs: [tests-linux, tests-windows, hook-pack, personal-data]')],
+    ['the gate not waiting for Windows', WORKFLOW.replace(gateNeeds, 'needs: [route, tests-linux, tests-clock-ahead, hook-pack]')],
+    ['the aggregate not waiting for the personal-data check', WORKFLOW.replace(validateNeeds, 'needs: [gate, issue-closure]')],
+    ['the gate not waiting for the clock-ahead run', WORKFLOW.replace(gateNeeds, 'needs: [route, tests-linux, tests-windows, hook-pack, hook-pack-windows]')],
+    ['the aggregate not waiting for the gate', WORKFLOW.replace(validateNeeds, 'needs: [personal-data, issue-closure]')],
+    ['the aggregate needing the test jobs directly (a light run would skip them)', WORKFLOW.replace(validateNeeds, 'needs: [gate, tests-linux, personal-data, issue-closure]')],
+    ['the aggregate condition removed', WORKFLOW.replace(`${validateNeeds}\n    if: \${{ !cancelled() }}\n`, `${validateNeeds}\n`)],
+    ['the aggregate run in a cancelled run', WORKFLOW.replace(`${validateNeeds}\n    if: \${{ !cancelled() }}\n`, `${validateNeeds}\n    if: \${{ always() }}\n`)],
+    ['the test jobs run only on a light run', WORKFLOW.split(heavyIf).join(heavyIf.replace("!= 'light'", "== 'light'"))],
+    ['one test job skipped on light runs no longer', WORKFLOW.replace(`  tests-windows:\n    needs: [route]\n${heavyIf}`, '  tests-windows:\n')],
+    ['a failed route job skipping the test jobs', WORKFLOW.split(heavyIf).join("    if: ${{ needs.route.outputs.mode != 'light' }}\n")],
+    ['the route job removed', WORKFLOW.replace(/\n  route:\n[\s\S]*?(?=\n  tests-linux:\n)/, '')],
+    ['the route job given write access', WORKFLOW.replace('      actions: read\n', '      actions: write\n')],
+    ['the route job running another script', WORKFLOW.replace('node repo/scripts/ci-validate-route.cjs route', 'node repo/scripts/other.cjs route')],
+    ['the gate legs not checked again', WORKFLOW.replace('node repo/scripts/ci-validate-route.cjs legs', 'node repo/scripts/ci-validate-route.cjs route')],
+    ['the gate check given another leg set', WORKFLOW.replace(' --legs gate', '')],
+    ['the gate legs taken from the route job', WORKFLOW.replace('          TEST_LEGS: ${{ steps.legs.outputs.legs }}\n', '          TEST_LEGS: ${{ needs.route.outputs.mode }}\n')],
+    ['the summary artifact no longer naming the tested commit', WORKFLOW.split('-attempt-${{ github.run_attempt }}-${{ github.sha }}\n').join('-attempt-${{ github.run_attempt }}\n')],
+    ['the validate summaries read from the route job', WORKFLOW.replace('          run-id: ${{ needs.gate.outputs.legs_run_id || github.run_id }}', '          run-id: ${{ needs.route.outputs.run_id }}')],
+    ['the validate summary check removed', WORKFLOW.replace(finalVerify, '')],
+    ['the validate summary check given the gate set', WORKFLOW.replace(finalVerify, `${verify}\n`)],
+    ['a condition on the validate step', WORKFLOW.replace('      - name: Check every job passed\n', "      - name: Check every job passed\n        if: ${{ github.event_name == 'push' }}\n")],
     ['the clock-ahead job removed', WORKFLOW.replace(/\n  tests-clock-ahead:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
     ['the clock-ahead run narrowed to one file', WORKFLOW.replace('--clock-ahead --clock-offset-days 400', 'repo/tests/skill-routing.test.cjs --clock-offset-days 400')],
     ['the clock-ahead run moved one day only', WORKFLOW.replace('--clock-ahead --clock-offset-days 400', '--clock-ahead --clock-offset-days 1')],
     ['a failed shard no longer uploads its summary', WORKFLOW.replace('        if: ${{ !cancelled() }}\n', '')],
     ['the personal-data check narrowed to one mode', WORKFLOW.replace('personal-data-guard.cjs ci', 'personal-data-guard.cjs pr')],
-    ['the closure check removed', WORKFLOW.replace(/\n  issue-closure:\n[\s\S]*?(?=\n  validate:\n)/, '')],
-    ['the aggregate not waiting for closure safety', WORKFLOW.replace('hook-pack-windows, personal-data, issue-closure]', 'hook-pack-windows, personal-data]')],
+    ['the closure check removed', WORKFLOW.replace(/\n  issue-closure:\n[\s\S]*?(?=\n  gate:\n)/, '')],
+    ['the aggregate not waiting for closure safety', WORKFLOW.replace(validateNeeds, 'needs: [gate, personal-data]')],
     ['the closure check given write permissions', WORKFLOW.replace('      issues: read', '      issues: write')],
     ['the closure check skipped on PRs', WORKFLOW.replace("        if: ${{ github.event_name == 'pull_request' }}", "        if: ${{ github.event_name == 'push' }}")],
     ['the personal-data check on a shallow clone', WORKFLOW.replace(/(\n  personal-data:\n[\s\S]*?)fetch-depth: 0/, '$1fetch-depth: 1')],
-    ['the personal-data job removed', WORKFLOW.replace(/\n  personal-data:\n[\s\S]*?(?=\n  validate:\n)/, '')],
+    ['the personal-data job removed', WORKFLOW.replace(/\n  personal-data:\n[\s\S]*?(?=\n  issue-closure:\n)/, '')],
+    ['the personal-data job skipped on light runs', WORKFLOW.replace('  personal-data:\n', `  personal-data:\n    needs: [route]\n${heavyIf}`)],
+    ['the closure check skipped on light runs', WORKFLOW.replace('  issue-closure:\n', `  issue-closure:\n    needs: [route]\n${heavyIf}`)],
     ['the hook pack job removed', WORKFLOW.replace(/\n  hook-pack:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
     ['the hook pack dropped on Windows', WORKFLOW.replace('    runs-on: windows-latest\n    timeout-minutes: 15', '    runs-on: ubuntu-latest\n    timeout-minutes: 15')],
     ['the Windows pack job removed', WORKFLOW.replace(/\n  hook-pack-windows:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
@@ -266,16 +332,16 @@ function assertDriftGuard(WORKFLOW) {
     ['a Windows family filter removed', WORKFLOW.replace(' --family ${{ matrix.family }}', '')],
     ['the Windows pack budget raised', WORKFLOW.replace(' --family ${{ matrix.family }} --budget-seconds 360', ' --family ${{ matrix.family }} --budget-seconds 400')],
     ['the Windows pack made optional', WORKFLOW.replace('  hook-pack-windows:\n', '  hook-pack-windows:\n    continue-on-error: true\n')],
-    ['the aggregate not waiting for Windows families', WORKFLOW.replace('hook-pack, hook-pack-windows, personal-data, issue-closure]', 'hook-pack, personal-data, issue-closure]')],
+    ['the gate not waiting for Windows families', WORKFLOW.replace(gateNeeds, 'needs: [route, tests-linux, tests-windows, tests-clock-ahead, hook-pack]')],
     ['the hook pack budget removed', WORKFLOW.replace(' run --budget-seconds 360', ' run')],
-    ['the aggregate not waiting for the hook pack', WORKFLOW.replace('needs: [tests-linux, tests-windows, tests-clock-ahead, hook-pack, hook-pack-windows, personal-data, issue-closure]', 'needs: [tests-linux, tests-windows, tests-clock-ahead, personal-data]')],
+    ['the gate not waiting for the hook pack', WORKFLOW.replace(gateNeeds, 'needs: [route, tests-linux, tests-windows, tests-clock-ahead, hook-pack-windows]')],
     ['the summary check removed', WORKFLOW.replace(`\n${verify}`, '')],
     ['the summary check not last', WORKFLOW.replace(`\n${verify}`, '').replace('          node repo/scripts/validate-toolkit.cjs\n', `          node repo/scripts/validate-toolkit.cjs\n${verify}\n`)],
     ['the leg results not passed in', WORKFLOW.replace('          TEST_LEGS: ${{ toJSON(needs) }}\n', '')],
     ['a step before Run validation', WORKFLOW.replace('          python-version: \'3.12\'\n\n      # The one', '          python-version: \'3.12\'\n\n      - name: Extra\n        run: echo hi\n\n      # The one')],
     ['a condition on the gate step', WORKFLOW.replace('      - name: Run validation\n', '      - name: Run validation\n        if: ${{ github.event_name == \'push\' }}\n')],
     ['an extra job', `${WORKFLOW}\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n`],
-    ['a test job removed', WORKFLOW.replace(/\n  tests-windows:\n[\s\S]*?(?=\n  validate:\n)/, '')],
+    ['a test job removed', WORKFLOW.replace(/\n  tests-windows:\n[\s\S]*?(?=\n  tests-clock-ahead:\n)/, '')],
   ];
   for (const [label, mutated] of mutations) {
     assert.notEqual(mutated, WORKFLOW, `${label} must change the workflow`);

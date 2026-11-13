@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { DURATIONS_COMMAND, LOCAL_TESTS, gateCommands, localCommands } = require('../scripts/run-validation-gate.cjs');
-const { VERIFY_COMMAND } = require('../scripts/ci-test-shards.cjs');
+const { GATE_VERIFY_COMMAND: VERIFY_COMMAND } = require('../scripts/ci-test-shards.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, ...rel.split('/')), 'utf8');

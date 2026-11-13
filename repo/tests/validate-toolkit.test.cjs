@@ -385,8 +385,8 @@ function parseValidationWorkflowSteps(source, jobName = 'validate') {
   return { steps, errors: [] };
 }
 
-// Every job of the validation workflow (test shards, the personal-data check and the validate job)
-// checks out the event's full history before its validation floor.
+// Every job of the validation workflow (the route job, test shards, the personal-data check, the
+// gate and the validate job) checks out the event's full history before its validation floor.
 function validationWorkflowCheckoutErrors(source) {
   const names = workflowJobNames(source);
   if (!names.length) return ['missing jobs section'];
@@ -415,7 +415,8 @@ function jobCheckoutErrors(source, jobName) {
     step.source.includes('npm run validate:toolkit') ||
     step.source.includes('node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci') ||
     step.source.includes('node repo/scripts/toolkit-hook-pack.cjs run') ||
-    step.source.includes('node repo/scripts/toolkit-issue-closure.cjs')
+    step.source.includes('node repo/scripts/toolkit-issue-closure.cjs') ||
+    step.source.includes('node repo/scripts/ci-validate-route.cjs')
   ));
   if (validationIndex === -1) errors.push('existing validation floor is missing');
   else if (parsed.steps.indexOf(checkout) >= validationIndex) errors.push('checkout must precede the existing validation floor');
@@ -711,7 +712,7 @@ test('every validation job fetches full history before its own validation floor'
   const relPath = '.github/workflows/validate.yml';
   const source = readText(relPath);
   assert.deepEqual(validationWorkflowCheckoutErrors(source), [], relPath);
-  assert.deepEqual(workflowJobNames(source), ['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'hook-pack-windows', 'personal-data', 'issue-closure', 'validate']);
+  assert.deepEqual(workflowJobNames(source), ['route', 'tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'hook-pack-windows', 'personal-data', 'issue-closure', 'gate', 'validate']);
   assert.match(source, /^permissions:\n  contents: read$/m, relPath + ' read-only permissions');
   assert.match(source, /^on:\n  pull_request:\n/m, relPath + ' pull_request trigger');
   assert.match(source, /^  push:\n    branches:\n      - main$/m, relPath + ' main push trigger');
@@ -721,11 +722,15 @@ test('every validation job fetches full history before its own validation floor'
 test('validation workflow checkout regressions reject missing, shallow, misplaced, overridden, or bypassed acquisition', () => {
   const relPath = '.github/workflows/validate.yml';
   const full = readText(relPath);
-  // Each mutation covers a test shard, the closure backstop and the aggregate validator.
+  // Each mutation covers the route job, a test shard, the closure backstop, the gate and the aggregate validator.
   const split = full.indexOf('\n  validate:\n');
   const closureSplit = full.indexOf('\n  issue-closure:\n');
+  const gateSplit = full.indexOf('\n  gate:\n');
+  const shardSplit = full.indexOf('\n  tests-linux:\n');
   const targets = [['first job', '', full], ['validate job', full.slice(0, split), full.slice(split)],
-    ['issue-closure job', full.slice(0, closureSplit), full.slice(closureSplit)]];
+    ['issue-closure job', full.slice(0, closureSplit), full.slice(closureSplit)],
+    ['gate job', full.slice(0, gateSplit), full.slice(gateSplit)],
+    ['first test job', full.slice(0, shardSplit), full.slice(shardSplit)]];
   for (const [where, head, source] of targets) {
     const withoutDepth = source.replace(/^          fetch-depth: 0\n/m, '');
     const variants = [
