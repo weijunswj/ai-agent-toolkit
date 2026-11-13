@@ -380,8 +380,8 @@ const FINDING_CODES = Object.freeze({
   GRAPHQL_REFUSED: { source: 'reconcile', next_action: 'Controller: GitHub refused GraphQL to three sweeps in a row; check the sign-in and GitHub status, the sweep reads one document at a time meanwhile' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
-  TASK_IDLE: { source: 'reconcile', next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
-  TASK_MERGED_OPEN: { source: 'reconcile', next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued)' },
+  TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
+  TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued)' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
   PR_DISCOVERY_INCOMPLETE: { source: 'reconcile', next_action: 'Controller: retry reconciliation; merged PR discovery could not finish within its read limits' },
@@ -401,7 +401,8 @@ const FINDING_CODES = Object.freeze({
 // Work-queue findings: a task on the programme graph that needs the controller's next step. They are
 // answered by acting (a lane, a state change, a close) or disposed with a reason, never acknowledged;
 // they list first, and a disposed one resolves when its condition clears so a later stall is new.
-const WORK_QUEUE_CODES = new Set(['TASK_IDLE', 'TASK_MERGED_OPEN']);
+// A code joins it with `queue: true` in its FINDING_CODES row.
+const WORK_QUEUE_CODES = new Set(Object.keys(FINDING_CODES).filter(code => FINDING_CODES[code].queue === true));
 // Findings with no issue of their own.
 const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
