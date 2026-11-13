@@ -22,7 +22,8 @@ const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
 const ADOPTION_HELP = 'Run toolkit governance discover, reuse the adoption proposal and ask only for missing parent, separate evidence store or required checks. Verify the store is private. Use repository-agent-rules to prepare the binding, governed block and supporting rules before publishing them together.';
 
-// The cloud sweep copies a governed repository needs, rendered from this Toolkit's current main:
+// The cloud sweep copies a governed repository needs, pinned to this Toolkit checkout's own commit,
+// which must be on its main branch:
 // { files: { path: text }, warning }. Turning governance on carries them in the same pull request as
 // the binding, so a repository never gets one without the other. A Toolkit source checkout runs its
 // own workflow files, so it gets nothing and no warning. When the copies cannot be rendered, the
@@ -335,6 +336,12 @@ class GitHubProposalTransport {
         && files.filter(file => file.filename === cache.BINDING_PATH && ['added', 'modified'].includes(file.status)).length === 1
         && files.every(file => file.filename === cache.BINDING_PATH || (cloud.includes(file.filename) && file.status === 'removed'));
       if (!valid) fail('PROPOSAL_SCOPE_INVALID');
+      // A removed sweep path must have been the Toolkit's own marked copy where the PR started.
+      const removed = files.filter(file => file.status === 'removed').map(file => file.filename);
+      if (removed.length) {
+        const marked = SHA.test(pr.base?.sha || '') ? this.#cloudCopies(repository, pr.base.sha) : [];
+        if (removed.some(name => !marked.includes(name))) fail('PROPOSAL_SCOPE_INVALID');
+      }
     }
     return { repository, number: pr.number, head: pr.head.sha, url: pr.html_url, answer: binding.governance === 'disabled' ? 'no' : 'yes', state: pr.state };
   }
@@ -364,8 +371,10 @@ class GitHubProposalTransport {
     if (headSha !== base.object.sha) {
       // Recover only our exact prepared commit. A branch someone changed is never overwritten.
       const diff = this.#api(`repos/${repository}/compare/${base.object.sha}...${headSha}`);
+      // The branch must hold exactly this proposal: its files, and every removal it lists, done.
       if (diff.total_commits !== 1 || diff.merge_base_commit?.sha !== base.object.sha || !diff.files?.length
-        || diff.files.some(file => !Object.hasOwn(files, file.filename) && !(removals.includes(file.filename) && file.status === 'removed'))) fail('PROPOSAL_BRANCH_CHANGED');
+        || diff.files.some(file => !Object.hasOwn(files, file.filename) && !(removals.includes(file.filename) && file.status === 'removed'))
+        || removals.some(name => !diff.files.some(file => file.filename === name && file.status === 'removed'))) fail('PROPOSAL_BRANCH_CHANGED');
       for (const [name, content] of Object.entries(files)) {
         const file = this.#api(`repos/${repository}/contents/${name}?ref=${headSha}`);
         if (file.type !== 'file' || file.encoding !== 'base64' || typeof file.content !== 'string' || Buffer.from(file.content, 'base64').toString('utf8') !== content) fail('PROPOSAL_BRANCH_CHANGED');

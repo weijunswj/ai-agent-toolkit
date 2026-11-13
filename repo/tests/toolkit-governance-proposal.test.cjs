@@ -564,25 +564,74 @@ test('no removes the marked cloud sweep copies in the same pull request, and onl
   assert.ok(!body.includes(gate), 'the unmarked gate file is never listed');
 });
 
-test('an off pull request may remove the cloud sweep copies, and nothing else', () => {
+test('an off pull request may remove the marked cloud sweep copies, and nothing else', () => {
   const repository = 'example-owner/example-repo';
   const [sweep, gate] = require('../scripts/toolkit-cloud-workflows.cjs').WORKFLOWS.map(row => row.file);
   const text = JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' });
-  const read = files => {
-    const responses = [
-      { number: 1, html_url: `https://github.com/${repository}/pull/1`, state: 'open', changed_files: files.length, body: '<!-- toolkit-governance-decision -->', head: { repo: { full_name: repository }, sha: 'a'.repeat(40) }, base: { ref: 'main' } },
-      { default_branch: 'main' },
-      { tree: { sha: 'b'.repeat(40) } },
-      { truncated: false, tree: [{ path: '.github', type: 'tree', mode: '040000', sha: 'd'.repeat(40) }] },
-      { truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] },
-      { type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: Buffer.byteLength(text), content: Buffer.from(text).toString('base64') },
-      files,
-    ];
-    return new GitHubProposalTransport({ run: () => JSON.stringify(responses.shift()) }).read(repository, 1);
-  };
+  const marker = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`;
+  const read = (files, atBase = { [sweep]: marker, [gate]: marker }) => new GitHubProposalTransport({ run(args) {
+    const endpoint = args[1];
+    const json = value => JSON.stringify(value);
+    if (endpoint.endsWith('/pulls/1')) return json({ number: 1, html_url: `https://github.com/${repository}/pull/1`, state: 'open', changed_files: files.length, body: '<!-- toolkit-governance-decision -->', head: { repo: { full_name: repository }, sha: 'a'.repeat(40) }, base: { ref: 'main', sha: '9'.repeat(40) } });
+    if (endpoint === `repos/${repository}`) return json({ default_branch: 'main' });
+    if (endpoint.includes('/git/commits/')) return json({ tree: { sha: 'b'.repeat(40) } });
+    if (endpoint.endsWith(`/git/trees/${'b'.repeat(40)}`)) return json({ truncated: false, tree: [{ path: '.github', type: 'tree', mode: '040000', sha: 'd'.repeat(40) }] });
+    if (endpoint.endsWith(`/git/trees/${'d'.repeat(40)}`)) return json({ truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] });
+    if (endpoint.includes('/contents/.github/toolkit-programme.json')) return json({ type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: Buffer.byteLength(text), content: Buffer.from(text).toString('base64') });
+    if (endpoint.includes('/pulls/1/files')) return json(files);
+    for (const name of [sweep, gate]) if (endpoint.includes(`/contents/${name}?ref=${'9'.repeat(40)}`)) {
+      if (atBase[name] === undefined) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
+      return json({ type: 'file', encoding: 'base64', content: Buffer.from(atBase[name]).toString('base64') });
+    }
+    throw Error(`unexpected endpoint ${endpoint}`);
+  } }).read(repository, 1);
   const binding = { filename: '.github/toolkit-programme.json', status: 'modified' };
   assert.equal(read([binding, { filename: sweep, status: 'removed' }, { filename: gate, status: 'removed' }]).answer, 'no');
+  assert.equal(read([binding]).answer, 'no');
   assert.throws(() => read([binding, { filename: sweep, status: 'modified' }]), /SCOPE_INVALID/);
   assert.throws(() => read([binding, { filename: '.github/workflows/other.yml', status: 'removed' }]), /SCOPE_INVALID/);
   assert.throws(() => read([{ filename: sweep, status: 'removed' }]), /SCOPE_INVALID/);
+  // A removed sweep path must have held the Toolkit's marked copy at the base: never someone's own file.
+  assert.throws(() => read([binding, { filename: gate, status: 'removed' }], { [sweep]: marker, [gate]: 'name: mine\n' }), /SCOPE_INVALID/);
+});
+
+test('recovering an interrupted off branch needs every listed removal done, and nothing extra', () => {
+  const repository = 'example-owner/example-repo';
+  const [sweep, gate] = require('../scripts/toolkit-cloud-workflows.cjs').WORKFLOWS.map(row => row.file);
+  const binding = { schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' };
+  const text = `${JSON.stringify(binding, null, 2)}\n`;
+  const marked = Buffer.from(`# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\n`).toString('base64');
+  const attempt = diffFiles => {
+    const calls = [];
+    const transport = new GitHubProposalTransport({ run(args, input) {
+      calls.push({ args, input }); const endpoint = args[1];
+      if (args[0] === 'auth') return '';
+      if (endpoint === 'user') return JSON.stringify({ login: 'example-owner' });
+      if (endpoint === `repos/${repository}`) return JSON.stringify({ default_branch: 'main' });
+      if (endpoint.endsWith('/git/ref/heads/main')) return JSON.stringify({ object: { sha: 'a'.repeat(40) } });
+      if (endpoint.includes('/git/ref/heads/toolkit/')) return JSON.stringify({ object: { sha: 'c'.repeat(40) } });
+      if (endpoint.includes(`/contents/${sweep}?ref=`)) return JSON.stringify({ type: 'file', encoding: 'base64', content: marked });
+      if (endpoint.includes(`/contents/${gate}?ref=`)) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
+      if (endpoint.includes('/git/commits/')) return JSON.stringify({ tree: { sha: 'b'.repeat(40) } });
+      if (endpoint.includes('/git/trees/')) return JSON.stringify({ truncated: false, tree: [] });
+      if (endpoint.includes('/compare/')) return JSON.stringify({ total_commits: 1, merge_base_commit: { sha: 'a'.repeat(40) }, files: diffFiles });
+      if (endpoint.includes('/contents/.github/toolkit-programme.json') && !input) return JSON.stringify({ type: 'file', encoding: 'base64', content: Buffer.from(text).toString('base64') });
+      if (endpoint.endsWith('/pulls')) return JSON.stringify({ number: 1 });
+      throw Error(`unexpected endpoint ${endpoint}`);
+    } });
+    const result = (() => { try { return transport.publish(repository, binding); } catch (error) { return error; } })();
+    return { result, writes: calls.filter(item => item.input).length };
+  };
+  const bindingFile = { filename: '.github/toolkit-programme.json', status: 'modified' };
+  // Exact branch: the binding and the listed removal.
+  const exact = attempt([bindingFile, { filename: sweep, status: 'removed' }]);
+  assert.deepEqual(exact.result, { number: 1, head: 'c'.repeat(40) });
+  // Binding only: the removal never happened, so the branch is not this proposal.
+  const bindingOnly = attempt([bindingFile]);
+  assert.match(String(bindingOnly.result.code), /BRANCH_CHANGED/);
+  assert.equal(bindingOnly.writes, 0, 'a changed branch receives no writes and no pull request');
+  // An extra removal not listed for this base is refused too.
+  const extra = attempt([bindingFile, { filename: sweep, status: 'removed' }, { filename: gate, status: 'removed' }]);
+  assert.match(String(extra.result.code), /BRANCH_CHANGED/);
+  assert.equal(extra.writes, 0);
 });
