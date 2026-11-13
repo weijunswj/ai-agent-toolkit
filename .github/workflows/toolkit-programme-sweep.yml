@@ -12,7 +12,10 @@
 # on a public branch is skipped with a notice too. Runs never overlap: one at a time, none
 # cancelled, and the sweep's lease in the evidence store keeps it from writing while the
 # computer's sweep is running. A pass works for up to 50 minutes, is killed at 55 and the job is
-# stopped at 58, so it ends before the next hourly start; the next run reports a stopped one.
+# stopped at 58, so it ends before the next hourly start; the next run reports a stopped one. It has
+# no request cap of its own: it reads until the App's remaining hourly count reaches the safety
+# margin, saves where it got to and the next run resumes. Each governed repository has its own App,
+# so its own hourly allowance.
 #
 # The hourly start is at minute 41, away from the top of the hour: GitHub delays and can drop
 # scheduled runs at busy times, the start of every hour most of all. The run after each merge keeps
