@@ -1720,7 +1720,7 @@ function renderCurrentBlockBody(parent, children, issues = new Map(), now = new 
 // The freshness line a page shows in its CURRENT block, or null.
 function boardLineOf(body) {
   const current = findStateBlock(String(body || ''), CURRENT_BLOCK_NAME).block;
-  return current?.body.split('\n').find(line => /^(?:Board updated: |⚠️ Board out of date )/.test(line)) || null;
+  return current?.body.split('\n').find(line => /^(?:Board updated: |⚠️ Board out of date |⚠️ Sweep stuck)/.test(line)) || null;
 }
 
 // The parent preview shows recent/acknowledged findings and a separate short waiting list.
@@ -2256,6 +2256,17 @@ function upsertStateBlock(text, rendered, placement = {}) {
 // A takeover (STALE_WRITER) or the loss of the pass lock (PASS_LOCK_LOST) stops the whole pass at
 // once; an intent it leaves IN_FLIGHT is recovered by the next pass.
 const STOPS_PASS = new Set(['STALE_WRITER', 'PASS_LOCK_LOST', 'PASS_STOPPED', 'SWEEP_STOP']);
+// Requests per pass for the changed-issues list; a longer list carries on next pass from its cursor.
+const CHANGED_PAGES = 10;
+// A runaway guard on one PR list (100 PRs a page), far above any real repository; the pass's own
+// request budget is what normally bounds it.
+const LIST_PAGE_GUARD = 1000;
+// PR discovery's own budget: a fixed part for the PR lists' detail reads and the parent, plus one
+// request for each batch of twenty task links and two for each task read this pass (an older PR to
+// reconfirm and a merge to confirm). It grows with the board, so a large board never fails discovery
+// on a fixed number; the list pages themselves count only against the pass's request budget.
+const DISCOVERY_BASE = 60;
+const discoveryBudget = (tasks, scoped = tasks) => DISCOVERY_BASE + Math.ceil(Math.max(0, tasks) / 20) + 2 * Math.max(0, scoped);
 
 class GitHubTransport {
   // `env`, when given, is the whole environment of every gh call (the cloud sweep's own token).
@@ -2333,6 +2344,10 @@ function assertPageCopy(doc) {
 const DOCUMENT_FILE = /^(parent|issue)-([1-9][0-9]*)\.json$/;
 const SWEEP_RECORD_FILE = 'sweep-lease.json';
 const SWEEP_RECORD_SCHEMA = 'toolkit.programme-sweep-lease.v1';
+// The sweep's recent passes, beside the lease: when each ended, how many tasks it read, how many it
+// left and whether it finished. Only the board's stuck note reads it.
+const SWEEP_HISTORY_FILE = 'sweep-history.json';
+const SWEEP_HISTORY_SCHEMA = 'toolkit.programme-sweep-history.v1';
 const SWEEP_STOP_REASONS = ['time limit', 'request cap', 'GitHub rate limit', 'state branch busy', 'GitHub GraphQL unavailable', 'tasks still to check', 'an incomplete read',
   'another pass took over', 'a GitHub request failed', 'an error'];
 
@@ -2357,6 +2372,21 @@ function validateSweepRecord(doc) {
     check(errors, isObject(doc.streaks) && Object.keys(doc.streaks).sort().join(',') === 'busy,graphql' && isInt(doc.streaks.busy) && isInt(doc.streaks.graphql), 'the sweep record streaks are invalid');
   }
   if (errors.length) throw new ProgrammeError('STATE_INVALID', `The sweep record is invalid: ${errors[0]}.`);
+  return doc;
+}
+
+function validateSweepHistory(doc) {
+  const errors = [];
+  const time = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+  check(errors, isObject(doc), 'the sweep history must be an object');
+  if (isObject(doc)) {
+    checkShape(errors, doc, { all: ['schema', 'repository', 'started_at', 'passes'] }, 'sweep history');
+    check(errors, doc.schema === SWEEP_HISTORY_SCHEMA && REPO.test(doc.repository || '') && time(doc.started_at), 'the sweep history names its schema, repository and start');
+    check(errors, Array.isArray(doc.passes) && doc.passes.length <= 200 && doc.passes.every(entry => isObject(entry)
+      && Object.keys(entry).sort().join(',') === 'at,complete,left,read' && time(entry.at) && isInt(entry.read)
+      && (entry.left === null || isInt(entry.left)) && typeof entry.complete === 'boolean'), 'the sweep history passes are invalid');
+  }
+  if (errors.length) throw new ProgrammeError('STATE_INVALID', `The sweep history is invalid: ${errors[0]}.`);
   return doc;
 }
 
@@ -2492,6 +2522,7 @@ class StateStore {
 
   // Where the sweep's shared record (its lease) lives.
   sweepRecordPath() { return `${this.store.path}${SWEEP_RECORD_FILE}`; }
+  sweepHistoryPath() { return `${this.store.path}${SWEEP_HISTORY_FILE}`; }
   // The documents as they stand now: the earlier snapshot when the branch has not moved since.
   currentSnapshot(earlier) {
     const branch = this.transport.request('GET', `repos/${this.store.repository}/branches/${encodeURIComponent(this.store.branch)}`);
@@ -2618,6 +2649,7 @@ class StateStore {
   // State documents and journals, or a public state branch's sidecars and checkpoint.
   validateRead(kind, doc) {
     if (kind === 'sweep_record') return validateSweepRecord(doc);
+    if (kind === 'sweep_history') return validateSweepHistory(doc);
     if (kind === 'sidecar') return assertSidecar(doc);
     if (kind === 'checkpoint') return assertCheckpoint(doc);
     if (kind === 'page_copy') return assertPageCopy(doc);
@@ -3106,6 +3138,7 @@ class BranchStateStore extends StateStore {
 
   // The sweep record lives in the private store beside the sidecars.
   sweepRecordPath() { return this.private.sweepRecordPath(); }
+  sweepHistoryPath() { return this.private.sweepHistoryPath(); }
 
   // The sidecars before the branch commit, as write() puts the sidecar before the public file.
   beforeBatch(written) {
@@ -3751,7 +3784,7 @@ class ProgrammeGraphReader {
   graphPullRequests(status, spend, watermark = null) {
     const all = [];
     const cutoff = status === 'closed' && watermark ? Date.parse(watermark) - 5 * 60000 : null;
-    for (let page = 1; page <= 10; page += 1) {
+    for (let page = 1; page <= LIST_PAGE_GUARD; page += 1) {
       spend();
       const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=${status}&per_page=100&sort=updated&direction=desc&page=${page}`);
       if (response.status !== 200) throw ghFailure(response, 'Reading programme PR history');
@@ -3767,7 +3800,7 @@ class ProgrammeGraphReader {
       }
       if (response.json.length < 100) return all;
     }
-    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The programme PR scan reached ten full pages.');
+    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `The programme PR scan reached ${LIST_PAGE_GUARD} full pages.`);
   }
 
   // At most twenty aliases, each with two bounded issue connections. No partial GraphQL data is used.
@@ -3803,22 +3836,36 @@ class ProgrammeGraphReader {
     }));
   }
 
-  // The issues and pull requests GitHub changed at or after `since`, read in full or reported
-  // incomplete: a missed change would leave a task unread for up to a whole rotation.
+  // The issues and pull requests GitHub changed at or after `since`, oldest change first. Each
+  // request asks again from the update time the last one ended on (keyset paging), so an item that
+  // changes during the read moves to the end and is read then, never skipped. The read stops after
+  // CHANGED_PAGES requests: it is then incomplete, and `cursor` is the update time read up to, so
+  // the next pass carries on from there instead of starting over. Rows that share that time are
+  // read again next pass, through the pass's own overlap.
   changedSince(since) {
-    const issues = new Set(); const prs = [];
-    for (let page = 1; page <= 10; page += 1) {
-      const response = this.transport.request('GET', `repos/${this.repository}/issues?state=all&sort=updated&direction=desc&since=${encodeURIComponent(since)}&per_page=100&page=${page}`);
+    const issues = new Set(); const prs = []; const seen = new Set(); const order = [];
+    let from = since; let page = 1; let cursor = null;
+    for (let request = 0; request < CHANGED_PAGES; request += 1) {
+      const response = this.transport.request('GET', `repos/${this.repository}/issues?state=all&sort=updated&direction=asc&since=${encodeURIComponent(from)}&per_page=100&page=${page}`);
       if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
-      if (response.status !== 200 || !Array.isArray(response.json)) return { issues, prs, complete: false };
+      if (response.status !== 200 || !Array.isArray(response.json)) return { issues, prs, order, complete: false, cursor };
+      let last = null;
       for (const row of response.json) {
-        if (!isObject(row) || !isInt(row.number, 1)) return { issues, prs, complete: false };
+        if (!isObject(row) || !isInt(row.number, 1) || !Number.isFinite(Date.parse(row.updated_at))) return { issues, prs, order, complete: false, cursor };
+        last = row.updated_at;
+        if (seen.has(row.number)) continue;
+        seen.add(row.number);
         if (row.pull_request) prs.push({ number: row.number, title: row.title || '', body: [row.title, row.body].filter(Boolean).join('\n') });
-        else issues.add(row.number);
+        else { issues.add(row.number); order.push(row.number); }
       }
-      if (response.json.length < 100) return { issues, prs, complete: true };
+      if (response.json.length < 100) return { issues, prs, order, complete: true, cursor: null };
+      // Everything changed before `last` has been read; rows at `last` itself may continue.
+      cursor = last;
+      // A full page of one update time cannot move the keyset forward: page through it instead.
+      if (Date.parse(last) <= Date.parse(from)) page += 1;
+      else { from = last; page = 1; }
     }
-    return { issues, prs, complete: false };
+    return { issues, prs, order, complete: false, cursor };
   }
 
   pullRequestForBranch(branch) {
@@ -4317,6 +4364,7 @@ class Reconciler {
     const all = outcomes;
     // A queued pass observes only the tasks it read; the graph reads above cover the rest.
     if (sweep) outcomes = sweep.read.map(number => all.find(outcome => outcome.issue === number));
+    if (sweep) this.sweepRead = sweep.read.length;
     // Every task the lists showed keeps its current facts on the parent page, read or not.
     if (sweep) for (const [number, facts] of rows) if (!issues.has(number)) issues.set(number, facts);
     for (const outcome of outcomes) read(outcome.issue);
@@ -4449,8 +4497,8 @@ class Reconciler {
       all.filter(number => LIVE_GATE_STATES.includes(stored(number)?.gate?.state)),
       // No document yet, or no complete facts from a list: nothing shows whether it changed.
       all.filter(number => !stored(number) || !rows.has(number)),
-      // Changed tasks newest first, as GitHub lists them, then those changed through a PR.
-      [...new Set([...[...changed.issues].filter(number => tasks.has(number)), ...all.filter(touched)])], all.filter(drifted), all.filter(checksMoved),
+      // Changed tasks newest change first (the list is read oldest first), then those changed through a PR.
+      [...new Set([...[...(changed.order || changed.issues)].reverse().filter(number => tasks.has(number)), ...all.filter(touched)])], all.filter(drifted), all.filter(checksMoved),
       (queued.queue || []).filter(number => tasks.has(number)),
     ];
     // Without a saved queue (a first pass) every task is in scope; otherwise this pass's rotation share.
@@ -4468,9 +4516,10 @@ class Reconciler {
     // task on a first pass, is likely to need its page drawn this pass, so its page is budgeted; a
     // rotation-only read rarely is.
     let pages = 0;
+    this.pausedBy = null;
     for (const number of order) {
       const needsPage = !queued.since || urgent.has(number);
-      if (!queued.canRead(pages, needsPage)) break;
+      if (!queued.canRead(pages, needsPage)) { this.pausedBy = queued.pausedBy?.() || null; break; }
       const doc = stored(number);
       const outcome = outcomes.find(entry => entry.issue === number);
       try {
@@ -4503,7 +4552,7 @@ class Reconciler {
     const left = order.filter(number => !read.includes(number) && !failed.includes(number));
     return { lists, graph, closing, read, prCache, ...primed,
       counts: { reused: all.length - read.length, reread: read.filter(number => !urgent.has(number)).length },
-      result: { order, read, failed, left, changedComplete: changed.complete,
+      result: { order, read, failed, left, changedComplete: changed.complete, changedCursor: changed.complete ? null : changed.cursor || null,
         why: Object.fromEntries(['intents', 'gates', 'unverified', 'changed', 'drifted', 'checks', 'queued'].map((name, at) => [name, reasons[at].length])) } };
   }
 
@@ -4511,11 +4560,15 @@ class Reconciler {
   // graph (a confirmed merge, an older PR) happen later, only for the tasks read.
   listGraph(parent, outcomes) {
     let requests = 0;
-    const spend = () => { if (requests >= 60) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','PR discovery reached its sixty-request budget.'); requests++; };
+    let pages = 0;
+    const budget = DISCOVERY_BASE + Math.ceil(outcomes.length / 20);
+    const spend = () => { if (requests >= budget) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `PR discovery reached its ${budget}-request budget.`); requests++; };
+    // List pages are counted apart: only the pass's own request budget stops them.
+    const page = () => { pages++; };
     const watermark = parent.private?.graph_pr_watermark || null;
     const scanStarted = this.now();
     const list = status => {
-      try { return { list: this.reader.graphPullRequests(status, spend, status === 'closed' ? watermark : null), complete: true }; }
+      try { return { list: this.reader.graphPullRequests(status, page, status === 'closed' ? watermark : null), complete: true }; }
       catch (error) { if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; return { list: [], complete: false }; }
     };
     const open = list('open');
@@ -4528,7 +4581,7 @@ class Reconciler {
       catch (error) { if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; }
     }
     return { openListed: open.list, openComplete: open.complete, closedListed: closed.list, closedComplete: closed.complete,
-      openReferences: referencedIssues(open.list), links, requests, watermark, scanStarted };
+      openReferences: referencedIssues(open.list), links, requests, pages, watermark, scanStarted };
   }
 
   // The parent's comments. With a copy from an earlier pass only the comments changed since its
@@ -4564,8 +4617,13 @@ class Reconciler {
     // this scan must remain eligible on the next one.
     const scanStarted = pre ? pre.scanStarted : this.now();
     let requests = pre ? pre.requests : 0; let listsComplete = true; let listed = [];
+    let pages = pre ? pre.pages : 0;
     const watermark = parent.private?.graph_pr_watermark || null;
-    const spend = () => { if (requests >= 60) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','PR discovery reached its sixty-request budget.'); requests++; };
+    // The task links and the per-task reads share this budget, which grows with the board and the
+    // tasks read; the list pages are counted apart and only the pass's request budget stops them.
+    const budget = discoveryBudget(outcomes.length, scoped ? scoped.size : outcomes.length);
+    const spend = () => { if (requests >= budget) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `PR discovery reached its ${budget}-request budget.`); requests++; };
+    const page = () => { pages++; };
     const incomplete = (numbers, error) => {
       if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error;
       for (const number of numbers) discovery.set(number,{complete:false,detail:'PR discovery was incomplete; existing PR history is retained.'});
@@ -4577,9 +4635,9 @@ class Reconciler {
       listed.push(...openListed, ...closedListed);
       if (!openComplete || !closedComplete) { incomplete(outcomes.map(outcome=>outcome.issue),{}); listsComplete=false; }
     } else {
-      try { openListed = this.reader.graphPullRequests('open',spend); listed.push(...openListed); }
+      try { openListed = this.reader.graphPullRequests('open',page); listed.push(...openListed); }
       catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; openComplete=false; }
-      try { closedListed=this.reader.graphPullRequests('closed',spend,watermark); listed.push(...closedListed); }
+      try { closedListed=this.reader.graphPullRequests('closed',page,watermark); listed.push(...closedListed); }
       catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; closedComplete=false; }
     }
     const references = referencedIssues(listed);
@@ -4653,7 +4711,7 @@ class Reconciler {
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
       && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
-    return {discovery,histories,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted,closedListed,closedComplete};
+    return {discovery,histories,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests:requests+pages,pages,watermark,scanStarted,closedListed,closedComplete};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -5592,6 +5650,10 @@ class Reconciler {
   }
 
   // CURRENT's freshness line. An issue-scoped pass repeats what the last finished pass recorded.
+  // A finished pass says when the board was updated. A pass that stops early says so in a short,
+  // calm note beside its own time (it did update what it read), and the next run carries on. Only a
+  // sweep that is truly stuck gets a warning: no pass finished for six hours, and the passes in
+  // those hours read fewer than ten tasks in all.
   boardLine(parent) {
     const board = this.board;
     if (!board) return null;
@@ -5599,10 +5661,21 @@ class Reconciler {
     const record = board.record || {};
     const sgt = time => `${new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Singapore', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(time))} SGT`;
     if (board.complete && !this.pass.stopped) return `Board updated: ${sgt(board.time)} (state revision ${parent.revision})`;
-    const stopped = (record.stopped_passes || 0) + 1;
-    const reason = this.stopReason || this.pass.stopReason || (this.pass.stopped ? 'time limit' : board.left ? 'tasks still to check' : record.reason || 'an incomplete read');
-    const since = record.last_complete_at ? `since ${sgt(record.last_complete_at)}` : 'since before the first finished pass';
-    return `⚠️ Board out of date ${since}: ${stopped} pass${stopped === 1 ? '' : 'es'} stopped early (${reason}). ${board.left} task${board.left === 1 ? '' : 's'} still to check.`;
+    const reason = this.stopReason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : board.left ? 'tasks still to check' : record.reason || 'an incomplete read');
+    const tasks = `${board.left} task${board.left === 1 ? '' : 's'}`;
+    const stuck = this.queued?.stuck?.(this.sweepRead || 0);
+    if (stuck?.stuck) {
+      const since = record.last_complete_at ? `since ${sgt(record.last_complete_at)}` : 'yet';
+      return `⚠️ Sweep stuck: no pass has finished ${since}, and the passes in the last 6 hours read ${stuck.read} task${stuck.read === 1 ? '' : 's'}. ${tasks} still to check (${reason}).`;
+    }
+    const app = this.queued?.host === 'cloud' ? ' App' : '';
+    const next = board.left ? `the next run picks up the ${tasks} left` : 'the next run reads it again';
+    const note = reason === 'GitHub rate limit' ? `Paused at GitHub's hourly${app} limit; ${next}.`
+      : reason === 'request cap' ? `Paused at this pass's request limit; ${next}.`
+        : reason === 'time limit' ? `Paused at this pass's time limit; ${next}.`
+          : reason === 'tasks still to check' ? `${next[0].toUpperCase()}${next.slice(1)}.`
+            : `Not every read finished (${reason}); ${next}.`;
+    return `Board updated: ${sgt(this.now())} (state revision ${parent.revision}). ${note}`;
   }
 
   // Only verified stored state proves the predecessor was reported. Its controller answer and
@@ -6680,7 +6753,8 @@ class Reconciler {
       report.sweep = { complete: Boolean(plan.complete && !plan.stopped && !this.pass.stopped), changedComplete: Boolean(sweep?.changedComplete),
         board_time: this.board?.time || null,
         read: sweep?.read.length ?? 0, tasks: sweep?.read || [], why: sweep?.why || {}, left: sweep ? sweep.left.length + sweep.failed.length : (this.sweepOrder?.length ?? plan.parent?.sweep?.queue.length ?? 0),
-        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : null) };
+        changedCursor: sweep?.changedCursor || null,
+        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : null) };
     }
     return report;
   }
@@ -6730,5 +6804,6 @@ module.exports = Object.freeze({
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
   SAFE_LIMIT, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS,
-  contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, ROTATION_PASSES, PASS_PHASES,
+  contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
+  DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });

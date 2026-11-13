@@ -65,7 +65,7 @@ const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
 const { SweepNotes, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
-const { SweepRequests, passCap } = require('./programme-sweep.cjs');
+const { SweepRequests, passCap, capText } = require('./programme-sweep.cjs');
 const { SweepLease } = require('./programme-sweep-lease.cjs');
 // Issues changed up to this long before the predecessor started (by GitHub's clock) are read again.
 const SWEEP_OVERLAP_MS = 5 * 60 * 1000;
@@ -626,17 +626,24 @@ const commands = {
     const lease = context.lease;
     const queued = lease ? {
       since: parentDoc.sweep && lease.record.changed_since ? new Date(Date.parse(lease.record.changed_since) - SWEEP_OVERLAP_MS).toISOString() : null,
-      queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: lease.findings(),
+      queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: lease.findings(), host: lease.host,
+      // The board's stuck rule, counting this pass's own reads.
+      stuck: read => lease.stuck(read),
       canRead: (pages, needsPage) => context.requests.canStartTask(pages, needsPage) && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,
+      // Why reading stopped once canRead says no: the time left, or the request limit that binds.
+      pausedBy: () => (context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS ? context.requests.bound() : 'time limit'),
       settle: () => { context.requests.reading = false; },
       // The lease's state commit window: it carries the progress and the renewed expiry.
       lease: { open: () => lease.openBatch(context.store), entry: snapshot => lease.batchEntry(snapshot, context.pass.snapshot()), close: outcome => lease.closeBatch(outcome) },
     } : null;
     const report = commands.reconcile({ ...args, apply: true, inventory, queued }, context);
     if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
-    if (report.sweep) context.sweepOutcome = { changedSince: report.sweep.changedComplete ? context.requests?.serverStart || null : null, completeAt: report.sweep.board_time,
-      complete: report.sweep.complete && !report.holds.length, noWrite: report.sweep.noWrite, reason: report.sweep.reason };
-    if (context.requests) report.metrics = `Sweep: requests=${context.requests.count}, cap=${context.requests.cap}, tasks read=${report.sweep?.read ?? 0}, queue left=${report.sweep?.left ?? 0}, complete=${context.sweepOutcome?.complete ? 'yes' : 'no'}`;
+    // A whole changed list moves the next pass's start to this pass's start; a list cut short moves it
+    // only to the update time it read up to, so the next pass carries on from there. A pass that saved
+    // nothing keeps the old start, so the next pass reads those changes again.
+    if (report.sweep) context.sweepOutcome = { changedSince: report.sweep.noWrite ? null : report.sweep.changedComplete ? context.requests?.serverStart || null : report.sweep.changedCursor || null, completeAt: report.sweep.board_time,
+      complete: report.sweep.complete && !report.holds.length, noWrite: report.sweep.noWrite, reason: report.sweep.reason, read: report.sweep.read ?? 0, left: report.sweep.left ?? 0 };
+    if (context.requests) report.metrics = `Sweep: requests=${context.requests.count}, cap=${capText(context.requests.cap)}, tasks read=${report.sweep?.read ?? 0}, queue left=${report.sweep?.left ?? 0}, complete=${context.sweepOutcome?.complete ? 'yes' : 'no'}`;
     cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
     return report;
   },
@@ -1052,9 +1059,10 @@ function runPasses(args, deps, out) {
     cap: deps.requestCap || sweepRequestCap(args, cloudEnvironment) }) : null;
   if (requests) {
     requests.reading = false;
-    requests.onLimit = () => { if (!pass.stopped) { pass.stopped = pass.snapshot('time_limit'); pass.stopReason = 'request cap'; } };
+    // The limit that binds names the stop: the pass's own cap, or GitHub's hourly allowance.
+    requests.onLimit = (reason = 'request cap') => { if (!pass.stopped) { pass.stopped = pass.snapshot('time_limit'); pass.stopReason = reason; } };
     // The last requests settle intents and release the lease: no more page work this process.
-    requests.onExhausted = () => { requests.onLimit(); pass.deadline = pass.nowMs(); };
+    requests.onExhausted = () => { requests.onLimit(requests.bound()); pass.deadline = pass.nowMs(); };
   }
   const passDeps = { ...deps, ...(requests ? { transport: requests } : {}), heartbeat: () => beat.fn(), sweepNotes: notes };
   const context = openContext(args, passDeps);
@@ -1130,13 +1138,27 @@ function runPasses(args, deps, out) {
           if (!noteActive) { noteActive = true; progress.write(pass.snapshot()); }
         }
         let failed = null;
+        let paused = false;
         try { code = Math.max(code, finish(passArgs, deps, out, context)); }
-        catch (error) { failed = error; throw error; }
+        catch (error) {
+          // GitHub's hourly count for the App was already at the safety margin: this pass saved nothing
+          // and the next run picks up where the last one stopped. That is a pause, not a failure.
+          if (requests && error.code === 'PASS_STOPPED' && error.reason === 'GitHub rate limit' && !context.sweepOutcome) {
+            paused = true;
+            context.sweepOutcome = { changedSince: null, complete: false, reason: 'GitHub rate limit', read: 0, left: null };
+          } else { failed = error; throw error; }
+        }
         finally {
           if (measure) notes.saveMetrics();
           // An error stop goes to the local note when this computer's lock still owns it; otherwise
           // (the cloud, or a lock another process took) the lease release carries it.
           if (requests) releaseLease(context, pass, { error: failed, noteHolds: Boolean(file) && host === 'computer' && held.owns() });
+        }
+        if (paused) {
+          out.write(args.json ? `${JSON.stringify({ outcome: 'PAUSED', reason: 'GitHub rate limit' }, null, 2)}\n` : 'Paused: GitHub\'s hourly limit is at the safety margin, so this pass read nothing; the next run picks up where the last one stopped.\n');
+          passes += 1;
+          progress.finish();
+          break;
         }
         passes += 1;
         progress.finish();
@@ -1219,7 +1241,8 @@ function releaseLease(context, pass, { error = null, noteHolds = false } = {}) {
     const errorStop = error && !noteHolds ? pass.snapshot('interrupted') : null;
     lease.release({ changedSince: error ? null : outcome.changedSince || null, completeAt: outcome.completeAt || null, complete: !error && Boolean(outcome.complete && outcome.completeAt),
       stop: errorStop || (outcome.noWrite && pass.stopped ? { ...pass.stopped, cause: 'time_limit' } : null), reason: error ? errorReason(error) : outcome.reason || null,
-      busy: outcome.reason === 'state branch busy', graphqlRefused: Boolean(context.store.graphqlRefused || context.store.private?.graphqlRefused) });
+      busy: outcome.reason === 'state branch busy', graphqlRefused: Boolean(context.store.graphqlRefused || context.store.private?.graphqlRefused),
+      read: outcome.read || 0, left: outcome.left ?? null, history: !error });
   } catch (releaseError) {
     // The pass's own error is the one reported; a release that fails after it leaves the lease to expire.
     if (!error && (!releaseError.code || ['STALE_WRITER', 'PASS_LOCK_LOST'].includes(releaseError.code))) throw releaseError;
