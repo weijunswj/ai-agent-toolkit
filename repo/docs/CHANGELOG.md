@@ -1,12 +1,10 @@
 # Toolkit Changelog
 
-## 3.85.1
+## 3.86.0
 
-### Fixed
+### Changed
 
-- **Store push refusal wording:** the default-branch merge hold now follows `Push-Location` like `cd` and `Set-Location`, so a push to an evidence store reached that way is judged in the store's own folder and refused by the store guard with the store-command message. Before, it was judged in the starting folder and got "push to another branch and open one", which is wrong for a store and made an agent hold back the store command too. A default-branch push whose remote is a bound store not named `TRANSPORT-*` also shows the store-command message. The push stays refused either way, and a command with several refused pushes names each reason once.
-- **Folder stack:** the merge hold now goes back a folder on `popd` and `Pop-Location`, so `Push-Location <folder>; Pop-Location; git push origin main` (or the `pushd`/`popd` pair) is judged in the folder the push really runs in, and a default-branch push there is refused. A `popd` or `Pop-Location` with nothing saved in the same command leaves the folder where it is, as the shell does.
-- **Merge target after `Push-Location`:** a merge that names no repository, after a `Push-Location` in the same command, is now refused like one after `cd`, because its repository cannot be told.
+- **Shard timings catch-all:** The Toolkit Shard Timings workflow also starts on a push to `main`, in case the daily schedule stops firing. A push run first checks whether a refresh ran in the last 24 hours and skips the refresh when one did, and only one run goes at a time.
 
 ## 3.85.0
 
