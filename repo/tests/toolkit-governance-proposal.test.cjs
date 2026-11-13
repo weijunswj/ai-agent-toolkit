@@ -291,7 +291,8 @@ test('first yes goes from the owner prompt through discovery and real publicatio
   const pending = f.owner.pending(f.cwd, { sessionId: 'owner', epoch });
   const stdout = [], stderr = [];
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
-  const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport,
+  // The render result is set here, never left to where this checkout's commit sits: the prepared copies travel as they are.
+  const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: {}, warning: null }),
     stdout: { write: text => stdout.push(text) }, stderr: { write: text => stderr.push(text) },
     discoveryGh: () => ({ ok: false, reason: 'offline' }) });
   assert.equal(await cli.main(['discover']), 0);
@@ -484,4 +485,166 @@ test('shallow binding reads still refuse symlinks, non-files and truncated trees
     const transport = new GitHubProposalTransport({ run: () => JSON.stringify(responses.shift()) });
     assert.throws(() => transport.read(repository, 1), /PROPOSAL_(BINDING_NOT_REGULAR|TREE_UNREADABLE)/, damage);
   }
+});
+
+test('yes carries fresh cloud sweep copies with the binding, moves a v1 binding to v2, and names a copy it could not render', t => {
+  const { bindingV2 } = require('../scripts/toolkit-governance-proposal.cjs');
+  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
+  const programme = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+  const v1 = { schema: 'toolkit.programme-binding.v1', repository: 'example-owner/example-repo', parent_issue: 1, record_prefix: 'INT-FX-', writer_prefix: 'INT-FX-',
+    store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' }, required_checks: ['validate'] };
+  const v2 = bindingV2(v1);
+  assert.deepEqual(v2, { schema: 'toolkit.programme-binding.v2', repository: v1.repository, governance: 'enabled', parents: [{ issue: 1, record_prefix: 'INT-FX-', writer_prefix: 'INT-FX-' }], store: v1.store, required_checks: ['validate'] });
+  programme.validateBinding(v2);
+  assert.equal(bindingV2(v2), v2, 'a v2 binding is kept as it is');
+  for (const [cloud, expectWarning] of [[{ files: Object.fromEntries(workflows.WORKFLOWS.map(row => [row.file, `# copy of ${row.id}\n`])), warning: null }, false], [{ files: {}, warning: 'Toolkit: the cloud sweep copies were not refreshed in this pull request (reason). To fix it, run it.' }, true]]) {
+    let published = null;
+    const transport = { list: () => published ? [proposal('yes')] : [], publish(repository, binding, files) { published = { binding, files }; return proposal('yes'); }, read: () => proposal('yes') };
+    const f = fixture(t, transport);
+    const owner = new GovernanceProposals({ ...f.options, cloudWorkflows: () => cloud });
+    prepareAdoption(f);
+    fs.writeFileSync(path.join(f.cwd, governance.BINDING_FILE), JSON.stringify(v1));
+    const request = owner.request(f.cwd, 'yes', run);
+    const result = owner.publish(f.cwd, request.run, v1);
+    assert.equal(published.binding.schema, 'toolkit.programme-binding.v2');
+    assert.equal(JSON.parse(published.files['.github/toolkit-programme.json']).schema, 'toolkit.programme-binding.v2');
+    assert.ok(published.files['AGENTS.md']);
+    for (const row of workflows.WORKFLOWS) assert.equal(published.files[row.file], cloud.files[row.file], row.file);
+    assert.equal(result.warning, expectWarning ? cloud.warning : undefined);
+  }
+  // No receipt reaches the renderer when the answer is no.
+  let rendered = 0;
+  const f = fixture(t, { list: () => [], publish: () => proposal('no'), read: () => proposal('no') });
+  const owner = new GovernanceProposals({ ...f.options, cloudWorkflows: () => { rendered++; return { files: {}, warning: null }; } });
+  owner.publish(f.cwd, owner.request(f.cwd, 'no', run).run);
+  assert.equal(rendered, 0);
+});
+
+test('the default renderer leaves a Toolkit source checkout alone, renders both copies, and names a reason and fix when it cannot', t => {
+  const { cloudWorkflowFiles } = require('../scripts/toolkit-governance-proposal.cjs');
+  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
+  assert.deepEqual(cloudWorkflowFiles(path.join(__dirname, '..', '..')), { files: {}, warning: null });
+  // The commit is set here, so the result never depends on whether this checkout's HEAD is on origin/main.
+  const commit = workflows.toolkitHead();
+  const f = fixture(t);
+  const rendered = cloudWorkflowFiles(f.cwd, { commit });
+  assert.equal(rendered.warning, null);
+  assert.deepEqual(Object.keys(rendered.files).sort(), workflows.WORKFLOWS.map(row => row.file).sort());
+  for (const text of Object.values(rendered.files)) assert.match(text, new RegExp(`^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED [a-z-]+ toolkit=${commit} `, 'm'));
+  // A same-named file that is not a Toolkit copy stops the render, with the reason and the fix.
+  const [sweep] = workflows.WORKFLOWS.map(row => row.file);
+  fs.mkdirSync(path.join(f.cwd, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(f.cwd, ...sweep.split('/')), 'name: my own sweep\n');
+  const refused = cloudWorkflowFiles(f.cwd, { commit });
+  assert.deepEqual(refused.files, {});
+  assert.match(refused.warning, /cloud sweep copies were not refreshed in this pull request \(.*is not a Toolkit copy; move it aside first\)\. To fix it, run node repo\/scripts\/toolkit-cloud-workflows\.cjs --repo/);
+  // A folder that is not a git checkout stops it too.
+  assert.match(cloudWorkflowFiles(path.join(f.root, 'empty'), { commit }).warning || '', /not refreshed/);
+});
+
+test('no removes the marked cloud sweep copies in the same pull request, and only those', () => {
+  const repository = 'example-owner/example-repo';
+  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
+  const [sweep, gate] = workflows.WORKFLOWS.map(row => row.file);
+  const off = { schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' };
+  const marked = Buffer.from(`# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`).toString('base64');
+  const calls = [];
+  const transport = new GitHubProposalTransport({ run(args, input) {
+    calls.push({ args, input }); const endpoint = args[1];
+    if (args[0] === 'auth') return '';
+    if (endpoint === 'user') return JSON.stringify({ login: 'example-owner' });
+    if (endpoint === `repos/${repository}`) return JSON.stringify({ default_branch: 'main' });
+    if (endpoint.includes('/git/ref/heads/toolkit/')) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
+    if (endpoint.endsWith('/git/ref/heads/main')) return JSON.stringify({ object: { sha: 'a'.repeat(40) } });
+    if (endpoint.includes(`/contents/${sweep}`)) return JSON.stringify({ type: 'file', encoding: 'base64', content: marked });
+    // The gate here is someone's own file with the same name: never removed.
+    if (endpoint.includes(`/contents/${gate}`)) return JSON.stringify({ type: 'file', encoding: 'base64', content: Buffer.from('name: mine\n').toString('base64') });
+    if (endpoint.endsWith('/git/commits') && input) return JSON.stringify({ sha: 'c'.repeat(40) });
+    if (endpoint.includes('/git/commits/')) return JSON.stringify({ tree: { sha: 'b'.repeat(40) } });
+    if (endpoint.endsWith('/git/trees') && input) return JSON.stringify({ sha: 'e'.repeat(40) });
+    if (endpoint.includes('/git/trees/')) return JSON.stringify({ truncated: false, tree: [] });
+    if (endpoint.endsWith('/git/refs')) return '{}';
+    if (endpoint.includes('/git/refs/heads/')) return '{}';
+    if (endpoint.endsWith('/pulls')) return JSON.stringify({ number: 1 });
+    throw Error(`unexpected endpoint ${endpoint}`);
+  } });
+  assert.deepEqual(transport.publish(repository, off), { number: 1, head: 'c'.repeat(40) });
+  const tree = calls.find(item => item.args[1].endsWith('/git/trees') && item.input).input.tree;
+  assert.deepEqual(tree.map(entry => [entry.path, entry.sha === null ? 'removed' : 'written']), [['.github/toolkit-programme.json', 'written'], [sweep, 'removed']]);
+  const body = calls.find(item => item.args[1].endsWith('/pulls') && item.input).input.body;
+  const removed = body.slice(body.indexOf('Removed files'));
+  assert.ok(body.includes('Removed files') && removed.split('\n')[1] === `- ${sweep}`, body);
+  assert.ok(!body.includes(gate), 'the unmarked gate file is never listed');
+});
+
+test('an off pull request may remove the marked cloud sweep copies, and nothing else', () => {
+  const repository = 'example-owner/example-repo';
+  const [sweep, gate] = require('../scripts/toolkit-cloud-workflows.cjs').WORKFLOWS.map(row => row.file);
+  const text = JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' });
+  const marker = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`;
+  const read = (files, atBase = { [sweep]: marker, [gate]: marker }) => new GitHubProposalTransport({ run(args) {
+    const endpoint = args[1];
+    const json = value => JSON.stringify(value);
+    if (endpoint.endsWith('/pulls/1')) return json({ number: 1, html_url: `https://github.com/${repository}/pull/1`, state: 'open', changed_files: files.length, body: '<!-- toolkit-governance-decision -->', head: { repo: { full_name: repository }, sha: 'a'.repeat(40) }, base: { ref: 'main', sha: '9'.repeat(40) } });
+    if (endpoint === `repos/${repository}`) return json({ default_branch: 'main' });
+    if (endpoint.includes('/git/commits/')) return json({ tree: { sha: 'b'.repeat(40) } });
+    if (endpoint.endsWith(`/git/trees/${'b'.repeat(40)}`)) return json({ truncated: false, tree: [{ path: '.github', type: 'tree', mode: '040000', sha: 'd'.repeat(40) }] });
+    if (endpoint.endsWith(`/git/trees/${'d'.repeat(40)}`)) return json({ truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] });
+    if (endpoint.includes('/contents/.github/toolkit-programme.json')) return json({ type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: Buffer.byteLength(text), content: Buffer.from(text).toString('base64') });
+    if (endpoint.includes('/pulls/1/files')) return json(files);
+    for (const name of [sweep, gate]) if (endpoint.includes(`/contents/${name}?ref=${'9'.repeat(40)}`)) {
+      if (atBase[name] === undefined) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
+      return json({ type: 'file', encoding: 'base64', content: Buffer.from(atBase[name]).toString('base64') });
+    }
+    throw Error(`unexpected endpoint ${endpoint}`);
+  } }).read(repository, 1);
+  const binding = { filename: '.github/toolkit-programme.json', status: 'modified' };
+  assert.equal(read([binding, { filename: sweep, status: 'removed' }, { filename: gate, status: 'removed' }]).answer, 'no');
+  assert.equal(read([binding]).answer, 'no');
+  assert.throws(() => read([binding, { filename: sweep, status: 'modified' }]), /SCOPE_INVALID/);
+  assert.throws(() => read([binding, { filename: '.github/workflows/other.yml', status: 'removed' }]), /SCOPE_INVALID/);
+  assert.throws(() => read([{ filename: sweep, status: 'removed' }]), /SCOPE_INVALID/);
+  // A removed sweep path must have held the Toolkit's marked copy at the base: never someone's own file.
+  assert.throws(() => read([binding, { filename: gate, status: 'removed' }], { [sweep]: marker, [gate]: 'name: mine\n' }), /SCOPE_INVALID/);
+});
+
+test('recovering an interrupted off branch needs every listed removal done, and nothing extra', () => {
+  const repository = 'example-owner/example-repo';
+  const [sweep, gate] = require('../scripts/toolkit-cloud-workflows.cjs').WORKFLOWS.map(row => row.file);
+  const binding = { schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' };
+  const text = `${JSON.stringify(binding, null, 2)}\n`;
+  const marked = Buffer.from(`# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\n`).toString('base64');
+  const attempt = diffFiles => {
+    const calls = [];
+    const transport = new GitHubProposalTransport({ run(args, input) {
+      calls.push({ args, input }); const endpoint = args[1];
+      if (args[0] === 'auth') return '';
+      if (endpoint === 'user') return JSON.stringify({ login: 'example-owner' });
+      if (endpoint === `repos/${repository}`) return JSON.stringify({ default_branch: 'main' });
+      if (endpoint.endsWith('/git/ref/heads/main')) return JSON.stringify({ object: { sha: 'a'.repeat(40) } });
+      if (endpoint.includes('/git/ref/heads/toolkit/')) return JSON.stringify({ object: { sha: 'c'.repeat(40) } });
+      if (endpoint.includes(`/contents/${sweep}?ref=`)) return JSON.stringify({ type: 'file', encoding: 'base64', content: marked });
+      if (endpoint.includes(`/contents/${gate}?ref=`)) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
+      if (endpoint.includes('/git/commits/')) return JSON.stringify({ tree: { sha: 'b'.repeat(40) } });
+      if (endpoint.includes('/git/trees/')) return JSON.stringify({ truncated: false, tree: [] });
+      if (endpoint.includes('/compare/')) return JSON.stringify({ total_commits: 1, merge_base_commit: { sha: 'a'.repeat(40) }, files: diffFiles });
+      if (endpoint.includes('/contents/.github/toolkit-programme.json') && !input) return JSON.stringify({ type: 'file', encoding: 'base64', content: Buffer.from(text).toString('base64') });
+      if (endpoint.endsWith('/pulls')) return JSON.stringify({ number: 1 });
+      throw Error(`unexpected endpoint ${endpoint}`);
+    } });
+    const result = (() => { try { return transport.publish(repository, binding); } catch (error) { return error; } })();
+    return { result, writes: calls.filter(item => item.input).length };
+  };
+  const bindingFile = { filename: '.github/toolkit-programme.json', status: 'modified' };
+  // Exact branch: the binding and the listed removal.
+  const exact = attempt([bindingFile, { filename: sweep, status: 'removed' }]);
+  assert.deepEqual(exact.result, { number: 1, head: 'c'.repeat(40) });
+  // Binding only: the removal never happened, so the branch is not this proposal.
+  const bindingOnly = attempt([bindingFile]);
+  assert.match(String(bindingOnly.result.code), /BRANCH_CHANGED/);
+  assert.equal(bindingOnly.writes, 0, 'a changed branch receives no writes and no pull request');
+  // An extra removal not listed for this base is refused too.
+  const extra = attempt([bindingFile, { filename: sweep, status: 'removed' }, { filename: gate, status: 'removed' }]);
+  assert.match(String(extra.result.code), /BRANCH_CHANGED/);
+  assert.equal(extra.writes, 0);
 });
