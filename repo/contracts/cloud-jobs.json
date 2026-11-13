@@ -12,7 +12,8 @@
       "workflow": ".github/workflows/toolkit-programme-sweep.yml",
       "schedule": {
         "cadence": "hourly",
-        "cron": "41 * * * *"
+        "cron": "41 * * * *",
+        "workflow": ".github/workflows/toolkit-programme-sweep-gate.yml"
       },
       "replaces_computer_job": "toolkit-programme-sweep",
       "tokens": [
