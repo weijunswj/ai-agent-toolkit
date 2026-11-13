@@ -329,15 +329,24 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
   };
 }
 
-// config.toml without the tables Codex writes for the Toolkit plugin itself: its marketplace, its
-// plugin entry and its hook records (headers naming ai-agent-toolkit), with blank lines folded, so two
-// files that differ only by those tables compare equal.
-const TOOLKIT_PLUGIN_TABLE = /^\s*\[{1,2}[^\]]*ai-agent-toolkit[^\]]*\]{1,2}\s*(#.*)?$/;
+// config.toml without exactly the three tables the Codex plugin install writes for Toolkit: its
+// marketplace, its plugin entry and its hook records, matched on the whole table path. Any other table,
+// even one whose name holds "ai-agent-toolkit" (a project trust entry for a checkout of that name, an
+// MCP server), stays. Blank lines and trailing spaces are folded, so two files that differ only by those
+// tables compare equal.
+const TOOLKIT_MARKETPLACE = 'ai-agent-toolkit-local';
+const TOOLKIT_PLUGIN_ID = `ai-agent-toolkit@${TOOLKIT_MARKETPLACE}`;
+const TABLE_END = String.raw`\s*\]\s*(?:#.*)?$`;
+const INSTALL_TABLES = Object.freeze([
+  new RegExp(String.raw`^\s*\[\s*marketplaces\.(?:${TOOLKIT_MARKETPLACE}|"${TOOLKIT_MARKETPLACE}"|'${TOOLKIT_MARKETPLACE}')${TABLE_END}`),
+  new RegExp(String.raw`^\s*\[\s*plugins\.(["'])${TOOLKIT_PLUGIN_ID}\1${TABLE_END}`),
+  new RegExp(String.raw`^\s*\[\s*hooks\.state\.(["'])${TOOLKIT_PLUGIN_ID}:[^"'\]]*\1${TABLE_END}`),
+]);
 function withoutToolkitPluginTables(bytes) {
   const kept = [];
   let skipping = false;
   for (const line of Buffer.from(bytes || '').toString('utf8').split(/\r?\n/)) {
-    if (/^\s*\[/.test(line)) skipping = TOOLKIT_PLUGIN_TABLE.test(line);
+    if (/^\s*\[/.test(line)) skipping = INSTALL_TABLES.some((pattern) => pattern.test(line));
     if (!skipping && line.trim()) kept.push(line.trimEnd());
   }
   return kept.join('\n');
@@ -352,8 +361,10 @@ function withoutToolkitPluginTables(bytes) {
 function sameApprovedProposal(approved, fresh) {
   if (!approved || !fresh || approved.status !== fresh.status || !fresh.approval_binding) return false;
   const before = approved.approval_binding?.snapshot, after = fresh.approval_binding.snapshot;
-  // A file the plugin install created counts as empty before it.
+  // Malformed input: a proposal without its snapshot is never carried over.
   if (!before || !after) return false;
+  // A missing file has a snapshot with empty bytes, so a config.toml the plugin install created
+  // compares as empty before it.
   if (withoutToolkitPluginTables(before.bytes) !== withoutToolkitPluginTables(after.bytes)) return false;
   if (Boolean(approved.requires_user_confirmation) !== Boolean(fresh.requires_user_confirmation)) return false;
   const edit = (proposal) => JSON.stringify({

@@ -246,7 +246,11 @@ test('command line: plan prints the list and the code, apply needs the code, bad
   assert.equal(unasked.code, 1);
   assert.match(unasked.err, /remove needs --app: ask the owner first whether to remove Toolkit from only this app .* or from every app \(--app all\)/);
   assert.equal(run(['plan', '--app', 'everywhere']).code, 1);
-  assert.match(run(['plan', '--app', 'codex']).out, /From: Codex only\. Your other apps keep their Toolkit; run plan with --app all/);
+  // No other app has the plugin here, so a one-app plan says the shared parts go too.
+  const codexOnly = run(['plan', '--app', 'codex']).out;
+  assert.match(codexOnly, /From: Codex only\. Claude Code's own Toolkit files stay; run plan with --app all to remove them too\./);
+  assert.match(codexOnly, /Also removed, because no other app has the Toolkit plugin: the scheduled tasks and their files, Antigravity's rules and skill copies, and the Toolkit folder\./);
+  assert.doesNotMatch(codexOnly, /Kept, because/);
   const plan = run(['plan', '--app', 'all']);
   assert.equal(plan.code, 0);
   const code = /Plan code: ([a-f0-9]{64})/.exec(plan.out)[1];
@@ -467,6 +471,7 @@ test('removal from Codex only, while Claude Code keeps Toolkit: nothing of Claud
   assert.deepEqual(plan.rules.map(file => file.harness), ['codex'], "only Codex's global rules file");
   assert.deepEqual(rules.asked, [['codex']]);
   assert.match(text, /From: Codex only\./);
+  assert.doesNotMatch(text, /Also removed, because/);
   assert.match(text, /Kept, because Claude Code still has the Toolkit plugin: the scheduled tasks and their files, Antigravity's rules and skill copies, and the Toolkit folder\./);
   assert.match(text, /- ~\/\.codex\/agents\/toolkit-g1\.toml: removed/);
   assert.match(text, /Codex helper limit:/);
@@ -492,6 +497,7 @@ test('removal from Codex only, with no other app keeping Toolkit: the shared par
   assert.deepEqual(rules.asked, [['codex', 'antigravity']]);
   const text = removal.describePlan(plan).join('\n');
   assert.match(text, /Toolkit folder \(goes last/);
+  assert.match(text, /Also removed, because no other app has the Toolkit plugin/);
   assert.doesNotMatch(text, /\.claude\/agents|Claude Code subagent limit|\.claude\/skills/);
 });
 

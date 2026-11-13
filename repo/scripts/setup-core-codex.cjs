@@ -123,7 +123,11 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
       fresh = choice === 'remove'
         ? delegation.previewCodexDelegationRemoval(configPath, options)
         : delegation.previewCodexDelegation(configPath, { ...options, helperCount, allowUserOwnedReplacement: true });
-    } catch { return approved; }
+    } catch (error) {
+      // The approved proposal then meets its own check: it applies on an unchanged file, else asks again.
+      console.log(`Codex helper limit: config.toml could not be read again before the write (${String(error?.message || error).replace(/[\r\n]+/g, ' ').slice(0, 200)}), so the approved proposal is checked as it was.`);
+      return approved;
+    }
     if (fresh.approval_binding?.snapshot?.sha256 === approved.approval_binding.snapshot?.sha256) return approved;
     return delegation.sameApprovedProposal(approved, fresh) ? fresh : approved;
   }

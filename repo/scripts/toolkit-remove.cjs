@@ -300,11 +300,15 @@ function taskLine(item) {
   return `${where}${item.repository ? ` (${item.repository})` : ''}: ${KINDS[item.kind].label}; id ${item.id}`;
 }
 
-// Who the removal is for, and what another app keeps.
+// Who the removal is for, and what happens to the parts every app shares.
+const SHARED = "the scheduled tasks and their files, Antigravity's rules and skill copies, and the Toolkit folder";
 function scopeLines(app, keptFor = []) {
   if (app === 'all') return ['From: every app on this computer.'];
-  const lines = [`From: ${HOST_LABELS[app]} only. Your other apps keep their Toolkit; run plan with --app all to remove it everywhere.`];
-  if (keptFor.length) lines.push(`Kept, because ${keptFor.map(host => HOST_LABELS[host]).join(' and ')} still ${keptFor.length === 1 ? 'has' : 'have'} the Toolkit plugin: the scheduled tasks and their files, Antigravity's rules and skill copies, and the Toolkit folder.`);
+  const others = Object.keys(HOST_LABELS).filter(host => host !== app).map(host => HOST_LABELS[host]).join(' and ');
+  const lines = [`From: ${HOST_LABELS[app]} only. ${others}'s own Toolkit files stay; run plan with --app all to remove them too.`];
+  lines.push(keptFor.length
+    ? `Kept, because ${keptFor.map(host => HOST_LABELS[host]).join(' and ')} still ${keptFor.length === 1 ? 'has' : 'have'} the Toolkit plugin: ${SHARED}.`
+    : `Also removed, because no other app has the Toolkit plugin: ${SHARED}.`);
   return lines;
 }
 

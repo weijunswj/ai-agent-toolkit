@@ -80,6 +80,20 @@ test('any other change after the approval still needs a fresh answer', () => {
   assert.equal(config.sameApprovedProposal(one, preview(other, 2)), false);
 });
 
+test('only the install\'s own three tables are ignored, never another table that names ai-agent-toolkit', () => {
+  for (const extra of [
+    "\n[projects.'C:\\Users\\example\\GitHub\\ai-agent-toolkit']\ntrust_level = \"trusted\"\n",
+    '\n[mcp_servers.ai-agent-toolkit-notes]\ncommand = "notes.exe"\n',
+    '\n[plugins."ai-agent-toolkit@another-marketplace"]\nenabled = true\n',
+    '\n[marketplaces.ai-agent-toolkit-local-copy]\nsource = "x"\n',
+  ]) {
+    const file = configFile('model = "example"\n');
+    const approved = preview(file);
+    fs.appendFileSync(file, `${PLUGIN_TABLES}${extra}`);
+    assert.equal(config.sameApprovedProposal(approved, preview(file)), false, extra);
+  }
+});
+
 test('an unchanged file keeps the approved proposal as it is', () => {
   const file = configFile('model = "example"\n');
   const approved = preview(file);
