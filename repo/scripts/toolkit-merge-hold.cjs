@@ -85,8 +85,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     (a sha field is not read); a call whose fields are missing, not readable or disagree is refused;
 //   - refused when written directly: any connector's auto-merge tool, GraphQL merges (the number cannot be read), the merge queue, branch merges,
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
-//     to the remote's default branch (evidence stores excepted, by name; a refused push the attribution
-//     guard reads as one to a bound store shows that guard's store-command message), a merge whose target is
+//     to the remote's default branch (evidence stores excepted, by name; a refused push whose remote is an
+//     evidence store bound on this computer shows the store-command message instead), a merge whose target is
 //     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
 //     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
 //     run through another shell or expression runner (bash -c, pwsh -Command, cmd /c, eval) is
@@ -142,7 +142,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELLS, SHELL_TOOLS, ShellCall, MOVES_TARGET, connectorTarget, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { STORE_PUSH_MESSAGE, githubSlug, SHELLS, SHELL_TOOLS, ShellCall, MOVES_TARGET, connectorTarget, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -495,7 +495,7 @@ function pushTarget(cwd, remote, registryOptions = {}) {
     if (!defaultBranch) defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/${remoteName}/${name}`)) || null;
   } else defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/origin/${name}`)) || null;
   const named = /TRANSPORT-[^/\s]*?(?:\.git)?\/?$/i.test(String(url || ''));
-  return { default: defaultBranch, current, store: named || (remoteName === 'origin' && evidenceStoreAt(root, registryOptions)) };
+  return { default: defaultBranch, current, url, store: named || (remoteName === 'origin' && evidenceStoreAt(root, registryOptions)) };
 }
 
 // Whether the governance state names the repository at `root` an evidence store (rule S1). A state
@@ -504,17 +504,15 @@ function evidenceStoreAt(root, registryOptions = {}) {
   try { return governance.governanceState(root, registryOptions).rule === 'S1'; } catch { return false; }
 }
 
-const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed']);
-
-// The attribution guard's store refusal when this command pushes to an evidence store this computer
-// has bound, else ''. A refused push whose target that guard reads as a bound store gets its message
-// (go through toolkit-store.cjs) instead of the default-branch advice (push another branch and open a
-// pull request), which is wrong for a store: its default branch is written directly, by the store
-// command, under standing permission. The push stays refused either way. A guard that cannot load
-// leaves the default-branch message.
-function storePushReason(text, cwd, registryOptions = {}, shell = null) {
-  try { return require('./toolkit-attribution-guard.cjs').storePushRefusal(text, cwd || process.cwd(), 0, registryOptions, shell); } catch { return ''; }
+// Whether a remote URL is an evidence store an enabled binding cached on this computer names, at
+// any freshness (the attribution guard's reading). A cache that cannot be read names none.
+function boundStore(url, registryOptions = {}) {
+  const slug = githubSlug(url);
+  if (!slug) return false;
+  try { return governance.evidenceStoreRepositories(registryOptions).stores.has(slug); } catch { return false; }
 }
+
+const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed']);
 
 // The refusal for a git push in one segment, or ''. `variables` holds what earlier segments of the
 // same command assigned (assignmentOf).
@@ -550,7 +548,12 @@ function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), 
   const hitsDefault = mirror
     || (refspecs.length === 0 && target.current === target.default)
     || refspecs.some(spec => branchOf(spec.includes(':') ? spec.slice(spec.lastIndexOf(':') + 1) : spec) === target.default);
-  return hitsDefault ? `this command pushes to the default branch \`${target.default}\`. Changes must reach the default branch through a pull request the user merges; push to another branch and open one.` : '';
+  if (!hitsDefault) return '';
+  // A push to an evidence store this computer has bound stays refused, but with the store-command
+  // message: a pull request is the wrong advice for a store, whose default branch is written
+  // directly by toolkit-store.cjs under standing permission.
+  if (boundStore(target.url, registryOptions)) return STORE_PUSH_MESSAGE;
+  return `this command pushes to the default branch \`${target.default}\`. Changes must reach the default branch through a pull request the user merges; push to another branch and open one.`;
 }
 
 // ---- requested merges -------------------------------------------------------------------------
@@ -754,7 +757,7 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
     if (assigned) { assignVariable(variables, assigned); continue; }
     if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
     const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
-    if (reason) return refuse(storePushReason(text, cwd, registryOptions, shell) || reason);
+    if (reason) return refuse(reason);
   }
   return '';
 }
