@@ -74,6 +74,12 @@ const TASKS_ASK = Object.freeze({
 
 // Why a row is left out of the Codex block. A Codex prefix rule allows any arguments after its
 // prefix, so it cannot hold an exact line or ask for a flag that appears later in the command.
+const PROGRAMME_STATE = path.join(__dirname, '..', '..', 'skills', 'github-program-reconciler', 'scripts', 'programme-state.cjs');
+function governanceEnabled(binding) {
+  if (!binding) return false;
+  const { validateBinding, bindingEnabled } = require(PROGRAMME_STATE);
+  try { return bindingEnabled(validateBinding(binding)); } catch { return false; }
+}
 const CODEX_OPEN = 'Codex would allow any flag after this command, including the ones that must ask.';
 
 // forms: what follows the command in an allow line. ' *' is any arguments; '' and ' --json' are
@@ -188,8 +194,9 @@ class PermissionBlocks {
     const root = this.#path.basename(common) === '.git' ? this.#path.dirname(common) : this.#git(start, ['rev-parse', '--show-toplevel']);
     if (!root) return { ok: false, reason: 'the repository\'s main folder could not be found.' };
     const binding = this.#readJson(this.#path.join(root, '.github', 'toolkit-programme.json'));
-    // A version 1 programme file has no governance key and reads as enabled (programme-state's bindingEnabled).
-    if (!binding || !(binding.schema === 'toolkit.programme-binding.v1' || binding.governance === 'enabled')) return { ok: false, reason: 'this repository has no Toolkit programme file with governance enabled.' };
+    // Read as the sweep reads it: programme-state's validateBinding, then bindingEnabled. A version 1
+    // file reads as enabled; a hand-broken one (say, carrying governance: "disabled") is invalid, so off.
+    if (!governanceEnabled(binding)) return { ok: false, reason: 'this repository has no Toolkit programme file with governance enabled.' };
     return { ok: true, root, binding };
   }
 

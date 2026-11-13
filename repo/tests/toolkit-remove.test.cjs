@@ -478,4 +478,8 @@ test('the setup skill routes remove toolkit to the full plan, never the app unin
   assert.match(section, /Do this even when the app offers its own plugin uninstall tool \(such as Codex's `uninstall_plugin`\) or the plugin is already gone/);
   assert.match(section, /an app's own uninstall tool may do this step for that app/);
   assert.ok(section.indexOf('toolkit-remove.cjs plan') < section.indexOf('Only after a yes'), 'the plan comes before any uninstall');
+  // The app's own uninstall tool is allowed only as a step after the user's yes, never before the plan is shown.
+  const afterYes = section.slice(section.indexOf('Only after a yes'));
+  assert.equal(section.split("an app's own uninstall tool may do this step").length, 2, 'the allowance appears once');
+  assert.match(afterYes.split('. ')[0], /an app's own uninstall tool may do this step for that app/, 'the allowance sits in the step after the yes');
 });

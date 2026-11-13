@@ -150,6 +150,23 @@ test('gate: a version 1 binding names its parent issue, as bindingEnabled says; 
   assert.equal(parentsOf(null), null);
 });
 
+test('gate: it turns governance on for exactly the files the sweep reads as enabled (validateBinding, then bindingEnabled)', () => {
+  // The gate reads the raw file (it checks out only itself), so this table keeps its reading in step
+  // with the sweep's. A hand-broken version 1 file carrying version 2 keys is not a valid file.
+  const { parentsOf } = gateScript();
+  const sweepEnabled = file => { try { return state.bindingEnabled(state.validateBinding(file)); } catch { return false; } };
+  const { parents, ...v2NoParents } = binding();
+  for (const [label, file] of [
+    ['v1', bindingV1()], ['v2 enabled', binding()], ['v2 disabled', binding({ governance: 'disabled' })],
+    ['v1 with governance disabled', { ...bindingV1(), governance: 'disabled' }], ['v1 with governance enabled', { ...bindingV1(), governance: 'enabled' }],
+    ['v1 with v2 parents', { ...bindingV1(), parents }], ['no schema, enabled', { ...v2NoParents, schema: undefined, parents }],
+    ['v2 without a governance key', { ...v2NoParents, governance: undefined, parents }], ['unknown schema', { ...bindingV1(), schema: 'toolkit.programme-binding.v9' }],
+  ]) {
+    const file2 = JSON.parse(JSON.stringify(file));
+    assert.equal(parentsOf(file2) !== null, sweepEnabled(file2), label);
+  }
+});
+
 test('action: no App configured gives a warning naming the repository, the variable, the secret and the check', () => {
   const result = runAction('run', { env: { STORE_REPOSITORY: 'owner/evidence', APP_CLIENT_ID_SET: 'false', MINT_OUTCOME: 'skipped/skipped' } });
   assert.equal(result.code, 0);
@@ -467,7 +484,7 @@ test('gate: activity (a finished CI run included) starts a sweep when none finis
 });
 
 const actionsToken = ['example', 'actions', 'token'].join('-');
-const gateBinding = JSON.stringify({ governance: 'enabled', parents: [{ issue: 421 }] });
+const gateBinding = JSON.stringify(binding());
 function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], binding = gateBinding, ci = [], jobs = [] } = {}) {
   const calls = [];
   const fetchImpl = async (url, options) => {
@@ -522,7 +539,8 @@ test('gate: a quiet hour reads four small answers and starts nothing; a change s
 test('gate: a repository it skips gets one warning naming the repository, the reason and the fix (record 808)', async () => {
   const { gate } = gateScript();
   for (const [binding, reason] of [[JSON.stringify({ governance: 'disabled' }), /turns governance off/], ['{"schema":', /missing or unreadable/],
-    [JSON.stringify({ governance: 'enabled', parents: [] }), /names no parent issue/]]) {
+    [JSON.stringify({ schema: state.SCHEMA.bindingV2, governance: 'enabled', parents: [] }), /names no parent issue/],
+    [JSON.stringify({ ...bindingV1(), governance: 'disabled' }), /is not a valid programme file/]]) {
     const lines = [];
     const off = fakeGitHub({ binding });
     assert.equal((await gate({ env: gateEnv, fetchImpl: off.fetchImpl, now: T, log: line => lines.push(line) })).start, false);
