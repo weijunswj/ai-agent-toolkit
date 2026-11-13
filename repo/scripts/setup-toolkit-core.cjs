@@ -1702,12 +1702,17 @@ function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitR
 
 // Whether Antigravity is installed and whether Toolkit's copies of its skills are already there.
 function antigravityState(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot })) {
-  try { return { installed: owner.installed(), copies: owner.hasCopies() }; }
-  catch { return { installed: false, copies: false }; }
+  try {
+    const copies = owner.hasCopies();
+    // Toolkit's copies that a copy run would change: out of date, or missing since a newer Toolkit added a skill.
+    const outOfDate = copies ? owner.inspect().filter((row) => row.state === 'stale' || row.state === 'missing').length : 0;
+    return { installed: owner.installed(), copies, outOfDate };
+  } catch { return { installed: false, copies: false, outOfDate: 0 }; }
 }
 
 function antigravitySkillsOutcome(state) {
-  if (state?.copies) return "Toolkit's skills are in Antigravity's global skills folder.";
+  if (state?.copies && state.outOfDate) return `Toolkit's skills are in Antigravity's global skills folder; ${state.outOfDate} of Toolkit's copies there are out of date or missing.`;
+  if (state?.copies) return "Toolkit's skills are in Antigravity's global skills folder and match this Toolkit version.";
   return "Toolkit's skills are not in Antigravity's global skills folder.";
 }
 
@@ -1725,12 +1730,14 @@ function antigravitySkillsQuestion(args, current) {
       ...(current.antigravity?.copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
       wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
     ],
-    recommendation: current.antigravity?.copies
-      ? { value: 'copy', outcome: "Keep Toolkit's skills in Antigravity current.", reason: 'You chose to copy them before, so setup keeps those copies up to date.' }
-      : { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' },
+    recommendation: current.antigravity?.copies && current.antigravity.outOfDate
+      ? { value: 'copy', outcome: "Bring Toolkit's skills in Antigravity up to date.", reason: 'You chose to copy them before, and some of the copies are older than this Toolkit version.' }
+      : current.antigravity?.copies
+        ? { value: 'keep', outcome: "Leave Toolkit's skills in Antigravity as they are.", reason: 'Your copies already match this Toolkit version; setup offers to refresh them when they fall behind.' }
+        : { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' },
     selected: args.setupChoices.antigravitySkills,
     current: outcome,
-    currentShort: current.antigravity?.copies ? 'Copied' : 'Not copied',
+    currentShort: !current.antigravity?.copies ? 'Not copied' : current.antigravity.outOfDate ? `Copied, ${current.antigravity.outOfDate} out of date` : 'Copied, up to date',
     currentVerification: 'state-derived',
     afterApplying: 'Start a new Antigravity session to load changed skills.',
   });
@@ -2010,7 +2017,8 @@ function codexDocLimitCells(current) {
 }
 
 // A report-only row: it shows Codex state the owner changes in Codex itself, takes no answer, has
-// no number or letters and shows as a status line; its Current text is still bound into the bank identity.
+// no number or letters and shows as a status line. Only its place, title and what it controls are
+// bound into the bank identity, so a change in its Current text keeps the owner's answers.
 function reportOnlyRow({ id, key, section, title, whatThisControls, current, currentShort, recommendedText }) {
   return {
     id, key, section, title, whatThisControls, report_only: true,

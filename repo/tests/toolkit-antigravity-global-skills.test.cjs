@@ -66,9 +66,27 @@ test('the question shows only when Antigravity is installed or Toolkit copies ex
   const fresh = spec({ installed: true, copies: false });
   assert.equal(fresh.recommended, 'keep');
   assert.deepEqual(fresh.choices.map((choice) => choice.value), ['keep', 'copy']);
-  const kept = spec({ installed: true, copies: true });
-  assert.equal(kept.recommended, 'copy');
-  assert.deepEqual(kept.choices.map((choice) => choice.value), ['keep', 'copy', 'remove']);
+  // Copies that already match this Toolkit version recommend keeping them; out-of-date copies recommend a refresh.
+  const current = spec({ installed: true, copies: true, outOfDate: 0 });
+  assert.equal(current.recommended, 'keep');
+  assert.equal(current.current_short, 'Copied, up to date');
+  assert.deepEqual(current.choices.map((choice) => choice.value), ['keep', 'copy', 'remove']);
+  const behind = spec({ installed: true, copies: true, outOfDate: 3 });
+  assert.equal(behind.recommended, 'copy');
+  assert.equal(behind.current_short, 'Copied, 3 out of date');
+  assert.deepEqual(behind.choices.map((choice) => choice.value), ['keep', 'copy', 'remove']);
   assert.throws(() => core.parseArgs(['--antigravity-skills', 'everything']), /Unsupported --antigravity-skills choice/);
   assert.equal(core.parseArgs(['--antigravity-skills', 'copy']).setupChoices.antigravitySkills, 'copy');
+});
+
+test('setup counts Toolkit copies in Antigravity that a copy run would change', (t) => {
+  const dir = home(t);
+  const owner = new AntigravityGlobalSkills({ toolkitRoot: repoRoot, homeDir: dir });
+  assert.deepEqual(core.antigravityState({ repoRoot }, owner), { installed: owner.installed(), copies: false, outOfDate: 0 });
+  owner.install();
+  assert.equal(core.antigravityState({ repoRoot }, owner).outOfDate, 0);
+  const [first] = owner.recorded();
+  assert.ok(first, 'the install recorded at least one copy');
+  fs.appendFileSync(path.join(first.target, first.skill, 'SKILL.md'), '\nolder copy\n');
+  assert.equal(core.antigravityState({ repoRoot }, owner).outOfDate, 1);
 });
