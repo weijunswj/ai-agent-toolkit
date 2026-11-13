@@ -358,6 +358,30 @@ test('installer in a Toolkit checkout: an older hook is drift, and a rerun repai
   assert.notEqual(commitThroughHooks(repo, ['-m', 'add contact']).status, 0, 'the repaired hook runs the real guard');
 });
 
+test('pre-push in a Toolkit checkout: the plain-text check runs from its in-repo source too', (t) => {
+  const repo = toolkitRepo(t);
+  assert.equal(repo.installer([]).status, 0);
+  const plainInstaller = path.resolve(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'install-plain-text-check.cjs');
+  const installed = require('node:child_process').spawnSync(process.execPath, [plainInstaller, '--repo', repo.root], { cwd: repo.root, env: repo.env, encoding: 'utf8', windowsHide: true });
+  assert.equal(installed.status, 0, `${installed.stdout}${installed.stderr}`);
+  // The Toolkit keeps the check source in place of a vendored copy, like the guard.
+  fs.rmSync(path.join(repo.root, '.github', 'scripts'), { recursive: true });
+  repo.write('skills/secure-ci-cd/scripts/plain-text-check.cjs', fs.readFileSync(path.resolve(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8'));
+  repo.git(['add', '-A']);
+  repo.git(['commit', '-q', '--no-verify', '-m', 'plain-text check']);
+  const remote = new TestRepo(t, { config: null, bare: true });
+  repo.git(['remote', 'add', 'origin', remote.root]);
+  repo.git(['push', '-q', '-u', 'origin', 'main']);
+  // Built from pieces so this file carries no reference itself.
+  repo.commit('guide', { 'docs/guide.md': `See ${['#', '42'].join('')} for details.\n` });
+  const push = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.notEqual(push.status, 0, 'pre-push runs the in-repo plain-text check');
+  assert.match(push.stderr, /docs\/guide\.md:1: number-reference/);
+  repo.commit('plain guide', { 'docs/guide.md': 'See the install steps for details.\n' });
+  const clean = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.equal(clean.status, 0, clean.stderr);
+});
+
 test('installer --check in a Toolkit checkout: no guard hooks is not drift, and --uninstall still removes them', (t) => {
   const repo = toolkitRepo(t);
   let result = repo.installer(['--check']);

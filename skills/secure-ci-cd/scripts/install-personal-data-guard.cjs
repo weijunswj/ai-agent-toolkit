@@ -95,13 +95,15 @@ function hookText(name) {
   } else {
     lines.push('input=$(cat)');
     lines.push('printf \'%s\\n\' "$input" | node "$guard" pre-push "$1" --repo "$root" || exit $?');
-    // A repository that also runs the plain-text check gets it on the files the current branch changes
+    // A repository that also runs the plain-text check (a copy under .github/scripts, or in the Toolkit's
+    // own checkout its source under skills/secure-ci-cd/scripts) gets it on the files the current branch changes
     // since the branch it tracks, else origin's default branch, main or master. The check reads the
     // working folder, so it runs only when this push sends the current commit and the folder has no
     // uncommitted changes; otherwise it is skipped with a note. It blocks only on findings (exit 1);
     // a check that cannot run (exit 2, such as broken settings) prints a note and the push goes on.
     lines.push(
       'plain="$root/.github/scripts/plain-text-check.cjs"',
+      'if [ ! -f "$plain" ]; then plain="$root/skills/secure-ci-cd/scripts/plain-text-check.cjs"; fi',
       'if [ -f "$plain" ] && [ -f "$root/.github/plain-text.json" ]; then',
       '  head=$(git rev-parse -q --verify HEAD)',
       '  base=$(git rev-parse -q --verify \'@{upstream}\' || git rev-parse -q --verify refs/remotes/origin/HEAD || git rev-parse -q --verify refs/remotes/origin/main || git rev-parse -q --verify refs/remotes/origin/master)',
