@@ -12,7 +12,9 @@
 // --check changes nothing and reports drift: a hand-edited or outdated copy, missing hooks.
 // --uninstall removes this clone's guard hooks and puts back any hook they had set aside. The committed
 // files (guard copy, config, workflow) are listed, to remove through a pull request.
-// The Toolkit's own repository is refused: it keeps the guard source under skills/, and its CI runs it.
+// In the Toolkit's own repository the guard source already sits under skills/secure-ci-cd/scripts and its
+// CI runs it, so only the hooks are installed there: no copy and no workflow. The hooks look for the guard
+// at .github/scripts/ first, then at that in-repo path, and block when neither is there.
 //
 // Usage: node install-personal-data-guard.cjs --repo <dir> [--identity excluded|included]
 //          [--identity-reason <text>] [--required-check validate|personal-data|none] [--workflow] [--check]
@@ -37,7 +39,7 @@ const HOOKS = ['pre-commit', 'commit-msg', 'pre-push'];
 const SAVED_SUFFIX = '.pre-personal-data-guard';
 // Where the guard source sits in a Toolkit checkout. A repository that has it is the Toolkit itself.
 const TOOLKIT_GUARD_SOURCE = path.join('skills', 'secure-ci-cd', 'scripts', 'personal-data-guard.cjs');
-const TOOLKIT_REFUSAL = "is the Toolkit's own repository: it keeps the guard source in skills/secure-ci-cd/scripts and its CI runs the guard, so the guard is not installed into it";
+const TOOLKIT_NOTE = "is the Toolkit's own repository: it keeps the guard source in skills/secure-ci-cd/scripts and its CI runs the guard";
 
 class InstallError extends Error {
   constructor(message) { super(message); this.name = 'InstallError'; }
@@ -72,13 +74,15 @@ function hookText(name) {
     `# ${name}${SAVED_SUFFIX} next to this file and runs after the guard.`,
     'root=$(git rev-parse --show-toplevel) || exit 1',
     'guard="$root/.github/scripts/personal-data-guard.cjs"',
+    // The Toolkit's own checkout keeps the guard source in place of a vendored copy.
+    'if [ ! -f "$guard" ]; then guard="$root/skills/secure-ci-cd/scripts/personal-data-guard.cjs"; fi',
     `chained="$(dirname "$0")/${name}${SAVED_SUFFIX}"`,
     'if ! command -v node >/dev/null 2>&1; then',
     '  echo "personal-data-guard: node was not found on PATH, so the check cannot run; blocked." >&2',
     '  exit 1',
     'fi',
     'if [ ! -f "$guard" ]; then',
-    '  echo "personal-data-guard: .github/scripts/personal-data-guard.cjs is missing; blocked. Run the installer again." >&2',
+    '  echo "personal-data-guard: neither .github/scripts/personal-data-guard.cjs nor skills/secure-ci-cd/scripts/personal-data-guard.cjs was found; blocked. Run the installer again." >&2',
     '  exit 1',
     'fi',
   ];
@@ -170,10 +174,7 @@ class GuardInstaller {
 
   install({ identity, identityReason, requiredCheck = 'none', workflow = false }) {
     const { top, hooks } = this.locate();
-    if (fs.existsSync(path.join(top, TOOLKIT_GUARD_SOURCE))) {
-      const leftover = this.#guardHooks(hooks).some(hook => hook.text?.includes(HOOK_MARKER));
-      throw new InstallError(`${top} ${TOOLKIT_REFUSAL}.${leftover ? ' Guard hooks from an earlier install are still in this clone; run the installer with --uninstall to remove them.' : ''} Nothing was installed.`);
-    }
+    const toolkit = fs.existsSync(path.join(top, TOOLKIT_GUARD_SOURCE));
     try { fs.mkdirSync(hooks, { recursive: true }); }
     catch (error) { throw new InstallError(`the hooks folder ${hooks} could not be created (${error.code || 'error'}), so nothing was installed.`); }
     const configFile = path.join(top, CONFIG_PATH);
@@ -194,15 +195,19 @@ class GuardInstaller {
     } else {
       this.#say(`Config kept: ${CONFIG_PATH}.`);
     }
-    writeFile(path.join(top, VENDORED_PATH), vendoredText());
-    this.#say(`Guard copied: ${VENDORED_PATH} (guard v${GUARD_VERSION}).`);
+    if (toolkit) this.#say(`Guard copy skipped: ${top} ${TOOLKIT_NOTE}, so the hooks run ${TOOLKIT_GUARD_SOURCE.split(path.sep).join('/')}.`);
+    else {
+      writeFile(path.join(top, VENDORED_PATH), vendoredText());
+      this.#say(`Guard copied: ${VENDORED_PATH} (guard v${GUARD_VERSION}).`);
+    }
     for (const name of HOOKS) this.#say(this.#installHook(hooks, name));
     for (const name of HOOKS) {
       const text = readOrNull(path.join(hooks, name));
       if (!text || !text.includes(HOOK_MARKER)) throw new InstallError(`The ${name} hook could not be read back from ${hooks}; treat the guard as not installed.`);
     }
     this.#say(`Hooks folder git uses: ${hooks}`);
-    if (workflow) {
+    if (workflow && toolkit) this.#say('CI workflow skipped: the Toolkit\'s own CI already runs the guard.');
+    else if (workflow) {
       const target = path.join(top, WORKFLOW_PATH);
       const template = fs.readFileSync(WORKFLOW_TEMPLATE, 'utf8');
       const current = readOrNull(target);
@@ -210,8 +215,11 @@ class GuardInstaller {
       else if (current.replace(/\r\n/g, '\n') === template) this.#say(`CI workflow already current: ${WORKFLOW_PATH}.`);
       else this.#say(`CI workflow kept as it is (it differs from the template): ${WORKFLOW_PATH}.`);
     }
-    this.#say('Next: commit the config, the guard copy and the workflow through a pull request. Hooks stay local to');
-    this.#say('this clone; CI is the check that cannot be skipped with --no-verify.');
+    if (toolkit) this.#say('Hooks stay local to this clone; CI is the check that cannot be skipped with --no-verify.');
+    else {
+      this.#say('Next: commit the config, the guard copy and the workflow through a pull request. Hooks stay local to');
+      this.#say('this clone; CI is the check that cannot be skipped with --no-verify.');
+    }
   }
 
   #installHook(hooks, name) {
@@ -259,15 +267,17 @@ class GuardInstaller {
   // Drift report; changes nothing.
   check() {
     const { top, hooks } = this.locate();
-    if (fs.existsSync(path.join(top, TOOLKIT_GUARD_SOURCE))) {
-      const leftover = this.#guardHooks(hooks).filter(hook => hook.text?.includes(HOOK_MARKER)).map(hook => hook.name);
-      if (leftover.length) { this.#say(`Drift: ${top} ${TOOLKIT_REFUSAL}, and guard hooks are still in this clone (${leftover.join(', ')}); run the installer with --uninstall.`); return 1; }
-      this.#say(`No drift: ${top} is the Toolkit's own repository, and no guard hooks are installed in it.`);
+    const toolkit = fs.existsSync(path.join(top, TOOLKIT_GUARD_SOURCE));
+    // Hooks are optional in the Toolkit's own clone; once any is there, all of them must be current.
+    if (toolkit && !this.#guardHooks(hooks).some(hook => hook.text?.includes(HOOK_MARKER))) {
+      this.#say(`No drift: ${top} ${TOOLKIT_NOTE}, and no guard hooks are installed in it.`);
       return 0;
     }
     const problems = [];
-    const copy = vendoredState(readOrNull(path.join(top, VENDORED_PATH)));
-    if (copy.state !== 'current') problems.push(`guard copy ${VENDORED_PATH}: ${copy.state}`);
+    if (!toolkit) {
+      const copy = vendoredState(readOrNull(path.join(top, VENDORED_PATH)));
+      if (copy.state !== 'current') problems.push(`guard copy ${VENDORED_PATH}: ${copy.state}`);
+    }
     if (!fs.existsSync(path.join(top, CONFIG_PATH))) problems.push(`config ${CONFIG_PATH}: missing`);
     for (const name of HOOKS) {
       const text = readOrNull(path.join(hooks, name));
