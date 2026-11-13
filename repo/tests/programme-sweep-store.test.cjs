@@ -195,6 +195,68 @@ test('snapshot: large documents over budget stop before writes', () => {
   assert.throws(() => store.readSnapshot(), error => error.code === 'PASS_STOPPED' && error.noWrite === true);
 });
 
+test('snapshot: a large document whose blob cannot be read stops with the failed read', () => {
+  const f = fixture();
+  truncateLarge(f, ['issue-500.json']);
+  f.github.intercept(call => (/\/git\/blobs\//.test(call.path) ? { status: 404, json: { message: 'Not Found' } } : undefined));
+  assert.throws(() => f.store.readSnapshot(), { code: 'GH_FAILED' });
+});
+
+// After the branch moved, the read-back reads no blob one by one and never stops on the budget.
+function lowBudgetCommit(f, { refuseGraphql = false } = {}) {
+  let left = 100;
+  const transport = Object.assign(Object.create(f.github), { left: () => left, reserve: 2 });
+  const store = new state.StateStore({ transport, store: f.store.store, now: () => NOW });
+  const batch = new state.StateBatch(store, store.readSnapshot(), 421);
+  batch.mutate('child', 500, { writer: f.writer, change: doc => { doc.next_action = 'Checked 500'; return doc; } });
+  if (refuseGraphql) f.github.intercept(call => (call.path === 'graphql' ? { status: 403, json: { message: 'refused' } } : undefined));
+  left = 2; // settlement at the reserve, as after a pass the request budget stopped
+  const calls = f.github.calls.length;
+  const result = store.commitBatch(batch);
+  const blobs = f.github.calls.slice(calls).filter(call => /\/git\/blobs\//.test(call.path)).length;
+  f.github.hooks = [];
+  return { result, blobs, head: batch.snapshot.head, store };
+}
+
+test('readback: a large unwritten document and a budget at the reserve do not fail a landed commit', () => {
+  const f = fixture();
+  truncateLarge(f, ['issue-501.json']);
+  const { result, blobs, head, store } = lowBudgetCommit(f);
+  assert.equal(result.written.length, 1);
+  assert.notEqual(result.head, head, 'the branch moved');
+  assert.equal(blobs, 0, 'the read-back reads no blob');
+  assert.equal(store.snapshotDoc(store.readSnapshot(), 'child', 500).doc.next_action, 'Checked 500', 'the commit landed');
+});
+
+test('readback: with GraphQL refused, a budget at the reserve does not fail a landed commit', () => {
+  const f = fixture();
+  const { result, blobs, store } = lowBudgetCommit(f, { refuseGraphql: true });
+  assert.equal(result.written.length, 1);
+  assert.equal(blobs, 0, 'the read-back compares blob ids from the listing');
+  assert.equal(store.snapshotDoc(store.readSnapshot(), 'child', 500).doc.next_action, 'Checked 500', 'the commit landed');
+});
+
+test('readback: a written document too large for GraphQL is checked by the created tree blob id', () => {
+  const f = fixture();
+  truncateLarge(f, ['issue-500.json']);
+  const { result, blobs } = lowBudgetCommit(f);
+  assert.equal(result.written.length, 1);
+  assert.equal(blobs, 0, 'checked by blob id, not read');
+  assert.match(result.written[0].blob, /^[0-9a-f]{40}$/);
+  // A commit whose large written document does not match the created tree is refused.
+  const g = fixture();
+  truncateLarge(g, ['issue-500.json']);
+  g.github.intercept(call => {
+    if (call.method !== 'POST' || !call.path.endsWith('/git/trees')) return undefined;
+    const answer = g.github.route(call.method, call.path, call.body);
+    answer.json.tree = answer.json.tree.map(item => ({ ...item, sha: 'f'.repeat(40) }));
+    return answer;
+  });
+  const batch = new state.StateBatch(g.store, g.store.readSnapshot(), 421);
+  batch.mutate('child', 500, { writer: g.writer, change: doc => { doc.next_action = 'Checked 500'; return doc; } });
+  assert.throws(() => g.store.commitBatch(batch), { code: 'STATE_READBACK_MISMATCH' });
+});
+
 test('snapshot: fallback over budget stops before writes', () => {
   const f = fixture();
   const transport = Object.assign(Object.create(f.github), { left: () => 3, reserve: 2 });
