@@ -764,6 +764,8 @@ test('an ack needs a next step and a due time within 72 hours; past due it is ne
   assert.throws(() => state.answerFinding(doc, { id, state: 'acknowledged', next: 'x'.repeat(201), now: at(0) }), /ack needs --next/);
   assert.throws(() => state.answerFinding(doc, { id, state: 'acknowledged', next: 'Fix CI', due: at(73), now: at(0) }), /at most 72 hours/);
   assert.throws(() => state.answerFinding(doc, { id, state: 'acknowledged', next: 'Fix CI', due: at(-1), now: at(0) }), /after now/);
+  assert.throws(() => state.answerFinding(doc, { id, state: 'acknowledged', next: 'Fix CI', due: '2026-11-13T09:00:00', now: at(0) }), /with Z or an offset/, 'no zone is never read as local time');
+  assert.equal(state.answerFinding(doc, { id, state: 'acknowledged', next: 'Fix CI', due: '2026-11-13T17:00:00+08:00', now: at(0) }).attention[0].due, at(9));
   const acked = state.answerFinding(doc, { id, state: 'acknowledged', next: 'Builder fixes CI today', now: at(0) });
   assert.equal(acked.attention[0].due, at(24), 'due 24 hours ahead unless given');
   assert.equal(acked.private.attention_notes[id], 'Builder fixes CI today');
@@ -825,4 +827,29 @@ test('every session-start problem line names who acts and when', () => {
   for (const action of Object.values(gate.FINDING_ACTIONS)) assert.ok(line.includes(action), `${action} in ${line}`);
   assert.match(line, /Attention: 2 new[^]*Run programme\.cjs attention for the list\. Controller: answer each new or overdue finding this turn/);
   assert.match(line, /Programme sweep: last run failed[^]*see toolkit tasks\. Controller: fix the task this turn/);
+});
+
+test('a task line gets the controller action only for a fault, never against an owner stop', () => {
+  for (const line of ['Programme sweep: last run failed at 10:00Z; see toolkit tasks.', 'Programme sweep: held at 10:00Z; see toolkit tasks.',
+    'Programme sweep: skipped (offline), 3 runs in a row since 09:00Z; see toolkit tasks.', 'Programme sweep: no run since 07:00Z (over 2 hours); see toolkit tasks.',
+    'Task health: programme-sweep: task code older than managed checkout', 'health file not shared: no verified evidence store', 'Task health file is over 26 hours old']) {
+    assert.equal(gate.taskAction(line), ` ${gate.FINDING_ACTIONS.tasks}`, line);
+  }
+  assert.equal(gate.taskAction('Programme sweep: stopped by owner; see toolkit tasks.'), ' No action: the owner stopped it.');
+  assert.equal(gate.taskAction('Footer sweep: stopped by owner; see toolkit tasks.'), ' No action: the owner stopped it.');
+  assert.equal(gate.taskAction('Shard timings: deferred for 5 minutes, 1 deferral; awaiting an eligible task retry; see toolkit tasks.'), '');
+  assert.equal(gate.taskAction('Scheduled jobs: owned by other-pc; ask the owner to move them back.'), '');
+});
+
+test('an owner-stopped sweep at session start says no action is needed', () => {
+  const root = tmp();
+  const home = tmp();
+  const now = new Date(2026, 10, 1, 12, 0, 0);
+  const programmeDeps = { attentionDir: tmp(), sessionsDir: tmp(), home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => now.toISOString() };
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
+  tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
+    purpose: 'Sweep.', repository: 'acme/app', created: '2026-10-30T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', job: 'programme-sweep', definition: '0123456789ab', stopped_by_owner: true, stopped_at: '2026-10-31T00:00:00.000Z' }]);
+  const line = gate.sessionLine(root, { stateReader: () => enabled, programmeDeps });
+  assert.match(line, /Programme sweep: stopped by owner; see toolkit tasks\. No action: the owner stopped it\./);
+  assert.ok(!line.includes(gate.FINDING_ACTIONS.tasks), line);
 });

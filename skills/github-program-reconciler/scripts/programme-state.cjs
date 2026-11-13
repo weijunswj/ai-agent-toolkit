@@ -414,6 +414,8 @@ const ATTENTION_NOTE_LIMIT = 200;
 const ACK_DUE_HOURS = 24;
 const ACK_DUE_MAX_HOURS = 72;
 const HOUR_MS = 60 * 60 * 1000;
+// A due time is full ISO 8601 with Z or an offset, so text without a zone is never read as local time.
+const DUE_TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d{1,3})?)?(?:Z|[+-]\d\d:\d\d)$/;
 const BODY_SECTION_KINDS = ['CURRENT', 'STATE', 'CONTEXT', 'TRACE', 'NAV', 'hand_written'];
 const SIZE_CODES = ['BODY_TOO_LARGE', 'BODY_NEAR_LIMIT'];
 const PAGE_CODES = SIZE_CODES;
@@ -720,6 +722,7 @@ function answerFinding(doc, { id, state, reason = null, next = null, due = null,
   if (state === 'acknowledged') {
     if (!isText(next) || next.length > ATTENTION_NOTE_LIMIT) throw new ProgrammeError('USAGE', `ack needs --next <the step you will take> of at most ${ATTENTION_NOTE_LIMIT} characters.`);
     const time = Date.parse(now);
+    if (due !== null && !DUE_TIME.test(String(due))) throw new ProgrammeError('USAGE', 'ack --due must be an ISO 8601 date and time with Z or an offset, for example 2026-11-14T09:00:00Z.');
     dueAt = due === null ? time + ACK_DUE_HOURS * HOUR_MS : Date.parse(due);
     if (Number.isNaN(dueAt) || dueAt <= time || dueAt > time + ACK_DUE_MAX_HOURS * HOUR_MS) {
       throw new ProgrammeError('USAGE', `ack --due must be a date and time after now and at most ${ACK_DUE_MAX_HOURS} hours ahead; a longer wait is a tracked task, or dispose with a reason.`);
@@ -6952,7 +6955,7 @@ module.exports = Object.freeze({
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
-  SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
+  SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, DUE_TIME, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,

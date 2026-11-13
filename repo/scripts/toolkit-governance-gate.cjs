@@ -1651,6 +1651,15 @@ const FINDING_ACTIONS = Object.freeze({
   checkpoint: 'Controller: check that session\'s work this turn and record it by hand if the record is lost; the session tells the controller if it is the one reading this.',
 });
 
+// A task line needs the controller only when it reports a fault: a failed, held or skipped run, no
+// run for over 2 hours, a task-health flag, or a health file that is stale or not shared. An owner's stop, a plain deferral and another
+// computer's jobs (whose line names the owner's step) get no controller action.
+const TASK_FAULT = /(?:last run failed|held at|skipped|no run (?:since|recorded)|Task health: |health file not shared|Task health file is over)/;
+function taskAction(line) {
+  if (TASK_FAULT.test(line)) return ` ${FINDING_ACTIONS.tasks}`;
+  return /stopped by owner/.test(line) ? ' No action: the owner stopped it.' : '';
+}
+
 function programmeLines(state, registryOptions = {}, deps = {}) {
   const lines = [];
   try {
@@ -1671,7 +1680,7 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
     if (deps.home || registryOptions.testOnly !== true) {
       const now = deps.now ? new Date(deps.now()) : new Date();
       const sweep = require('./toolkit-tasks.cjs').sweepLine(binding.repository, { home: deps.home, now, registry: deps.registry });
-      if (sweep) lines.push(`${sweep} ${FINDING_ACTIONS.tasks}`);
+      if (sweep) lines.push(`${sweep}${taskAction(sweep)}`);
     }
   } catch { /* no attention line */ }
   try {
@@ -1708,6 +1717,7 @@ function insideRepository(cwd) {
 module.exports = Object.freeze({
   ANSWER,
   FINDING_ACTIONS,
+  taskAction,
   ASK,
   HOST_SESSION_VARIABLE,
   LAUNCHER_MARKERS,

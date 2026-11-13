@@ -466,14 +466,17 @@ function answer(args, context, deps, answerState) {
     change: doc => state.answerFinding(doc, { id: args.finding, state: answerState, reason: args.reason || null, next: args.next || null, due: args.due || null, now: nowText(deps) }) });
   if (!deps.rehearsal) cacheAttention(context, result.doc, true, deps);
   const entry = (result.doc?.attention || []).find(item => item.id === args.finding);
-  return { ...writeResult('parent', context.binding.parent_issue, result, writer), finding: args.finding, state: answerState, ...(entry?.due && answerState === 'acknowledged' ? { due: entry.due } : {}),
+  const kept = result.outcome === 'NOOP' && answerState === 'acknowledged' && entry?.due
+    ? { note: `Already acknowledged until ${entry.due}; nothing changed. It can be answered again once that time passes.` } : {};
+  return { ...writeResult('parent', context.binding.parent_issue, result, writer), finding: args.finding, state: answerState, ...(entry?.due && answerState === 'acknowledged' ? { due: entry.due } : {}), ...kept,
     attention: state.attentionLine(result.doc.attention, nowText(deps)) };
 }
 
 const STATE_BLOCK = Object.freeze({ kind: 'branch', branch: state.STATE_BRANCH, path: state.STATE_PATH });
 
-// A store that runs every write's checks and keeps the result in memory: the same fence, finding
-// state, field limits and document validation as a real write, and nothing reaches GitHub.
+// A store that runs every write's content checks and keeps the result in memory: the same fence,
+// finding state, field limits and document validation as a real write, and nothing reaches GitHub.
+// It does not check the store's version token, privacy or branch, and logs no order run.
 function rehearsalStore(store) {
   const staged = new Map();
   const rehearsal = Object.create(store);

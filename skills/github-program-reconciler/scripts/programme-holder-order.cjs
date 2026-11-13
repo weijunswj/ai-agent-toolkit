@@ -11,7 +11,7 @@
 // string does today; it narrows that word to named writes, a time limit and a trail. It never
 // claims, takes over, creates the parent or moves the state.
 const crypto = require('node:crypto');
-const { ProgrammeError, ATTENTION_NOTE_LIMIT } = require('./programme-state.cjs');
+const { ProgrammeError, ATTENTION_NOTE_LIMIT, DUE_TIME } = require('./programme-state.cjs');
 
 const SCHEMA = 'toolkit.programme-holder-order.v1';
 const MAX_OPS = 60;
@@ -66,7 +66,7 @@ function checkOp(op, at) {
   for (const key of ['next', 'reason']) {
     if (['ack', 'dispose'].includes(op.command) && op[key] !== undefined && op[key].length > ATTENTION_NOTE_LIMIT) throw refuse(`write ${at + 1} (${op.command}) needs ${key} of at most ${ATTENTION_NOTE_LIMIT} characters`);
   }
-  if (op.due !== undefined && Number.isNaN(Date.parse(op.due))) throw refuse(`write ${at + 1} (ack) needs due as a date and time`);
+  if (op.due !== undefined && !DUE_TIME.test(op.due)) throw refuse(`write ${at + 1} (ack) needs due as an ISO 8601 date and time with Z or an offset`);
   if (op.command === 'return' && Boolean(op.record) === Boolean(op.consume)) throw refuse(`write ${at + 1} (return) needs exactly one of record or consume`);
   if (op.command === 'return' && op.consume && !op.verdict) throw refuse(`write ${at + 1} (return consume) needs a verdict`);
   return op;

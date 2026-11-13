@@ -190,6 +190,7 @@ test('an ack in an order carries its next step, and a due time it gives must be 
   const f = setup(t);
   assert.equal(f.run(f.order({ ops: [{ command: 'ack', finding: ADDED }] })).error?.code, 'ORDER_INVALID');
   assert.equal(f.run(f.order({ ops: [{ command: 'ack', finding: ADDED, next: 'x', due: 'soon' }] })).error?.code, 'ORDER_INVALID');
+  assert.equal(f.run(f.order({ ops: [{ command: 'ack', finding: ADDED, next: 'x', due: '2026-11-12T18:00:00' }] })).error?.code, 'ORDER_INVALID', 'a due time needs its zone');
   const due = new Date(NOW + 6 * 3600 * 1000).toISOString();
   const result = f.run(f.order({ ops: [{ command: 'ack', finding: ADDED, next: 'Confirm #423 today.', due }] }));
   assert.equal(result.report.outcome, 'DONE');
