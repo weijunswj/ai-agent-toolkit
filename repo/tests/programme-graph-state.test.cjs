@@ -485,3 +485,53 @@ test('the first refresh of a v1 child keeps discovered PRs through its schema up
   assert.deepEqual(f.child(2).prs,[{number:20,state:'MERGED',merge_sha:SHA}]);
   const before=writes(f); assert.deepEqual(f.run().effects,[]); assert.equal(writes(f),before);
 });
+
+// A merge train PR carries its members: it Refs every member's task and merges them all, so the
+// member PR (merged indirectly) must stay the task's PR and the train must never join its history.
+const trainBody = (members, refs, head = SHA) => ['## Merge train', '', '| Member | Reviewed head | Tier | Bump | Review |', '|---|---|---|---|---|',
+  ...members.map(n => `| #${n} | \`${head}\` | NORMAL | patch | PASS |`), '', 'UAT: NOT_REQUIRED (no member needs an owner test)', '', ...refs.map(n => `Refs #${n}`)].join('\n');
+
+test('merge train carrier: a merged train stays out of task history and backfill, even on a merge-time tie', () => {
+  const f = fixture([2,3]);
+  // Finished by the controller before the close is copied, so the pass backfills the merged PR.
+  for (const task of [2,3]) f.store.mutate('child',task,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:'DONE',completed_at:new Date(epoch).toISOString()})});
+  f.close(2); f.close(3);
+  const at = '2026-11-07T00:00:00Z';
+  pr(f,21,{merged:true,mergedAt:at,body:'Closes #2'}); pr(f,22,{merged:true,mergedAt:at,body:'Closes #3'});
+  pr(f,30,{merged:true,mergedAt:at,body:trainBody([21,22],[2,3])});
+  f.github.issuePrLinks.set(2,{closing:[21],timeline:[30]}); f.github.issuePrLinks.set(3,{closing:[22],timeline:[30]});
+  assert.deepEqual(f.run().holds,[]);
+  for (const [task, member] of [[2,21],[3,22]]) {
+    assert.deepEqual(f.child(task).prs.map(p => p.number),[member]);
+    assert.equal(f.child(task).pr.number,member,'the member, not the train, is the task\'s merged PR');
+  }
+  assert.ok(!(f.parent().attention || []).some(e => e.code === 'PR_WITHOUT_TASK' && e.issue === 30));
+});
+
+test('merge train carrier: an open train gets no PATH or STATUS block and no task history', () => {
+  const f = fixture([2]); pr(f,21,{body:'Refs #2'}); pr(f,30,{body:trainBody([21],[2])});
+  const before = f.github.prs.get(30).body;
+  assert.deepEqual(f.run().holds,[]);
+  assert.deepEqual(f.child(2).prs.map(p => p.number),[21]);
+  assert.equal(f.github.prs.get(30).body,before,'the train body is never rewritten');
+  assert.ok(!(f.parent().attention || []).some(e => e.code === 'PR_WITHOUT_TASK' && e.issue === 30));
+});
+
+test('merge train carrier: a train saved in task history before this rule is dropped on the next pass', () => {
+  const f = fixture([2]); pr(f,21,{merged:true,mergedAt:'2026-11-07T00:00:00Z',body:'Refs #2'});
+  pr(f,30,{merged:true,mergedAt:'2026-11-07T00:00:00Z',body:trainBody([21],[2])});
+  f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,prs:[{number:30,state:'MERGED',merge_sha:SHA},{number:21,state:'MERGED',merge_sha:SHA}]})});
+  f.time(epoch + 86400000);
+  assert.deepEqual(f.run().holds,[]);
+  assert.deepEqual(f.child(2).prs.map(p => p.number),[21]);
+});
+
+test('merge train carrier: a pasted train table on a PR that carried no member stays in task history', () => {
+  const f = fixture([2,3]);
+  pr(f,21,{merged:true,mergedAt:'2026-11-01T00:00:00Z',body:'Refs #2'});
+  pr(f,31,{merged:true,mergedAt:'2026-11-07T00:00:00Z',body:trainBody([21],[2])});
+  pr(f,22,{body:'Refs #3'}); pr(f,32,{body:trainBody([22],[3],'c'.repeat(40))});
+  assert.deepEqual(f.run().holds,[]);
+  assert.deepEqual(f.child(2).prs.map(p => p.number),[31,21],'merged a week after its "member": not its carrier');
+  assert.deepEqual(f.child(3).prs.map(p => p.number).sort((a,b)=>a-b),[22,32],'an open table whose head is not the member\'s head: not its carrier');
+});
