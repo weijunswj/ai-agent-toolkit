@@ -268,7 +268,7 @@ class MergedSweepBindingReader {
     if (text) {
       try {
         const binding = state.validateBinding(JSON.parse(text));
-        if (binding.governance === 'enabled' && binding.repository.toLowerCase() === this.repository.toLowerCase()) this.binding = binding;
+        if (state.bindingEnabled(binding) && binding.repository.toLowerCase() === this.repository.toLowerCase()) this.binding = binding;
       } catch { /* The governance rule table receives the exact invalid bytes and refuses them. */ }
     }
     return { schema: 'toolkit.governance-binding-cache.v1', repository_id: identity.repository_id, remote: identity.remote.canonical,
