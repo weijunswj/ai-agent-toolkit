@@ -284,7 +284,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   // The nudge closes quiet chat reply threads and lists threads due for rotation.
   const nudge = fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
   assert.match(nudge, /reason QUIET-6H, unresolved post reply threads with no new message for 6 hours or more/);
-  assert.match(nudge, /Rotate: long-lived non-gate worker threads \(integrator, review runner, record keeper; never gate sessions/);
+  assert.match(nudge, /Rotate: standing non-gate threads \(integrator, review runner, record keeper, any long-lived lane; never gate sessions/);
   assert.match(nudge, /the QUIET-6H due time in the state file has not passed/);
   assert.match(nudge, /no answer; never a task home thread\./);
   assert.match(nudge, /\*\*Rotate:\*\*/);
@@ -908,7 +908,7 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
         "Reuse step 4's current Remote Control findings", 'Do not count it as working because a coordinator message was sent to it',
         '"UNRELAYED ASK: <n> | "', '**Unrelayed:**', '**Waiting on owner:**',
         'A lane whose device is confirmed not reachable also goes under **Waiting on owner:**', 'the step "bring Claude on that device back online"',
-        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | " and "LANES UNDER CAP:', 'A failed status read is "could not be checked", never offline',
+        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | ", "ROTATE DUE: <n> | " and "LANES UNDER CAP:', 'A failed status read is "could not be checked", never offline',
         'An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']) {
         assert.ok(text.includes(phrase), `${repo}/${session}: ${phrase}`);
       }
@@ -948,9 +948,15 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
   assert.ok(rotation.indexOf('reads it back with `get_trigger`') < rotation.indexOf('then deletes the outdated task'), 'the outdated task goes only after the new one reads back');
   assert.doesNotMatch(rotation, /disables the old task/, 'a rotation leaves no disabled copy behind');
   assert.doesNotMatch(rotation, /test-fires/, 'a rotation never fires the new task');
+  const rotate = nudge.split('\n').find(line => line.startsWith('   Rotate:'));
+  for (const required of ['any long-lived lane', '15 or more PRs, records or review rounds, started over a day ago, or show summarised context',
+    'any thread the coordinator reused for a new task after its own finished', '"ROTATE DUE: <n> | "']) assert.ok(rotate.includes(required), required);
+  assert.ok(first.includes('"ROTATE DUE: <n> | "'), 'ROTATE DUE is a first-line prefix');
+  assert.ok(acting.includes('- `ROTATE DUE`: rotate each listed thread this turn'), 'the coordinator acts on ROTATE DUE');
   assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
   const freshAge = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
   assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
   const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
   assert.match(skill, /\*\*Every task run reaches the project chat\.\*\*[^\n]*a prefixed line is work, never `no_reply_needed`\./);
+  assert.match(skill, /each new task gets a fresh thread, linking the old one\. Rotate every standing non-gate thread \(integrator, review runner, record keeper, any long-lived lane\) per `agent-cost-control`, and at the latest at 15 PRs, records or review rounds, a day old or summarised context:/);
 });
