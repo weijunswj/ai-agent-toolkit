@@ -1047,6 +1047,75 @@ test('an open catalogued task that cannot attach blocks parent completion', () =
   assert.ok(f.reconciler().plan().effects.some(effect => effect.kind === 'set_parent_state' && effect.target.state === 'closed'));
 });
 
+// With the binding's standing permission, a finished task leaves its native parent: never one with
+// open work or an open PR, never closed or deleted, and every detach stays on record.
+function detachFixture({ permit = true } = {}) {
+  const f = setup({
+    outcomes: [
+      { issue: 620, label: 'Finished', class: 'COMPLETED', parent: 421, order: 1 },
+      { issue: 621, label: 'Finished, open sub-issue', class: 'COMPLETED', parent: 421, order: 2 },
+      { issue: 622, label: 'Finished, open PR', class: 'COMPLETED', parent: 421, order: 3 },
+      { issue: 623, label: 'Open', class: 'COMMITTED', parent: 421, order: 4 },
+      { issue: 624, label: 'Retired', class: 'RETIRED', parent: 421, order: 5 },
+    ],
+    issues: github => {
+      github.addIssue(620, { state: 'closed', parent: 421 });
+      github.addIssue(621, { state: 'closed', parent: 421 });
+      github.addIssue(625, { state: 'open', parent: 621 });
+      github.addIssue(622, { state: 'closed', parent: 421 });
+      github.addPr(900, { head: 'a'.repeat(40), body: 'Refs #622' });
+      github.addIssue(623, { state: 'open', parent: 421 });
+      github.addIssue(624, { state: 'closed', parent: 421 });
+    },
+  });
+  Object.assign(f.binding, { schema: state.SCHEMA.bindingV2, governance: 'enabled', parents: [{ issue: 421, record_prefix: 'INT-TK421-' }] });
+  if (permit) f.binding.detach_finished_children = true;
+  return f;
+}
+test('without the binding permission nothing is detached', () => {
+  const f = detachFixture({ permit: false });
+  assert.equal(kinds(f.reconciler().run()).filter(kind => kind.startsWith('detach')).length, 0);
+  assert.throws(() => f.reconciler().mutator.detach(421, f.github.issues.get(620).id, { binding: f.binding }), /DETACH_REFUSED|No bound permission/);
+});
+test('a finished task with no open work or PR is detached, read back and recorded', () => {
+  const f = detachFixture();
+  const dry = f.reconciler().run();
+  const detaches = kinds(dry).filter(kind => kind.startsWith('detach'));
+  assert.deepEqual(detaches.sort(), ['detach #620', 'detach #624'], JSON.stringify(dry.effects.map(effect => effect.kind)));
+  assert.ok(codes(dry).includes('NATIVE_DETACH_FINISHED #620'));
+  assert.equal(f.github.issues.get(620).parent, 421, 'a dry run writes nothing');
+  const applied = f.reconciler().run({ apply: true });
+  assert.deepEqual(applied.holds, [], JSON.stringify(applied.holds));
+  for (const number of [620, 624]) {
+    assert.equal(f.github.issues.get(number).parent, null, `#${number} detached`);
+    assert.equal(f.github.issues.get(number).state, 'closed', `#${number} never reopened or deleted`);
+  }
+  assert.equal(f.github.issues.get(621).parent, 421, 'open sub-issue keeps its parent');
+  assert.equal(f.github.issues.get(622).parent, 421, 'open PR keeps its parent');
+  assert.equal(f.github.issues.get(623).parent, 421, 'open task keeps its parent');
+  const parent = f.store.read('parent', 421).doc;
+  assert.deepEqual(parent.private.detached_children.map(entry => [entry.issue, entry.parent]).sort(), [[620, 421], [624, 421]]);
+  assert.ok(parent.outcomes.some(outcome => outcome.issue === 620), 'the catalogue keeps the detached task');
+  assert.deepEqual(parent.pending_effects, []);
+  // Nothing re-attaches it, and the next pass has nothing to do for it.
+  const next = f.reconciler().run();
+  assert.ok(!kinds(next).some(kind => kind.endsWith('#620') || kind.endsWith('#624')), JSON.stringify(next.effects));
+  // A reopened task gets its parent back.
+  f.github.issues.get(620).state = 'open';
+  assert.ok(kinds(f.reconciler().run()).includes('attach #620'));
+});
+test('a detach whose task reopened after planning is not written', () => {
+  const f = detachFixture();
+  const r = f.reconciler();
+  f.github.hooks.push(call => {
+    if (call.method === 'GET' && /\/issues\/620$/.test(call.path) && f.github.calls.some(c => c.method === 'PUT')) f.github.issues.get(620).state = 'open';
+    return null;
+  });
+  r.run({ apply: true });
+  assert.equal(f.github.issues.get(620).parent, 421);
+  assert.equal(f.github.calls.filter(call => call.method === 'DELETE' && call.path.endsWith('/issues/421/sub_issue')).length, 1, 'only #624 was detached');
+});
+
 test('apply shows state writes from the same pass on the parent without a second edit', () => {
   const outcomes = [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }];
   const { github, store, reconciler } = setup({ outcomes, issues: github => {
