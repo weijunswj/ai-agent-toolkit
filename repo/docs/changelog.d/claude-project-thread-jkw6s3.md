@@ -1,3 +1,0 @@
-### Fixed
-
-- **Skill descriptions in Codex:** Codex lists each skill with only about the first 200 characters of its description, so a trigger written further down was never seen there. `remove toolkit` and its full removal plan now open the setup skill's description (Codex had asked whether "remove" meant the computer, the repository or governance instead of showing the plan), and the Toolkit env and release-readiness skills put their trigger phrases first too. A check now keeps every quoted phrase or command in a skill description within the first 195 characters, and every description within 1,024 characters (the programme reconciler's was 1,051).
