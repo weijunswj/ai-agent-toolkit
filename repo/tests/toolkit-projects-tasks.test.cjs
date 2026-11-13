@@ -284,7 +284,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   // The nudge closes quiet chat reply threads and lists threads due for rotation.
   const nudge = fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
   assert.match(nudge, /reason QUIET-6H, unresolved post reply threads with no new message for 6 hours or more/);
-  assert.match(nudge, /Rotate: standing non-gate threads \(integrator, review runner, record keeper, any long-lived lane; never gate sessions/);
+  assert.match(nudge, /Rotate: standing non-gate threads \(integrator, review runner, record keeper, any long-lived lane, Remote Control lanes included; never gate sessions/);
   assert.match(nudge, /the QUIET-6H due time in the state file has not passed/);
   assert.match(nudge, /no answer; never a task home thread\./);
   assert.match(nudge, /\*\*Rotate:\*\*/);
@@ -949,10 +949,13 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
   assert.doesNotMatch(rotation, /disables the old task/, 'a rotation leaves no disabled copy behind');
   assert.doesNotMatch(rotation, /test-fires/, 'a rotation never fires the new task');
   const rotate = nudge.split('\n').find(line => line.startsWith('   Rotate:'));
-  for (const required of ['any long-lived lane', '15 or more PRs, records or review rounds, started over a day ago, or show summarised context',
+  for (const required of ['any long-lived lane, Remote Control lanes included', 'that still take new work and have handled 15 or more PRs, records or review rounds, started over a day ago, or show summarised context',
+    'never one only waiting on the owner (a test, a decision card, an open ask or a watched PR) until that clears',
     'any thread the coordinator reused for a new task after its own finished', '"ROTATE DUE: <n> | "']) assert.ok(rotate.includes(required), required);
   assert.ok(first.includes('"ROTATE DUE: <n> | "'), 'ROTATE DUE is a first-line prefix');
   assert.ok(acting.includes('- `ROTATE DUE`: rotate each listed thread this turn'), 'the coordinator acts on ROTATE DUE');
+  const device = fs.readFileSync(path.join(dir, 'reference', 'device-work.md'), 'utf8');
+  assert.ok(device.includes('- **Rotate long Remote Control lanes too.**') && device.includes('you end its session with `stop_remote_control` once the handoff is read back'), 'Remote Control lanes rotate too');
   assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
   const freshAge = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
   assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');

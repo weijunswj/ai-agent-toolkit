@@ -736,7 +736,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // Toolkit-made tasks: rendered, named, swapped by recreate; project and local tasks report-only.
   for (const required of ['toolkit-projects-tasks.cjs --render <daily-check-in|hourly-nudge> --params <file>',
     '`<PROJECT>: Daily check-in`, `<PROJECT>: Hourly nudge`', '**Change = recreate.**', 'only then delete the old task',
-    'If the test run fails, delete the new one, keep the old one and report', 'say undo task sync <name>',
+    'If the read-back fails, delete the new one, keep the old one and report', 'Read it back with `get_trigger` (enabled, the right next run time, bound to its new home thread; never `fire_trigger` it, the first scheduled run is the proof); only then delete the old task', 'say undo task sync <name>',
     'A `malformed` prompt holds and is reported', '**The project\'s own tasks** are never changed without the owner',
     'never recreated or moved to the cloud', 'Trigger ids live only on this line, never in a prompt', '--check-memory <file>',
     'Fresh-session routines cannot be created from a device-linked', 'Run every day by default']) {
@@ -865,8 +865,9 @@ test('on a Windows device every governed repository gets its own programme sweep
 test('Projects catches up a moved task through its home thread and never fire_triggers a bound task', () => {
   const text = bundle();
   const reference = read(`${REFERENCE_DIR}/recurring-tasks.md`);
-  assert.match(reference, /\*\*Moving a task or catching up a run\.\*\* A schedule change, or a recreate, whose new time has already passed today skips today's run if it has not already run today \(a swap's test run counts as today's run\): say which run will be skipped before the move, and catch it up the same turn\./);
-  assert.match(reference, /To catch up a bound task, or to test-fire one during a swap, message its home thread to run its prompt there now/);
+  assert.match(reference, /\*\*Moving a task or catching up a run\.\*\* A schedule change, or a recreate, whose new time has already passed today skips today's run if it has not already run today: say which run will be skipped before the move, and catch it up the same turn\./);
+  assert.match(reference, /To catch up a bound task, message its home thread to run its prompt there now/);
+  assert.doesNotMatch(reference, /Fire it once|test-fire one during a swap|swap's test run/, 'a swap never fires the replacement');
   assert.match(reference, /Never fire_trigger a bound task from another thread: that run starts in a new session with no project tools, files or memory/);
   assert.match(reference, /Confirm the catch-up's report reached the coordinator\. Never run a bound task's prompt in another thread or in the coordinator\./);
   assert.match(text, /\*\*Moving a task or catching up:\*\* a move to a time already passed today skips today's run unless it already ran today, so catch it up the same turn/);
