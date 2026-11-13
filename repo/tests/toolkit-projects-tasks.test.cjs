@@ -908,7 +908,8 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
         "Reuse step 4's current Remote Control findings", 'Do not count it as working because a coordinator message was sent to it',
         '"UNRELAYED ASK: <n> | "', '**Unrelayed:**', '**Waiting on owner:**',
         'A lane whose device is confirmed not reachable also goes under **Waiting on owner:**', 'the step "bring Claude on that device back online"',
-        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | " and "LANES UNDER CAP:', 'A failed status read is "could not be checked", never offline',
+        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | ", "LANES UNDER CAP:', 'and "WORK QUEUE: <n> | " prefixes',
+        'the programme graph is the queue', 'it needs the coordinator\'s step this turn even when lanes are full', 'A failed status read is "could not be checked", never offline',
         'An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']) {
         assert.ok(text.includes(phrase), `${repo}/${session}: ${phrase}`);
       }
