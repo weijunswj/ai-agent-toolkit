@@ -11,7 +11,9 @@
 // no App configured it prints a notice and exits 0. A failed sign-in fails the job with a fixed
 // message naming the App's variable and secret. Any other failure names the CLI's stop code and the
 // HTTP status of a failed GitHub request, when there is one; GitHub's own error text, tokens and keys
-// are never printed. The job summary gets the pass's metrics line.
+// are never printed. The job summary gets the pass's metrics line. When the pass stopped early and
+// read something, `follow_up_at` (milliseconds) tells the workflow's follow-up job when to start the
+// next run: once GitHub's hourly App limit has reset, or at once after the pass's time limit.
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -21,6 +23,7 @@ const PRIVATE_KEY_SECRET = 'TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY';
 const BINDING_PATH = Object.freeze(['.github', 'toolkit-programme.json']);
 const BINDING_LIMIT = 64 * 1024;
 // The scheduled pass's own kill; the workflow stops the job three minutes after it.
+const { RESET_WAIT_MS } = require('./toolkit-programme-sweep-gate.cjs');
 const RUN_TIMEOUT_MS = require('../../skills/github-program-reconciler/scripts/programme-state.cjs').PASS_BUDGETS.scheduled.killMs;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const SAFE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -98,13 +101,23 @@ function summaryLine(report) {
   return `Programme Sweep: ${report.metrics}${held}`;
 }
 
+// When the next run should start after this pass, or 0 when the hourly start is enough. Only a pass
+// that read something and left tasks follows up, so a pass that cannot make progress never loops.
+function followUpAt(report, started, now) {
+  const sweep = report?.sweep;
+  if (!sweep || !(sweep.left > 0) || !(sweep.read > 0)) return 0;
+  if (sweep.reason === 'GitHub rate limit') return started + RESET_WAIT_MS;
+  if (sweep.reason === 'time limit') return now;
+  return 0;
+}
+
 class ProgrammeSweepAction {
   constructor({ env = process.env, root = env.GITHUB_WORKSPACE || process.cwd(), readFile = fs.readFileSync,
     validateBinding = binding => require(path.join(root, 'skills', 'github-program-reconciler', 'scripts', 'programme-state.cjs')).validateBinding(binding),
     refresh = input => runRefresh(input), notice = message => process.stdout.write(`::notice::${message}\n`),
     failure = message => process.stderr.write(`${message}\n`), output = (name, value) => fs.appendFileSync(env.GITHUB_OUTPUT, `${name}=${value}\n`),
-    summary = line => fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `${line}\n`) } = {}) {
-    Object.assign(this, { env, root, readFile, validateBinding, refresh, notice, failure, output, summary });
+    summary = line => fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `${line}\n`), now = () => Date.now() } = {}) {
+    Object.assign(this, { env, root, readFile, validateBinding, refresh, notice, failure, output, summary, now });
   }
 
   // Step one: the store to mint a token for, or a notice and nothing more.
@@ -124,6 +137,7 @@ class ProgrammeSweepAction {
     if (env.MINT_OUTCOME !== 'success/success' || !env.GOVERNED_TOKEN || !env.STORE_TOKEN || !BOT_LOGIN.test(env.SWEEP_LOGIN || '')) {
       this.failure(SIGN_IN_FAILURE); return 1;
     }
+    const started = this.now();
     let result;
     try { result = this.refresh({ root: this.root, env }); } catch { this.failure(GENERAL_FAILURE); return 1; }
     if (result.code === 'GH_AUTH') { this.failure(SIGN_IN_FAILURE); return 1; }
@@ -134,6 +148,8 @@ class ProgrammeSweepAction {
     // A line that could carry a token is never written.
     if (!line || [env.GOVERNED_TOKEN, env.STORE_TOKEN].some(token => line.includes(token))) { this.failure(SUMMARY_FAILURE); return 1; }
     try { this.summary(line); } catch { this.failure(SUMMARY_FAILURE); return 1; }
+    const at = followUpAt(result.report, started, this.now());
+    if (at) try { this.output('follow_up_at', String(at)); } catch { /* no follow-up; the hourly start resumes */ }
     return 0;
   }
 }
@@ -144,4 +160,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SIGN_IN_FAILURE, GENERAL_FAILURE, readCheckedOutBinding, lastReport, runRefresh, failureLine, summaryLine, ProgrammeSweepAction });
+module.exports = Object.freeze({ CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SIGN_IN_FAILURE, GENERAL_FAILURE, readCheckedOutBinding, lastReport, runRefresh, failureLine, summaryLine, followUpAt, ProgrammeSweepAction });
