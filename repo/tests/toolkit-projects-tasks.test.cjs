@@ -940,6 +940,12 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
   assert.ok(periodic.includes('- **Task lines are work** (as in **Acting on the nudge report**).'), 'the check-in follows the same rule');
   assert.ok(acting.includes("that confirmed ping completes the prefix's action, so write `.done`"), 'a blocked prefix still closes its run');
   assert.ok(periodic.includes('  - `NEEDS SETUP`: as under **Acting on the nudge report**.'), 'the check-in acts on NEEDS SETUP');
+  const rotation = periodic.split('\n').find(line => line.includes('asks for a rebuild of that task the same turn'));
+  for (const required of ["A task's home thread cannot be moved", 'never ask the owner to repoint it', 'does every step itself',
+    'creates a new task bound to itself with that prompt and the same name, schedule and model', 'test-fires it',
+    'disables the old task (never deletes it, so it stays for undo)', 'with the new id and today\'s "since" date',
+    "the first rotation needs the owner's go; record it in project memory, and later rotations proceed on it", '`stopped by owner`']) assert.ok(rotation.includes(required), required);
+  assert.doesNotMatch(rotation, /then delete the old task/, 'a rotation never deletes the old task');
   assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
   const freshAge = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
   assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
