@@ -294,8 +294,9 @@ test('the controller, the changelog guide and the repo map describe the train th
   const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
   const finish = read('repo/controller/evidence-and-finish.md');
   assert.match(finish, /\*\*Merge trains:\*\* two or more merge-ready PRs/);
-  assert.match(finish, /Never hand-fix a train: a conflict, moved head or failed bump ejects that member; red CI splits it \(`split`\)/);
+  assert.match(finish, /Never hand-fix a train: a conflict, moved head or failed bump ejects that member \(once pushed, `eject`, never a rebuild\); red CI splits it \(`split`\)/);
   assert.match(finish, /RISKY members each need the owner's typed OK/);
+  assert.match(finish, /ejects that member \(once pushed, `eject`, never a rebuild\)/);
   const guide = read('repo/docs/changelog.d/README.md');
   for (const command of ['build', 'verify', 'body', 'land', 'eject']) assert.match(guide, new RegExp(`toolkit-merge-train\\.cjs ${command} --manifest`));
   assert.match(guide, /\*\*Eject after boarding:\*\* .*It never rewrites the branch/);
@@ -582,4 +583,14 @@ test('verify refuses a train on main that drops its bump, and a stacked train ne
   assert.equal(JSON.parse(fs.readFileSync(stackedOut, 'utf8')).stacked, true);
   assert.equal(train.run(['verify', '--manifest', stackedOut, '--head', stacked.head, '--main', result.head], f.repo).ok, true);
   assert.throws(() => train.checkManifest({ members: [f.member(4, '4'.repeat(40))], stacked: 'yes' }), /"stacked" must be true or false/);
+  const live = path.join(f.root, 'live.json');
+  fs.writeFileSync(live, JSON.stringify({ 80: { state: 'OPEN', head: stacked.head }, 3: { state: 'OPEN', head: three } }));
+  const landing = train.run(['land', '--manifest', stackedOut, '--pr', '80', '--head', stacked.head, '--main', result.head, '--live', live], f.repo);
+  assert.equal(landing.ok, false, 'a stacked train never lands, even against the train it stacks on');
+  assert.ok(landing.problems.some(problem => /the train is stacked .* catch it up on main first/.test(problem)), landing.problems.join('\n'));
+  const flagged = path.join(f.root, 'flagged.json');
+  fs.writeFileSync(flagged, JSON.stringify({ ...JSON.parse(fs.readFileSync(out, 'utf8')), stacked: true }));
+  fs.writeFileSync(live, JSON.stringify({ 81: { state: 'OPEN', head: noBump }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: two } }));
+  const dodged = train.run(['land', '--manifest', flagged, '--pr', '81', '--head', noBump, '--main', 'main', '--live', live], f.repo);
+  assert.equal(dodged.ok, false, 'marking a train on main stacked does not dodge its bump at land');
 });

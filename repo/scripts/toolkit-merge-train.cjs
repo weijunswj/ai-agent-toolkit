@@ -59,7 +59,7 @@
 // an earlier train commit (an ejected member's boarding merge, or a bump that a later bump replaced),
 // and every recorded revert must be there. Each bump is checked at the level of the members on board
 // when it was made.
-// land re-runs verify, requires main to be inside the train (else main moved: rebuild), every
+// land refuses a stacked train, re-runs verify, requires main to be inside the train (else main moved: rebuild), every
 // member's pull request open at its boarded head, the train pull request at --head and an owner OK
 // for every RISKY member, then names the pull request and head to merge. --live reads those pull request facts from
 // a JSON file ({"<number>": {"state": "OPEN", "head": "<sha>"}}) instead of `gh api` (REST).
@@ -569,6 +569,7 @@ function land(cwd, manifest, options) {
   if (!SHA.test(options.head || '')) throw new TrainError('--head must be the train pull request head as a full SHA');
   const checked = verify(cwd, manifest, options);
   const problems = [...checked.problems];
+  if (manifest.stacked) problems.push('the train is stacked (built with --onto) and has no bump: catch it up on main first');
   if (!isAncestor(cwd, checked.main, checked.head)) problems.push('main moved since the train was built: rebuild it on main and rerun CI');
   const train = livePr(manifest.repository, options.pr, options.live);
   if (train.state !== 'OPEN') problems.push(`the train pull request #${options.pr} is ${train.state}`);
