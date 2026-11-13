@@ -17,7 +17,9 @@
 // repository instead of crashing; hooks.json also sets onFailure: "block" for prompts and for the
 // state-changing tools (STATE_CHANGING_TOOLS below).
 //
-// Proven unsafe issue closures are refused locally and in cloud sessions. Unknown cloud checks are advisory. Governance still comes from the repository default branch.
+// Cloud sessions (CLAUDE_CODE_REMOTE=true) run every hold above too. Proven unsafe issue closures are
+// refused everywhere; an unknown closure check is advisory in the cloud. Governance still comes from
+// the repository default branch.
 
 const fs = require('node:fs');
 
@@ -30,7 +32,19 @@ function readInput(text) {
   } catch { return {}; }
 }
 
-const CLOUD_LINE = "Toolkit governance: cloud hooks are advisory for unknown state; proven unsafe issue closures are refused. Required CI checks remain the backstop. The programme file on origin's default branch decides governance here too; no local answer or project memory can decide it.";
+const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold and the undecided-repository hold run as on a computer. A Claude Projects thread's task auto-merge switch is the project line read from its session context; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
+
+// Records this cloud session's Projects task auto-merge switch when the prompt starts with the
+// host's session context. Never throws; an unreadable or unwritable switch stays Off.
+function recordProjectsSwitch(input, options) {
+  try {
+    const projects = require('./toolkit-projects-cloud.cjs');
+    const value = projects.switchSetting(input && input.prompt);
+    if (!value) return;
+    const directory = require('./toolkit-user-state.cjs').userStateDirectory(options.registryOptions || {});
+    new projects.ProjectsSwitch({ directory, now: options.now }).record(input && input.session_id, value);
+  } catch { /* stays Off */ }
+}
 
 function cloudSession(environment) { return Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true'; }
 
@@ -48,12 +62,14 @@ function exportHostSession(input, environment, gate) {
 function respond(event, input, options = {}) {
   options = { ...options, deadline: options.deadline ?? require('node:perf_hooks').performance.now() + 7500 };
 
-  if (cloudSession(options.environment || process.env)) {
-    if (event === 'PreToolUse') return closureDecision(input, { ...options, cloud: true });
-    if (event !== 'SessionStart') return {};
-    let inside = false;
-    try { inside = (options.gate || require('./toolkit-governance-gate.cjs')).insideRepository(input.cwd); } catch { inside = false; }
-    return inside ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: CLOUD_LINE } } : {};
+  // Cloud sessions run the same holds as local ones (local Toolkit is the base). Two differences:
+  // a Claude Projects thread's task auto-merge switch is read from the host's session context at
+  // the start of its first prompt (toolkit-projects-cloud.cjs), and an issue closure the cloud
+  // check cannot prove unsafe is advisory, since gh there may not be signed in.
+  const cloud = cloudSession(options.environment || process.env);
+  if (cloud) {
+    options = { ...options, cloud: true };
+    if (event === 'UserPromptSubmit') recordProjectsSwitch(input, options);
   }
   // The merge hold runs first and on its own, so an error in the governance check never skips it.
   if (event === 'PreToolUse') {
@@ -84,7 +100,8 @@ function respond(event, input, options = {}) {
       const closure = closureDecision(input, options);
       if (closure.hookSpecificOutput) return closure;
       const merge = mergeDecision(input, options);
-      return merge ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } } : {};
+      // A cloud closure advisory (closure.systemMessage) shows only when nothing refuses the call.
+      return merge ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } } : closure;
     }
     if (event === 'PostToolUse') {
       if (input.tool_name !== 'AskUserQuestion') return {};
@@ -94,7 +111,10 @@ function respond(event, input, options = {}) {
     exportHostSession(input, options.environment || process.env, gate);
     gate.startSession(input, { ...options, host: 'claude-code' });
     const line = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
-    return line ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line } } : {};
+    let inside = false;
+    if (cloud) { try { inside = gate.insideRepository(input.cwd); } catch { inside = false; } }
+    const text = [line, inside ? CLOUD_LINE : ''].filter(Boolean).join('\n');
+    return text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
   } catch {
     // A failed governance check outside a repository may still allow a merge there. Consume its
     // approval only if that failure path actually allows the call.
