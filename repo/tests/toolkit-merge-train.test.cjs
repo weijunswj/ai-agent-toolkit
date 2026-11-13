@@ -424,6 +424,8 @@ test('the controller, the changelog guide and the repo map describe the train th
   assert.match(roles, /The train needs no G2 of its own once `verify` passes and CI is green; only files `verify` lists under `overlap` \(two or more members change them\) get a short delta review\./);
   assert.match(roles, /A train holds 4 to 6 members \(`build` refuses a seventh\); later ready PRs board the next\. A member that fails CI or its delta review is ejected at once and the rest carry on/);
   assert.match(roles, /Never edit a train or member PR body while its CI runs; queue the edit until CI ends\./);
+  assert.match(roles, /The train's merge ask goes up where `land` and the merge run, never relayed/);
+  assert.match(read('repo/contracts/claude-projects/web-controller-projects/reference/cloud-hook-parity.md'), /A merge train's merge thread is the train thread: it posts the card for the train PR at its head and runs `land` and the merge itself[\s\S]*Fallback: the owner types `merge PR N at <full SHA> as a merge commit` in the train thread\./);
   assert.match(roles, /At boarding, copy each member's `Pack changes` lines into its manifest entry \(`pack_changes`\)/);
   assert.match(roles, /A stacked train's PR targets the running train's branch \(main's version check would call its fragments unfolded\) until that train lands, then main, before `catchup`\./);
   assert.match(read('repo/docs/changelog.d/README.md'), /Open its pull request against the running train's branch, not main/);
