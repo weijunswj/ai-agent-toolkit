@@ -293,3 +293,31 @@ test('by-hand website steps lead every save and removal; the commands follow as 
   assert.ok(removal.indexOf('By hand on GitHub') < removal.indexOf('gh variable delete'));
   assert.ok(removal.includes(variables) && removal.includes(secrets));
 });
+
+test('setup and removal end by checking both halves: the App and the cloud sweep copies', () => {
+  const setup = app.setupLines(SLUG, STORE, missing).join('\n');
+  assert.match(setup, /6\. Check both halves are in place: run toolkit governance check .*variable and secret as set and the cloud sweep copies .*toolkit-programme-sweep\.yml.* as current/);
+  assert.ok(setup.indexOf('5. Delete the .pem') < setup.indexOf('6. Check both halves'));
+  const removal = app.removalLines(SLUG, found, []).join('\n');
+  assert.match(removal, /turns governance off also removes the cloud sweep copies/);
+  assert.match(removal, /4\. Check both halves are gone: run toolkit governance check .*no App variable or secret left over and no cloud sweep copies/);
+});
+
+test('check reports cloud sweep copies left behind once governance is off, and only Toolkit copies', t => {
+  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
+  const ctx = home(t), repo = governed(ctx, 'leftover');
+  const options = { registryPath: ctx.registryPath, testOnly: true, offline: true, appReader: answering(missing) };
+  recordMerged(repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'toolkit-test-fixture/leftover', governance: 'disabled' }) });
+  const left = () => conformance.checkConformance(repo, options).findings.filter(entry => entry.id === 'CLOUD_WORKFLOW_LEFT_OVER');
+  assert.deepEqual(left(), []);
+  const [sweep, gate] = workflows.WORKFLOWS.map(row => row.file);
+  fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(repo, ...gate.split('/')), 'name: my own gate\n');
+  assert.deepEqual(left(), [], 'a file without the Toolkit marker is not a Toolkit copy');
+  fs.writeFileSync(path.join(repo, ...sweep.split('/')), `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\r\nname: sweep\r\n`);
+  const found = left();
+  assert.equal(found.length, 1);
+  assert.equal(found[0].severity, 'info');
+  assert.ok(found[0].message.includes(sweep) && !found[0].message.includes(gate));
+  assert.equal(conformance.checkConformance(repo, options).exit_code, 0, 'a left-over copy never changes the exit code');
+});

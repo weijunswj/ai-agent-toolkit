@@ -485,3 +485,103 @@ test('shallow binding reads still refuse symlinks, non-files and truncated trees
     assert.throws(() => transport.read(repository, 1), /PROPOSAL_(BINDING_NOT_REGULAR|TREE_UNREADABLE)/, damage);
   }
 });
+
+test('yes carries fresh cloud sweep copies with the binding, moves a v1 binding to v2, and names a copy it could not render', t => {
+  const { bindingV2 } = require('../scripts/toolkit-governance-proposal.cjs');
+  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
+  const programme = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+  const v1 = { schema: 'toolkit.programme-binding.v1', repository: 'example-owner/example-repo', parent_issue: 1, record_prefix: 'INT-FX-', writer_prefix: 'INT-FX-',
+    store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' }, required_checks: ['validate'] };
+  const v2 = bindingV2(v1);
+  assert.deepEqual(v2, { schema: 'toolkit.programme-binding.v2', repository: v1.repository, governance: 'enabled', parents: [{ issue: 1, record_prefix: 'INT-FX-', writer_prefix: 'INT-FX-' }], store: v1.store, required_checks: ['validate'] });
+  programme.validateBinding(v2);
+  assert.equal(bindingV2(v2), v2, 'a v2 binding is kept as it is');
+  for (const [cloud, expectWarning] of [[{ files: Object.fromEntries(workflows.WORKFLOWS.map(row => [row.file, `# copy of ${row.id}\n`])), warning: null }, false], [{ files: {}, warning: 'Toolkit: the cloud sweep copies were not refreshed in this pull request (reason). To fix it, run it.' }, true]]) {
+    let published = null;
+    const transport = { list: () => published ? [proposal('yes')] : [], publish(repository, binding, files) { published = { binding, files }; return proposal('yes'); }, read: () => proposal('yes') };
+    const f = fixture(t, transport);
+    const owner = new GovernanceProposals({ ...f.options, cloudWorkflows: () => cloud });
+    prepareAdoption(f);
+    fs.writeFileSync(path.join(f.cwd, governance.BINDING_FILE), JSON.stringify(v1));
+    const request = owner.request(f.cwd, 'yes', run);
+    const result = owner.publish(f.cwd, request.run, v1);
+    assert.equal(published.binding.schema, 'toolkit.programme-binding.v2');
+    assert.equal(JSON.parse(published.files['.github/toolkit-programme.json']).schema, 'toolkit.programme-binding.v2');
+    assert.ok(published.files['AGENTS.md']);
+    for (const row of workflows.WORKFLOWS) assert.equal(published.files[row.file], cloud.files[row.file], row.file);
+    assert.equal(result.warning, expectWarning ? cloud.warning : undefined);
+  }
+  // No receipt reaches the renderer when the answer is no.
+  let rendered = 0;
+  const f = fixture(t, { list: () => [], publish: () => proposal('no'), read: () => proposal('no') });
+  const owner = new GovernanceProposals({ ...f.options, cloudWorkflows: () => { rendered++; return { files: {}, warning: null }; } });
+  owner.publish(f.cwd, owner.request(f.cwd, 'no', run).run);
+  assert.equal(rendered, 0);
+});
+
+test('the default renderer leaves a Toolkit source checkout alone and names a reason and fix when it cannot render', t => {
+  const { cloudWorkflowFiles } = require('../scripts/toolkit-governance-proposal.cjs');
+  assert.deepEqual(cloudWorkflowFiles(path.join(__dirname, '..', '..')), { files: {}, warning: null });
+  const f = fixture(t);
+  const result = cloudWorkflowFiles(f.cwd);
+  // The fixture is no real checkout of a repository on main, so the render cannot happen here.
+  assert.deepEqual(result.files, {});
+  assert.match(result.warning, /cloud sweep copies were not refreshed .*To fix it, run node repo\/scripts\/toolkit-cloud-workflows\.cjs --repo/);
+});
+
+test('no removes the marked cloud sweep copies in the same pull request, and only those', () => {
+  const repository = 'example-owner/example-repo';
+  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
+  const [sweep, gate] = workflows.WORKFLOWS.map(row => row.file);
+  const off = { schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' };
+  const marked = Buffer.from(`# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`).toString('base64');
+  const calls = [];
+  const transport = new GitHubProposalTransport({ run(args, input) {
+    calls.push({ args, input }); const endpoint = args[1];
+    if (args[0] === 'auth') return '';
+    if (endpoint === 'user') return JSON.stringify({ login: 'example-owner' });
+    if (endpoint === `repos/${repository}`) return JSON.stringify({ default_branch: 'main' });
+    if (endpoint.includes('/git/ref/heads/toolkit/')) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
+    if (endpoint.endsWith('/git/ref/heads/main')) return JSON.stringify({ object: { sha: 'a'.repeat(40) } });
+    if (endpoint.includes(`/contents/${sweep}`)) return JSON.stringify({ type: 'file', encoding: 'base64', content: marked });
+    // The gate here is someone's own file with the same name: never removed.
+    if (endpoint.includes(`/contents/${gate}`)) return JSON.stringify({ type: 'file', encoding: 'base64', content: Buffer.from('name: mine\n').toString('base64') });
+    if (endpoint.endsWith('/git/commits') && input) return JSON.stringify({ sha: 'c'.repeat(40) });
+    if (endpoint.includes('/git/commits/')) return JSON.stringify({ tree: { sha: 'b'.repeat(40) } });
+    if (endpoint.endsWith('/git/trees') && input) return JSON.stringify({ sha: 'e'.repeat(40) });
+    if (endpoint.includes('/git/trees/')) return JSON.stringify({ truncated: false, tree: [] });
+    if (endpoint.endsWith('/git/refs')) return '{}';
+    if (endpoint.includes('/git/refs/heads/')) return '{}';
+    if (endpoint.endsWith('/pulls')) return JSON.stringify({ number: 1 });
+    throw Error(`unexpected endpoint ${endpoint}`);
+  } });
+  assert.deepEqual(transport.publish(repository, off), { number: 1, head: 'c'.repeat(40) });
+  const tree = calls.find(item => item.args[1].endsWith('/git/trees') && item.input).input.tree;
+  assert.deepEqual(tree.map(entry => [entry.path, entry.sha === null ? 'removed' : 'written']), [['.github/toolkit-programme.json', 'written'], [sweep, 'removed']]);
+  const body = calls.find(item => item.args[1].endsWith('/pulls') && item.input).input.body;
+  assert.match(body, new RegExp(`Removed files[^\\n]*\\n- ${sweep.replace(/\./g, '\\.')}`));
+  assert.doesNotMatch(body, new RegExp(gate.replace(/\./g, '\\.')));
+});
+
+test('an off pull request may remove the cloud sweep copies, and nothing else', () => {
+  const repository = 'example-owner/example-repo';
+  const [sweep, gate] = require('../scripts/toolkit-cloud-workflows.cjs').WORKFLOWS.map(row => row.file);
+  const text = JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' });
+  const read = files => {
+    const responses = [
+      { number: 1, html_url: `https://github.com/${repository}/pull/1`, state: 'open', changed_files: files.length, body: '<!-- toolkit-governance-decision -->', head: { repo: { full_name: repository }, sha: 'a'.repeat(40) }, base: { ref: 'main' } },
+      { default_branch: 'main' },
+      { tree: { sha: 'b'.repeat(40) } },
+      { truncated: false, tree: [{ path: '.github', type: 'tree', mode: '040000', sha: 'd'.repeat(40) }] },
+      { truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] },
+      { type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: Buffer.byteLength(text), content: Buffer.from(text).toString('base64') },
+      files,
+    ];
+    return new GitHubProposalTransport({ run: () => JSON.stringify(responses.shift()) }).read(repository, 1);
+  };
+  const binding = { filename: '.github/toolkit-programme.json', status: 'modified' };
+  assert.equal(read([binding, { filename: sweep, status: 'removed' }, { filename: gate, status: 'removed' }]).answer, 'no');
+  assert.throws(() => read([binding, { filename: sweep, status: 'modified' }]), /SCOPE_INVALID/);
+  assert.throws(() => read([binding, { filename: '.github/workflows/other.yml', status: 'removed' }]), /SCOPE_INVALID/);
+  assert.throws(() => read([{ filename: sweep, status: 'removed' }]), /SCOPE_INVALID/);
+});

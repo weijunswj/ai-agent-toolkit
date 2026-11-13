@@ -157,6 +157,7 @@ function setupLines(slug, store, state) {
     '   Or from the command line, with gh signed in (these ask you to type replace before overwriting an App someone else set up here meanwhile):',
     ...saveCommands(slug),
     '5. Delete the .pem file once the secret is saved. It is the App\'s password and never expires; the App\'s page can generate a new key any time.',
+    `6. Check both halves are in place: run toolkit governance check in ${slug}. It should report the App's variable and secret as set and the cloud sweep copies (.github/workflows/toolkit-programme-sweep.yml and its gate, which the governance pull request carries) as current.`,
     'Use one App per governed repository, even if another repository already has one: GitHub gives each App installation its own hourly allowance, so a busy repository never slows this one. toolkit governance check cannot tell whether two repositories share an App, because it reads only the variable and secret names.',
   ];
 }
@@ -165,13 +166,14 @@ function removalLines(slug, state, others) {
   const installation = 'Installed GitHub Apps, Configure, Repository access';
   if (none(state)) return [`Governance GitHub App: no App variable or secret is left on ${slug}. If the App's installation still lists ${slug}, remove it there (${installation}).`];
   return [
-    `Governance GitHub App: after you merge the pull request that turns governance off, remove what ${slug} no longer needs. Toolkit never deletes it for you:`,
+    `Governance GitHub App: the pull request that turns governance off also removes the cloud sweep copies (.github/workflows/toolkit-programme-sweep.yml and its gate). After you merge it, remove the App's variable and secret from ${slug} yourself. Toolkit never deletes them for you:`,
     `1. By hand on GitHub: open ${slug}, Settings, Secrets and variables, Actions. Delete ${APP.variable} on the Variables tab (${settingsPage(slug, 'variables')}) and ${APP.secret} on the Secrets tab (${settingsPage(slug, 'secrets')}).`,
     '   Or from the command line, with gh signed in:',
     `   gh variable delete ${APP.variable} --repo ${slug}`,
     `   gh secret delete ${APP.secret} --repo ${slug}`,
     `2. Remove ${slug} from the App's installation: GitHub Settings, Applications, ${installation}.`,
     '3. If no other repository uses the App (with one App per repository, none does), also remove the evidence store from the installation, uninstall the App and delete it (the App\'s settings, Advanced, Delete GitHub App); its private keys stop working.',
+    `4. Check both halves are gone: run toolkit governance check in ${slug}. It should report no App variable or secret left over and no cloud sweep copies.`,
     others.length
       ? `This computer knows these repositories still use governance: ${others.join(', ')}. Other computers may know more.`
       : 'This computer knows no other repository that still uses governance. Other computers may know more, so check before deleting the App.',

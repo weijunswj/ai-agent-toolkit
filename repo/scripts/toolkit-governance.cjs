@@ -277,7 +277,7 @@ class ToolkitGovernanceCli {
     let binding = null;
     try { binding = JSON.parse(fs.readFileSync(path.join(this.#cwd, governance.BINDING_FILE), 'utf8')); } catch { /* prepare explains missing adoption */ }
     const result = this.#proposals.publish(this.#cwd, run, binding);
-    this.#print(json, result, [result.text, ...this.#appLines(result.proposal, binding)]);
+    this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...this.#appLines(result.proposal, binding)]);
     return 0;
   }
 
