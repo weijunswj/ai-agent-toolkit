@@ -5491,7 +5491,9 @@ class Reconciler {
           done = issue ? issue.parent === target.parent : null;
         } else if (effect.kind === 'detach') {
           const issue = observed.issues.has(target.issue) ? observed.issues.get(target.issue) : this.reader.issue(target.issue);
-          done = issue ? issue.parent !== target.parent : null;
+          // Off every parent is done; still under the same one is not; moved elsewhere by someone else
+          // is neither, so it stays UNKNOWN and holds rather than being recorded as a detach.
+          done = issue ? (issue.parent === null ? true : issue.parent === target.parent ? false : null) : null;
         } else if (effect.kind === 'reorder') {
           const list = observed.subIssues.get(target.parent) || null;
           if (list) done = moveDone(list, target);
@@ -6621,7 +6623,16 @@ class Reconciler {
       });
     }
     // Finished tasks leave their native parent, a few per pass. Each is read again just before the
-    // write: a reopened task, a moved link or open sub-issues cancel it.
+    // write: a reopened task, a moved link, open sub-issues or an open PR that now tracks or names it
+    // cancel it. The open PR list is read once, just before the first detach write.
+    let openNow = null;
+    const openPrsNow = () => {
+      if (!openNow) {
+        const list = this.reader.openPullRequests();
+        openNow = { references: referencedIssues(list), numbers: new Set(list.map(pr => pr.number)) };
+      }
+      return openNow;
+    };
     for (const effect of plan.effects.filter(entry => entry.kind === 'detach').slice(0, DETACH_PER_PASS)) {
       if (this.pass.stop()) break;
       if (isHeld(`#${effect.target.issue}`, 'links')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
@@ -6629,6 +6640,16 @@ class Reconciler {
         const latest = this.reader.issue(effect.target.issue);
         if (!latest || latest.state !== 'closed' || latest.parent !== effect.target.parent || latest.open_sub_issues > 0) {
           return { outcome: 'NOT_DONE', code: 'DETACH_MOVED', detail: 'the task changed since planning; the next pass re-plans it' };
+        }
+        let open;
+        try { open = openPrsNow(); }
+        catch (error) {
+          if (STOPS_PASS.has(error.code)) throw error;
+          return { outcome: 'NOT_DONE', code: 'DETACH_PRS_UNREAD', detail: `the open PR list could not be read again before the write: ${error.message}` };
+        }
+        const tracked = plan.observed.prs.get(effect.target.issue);
+        if ((open.references.get(effect.target.issue) || []).length || (tracked && open.numbers.has(tracked.number))) {
+          return { outcome: 'NOT_DONE', code: 'DETACH_MOVED', detail: 'an open PR now tracks or names the task; the next pass re-plans it' };
         }
         guard();
         const response = this.mutator.detach(effect.target.parent, effect.childId, { binding: this.binding });

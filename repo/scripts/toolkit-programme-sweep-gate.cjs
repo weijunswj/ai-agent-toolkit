@@ -50,7 +50,7 @@ const BINDING_V1 = 'toolkit.programme-binding.v1';
 const BINDING_V2 = 'toolkit.programme-binding.v2';
 function governanceOf(binding) {
   if (!binding || typeof binding !== 'object' || Array.isArray(binding)) return 'invalid';
-  if (binding.schema === BINDING_V1) return binding.governance === undefined && binding.parents === undefined && binding.parent_lifecycle === undefined ? 'enabled' : 'invalid';
+  if (binding.schema === BINDING_V1) return binding.governance === undefined && binding.parents === undefined && binding.parent_lifecycle === undefined && binding.detach_finished_children === undefined ? 'enabled' : 'invalid';
   if (binding.schema === BINDING_V2 && binding.governance === 'enabled') return 'enabled';
   return binding.governance === 'disabled' ? 'disabled' : 'invalid';
 }

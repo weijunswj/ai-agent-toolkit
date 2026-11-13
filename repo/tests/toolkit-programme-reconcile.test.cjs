@@ -1116,6 +1116,76 @@ test('a detach whose task reopened after planning is not written', () => {
   assert.equal(f.github.calls.filter(call => call.method === 'DELETE' && call.path.endsWith('/issues/421/sub_issue')).length, 1, 'only #624 was detached');
 });
 
+function finishedTasks(count, extra = () => {}) {
+  const outcomes = [];
+  for (let i = 0; i < count; i += 1) outcomes.push({ issue: 600 + i, label: `F${i}`, class: 'COMPLETED', parent: 421, order: i + 1 });
+  const f = setup({ outcomes, issues: github => { for (const outcome of outcomes) github.addIssue(outcome.issue, { state: 'closed', parent: 421 }); extra(github); } });
+  Object.assign(f.binding, { schema: state.SCHEMA.bindingV2, governance: 'enabled', parents: [{ issue: 421, record_prefix: 'INT-TK421-' }], detach_finished_children: true });
+  return f;
+}
+const detachCalls = f => f.github.calls.filter(call => call.method === 'DELETE' && /\/issues\/\d+\/sub_issue$/.test(call.path)).length;
+// After the parent's intents are written (the first store PUT), run `act` once on the next read of #600.
+const afterIntent = (f, act) => {
+  let done = false;
+  f.github.intercept(call => {
+    if (!done && call.method === 'GET' && /\/issues\/600$/.test(call.path) && f.github.calls.some(entry => entry.method === 'PUT')) { done = true; return act() || null; }
+    return null;
+  });
+};
+test('at most 25 detaches per pass; the rest follow on the next pass and each is recorded once', () => {
+  const f = finishedTasks(30);
+  f.reconciler().run({ apply: true });
+  assert.equal(detachCalls(f), 25);
+  assert.deepEqual(f.store.read('parent', 421).doc.pending_effects, []);
+  f.reconciler().run({ apply: true });
+  f.reconciler().run({ apply: true });
+  assert.equal(detachCalls(f), 30);
+  const list = f.store.read('parent', 421).doc.private.detached_children;
+  assert.equal(list.length, 30);
+  assert.equal(new Set(list.map(entry => entry.issue)).size, 30);
+});
+test('governance disabled plans no detach and the mutator refuses', () => {
+  const f = finishedTasks(2);
+  f.binding.governance = 'disabled';
+  assert.equal(kinds(f.reconciler().run()).filter(kind => kind.startsWith('detach')).length, 0);
+  assert.throws(() => f.reconciler().mutator.detach(421, 1, { binding: f.binding }), /No bound permission/);
+});
+test('an open PR that names the task after planning cancels the detach', () => {
+  const f = finishedTasks(1);
+  afterIntent(f, () => { f.github.addPr(901, { head: 'b'.repeat(40), body: 'Refs #600' }); });
+  const report = f.reconciler().run({ apply: true });
+  assert.equal(detachCalls(f), 0);
+  assert.equal(f.github.issues.get(600).parent, 421);
+  assert.ok(JSON.stringify(report.holds).includes('DETACH_MOVED'), JSON.stringify(report.holds));
+  assert.equal(f.store.read('parent', 421).doc.private.detached_children, undefined);
+});
+test('a detach whose read-back failed is recovered as done and recorded once', () => {
+  const f = finishedTasks(1);
+  let sent = false, failed = false;
+  f.github.intercept(call => {
+    if (call.method === 'DELETE' && /sub_issue$/.test(call.path)) { sent = true; return null; }
+    if (sent && !failed && call.method === 'GET' && /\/issues\/600$/.test(call.path)) { failed = true; return { status: 502, json: { message: 'bad gateway' } }; }
+    return null;
+  });
+  f.reconciler().run({ apply: true });
+  f.reconciler().run({ apply: true });
+  const doc = f.store.read('parent', 421).doc;
+  assert.equal(f.github.issues.get(600).parent, null);
+  assert.equal(doc.private.detached_children.filter(entry => entry.issue === 600).length, 1);
+  assert.deepEqual(doc.pending_effects, []);
+});
+test('a pending detach whose task someone moved to another parent is held, never recorded', () => {
+  const f = finishedTasks(1, github => github.addIssue(500, { state: 'open', parent: 421 }));
+  afterIntent(f, () => ({ status: 401, json: { message: 'Bad credentials' } }));
+  try { f.reconciler().run({ apply: true }); } catch { /* the pass may stop on the refused read */ }
+  assert.deepEqual(f.store.read('parent', 421).doc.pending_effects.map(effect => effect.kind), ['detach']);
+  f.github.link(500, 600);
+  const report = f.reconciler().run({ apply: true });
+  assert.equal(detachCalls(f), 0);
+  assert.equal(f.store.read('parent', 421).doc.private.detached_children, undefined);
+  assert.ok(report.holds.some(hold => hold.code === 'EFFECT_UNKNOWN' && hold.target === '#600'), JSON.stringify(report.holds));
+});
+
 test('apply shows state writes from the same pass on the parent without a second edit', () => {
   const outcomes = [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }];
   const { github, store, reconciler } = setup({ outcomes, issues: github => {
