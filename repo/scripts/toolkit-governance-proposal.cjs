@@ -29,11 +29,12 @@ const ADOPTION_HELP = 'Run toolkit governance discover, reuse the adoption propo
 // own workflow files, so it gets nothing and no warning. When the copies cannot be rendered, the
 // existing ones (if any) still travel and the warning names the reason and the fix.
 const CLOUD_FIX = 'run node repo/scripts/toolkit-cloud-workflows.cjs --repo <this repository> from a Toolkit checkout on main, commit the copies to the governance pull request, then run toolkit governance check';
-function cloudWorkflowFiles(cwd) {
+// `root` and `commit` (the Toolkit checkout and the commit to pin) are only for tests.
+function cloudWorkflowFiles(cwd, { root = null, commit = null } = {}) {
   const workflows = require('./toolkit-cloud-workflows.cjs');
   if (workflows.isToolkitCheckout(cwd)) return { files: {}, warning: null };
   try {
-    const result = workflows.plan({ repo: cwd });
+    const result = workflows.plan({ repo: cwd, ...(root ? { root } : {}), ...(commit ? { commit } : {}) });
     const unmanaged = result.rows.find(row => row.state === 'unmanaged');
     if (unmanaged) throw new workflows.InstallError(`${unmanaged.file} exists and is not a Toolkit copy; move it aside first`);
     return { files: Object.fromEntries(result.rows.map(row => [row.file, row.expected])), warning: null };

@@ -291,7 +291,8 @@ test('first yes goes from the owner prompt through discovery and real publicatio
   const pending = f.owner.pending(f.cwd, { sessionId: 'owner', epoch });
   const stdout = [], stderr = [];
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
-  const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport,
+  // The render result is set here, never left to where this checkout's commit sits: the prepared copies travel as they are.
+  const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: {}, warning: null }),
     stdout: { write: text => stdout.push(text) }, stderr: { write: text => stderr.push(text) },
     discoveryGh: () => ({ ok: false, reason: 'offline' }) });
   assert.equal(await cli.main(['discover']), 0);
@@ -519,14 +520,26 @@ test('yes carries fresh cloud sweep copies with the binding, moves a v1 binding 
   assert.equal(rendered, 0);
 });
 
-test('the default renderer leaves a Toolkit source checkout alone and names a reason and fix when it cannot render', t => {
+test('the default renderer leaves a Toolkit source checkout alone, renders both copies, and names a reason and fix when it cannot', t => {
   const { cloudWorkflowFiles } = require('../scripts/toolkit-governance-proposal.cjs');
+  const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
   assert.deepEqual(cloudWorkflowFiles(path.join(__dirname, '..', '..')), { files: {}, warning: null });
+  // The commit is set here, so the result never depends on whether this checkout's HEAD is on origin/main.
+  const commit = workflows.toolkitHead();
   const f = fixture(t);
-  const result = cloudWorkflowFiles(f.cwd);
-  // The fixture is no real checkout of a repository on main, so the render cannot happen here.
-  assert.deepEqual(result.files, {});
-  assert.match(result.warning, /cloud sweep copies were not refreshed .*To fix it, run node repo\/scripts\/toolkit-cloud-workflows\.cjs --repo/);
+  const rendered = cloudWorkflowFiles(f.cwd, { commit });
+  assert.equal(rendered.warning, null);
+  assert.deepEqual(Object.keys(rendered.files).sort(), workflows.WORKFLOWS.map(row => row.file).sort());
+  for (const text of Object.values(rendered.files)) assert.match(text, new RegExp(`^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED [a-z-]+ toolkit=${commit} `, 'm'));
+  // A same-named file that is not a Toolkit copy stops the render, with the reason and the fix.
+  const [sweep] = workflows.WORKFLOWS.map(row => row.file);
+  fs.mkdirSync(path.join(f.cwd, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(f.cwd, ...sweep.split('/')), 'name: my own sweep\n');
+  const refused = cloudWorkflowFiles(f.cwd, { commit });
+  assert.deepEqual(refused.files, {});
+  assert.match(refused.warning, /cloud sweep copies were not refreshed in this pull request \(.*is not a Toolkit copy; move it aside first\)\. To fix it, run node repo\/scripts\/toolkit-cloud-workflows\.cjs --repo/);
+  // A folder that is not a git checkout stops it too.
+  assert.match(cloudWorkflowFiles(path.join(f.root, 'empty'), { commit }).warning || '', /not refreshed/);
 });
 
 test('no removes the marked cloud sweep copies in the same pull request, and only those', () => {
