@@ -38,6 +38,25 @@
           ]
         }
       ]
+    },
+    {
+      "id": "shard-timings",
+      "workflow": ".github/workflows/toolkit-shard-timings.yml",
+      "schedule": {
+        "cadence": "daily",
+        "cron": "37 2 * * *"
+      },
+      "replaces_computer_job": "toolkit-shard-timings",
+      "tokens": [
+        {
+          "name": "publish",
+          "repository": "governed_repository",
+          "takes": [
+            "contents",
+            "pull_requests"
+          ]
+        }
+      ]
     }
   ]
 }

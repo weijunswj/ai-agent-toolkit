@@ -163,6 +163,7 @@ test('--open-pr forwards the selected root and keeps the main-only guard; defaul
     readRun: () => run,
     readSummaries() { assert.fail('publish owns summary reads'); },
     publish(root, actualRun) { published.push([root, actualRun]); return 0; },
+    findOpen: () => [],
   };
   assert.equal(refresh.main(['--repo-root', selected, '--open-pr'], deps), 0);
   assert.equal(refresh.main(['--open-pr'], deps), 0);
@@ -171,6 +172,39 @@ test('--open-pr forwards the selected root and keeps the main-only guard; defaul
   assert.equal(refresh.main(['--repo-root', selected, '--open-pr'], deps), 2);
   assert.match(errors.join(''), /--open-pr reads main runs only/);
   assert.equal(published.length, 2);
+});
+
+test('--open-pr opens nothing while an earlier shard timing pull request is open', () => {
+  const run = { databaseId: 123, headBranch: 'main', headSha: 'a'.repeat(40) };
+  const out = [];
+  const asked = [];
+  const deps = {
+    out: { write(text) { out.push(text); } }, err: { write(text) { assert.fail(text); } },
+    readRun: () => run,
+    publish() { assert.fail('an open refresh pull request blocks a second one'); },
+    findOpen(root) { asked.push(root); return [{ number: 41, headRefName: `${refresh.REFRESH_BRANCH_PREFIX}1234567` }]; },
+  };
+  assert.equal(refresh.main(['--open-pr'], deps), 0);
+  assert.equal(asked.length, 1);
+  assert.match(out.join(''), /already open \(#41\); no new pull request/);
+  // Only --open-pr asks: a report run never lists pull requests.
+  assert.equal(refresh.main([], { ...deps, readSummaries: () => [], findOpen() { assert.fail('report runs do not list pull requests'); } }), 0);
+});
+
+test('publish token: the push and pull request use the App token through environment-only git config', () => {
+  assert.equal(refresh.publishEnv({ PATH: '/bin' }), undefined, 'no App token, no change: gh and git use their own sign-in');
+  const token = ['example', 'publish', 'token'].join('-');
+  const env = refresh.publishEnv({ PATH: '/bin', TOOLKIT_SHARD_PUBLISH_TOKEN: token, GITHUB_TOKEN: 'built-in', GH_TOKEN: 'reader' });
+  assert.equal(env.GH_TOKEN, token);
+  assert.equal(env.GITHUB_TOKEN, undefined, 'the built-in token never reaches the publish step');
+  assert.equal(env.TOOLKIT_SHARD_PUBLISH_TOKEN, undefined);
+  assert.equal(env.GIT_CONFIG_COUNT, '1');
+  assert.equal(env.GIT_CONFIG_KEY_0, 'http.https://github.com/.extraheader');
+  assert.equal(env.GIT_CONFIG_VALUE_0, `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`);
+  const appended = refresh.publishEnv({ TOOLKIT_SHARD_PUBLISH_TOKEN: token, GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'a.b', GIT_CONFIG_VALUE_0: 'c' });
+  assert.equal(appended.GIT_CONFIG_COUNT, '3');
+  assert.equal(appended.GIT_CONFIG_KEY_2, 'http.https://github.com/.extraheader');
+  assert.equal(appended.GIT_CONFIG_KEY_0, 'a.b', 'existing entries are kept');
 });
 
 for (const [system, ratio, expected] of [['linux', 1.38, false], ['linux', 1.50, false], ['linux', 1.51, true], ['windows', 1.30, false], ['windows', 1.31, true]]) {
