@@ -15,7 +15,7 @@ Use this to find out whether a repository's CI has fallen behind its code: new p
 node <toolkit>/skills/secure-ci-cd/scripts/ci-checkup.cjs --repo <path> [--base <ref>] [--runs <n>] [--no-github] [--json]
 ```
 
-Run it from the Toolkit copy; do not copy it into the repository, so it never goes stale there. It is read-only: it reads files, lists them with git, and with a working `gh` login reads the job times of the last few green runs on the default branch and the default branch's required checks. It writes nothing, runs no repository code and needs no install. It starts `git` and `gh` only by full path from PATH folders outside the repository, from a working folder outside it, so a program planted in the repository never runs; it skips links that lead out of the repository; and `--base` never rewrites the git index and refuses a ref that starts with `-`. Without a `gh` login the job-time rows say "not checked (no GitHub access)" instead of guessing, and required checks it cannot read (classic branch protection needs admin) count as unknown, not as none.
+Run it from the Toolkit copy; do not copy it into the repository, so it never goes stale there. It is read-only: it reads files, lists them with git, and with a working `gh` login reads the job times and job counts of the last few green runs on the default branch and the default branch's required checks. It writes nothing, runs no repository code and needs no install. It starts `git` and `gh` only by full path from PATH folders outside the repository, from a working folder outside it, so a program planted in the repository never runs; it skips links that lead out of the repository; and `--base` never rewrites the git index and refuses a ref that starts with `-`. Without a `gh` login the job-time rows say "not checked (no GitHub access)" instead of guessing, and required checks it cannot read (classic branch protection needs admin) count as unknown, not as none.
 
 ## What It Compares
 
@@ -24,7 +24,7 @@ Run it from the Toolkit copy; do not copy it into the repository, so it never go
 | Parts | A package `test`, `lint`, `build` or `typecheck` script no CI step runs; a Go, Rust, Maven, Gradle or Python project no step builds or tests; a Dockerfile no step builds (not under examples, fixtures or `.devcontainer`) |
 | Tests | A test file (`*.test.*`, `*.spec.*`, `test_*` and `*_test` Python, JavaScript or TypeScript files, `*_test.go`) or test folder no step reaches, directly, through a folder a reached script names, or through a test runner a CI command starts above it (only its targets, such as `discover -s tests`, when it names any) |
 | Scripts | A script no test names, imports (including a bare Python import of a script folder) or runs through `python -m` or a package script name, after following `require`/`import`; a script CI or a package script starts (not one it only compiles, lints, syntax-checks or names in a comment), a test named after the script on whole name parts, and a thin `__main__.py` count as covered (always a CHECK) |
-| Speed | No declared time budget; a budget no CI step checks; test files with no measured time; a job over budget; a test job with no matrix whose measured time is over the unsharded limit |
+| Speed | No declared time budget; a budget no CI step checks; test files with no measured time; a job over budget; a test job with no matrix whose measured time is over the unsharded limit; `edited` in the pull request types of a workflow with two or more jobs not gated on `github.event.action`; a pull request workflow with no concurrency group; plain `cancel-in-progress: true` with `edited` and no head SHA in the group (an edit cancels the run on the same commit), or with a push trigger and no run id or SHA in the group (default-branch pushes cancel each other); a measured run that started more than half of `concurrent_jobs` (always a CHECK; see `ci-speed.md`) |
 | Hygiene | An action not pinned to a full commit SHA; no `permissions:`; `continue-on-error`, `|| true`, `set +e`, `exit 0` in PowerShell or cmd (CHECK when inside a block or after failure handling), or a custom shell template such as `bash {0}` without `-e` (plain `shell: bash` runs with `-e`); CHECK for an unresolved runner only when the step has `exit 0` and no shell is set; path filters on a pull request trigger when a job in that workflow is a required check, or when the required checks cannot be read or may belong to a job with an expression name or a reusable workflow (a required check that never runs stays "Pending"); no Dependabot `github-actions` entry |
 | Status document | No CI status document (the setting, else the default path, else the one Markdown file named like a CI/CD status document that is not a template); a workflow it does not list; a workflow it lists that is gone |
 
@@ -39,6 +39,7 @@ An optional `.github/ci-checkup.json` in the repository:
   "schema": "ci-checkup/v1",
   "status_doc": "docs/ci-cd/CURRENT_CICD_STATUS.md",
   "budgets": { "job_seconds": 600, "unsharded_test_job_seconds": 300 },
+  "concurrent_jobs": 20,
   "ignore": [
     { "check": "scripts.untested", "path": "tools/", "reason": "one-off maintenance helpers, run by hand" }
   ]
@@ -47,6 +48,7 @@ An optional `.github/ci-checkup.json` in the repository:
 
 - `status_doc` names the status document when it is not at the default path.
 - `budgets` are seconds. Without `job_seconds` the report notes that no budget is declared. The 300-second unsharded test job value is a starting point, not a measurement; set the repository's own once job times are measured.
+- `concurrent_jobs` is the account's cap on jobs running at once on GitHub-hosted runners (Free 20, the default; Pro 40; Team 60). With a `gh` login, a recent green run that started more than half of it is raised.
 - Every `ignore` needs a known `check` and a reason of at least 12 characters; a `path` ending in `/` covers a folder. An ignore that matches nothing is reported so it can be removed. Add one only when the owner agrees the item is not a gap.
 
 ## Judge, Then Fix

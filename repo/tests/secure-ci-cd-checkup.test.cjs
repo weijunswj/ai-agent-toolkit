@@ -648,3 +648,62 @@ test('hygiene: only runner labels and referenced matrix values determine the def
     });
   }
 });
+
+// Delivery speed: edits that rerun heavy jobs, concurrency, and jobs per run against the account's
+// concurrent job cap.
+
+const TWO_JOBS = (on, concurrency = '', ifLine = '') => `name: CI
+on:
+${on}
+permissions:
+  contents: read
+${concurrency}jobs:
+  test:
+    runs-on: ubuntu-latest
+${ifLine}    steps:
+      - run: npm test
+  lint:
+    runs-on: ubuntu-latest
+${ifLine}    steps:
+      - run: npm run lint
+`;
+const GROUP = 'concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\n';
+
+test('speed: an edit that reruns heavy jobs is raised; a light or gated workflow is not', () => {
+  for (const on of ['  pull_request:\n    types: [opened, edited, synchronize]', '  pull_request:\n    types:\n      - opened\n      - edited', '  pull_request: {types: [edited, synchronize]}']) {
+    const items = hits(report({ '.github/workflows/ci.yml': TWO_JOBS(on, GROUP) }), 'speed.edits');
+    assert.deepEqual(items.map((e) => e.path), ['.github/workflows/ci.yml'], on);
+    assert.match(items[0].message, /reruns 2 jobs/);
+  }
+  assert.deepEqual(hits(report({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:\n    types: [opened, synchronize] # not edited', GROUP) }), 'speed.edits'), []);
+  assert.deepEqual(hits(report({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:\n    types: [opened, edited]', GROUP, "    if: github.event.action != 'edited'\n") }), 'speed.edits'), []);
+  assert.deepEqual(hits(report({ '.github/workflows/ci.yml': WORKFLOW('npm test').replace('  pull_request:\n', '  pull_request:\n    types: [edited]\n') }), 'speed.edits'), [], 'one job is already light');
+});
+
+test('speed: concurrency that keeps stale runs or cancels useful ones is raised', () => {
+  const messages = (files) => hits(report(files), 'speed.concurrency').map((e) => e.message);
+  assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:') }), ['no concurrency group, so a run for an older commit keeps its job slots after a new push']);
+  assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:', GROUP) }), []);
+  assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  push:', '') }), [], 'push-only workflows are not asked for a group');
+  const edited = messages({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:\n    types: [opened, edited]', GROUP) });
+  assert.equal(edited.length, 1);
+  assert.match(edited[0], /a title or body edit cancels the full run on the same commit/);
+  assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:\n    types: [opened, edited]', GROUP.replace('github.ref', 'github.event.pull_request.head.sha')) }), []);
+  const push = messages({ '.github/workflows/ci.yml': TWO_JOBS('  push:\n    branches: [main]\n  pull_request:', GROUP) });
+  assert.deepEqual(push, ['cancel-in-progress is always on, so pushes to the default branch cancel each other and a merged commit may never finish its run']);
+  for (const group of [GROUP.replace("github.ref }}", "github.event_name == 'pull_request' && github.ref || github.run_id }}"), GROUP.replace('cancel-in-progress: true', "cancel-in-progress: ${{ github.event_name == 'pull_request' }}")]) {
+    assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  push:\n    branches: [main]\n  pull_request:', group) }), [], group);
+  }
+  assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('[push, pull_request]', GROUP).replace('on:\n[push', 'on: [push') }).length, 1, 'inline trigger list');
+});
+
+test('speed: a run that takes more than half the concurrent job cap is raised from measured runs', () => {
+  const files = { '.github/workflows/ci.yml': TWO_JOBS('  pull_request:', GROUP) };
+  const slots = (runJobs, settings) => hits(report({ ...files, ...(settings ? { '.github/ci-checkup.json': JSON.stringify({ schema: 'ci-checkup/v1', ...settings }) } : {}) }, { jobTimes: new Map(), runJobs: new Map(runJobs) }), 'speed.slots');
+  const full = slots([['CI', 20]]);
+  assert.deepEqual(full.map((e) => [e.path, e.message]), [['.github/workflows/ci.yml', 'one CI run started 20 jobs and the account runs at most 20 at once, so one run fills every slot and the next one queues']]);
+  assert.match(slots([['CI', 11]])[0].message, /so two runs at once and the next one queues/);
+  assert.deepEqual(slots([['CI', 10]]), []);
+  assert.deepEqual(slots([['CI', 20]], { concurrent_jobs: 40 }), [], 'a Pro cap of 40');
+  assert.throws(() => slots([['CI', 20]], { concurrent_jobs: 0 }), /concurrent_jobs must be a positive whole number/);
+});

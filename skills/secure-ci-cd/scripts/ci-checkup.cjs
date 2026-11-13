@@ -13,14 +13,16 @@
 //   --runs       how many recent green default-branch runs to read job times from (default 5)
 //   --no-github  skip the GitHub run listing; speed rows say "not checked"
 //   --json       machine-readable report
-// Tests may pass `jobTimes` (a Map of "workflow / job" to seconds) and `requiredChecks` (a list, or
-// null for unknown) to checkup() instead of reading them through gh.
+// Tests may pass `jobTimes` (a Map of "workflow / job" to seconds), `runJobs` (a Map of workflow
+// name to the most jobs one run started) and `requiredChecks` (a list, or null for unknown) to
+// checkup() instead of reading them through gh.
 // git and gh run by full path from PATH entries outside the target repository, from a working
 // folder outside it, so nothing the repository holds can run.
 // Settings: <repo>/.github/ci-checkup.json (optional), schema ci-checkup/v1:
 //   { "schema": "ci-checkup/v1",
 //     "status_doc": "docs/ci-cd/CURRENT_CICD_STATUS.md",
 //     "budgets": { "job_seconds": 600, "unsharded_test_job_seconds": 300 },
+//     "concurrent_jobs": 20,
 //     "ignore": [ { "check": "scripts.untested", "path": "tools/once.sh", "reason": "..." } ] }
 // Every ignore entry needs a reason; a path ending in "/" covers the whole folder.
 
@@ -37,6 +39,9 @@ const TOOLKIT_SHARDS_REL = 'repo/contracts/ci/test-shards.json';
 const TOOLKIT_SHARDS_SCHEMA = 'toolkit-test-shards/v1';
 // Starting values, not measurements: a repository sets its own in the settings file.
 const DEFAULTS = Object.freeze({ job_seconds: null, unsharded_test_job_seconds: 300, runs: 5 });
+// GitHub-hosted runners run at most 20 jobs at once per account on the Free plan (Pro 40, Team 60,
+// Enterprise 500); `concurrent_jobs` in the settings file sets the account's own cap.
+const DEFAULT_CONCURRENT_JOBS = 20;
 const MIN_REASON = 12;
 
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.tmp', 'dist', 'build', 'vendor', '.venv', 'venv', '__pycache__', 'target', 'coverage', '.next', '.cache']);
@@ -74,6 +79,9 @@ const CHECKS = Object.freeze({
   'speed.budget': 'no declared time budget, or a budget not checked in CI',
   'speed.durations': 'test files with no measured time',
   'speed.jobs': 'a CI job over its budget, or a long test job with no sharding or matrix',
+  'speed.edits': 'a title, body or label edit that reruns heavy jobs',
+  'speed.concurrency': 'a concurrency setting that lets stale runs hold job slots or cancels useful runs',
+  'speed.slots': 'one run that starts more than half of the account\'s concurrent jobs',
   'hygiene.unpinned': 'an action not pinned to a full commit SHA',
   'hygiene.permissions': 'a workflow with no permissions block',
   'hygiene.masked': 'a test step whose failure is masked',
@@ -166,13 +174,13 @@ function listFiles(root, tools) {
 
 function loadSettings(root) {
   const text = readText(root, SETTINGS_REL);
-  if (text === null) return { present: false, status_doc: null, budgets: {}, ignore: [] };
+  if (text === null) return { present: false, status_doc: null, budgets: {}, concurrent_jobs: DEFAULT_CONCURRENT_JOBS, ignore: [] };
   let data;
   try { data = JSON.parse(text); } catch (error) { throw new UsageError(`${SETTINGS_REL} is not valid JSON: ${error.message}`); }
   const errors = [];
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new UsageError(`${SETTINGS_REL} must be a JSON object`);
   if (data.schema !== SETTINGS_SCHEMA) errors.push(`schema must be ${SETTINGS_SCHEMA}`);
-  for (const key of Object.keys(data)) if (!['schema', 'status_doc', 'budgets', 'ignore'].includes(key)) errors.push(`unknown key ${key}`);
+  for (const key of Object.keys(data)) if (!['schema', 'status_doc', 'budgets', 'concurrent_jobs', 'ignore'].includes(key)) errors.push(`unknown key ${key}`);
   if (data.status_doc !== undefined && (typeof data.status_doc !== 'string' || !data.status_doc.trim())) errors.push('status_doc must be a repository path');
   const budgets = data.budgets === undefined ? {} : data.budgets;
   if (!budgets || typeof budgets !== 'object' || Array.isArray(budgets)) errors.push('budgets must be an object');
@@ -180,6 +188,7 @@ function loadSettings(root) {
     if (!['job_seconds', 'unsharded_test_job_seconds'].includes(key)) errors.push(`budgets.${key} is not a known budget`);
     else if (!Number.isFinite(value) || value <= 0) errors.push(`budgets.${key} must be a positive number of seconds`);
   }
+  if (data.concurrent_jobs !== undefined && (!Number.isInteger(data.concurrent_jobs) || data.concurrent_jobs <= 0)) errors.push('concurrent_jobs must be a positive whole number');
   const ignore = data.ignore === undefined ? [] : data.ignore;
   if (!Array.isArray(ignore)) errors.push('ignore must be a list');
   else ignore.forEach((entry, index) => {
@@ -189,7 +198,7 @@ function loadSettings(root) {
     if (typeof entry.reason !== 'string' || entry.reason.trim().length < MIN_REASON) errors.push(`ignore[${index}] needs a reason of at least ${MIN_REASON} characters`);
   });
   if (errors.length) throw new UsageError(`${SETTINGS_REL} refused: ${errors.join('; ')}`);
-  return { present: true, status_doc: data.status_doc ? norm(data.status_doc) : null, budgets: budgets || {}, ignore };
+  return { present: true, status_doc: data.status_doc ? norm(data.status_doc) : null, budgets: budgets || {}, concurrent_jobs: data.concurrent_jobs || DEFAULT_CONCURRENT_JOBS, ignore };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -308,6 +317,34 @@ function windowsRunner(lines, keys, end, indent) {
   return values.some((label) => /windows/i.test(label));
 }
 
+// Events named under `on:`: inline (`on: push`, `on: [push, pull_request]`) or as a block.
+function triggerEvents(lines, onKey) {
+  if (!onKey) return [];
+  const inline = onKey.value.replace(/\s+#.*$/, '').trim();
+  if (inline) return (inline.match(/[A-Za-z_]+(?=\s*(?:[,:\]}]|$))/g) || []).filter((word) => !['types', 'branches', 'paths', 'tags', 'inputs', 'cron'].includes(word));
+  const end = blockEnd(lines, onKey.line, 0);
+  const first = lines.slice(onKey.line + 1, end).find((line) => line.trim() && !line.trimStart().startsWith('#'));
+  if (!first) return [];
+  const indent = indentOf(first);
+  const events = mapKeys(lines, onKey.line + 1, end, indent).map((entry) => entry.key);
+  for (let i = onKey.line + 1; i < end; i++) if (indentOf(lines[i]) === indent && /^\s*-\s+['"]?\w+['"]?\s*$/.test(lines[i])) events.push(unquote(lines[i].trim().slice(1)));
+  return events;
+}
+
+// A key's inline value plus its nested block, as one text (for `concurrency:` and `if:`).
+function keyText(lines, entry, indent) {
+  if (!entry) return null;
+  return [entry.value, ...lines.slice(entry.line + 1, blockEnd(lines, entry.line, indent))].join('\n');
+}
+
+// `concurrency:` as its text and whether cancel-in-progress is a plain `true` (an expression such as
+// `${{ github.event_name == 'pull_request' }}` is a choice the author made, so it is not judged).
+function concurrencyOf(text) {
+  if (text === null) return null;
+  const cancel = (text.match(/cancel-in-progress['"]?\s*:\s*['"]?([^,}\s'"]+)/) || [])[1];
+  return { text, cancels: cancel === 'true' };
+}
+
 function parseWorkflow(rel, text) {
   const lines = text.split('\n');
   const top = mapKeys(lines, 0, lines.length, 0);
@@ -325,10 +362,23 @@ function parseWorkflow(rel, text) {
       if (/^\s*['"]?paths(-ignore)?['"]?\s*:/.test(onLines[j])) prPathFilters = true;
     }
   });
+  // `edited` in the types of a pull request trigger: a title, body or base edit starts a new run.
+  let prEdited = false;
+  onLines.forEach((line, i) => {
+    const match = line.match(/^(\s*)(?:-\s+)?['"]?pull_request(?:_target)?['"]?\s*:(.*)$/);
+    const flow = i === 0 ? line.match(/pull_request(?:_target)?['"]?\s*:\s*(\{.*)$/) : null;
+    if (!match && !flow) return;
+    const block = [flow ? flow[1] : match[2]];
+    if (match) for (let j = i + 1; j < onLines.length && (!onLines[j].trim() || indentOf(onLines[j]) > match[1].length); j++) block.push(onLines[j].replace(/\s+#.*$/, ''));
+    if (/\btypes\b[\s\S]*\bedited\b/.test(block.join('\n'))) prEdited = true;
+  });
   const workflow = {
     rel,
     text,
     name: unquote((top.find((entry) => entry.key === 'name') || { value: '' }).value),
+    events: triggerEvents(lines, onKey),
+    prEdited,
+    concurrency: concurrencyOf(keyText(lines, top.find((entry) => entry.key === 'concurrency'), 0)),
     permissions: top.some((entry) => entry.key === 'permissions'),
     prPathFilters,
     dir: defaultsDir(lines, 0, lines.length, 0),
@@ -349,6 +399,8 @@ function parseWorkflow(rel, text) {
       name: unquote((keys.find((entry) => entry.key === 'name') || { value: '' }).value),
       line: job.line + 1,
       permissions: keys.some((entry) => entry.key === 'permissions'),
+      if: keyText(lines, keys.find((entry) => entry.key === 'if'), jobIndent + 2) || '',
+      concurrency: concurrencyOf(keyText(lines, keys.find((entry) => entry.key === 'concurrency'), jobIndent + 2)),
       continueOnError: keys.some((entry) => entry.key === 'continue-on-error' && !/^false$/i.test(unquote(entry.value))),
       matrix: /\bmatrix:/.test(body),
       uses: (keys.find((entry) => entry.key === 'uses') || {}).value,
@@ -791,22 +843,46 @@ function githubRepo(root, tools) {
   return tools.githubRepo;
 }
 
-function jobTimes(root, runs, tools) {
+// Recent green default-branch runs: each job's longest time, and the most jobs one run of each
+// workflow started (skipped jobs take no slot).
+function recentRuns(root, runs, tools) {
   const repo = githubRepo(root, tools);
   if (!repo) return null;
   const list = ghJson(tools, ['run', 'list', '-R', repo.slug, '--branch', repo.branch, '--status', 'success', '--limit', String(runs), '--json', 'databaseId,workflowName']);
   if (!list) return null;
-  const jobs = new Map();
+  const times = new Map();
+  const runJobs = new Map();
   for (const entry of list) {
     const view = ghJson(tools, ['run', 'view', String(entry.databaseId), '-R', repo.slug, '--json', 'jobs']);
+    let started = 0;
     for (const job of (view && view.jobs) || []) {
       if (!job.startedAt || !job.completedAt) continue;
+      if (job.conclusion !== 'skipped') started++;
       const seconds = (Date.parse(job.completedAt) - Date.parse(job.startedAt)) / 1000;
       const key = `${entry.workflowName} / ${job.name}`;
-      jobs.set(key, Math.max(jobs.get(key) || 0, seconds));
+      times.set(key, Math.max(times.get(key) || 0, seconds));
     }
+    runJobs.set(entry.workflowName, Math.max(runJobs.get(entry.workflowName) || 0, started));
   }
-  return jobs;
+  return { times, runJobs };
+}
+
+// Delivery speed read from the workflow files alone: edits that rerun heavy jobs, and concurrency
+// that keeps stale runs or cancels useful ones. Every item is a CHECK: the agent judges the fix.
+function checkDelivery(workflows) {
+  const items = [];
+  for (const workflow of workflows) {
+    const pr = workflow.events.some((event) => /^pull_request(_target)?$/.test(event));
+    const heavy = workflow.jobs.filter((job) => !/github\.event\.action/.test(job.if));
+    if (pr && workflow.prEdited && heavy.length >= 2) items.push(item('CHECK', 'speed.edits', workflow.rel, `an edit to the pull request title or body reruns ${heavy.length} jobs here${heavy.some((job) => job.matrix) ? ' (more with matrix legs)' : ''}, because edited is in the pull request types`, 'move the checks that read the title or body into a light workflow of their own and leave edited out of this one, or skip the heavy jobs when github.event.action is edited'));
+    const cancels = workflow.concurrency || workflow.jobs.find((job) => job.concurrency);
+    if (pr && !cancels) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'no concurrency group, so a run for an older commit keeps its job slots after a new push', "add concurrency with group ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }} and cancel-in-progress: ${{ github.event_name == 'pull_request' }}"));
+    const top = workflow.concurrency;
+    if (top && top.cancels && pr && workflow.prEdited && !/\bsha\b/.test(top.text)) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'cancel-in-progress with edited in the types: a title or body edit cancels the full run on the same commit and starts it again', 'split the edit checks into a light workflow, or add github.event.pull_request.head.sha to the group so an edit never cancels a run on the same commit'));
+    // A group keyed on the run id or the commit gives every push its own group, so nothing cancels.
+    if (top && top.cancels && workflow.events.includes('push') && !/\brun_id\b|\bsha\b/.test(top.text)) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'cancel-in-progress is always on, so pushes to the default branch cancel each other and a merged commit may never finish its run', "cancel only pull request runs: cancel-in-progress: ${{ github.event_name == 'pull_request' }}"));
+  }
+  return items;
 }
 
 // Required status checks on the default branch, read-only. `api(args)` returns the parsed answer
@@ -850,10 +926,20 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   } else if (!budgets.job_seconds) {
     items.push(item('CHECK', 'speed.budget', SETTINGS_REL, 'no CI job-time budget is declared', `measure the job times, then set budgets.job_seconds in ${SETTINGS_REL}`));
   }
-  const times = options.jobTimes || (options.github ? jobTimes(root, options.runs, options.tools) : null);
-  if (!times) {
+  items.push(...checkDelivery(workflows));
+  const measured = options.jobTimes ? { times: options.jobTimes, runJobs: options.runJobs || new Map() } : (options.github ? recentRuns(root, options.runs, options.tools) : null);
+  if (!measured) {
     items.push(item('CHECK', 'speed.jobs', '', 'job times not checked (no GitHub access)', 'run again with a working gh login to compare job times with budgets'));
     return items;
+  }
+  const times = measured.times;
+  // A run that takes more than half the account's job slots makes the next pull request queue,
+  // and queue time, not run time, is usually most of the wait.
+  const cap = settings.concurrent_jobs || DEFAULT_CONCURRENT_JOBS;
+  for (const [workflowName, count] of measured.runJobs) {
+    if (count * 2 <= cap) continue;
+    const workflow = workflows.find((w) => (w.name || path.posix.basename(w.rel)) === workflowName || w.rel === workflowName);
+    items.push(item('CHECK', 'speed.slots', workflow ? workflow.rel : '', `one ${workflowName} run started ${count} jobs and the account runs at most ${cap} at once, so ${count >= cap ? 'one run fills every slot' : 'two runs at once'} and the next one queues`, `group small jobs and short matrix legs into fewer jobs (each one queues and repeats its setup), and skip jobs a change cannot affect; set concurrent_jobs in ${SETTINGS_REL} when the plan's cap is not ${DEFAULT_CONCURRENT_JOBS} (Free 20, Pro 40, Team 60)`));
   }
   for (const [name, seconds] of times) {
     if (budgets.job_seconds && seconds > budgets.job_seconds) items.push(item('GAP', 'speed.jobs', '', `${name} took ${Math.round(seconds)} s, over the ${budgets.job_seconds} s budget`, 'make the slow files fast or shard the job (fast-tests-and-sharding playbook)'));

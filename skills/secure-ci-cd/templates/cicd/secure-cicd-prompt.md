@@ -88,6 +88,7 @@ Default pipeline standard:
 - Prefer short-lived credentials or OIDC over long-lived cloud secrets when the target supports it.
 - Never hardcode credentials.
 - Never print secrets.
+- Design for delivery speed without dropping a gate: follow `ci-speed.md` beside this prompt (light runs for title and body edits, concurrency that cancels only stale runs, few enough jobs for the account's concurrent job cap, required checks that always report).
 
 Phase 1: Inspect the repository.
 
