@@ -28,6 +28,7 @@ A merge train lands several reviewed pull requests with one bump and one CI run.
 
 ```text
 node repo/scripts/toolkit-merge-train.cjs build --manifest train.json --branch toolkit-train/<name> --out boarded.json
+node repo/scripts/toolkit-merge-train.cjs catchup --manifest boarded.json
 node repo/scripts/toolkit-merge-train.cjs verify --manifest boarded.json --head toolkit-train/<name>
 node repo/scripts/toolkit-merge-train.cjs body --manifest boarded.json
 node repo/scripts/toolkit-merge-train.cjs land --manifest boarded.json --pr <train PR> --head <train head SHA>
@@ -35,11 +36,12 @@ node repo/scripts/toolkit-merge-train.cjs land --manifest boarded.json --pr <tra
 
 - **Manifest:** each member's pull request number, reviewed head (full SHA), review link, tier, `Bump:` level, `UAT:` line, closing lines and, for RISKY members, the owner's typed merge OK. Members hold main's version, like any open pull request.
 - **Build:** run it in a worktree of its own; it refuses a branch checked out in another worktree. It merges each member head in order, ejects one that conflicts or is already on main, then runs the bump once at the highest member level. A bump that fails (a member already carrying its own bump) stops the build with a clean tree.
-- **Verify:** proves the train holds only member merges and main catch-up merges identical to Git's own clean merge, plus one last commit identical to a fresh bump. Run it before pushing and again before the merge.
+- **Rolling trains:** while a landing is in flight, ready pull requests board the next train with `build --onto <the landing's head>`, which takes no bump. Once that landing merges, boarding closes and `catchup`, run in a clean checkout of the train, merges main in as one merge commit and adds the one bump; no rebuild and no force-push. A main that does not merge cleanly is refused, so the clashing member is ejected. The next train opens at once, and a lone ready pull request merges on its own.
+- **Verify:** proves the train holds only member merges and main catch-up merges identical to Git's own clean merge, plus one last commit identical to a fresh bump. It also lists the files two or more members change (`overlap`): with none, the train needs no review of its own once CI is green; shared files get a short delta review. Run it before pushing and again before the merge.
 - **The train pull request:** its body is the `body` output under the usual header, so it lists every member, one `Bump:` line, the strictest `UAT:` line and every member's closing lines. When any member needs an owner test, closing lines become `Refs`: each member's own `Closes` line still closes its issue when the train lands. Its tier is the highest member tier.
 - **Land:** re-runs verify and checks main has not moved, every member is open at its boarded head, the train pull request is at the given head and every RISKY member has the owner's OK. It then names the train pull request and the exact head to merge; it never merges. The merging agent merges that head by the usual route (`--match-head-commit`, a merge commit, the merge hold and any owner card).
 - **Red CI:** never patch the train. `split --out-prefix half` writes two halves; rebuild and test each until the culprit is out, then land the rest.
-- **While CI runs:** `build --onto <running train head>` combines the next members early to find conflicts. A stacked train takes no bump and cannot land; rebuild it on main once the earlier train merges.
+- **While CI runs:** the stacked train above combines the next members early, so conflicts show before main frees. It takes no bump and cannot land until `catchup` brings main in.
 - **Native merge queue:** GitHub offers it only to some organisation-owned repositories, and it cannot run this bump, so trains do not use it.
 
 ## When main moves

@@ -223,6 +223,54 @@ test('a train stacked on a running train combines early, takes no bump and canno
   assert.ok(landing.problems.some(problem => /neither a member's reviewed head nor main/.test(problem)), landing.problems.join('\n'));
 });
 
+test('once the running train lands, catchup merges main into the stacked train, adds the bump and it lands', t => {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const two = f.branch('pr-2', { 'c.txt': 'c\n' });
+  const first = built(f, [f.member(1, one)]);
+  const out = path.join(f.root, 'next.json');
+  const next = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two, { bump: 'minor' })] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo);
+  assert.equal(next.stacked, true);
+  const manifest = JSON.parse(fs.readFileSync(out, 'utf8'));
+  // Main moving under the stacked train refuses catch-up until the running train is in.
+  f.git('switch', '--quiet', 'main');
+  f.git('merge', '--quiet', '--no-ff', '--no-edit', first.result.head);
+  f.git('switch', '--quiet', 'toolkit-train/two');
+  const caught = train.catchup(f.repo, manifest, { main: 'main' });
+  assert.equal(caught.ok, true, JSON.stringify(caught));
+  assert.equal(caught.level, 'minor');
+  assert.ok(caught.bump, 'one bump commit after the catch-up merge');
+  assert.equal(f.git('show', `${caught.head}:VERSION`), '1.1.0', 'the bump runs on top of the landed train');
+  assert.equal(f.git('show', '-s', '--format=%P', `${caught.head}~1`).split(' ')[1], f.git('rev-parse', 'main'), 'main came in as one merge commit');
+  assert.equal(f.git('status', '--porcelain'), '');
+  const checked = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', 'main'], f.repo);
+  assert.equal(checked.ok, true, JSON.stringify(checked));
+  const live = path.join(f.root, 'live.json');
+  fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: caught.head }, 2: { state: 'OPEN', head: two } }));
+  const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', caught.head, '--main', 'main', '--live', live], f.repo);
+  assert.equal(landing.ok, true, JSON.stringify(landing));
+  assert.throws(() => train.catchup(f.repo, manifest, { main: 'main' }), /main is already inside the train/);
+});
+
+test('catchup refuses a main that clashes with the stacked train and leaves the tree clean', t => {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const two = f.branch('pr-2', { 'a.txt': 'one\nTWO from 2\nthree\n' });
+  const first = built(f, [f.member(1, one)]);
+  const out = path.join(f.root, 'next.json');
+  train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two)] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo);
+  f.git('switch', '--quiet', 'main');
+  f.write('a.txt', 'one\nTWO on main\nthree\n');
+  f.git('commit', '--quiet', '-am', 'clash on main');
+  f.git('switch', '--quiet', 'toolkit-train/two');
+  const before = f.git('rev-parse', 'HEAD');
+  const caught = train.catchup(f.repo, JSON.parse(fs.readFileSync(out, 'utf8')), { main: 'main' });
+  assert.equal(caught.ok, false);
+  assert.match(caught.problems[0], /does not merge cleanly into the train: eject the clashing member/);
+  assert.equal(f.git('rev-parse', 'HEAD'), before);
+  assert.equal(f.git('status', '--porcelain'), '');
+});
+
 test('land checks live heads, main and RISKY owner OKs before it names the one merge', t => {
   const f = fixture(t);
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
@@ -326,27 +374,30 @@ test('the controller, the changelog guide and the repo map describe the train th
   const root = path.join(__dirname, '..', '..');
   const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
   const finish = read('repo/controller/evidence-and-finish.md');
-  assert.match(finish, /\*\*Merge trains:\*\* two or more merge-ready PRs/);
-  assert.match(finish, /Never hand-fix a train: a conflict, moved head or failed bump ejects that member; red CI splits it \(`split`\)/);
+  assert.match(finish, /\*\*Merge trains:\*\* ready means G2 PASS at an exact head and green CI\. With main free, two or more ready PRs land as one train, chosen unasked/);
+  // Rolling trains: the open train boards while a landing is in flight, closes when main frees, and
+  // the next opens at once; a lone ready PR merges alone and nothing waits on a train.
+  assert.match(finish, /while a landing is in flight, ready PRs board the open train stacked on it \(`build --onto`, no bump\)\. When main frees, boarding closes, `catchup` merges main in and bumps once/);
+  assert.match(finish, /the next train opens at once\. A lone ready PR merges alone; no PR waits on a train\./);
+  assert.match(finish, /Never hand-fix a train: a conflict, moved head or failed bump ejects that member to a later train once fixed and re-reviewed; red CI splits it \(`split`\)/);
   assert.match(finish, /RISKY members each need the owner's typed OK/);
   const guide = read('repo/docs/changelog.d/README.md');
   for (const command of ['build', 'verify', 'body', 'land']) assert.match(guide, new RegExp(`toolkit-merge-train\\.cjs ${command} --manifest`));
   assert.match(guide, /\*\*Batches:\*\* several merge-ready pull requests land as one merge train that bumps once/);
-  assert.match(read('repo/ARCHITECTURE.md'), /`repo\/scripts\/toolkit-merge-train\.cjs` \(`build`, `verify`, `body`, `split`, `land`; never merges/);
+  assert.match(read('repo/ARCHITECTURE.md'), /`repo\/scripts\/toolkit-merge-train\.cjs` \(`build`, `catchup`, `verify`, `body`, `split`, `land`; never merges/);
   // Every controller type learns the train is its own default: CONTROLLER.md routes the merge step
   // to the page that holds it, the Projects skill puts it ahead of the one-PR bump route, and the
   // hourly nudge flags ready PRs that should ride together.
-  assert.match(finish, /land as one train, chosen unasked\. Trains batch, never gate: a PR ready alone, or one that clashes with no running train, merges alone; an ejected member rides a later train once fixed and re-reviewed:/);
   // A train lane is mechanical: no G0 or G1, the small tier, no conflict fixes, and no G2 of its
   // own unless verify lists files two or more members change.
   const roles = read('repo/controller/roles-and-routes.md');
-  assert.match(roles, /\*\*Merge-train lanes:\*\* running a train \(`toolkit-merge-train\.cjs` build, verify, body, land\) is mechanical: no G0 or G1, the small tier at medium effort/);
+  assert.match(roles, /\*\*Merge-train lanes:\*\* running a train \(`toolkit-merge-train\.cjs` build, catchup, verify, body, land\) is mechanical: no G0 or G1, the small tier at medium effort/);
   assert.match(roles, /The lane never resolves a conflict or edits code; it ejects the member, whose builder fixes it\./);
   assert.match(roles, /The train needs no G2 of its own once `verify` passes and CI is green; only files `verify` lists under `overlap` \(two or more members change them\) get a short delta review\./);
   assert.match(read('repo/CONTROLLER.md'), /\[Roles and routes\]\(controller\/roles-and-routes\.md\) `[0-9a-f]{12}`: before resolving a route or launching, relaying or reviewing a gate, helper or merge-train lane\./);
   assert.match(read('skills/agent-cost-control/SKILL.md'), /\*\*A merge-train lane is on the ladder\.\*\* Building, verifying and landing a merge train is mechanical and needs no G0 or G1: step 1 \(small, medium\)\. It never resolves a conflict or edits code/);
   assert.match(read('repo/CONTROLLER.md'), /\[Evidence, progress and finish\]\(controller\/evidence-and-finish\.md\) `[0-9a-f]{12}`: before merging,/);
-  assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit PRs hold main's version\. Two or more ready PRs ride one merge train unasked \(cheap, no gates: `CONTROLLER\.md`\); else the merge thread, before the check and any card, merges `main` in/);
+  assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit PRs hold main's version\. Ready PRs ride rolling merge trains unasked \(cheap, no gates: `CONTROLLER\.md`\); a lone one: the merge thread, before the check and any card, merges `main` in/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md'), /Flag `train due: <PR numbers>` when two or more PRs each have green CI and a G2 PASS at their current head, carry no bump of their own and no merge train holds them/);
 });
 

@@ -10,6 +10,7 @@
 // exact head the merging agent may merge, by the repository's normal merge route.
 //
 //   node repo/scripts/toolkit-merge-train.cjs build  --manifest <file> --branch <name> [--main <ref>] [--onto <ref>] [--out <file>] [--json]
+//   node repo/scripts/toolkit-merge-train.cjs catchup --manifest <file> [--main <ref>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs verify --manifest <file> --head <ref> [--main <ref>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs body   --manifest <file> [--json]
 //   node repo/scripts/toolkit-merge-train.cjs split  --manifest <file> --out-prefix <path> [--json]
@@ -30,9 +31,11 @@
 // other worktree. It resets --branch to --onto (default
 // --main, default origin/main), merges each member head, ejects one that conflicts or is already on
 // main, then runs the bump command and commits the result. --onto another train's head combines new
-// members while that train waits on CI: such a stacked train takes no bump and cannot land; rebuild
-// it on main once the earlier train has merged. --out writes the boarded manifest, with the ejected
-// members and their reasons under "ejected", for verify, body and land.
+// members while that train waits on CI: such a stacked train takes no bump and cannot land until
+// the earlier train has merged. Then catchup, run in a clean checkout of the stacked train, merges
+// main in as one merge commit (no rebuild and no force-push) and adds the one bump; a main that does
+// not merge cleanly is refused, never hand-fixed. --out writes the boarded manifest, with the
+// ejected members and their reasons under "ejected", for catchup, verify, body and land.
 //
 // verify walks the train's first-parent commits after main and refuses anything that is not a
 // member merge or a main catch-up merge whose tree equals Git's own clean merge, or a last bump
@@ -57,7 +60,7 @@ const TIERS = Object.freeze(['LIGHT', 'NORMAL', 'RISKY']);
 const TOOLKIT_BUMP = 'node repo/scripts/bump-version.cjs --next {level} --base {base}';
 const UAT_LINE = /^UAT: (NOT_REQUIRED|OWNER_TEST_NEEDED|PASSED)\b/;
 const LINK_LINE = /^(Closes|Fixes|Resolves|Refs) #\d+$/;
-const COMMANDS = Object.freeze(['build', 'verify', 'body', 'split', 'land']);
+const COMMANDS = Object.freeze(['build', 'catchup', 'verify', 'body', 'split', 'land']);
 
 class TrainError extends Error {
   constructor(message, code = 2) { super(message); this.code = code; }
@@ -223,6 +226,38 @@ function build(cwd, manifest, options) {
   const out = { ...manifest, members: boarded, ejected: ejected.map(({ pr, head: sha, reason }) => ({ pr, head: sha, reason })) };
   if (options.out) fs.writeFileSync(options.out, `${JSON.stringify(out, null, 2)}\n`);
   return { ok: boarded.length > 0, branch, head, main, onto, stacked, level, bump, boarded: boarded.map(member => member.pr), ejected: out.ejected };
+}
+
+function catchup(cwd, manifest, options) {
+  if (git(cwd, ['status', '--porcelain']).stdout) throw new TrainError('catchup needs a clean checkout of the train; use its own worktree');
+  const main = resolve(cwd, options.main, '--main');
+  const branch = git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']).stdout;
+  const missing = manifest.members.filter(member => !isAncestor(cwd, member.head, 'HEAD')).map(member => `#${member.pr}`);
+  if (missing.length) throw new TrainError(`the checkout is not this train: ${missing.join(', ')} not on ${branch}`, 1);
+  if (isAncestor(cwd, main, 'HEAD')) throw new TrainError('main is already inside the train; nothing to catch up', 1);
+  const merged = git(cwd, ['-c', 'rerere.enabled=false', 'merge', '--no-ff', '--no-edit', '-m', `Merge train: catch up with main at ${main.slice(0, 12)}`, main], { allowFail: true });
+  if (merged.status !== 0) {
+    git(cwd, ['merge', '--abort'], { allowFail: true });
+    return { ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, problems: ['main does not merge cleanly into the train: eject the clashing member (split or rebuild without it), never hand-fix'] };
+  }
+  const level = trainLevel(manifest.members);
+  let bump = null;
+  const argv = bumpArgv(cwd, manifest, level, main);
+  if (argv) {
+    try {
+      runBump(cwd, argv);
+    } catch (error) {
+      git(cwd, ['reset', '--quiet', '--hard', 'HEAD'], { allowFail: true });
+      git(cwd, ['clean', '--quiet', '-fd'], { allowFail: true });
+      return { ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, level, problems: [error.message] };
+    }
+    git(cwd, ['add', '--all']);
+    if (git(cwd, ['diff', '--cached', '--quiet'], { allowFail: true }).status !== 0) {
+      git(cwd, ['commit', '--quiet', '--no-verify', '-m', `Merge train: bump ${level} for ${manifest.members.map(member => `#${member.pr}`).join(', ')}`]);
+      bump = git(cwd, ['rev-parse', 'HEAD']).stdout;
+    }
+  }
+  return { ok: true, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, level, bump };
 }
 
 function reproducesBump(cwd, manifest, commit, parent, level, main) {
@@ -406,6 +441,7 @@ function run(argv, cwd = process.cwd()) {
   const options = parseArgs(argv);
   const manifest = readManifest(options.manifest);
   if (options.command === 'build') return build(cwd, manifest, options);
+  if (options.command === 'catchup') return catchup(cwd, manifest, options);
   if (options.command === 'verify') return verify(cwd, manifest, options);
   if (options.command === 'body') return { ok: true, body: body(manifest) };
   if (options.command === 'split') {
@@ -441,4 +477,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { TOOLKIT_BUMP, TrainError, body, build, checkManifest, land, run, split, trainLevel, trainTier, verify };
+module.exports = { TOOLKIT_BUMP, TrainError, body, build, catchup, checkManifest, land, run, split, trainLevel, trainTier, verify };
