@@ -44,7 +44,11 @@ function fakeGit({ root = '/work/repo' } = {}) {
     return { status: 1, stdout: '' };
   };
 }
-const governedFs = (binding = { governance: 'enabled', store: { kind: 'github', repository: 'Owner/Store' } }) => ({
+// A whole, valid programme file: the repo block reads it as the sweep does (validateBinding, then bindingEnabled).
+const STORE = { kind: 'github', repository: 'Owner/Store', branch: 'main', path: 'state/' };
+const ENABLED = { schema: 'toolkit.programme-binding.v2', repository: 'Owner/Repo', governance: 'enabled', parents: [{ issue: 7, record_prefix: 'TEST-' }], store: STORE, required_checks: [] };
+const V1 = { schema: 'toolkit.programme-binding.v1', repository: 'Owner/Repo', parent_issue: 7, record_prefix: 'TEST-', writer_prefix: 'TEST-', store: STORE, required_checks: [] };
+const governedFs = (binding = ENABLED) => ({
   ...hostFs,
   readFileSync: (file, ...rest) => (slashed(file).endsWith('/work/repo/.github/toolkit-programme.json') ? JSON.stringify(binding) : fs.readFileSync(file, ...rest)),
 });
@@ -133,13 +137,15 @@ test('missing pieces stop with a plain line and leave only the safe part', t => 
   assert.deepEqual(noHold.blocks[1].allow, ['Bash(gh pr comment *)', 'Bash(gh issue comment *)']);
   assert.deepEqual(noHold.stops, []);
 
-  for (const binding of [{ governance: 'disabled' }, null]) {
+  // A hand-broken version 1 file that says governance is disabled is not a valid file, so it is off,
+  // as the sweep reads it; so is a file without a schema.
+  for (const binding of [{ governance: 'disabled' }, null, { ...V1, governance: 'disabled' }, { ...V1, governance: 'enabled' }, { ...ENABLED, schema: undefined }]) {
     const off = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(binding), run: fakeGit() }).build({});
     assert.deepEqual(off.blocks.map(block => block.scope), ['computer']);
     assert.match(off.stops[0].stopped, /^no repo block: this repository has no Toolkit programme file with governance enabled/);
   }
   // A version 1 programme file has no governance key and reads as enabled, as everywhere else.
-  const v1 = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs({ schema: 'toolkit.programme-binding.v1', parent_issue: 7, store: { kind: 'github', repository: 'Owner/Store' } }), run: fakeGit() }).build({});
+  const v1 = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(V1), run: fakeGit() }).build({});
   assert.deepEqual(v1.blocks.map(block => block.scope), ['computer', 'repo']);
   assert.deepEqual(v1.stops, []);
   const codex = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(), run: fakeGit() }).build({ host: 'codex' });

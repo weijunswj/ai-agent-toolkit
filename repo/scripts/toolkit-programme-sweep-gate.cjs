@@ -41,13 +41,23 @@ function boardLine(body) {
   return String(body || '').split(/\r?\n/).find(line => /^(?:Board updated: |⚠️ Board out of date |⚠️ Sweep stuck)/.test(line)) || null;
 }
 
-// A version 1 binding has no governance key and reads as enabled (programme-state's bindingEnabled;
-// a test keeps the two in step). This file reads the raw JSON and loads nothing else.
+// How the sweep reads the file (programme-state's validateBinding, then bindingEnabled), cut down to
+// the keys that decide on or off; a test keeps the two in step. The gate checks out only this file, so
+// it reads the raw JSON and loads nothing else. 'enabled': version 1 with no version 2 keys (always
+// on), or version 2 with governance enabled. 'disabled': governance says disabled. 'invalid': anything
+// else, such as a version 1 file carrying a governance or parents key.
 const BINDING_V1 = 'toolkit.programme-binding.v1';
+const BINDING_V2 = 'toolkit.programme-binding.v2';
+function governanceOf(binding) {
+  if (!binding || typeof binding !== 'object' || Array.isArray(binding)) return 'invalid';
+  if (binding.schema === BINDING_V1) return binding.governance === undefined && binding.parents === undefined && binding.parent_lifecycle === undefined ? 'enabled' : 'invalid';
+  if (binding.schema === BINDING_V2 && binding.governance === 'enabled') return 'enabled';
+  return binding.governance === 'disabled' ? 'disabled' : 'invalid';
+}
 
 // The parent issues the binding names, or null when governance is off or the binding is unreadable.
 function parentsOf(binding) {
-  if (!binding || !(binding.schema === BINDING_V1 || binding.governance === 'enabled')) return null;
+  if (governanceOf(binding) !== 'enabled') return null;
   const numbers = Array.isArray(binding.parents) ? binding.parents.map(parent => parent?.issue) : [binding.parent_issue];
   const valid = numbers.filter(number => Number.isSafeInteger(number) && number > 0);
   return valid.length ? valid : null;
@@ -112,8 +122,10 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
   const parents = parentsOf(binding);
   if (!parents) {
     // Record 808: a skip is one visible warning that names the repository, the reason and the fix.
+    const governance = governanceOf(binding);
     const why = !binding || typeof binding !== 'object' ? 'the programme file on main is missing or unreadable'
-      : !(binding.schema === BINDING_V1 || binding.governance === 'enabled') ? 'the programme file on main turns governance off' : 'the programme file on main names no parent issue';
+      : governance === 'disabled' ? 'the programme file on main turns governance off'
+        : governance === 'invalid' ? 'the programme file on main is not a valid programme file' : 'the programme file on main names no parent issue';
     log(`::warning::Programme Sweep gate skipped ${repository}: ${why}. Fix: run toolkit governance check in a clone of ${repository}; turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows if it should not be governed.`);
     return { start: false, reason: 'governance off' };
   }
@@ -186,4 +198,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = Object.freeze({ SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, parentsOf, decide, gate, followUp, SetupError, GitHubAnswerError, isBlip });
+module.exports = Object.freeze({ SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, governanceOf, parentsOf, decide, gate, followUp, SetupError, GitHubAnswerError, isBlip });
