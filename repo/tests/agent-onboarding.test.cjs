@@ -22,9 +22,12 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   assert.equal(readme.split('\n')[4], '**Supported OS:** Windows 10 and 11. macOS and Linux computers are not supported. (Linux is still used for CI, cloud agent sessions and the remote servers some skills manage.)');
   assert.match(readme, /Open the folder in Codex or Claude Code and say `setup toolkit`/);
   assert.match(readme, /say `refresh toolkit`/);
-  assert.match(readme, /`claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`/);
-  assert.match(readme, /`codex plugin remove ai-agent-toolkit@ai-agent-toolkit-local`/);
-  assert.match(readme, /toolkit-global-rules\.cjs" --remove/);
+  // Removal is one command; the README lists only what is left to the person and what stays on purpose.
+  const remove = readme.slice(readme.indexOf('## Remove'), readme.indexOf('## Skills'));
+  assert.match(remove, /Say `remove toolkit` in Claude Code or Codex/);
+  assert.match(remove, /\(repo\/docs\/TOOLKIT-LOCAL-BRIDGE\.md#remove-toolkit-from-this-computer\)/);
+  assert.match(remove, /\*\*Left for you:\*\*[^\n]*say `remove toolkit` again/);
+  assert.doesNotMatch(remove, /node "|--remove|--disable-auto-sync|%USERPROFILE%/);
   assert.match(readme, /\[Skill Safety Matrix\]\(repo\/docs\/SKILL-SAFETY-MATRIX\.md\)/);
   assert.match(readme, /\[How To Use\]\(repo\/docs\/HOW-TO-USE\.md#install-toolkit-skills\)/);
   assert.match(readme, /Maintainers start with \[AGENTS\.md\]\(AGENTS\.md\)/);
