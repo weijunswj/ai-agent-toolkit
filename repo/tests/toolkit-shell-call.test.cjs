@@ -140,9 +140,33 @@ test('AT12: shipped matchers cover nested shell calls but not the outer code cel
 // Closure scans are linear (about the same time per character from 4K to 1M characters), but from
 // 16K to 64K the per-character cost still steps up, so on a busy runner a 5ms sample at 16K grew past
 // the 10x limit. Start at 16K, grow until the smaller sample takes 15ms, and keep the best of five.
-// The ceiling is 2M so a fast runner can still grow past 64K: with 512K the growth stopped at a
-// 64K sample of under 5ms, too short to time.
-const SCAN_TIMING = Object.freeze({ startSize: 16384, maxSize: 2097152, minMs: 15, runs: 5 });
+// On a fast runner the growth reaches a 256K sample, so the larger sample is 1M characters: exactly
+// the reader's input bound (SCAN_BOUND). scanInput never builds past the size it is asked for, so no
+// timed input crosses the bound; the bound refusal itself is proven by its own test below.
+const SCAN_BOUND = 1024 * 1024;
+const SCAN_TIMING = Object.freeze({ startSize: 16384, maxSize: SCAN_BOUND, minMs: 15, runs: 5 });
+// Repeats unit (then closer, as a pair) as many whole times as fit in size with tail, never more.
+const scanInput = (size, unit, tail = '', closer = '') => {
+  const count = Math.floor((size - tail.length) / (unit.length + closer.length));
+  return unit.repeat(count) + closer.repeat(count) + tail;
+};
+
+test('scan timing inputs stay within the read bound, and the bound still refuses', () => {
+  // The largest sample timing() can take is four times the largest size its growth loop reaches.
+  let size = SCAN_TIMING.startSize;
+  while (size * 16 <= SCAN_TIMING.maxSize) size *= 4;
+  const largest = size * 4;
+  assert.equal(largest, SCAN_BOUND, 'a fast runner still times a sample at the full bound');
+  for (const [unit, tail, closer] of [['time ', ''], ['<<EOF\n', '\tEOF'], ['x gh ', ''], ['f { ', '', '} '], ['a<<b ', '']]) {
+    const input = scanInput(largest, unit, tail, closer);
+    assert.ok(input.length <= SCAN_BOUND && input.length > SCAN_BOUND - unit.length - (closer || '').length - tail.length, JSON.stringify(unit));
+  }
+  const atBound = scanInput(SCAN_BOUND, 'x gh ');
+  assert.doesNotThrow(() => closureReader.scriptCommands(atBound));
+  assert.throws(() => closureReader.scriptCommands(atBound + 'x'.repeat(SCAN_BOUND - atBound.length + 1)), /bound exceeded/);
+  assert.throws(() => closureReader.scriptCommands('gh ' + 'x'.repeat(SCAN_BOUND)), /bound exceeded/);
+  assert.deepEqual(closureReader.scriptCommands('x'.repeat(SCAN_BOUND + 1)), [], 'text past the bound with no gh is not a closure command');
+});
 
 test('generic token values and offsets stay pinned while expansion follows quoting', () => {
   const source = "echo '$body' \"$body\" '\u0060literal\u0060' \\$body \"$ \"; gh pr edit 7";
@@ -175,7 +199,7 @@ test('literal document text survives CRLF, tab-stripped heredocs and here-string
 
 test('closure scanner stays bounded on missing documents, substitutions and braces', () => {
   for(const unit of ['a<<b ','<<a\n',"@'\n",'"$(', 'x{','{} ','`x ']) {
-    const result=hostile.timing(text=>closureReader.scriptCommands(text),size=>unit.repeat(Math.ceil(size/unit.length)),SCAN_TIMING);
+    const result=hostile.timing(text=>closureReader.scriptCommands(text),size=>scanInput(size,unit),SCAN_TIMING);
     assert.ok(result.ok,`${unit}: ${result.message}`);
   }
 });
@@ -403,7 +427,7 @@ test('closure shell quoting, braces, documents and script options retain the exe
 
 test('wrapper, hidden-position and document scans grow within their existing bound',()=>{
   for(const [unit,powershell,tail]of [['time ',false,''],['<<EOF\n',false,'\tEOF'],['x gh ',false,''],['$x = ',true,''],['$x=',true,''],['W { ',true,''],['command ',false,''],['x bash ',false,'']]) {
-    const result=hostile.timing(text=>closureReader.scriptCommands(text,{powershell}),size=>unit.repeat(Math.ceil(size/unit.length))+tail,SCAN_TIMING);
+    const result=hostile.timing(text=>closureReader.scriptCommands(text,{powershell}),size=>scanInput(size,unit,tail),SCAN_TIMING);
     assert.ok(result.ok,`${unit}: ${result.message}`);
   }
 });
@@ -457,10 +481,7 @@ test('attached blocks, comments and stop-parsing scans retain the hostile input 
     const result = hostile.timing(text => {
       try { closureReader.scriptCommands(text,{powershell}); }
       catch (error) { assert.match(error.message,/bound exceeded/); }
-    }, size => {
-      const count = Math.ceil(size/unit.length);
-      return unit.repeat(count) + (unit === 'f { ' ? '} '.repeat(count) : '');
-    }, SCAN_TIMING);
+    }, size => scanInput(size, unit, '', unit === 'f { ' ? '} ' : ''), SCAN_TIMING);
     assert.ok(result.ok, `${unit}: ${result.message}`);
   }
 });

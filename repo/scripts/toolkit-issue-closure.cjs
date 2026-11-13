@@ -145,7 +145,8 @@ function queryText(value, expanding, command, call, commands, index) {
     // Resolve only a leading literal assignment. An assignment under a condition or function
     // might never run, leaving an older closeIssue mutation in the variable.
     const assignmentName = new RegExp(`^\\$?${variable[1]}(?:\\+?=|$)`, command.powershell ? 'i' : '');
-    const assignments = commands.filter((part, at) => at !== index && (part.sourceWords || part.allWords || part.words).some(word => assignmentName.test(word)));
+    // A word that is a -f/-F/--field/--raw-field value (query=$query) is a field, not an assignment.
+    const assignments = commands.filter((part, at) => at !== index && (part.sourceWords || part.allWords || part.words).some((word, w, list) => assignmentName.test(word) && !/^(?:-f|-F|--field|--raw-field)$/.test(list[w - 1] || '')));
     const literal = new RegExp(`(?:^|[;\\n])\\s*\\$?${variable[1]}\\s*=\\s*'((?:[^']|'')*)'\\s*(?=;|\\r?\\n|$)`, command.powershell ? 'gi' : 'g');
     const matches = [...call.text.matchAll(literal)];
     if (assignments.length !== 1 || commands.indexOf(assignments[0]) >= index || matches.length !== 1 || call.text.slice(0, matches[0].index).trim()) throw new Error('GraphQL query variable is unresolved. Put its literal assignment first, or use single quotes or a readable query file.');
@@ -198,6 +199,7 @@ function apiOperation(flags, positional, call, command, commands, index, expansi
 function shellOperations(input, options = {}) {
   const call = ShellCall.from(input); const operations = []; const commands = closureCommands(input, options);
   for (const [index, command] of commands.entries()) {
+    if (command.unreadableReason) throw Object.assign(new Error(command.unreadableReason), { complete: true });
     if (command.unreadableGh) throw new Error('Start-Process gh arguments cannot be inspected. Use one literal argument string and supported options, or run gh as its own command.');
     const gh = ghCommand(command.words); if (!gh) continue;
     if (gh.variable) throw Object.assign(new Error('This gh command takes its command words from a variable, so Toolkit cannot tell what it runs and it was refused. Write the gh command out in full.'), { complete: true });
@@ -222,6 +224,8 @@ function shellOperations(input, options = {}) {
     }
     const { flags, positional, expansions } = parsed;
     if (flags.has('help')) continue;
+    // PowerShell @name splats a variable's values in as further arguments.
+    if (command.psLike && positional.some(word => /^@[A-Za-z_]\w*$/.test(word))) throw Object.assign(new Error(`This gh ${noun}${verb ? ' ' + verb : ''} command takes arguments from a splatted variable (@name), so Toolkit cannot tell what it runs and it was refused. Write the arguments out in full.`), { complete: true });
     if (command.hidden && kind !== 'api') throw hidden();
     if (kind === 'api') {
       let op;

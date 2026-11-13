@@ -1971,7 +1971,8 @@ test('binding checks name workflow jobs that always wait for every test job', ()
   for (const name of binding.required_checks) {
     const body = jobs.get(name);
     assert.ok(body, `required check ${name} must be a workflow job`);
-    assert.match(body, /^    if: \$\{\{\s*always\(\)\s*\}\}\s*$/m, `${name} must run even after failed tests`);
+    // `!cancelled()` runs after failed tests too; only a cancelled run skips it, and that run reports cancelled.
+    assert.match(body, /^    if: \$\{\{\s*(?:always\(\)|!cancelled\(\))\s*\}\}\s*$/m, `${name} must run even after failed tests`);
     const needs = /^    needs:\s*\[([^\]]*)\]/m.exec(body)?.[1].split(',').map(value => value.trim().replace(/^['"]|['"]$/g, ''))
       || [...(body.match(/^    needs:\s*\r?\n((?:      - [\w-]+\r?\n)+)/m)?.[1] || '').matchAll(/- ([\w-]+)/g)].map(match => match[1]);
     for (const testJob of tests.filter(job => job !== name)) assert.ok(needs.includes(testJob), `${name} must need ${testJob}`);
