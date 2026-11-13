@@ -85,7 +85,7 @@ function bindingV1() {
 function runAction(mode, { env = {}, file = binding(), refresh = null } = {}) {
   const notices = [], failures = [], outputs = [], summaries = [], refreshes = [], warnings = [];
   const runner = new (action().ProgrammeSweepAction)({
-    env: { GITHUB_REPOSITORY: 'owner/repository', ...env }, root: ROOT,
+    env: { GITHUB_REPOSITORY: 'owner/repository', GITHUB_REF: 'refs/heads/main', DEFAULT_BRANCH: 'main', ...env }, root: ROOT,
     readFile: () => { if (file === null) throw Object.assign(new Error('absent'), { code: 'ENOENT' }); return Buffer.from(typeof file === 'string' ? file : JSON.stringify(file)); },
     validateBinding: value => state.validateBinding(value),
     refresh: input => { refreshes.push(input); return refresh ? refresh(input) : { status: 0, code: null, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [] } }; },
@@ -668,7 +668,7 @@ test('M5: a run whose pass found the App limit at the margin ends green with the
 function runFooters({ env = {}, footers = null, now = Date.parse('2026-11-13T00:00:00Z') } = {}) {
   const failures = [], summaries = [], warnings = [], calls = [];
   const runner = new (action().ProgrammeSweepAction)({
-    env: { GITHUB_REPOSITORY: 'owner/repository', GITHUB_REPOSITORY_OWNER: 'owner', STORE_REPOSITORY: 'owner/evidence', GOVERNED_TOKEN: fakeToken, STORE_TOKEN: storeToken, PATH: process.env.PATH, ...env },
+    env: { GITHUB_REPOSITORY: 'owner/repository', GITHUB_REPOSITORY_OWNER: 'owner', STORE_REPOSITORY: 'owner/evidence', GOVERNED_TOKEN: fakeToken, STORE_TOKEN: storeToken, REFRESHED: 'true', PATH: process.env.PATH, ...env },
     root: ROOT, nowMs: () => now,
     footers: input => { calls.push(input); return footers ? footers(input) : { status: 0, results: [] }; },
     failure: message => failures.push(message), summary: line => summaries.push(line), warning: message => warnings.push(message),
@@ -745,9 +745,57 @@ test('workflow: footer cleaning runs after the refresh, on minted tokens, and a 
   assert.match(text, /  workflow_dispatch:\r?\n    inputs:\r?\n      footer_since:\r?\n        description: .+\r?\n        required: false\r?\n        default: ''/);
   const footers = step("Clean the cloud footer from the owner's posts");
   assert.ok(text.indexOf("- name: Clean the cloud footer") > text.indexOf('- name: Refresh the programme'), 'after the refresh');
-  assert.match(footers, /if: \$\{\{ !cancelled\(\) && steps\.governed\.outcome == 'success' && steps\.store\.outcome == 'success' && steps\.refresh\.outputs\.at_limit != 'true' \}\}/);
+  assert.match(footers, /if: \$\{\{ !cancelled\(\) && steps\.governed\.outcome == 'success' && steps\.store\.outcome == 'success' && steps\.refresh\.outputs\.refreshed == 'true' && steps\.refresh\.outputs\.at_limit != 'true' \}\}/);
+  assert.match(footers, /REFRESHED: \$\{\{ steps\.refresh\.outputs\.refreshed \}\}/);
   assert.match(footers, /FOOTER_SINCE: \$\{\{ inputs\.footer_since \}\}/);
   assert.match(footers, /run: node repo\/scripts\/toolkit-programme-sweep-action\.cjs footers\s*$/);
   assert.doesNotMatch(footers, /secrets\./);
   assert.match(step('Mint the evidence store token'), /permission-contents: write\r?\n\s+permission-issues: write\r?\n\s+permission-pull-requests: write/);
+});
+
+// A manual run can pick any branch. Off the default branch no App token is minted and nothing is
+// edited: the store step stops it with one warning, and the footer step needs a refresh that ran.
+test('off the default branch: the store step names no store, so no token is minted, with one warning naming the ref and the branch', () => {
+  for (const env of [{ GITHUB_REF: 'refs/heads/feature/x' }, { GITHUB_REF: 'refs/tags/v1' }, { GITHUB_REF: 'refs/pull/5/merge' }, { DEFAULT_BRANCH: '' }, { GITHUB_REF: '' }]) {
+    const result = runAction('store', { env });
+    assert.equal(result.code, 0, JSON.stringify(env));
+    assert.deepEqual(result.outputs, [['store', '']], JSON.stringify(env));
+    assertSkipWarning(result, /not the default branch/);
+    assert.equal(result.refreshes.length, 0);
+  }
+  const named = runAction('store', { env: { GITHUB_REF: 'refs/heads/feature/x' } });
+  assert.match(named.warnings[0], /refs\/heads\/feature\/x/);
+  assert.match(named.warnings[0], /main/);
+  assert.match(named.warnings[0], /Fix: start it from main/);
+  const other = runAction('store', { env: { GITHUB_REF: 'refs/heads/trunk', DEFAULT_BRANCH: 'trunk' } });
+  assert.deepEqual(other.outputs, [['store', 'evidence'], ['store_repository', 'owner/evidence']], 'a default branch not called main still runs');
+  assert.match(step('Read the evidence store from the binding'), /DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}/);
+  for (const name of ['Mint the governed repository token', 'Mint the evidence store token']) assert.match(step(name), /steps\.binding\.outputs\.store != ''/, name);
+});
+
+test('refreshed: only a pass that ran says so; every skip and failure leaves footer cleaning off', () => {
+  const ran = runAction('run', { env: minted });
+  assert.ok(ran.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'));
+  const held = runAction('run', { env: minted, refresh: () => ({ status: 1, code: null, report: { metrics: 'Sweep: requests=4', holds: ['x'] } }) });
+  assert.ok(held.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'), 'a held pass ran');
+  for (const [label, env, refresh] of [
+    ['main moved', minted, () => ({ status: 1, code: 'MAIN_MOVED', report: null })],
+    ['public state', minted, () => ({ status: 1, code: 'CLOUD_PUBLIC_STATE', report: null })],
+    ['sign-in', minted, () => ({ status: 1, code: 'GH_AUTH', report: null })],
+    ['failure', minted, () => ({ status: 1, code: 'GOVERNANCE_STATE_UNAVAILABLE', report: null })],
+    ['no store', { ...minted, STORE_REPOSITORY: '' }, null],
+    ['no App', { ...minted, APP_CLIENT_ID_SET: 'false' }, null],
+    ['mint failed', { ...minted, MINT_OUTCOME: 'failure/success' }, null]]) {
+    const result = runAction('run', { env, refresh });
+    assert.equal(result.outputs.some(([name]) => name === 'refreshed'), false, label);
+  }
+});
+
+test('footers: without a refresh that ran this commit, nothing is edited and one warning says so', () => {
+  for (const REFRESHED of ['', 'false', undefined]) {
+    const result = runFooters({ env: { REFRESHED } });
+    assert.deepEqual([result.code, result.calls.length], [0, 0], String(REFRESHED));
+    assert.deepEqual(result.warnings, [action().FOOTER_SKIPPED]);
+    assert.deepEqual(result.summaries, []);
+  }
 });
