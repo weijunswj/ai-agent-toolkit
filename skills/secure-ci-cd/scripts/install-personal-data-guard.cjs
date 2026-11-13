@@ -37,8 +37,14 @@ const VENDOR_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED personal-dat
 const HOOK_MARKER = 'AI-AGENT-TOOLKIT:secure-ci-cd:HOOK personal-data-guard';
 const HOOKS = ['pre-commit', 'commit-msg', 'pre-push'];
 const SAVED_SUFFIX = '.pre-personal-data-guard';
-// Where the guard source sits in a Toolkit checkout. A repository that has it is the Toolkit itself.
+// Where the guard source sits in a Toolkit checkout. A repository is the Toolkit itself only when it has
+// both this file and the governance conformance script, so one stray file does not make another repository
+// skip its guard copy and workflow.
 const TOOLKIT_GUARD_SOURCE = path.join('skills', 'secure-ci-cd', 'scripts', 'personal-data-guard.cjs');
+const TOOLKIT_MARKERS = [TOOLKIT_GUARD_SOURCE, path.join('repo', 'scripts', 'toolkit-governance-conformance.cjs')];
+const isToolkitCheckout = top => TOOLKIT_MARKERS.every(marker => fs.existsSync(path.join(top, marker)));
+// In a Toolkit checkout the hooks try .github/scripts first, so a copy there would run instead of the source.
+const SHADOW = `${VENDORED_PATH.split(path.sep).join('/')} is in this Toolkit checkout, so the hooks run it instead of the in-repo guard; delete it`;
 const TOOLKIT_NOTE = "is the Toolkit's own repository: it keeps the guard source in skills/secure-ci-cd/scripts and its CI runs the guard";
 
 class InstallError extends Error {
@@ -176,7 +182,7 @@ class GuardInstaller {
 
   install({ identity, identityReason, requiredCheck = 'none', workflow = false }) {
     const { top, hooks } = this.locate();
-    const toolkit = fs.existsSync(path.join(top, TOOLKIT_GUARD_SOURCE));
+    const toolkit = isToolkitCheckout(top);
     try { fs.mkdirSync(hooks, { recursive: true }); }
     catch (error) { throw new InstallError(`the hooks folder ${hooks} could not be created (${error.code || 'error'}), so nothing was installed.`); }
     const configFile = path.join(top, CONFIG_PATH);
@@ -197,7 +203,10 @@ class GuardInstaller {
     } else {
       this.#say(`Config kept: ${CONFIG_PATH}.`);
     }
-    if (toolkit) this.#say(`Guard copy skipped: ${top} ${TOOLKIT_NOTE}, so the hooks run ${TOOLKIT_GUARD_SOURCE.split(path.sep).join('/')}.`);
+    if (toolkit) {
+      this.#say(`Guard copy skipped: ${top} ${TOOLKIT_NOTE}, so the hooks run ${TOOLKIT_GUARD_SOURCE.split(path.sep).join('/')}.`);
+      if (fs.existsSync(path.join(top, VENDORED_PATH))) this.#say(`Warning: ${SHADOW}.`);
+    }
     else {
       writeFile(path.join(top, VENDORED_PATH), vendoredText());
       this.#say(`Guard copied: ${VENDORED_PATH} (guard v${GUARD_VERSION}).`);
@@ -269,9 +278,12 @@ class GuardInstaller {
   // Drift report; changes nothing.
   check() {
     const { top, hooks } = this.locate();
-    const toolkit = fs.existsSync(path.join(top, TOOLKIT_GUARD_SOURCE));
+    const toolkit = isToolkitCheckout(top);
+    const shadow = toolkit && fs.existsSync(path.join(top, VENDORED_PATH));
+    if (shadow) this.#say(`Drift: ${SHADOW}.`);
     // Hooks are optional in the Toolkit's own clone; once any is there, all of them must be current.
     if (toolkit && !this.#guardHooks(hooks).some(hook => hook.text?.includes(HOOK_MARKER))) {
+      if (shadow) return 1;
       this.#say(`No drift: ${top} ${TOOLKIT_NOTE}, and no guard hooks are installed in it.`);
       return 0;
     }
@@ -288,7 +300,7 @@ class GuardInstaller {
       // Any difference from the current hook text, so a hook from before a template change is found too.
       else if (text.replace(/\r\n/g, '\n') !== hookText(name)) problems.push(`hook ${name}: outdated`);
     }
-    if (problems.length) {
+    if (problems.length || shadow) {
       for (const problem of problems) this.#say(`Drift: ${problem}`);
       return 1;
     }
