@@ -378,6 +378,50 @@ test('a task whose PRs have all merged is on the work queue after one quiet hour
   assert.deepEqual(idle({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2, lifecycle: 'WAITING_OWNER' }), [], 'owner UAT after merge is the owner\'s');
 });
 
+test('an open PR whose update time cannot be read counts as moving', () => {
+  const f = idleRun({ openPr: true });
+  f.github.prs.get(900).updated_at = null;
+  assert.deepEqual(f.reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code)), []);
+});
+
+test('merged tracked PRs plus a stale open PR naming the task raise TASK_IDLE, not TASK_MERGED_OPEN', () => {
+  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 30 });
+  f.github.addPr(901, { head: SHA_A, branch: 'later', body: 'Refs #806' });
+  f.github.prs.get(901).updated_at = new Date(START - 2 * HOUR).toISOString();
+  const found = f.reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code));
+  assert.deepEqual(found.map(finding => finding.code), ['TASK_IDLE']);
+  assert.match(found[0].detail, /open PR #901 has not changed for over 24 hours/);
+});
+
+test('a pass that could not read every open PR raises no work-queue finding', () => {
+  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
+  const pass = f.reconciler();
+  const parentDoc = f.store.read('parent', 421).doc;
+  const docs = new Map([[806, f.store.read('child', 806).doc]]);
+  const observed = complete => ({ prGraph: { openComplete: complete }, references: new Map(), prUpdated: new Map(), comments: new Map(), blockedBy: new Map(), issues: new Map() });
+  const run = complete => { const findings = []; pass.diffIdle(parentDoc, docs, observed(complete), null, findings); return findings.map(finding => finding.code); };
+  assert.deepEqual(run(true), ['TASK_MERGED_OPEN'], 'the same task is flagged when the list was read whole');
+  assert.deepEqual(run(false), [], 'an unread open PR could be moving it');
+});
+
+test('a task blocked by another open task that is moving is not idle; behind a stalled blocker both are', () => {
+  const f = setup({ clock: true, outcomes: [{ issue: 806, class: 'COMMITTED', order: 1 }, { issue: 807, class: 'COMMITTED', order: 2 }] });
+  f.github.issues.get(806).blockedBy = [807];
+  f.reconciler().run({ apply: true });
+  const parentDoc = f.store.read('parent', 421).doc;
+  const active = (number, holder) => f.store.mutate('child', number, { writer, parentDoc, change: doc => ({ ...doc, lifecycle: 'ACTIVE', blockers: number === 806 ? ['waiting on #807'] : [],
+    ...(holder ? { fence: { ...doc.fence, holder_prefix: 'INT-TK421-', holder_session: 'lane-1' } } : {}) }) });
+  active(806, false);
+  active(807, true);
+  f.time.now = START + 7 * HOUR;
+  const queue = () => f.reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code)).map(finding => finding.issue).sort();
+  assert.deepEqual(queue(), [], 'the blocker carries the work');
+  f.time.now = START;
+  f.store.mutate('child', 807, { writer, parentDoc, change: doc => ({ ...doc, fence: { ...doc.fence, holder_prefix: null, holder_session: null } }) });
+  f.time.now = START + 7 * HOUR;
+  assert.deepEqual(queue(), [806, 807], 'a stalled blocker surfaces, and so does the task behind it');
+});
+
 test('the parent page lists the work queue first and the graph says the shown PR merged', () => {
   const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
   f.reconciler().run({ apply: true });

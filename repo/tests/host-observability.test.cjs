@@ -237,6 +237,16 @@ const stateMatrix = [
   { name: 'alert transport fails with no failure heartbeat URL: the ping is skipped', responses: { '/hook': 500 }, expect: 'OBSERVABILITY_DEGRADED',
     report: [/Off-host heartbeat \| OBSERVABILITY_DEGRADED \| Not pinged: the alert failed to send and no HEARTBEAT_FAIL_URL is set/],
     check: ({ rx }) => assert.deepEqual(pinged(rx), [], 'the off-host monitor misses a ping and raises its alarm') },
+  // A degraded or emergency pulse with no failure URL never sends the healthy ping: the off-host
+  // monitor would otherwise see a healthy host.
+  { name: 'degraded with no failure heartbeat URL: the ping is skipped', host: { docker: 'fail' }, expect: 'OBSERVABILITY_DEGRADED',
+    report: [/Off-host heartbeat \| OBSERVABILITY_DEGRADED \| Not pinged: the host is OBSERVABILITY_DEGRADED and no HEARTBEAT_FAIL_URL is set/],
+    check: ({ rx }) => assert.deepEqual(pinged(rx), [], 'a healthy ping would hide the degraded host') },
+  { name: 'emergency with no failure heartbeat URL: the ping is skipped', host: { diskPct: 97 }, expect: 'EMERGENCY_PRESSURE',
+    report: [/Off-host heartbeat \| OBSERVABILITY_DEGRADED \| Not pinged: the host is EMERGENCY_PRESSURE and no HEARTBEAT_FAIL_URL is set/],
+    check: ({ rx }) => assert.deepEqual(pinged(rx), []) },
+  { name: 'degraded with a failure heartbeat URL pings the failure URL', host: { docker: 'fail' }, env: failURL, expect: 'OBSERVABILITY_DEGRADED',
+    check: ({ rx }) => assert.deepEqual(pinged(rx), ['hb-fail']) },
   { name: 'unsupported webhook format', env: { ALERT_WEBHOOK_FORMAT: 'xml' }, expect: 'OBSERVABILITY_DEGRADED',
     report: [/Alerting \| OBSERVABILITY_DEGRADED \| Not set up: unknown ALERT_WEBHOOK_FORMAT xml/], check: ({ rx }) => assert.equal(hooks(rx).length, 0) },
   { name: 'plain http webhook to another host', env: { ALERT_WEBHOOK_URL: `http://alerts.example.com/hook/${SECRET_HOOK}` }, expect: 'OBSERVABILITY_DEGRADED',
@@ -291,6 +301,32 @@ test('a first pulse alerts once, pings the heartbeat, and a repeat with no chang
   assert.match(second.stdout, /Alert: not needed/);
   assert.equal(hooks(rx).length, 1);
   assert.equal(beats(rx).length, 2, 'the heartbeat is pinged on every run');
+});
+
+// A state that is not NORMAL, or failing services, that does not change is re-sent every
+// REMIND_EVERY_PULSES pulses (default 24), so a degraded host is never reported once and forgotten.
+test('an unchanged non-NORMAL state is re-sent as a reminder every 24 pulses', { skip }, async (t) => {
+  const host = makeHost(t, { memAvailKb: 800000 });
+  const rx = await receiver(t);
+  writeState(host, [...fresh()(nowSec()), 'last_sent_signature=REVIEW_CAPACITY|OK', 'pulses_since_alert=22']);
+  const quiet = await run(pulseScript, [], host, alertEnv(rx));
+  assert.match(quiet.stdout, /Alert: not needed/);
+  assert.equal(hooks(rx).length, 0);
+  assert.equal(readState(host).pulses_since_alert, '23');
+  const reminder = await run(pulseScript, [], host, alertEnv(rx));
+  assert.match(reminder.stdout, /Alert: sent \(webhook=sent\); reminder: unchanged for 24 pulses/);
+  assert.equal(hooks(rx).length, 1);
+  assert.match(JSON.parse(hooks(rx)[0].body).subject, /reminder, unchanged for 24 pulses/);
+  assert.equal(readState(host).pulses_since_alert, '0');
+});
+
+test('an unchanged NORMAL state with services OK is never re-sent', { skip }, async (t) => {
+  const host = makeHost(t);
+  const rx = await receiver(t);
+  writeState(host, [...fresh()(nowSec()), 'last_sent_signature=NORMAL|OK', 'pulses_since_alert=40']);
+  const result = await run(pulseScript, [], host, alertEnv(rx));
+  assert.match(result.stdout, /Alert: not needed/);
+  assert.equal(hooks(rx).length, 0);
 });
 
 // --status at the stale limit: just under, at and just over 60 minutes.

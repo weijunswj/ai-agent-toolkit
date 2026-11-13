@@ -445,8 +445,12 @@ function showAttention(parentDoc, args, deps) {
 // (an origin URL) write it only to a folder they name.
 function cacheAttention(context, parentDoc, complete, deps = {}) {
   if (!parentDoc || (deps.originUrl && !deps.attentionDir)) return;
+  // The longest-stalled work-queue task, so session start names it: its number, code, when it was
+  // flagged and the Toolkit's own next step for that code (no text from GitHub).
+  const [oldest] = state.workQueue(parentDoc.attention);
   attentionCache.writeCache(context.repository, { line: state.attentionLine(parentDoc.attention, nowText(deps)), counts: state.attentionCounts(parentDoc.attention),
-    digest: state.attentionDigest(parentDoc.attention), complete }, deps);
+    digest: state.attentionDigest(parentDoc.attention), complete,
+    queue: oldest ? { count: state.workQueue(parentDoc.attention).length, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.changed_at, next: state.FINDING_CODES[oldest.code].next_action } } : null }, deps);
 }
 
 const TERMINAL = ['DONE', 'RETIRED'];
@@ -1063,7 +1067,7 @@ function formatAttention(result) {
   if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
   // Work-queue findings first: each is a task on the graph that needs the controller's next step now.
   const queue = result.findings.filter(entry => state.WORK_QUEUE_CODES.has(entry.code));
-  if (queue.length) lines.push('', 'Work queue (act on each now: a lane, a state change or a close; never ack)', ...queue.map(entry => `- ${entry.id} ${entry.code} #${entry.issue}: ${entry.next_action}`), '');
+  if (queue.length) lines.push('', 'Work queue (act on each now: a lane, a state change or a close; never ack)', ...queue.map(entry => `- ${entry.id}${entry.state === 'acknowledged' ? ' acknowledged' : ''} ${entry.code} #${entry.issue}: ${entry.next_action}`), '');
   for (const entry of result.findings.filter(item => !state.WORK_QUEUE_CODES.has(item.code))) {
     lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
     lines.push(...formatBodyDiagnostics(entry.diagnostics));

@@ -50,9 +50,13 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         const source = fs.readFileSync(full, 'utf8');
         const loads = [...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim());
         // Repository identity already loads through governance state; its direct import normalises the target identity.
-        assert.deepEqual(loads.sort(), ["'../../skills/github-program-reconciler/scripts/programme-state.cjs'", "'../../skills/github-program-reconciler/scripts/resolve-executable.cjs'", "'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-governance-binding.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-repository-identity.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
+        assert.deepEqual(loads.sort(), ["'../../skills/github-program-reconciler/scripts/programme-state.cjs'", "'../../skills/github-program-reconciler/scripts/resolve-executable.cjs'", "'./toolkit-auto-merge-eligible.cjs'", "'./toolkit-governance-binding.cjs'", "'./toolkit-governance-gate.cjs'", "'./toolkit-governance-state.cjs'", "'./toolkit-projects-cloud.cjs'", "'./toolkit-projects-delivery.cjs'", "'./toolkit-repository-identity.cjs'", "'./toolkit-shell-call.cjs'", "'node:crypto'", "'node:fs'", "'node:path'"]);
         assert.doesNotMatch(source, /\bimport\s*\(|child_process|(?<![.\w])(?:spawn|exec|execFile|fork)(?:Sync)?\s*\(|\bfetch\s*\(|node:https?\b|node:net\b/);
         assert.deepEqual([...source.matchAll(/\.request\('([A-Z]+)',\s*([^)]*)\)/g)].map(match => [match[1], match[2]]), [['GET', 'apiPath']]);
+        // The Projects cloud reader it loads only parses prompt text and keeps one private state file.
+        const cloud = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-projects-cloud.cjs'), 'utf8');
+        assert.deepEqual([...cloud.matchAll(/\brequire\s*\(([^)]*)\)/g)].map((match) => match[1].trim()), ["'node:crypto'", "'node:fs'", "'node:path'"]);
+        assert.doesNotMatch(cloud, /child_process|\bfetch\s*\(|node:https?\b|node:net\b/);
         // The merge-scope check it loads starts only git, with read-only subcommands, and loads only
         // Node's own modules. Its one file read is the pull request body its CLI is handed; it writes nothing.
         const scope = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-auto-merge-eligible.cjs'), 'utf8');

@@ -178,6 +178,7 @@ Start remediation only after the audit report exists.
 - Re-run relevant click-through/browser verification for affected user-facing flows.
 - Update the audit report after each remediation batch.
 - Record which findings were closed, partially closed, deferred, or newly found.
+- Give every unresolved or deferred finding an owner and a tracked follow-up (an issue, a PR task or a recorded promise) with the event that starts it, and link it from the report. A finding with no follow-up is not deferred; it is open.
 - Commit to a non-main branch, push, and open or update a PR unless the user explicitly asks for local-only.
 - Check CI/status when accessible, and run the `secure-ci-cd` CI check-up so CI still covers the code; list its real gaps as findings.
 - Stop for ambiguous product decisions, live-system actions, deployment, secrets, external services, destructive actions, customer/private data, or security-sensitive operations requiring explicit approval.
