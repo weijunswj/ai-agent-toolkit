@@ -554,12 +554,31 @@ for (const [label, body, options] of [
 const TRAIN_BODY = members => ['## Merge train', '', '| Member | Reviewed head | Tier | Bump | Review |', '|---|---|---|---|---|',
   ...members.map(pr => `| #${pr} | \`${String(pr % 10).repeat(40)}\` | NORMAL | patch | PASS |`), '',
   `UAT: OWNER_TEST_NEEDED (each member's own test after the merge: #${members[0]})`, '', 'Refs #1'].join('\n');
+// Each source may set `head` (its real head; a member defaults to the head its train row names)
+// and a train may set `contains` (the heads its branch holds; default every row's head).
 function timelineGuard(sources) {
   const github = new FakeGitHub({ repository: repo });
   github.addIssue(1);
   const events = sources.map(({ number, body, merged = true, at = '2026-11-12T10:00:00Z' }) => ({ event: 'cross-referenced', source: { issue: { number, body,
     repository_url: `https://api.github.com/repos/${repo}`, pull_request: { merged_at: merged ? at : null } } } }));
-  github.intercept(call => (call.method === 'GET' && /\/issues\/1\/timeline\?/.test(call.path) ? { status: 200, json: events } : undefined));
+  const { mergeTrainRows } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  const rowHead = new Map(); const contains = new Map();
+  for (const source of sources) {
+    const rows = mergeTrainRows(source.body) || [];
+    for (const row of rows) if (!rowHead.has(row.pr)) rowHead.set(row.pr, row.head);
+    if (rows.length) contains.set(source.head || 'e'.repeat(40), new Set(source.contains || rows.map(row => row.head)));
+  }
+  const heads = new Map(sources.map(source => [source.number, source.head || rowHead.get(source.number) || 'e'.repeat(40)]));
+  for (const source of sources) if (!source.head && mergeTrainRows(source.body)) heads.set(source.number, 'e'.repeat(40));
+  github.intercept(call => {
+    if (call.method !== 'GET') return undefined;
+    if (/\/issues\/1\/timeline\?/.test(call.path)) return { status: 200, json: events };
+    const pull = /\/pulls\/(\d+)$/.exec(call.path);
+    if (pull && heads.has(Number(pull[1]))) return { status: 200, json: { number: Number(pull[1]), merged: true, head: { sha: heads.get(Number(pull[1])) } } };
+    const compare = /\/compare\/([0-9a-f]{40})\.\.\.([0-9a-f]{40})(?:\?|$)/.exec(call.path);
+    if (compare) return { status: 200, json: { status: compare[1] === compare[2] ? 'identical' : contains.get(compare[2])?.has(compare[1]) ? 'ahead' : 'diverged' } };
+    return undefined;
+  });
   const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
   return new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state });
 }
@@ -597,6 +616,14 @@ for (const [label, sources] of [
   const result = timelineGuard(sources).checkTexts(['Closes #1']);
   assert.equal(result.status, 'refused');
   assert.match(result.reason, new RegExp(`merged PR #${sources[0].number},`));
+});
+for (const [label, sources] of [
+  ['the member merged at a head other than the one its row names', [{ number: 970, body: TRAIN_BODY([948, 947]) }, { number: 947, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', at: MEMBER_LATER, head: 'd'.repeat(40) }]],
+  ['the train branch does not hold the member head (a pasted table naming a sibling)', [{ number: 970, body: TRAIN_BODY([948, 947]), contains: [] }, { number: 947, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', at: MEMBER_LATER }]],
+]) test(`a merged train keeps its hold when ${label}`, () => {
+  const result = timelineGuard(sources).checkTexts(['Closes #1']);
+  assert.equal(result.status, 'refused');
+  assert.match(result.reason, /merged PR #970,/);
 });
 test('a merged train releases its hold through a carried member whose UAT is PASSED', () => {
   const guard = timelineGuard([{ number: 970, body: TRAIN_BODY([948, 947]) }, { number: 947, body: 'Refs #1\n\nUAT: PASSED (owner OK)', at: MEMBER_LATER }]);

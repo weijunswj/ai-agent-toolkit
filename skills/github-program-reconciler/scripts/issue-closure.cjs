@@ -131,11 +131,28 @@ class IssueClosureGuard {
         const train = { state: 'MERGED', merged_at };
         const backing = rows.filter(row => row.pr !== pr && merged.has(row.pr));
         if (backing.length && backing.every(row => trainCarried(train, asMerged(merged.get(row.pr)), row.head) && !owing.has(row.pr)
-          && ['NOT_REQUIRED', 'PASSED'].includes(this.uatState(merged.get(row.pr).body)))) continue;
+          && ['NOT_REQUIRED', 'PASSED'].includes(this.uatState(merged.get(row.pr).body)))
+          && this.carriedHeads(repository, pr, backing, budget)) continue;
       }
       found.add(pr);
     }
     return [...found].sort((a, b) => a - b);
+  }
+
+  // A table and merge times can still be pasted. Each member must have merged at the head its row
+  // names, and that head must sit inside the train's own branch: one PR read per member, one for the
+  // train and one compare per member. A failed read is an unknown, never a release.
+  carriedHeads(repository, train, rows, budget) {
+    const head = this.get(`repos/${repository}/pulls/${train}`, budget)?.head?.sha;
+    if (!/^[0-9a-f]{40}$/i.test(head || '')) throw new Error('Merge train head unreadable.');
+    for (const row of rows) {
+      const member = this.get(`repos/${repository}/pulls/${row.pr}`, budget);
+      if (member?.merged !== true || String(member.head?.sha || '').toLowerCase() !== row.head) return false;
+      if (row.head === head.toLowerCase()) continue;
+      const status = this.get(`repos/${repository}/compare/${row.head}...${head}?per_page=1`, budget)?.status;
+      if (!['ahead', 'identical'].includes(status)) return false;
+    }
+    return true;
   }
 
   budget() { return { requests: 0, deadline: Math.min(this.deadline ?? Infinity, this.now() + this.deadlineMs) }; }
