@@ -9,5 +9,5 @@ Title: Merge by card in Claude Code
 
 ### Changed
 
-- The order for a merge that needs the owner is now: task auto-merge when it applies, then the card, then typed `merge N`. Codex keeps typed `merge N`. In cloud sessions the governance hook runs in cloud mode, which skips the merge hold, so a Projects card there still rests on the written rules and required CI.
+- The order for a merge that needs the owner is now: task auto-merge when it applies, then the card, then typed `merge N`. Codex keeps typed `merge N`. This card records nothing in a cloud session, where the Claude Projects merge card applies instead.
 - Hook pack rows may use a placeholder in an object key, so a card answer can be keyed by its question.

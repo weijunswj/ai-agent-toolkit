@@ -111,6 +111,27 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
     return preview;
   }
 
+  // The approved proposal, read again just before the write. Earlier steps of this same run (the Codex
+  // plugin install) write config.toml after the owner answered; when the fresh proposal is still the
+  // same edit, the owner's answer holds for it, so the helper limit is applied in this run instead of
+  // stopping and asking the whole question bank again. A different edit keeps the approved one, which
+  // then fails its own check and asks again.
+  function currentApprovedProposal(choice, configPath, current, helperCount, approved) {
+    const options = { runtime: current.runtime.runtime, setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs') };
+    let fresh;
+    try {
+      fresh = choice === 'remove'
+        ? delegation.previewCodexDelegationRemoval(configPath, options)
+        : delegation.previewCodexDelegation(configPath, { ...options, helperCount, allowUserOwnedReplacement: true });
+    } catch (error) {
+      // The approved proposal then meets its own check: it applies on an unchanged file, else asks again.
+      console.log(`Codex helper limit: config.toml could not be read again before the write (${String(error?.message || error).replace(/[\r\n]+/g, ' ').slice(0, 200)}), so the approved proposal is checked as it was.`);
+      return approved;
+    }
+    if (fresh.approval_binding?.snapshot?.sha256 === approved.approval_binding.snapshot?.sha256) return approved;
+    return delegation.sameApprovedProposal(approved, fresh) ? fresh : approved;
+  }
+
   // The Codex half of applyHostDelegationControl: the approved helper-capacity proposal.
   async function applyCodexDelegationControl(args, current) {
     const choice = args.setupChoices.codexHelperCapacity;
@@ -141,8 +162,9 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
     if (!preview || !['preview', 'removal-preview'].includes(preview.status) || !preview.approval_binding) {
       throw new Error('Selected helper setting remains unapplied. Toolkit could not verify the approved Codex proposal. Rerun setup to receive a fresh proposal.');
     }
-    options.backupGenerationId = preview.backup_generation_id;
-    options.approvedProposal = preview.approval_binding;
+    const approved = currentApprovedProposal(choice, configPath, current, options.helperCount, preview);
+    options.backupGenerationId = approved.backup_generation_id;
+    options.approvedProposal = approved.approval_binding;
     const effectiveChoice = ['one-helper', 'root-only', 'custom'].includes(choice) ? 'custom' : choice;
     const result = await delegation.delegationResultForChoice(effectiveChoice, configPath, options);
     if (result.status === 'approval-stale' || result.status === 'approval-invalid') throw new Error(result.detail);
@@ -276,7 +298,7 @@ function defineCodexSetup({ RUNTIMES, defaultCodexPluginCachePath, expectedToolk
     for (const line of lines.length ? lines : [`held: ${result.detail}`]) console.log(line);
     return result;
   }
-  return { selectedHelperCount, needsPipedCodexProposalApproval, confirmSelectedDelegationProposal, applyCodexDelegationControl, detectCodexRuntimeAfterApproval, codexPluginFromFiles, runCodexNativePluginSetup, runCodexGlobalRules };
+  return { selectedHelperCount, needsPipedCodexProposalApproval, confirmSelectedDelegationProposal, currentApprovedProposal, applyCodexDelegationControl, detectCodexRuntimeAfterApproval, codexPluginFromFiles, runCodexNativePluginSetup, runCodexGlobalRules };
 }
 
 module.exports = { defineCodexSetup };

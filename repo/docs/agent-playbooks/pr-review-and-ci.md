@@ -61,7 +61,7 @@ The merge hold waits for the owner's approval, in this order:
 - **Merge card (Claude Code on this computer):** run the merge naming the full head SHA. The hold refuses it and hands back one exact card, "Merge owner/name#N at <short SHA>?" with Merge and Not now. Show that card unchanged. The owner's tap on Merge approves that pull request at that commit, once; run the same merge again. A new head needs a new card. Not now approves nothing and withdraws an unused approval for that pull request, so do not show the card again for that commit unless the owner asks.
 - **Typed "merge N":** where there is no card (Codex, a resumed or launched chat) or the tap was not recorded.
 
-The card counts only in a chat the owner started, shown exactly as the hold gave it. A card with other wording, a filled-in answer, or words typed into Other records nothing. Never tap it for the owner through a UI or computer use. In a cloud session the governance hook runs in cloud mode, which skips the merge hold, so a Projects card there rests on the written rules and required CI.
+The card counts only in a chat the owner started, shown exactly as the hold gave it. A card with other wording, a filled-in answer, or words typed into Other records nothing. Never tap it for the owner through a UI or computer use. This card records nothing in a cloud session; there, the hold names the Claude Projects merge card the thread posts itself (Bridge page, "Cloud sessions").
 
 ## Plain-Text Findings
 

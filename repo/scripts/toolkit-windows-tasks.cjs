@@ -385,11 +385,12 @@ $task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings 
 Register-ScheduledTask -TaskPath $path -TaskName $p.name -InputObject $task -Force | Out-Null
 ConvertTo-Json -InputObject @{ registered = $true } -Compress`,
   unregister: String.raw`$path = PathOf $p.folder
-$t = @(ReadTasks $path) | Where-Object { $_.TaskName -ieq $p.name }
-if ($t -and $p.expected_xml -and (Export-ScheduledTask -TaskPath $path -TaskName $p.name) -cne $p.expected_xml) { throw 'Task changed before removal; left alone.' }
-if (-not $t -or $t.TaskPath -ne $path) { ConvertTo-Json -InputObject @{ removed = $false } -Compress }
-elseif (([string]$t.Description).IndexOf($p.marker) -lt 0) { throw "The task in $path no longer carries Toolkit's marker; it was left alone." }
-else { Unregister-ScheduledTask -TaskPath $path -TaskName $p.name -Confirm:$false; ConvertTo-Json -InputObject @{ removed = $true } -Compress }`,
+$t = @(@(ReadTasks $path) | Where-Object { $_.TaskName -ieq $p.name })
+if ($t.Count -gt 1) { throw 'More than one task has this name; left alone.' }
+if ($t -and $p.expected_xml -and (Export-ScheduledTask -InputObject $t[0]) -cne $p.expected_xml) { throw 'Task changed before removal; left alone.' }
+if (-not $t -or $t[0].TaskPath -ne $path) { ConvertTo-Json -InputObject @{ removed = $false } -Compress }
+elseif (([string]$t[0].Description).IndexOf($p.marker) -lt 0) { throw "The task in $path no longer carries Toolkit's marker; it was left alone." }
+else { Unregister-ScheduledTask -InputObject $t[0] -Confirm:$false; ConvertTo-Json -InputObject @{ removed = $true } -Compress }`,
   restore: String.raw`$path = PathOf $p.folder
 if ((Export-ScheduledTask -TaskPath $path -TaskName $p.name) -cne $p.expected_xml) { throw 'Task changed before restoration; left alone.' }
 Register-ScheduledTask -TaskPath $path -TaskName $p.name -Xml $p.previous_xml -Force | Out-Null`,

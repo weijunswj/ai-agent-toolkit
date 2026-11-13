@@ -2,6 +2,8 @@
 
 Source-watch is review-notification-only. It may open or refresh a stable PR with a report, but it must not copy upstream files, update pins or advisory records, execute upstream code, delete toolkit components, auto-merge, or push to `main`.
 
+Each notification PR is the controller's to triage within 3 days of opening or refresh: keep (advance the cursor in a separate PR), adapt (a separate evidence-backed update PR), or close with the reason. An untriaged notification PR older than that is reported by the Projects daily check-in as `PR ATTENTION`.
+
 `review-state.json` stores human-advanced, per-target reviewed-through cursors. A cursor records the exact upstream state that was reviewed and dispositioned; it never adopts a source pin, changes an advisory baseline, or records the latest observation. The detector uses an identity-matching cursor first, then the adopted SOURCE-LOCK pin or advisory compatibility baseline as the migration fallback. The scheduled workflow never writes review state.
 
 ## Review Lanes
