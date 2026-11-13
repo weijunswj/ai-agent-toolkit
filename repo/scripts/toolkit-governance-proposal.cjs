@@ -29,7 +29,8 @@ function adoptionFiles(cwd, text) {
   const playbooks = fs.readdirSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/docs/agent-playbooks')).filter(name => name.endsWith('.md'));
   const names = ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md',
     ...playbooks.map(name => `docs/agent-playbooks/${name}`),
-    ...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json'];
+    ...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json',
+    ...require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(workflow => workflow.file)];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
     const file = path.join(cwd, name);

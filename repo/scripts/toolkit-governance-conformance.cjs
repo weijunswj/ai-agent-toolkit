@@ -155,6 +155,7 @@ function checkConformance(cwd, options = {}) {
   }
   if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
   if (state.state === 'ENABLED' && state.materials.binding) findings.push(...appFindings(state, options));
+  if (state.state === 'ENABLED' && state.materials.binding) findings.push(...cloudWorkflowFindings(state, toolkitRoot, options));
   const drift = findings.some(entry => entry.severity === 'drift');
   return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot));
 }
@@ -295,6 +296,28 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   return out;
 }
 
+// The cloud sweep copies a governed repository carries (toolkit-cloud-workflows.cjs). A missing or
+// hand-edited copy is drift; one rendered from an older Toolkit commit is only noted, since every
+// rules refresh updates it. The Toolkit's own checkout runs its own files and is skipped.
+function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
+  if (fs.existsSync(path.join(state.root, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'))) return [];
+  let result;
+  try {
+    const workflows = require('./toolkit-cloud-workflows.cjs');
+    // The check compares with this checkout's own commit; only an install needs it to be on main.
+    result = workflows.plan({ repo: state.root, root: toolkitRoot, commit: options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot) });
+  } catch (error) {
+    return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The cloud sweep workflows could not be checked: ${error.name === 'InstallError' ? error.message : 'the Toolkit copy could not render them.'}`)];
+  }
+  const out = [];
+  for (const row of result.rows) {
+    if (row.state === 'current') continue;
+    if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} is pinned to an older Toolkit commit; the next rules refresh updates it.`));
+    else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so this repository's programme board gets no cloud sweep. Refresh the repository rules to fix it.`));
+  }
+  return out;
+}
+
 // The cloud jobs guide from the contract: each job and the tokens it mints from the governance App.
 function cloudJobsGuide(state, toolkitRoot) {
   if (state?.state !== 'ENABLED' || !fs.existsSync(path.join(toolkitRoot, 'repo/contracts/cloud-jobs.json'))) return null;
@@ -320,4 +343,4 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
   });
 }
 
-module.exports = Object.freeze({ checkConformance, enforcementStatus, expectedGovernedBlock, PROMPT_HOLD_HOOK });
+module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, enforcementStatus, expectedGovernedBlock, PROMPT_HOLD_HOOK });
