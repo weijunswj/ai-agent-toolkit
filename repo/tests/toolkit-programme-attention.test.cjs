@@ -723,3 +723,28 @@ test('a refresh that changes only the CURRENT summary names it in the effect', (
   assert.ok(plan.effects.some(effect => effect.text === "Update the comment trace and CURRENT summary in #421's body" || effect.text === "Update the CURRENT summary in #421's body"), JSON.stringify(plan.effects.map(effect => effect.text)));
   assert.equal(plan.effects.some(effect => /comment trace in #421/.test(effect.text) && !/CURRENT/.test(effect.text)), false, 'never labelled as the comment trace alone');
 });
+
+test('work queue: a stalled-task finding is never acknowledged, leads the list, and returns as new after a dispose clears', () => {
+  const at = minute => new Date(Date.parse('2026-11-13T00:00:00Z') + minute * 60000).toISOString();
+  const seen = [{ code: 'TASK_IDLE', issue: 835 }, { code: 'TASK_MERGED_OPEN', issue: 877 }];
+  const noise = Array.from({ length: 12 }, (_, i) => ({ code: 'CLOSING_COMMENT_MISSING', issue: 900 + i }));
+  let list = state.foldAttention([], { source: 'reconcile', complete: true, now: at(0), seen });
+  list = state.foldAttention(list, { source: 'reconcile', complete: true, now: at(5), seen: [...seen, ...noise] });
+  const idle = list.find(entry => entry.code === 'TASK_IDLE');
+  const doc = { attention: list, private: {} };
+  assert.throws(() => state.answerFinding(doc, { id: idle.id, state: 'acknowledged', now: at(6) }), error => error.code === 'QUEUE_FINDING_NEEDS_ACTION' && /dispose --finding/.test(error.message));
+  // The line counts the queue, and the CURRENT block shows every queue entry ahead of twelve newer findings.
+  assert.match(state.attentionLine(list, at(6)), /^Attention: 14 new, 0 acknowledged, 2 in the work queue$/);
+  assert.deepEqual(state.workQueue(list).map(entry => entry.issue).sort(), [835, 877]);
+  // Two days on, they show as work queue, never as waiting on the owner.
+  assert.match(state.attentionLine(list, at(3000)), /, 2 in the work queue, 12 waiting on you$/);
+  // Disposed with a reason, then the task moves (unseen on a complete run): resolved, so a later stall is new.
+  const disposed = state.answerFinding(doc, { id: idle.id, state: 'disposed', reason: 'owner parked it until Monday', now: at(7) });
+  const moved = state.foldAttention(disposed.attention, { source: 'reconcile', complete: true, now: at(8), seen: [seen[1], ...noise] });
+  assert.equal(moved.find(entry => entry.id === idle.id).state, 'resolved');
+  const again = state.foldAttention(moved, { source: 'reconcile', complete: true, now: at(9), seen: [...seen, ...noise] });
+  assert.equal(again.find(entry => entry.id === idle.id).state, 'new');
+  // Other codes keep their old answers.
+  const other = list.find(entry => entry.code === 'CLOSING_COMMENT_MISSING');
+  assert.equal(state.answerFinding(doc, { id: other.id, state: 'acknowledged', now: at(6) }).attention.find(entry => entry.id === other.id).state, 'acknowledged');
+});

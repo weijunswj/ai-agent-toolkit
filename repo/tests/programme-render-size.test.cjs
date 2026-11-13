@@ -41,7 +41,11 @@ test('parent PR cells stay bounded and each row is no larger than the main row f
     const cells = row.slice(1, -1).split('|');
     const child = f.children.get(Number(cells[2].slice(1)));
     // One PR per row: the most recently opened one, and none for a retired task.
-    const latest = child.lifecycle === 'RETIRED' ? '-' : `#${state.latestPr(child)}`;
+    // On a task still open, a merged or closed PR says so; finished rows show the number alone.
+    const shown = [child.pr, ...(child.prs || [])].find(pr => pr?.number === state.latestPr(child))?.state;
+    const finished = ['DONE', 'RETIRED'].includes(child.lifecycle) || cells[4] === '-';
+    const suffix = !finished && shown === 'MERGED' ? ' merged' : !finished && shown === 'CLOSED' ? ' closed' : '';
+    const latest = child.lifecycle === 'RETIRED' ? '-' : `#${state.latestPr(child)}${suffix}`;
     assert.equal(cells[3], latest);
     assert.equal(/\+\d/.test(cells[3]), false, 'the cell never counts other PRs');
     const mainRow = `| ${cells.join(' | ')} |`;
@@ -49,13 +53,13 @@ test('parent PR cells stay bounded and each row is no larger than the main row f
   }
   const child = f.children.get(500);
   child.prs.push(...Array.from({ length: 100 }, (_, i) => ({ number: 5000 + i, state: 'MERGED', merge_sha: 'c'.repeat(40) })));
-  assert.equal(rows()[0].split('|')[4], '#5099', 'a hundred more PRs still show as one: the latest');
+  assert.match(rows()[0].split('|')[4], /^#5099(?: merged)?$/, 'a hundred more PRs still show as one: the latest');
   assert.doesNotMatch(render(), /#5000|\/commit\//);
   const detail = state.renderChildBlockBody(child, f.parent.outcomes[0]);
   for (const pr of child.prs) assert.ok(detail.includes(`#${pr.number} ${pr.state}`));
   assert.match(detail, /\/commit\/ccccccc/);
   child.prs = [];
-  assert.equal(rows()[0].split('|')[4], '#2000');
+  assert.match(rows()[0].split('|')[4], /^#2000(?: merged| closed)?$/);
   child.pr.number = null;
   assert.equal(rows()[0].split('|')[4], '-');
 });

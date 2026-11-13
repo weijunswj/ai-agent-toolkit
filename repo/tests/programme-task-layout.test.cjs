@@ -315,7 +315,7 @@ test('the status block of a block-holding page never lands inside the PATH block
   assert.equal(state.findStateBlock(body, state.NAV_BLOCK_NAME).block.tampered, false, 'the PATH block is whole');
 });
 
-const idle = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, holder = false, openPr = false, hours = 7, comment = null } = {}) => {
+const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, holder = false, openPr = false, openPrUpdated = null, merged = false, hours = 7, comment = null } = {}) => {
   const f = setup({ clock: true });
   f.reconciler().run({ apply: true });
   const parentDoc = f.store.read('parent', 421).doc;
@@ -326,17 +326,21 @@ const idle = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, holder
     return next;
   } });
   if (openPr) f.github.addPr(900, { head: SHA_A, branch: 'feature', body: 'Refs #806' });
+  if (openPr && openPrUpdated !== null) f.github.prs.get(900).updated_at = new Date(START + openPrUpdated * HOUR).toISOString();
+  if (merged) f.github.addPr(900, { head: SHA_A, branch: 'feature', body: 'Refs #806', merged: true, mergedAt: new Date(START).toISOString() });
   if (comment !== null) f.github.addComment(806, { body: 'A note', createdAt: new Date(START + comment * HOUR).toISOString() });
   f.time.now = START + hours * HOUR;
-  return f.reconciler().run().findings.filter(finding => finding.code === 'TASK_IDLE');
+  return f;
 };
+const idle = options => idleRun(options).reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code));
 
 test('a task shown IN PROGRESS with no open PR, no live gate, no holder and no change for six hours is flagged', () => {
   assert.equal(state.TASK_IDLE_HOURS, 6);
   const found = idle();
   assert.equal(found.length, 1);
   assert.equal(found[0].issue, 806);
-  assert.match(found[0].detail, /shown IN PROGRESS \(ACTIVE\) with no open PR, no live gate assignment and no holder/);
+  assert.equal(found[0].code, 'TASK_IDLE');
+  assert.match(found[0].detail, /shown IN PROGRESS \(ACTIVE\) with no moving PR, no live gate assignment and no holder/);
   assert.equal(idle({ lifecycle: 'HOLD' }).length, 1, 'a held task still shown IN PROGRESS is flagged too');
   assert.equal(idle({ gate: { role: 'G1', state: 'RETIRED' } }).length, 1, 'an ended assignment is not a live lane');
 });
@@ -347,12 +351,40 @@ for (const [name, options] of [
   ['with a live gate assignment', { gate: { role: 'G1', state: 'ACTIVE', assignment: { id: 'g1-806', role: 'G1' } } }],
   ['held by a lane', { holder: true }],
   ['with an open PR that names it', { openPr: true }],
+  ['with an open PR that changed in the last day', { openPr: true, openPrUpdated: -10 }],
   ['with an open PR in its history', { prs: [{ number: 900, state: 'OPEN', merge_sha: null }] }],
   ['waiting on the owner', { lifecycle: 'WAITING_OWNER' }],
   ['still queued', { lifecycle: 'PLANNED' }],
   ['already finished', { lifecycle: 'DONE' }],
 ]) test(`a task ${name} is not flagged as idle`, () => {
   assert.deepEqual(idle(options), []);
+});
+
+test('a stale open PR no longer hides an idle task', () => {
+  assert.equal(state.PR_STALE_HOURS, 24);
+  const found = idle({ openPr: true, openPrUpdated: -30 });
+  assert.equal(found.length, 1);
+  assert.equal(found[0].code, 'TASK_IDLE');
+  assert.match(found[0].detail, /open PR #900 has not changed for over 24 hours/);
+});
+
+test('a task whose PRs have all merged is on the work queue after one quiet hour', () => {
+  assert.equal(state.TASK_MERGED_OPEN_HOURS, 1);
+  const found = idle({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
+  assert.equal(found.length, 1);
+  assert.equal(found[0].code, 'TASK_MERGED_OPEN');
+  assert.match(found[0].detail, /every PR merged or closed/);
+  assert.deepEqual(idle({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 0.5 }), [], 'under an hour it is still settling');
+  assert.deepEqual(idle({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2, lifecycle: 'WAITING_OWNER' }), [], 'owner UAT after merge is the owner\'s');
+});
+
+test('the parent page lists the work queue first and the graph says the shown PR merged', () => {
+  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
+  f.reconciler().run({ apply: true });
+  const body = f.github.issues.get(421).body;
+  assert.match(body, /Attention: \d+ new, 0 acknowledged, 1 in the work queue/);
+  assert.match(body, /\*\*Work queue\*\* \(the controller acts on each now\)\n- TASK_MERGED_OPEN #806/);
+  assert.match(body, /\|#806\|#900 merged\|NOW\|IN PROGRESS\|/);
 });
 
 // Blocks that are only shown: an example of a block inside a code fence, a quote, a list item or
