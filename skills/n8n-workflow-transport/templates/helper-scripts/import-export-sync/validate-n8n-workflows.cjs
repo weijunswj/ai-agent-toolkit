@@ -157,6 +157,7 @@ const secretPatterns = [
   { label: 'sk-prefixed API key', regex: /sk-[A-Za-z0-9_-]{20,}/g },
   { label: 'Google API key', regex: /AIza[0-9A-Za-z_-]{20,}/g },
   { label: 'Pinecone-looking API key', regex: /pcsk_[A-Za-z0-9_-]{20,}/gi },
+  { label: 'Stripe-looking secret key', regex: /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g },
   { label: 'Bearer token', regex: /Bearer\s+[A-Za-z0-9._-]{20,}/gi },
   { label: 'JWT-looking token', regex: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
 ];
@@ -241,7 +242,13 @@ function createPolicyHelpers(policy) {
     // or expression) and trailing prose punctuation. Only a host that is itself an expression
     // ({{ ... }}) holds no real host and is skipped; anything else is checked, parseable or not.
     const authority = url.replace(/^https?:\/\//i, '').split(/[/?#]/)[0];
-    const host = authority.slice(authority.lastIndexOf('@') + 1)
+    // An allowed host clears only the host. Literal user info, or a literal value for a
+    // credential-named query parameter, is a finding on any host: it is how keys get pasted.
+    const at = authority.lastIndexOf('@');
+    if (at > 0 && !/^\{\{expr\}\}$/.test(authority.slice(0, at))) return false;
+    const query = url.split('?')[1] || '';
+    if (/(?:^|[&;])(?:key|api_?key|apikey|hapikey|access_token|token|secret|password|client_secret|sig|signature)=(?!\{\{)[^&#]+/i.test(query)) return false;
+    const host = authority.slice(at + 1)
       .replace(/:[^:\]]*$/, '')
       .replace(/[\]`.,;]+$/, '')
       .toLowerCase();

@@ -1457,6 +1457,29 @@ test('validate-n8n-workflows.cjs still fails a real host hidden next to an expre
   }
 });
 
+test('validate-n8n-workflows.cjs still fails a credential in the user info or query of an allowed public host', () => {
+  const stripeKey = ['sk', 'live', 'Abc123Def456Ghi789Jkl012'].join('_');
+  const hubspotKey = ['0f1e2d3c', '4b5a', '4978', '8695', 'a4b3c2d1e0f9'].join('-');
+  for (const value of [
+    `https://${stripeKey}:@api.stripe.com/v1/charges`,
+    `https://api.hubapi.com/contacts/v1/lists?count=10&hapikey=${hubspotKey}`,
+    `https://api.openai.com/v1/models?api_key=${hubspotKey}`,
+  ]) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({ url: value }));
+    const result = runNode(validateScript, [], { cwd });
+    assert.notEqual(result.status, 0, `${value} must fail`);
+    assert.match(result.stderr, /production-looking URL\(s\) at nodes\.0\.parameters\.url/, value);
+    assert.doesNotMatch(result.stdout + result.stderr, new RegExp(`${stripeKey}|${hubspotKey}`), 'the log never prints the credential');
+  }
+  for (const value of ['=https://generativelanguage.googleapis.com/v1/models?key={{ $env.KEY }}', '=https://{{ $env.U }}@api.openai.com/v1/models']) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({ url: value }));
+    const result = runNode(validateScript, [], { cwd });
+    assert.equal(result.status, 0, `${value} carries no literal credential: ${result.stderr}`);
+  }
+});
+
 test('validate-n8n-workflows.cjs passes a vanilla OpenAI HTTP Request with no policy file and still fails a company host', () => {
   const cwd = tempDir();
   writeJson(path.join(cwd, 'n8n-workflows', 'openai.json'), urlWorkflow({
