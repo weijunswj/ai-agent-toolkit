@@ -1,4 +1,0 @@
-### Changed
-
-- **Governance App setup:** The steps to save the App's Client ID and private key now lead with GitHub's website (Settings, Secrets and variables, Actions: the variable on the Variables tab, the whole `.pem` text on the Secrets tab), each step stopping if the name is already there, then say to delete the `.pem` file. The guarded `gh` commands stay as the other way. Removal leads with the same page.
-- **Governance on and off cover both halves:** The pull request that turns governance on always carries fresh cloud sweep copies (the sweep and its gate) pinned to the Toolkit checkout's own commit, which must be on main, and moves a version 1 binding to version 2; when the copies cannot be rendered it says why and how to fix it. The pull request that turns governance off also removes those copies. Both guides end with `toolkit governance check`, which now also reports cloud sweep copies left once governance is off.
