@@ -225,6 +225,34 @@ test('busy state branch: a pass that saves nothing keeps the changed-since bookm
   assert.ok(f.github.readFile('state/sweep-lease.json').changed_since > before, 'a pass that saves moves the bookmark on');
 });
 
+test('M4: a pass that starts below the margin ends calmly: exit 0, the pause note, no stop finding', t => {
+  const f = fixture(t, { count: 20 });
+  f.run({ cloud: true });
+  f.stale();
+  // An extra start while GitHub's hourly count is already under the margin (500 of 5,000).
+  const left = { core: 300, graphql: 5000 };
+  const low = limited(f.github, left);
+  const before = f.page();
+  const queueBefore = f.parent().sweep.queue;
+  const result = f.run({ cloud: true, transport: low.transport });
+  assert.equal(result.code, 0, 'not a failure: the job stays green');
+  assert.deepEqual(result.report, { outcome: 'PAUSED', reason: 'GitHub rate limit' });
+  assert.equal(f.page(), before, 'nothing is drawn under the margin');
+  assert.deepEqual(f.parent().sweep.queue, queueBefore, 'the saved place is kept');
+  const lease = f.github.readFile('state/sweep-lease.json');
+  assert.equal(lease.unreported, null, 'no stop is left for the next pass to report');
+  assert.ok(!(f.parent().attention || []).some(entry => entry.code === 'PASS_STOPPED'), 'no stop finding');
+  // The action turns it into a calm summary line and no follow-up.
+  const action = require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-action.cjs'));
+  assert.match(action.summaryLine(result.report), /^Programme Sweep paused: GitHub's hourly App limit/);
+  assert.equal(action.followUpAt(result.report, 1, 2), 0);
+  // A new hour: the next run reads the changes.
+  left.core = 5000;
+  const next = f.run({ cloud: true, transport: low.transport });
+  assert.equal(next.code, 0, JSON.stringify(next.report.holds));
+  assert.ok(next.report.sweep.read > 0);
+});
+
 test('history: each unfinished pass is kept beside the lease, the lease keeps its old fields, the window is six hours', t => {
   const f = fixture(t, { count: 30 });
   // Finished passes write no history: the lease's last finish time already rules out "stuck".

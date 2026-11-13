@@ -36,6 +36,7 @@ const NOTICES = Object.freeze({
   no_app: `Programme Sweep skipped: the governance GitHub App is not set up here. Set the repository variable ${CLIENT_ID_VARIABLE} and the secret ${PRIVATE_KEY_SECRET}; toolkit governance check lists what the App needs.`,
   main_moved: 'Programme Sweep skipped: the default branch moved while this run was starting; the next run picks it up.',
   queued: 'Programme Sweep queued: another sweep is running; the next hourly run will retry.',
+  paused: 'Programme Sweep paused: GitHub\'s hourly App limit for this repository is at the safety margin, so this pass read nothing; the next run picks up where the last one stopped.',
 });
 const SIGN_IN_FAILURE = `Programme Sweep failed: the governance GitHub App could not sign in. Check ${CLIENT_ID_VARIABLE} and ${PRIVATE_KEY_SECRET}: the App may not be installed on this repository or its evidence store, or the key was revoked.`;
 const GENERAL_FAILURE = 'Programme Sweep failed. Open this workflow run and toolkit governance check for the cause.';
@@ -96,6 +97,7 @@ function failureLine(result) {
 
 function summaryLine(report) {
   if (report?.outcome === 'QUEUED') return NOTICES.queued;
+  if (report?.outcome === 'PAUSED') return NOTICES.paused;
   if (!report || typeof report.metrics !== 'string' || !METRICS.test(report.metrics)) return null;
   const held = Array.isArray(report.holds) && report.holds.length ? '; this pass held, the next run retries' : '';
   return `Programme Sweep: ${report.metrics}${held}`;

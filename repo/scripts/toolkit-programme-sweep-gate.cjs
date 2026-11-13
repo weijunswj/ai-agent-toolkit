@@ -16,9 +16,11 @@
 //   - the last sweep finished six hours ago or more, so slower facts (checks, drift) still refresh.
 // A start from activity (including a finished CI run) waits until an hour after the last sweep
 // finished; the hourly start then picks the change up. Activity during a running sweep queues one
-// more run behind it, since the running pass may have read past the change. Nothing starts while a
-// sweep is already queued.
+// more run behind it, since the running pass may have read past the change, unless that run's
+// follow-up is already waiting to start the next one. Nothing starts while a sweep is already queued.
 const SWEEP_WORKFLOW = 'toolkit-programme-sweep.yml';
+// The sweep workflow's follow-up job, by its name there.
+const FOLLOW_UP_JOB = 'Start the next run after an early stop';
 const BRANCH = 'main';
 const HOUR_MS = 60 * 60 * 1000;
 // GitHub's hourly App limit resets at most an hour after the first request of the window, and the
@@ -48,11 +50,14 @@ function parentsOf(binding) {
 }
 
 // What the facts say: { start, reason }.
-function decide({ event, now, runs, lines, changedSince }) {
+function decide({ event, now, runs, lines, changedSince, followUpWaiting = false }) {
   if (runs.some(run => WAITING.has(run.status))) return { start: false, reason: 'a sweep is already queued' };
   // A running sweep may have read past this change: activity queues one more behind it. The hourly
   // start leaves a running sweep alone.
   if (runs.some(run => run.status === 'in_progress')) {
+    // A run whose sweep stopped early and whose follow-up is waiting (for GitHub's hourly App limit to
+    // reset, most often) starts the next sweep itself; one started now would begin under the margin.
+    if (followUpWaiting) return { start: false, reason: 'a follow-up run is already on its way' };
     return ACTIVITY_EVENTS.includes(event) ? { start: true, reason: 'activity during a running sweep; one more waits behind it' } : { start: false, reason: 'a sweep is running' };
   }
   const last = lastSweep(runs);
@@ -103,7 +108,13 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
       changedSince = ci.some(run => Date.parse(run.updated_at) > Date.parse(since));
     }
   }
-  const verdict = decide({ event: env.EVENT_NAME || '', now, runs, lines, changedSince });
+  // Only while a sweep run is in progress: is its follow-up job the part still running?
+  let followUpWaiting = false;
+  for (const run of runs.filter(item => item.status === 'in_progress' && Number.isSafeInteger(item.id))) {
+    const jobs = (await call('GET', `actions/runs/${run.id}/jobs`)).jobs || [];
+    if (jobs.some(job => job.name === FOLLOW_UP_JOB && job.status !== 'completed')) followUpWaiting = true;
+  }
+  const verdict = decide({ event: env.EVENT_NAME || '', now, runs, lines, changedSince, followUpWaiting });
   if (verdict.start) await call('POST', `actions/workflows/${SWEEP_WORKFLOW}/dispatches`, { ref: BRANCH });
   log(`Programme Sweep gate: ${verdict.start ? 'started the sweep' : 'nothing to start'} (${verdict.reason}).`);
   return verdict;
@@ -133,4 +144,4 @@ if (require.main === module) {
   run.catch(error => { process.stderr.write(`Programme Sweep ${process.argv[2] === 'follow-up' ? 'follow-up' : 'gate'} failed: ${error.message}\n`); process.exitCode = 1; });
 }
 
-module.exports = Object.freeze({ SWEEP_WORKFLOW, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, parentsOf, decide, gate, followUp });
+module.exports = Object.freeze({ SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, parentsOf, decide, gate, followUp });

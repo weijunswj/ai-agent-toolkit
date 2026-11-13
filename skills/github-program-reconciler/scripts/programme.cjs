@@ -1138,13 +1138,27 @@ function runPasses(args, deps, out) {
           if (!noteActive) { noteActive = true; progress.write(pass.snapshot()); }
         }
         let failed = null;
+        let paused = false;
         try { code = Math.max(code, finish(passArgs, deps, out, context)); }
-        catch (error) { failed = error; throw error; }
+        catch (error) {
+          // GitHub's hourly count for the App was already at the safety margin: this pass saved nothing
+          // and the next run picks up where the last one stopped. That is a pause, not a failure.
+          if (requests && error.code === 'PASS_STOPPED' && error.reason === 'GitHub rate limit' && !context.sweepOutcome) {
+            paused = true;
+            context.sweepOutcome = { changedSince: null, complete: false, reason: 'GitHub rate limit', read: 0, left: null };
+          } else { failed = error; throw error; }
+        }
         finally {
           if (measure) notes.saveMetrics();
           // An error stop goes to the local note when this computer's lock still owns it; otherwise
           // (the cloud, or a lock another process took) the lease release carries it.
           if (requests) releaseLease(context, pass, { error: failed, noteHolds: Boolean(file) && host === 'computer' && held.owns() });
+        }
+        if (paused) {
+          out.write(args.json ? `${JSON.stringify({ outcome: 'PAUSED', reason: 'GitHub rate limit' }, null, 2)}\n` : 'Paused: GitHub\'s hourly limit is at the safety margin, so this pass read nothing; the next run picks up where the last one stopped.\n');
+          passes += 1;
+          progress.finish();
+          break;
         }
         passes += 1;
         progress.finish();

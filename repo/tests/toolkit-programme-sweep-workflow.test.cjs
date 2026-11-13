@@ -365,6 +365,7 @@ test('sweep workflow: the follow-up job holds only the built-in token and waits 
   const text = workflow().replace(/\r\n/g, '\n');
   const job = text.slice(text.indexOf('  follow-up:'));
   assert.match(job, /needs: sweep\n    if: \$\{\{ needs\.sweep\.outputs\.follow_up_at != '' \}\}/);
+  assert.match(job, new RegExp(`^    name: ${gateScript().FOLLOW_UP_JOB}$`, 'm'), 'the gate finds the follow-up job by this name');
   assert.match(job, /permissions:\n      actions: write\n    steps:/);
   assert.match(job, /timeout-minutes: 65/);
   assert.doesNotMatch(job, /secrets\.|outputs\.token|concurrency:/);
@@ -413,12 +414,15 @@ test('gate: activity (a finished CI run included) starts a sweep when none finis
     assert.deepEqual(decide({ event, now: T, lines: [COMPLETE], changedSince: false, runs: [{ status: 'in_progress' }, done(HOUR - 1)] }),
       { start: true, reason: 'activity during a running sweep; one more waits behind it' });
     assert.equal(decide({ event, now: T, lines: [COMPLETE], changedSince: false, runs: [{ status: 'queued' }, { status: 'in_progress' }] }).start, false, 'never more than one waiting');
+    // M4: a follow-up waiting for the App limit to reset starts the next sweep; none starts under the margin now.
+    assert.deepEqual(decide({ event, now: T, lines: [PAUSED], changedSince: true, runs: [{ status: 'in_progress' }, done(2 * HOUR)], followUpWaiting: true }),
+      { start: false, reason: 'a follow-up run is already on its way' });
   }
 });
 
 const actionsToken = ['example', 'actions', 'token'].join('-');
 const gateBinding = JSON.stringify({ governance: 'enabled', parents: [{ issue: 421 }] });
-function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], binding = gateBinding, ci = [] } = {}) {
+function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], binding = gateBinding, ci = [], jobs = [] } = {}) {
   const calls = [];
   const fetchImpl = async (url, options) => {
     const route = url.replace('https://api.github.com/repos/owner/repository/', '');
@@ -427,7 +431,7 @@ function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], bi
     const json = route.startsWith('actions/workflows/toolkit-programme-sweep.yml/runs') ? { workflow_runs: runs }
       : route === 'issues/421' ? { body: `# Programme\n\n${body}\n` } : route.startsWith('issues?') ? changed
         : route === 'contents/.github/toolkit-programme.json?ref=main' ? { content: Buffer.from(binding).toString('base64') }
-          : route.startsWith('actions/workflows/validate.yml/runs') ? { workflow_runs: ci } : null;
+          : route.startsWith('actions/workflows/validate.yml/runs') ? { workflow_runs: ci } : /^actions\/runs\/\d+\/jobs$/.test(route) ? { jobs } : null;
     return { ok: true, status: options.method === 'POST' ? 204 : 200, json: async () => json };
   };
   return { calls, fetchImpl };
@@ -453,6 +457,17 @@ test('gate: a quiet hour reads four small answers and starts nothing; a change s
   assert.match(ciDone.calls[4], /^GET actions\/workflows\/validate\.yml\/runs\?status=completed&per_page=1$/);
   const ciOld = fakeGitHub({ ci: [{ updated_at: '2026-11-13T00:50:00Z' }] });
   assert.equal((await gate({ env: ciEnv, fetchImpl: ciOld.fetchImpl, now: T, log: () => {} })).start, false, 'a CI run before the last sweep is already read');
+  // M4: an issue comment while a run's follow-up waits for the App limit starts nothing; the jobs are
+  // read only for a run in progress.
+  const commentEnv = { ...gateEnv, EVENT_NAME: 'issue_comment' };
+  const waiting = fakeGitHub({ runs: [{ id: 77, status: 'in_progress' }, done(2 * HOUR)], body: PAUSED,
+    jobs: [{ name: 'Refresh the programme', status: 'completed' }, { name: gateScript().FOLLOW_UP_JOB, status: 'in_progress' }] });
+  assert.deepEqual(await gate({ env: commentEnv, fetchImpl: waiting.fetchImpl, now: T, log: () => {} }), { start: false, reason: 'a follow-up run is already on its way' });
+  assert.ok(waiting.calls.includes('GET actions/runs/77/jobs'));
+  assert.ok(!waiting.calls.some(call => call.startsWith('POST')));
+  const sweeping = fakeGitHub({ runs: [{ id: 78, status: 'in_progress' }, done(2 * HOUR)], jobs: [{ name: 'Refresh the programme', status: 'in_progress' }] });
+  assert.equal((await gate({ env: commentEnv, fetchImpl: sweeping.fetchImpl, now: T, log: () => {} })).start, true, 'a sweep still reading: one more waits behind it');
+  assert.equal(quiet.calls.filter(call => /jobs$/.test(call)).length, 0);
   const off = fakeGitHub({ binding: JSON.stringify({ governance: 'disabled' }) });
   assert.equal((await gate({ env: gateEnv, fetchImpl: off.fetchImpl, now: T, log: () => {} })).start, false);
   assert.deepEqual(off.calls, ['GET contents/.github/toolkit-programme.json?ref=main'], 'governance off reads only the binding');
