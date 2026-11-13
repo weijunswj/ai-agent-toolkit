@@ -22,6 +22,10 @@
 // gives one, and writes only counts to the job summary, never a post or its link. A failed edit of a
 // review body is a warning (GitHub may refuse an App's edit there, so those wait for a manual clean);
 // any other failed edit or read-back fails the step.
+//
+// The Toolkit's code runs from this file's own checkout. The binding and the working folder come from
+// the repository the run checked out (GITHUB_WORKSPACE). In the Toolkit repository they are the same
+// folder; a governed repository's copy of the workflow checks the Toolkit out beside its own files.
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -55,6 +59,7 @@ const FOOTER_FAILURE = 'Footer cleaning failed: an edit or its read-back did not
 const FOOTER_REVIEW_WARNING = 'Footer cleaning: GitHub refused the App\'s edit of some review bodies; they wait for a manual clean.';
 const FOOTER_FAILED = new Set(['FAILED', 'STILL_FOOTED', 'MISMATCH']);
 const FOOTER_SCRIPT = ['repo', 'scripts', 'toolkit-github-footer-sweep.cjs'];
+const TOOLKIT_ROOT = path.resolve(__dirname, '..', '..');
 
 // The binding this run checked out: { status, store } with status enabled, ungoverned, foreign_store or public_state.
 function readCheckedOutBinding({ root, env, readFile = fs.readFileSync, validateBinding }) {
@@ -84,12 +89,12 @@ function lastReport(output) {
 
 // Runs the CLI without a shell. Only the two tokens, the App's login and the store reach it; the
 // built-in token, the private key and any other token variable are removed.
-function runRefresh({ root, env, spawn = spawnSync }) {
+function runRefresh({ root, env, toolkitRoot = TOOLKIT_ROOT, spawn = spawnSync }) {
   const child = { ...env, TOOLKIT_PROGRAMME_CLOUD_SWEEP: '1', GITHUB_ACTIONS: 'true' };
   for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', PRIVATE_KEY_SECRET, 'TOOLKIT_GOVERNANCE_TOKEN']) delete child[name];
   let result;
   try {
-    result = spawn(process.execPath, [path.join(root, 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs'), 'refresh', '--scheduled', '--json'],
+    result = spawn(process.execPath, [path.join(toolkitRoot, 'skills', 'github-program-reconciler', 'scripts', 'programme.cjs'), 'refresh', '--scheduled', '--json'],
       { cwd: root, env: child, encoding: 'utf8', windowsHide: true, timeout: RUN_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, shell: false });
   } catch { return { code: 'EXEC_FAILED', report: null, status: 1 }; }
   if (!result || result.error) return { code: 'EXEC_FAILED', report: null, status: 1 };
@@ -132,11 +137,11 @@ function followUpAt(report, started, now) {
 }
 
 // The footer sweep for one repository under one token, without a shell. Only that token reaches it.
-function runFooterSweep({ root, env, repository, token, author, since, spawn = spawnSync }) {
+function runFooterSweep({ root, env, repository, token, author, since, toolkitRoot = TOOLKIT_ROOT, spawn = spawnSync }) {
   const child = { PATH: env.PATH, HOME: env.HOME, GH_TOKEN: token, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1' };
   let result;
   try {
-    result = spawn(process.execPath, [path.join(root, ...FOOTER_SCRIPT), '--repo', repository, '--since', since, '--author', author, '--apply', '--json'],
+    result = spawn(process.execPath, [path.join(toolkitRoot, ...FOOTER_SCRIPT), '--repo', repository, '--since', since, '--author', author, '--apply', '--json'],
       { cwd: root, env: child, encoding: 'utf8', windowsHide: true, timeout: 10 * 60 * 1000, maxBuffer: MAX_OUTPUT_BYTES, shell: false });
   } catch { return { status: 1, results: null }; }
   if (!result || result.error) return { status: 1, results: null };
@@ -159,7 +164,7 @@ function footerCounts(results) {
 
 class ProgrammeSweepAction {
   constructor({ env = process.env, root = env.GITHUB_WORKSPACE || process.cwd(), readFile = fs.readFileSync,
-    validateBinding = binding => require(path.join(root, 'skills', 'github-program-reconciler', 'scripts', 'programme-state.cjs')).validateBinding(binding),
+    validateBinding = binding => require(path.join(TOOLKIT_ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-state.cjs')).validateBinding(binding),
     refresh = input => runRefresh(input), notice = message => process.stdout.write(`::notice::${message}\n`),
     failure = message => process.stderr.write(`${message}\n`), output = (name, value) => fs.appendFileSync(env.GITHUB_OUTPUT, `${name}=${value}\n`),
     summary = line => fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `${line}\n`), footers = input => runFooterSweep(input),
@@ -230,4 +235,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, followUpAt, ProgrammeSweepAction });
+module.exports = Object.freeze({ TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, followUpAt, ProgrammeSweepAction });

@@ -117,6 +117,12 @@ function writePlainTextCheck(repo, settings = { schema: 'toolkit-plain-text-conf
   fs.writeFileSync(path.join(repo, '.github', 'plain-text.json'), JSON.stringify(settings));
 }
 
+// The cloud sweep copies a governed repository carries, rendered at this Toolkit checkout's commit.
+function writeCloudWorkflows(repo) {
+  const workflows = require(path.join(scripts, 'toolkit-cloud-workflows.cjs'));
+  workflows.apply(workflows.plan({ repo, commit: workflows.toolkitHead() }));
+}
+
 function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, repository = 'example-owner/example-repo', plainText = true } = {}) {
   fs.writeFileSync(path.join(repo, 'AGENTS.md'), `# Repo\n\n${blockText}\n`);
   if (plainText) writePlainTextCheck(repo);
@@ -131,6 +137,7 @@ function writeGoverned(repo, { blockText = expectedBlockText(), binding = true, 
     fs.mkdirSync(path.join(repo, '.github', 'workflows'), { recursive: true });
     fs.writeFileSync(path.join(repo, '.github', 'workflows', 'ci.yml'), WORKFLOW);
     fs.writeFileSync(path.join(repo, '.github', 'dependabot.yml'), 'version: 2\nupdates:\n  - package-ecosystem: "github-actions"\n    directory: "/"\n');
+    writeCloudWorkflows(repo);
   }
 }
 
@@ -342,6 +349,16 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   assert.deepEqual(await checkIds(), ['PLAIN_TEXT_CHECK_DRIFT']);
   writePlainTextCheck(conformant);
   assert.deepEqual(await checkIds(), []);
+
+  // An ENABLED repository needs its cloud sweep copies; a hand edit is drift, an older pin only a note.
+  const sweepCopy = path.join(conformant, '.github', 'workflows', 'toolkit-programme-sweep.yml');
+  fs.rmSync(sweepCopy);
+  assert.deepEqual(await checkIds(), ['CLOUD_WORKFLOW_DRIFT']);
+  writeCloudWorkflows(conformant);
+  fs.appendFileSync(sweepCopy, '# local edit\n');
+  assert.deepEqual(await checkIds(), ['CLOUD_WORKFLOW_DRIFT']);
+  writeCloudWorkflows(conformant);
+  assert.deepEqual(await checkIds(), [], 'a refresh rewrites an edited copy');
 
   // Enabled without the binding is incomplete; disabled with a block reports it ignored.
   await run(ctx, incomplete, ['enable']);
