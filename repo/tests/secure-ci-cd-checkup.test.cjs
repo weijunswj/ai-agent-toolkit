@@ -690,14 +690,19 @@ test('speed: concurrency that keeps stale runs or cancels useful ones is raised'
   assert.match(edited[0], /a title or body edit cancels the full run on the same commit/);
   assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:\n    types: [opened, edited]', GROUP.replace('cancel-in-progress: true', "cancel-in-progress: ${{ github.event.action != 'edited' }}")) }), [], 'an edit waits instead of cancelling');
   // A group keyed on the commit never cancels a stale commit's run, so it is raised, not trusted.
-  for (const key of ['github.event.pull_request.head.sha', 'github.sha']) {
+  for (const key of ['github.event.pull_request.head.sha', 'github.sha', 'github.ref }}-${{ github.sha']) {
     const perCommit = messages({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:', GROUP.replace('github.ref', key)) });
     assert.deepEqual(perCommit, ['the concurrency group is keyed on the commit SHA, so a new push never cancels the run for the older commit and stale runs keep their job slots'], key);
   }
   assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:', GROUP.replace('github.ref', "github.event_name == 'push' && github.sha || github.ref")) }), [], 'the SHA keys only pushes');
   const push = messages({ '.github/workflows/ci.yml': TWO_JOBS('  push:\n    branches: [main]\n  pull_request:', GROUP) });
-  assert.deepEqual(push, ['cancel-in-progress is always on, so pushes to the default branch cancel each other and a merged commit may never finish its run']);
-  for (const group of [GROUP.replace("github.ref }}", "github.event_name == 'pull_request' && github.ref || github.run_id }}"), GROUP.replace('cancel-in-progress: true', "cancel-in-progress: ${{ github.event_name == 'pull_request' }}")]) {
+  assert.deepEqual(push, ['cancel-in-progress is always on and pushes share one group, so pushes to the default branch cancel each other and a merged commit may never finish its run']);
+  // A shared push group loses waiting runs even when only pull request runs cancel.
+  const shared = GROUP.replace('cancel-in-progress: true', `cancel-in-progress: \${{ github.event_name == 'pull_request' && github.event.action != 'edited' }}`).replace('github.ref', 'github.event.pull_request.number || github.ref');
+  assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  push:\n    branches: [main]\n  pull_request:', shared) }), ['pushes share one concurrency group, so a burst of merges replaces the waiting run for a merged commit and pushes run one at a time']);
+  assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  push:\n    branches: [main]\n  pull_request:', shared.replace('|| github.ref', '|| github.run_id')) }), [], 'the recommended setup');
+  assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  push:\n    branches: [main]', 'concurrency:\n  group: refresh\n  cancel-in-progress: false\n') }), [], 'a push-only job may keep only the newest run');
+  for (const group of [GROUP.replace("github.ref }}", "github.event_name == 'pull_request' && github.ref || github.run_id }}"), GROUP.replace("github.ref }}", "github.event_name == 'pull_request' && github.ref || github.sha }}")]) {
     assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  push:\n    branches: [main]\n  pull_request:', group) }), [], group);
   }
   assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('[push, pull_request]', GROUP).replace('on:\n[push', 'on: [push') }).length, 1, 'inline trigger list');

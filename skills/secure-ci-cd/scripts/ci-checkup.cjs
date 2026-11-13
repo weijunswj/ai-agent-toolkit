@@ -896,15 +896,20 @@ function checkDelivery(workflows) {
     const heavy = workflow.jobs.filter((job) => !/github\.event\.action/.test(job.if));
     if (pr && workflow.prEdited && heavy.length >= 2) items.push(item('CHECK', 'speed.edits', workflow.rel, `an edit to the pull request title or body reruns ${heavy.length} jobs here${heavy.some((job) => job.matrix) ? ' (more with matrix legs)' : ''}, because edited is in the pull request types`, 'move the checks that read the title or body into a light workflow of their own and leave edited out of this one, or skip the heavy jobs when github.event.action is edited'));
     const grouped = workflow.concurrency || workflow.jobs.find((job) => job.concurrency);
-    if (pr && !grouped) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'no concurrency group, so a run for an older commit keeps its job slots after a new push', `add concurrency with group \${{ github.workflow }}-\${{ github.event.pull_request.number || github.ref }} and cancel-in-progress: ${CANCEL_PR_COMMITS}`));
+    if (pr && !grouped) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'no concurrency group, so a run for an older commit keeps its job slots after a new push', `add concurrency with group \${{ github.workflow }}-\${{ github.event.pull_request.number || github.run_id }} and cancel-in-progress: ${CANCEL_PR_COMMITS}`));
     const top = workflow.concurrency;
     if (!top) continue;
     // Every commit has its own SHA, so a pull request group keyed on it never cancels a stale run.
-    const perCommit = /\bhead\.sha\b/.test(top.text) || (/\bgithub\.sha\b/.test(top.text) && !/\bgithub\.(ref|head_ref)\b|pull_request\.number/.test(top.text));
-    if (pr && perCommit) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'the concurrency group is keyed on the commit SHA, so a new push never cancels the run for the older commit and stale runs keep their job slots', `key the group on the pull request number and use cancel-in-progress: ${CANCEL_PR_COMMITS}`));
+    // `github.sha` only as a guarded choice (`... && github.sha || ...` or a `|| github.sha` fallback)
+    // is taken as keying pushes, not pull requests.
+    const perCommit = /\bhead\.sha\b/.test(top.text) || (/\bgithub\.sha\b/.test(top.text) && !/&&\s*github\.sha\s*\|\||\|\|\s*github\.sha\b/.test(top.text));
+    if (pr && perCommit) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'the concurrency group is keyed on the commit SHA, so a new push never cancels the run for the older commit and stale runs keep their job slots', `key the group on the pull request number (github.run_id for pushes) and use cancel-in-progress: ${CANCEL_PR_COMMITS}`));
     if (top.cancels && pr && workflow.prEdited) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'cancel-in-progress with edited in the types: a title or body edit cancels the full run on the same commit and starts it again', `cancel only for new commits: cancel-in-progress: ${CANCEL_PR_COMMITS}, or split the edit checks into a light workflow`));
-    // A group keyed on the run id or the commit gives every push its own group, so nothing cancels.
-    if (top.cancels && workflow.events.includes('push') && !/\bgithub\.(run_id|sha)\b/.test(top.text)) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'cancel-in-progress is always on, so pushes to the default branch cancel each other and a merged commit may never finish its run', `cancel only pull request runs: cancel-in-progress: ${CANCEL_PR_COMMITS}`));
+    // Pushes need a group of their own (run id or commit): in a shared group a newer pending run
+    // replaces the waiting one whatever the cancel setting, so a burst of merges loses a run. Only
+    // check workflows (pull request and push) are judged: a push-only job such as a refresh may mean
+    // to keep just the newest run.
+    if (pr && workflow.events.includes('push') && !/\bgithub\.(run_id|sha)\b/.test(top.text)) items.push(item('CHECK', 'speed.concurrency', workflow.rel, top.cancels ? 'cancel-in-progress is always on and pushes share one group, so pushes to the default branch cancel each other and a merged commit may never finish its run' : 'pushes share one concurrency group, so a burst of merges replaces the waiting run for a merged commit and pushes run one at a time', 'key push runs on the run id, for example group ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}'));
   }
   return items;
 }
