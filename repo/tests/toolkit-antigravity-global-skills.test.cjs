@@ -83,10 +83,49 @@ test('setup counts Toolkit copies in Antigravity that a copy run would change', 
   const dir = home(t);
   const owner = new AntigravityGlobalSkills({ toolkitRoot: repoRoot, homeDir: dir });
   assert.deepEqual(core.antigravityState({ repoRoot }, owner), { installed: owner.installed(), copies: false, outOfDate: 0 });
+  const target = path.join(dir, '.gemini', 'config', 'skills');
+  const names = owner.skillNames();
+  // A folder the owner copied by hand is never Toolkit's, whatever its content.
+  fs.mkdirSync(path.join(target, names[0]), { recursive: true });
+  fs.writeFileSync(path.join(target, names[0], 'SKILL.md'), 'mine\n');
   owner.install();
-  assert.equal(core.antigravityState({ repoRoot }, owner).outOfDate, 0);
-  const [first] = owner.recorded();
-  assert.ok(first, 'the install recorded at least one copy');
-  fs.appendFileSync(path.join(first.target, first.skill, 'SKILL.md'), '\nolder copy\n');
+  assert.equal(core.antigravityState({ repoRoot }, owner).outOfDate, 0, 'a hand copy is not out of date');
+  // An edited copy is stale.
+  fs.appendFileSync(path.join(target, names[1], 'SKILL.md'), '\nolder copy\n');
   assert.equal(core.antigravityState({ repoRoot }, owner).outOfDate, 1);
+  // A deleted copy is missing.
+  fs.rmSync(path.join(target, names[2]), { recursive: true, force: true });
+  assert.equal(core.antigravityState({ repoRoot }, owner).outOfDate, 2);
+  // A copy of a skill the source no longer has is removed by a copy run, so it counts too.
+  const ledgerPath = path.join(dir, '.ai-agent-toolkit', 'antigravity-toolkit-skills.json');
+  const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+  ledger.targets[target] = [...ledger.targets[target], 'retired-skill'].sort();
+  fs.writeFileSync(ledgerPath, JSON.stringify(ledger));
+  fs.mkdirSync(path.join(target, 'retired-skill'), { recursive: true });
+  fs.writeFileSync(path.join(target, 'retired-skill', 'SKILL.md'), 'old\n');
+  assert.equal(core.antigravityState({ repoRoot }, owner).outOfDate, 3);
+});
+
+test('a copy setup cannot read never hides the copies', (t) => {
+  // The copies stay "copied" (so the question shows and Toolkit's n8n copies there are kept), with an
+  // honest "could not check" and a refresh recommended, never "up to date".
+  const failing = {
+    installed: () => true, hasCopies: () => true, skillNames: () => ['a'], recorded: () => [],
+    inspect: () => { throw new Error('The skills copy found a symbolic link and stopped: a/link'); },
+  };
+  const state = core.antigravityState({ repoRoot }, failing);
+  assert.deepEqual(state, { installed: true, copies: true, outOfDate: null });
+  const row = core.setupQuestionSpecs(core.parseArgs(['--plan', '--host', 'codex']), {
+    ...core.documentationFixtureState(), antigravity: state,
+  }).find((spec) => spec.id === 'antigravity-skills');
+  assert.equal(row.current_short, 'Copied, could not check');
+  assert.equal(row.recommended, 'copy');
+  if (process.platform === 'win32') return;
+  // The same with a real link inside a recorded copy.
+  const dir = home(t);
+  const owner = new AntigravityGlobalSkills({ toolkitRoot: repoRoot, homeDir: dir });
+  owner.install();
+  const [first] = owner.recorded();
+  fs.symlinkSync(path.join(first.target, first.skill, 'SKILL.md'), path.join(first.target, first.skill, 'link.md'));
+  assert.deepEqual(core.antigravityState({ repoRoot }, owner), { installed: true, copies: true, outOfDate: null });
 });
