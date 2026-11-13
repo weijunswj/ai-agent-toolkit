@@ -1484,6 +1484,14 @@ function questionBankApprovalPayload(specs) {
     total_visible_question_count: specs[0]?.presentation?.total_visible_question_count || specs.length,
     sections: [...sectionMap.values()],
     questions: specs.map((spec) => {
+      // A report-only row takes no answer and setup never changes what it shows (the Codex hook
+      // states, which the owner changes in Codex's /hooks), so only its place in the table is bound:
+      // turning a hook on while the table is open does not void the answers.
+      if (spec.report_only) {
+        return { id: spec.id, key: spec.key, section_id: spec.presentation.section_id, section_index: spec.presentation.section_index,
+          question_index: spec.presentation.question_index, question_ref: spec.presentation.question_ref, section_title: spec.section,
+          title: spec.title, report_only: true, what_this_controls: spec.whatThisControls };
+      }
       const recommendedChoice = selectedChoice(spec, spec.recommended);
       const displayedSelection = spec.selected || spec.empty_input || '';
       const displayedChoice = selectedChoice(spec, displayedSelection);
@@ -2341,7 +2349,8 @@ function setupQuestionSpecs(args, current) {
     }));
     specs.push(...claudeSettingQuestions(args, current));
   }
-  if (args.host === 'codex' && (current.antigravity?.installed || current.antigravity?.copies)) specs.push(antigravitySkillsQuestion(args, current));
+  // Both apps offer the Antigravity copy: it is one folder on this computer, whichever app sets it up.
+  if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
   specs.push(taskAutoMergeQuestion(args, current));
   if (current.scheduledTasksSupported) specs.push(resolvedQuestion({
     id: 'scheduled-task-update', key: 'scheduledTaskUpdate', section: 'Windows scheduled tasks',
@@ -4626,6 +4635,7 @@ module.exports = {
   withPresentationMetadata,
   buildNonTtyAnswerPlan,
   questionBankApprovalPayload,
+  questionBankSemanticIdentity,
   spreadsheetChoiceReference,
   parseConciseQuestionBankAnswer,
   assertQuestionBankAnswerBinding,
