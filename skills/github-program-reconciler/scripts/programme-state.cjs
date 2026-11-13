@@ -2716,9 +2716,17 @@ class StateStore {
     }
     if (response.status === 404) return { doc: null, sha: null };
     if (response.status !== 200) throw ghFailure(response, `Reading ${docPath}`);
-    if (response.json.encoding !== 'base64') throw new ProgrammeError('STATE_INVALID', `${docPath} is too large to read through the Contents API.`);
+    let content = response.json.content;
+    if (response.json.encoding !== 'base64') {
+      // The Contents API leaves out the text of a file over 1 MB (encoding "none"); it is then read
+      // whole by its blob id, which the Git Data API serves up to 100 MB.
+      if (!isSha(response.json.sha)) throw new ProgrammeError('STATE_INVALID', `${docPath} is too large to read through the Contents API.`);
+      const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${response.json.sha}`);
+      if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${docPath}`);
+      content = blob.json.content;
+    }
     let doc;
-    try { doc = JSON.parse(Buffer.from(response.json.content, 'base64').toString('utf8')); }
+    try { doc = JSON.parse(Buffer.from(content, 'base64').toString('utf8')); }
     catch { throw new ProgrammeError('STATE_INVALID', `${docPath} is not valid JSON.`); }
     return { doc: this.validateRead(kind, doc), sha: response.json.sha };
   }
