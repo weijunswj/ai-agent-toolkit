@@ -288,7 +288,7 @@ test('Codex settings: the plan lists the raised project_doc_max_bytes line, its 
   const text = removal.describePlan(plan).join('\n');
   assert.match(text, /Codex settings:\n- ~\/\.codex\/config\.toml: Toolkit's project_doc_max_bytes line is taken out and the earlier value 32768 comes back; the rest of the file stays \(a backup is saved first, then Codex is asked to load the file\)/);
   assert.doesNotMatch(text, /Not touched:[^\n]*app settings files,/);
-  assert.match(text, /App settings files are left alone, apart from the Codex settings line listed above/);
+  assert.match(text, /Not touched: your repositories, your keys/);
   // The line is in the plan code: a list read without it removes nothing.
   const raised = fs.readFileSync(rules.codex);
   fs.writeFileSync(rules.codex, original);
@@ -331,4 +331,138 @@ test('Codex settings: a config.toml Toolkit created for the line is deleted, and
   assert.equal(fs.readFileSync(rules.codex, 'utf8'), damaged);
   assert.equal(after.codex_settings, null);
   assert.equal(after.held_codex_settings.action, 'held');
+});
+
+// ---- The other parts: app settings, helper agent files, skill copies and the Toolkit folder ----
+const parts = require('../scripts/toolkit-remove-parts.cjs');
+const { ClaudeSubagentDepthSetting } = require('../scripts/toolkit-claude-subagent-depth.cjs');
+const { OfficialN8nSkills } = require('../scripts/toolkit-n8n-official-skills.cjs');
+const claudeHelpers = require('../scripts/toolkit-claude-helper-agents.cjs');
+const codexHelpers = require('../scripts/toolkit-codex-helper-agents.cjs');
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
+
+// A home with everything a full setup leaves behind, built through the owning modules where they run offline.
+function fullHome(t) {
+  const home = s.tempHome(t);
+  const environment = { CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') };
+  const control = path.join(home, '.ai-agent-toolkit', 'agent-control');
+  const depth = new ClaudeSubagentDepthSetting({ environment, controlRoot: control });
+  fs.mkdirSync(environment.CLAUDE_CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(path.join(environment.CLAUDE_CONFIG_DIR, 'settings.json'), '{\n  "theme": "dark"\n}\n');
+  assert.equal(depth.apply('enable').changed, true);
+  const { ClaudeUserSettings } = require('../scripts/toolkit-claude-user-settings.cjs');
+  new ClaudeUserSettings({ environment, controlRoot: control }).apply({ attribution: 'enable' });
+  const agents = { claude: path.join(environment.CLAUDE_CONFIG_DIR, 'agents'), codex: path.join(environment.CODEX_HOME, 'agents') };
+  fs.mkdirSync(agents.claude, { recursive: true }); fs.mkdirSync(agents.codex, { recursive: true });
+  fs.writeFileSync(path.join(agents.claude, 'toolkit-g0.md'), `---\nname: toolkit-g0\n---\n${claudeHelpers.MARKER}\n`);
+  fs.writeFileSync(path.join(agents.claude, 'my-reviewer.md'), '---\nname: my-reviewer\n---\nMine.\n');
+  fs.writeFileSync(path.join(agents.codex, 'toolkit-g1.toml'), `${codexHelpers.MARKER}\nname = "toolkit-g1"\n`);
+  const n8n = new OfficialN8nSkills({ toolkitRoot: REPO_ROOT, host: 'claude-code', homeDir: home });
+  assert.ok(n8n.install().copied.length > 0);
+  fs.mkdirSync(path.join(home, '.claude', 'skills', 'my-skill'), { recursive: true });
+  const folder = path.join(home, '.ai-agent-toolkit');
+  for (const file of ['source/repo/README.md', 'current/state.json', 'user-state/tmp/scrap.txt', 'env/manifest.json', 'backups/global-rules/a.md', 'agent-control/backups/claude-settings/b.json', 'agent-control/profile.json', 'notes/mine.txt']) {
+    fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), 'x');
+  }
+  const installed = { 'claude-code': true, codex: false };
+  const delegation = { calls: [], RUNTIMES: { UNKNOWN: 'unknown', V1: 'v1', V2: 'v2' }, owned: true,
+    inspectCodexDelegationConfig() { return this.owned ? { ownership: 'toolkit-managed-v2', helper_count: 2 } : { ownership: 'none', status: 'unconfigured' }; },
+    removeCodexDelegation(file, options) { this.calls.push([file, options]); this.owned = false; return { status: 'removed', changed: true }; } };
+  const list = [new parts.ClaudeDepthPart({ environment: { ...environment, AI_AGENT_TOOLKIT_CONTROL_ROOT: control }, home }),
+    new parts.ClaudeUserSettingsPart({ environment: { ...environment, AI_AGENT_TOOLKIT_CONTROL_ROOT: control }, home }),
+    new parts.CodexHelperLimitPart({ environment, home, delegation }), new parts.HelperAgentFilesPart({ environment, home }),
+    new parts.SkillCopiesPart({ home, toolkitRoot: REPO_ROOT }), new parts.ToolkitFolderPart({ home, environment, plugins: () => installed })];
+  const make = () => new removal.ToolkitRemoval({ home, parts: list, plugins: () => installed });
+  return { home, environment, depth, agents, folder, installed, delegation, make };
+}
+
+test('full removal: settings, helper files and skill copies go after the OK; the folder waits for the plugins, then goes keeping env and backups', t => {
+  const h = fullHome(t);
+  const plan = h.make().plan();
+  const text = removal.describePlan(plan).join('\n');
+  assert.equal(plan.nothing, false);
+  assert.deepEqual(plan.plugins, ['claude-code']);
+  assert.match(text, /Claude Code subagent limit:\n- ~\/\.claude\/settings\.json: the subagent limit CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: removed/);
+  assert.match(text, /Claude Code preferences you chose at setup:\n- ~\/\.claude\/settings\.json: No AI attribution in commits and pull requests \(attribution\): kept, set at setup and kept as your own/);
+  assert.match(text, /Not touched: [^\n]*the Claude Code preferences you chose at setup/);
+  assert.match(text, /Codex helper limit:\n- ~\/\.codex\/config\.toml: Toolkit's helper limit block: removed \(toolkit-managed-v2, 2 helpers; Codex may then use its own higher default/);
+  assert.match(text, /- ~\/\.claude\/agents\/toolkit-g0\.md: removed\n- ~\/\.codex\/agents\/toolkit-g1\.toml: removed/);
+  assert.doesNotMatch(text, /my-reviewer|my-skill/);
+  assert.match(text, /Skill folders Toolkit copied:\n- ~\/\.claude\/skills\/[^\n]+: removed/);
+  assert.match(text, /Toolkit folder \(goes last, once no Toolkit plugin is installed\):/);
+  assert.match(text, /~\/\.ai-agent-toolkit\/agent-control: removed \(its backups folder stays\)/);
+  assert.match(text, /~\/\.ai-agent-toolkit\/env: kept, the list of your keys/);
+  assert.match(text, /~\/\.ai-agent-toolkit\/notes: kept, not a Toolkit file/);
+  assert.match(text, /Plugins to uninstall[^\n]*\n- Claude Code: `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local`\n- Claude Code: `claude plugin marketplace remove ai-agent-toolkit-local`/);
+  assert.doesNotMatch(text, /codex plugin remove/);
+  // The plugin state is not in the code: the agent uninstalls between plan and apply.
+  h.installed['claude-code'] = false;
+  assert.equal(h.make().plan().code, plan.code);
+  h.installed['claude-code'] = true;
+  const first = h.make().apply(plan.code);
+  assert.equal(first.ok, true, JSON.stringify(first));
+  const settings = JSON.parse(fs.readFileSync(path.join(h.environment.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'));
+  assert.deepEqual(settings, { theme: 'dark', attribution: false }, 'the depth limit goes; the attribution preference stays');
+  assert.equal(h.delegation.calls.length, 1);
+  assert.equal(h.delegation.calls[0][1].approveCapacityResetRisk, true);
+  assert.deepEqual(fs.readdirSync(h.agents.claude), ['my-reviewer.md']);
+  assert.deepEqual(fs.readdirSync(h.agents.codex), []);
+  assert.deepEqual(fs.readdirSync(path.join(h.home, '.claude', 'skills')), ['my-skill']);
+  assert.ok(fs.existsSync(path.join(h.folder, 'source', 'repo', 'README.md')), 'the folder waits while a plugin is installed');
+  assert.equal(first.folder_kept, true);
+  const after = removal.describeResult(first).join('\n');
+  assert.match(after, /~\/\.ai-agent-toolkit: kept \(the Claude Code plugin is still installed/);
+  assert.match(after, /Last step, uninstall the plugin[^\n]*\n- Claude Code: `claude plugin uninstall/);
+  assert.match(after, /say `remove toolkit` again, or run this in PowerShell and follow it:\nnode "[^"]*toolkit-remove\.cjs" plan/);
+  // Once the plugin is gone, a second run lists only the folder and removes Toolkit's entries.
+  h.installed['claude-code'] = false;
+  const second = h.make().plan();
+  assert.deepEqual(second.parts.filter(part => part.items.some(item => item.action === 'remove')).map(part => part.key), ['toolkit_folder']);
+  const done = h.make().apply(second.code);
+  assert.equal(done.ok, true, JSON.stringify(done));
+  assert.equal(done.folder_kept, false);
+  assert.deepEqual(fs.readdirSync(h.folder).sort(), ['agent-control', 'backups', 'env', 'notes']);
+  assert.deepEqual(fs.readdirSync(path.join(h.folder, 'agent-control')), ['backups']);
+  assert.equal(fs.readFileSync(path.join(h.folder, 'env', 'manifest.json'), 'utf8'), 'x');
+  assert.match(removal.describeResult(done).join('\n'), /Start a new session in each app/);
+  assert.equal(h.make().plan().nothing, true);
+});
+
+test('full removal: a Claude Code subagent limit you set yourself is listed as kept and left alone', t => {
+  const h = fullHome(t);
+  const file = path.join(h.environment.CLAUDE_CONFIG_DIR, 'settings.json');
+  fs.writeFileSync(file, '{\n  "env": {\n    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "3"\n  }\n}\n');
+  const plan = h.make().plan();
+  assert.match(removal.describePlan(plan).join('\n'), /CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: kept, you set this value yourself/);
+  h.make().apply(plan.code);
+  assert.equal(fs.readFileSync(file, 'utf8'), '{\n  "env": {\n    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "3"\n  }\n}\n');
+});
+
+test('full removal: a helper file that changes after the plan gives a new code, and nothing is removed', t => {
+  const h = fullHome(t);
+  const plan = h.make().plan();
+  fs.writeFileSync(path.join(h.agents.claude, 'toolkit-g0.md'), 'edited by hand, marker gone\n');
+  assert.throws(() => h.make().apply(plan.code), /nothing was removed/);
+  assert.equal(fs.readFileSync(path.join(h.agents.claude, 'toolkit-g0.md'), 'utf8'), 'edited by hand, marker gone\n');
+  assert.ok(fs.existsSync(path.join(h.environment.CLAUDE_CONFIG_DIR, 'settings.json')));
+  assert.equal(h.depth.inspect().state, 'toolkit-one-layer');
+});
+
+test('full removal: a part that cannot be read is held and the rest of the plan still shows', t => {
+  const home = s.tempHome(t);
+  const broken = { key: 'broken', title: 'Broken part', plan() { throw new Error('unreadable'); }, apply() { throw new Error('must not run'); } };
+  const plan = new removal.ToolkitRemoval({ home, parts: [broken] }).plan();
+  assert.match(removal.describePlan(plan).join('\n'), /Broken part:\n- Broken part: left alone, could not be read \(unreadable\)/);
+});
+
+test('plugin state reads the Claude Code registry and the Codex config and cache', t => {
+  const home = s.tempHome(t);
+  const environment = { CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex') };
+  assert.deepEqual(parts.pluginState({ environment, home }), { 'claude-code': false, codex: false });
+  fs.mkdirSync(path.join(home, '.claude', 'plugins'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { [parts.PLUGIN_ID]: [{ scope: 'user' }] } }));
+  fs.mkdirSync(path.join(home, '.codex', 'plugins', 'cache', parts.MARKETPLACE, 'ai-agent-toolkit'), { recursive: true });
+  assert.deepEqual(parts.pluginState({ environment, home }), { 'claude-code': true, codex: false }, 'a cache without the config entry is not an install');
+  fs.writeFileSync(path.join(home, '.codex', 'config.toml'), `model = "x"\n\n[plugins."${parts.PLUGIN_ID}"]\nenabled = true\n`);
+  assert.deepEqual(parts.pluginState({ environment, home }), { 'claude-code': true, codex: true });
 });

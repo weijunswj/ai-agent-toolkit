@@ -21,12 +21,22 @@ test('the App holds one permission list, and the creation link is built from it'
   assert.deepEqual(app.APP.permissions, { contents: 'write', issues: 'write', pull_requests: 'write', checks: 'read', statuses: 'read' });
   const link = new URL(app.creationLink(SLUG));
   assert.equal(`${link.origin}${link.pathname}`, 'https://github.com/settings/apps/new');
-  assert.equal(link.searchParams.get('name'), 'example-owner-toolkit-governance');
+  // One App per governed repository, named for it, within GitHub's 34-character limit.
+  assert.equal(link.searchParams.get('name'), 'example-repo-governance', 'owner-repo-governance would pass 34 characters');
   assert.equal(link.searchParams.get('url'), `https://github.com/${SLUG}`);
   assert.equal(link.searchParams.get('public'), 'false');
   assert.equal(link.searchParams.get('webhook_active'), 'false');
   for (const [name, level] of Object.entries(app.APP.permissions)) assert.equal(link.searchParams.get(name), level, name);
   for (const never of ['workflows', 'secrets', 'administration']) assert.equal(link.searchParams.has(never), false, never);
+});
+
+test('the App name is per repository, at most 34 characters, and falls back to the repository name', () => {
+  assert.equal(app.NAME_LIMIT, 34);
+  assert.equal(app.appName('ab/cd'), 'ab-cd-governance');
+  assert.equal(app.appName('weijunswj/ai-agent-toolkit'), 'ai-agent-toolkit-governance');
+  assert.equal(app.appName('owner/a-very-long-repository-name-indeed'), 'a-very-long-repository-governance');
+  assert.notEqual(app.appName('owner/one'), app.appName('owner/two'), 'two repositories get two names');
+  for (const slug of ['ab/cd', 'weijunswj/ai-agent-toolkit', 'owner/a-very-long-repository-name-indeed', 'o/x'.padEnd(80, 'y')]) assert.ok(app.appName(slug).length <= 34, slug);
 });
 
 test('every workflow token stays within the App permission list', () => {
@@ -54,7 +64,10 @@ test('setup names the link, the page checks, both repositories and the owner com
   assert.ok(text.includes(`gh variable set TOOLKIT_GOVERNANCE_APP_CLIENT_ID --repo ${SLUG} --body "<Client ID>"`));
   assert.ok(text.includes(`Get-Content -Raw "<key file>.pem" | gh secret set TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY --repo ${SLUG}`));
   assert.ok(text.includes(`gh secret set TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY --repo ${SLUG} < "<key file>.pem"`));
-  assert.match(text, /Already set the App up for another repository/);
+  assert.match(text, /Create this repository's own App/);
+  assert.match(text, /one App per governed repository/i);
+  assert.match(text, /cannot tell whether two repositories share an App/);
+  assert.doesNotMatch(text, /Already set the App up for another repository/);
   // Without a store the install step names this repository only.
   assert.doesNotMatch(app.setupLines(SLUG, null, missing).join('\n'), /example-store/);
 });

@@ -5,17 +5,23 @@
 # shard manifest. While an earlier refresh pull request is open it opens no second one. It makes no
 # model calls.
 #
+# A push to main also starts it, as a catch-all in case the daily schedule stops firing. A push run
+# first checks, in a few seconds and with no checkout, whether a refresh already ran in the last 24
+# hours, and skips the refresh when one did. Only one run goes at a time.
+#
 # The built-in token only reads: contents, Actions runs and their artifacts, and pull requests. The
 # governance GitHub App's token, minted for this repository with only contents and pull requests
 # write, is used for the push and the pull request alone, so the pull request's own checks start.
 # The checkout keeps no credentials and no token or key is printed. With no App configured the run
 # only reports what it would change; a configured App that cannot sign in fails the run. It never
-# runs for pull requests or forks.
+# runs for pull requests, forks or other branches.
 name: Toolkit Shard Timings
 
 on:
   schedule:
     - cron: '37 2 * * *'
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -26,8 +32,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  due:
+    name: Check whether a refresh is due
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      due: ${{ steps.check.outputs.due }}
+    steps:
+      - name: Check for a refresh in the last 24 hours
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "push" ]; then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          runs=$(gh api -X GET "repos/${REPO}/actions/workflows/toolkit-shard-timings.yml/runs" -f status=success -f created=">=${since}" -f per_page=30 --jq '.workflow_runs[].id')
+          for id in $runs; do
+            [ "$id" = "$RUN_ID" ] && continue
+            refreshed=$(gh api "repos/${REPO}/actions/runs/${id}/jobs" --jq '[.jobs[] | select(.name == "Refresh the shard timings" and .conclusion == "success")] | length')
+            if [ "$refreshed" -gt 0 ]; then
+              echo "::notice::A refresh already ran in the last 24 hours (run ${id}), so this push skips it."
+              echo "due=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "due=true" >> "$GITHUB_OUTPUT"
+
   refresh:
     name: Refresh the shard timings
+    needs: due
+    if: ${{ needs.due.outputs.due == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

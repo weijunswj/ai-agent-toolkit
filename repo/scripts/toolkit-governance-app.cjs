@@ -1,8 +1,12 @@
 'use strict';
 
-// The governance GitHub App: the one App every Toolkit governance workflow mints its short-lived
-// tokens from. Turning governance on shows the owner how to set it up, turning it off suggests and
-// guides its removal, and `toolkit governance check` keeps reporting either. Toolkit only prints the
+// The governance GitHub App: each governed repository has its own App, which every Toolkit governance
+// workflow of that repository mints its short-lived tokens from. GitHub counts its hourly allowance
+// per App installation, so one App per repository gives each repository its own allowance and a busy
+// repository never slows another. Turning governance on shows the owner how to set it up, turning it
+// off suggests and guides its removal, and `toolkit governance check` keeps reporting either. The
+// check reads only the names of the variable and the secret, so it cannot tell whether two
+// repositories share one App. Toolkit only prints the
 // owner's steps and reads whether the repository's variable and secret exist (names only); it never
 // creates, installs or deletes an App, key, variable or secret.
 const childProcess = require('node:child_process');
@@ -20,10 +24,20 @@ const LABELS = Object.freeze({ contents: 'Contents', issues: 'Issues', pull_requ
 const LEVELS = Object.freeze({ read: 'read-only', write: 'read and write' });
 const PAGE = 100;
 
-// GitHub's pre-filled "New GitHub App" page for a personal account.
+// GitHub App names are unique across GitHub and at most 34 characters long.
+const NAME_LIMIT = 34;
+// The repository's own App name: owner, repository and "governance" when that fits, else the
+// repository name alone, cut to fit. The owner can change it on GitHub's page if it is taken.
+function appName(slug) {
+  const [owner, repo] = slug.split('/');
+  const suffix = '-governance';
+  for (const name of [`${owner}-${repo}${suffix}`, `${repo}${suffix}`]) if (name.length <= NAME_LIMIT) return name;
+  return `${repo.slice(0, NAME_LIMIT - suffix.length).replace(/[-_.]+$/, '')}${suffix}`;
+}
+
+// GitHub's pre-filled "New GitHub App" page for a personal account, named for this repository.
 function creationLink(slug) {
-  const owner = slug.split('/')[0];
-  const params = new URLSearchParams({ name: `${owner}-toolkit-governance`, url: `https://github.com/${slug}`, public: 'false', webhook_active: 'false', ...APP.permissions });
+  const params = new URLSearchParams({ name: appName(slug), url: `https://github.com/${slug}`, public: 'false', webhook_active: 'false', ...APP.permissions });
   return `https://github.com/settings/apps/new?${params}`;
 }
 
@@ -115,13 +129,13 @@ function setupLines(slug, store, state) {
   const repositories = store ? `${slug} and ${store}` : slug;
   return [
     `Governance GitHub App: the governance jobs on GitHub do nothing until the App is set up (${unknown(state) ? `could not be checked (${state.reason})` : `variable ${state.variable}, secret ${state.secret}`}). Toolkit never creates it for you. After you merge the governance pull request:`,
-    `1. Create the App once for your account from this pre-filled page: ${creationLink(slug)}`,
-    `   Check the page: webhook "Active" unticked, installable only on this account, repository permissions ${permissionText()}, and everything else, Workflows included, no access.`,
+    `1. Create this repository's own App from this pre-filled page: ${creationLink(slug)}`,
+    `   Check the page: webhook "Active" unticked, installable only on this account, repository permissions ${permissionText()}, and everything else, Workflows included, no access. If GitHub says the name is taken, pick another; names are unique across GitHub.`,
     '2. On the App\'s page, copy the Client ID and generate a private key (a .pem file downloads).',
     `3. Install App, Only select repositories: ${repositories}.`,
     `4. Save both on ${slug}, then delete the .pem file. If someone else has set up an App here meanwhile, these ask you to type replace before overwriting it:`,
     ...saveCommands(slug),
-    'Already set the App up for another repository? Skip steps 1 and 2: add this repository to its installation and set the variable and the secret here, generating a new private key if you no longer hold one.',
+    'Use one App per governed repository, even if another repository already has one: GitHub gives each App installation its own hourly allowance, so a busy repository never slows this one. toolkit governance check cannot tell whether two repositories share an App, because it reads only the variable and secret names.',
   ];
 }
 
@@ -133,7 +147,7 @@ function removalLines(slug, state, others) {
     `1. gh variable delete ${APP.variable} --repo ${slug}`,
     `   gh secret delete ${APP.secret} --repo ${slug}`,
     `2. Remove ${slug} from the App's installation: GitHub Settings, Applications, ${installation}.`,
-    '3. If no other repository uses the App, also remove the evidence store from the installation, uninstall the App and delete it (the App\'s settings, Advanced, Delete GitHub App); its private keys stop working.',
+    '3. If no other repository uses the App (with one App per repository, none does), also remove the evidence store from the installation, uninstall the App and delete it (the App\'s settings, Advanced, Delete GitHub App); its private keys stop working.',
     others.length
       ? `This computer knows these repositories still use governance: ${others.join(', ')}. Other computers may know more.`
       : 'This computer knows no other repository that still uses governance. Other computers may know more, so check before deleting the App.',
@@ -151,4 +165,4 @@ function appFinding(stateName, slug, store, state, others) {
   return null;
 }
 
-module.exports = Object.freeze({ APP, permissionLabel, creationLink, saveCommands, ghReader, presence, setupLines, removalLines, appFinding });
+module.exports = Object.freeze({ APP, NAME_LIMIT, appName, permissionLabel, creationLink, saveCommands, ghReader, presence, setupLines, removalLines, appFinding });

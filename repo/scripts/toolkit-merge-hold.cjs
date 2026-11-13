@@ -85,8 +85,9 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     (a sha field is not read); a call whose fields are missing, not readable or disagree is refused;
 //   - refused when written directly: any connector's auto-merge tool, GraphQL merges (the number cannot be read), the merge queue, branch merges,
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
-//     to the remote's default branch (evidence stores excepted, by name), a merge whose target is
-//     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
+//     to the remote's default branch (evidence stores excepted, by name; a refused push whose remote is an
+//     evidence store bound on this computer shows the store-command message instead), a merge whose target is
+//     moved by cd, pushd, Set-Location, Push-Location or GH_REPO, and a bare number in a folder with more than one
 //     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
 //     run through another shell or expression runner (bash -c, pwsh -Command, cmd /c, eval) is
 //     refused whatever branch it names; encoded PowerShell commands are refused unread;
@@ -141,7 +142,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELLS, SHELL_TOOLS, ShellCall, MOVES_TARGET, connectorTarget, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { STORE_PUSH_MESSAGE, githubSlug, SHELLS, SHELL_TOOLS, ShellCall, MOVES_TARGET, connectorTarget, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -494,13 +495,21 @@ function pushTarget(cwd, remote, registryOptions = {}) {
     if (!defaultBranch) defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/${remoteName}/${name}`)) || null;
   } else defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/origin/${name}`)) || null;
   const named = /TRANSPORT-[^/\s]*?(?:\.git)?\/?$/i.test(String(url || ''));
-  return { default: defaultBranch, current, store: named || (remoteName === 'origin' && evidenceStoreAt(root, registryOptions)) };
+  return { default: defaultBranch, current, url, store: named || (remoteName === 'origin' && evidenceStoreAt(root, registryOptions)) };
 }
 
 // Whether the governance state names the repository at `root` an evidence store (rule S1). A state
 // that cannot be read is not one.
 function evidenceStoreAt(root, registryOptions = {}) {
   try { return governance.governanceState(root, registryOptions).rule === 'S1'; } catch { return false; }
+}
+
+// Whether a remote URL is an evidence store an enabled binding cached on this computer names, at
+// any freshness (the attribution guard's reading). A cache that cannot be read names none.
+function boundStore(url, registryOptions = {}) {
+  const slug = githubSlug(url);
+  if (!slug) return false;
+  try { return governance.evidenceStoreRepositories(registryOptions).stores.has(slug); } catch { return false; }
 }
 
 const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed']);
@@ -539,7 +548,12 @@ function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), 
   const hitsDefault = mirror
     || (refspecs.length === 0 && target.current === target.default)
     || refspecs.some(spec => branchOf(spec.includes(':') ? spec.slice(spec.lastIndexOf(':') + 1) : spec) === target.default);
-  return hitsDefault ? `this command pushes to the default branch \`${target.default}\`. Changes must reach the default branch through a pull request the user merges; push to another branch and open one.` : '';
+  if (!hitsDefault) return '';
+  // A push to an evidence store this computer has bound stays refused, but with the store-command
+  // message: a pull request is the wrong advice for a store, whose default branch is written
+  // directly by toolkit-store.cjs under standing permission.
+  if (boundStore(target.url, registryOptions)) return STORE_PUSH_MESSAGE;
+  return `this command pushes to the default branch \`${target.default}\`. Changes must reach the default branch through a pull request the user merges; push to another branch and open one.`;
 }
 
 // ---- requested merges -------------------------------------------------------------------------
@@ -738,14 +752,26 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   }
   let root = cwd;
   const variables = new Map();
+  // Every refused push is named, each reason once: a command that pushes both a default branch and
+  // a bound store gets the pull request advice and the store-command message.
+  const reasons = [];
+  // pushd and Push-Location save the folder they leave; popd and Pop-Location go back to the last
+  // one saved. With none saved here the shell's own stack is unknown: a real shell stays put on an
+  // empty stack, so the folder is left where it is (never reset to the starting folder).
+  const saved = [];
   for (const words of parts) {
     const assigned = assignmentOf(words);
     if (assigned) { assignVariable(variables, assigned); continue; }
-    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
+    if (/^(?:popd|pop-location)$/i.test(words[0])) { if (saved.length) root = saved.pop(); continue; }
+    if (/^(?:cd|pushd|chdir|set-location|sl|push-location)$/i.test(words[0]) && words.length >= 2) {
+      if (/^(?:pushd|push-location)$/i.test(words[0])) saved.push(root);
+      root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell));
+      continue;
+    }
     const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
-    if (reason) return refuse(reason);
+    if (reason && !reasons.includes(reason)) reasons.push(reason);
   }
-  return '';
+  return reasons.length ? refuse(reasons.join(' Also: ')) : '';
 }
 
 // Read command position with shell quoting intact: an env launch inside a message is just text.

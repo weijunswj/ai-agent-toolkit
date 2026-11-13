@@ -7,12 +7,13 @@
 // bodies, issue and pull request bodies), reports every post that ends with the footer and, with
 // --apply, edits each one to the same text minus the footer and reads it back.
 //
-// Only posts written by the signed-in account are edited unless --any-author is given; others are
+// Only posts written by the signed-in account are edited unless --author names another login (the
+// cloud sweep, signed in as an App, names the repository owner) or --any-author is given; others are
 // listed as skipped. Without --apply nothing is written. Each edit re-reads the post first and skips
 // it (SKIPPED_CHANGED) if it changed since the scan, then reads it back and reports MISMATCH when
 // GitHub stored anything other than the text sent.
 //
-// Usage: node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> [--repo ...] [--since <ISO time>] [--apply] [--any-author] [--json]
+// Usage: node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> [--repo ...] [--since <ISO time>] [--apply] [--author <login> | --any-author] [--json]
 // Exit: 0 no post with the footer; 3 posts with the footer found and none cleaned (a report-only run,
 // or every one skipped); 4 at least one post cleaned and nothing failed; 1 a scan, edit or read-back
 // failed (FAILED, STILL_FOOTED or MISMATCH); 2 bad arguments.
@@ -20,11 +21,12 @@
 const { execFileSync } = require('node:child_process');
 const { hasFooter, stripFooter } = require('./toolkit-github-footer-guard.cjs');
 
-const USAGE = 'Usage: node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> [--repo ...] [--since <ISO time>] [--apply] [--any-author] [--json]';
+const USAGE = 'Usage: node repo/scripts/toolkit-github-footer-sweep.cjs --repo <owner/name> [--repo ...] [--since <ISO time>] [--apply] [--author <login> | --any-author] [--json]';
 const REPOSITORY = /^[\w.-]+\/[\w.-]+$/;
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 
 function parseArgs(argv) {
-  const options = { repos: [], since: null, apply: false, anyAuthor: false, json: false };
+  const options = { repos: [], since: null, apply: false, anyAuthor: false, author: null, json: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--repo') {
@@ -37,10 +39,16 @@ function parseArgs(argv) {
       options.since = new Date(value).toISOString();
     } else if (arg === '--apply') options.apply = true;
     else if (arg === '--any-author') options.anyAuthor = true;
+    else if (arg === '--author') {
+      const value = argv[index += 1];
+      if (!LOGIN.test(value || '')) throw new Error('--author needs a GitHub login');
+      options.author = value;
+    }
     else if (arg === '--json') options.json = true;
     else throw new Error(`unknown argument ${JSON.stringify(arg)}`);
   }
   if (!options.repos.length) throw new Error('give at least one --repo');
+  if (options.author && options.anyAuthor) throw new Error('use --author or --any-author, not both');
   return options;
 }
 
@@ -84,7 +92,7 @@ function findFooted(gh, repo, since) {
 function sweep(options, deps = {}) {
   const transport = deps.gh || defaultGh;
   const gh = (args, input) => transport([...args, '--hostname', 'github.com'], input);
-  const login = options.anyAuthor ? null : gh(['api', 'user', '--jq', '.login']).trim();
+  const login = options.anyAuthor ? null : options.author || gh(['api', 'user', '--jq', '.login']).trim();
   const results = [];
   for (const repo of options.repos) {
     let footed;

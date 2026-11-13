@@ -10,10 +10,14 @@
 //     and is not this guard's is kept as <name>.pre-personal-data-guard and runs after the guard.
 //   - with --workflow, adds .github/workflows/personal-data-guard.yml from the template if absent.
 // --check changes nothing and reports drift: a hand-edited or outdated copy, missing hooks.
+// --uninstall removes this clone's guard hooks and puts back any hook they had set aside. The committed
+// files (guard copy, config, workflow) are listed, to remove through a pull request.
+// The Toolkit's own repository is refused: it keeps the guard source under skills/, and its CI runs it.
 //
 // Usage: node install-personal-data-guard.cjs --repo <dir> [--identity excluded|included]
 //          [--identity-reason <text>] [--required-check validate|personal-data|none] [--workflow] [--check]
-// Exit codes: 0 done (or no drift), 1 drift found by --check, 2 not installed (the reason is printed).
+//        node install-personal-data-guard.cjs --repo <dir> --uninstall
+// Exit codes: 0 done (or no drift), 1 drift found by --check, 2 not installed or not removed (the reason is printed).
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -31,6 +35,9 @@ const VENDOR_MARKER = /^\/\/ AI-AGENT-TOOLKIT:secure-ci-cd:VENDORED personal-dat
 const HOOK_MARKER = 'AI-AGENT-TOOLKIT:secure-ci-cd:HOOK personal-data-guard';
 const HOOKS = ['pre-commit', 'commit-msg', 'pre-push'];
 const SAVED_SUFFIX = '.pre-personal-data-guard';
+// Where the guard source sits in a Toolkit checkout. A repository that has it is the Toolkit itself.
+const TOOLKIT_GUARD_SOURCE = path.join('skills', 'secure-ci-cd', 'scripts', 'personal-data-guard.cjs');
+const TOOLKIT_REFUSAL = "is the Toolkit's own repository: it keeps the guard source in skills/secure-ci-cd/scripts and its CI runs the guard, so the guard is not installed into it";
 
 class InstallError extends Error {
   constructor(message) { super(message); this.name = 'InstallError'; }
@@ -156,8 +163,17 @@ class GuardInstaller {
 
   #say(line) { this.#out.write(`${line}\n`); }
 
+  // The guard's own hooks in this clone, and the hooks they set aside.
+  #guardHooks(hooks) {
+    return HOOKS.map(name => ({ name, file: path.join(hooks, name), text: readOrNull(path.join(hooks, name)), saved: readOrNull(path.join(hooks, `${name}${SAVED_SUFFIX}`)) }));
+  }
+
   install({ identity, identityReason, requiredCheck = 'none', workflow = false }) {
     const { top, hooks } = this.locate();
+    if (fs.existsSync(path.join(top, TOOLKIT_GUARD_SOURCE))) {
+      const leftover = this.#guardHooks(hooks).some(hook => hook.text?.includes(HOOK_MARKER));
+      throw new InstallError(`${top} ${TOOLKIT_REFUSAL}.${leftover ? ' Guard hooks from an earlier install are still in this clone; run the installer with --uninstall to remove them.' : ''} Nothing was installed.`);
+    }
     try { fs.mkdirSync(hooks, { recursive: true }); }
     catch (error) { throw new InstallError(`the hooks folder ${hooks} could not be created (${error.code || 'error'}), so nothing was installed.`); }
     const configFile = path.join(top, CONFIG_PATH);
@@ -218,9 +234,37 @@ class GuardInstaller {
     return chained ? `Hook installed: ${name} (the earlier hook runs after it).` : `Hook installed: ${name}.`;
   }
 
+  // Removes the guard hooks from this clone and puts back the hooks they set aside. A hook that is not
+  // the guard's is left alone. Committed files stay; they leave through a pull request.
+  uninstall() {
+    const { top, hooks } = this.locate();
+    let removed = 0;
+    for (const hook of this.#guardHooks(hooks)) {
+      if (!hook.text?.includes(HOOK_MARKER)) {
+        if (hook.saved !== null) this.#say(`${hook.name}: kept as it is, because it is not the guard's hook; ${hook.name}${SAVED_SUFFIX} is left for you to look at.`);
+        continue;
+      }
+      try {
+        if (hook.saved !== null) { fs.renameSync(`${hook.file}${SAVED_SUFFIX}`, hook.file); this.#say(`Hook removed: ${hook.name} (the earlier hook is back in its place).`); }
+        else { fs.rmSync(hook.file, { force: true }); this.#say(`Hook removed: ${hook.name}.`); }
+        removed += 1;
+      } catch (error) { throw new InstallError(`${hook.name}: the hook could not be removed (${error.code || 'error'}); ${removed} hook(s) were removed before it.`); }
+    }
+    if (!removed) this.#say(`No guard hooks were installed in ${hooks}.`);
+    const committed = [VENDORED_PATH, CONFIG_PATH, WORKFLOW_PATH].filter(file => fs.existsSync(path.join(top, file)));
+    if (committed.length) this.#say(`Still in the repository: ${committed.join(', ')}. Remove them through a pull request if the guard should go for everyone.`);
+    return 0;
+  }
+
   // Drift report; changes nothing.
   check() {
     const { top, hooks } = this.locate();
+    if (fs.existsSync(path.join(top, TOOLKIT_GUARD_SOURCE))) {
+      const leftover = this.#guardHooks(hooks).filter(hook => hook.text?.includes(HOOK_MARKER)).map(hook => hook.name);
+      if (leftover.length) { this.#say(`Drift: ${top} ${TOOLKIT_REFUSAL}, and guard hooks are still in this clone (${leftover.join(', ')}); run the installer with --uninstall.`); return 1; }
+      this.#say(`No drift: ${top} is the Toolkit's own repository, and no guard hooks are installed in it.`);
+      return 0;
+    }
     const problems = [];
     const copy = vendoredState(readOrNull(path.join(top, VENDORED_PATH)));
     if (copy.state !== 'current') problems.push(`guard copy ${VENDORED_PATH}: ${copy.state}`);
@@ -260,7 +304,7 @@ function writeFile(file, text, mode) {
 }
 
 function main(argv, { out = process.stdout, err = process.stderr, spawn = spawnSync } = {}) {
-  const options = { repo: process.cwd(), identity: null, identityReason: null, requiredCheck: 'none', workflow: false, check: false };
+  const options = { repo: process.cwd(), identity: null, identityReason: null, requiredCheck: 'none', workflow: false, check: false, uninstall: false };
   try {
     for (let index = 0; index < argv.length; index += 1) {
       const arg = argv[index];
@@ -276,15 +320,18 @@ function main(argv, { out = process.stdout, err = process.stderr, spawn = spawnS
       else if (arg === '--required-check') options.requiredCheck = value();
       else if (arg === '--workflow') options.workflow = true;
       else if (arg === '--check') options.check = true;
+      else if (arg === '--uninstall') options.uninstall = true;
       else throw new InstallError(`Unknown option ${arg}.`);
     }
+    if (options.check && options.uninstall) throw new InstallError('--check and --uninstall cannot be used together.');
     const installer = new GuardInstaller({ repo: options.repo, spawn, out });
     if (options.check) return installer.check();
+    if (options.uninstall) return installer.uninstall();
     installer.install(options);
     return 0;
   } catch (error) {
     const message = error instanceof InstallError || (error && error.name === 'GuardError') ? error.message : `internal error (${error && error.name ? error.name : 'unknown'})`;
-    err.write(`Not installed: ${message}\n`);
+    err.write(`${argv.includes('--uninstall') ? 'Not removed' : 'Not installed'}: ${message}\n`);
     return 2;
   }
 }

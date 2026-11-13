@@ -1,5 +1,46 @@
 # Toolkit Changelog
 
+## 3.88.0 (remove toolkit does the full uninstall)
+
+### Changed
+
+- `remove toolkit` now removes everything Toolkit put on the computer after one OK, not only scheduled tasks and global rules: Codex's helper limit block, Claude Code's subagent limit (only while it holds Toolkit's value), the helper agent files Toolkit generated, the skill folders it copied, and last the Toolkit folder `~/.ai-agent-toolkit`, keeping `env` and the backups. The Claude Code preferences chosen at setup, such as no AI attribution, are listed and kept. The folder waits until no Toolkit plugin is installed, and the result prints the exact plan line to finish with. The plan prints each app's plugin uninstall lines, which the agent runs after the OK, and the app screen to use when the command line is missing.
+- The README's Remove section is now one command plus what stays on purpose.
+- The personal-data guard installer refuses to install into the Toolkit's own repository, and `--uninstall` removes a clone's guard hooks and puts back any hook they set aside. `--check` in a Toolkit checkout points at `--uninstall` when guard hooks are left over.
+
+## 3.87.0 (cloud sweep runs to GitHub's limit and resumes)
+
+### Changed
+
+- **Cloud sweep has no request cap of its own:** the scheduled sweep on GitHub no longer stops at 1,500 requests. It reads until GitHub's remaining hourly count for the governance App reaches a safety margin, a tenth of the hourly limit GitHub reports (never under 200), then saves where it got to, and the next run resumes with changed and new tasks first. The margin keeps room for the repository's other governance jobs. The computer's caps stay as they were.
+- **No fixed limits that can stall a big board:** the changed-issues list is read oldest change first from the last update time it reached, so a list longer than one pass can read carries on next pass instead of starting over. PR discovery's budget grows with the board (sixty requests, plus one per twenty tasks and two per task read), and the open and closed PR lists are read whole within the pass's own request budget.
+- **A calm note instead of an alarm:** when a pass stops early, the board's freshness line keeps the pass's time and adds a short note, such as "Paused at GitHub's hourly App limit; the next run picks up the 340 tasks left." The warning `⚠️ Sweep stuck` appears only when no pass has finished for six hours and the passes in those hours read fewer than ten tasks. The evidence store keeps the recent unfinished passes in `sweep-history.json` beside the lease (a pass that finishes writes nothing there), so an older sweep's lease check is unaffected.
+- **One governance App per repository:** setup and the docs now guide one GitHub App per governed repository, so each repository gets its own hourly allowance. The pre-filled "New GitHub App" link is named for the repository, within GitHub's 34-character limit. `toolkit governance check` still reads only the variable and secret names, so it cannot tell whether two repositories share an App.
+- **A near-free gate in front of the sweep:** a new gate workflow holds the hourly start and also runs on issue, comment and pull request activity from people and when a Validate run finishes. With only the built-in token it starts the sweep when the board shows a saved place to resume, when anything changed or a CI run finished since the last successful sweep, or after six quiet hours; otherwise it ends in seconds. Activity during a running sweep queues one more run behind it, unless a follow-up is already waiting to start the next one. A pass that starts with the App's hourly count already at the margin ends green with a paused note instead of a stop, and follows up once the limit has reset. Bot activity, the sweep's own included, is ignored before a runner starts.
+- **The sweep follows up on itself:** a pass that stops early after reading something starts one more run, once GitHub's hourly App limit has reset or at once after its own time limit, so a backlog keeps draining when GitHub drops an hourly start.
+- **A pass that saves nothing keeps its place:** when the state branch is busy and a pass saves nothing, the changed-issues bookmark stays where it was, so the next pass reads those changes again.
+
+## 3.86.1
+
+### Fixed
+
+- **Store push refusal wording:** the default-branch merge hold now follows `Push-Location` like `cd` and `Set-Location`, so a push to an evidence store reached that way is judged in the store's own folder and refused by the store guard with the store-command message. Before, it was judged in the starting folder and got "push to another branch and open one", which is wrong for a store and made an agent hold back the store command too. A default-branch push whose remote is a bound store not named `TRANSPORT-*` also shows the store-command message. The push stays refused either way, and a command with several refused pushes names each reason once.
+- **Folder stack:** the merge hold now goes back a folder on `popd` and `Pop-Location`, so `Push-Location <folder>; Pop-Location; git push origin main` (or the `pushd`/`popd` pair) is judged in the folder the push really runs in, and a default-branch push there is refused. A `popd` or `Pop-Location` with nothing saved in the same command leaves the folder where it is, as the shell does.
+- **Merge target after `Push-Location`:** a merge that names no repository, after a `Push-Location` in the same command, is now refused like one after `cd`, because its repository cannot be told.
+
+## 3.86.0
+
+### Changed
+
+- **Shard timings catch-all:** The Toolkit Shard Timings workflow also starts on a push to `main`, in case the daily schedule stops firing. A push run first checks whether a refresh ran in the last 24 hours and skips the refresh when one did, and only one run goes at a time.
+
+## 3.85.0
+
+### Changed
+
+- The cloud Programme Sweep now cleans the "Generated by Claude Code" footer from posts the repository owner wrote in the governed repository and its evidence store, after each refresh, so footer cleaning no longer needs a computer's sweep. It reads the last 26 hours, or further back when a manual run gives `footer_since`, and writes only counts to the run summary. Refused review-body edits warn and wait for a manual clean; any other failed edit fails the step. The evidence store token gains issues and pull requests write for this.
+- `toolkit-github-footer-sweep.cjs` takes `--author <login>` to clean one named author's posts, for a sign-in, such as a GitHub App, that is not that person.
+
 ## 3.84.1
 
 ### Fixed

@@ -23,6 +23,11 @@ const state = require('./programme-state.cjs');
 const TTL_MS = 20 * 60 * 1000;
 const RENEW_BEFORE_MS = 10 * 60 * 1000;
 const STREAK_FINDING = 3;
+// The stuck rule the board shows: no pass has finished for STUCK_MS, and the passes in that time read
+// fewer than STUCK_READS tasks in all. The lease's history file keeps the passes of that window.
+const STUCK_MS = 6 * 60 * 60 * 1000;
+const STUCK_READS = 10;
+const HISTORY_LIMIT = 200;
 
 const empty = repository => ({ schema: 'toolkit.programme-sweep-lease.v1', repository, holder: null, pass: 0, changed_since: null,
   last_complete_at: null, stopped_passes: 0, reason: null, unreported: null, streaks: { busy: 0, graphql: 0 } });
@@ -43,6 +48,9 @@ class SweepLease {
     this.reportedStop = false;
     // The live holder an acquire found, or null.
     this.busy = null;
+    // The passes of the last STUCK_MS (a separate file, so an older sweep's strict lease check never
+    // sees it): { doc, sha }, or null when it could not be read.
+    this.history = null;
   }
 
   now() { return new Date(this.nowMs()).toISOString(); }
@@ -85,6 +93,7 @@ class SweepLease {
       if (!this.put(next, sha, 'programme sweep: take the lease')) return false;
       this.acquired = true;
       this.record = next;
+      this.history = this.readHistory();
       return true;
     });
   }
@@ -188,6 +197,48 @@ class SweepLease {
   // The earlier pass's stop that the state does not hold yet, or null.
   unreported() { return this.record?.unreported || null; }
 
+  // The history of recent passes, or null when it cannot be read: it only feeds the board's stuck
+  // note, so a missing or broken file never stops a pass.
+  readHistory() {
+    try {
+      const found = this.store.readPath(this.store.sweepHistoryPath(), 'sweep_history');
+      if (found.doc && found.doc.repository.toLowerCase() !== this.repository.toLowerCase()) return null;
+      return { doc: found.doc || { schema: state.SWEEP_HISTORY_SCHEMA, repository: this.repository, started_at: this.now(), passes: [] }, sha: found.sha };
+    } catch (error) {
+      if (state.STOPS_PASS.has(error.code) || error.code === 'GH_AUTH') throw error;
+      return null;
+    }
+  }
+
+  // Whether the board says the sweep is stuck, counting this pass's `read` tasks: no pass finished in
+  // the last STUCK_MS, the history covers that whole window, and those passes read fewer than
+  // STUCK_READS tasks. { stuck, read } where read is the window's total.
+  stuck(read = 0) {
+    const now = this.nowMs();
+    const from = now - STUCK_MS;
+    const doc = this.history?.doc;
+    const finished = Date.parse(this.record?.last_complete_at || '');
+    const total = read + (doc ? doc.passes.filter(entry => Date.parse(entry.at) >= from).reduce((sum, entry) => sum + entry.read, 0) : 0);
+    const watched = Boolean(doc) && Date.parse(doc.started_at) <= from;
+    return { stuck: watched && !(Number.isFinite(finished) && finished >= from) && total < STUCK_READS, read: total };
+  }
+
+  // Adds a pass that did not finish to the history, while this sweep still holds the lease. A
+  // finished pass moves last_complete_at on the lease instead, which alone rules out "stuck" for six
+  // hours, so a board that keeps finishing writes no history at all. A write that fails is left: the
+  // next pass counts without this one.
+  recordPass({ read, left, complete }) {
+    if (!this.history || complete) return;
+    try {
+      const now = this.nowMs();
+      const doc = structuredClone(this.history.doc);
+      doc.passes = [...doc.passes.filter(entry => Date.parse(entry.at) >= now - STUCK_MS), { at: this.now(), read, left, complete }].slice(-HISTORY_LIMIT);
+      this.store.putVerified(this.store.sweepHistoryPath(), 'sweep_history', state.canonicalText(state.validateSweepHistory(doc)), this.history.sha, 'programme sweep: pass history');
+    } catch (error) {
+      if (state.STOPS_PASS.has(error.code) || error.code === 'GH_AUTH') throw error;
+    }
+  }
+
   // Findings for streaks that reached three passes in a row.
   findings() {
     const streaks = this.record?.streaks || {};
@@ -197,13 +248,15 @@ class SweepLease {
   // Release with what this pass leaves for the next. Only the holder releases, with compare-and-swap
   // on the version it reads now: its own state commit or a renewal whose reply was lost may have
   // written it since, and another holder's record is left alone.
-  release({ changedSince = null, completeAt = null, complete, stop = null, reason = null, busy = false, graphqlRefused = false }) {
+  release({ changedSince = null, completeAt = null, complete, stop = null, reason = null, busy = false, graphqlRefused = false, read = 0, left = null, history = true }) {
     if (!this.acquired) return false;
     this.acquired = false;
     this.window = null;
     return this.writing(() => {
       const { doc, sha } = this.current();
       if (doc.holder?.nonce !== this.nonce) { this.held = null; return false; }
+      // A pass that ended with an error (a lost lock among them) writes only the lease itself.
+      if (history) this.recordPass({ read, left, complete: Boolean(complete) });
       const next = structuredClone(doc);
       next.holder = null;
       if (changedSince) next.changed_since = changedSince;
@@ -220,4 +273,4 @@ class SweepLease {
   }
 }
 
-module.exports = { SweepLease, TTL_MS, RENEW_BEFORE_MS, STREAK_FINDING };
+module.exports = { SweepLease, TTL_MS, RENEW_BEFORE_MS, STREAK_FINDING, STUCK_MS, STUCK_READS, HISTORY_LIMIT };
