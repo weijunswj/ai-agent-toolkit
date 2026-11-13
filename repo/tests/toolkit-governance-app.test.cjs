@@ -175,17 +175,29 @@ test('a published disable proposal suggests the removal, naming other governed r
 test('check reports the App while governance is on and left-overs once it is off', t => {
   const ctx = home(t), repo = governed(ctx, 'checked');
   const options = { registryPath: ctx.registryPath, testOnly: true };
-  const ids = (state, extra = {}) => conformance.checkConformance(repo, { ...options, appReader: answering(state), rulesetReader: () => ({ ok: false, reason: 'offline' }),
-    protectionReader: () => ({ ok: false, reason: 'offline' }), securityReader: () => ({ ok: false, reason: 'offline' }), ...extra }).findings.filter(entry => entry.id.startsWith('GOVERNANCE_APP'));
+  const reads = [];
+  const run = state => conformance.checkConformance(repo, { ...options, appReader: args => { reads.push(args); return answering(state)(args); },
+    rulesetReader: () => ({ ok: false, reason: 'offline' }), protectionReader: () => ({ ok: false, reason: 'offline' }), securityReader: () => ({ ok: false, reason: 'offline' }) });
+  const appOnly = result => result.findings.filter(entry => entry.id.startsWith('GOVERNANCE_APP'));
+  const ids = state => appOnly(run(state));
   const notSet = ids(missing);
   assert.deepEqual(notSet.map(entry => entry.id), ['GOVERNANCE_APP_NOT_SET_UP']);
   assert.ok(notSet[0].message.includes('toolkit-test-fixture/store'), 'the install step names the evidence store');
   assert.deepEqual(ids(found).map(entry => entry.id), ['GOVERNANCE_APP_SET']);
   assert.deepEqual(conformance.checkConformance(repo, { ...options, offline: true, appReader: () => assert.fail('no read offline') }).findings
     .filter(entry => entry.id.startsWith('GOVERNANCE_APP')).map(entry => entry.severity), ['unverified']);
-  // A missing App never changes the exit code.
-  const exitWith = state => conformance.checkConformance(repo, { ...options, offline: true, appReader: answering(state) }).exit_code;
-  assert.equal(exitWith(missing), exitWith(found));
+  // A missing App never changes the exit code: both runs go through the reader, which tells them apart.
+  reads.length = 0;
+  const withMissing = run(missing);
+  assert.ok(reads.length > 0, 'the App reader ran for the missing App');
+  reads.length = 0;
+  const withFound = run(found);
+  assert.ok(reads.length > 0, 'the App reader ran for the found App');
+  assert.deepEqual([appOnly(withMissing), appOnly(withFound)].map(list => list.map(entry => entry.id)), [['GOVERNANCE_APP_NOT_SET_UP'], ['GOVERNANCE_APP_SET']]);
+  // The fixture drifts for other reasons, so compare the drift itself as well as the exit code.
+  const drift = result => result.findings.filter(entry => entry.severity === 'drift').map(entry => entry.id);
+  assert.deepEqual(drift(withMissing), drift(withFound));
+  assert.equal(withMissing.exit_code, withFound.exit_code);
   recordMerged(repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'toolkit-test-fixture/checked', governance: 'disabled' }) });
   assert.equal(governance.governanceState(repo, options).rule, 'M2');
   assert.deepEqual(ids({ variable: 'missing', secret: 'found' }).map(entry => entry.id), ['GOVERNANCE_APP_LEFT_OVER']);

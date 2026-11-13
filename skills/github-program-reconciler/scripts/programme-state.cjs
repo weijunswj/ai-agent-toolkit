@@ -1426,8 +1426,15 @@ function contextResult(context) {
   return FAILED_CONCLUSIONS.has(context.conclusion) ? 'failed' : 'unknown';
 }
 
+// A check run that was cancelled, for example by a newer run of the same workflow.
+function isCancelled(context) {
+  return context.kind !== 'StatusContext' && context.__typename !== 'StatusContext' && context.status === 'COMPLETED' && context.conclusion === 'CANCELLED';
+}
+
 // Required checks at the exact head. Required = GitHub's isRequired flags plus the binding's list.
-// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN.
+// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN. A cancelled
+// result is set aside when the same check has any other result at the head (a newer run replaced
+// it), so that other result decides; a check whose only results were cancelled stays failed.
 function evaluateChecks({ head, rollupOid, contexts = [], complete = true, configured = [] }) {
   const empty = { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: isSha(head) ? head : null, missing: [], failing: [], reason: null };
   if (!isSha(head)) return { ...empty, reason: 'NO_HEAD' };
@@ -1436,7 +1443,9 @@ function evaluateChecks({ head, rollupOid, contexts = [], complete = true, confi
   const required = [...new Set([...contexts.filter(context => context.required).map(contextName), ...configured])].sort();
   if (!required.length) return { ...empty, reason: 'NO_REQUIRED_CHECKS' };
   const results = required.map(name => {
-    const found = contexts.filter(context => contextName(context) === name).map(contextResult);
+    const named = contexts.filter(context => contextName(context) === name);
+    const replaced = named.some(context => !isCancelled(context));
+    const found = named.filter(context => !replaced || !isCancelled(context)).map(contextResult);
     if (!found.length) return { name, result: 'missing' };
     if (found.includes('failed')) return { name, result: 'failed' };
     if (found.includes('pending')) return { name, result: 'pending' };
@@ -1545,6 +1554,28 @@ function isFinished(outcome, child) {
 
 function isRetired(outcome, child) {
   return outcome.class === 'RETIRED' || child?.lifecycle === 'RETIRED';
+}
+
+// Catalogued tasks that still owe work: open on GitHub, or (when GitHub was not read for them) not
+// finished in their state document. `docOf` gives a task's document and `issueOf` what GitHub showed.
+function unfinishedOutcomes(parent, docOf, issueOf) {
+  return parent.outcomes.filter(outcome => {
+    const issue = issueOf(outcome.issue);
+    return issue ? issue.state !== 'closed' : !isFinished(outcome, docOf(outcome.issue));
+  });
+}
+
+// True when an unfinished catalogued task sits anywhere under `number` in the catalogue.
+function hasUnfinishedDescendant(parent, number, docOf, issueOf) {
+  const byIssue = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
+  return unfinishedOutcomes(parent, docOf, issueOf).some(outcome => {
+    const seen = new Set([outcome.issue]);
+    for (let at = outcome.parent; at && !seen.has(at); at = byIssue.get(at)?.parent) {
+      if (at === number) return true;
+      seen.add(at);
+    }
+    return false;
+  });
 }
 
 // A planned outcome with an open or draft PR is already in progress.
@@ -1764,7 +1795,7 @@ function attentionBlockLines(attention, now) {
   return [
     `**${attentionLine(attention, now)}**`,
     // Work-queue tasks come ahead of the newest-first window, longest stalled first, so stalled work is never pushed out by bookkeeping.
-    ...(queue.length ? ['', '**Work queue** (the controller acts on each now)', ...queue.slice(0, WORK_QUEUE_SHOWN).map(entry => `- ${findingText(entry)}`),
+    ...(queue.length ? ['', '**Work queue** (the controller acts on each now)', ...queue.slice(0, WORK_QUEUE_SHOWN).map(entry => `- ${entry.state === 'acknowledged' ? '(acknowledged) ' : ''}${findingText(entry)}`),
       ...(queue.length > WORK_QUEUE_SHOWN ? [`- and ${queue.length - WORK_QUEUE_SHOWN} more: run programme.cjs attention`] : []), ''] : []),
     ...open.slice(0, ATTENTION_SHOWN).map(entry => `- ${entry.state === 'acknowledged' ? '(acknowledged) ' : ''}${findingText(entry)}`),
     ...(open.length > ATTENTION_SHOWN ? [`- and ${open.length - ATTENTION_SHOWN} more: run programme.cjs attention`] : []),
@@ -2671,9 +2702,17 @@ class StateStore {
     }
     if (response.status === 404) return { doc: null, sha: null };
     if (response.status !== 200) throw ghFailure(response, `Reading ${docPath}`);
-    if (response.json.encoding !== 'base64') throw new ProgrammeError('STATE_INVALID', `${docPath} is too large to read through the Contents API.`);
+    let content = response.json.content;
+    if (response.json.encoding !== 'base64') {
+      // The Contents API leaves out the text of a file over 1 MB (encoding "none"); it is then read
+      // whole by its blob id, which the Git Data API serves up to 100 MB.
+      if (!isSha(response.json.sha)) throw new ProgrammeError('STATE_INVALID', `${docPath} is too large to read through the Contents API.`);
+      const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${response.json.sha}`);
+      if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${docPath}`);
+      content = blob.json.content;
+    }
     let doc;
-    try { doc = JSON.parse(Buffer.from(response.json.content, 'base64').toString('utf8')); }
+    try { doc = JSON.parse(Buffer.from(content, 'base64').toString('utf8')); }
     catch { throw new ProgrammeError('STATE_INVALID', `${docPath} is not valid JSON.`); }
     return { doc: this.validateRead(kind, doc), sha: response.json.sha };
   }
@@ -4315,7 +4354,10 @@ class Reconciler {
         effects.push({ kind: 'set_parent_state', target: { issue: number, state: 'open', expected: lifecycleSnapshot(tree), repair } });
         effects.push({ kind: 'post_parent_repair', target: repair });
         findings.push({ code: 'PARENT_CLOSED_INCOMPLETE', issue: number, detail: 'The parent closed while native descendants remain open; lifecycle permission permits repair.' });
-      } else if (tree.issue.state === 'open' && tree.descendants.length && !open && policy.complete_when_children_closed) {
+      } else if (tree.issue.state === 'open' && tree.descendants.length && !open && policy.complete_when_children_closed
+        // Every catalogued task must be finished too: one that is not a native child (it could not
+        // attach, or was detached) is not in the tree.
+        && !unfinishedOutcomes(parent, number => this.planContext?.children.get(number)?.doc || null, number => observed.issues.get(number)).length) {
         const closure = new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.reader.transport, repository: this.binding.repository, deadlineMs: 120000 });
         const full = closure.tree(this.binding.repository, number, closure.budget(), new Set(), { full: true });
         observed.lifecycle = full;
@@ -4524,13 +4566,17 @@ class Reconciler {
       const checks = evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: this.binding.required_checks });
       return pr.state !== doc.pr.state || pr.head !== doc.pr.head || checks.state !== doc.pr.checks?.state;
     };
+    const detachedFinished = number => TERMINAL_LIFECYCLES.includes(stored(number)?.lifecycle)
+      && isFinished(outcomes.find(outcome => outcome.issue === number), stored(number))
+      && !hasUnfinishedDescendant(parent, number, stored, () => null);
     const all = outcomes.map(outcome => outcome.issue);
     const share = new Set(all.filter(number => number % ROTATION_PASSES === queued.pass % ROTATION_PASSES));
     const reasons = [
       all.filter(number => stored(number)?.pending_effects?.length),
       all.filter(number => LIVE_GATE_STATES.includes(stored(number)?.gate?.state)),
-      // No document yet, or no complete facts from a list: nothing shows whether it changed.
-      all.filter(number => !stored(number) || !rows.has(number)),
+      // No document yet, or no complete facts from a list: nothing shows whether it changed. A
+      // finished task taken off the native list is the exception: its reopen shows as a change.
+      all.filter(number => !stored(number) || !rows.has(number) && !detachedFinished(number)),
       // Changed tasks newest change first (the list is read oldest first), then those changed through a PR.
       [...new Set([...[...(changed.order || changed.issues)].reverse().filter(number => tasks.has(number)), ...all.filter(touched)])], all.filter(drifted), all.filter(checksMoved),
       (queued.queue || []).filter(number => tasks.has(number)),
@@ -4811,15 +4857,19 @@ class Reconciler {
   // history, or naming it) updated in the last PR_STALE_HOURS. A stale open PR does not hide it, so work
   // parked behind a stalled PR surfaces. A task whose PRs have all merged or closed is TASK_MERGED_OPEN
   // after TASK_MERGED_OPEN_HOURS of quiet; any other idle task is TASK_IDLE after TASK_IDLE_HOURS. A task
-  // waiting on the owner is left out: the owner already has it.
+  // waiting on the owner is left out: the owner already has it. So is a task natively blocked by another
+  // open task on the graph that is itself moving: the blocker carries the work. A pass that could not
+  // read every open PR raises none, since an unread open PR could be moving the task.
   diffIdle(parent, docs, observed, only, findings) {
+    if (observed.prGraph?.openComplete === false) return;
     const now = Date.parse(this.now());
     const hour = 60 * 60 * 1000;
-    for (const outcome of parent.outcomes) {
-      if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
+    const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
+    // The stall of one task, or null when something moves it (or it is not shown IN PROGRESS).
+    const stall = outcome => {
       const doc = docs.get(outcome.issue);
-      if (!doc || statusText(outcome, doc) !== 'IN PROGRESS' || doc.lifecycle === 'WAITING_OWNER') continue;
-      if (LIVE_GATE_STATES.includes(doc.gate?.state) || doc.fence?.holder_prefix) continue;
+      if (!doc || statusText(outcome, doc) !== 'IN PROGRESS' || doc.lifecycle === 'WAITING_OWNER') return null;
+      if (LIVE_GATE_STATES.includes(doc.gate?.state) || doc.fence?.holder_prefix) return null;
       const open = [...new Set([
         ...(['OPEN', 'DRAFT'].includes(doc.pr?.state) ? [doc.pr.number] : []),
         ...(doc.prs || []).filter(pr => pr.state === 'OPEN').map(pr => pr.number),
@@ -4827,17 +4877,33 @@ class Reconciler {
       ])].filter(number => isInt(number, 1));
       // An open PR whose last update cannot be read counts as moving.
       const updated = number => Date.parse(observed.prUpdated?.get(number) || '');
-      if (open.some(number => !Number.isFinite(updated(number)) || now - updated(number) < PR_STALE_HOURS * hour)) continue;
+      if (open.some(number => !Number.isFinite(updated(number)) || now - updated(number) < PR_STALE_HOURS * hour)) return null;
       const written = Date.parse(doc.volatile?.written_at || '');
       // A document with no write time is new in this pass or cannot be dated; neither is idle.
-      if (!Number.isFinite(written)) continue;
+      if (!Number.isFinite(written)) return null;
       const comments = (observed.comments.get(outcome.issue) || []).filter(comment => !String(comment.body || '').includes('programme-trace intent='))
         .map(comment => Date.parse(comment.created_at)).filter(Number.isFinite);
       const latest = Math.max(written, ...comments);
       const closedPrs = [doc.pr, ...(doc.prs || [])].filter(pr => isInt(pr?.number, 1));
       const merged = !open.length && closedPrs.length > 0 && closedPrs.every(pr => ['MERGED', 'CLOSED'].includes(pr.state));
       const hours = merged ? TASK_MERGED_OPEN_HOURS : TASK_IDLE_HOURS;
-      if (now - latest < hours * hour) continue;
+      if (now - latest < hours * hour) return null;
+      return { doc, open, merged, hours, latest };
+    };
+    // A blocker moves when it is an open task on this graph shown IN PROGRESS that is not stalled itself
+    // (one level only: a blocker skipped for its own blocker still counts as stalled here).
+    const moving = number => {
+      const outcome = outcomes.get(number);
+      const doc = docs.get(number);
+      if (!outcome || !doc || observed.issues.get(number)?.state === 'closed' || statusText(outcome, doc) !== 'IN PROGRESS') return false;
+      return stall(outcome) === null;
+    };
+    for (const outcome of parent.outcomes) {
+      if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
+      const found = stall(outcome);
+      if (!found) continue;
+      if ((observed.blockedBy.get(outcome.issue) || []).some(moving)) continue;
+      const { doc, open, merged, hours, latest } = found;
       const since = new Date(latest).toISOString().slice(0, 16);
       const stale = open.length ? `; open PR ${open.map(number => `#${number}`).join(', ')} has not changed for over ${PR_STALE_HOURS} hours` : '';
       findings.push(merged
@@ -4904,8 +4970,16 @@ class Reconciler {
       if (issue.state === 'open' && start.closed_by_sweep) findings.push({code:'CHILD_REOPENED',issue:issueNumber});
     }
     if (this.refreshFacts && desired.closed_by_sweep && desired.lifecycle === 'DONE' && !completionAccepted(desired)) findings.push({code:'CLOSED_WITHOUT_ACCEPTANCE',issue:issueNumber});
-    // Native parent.
-    if (outcome.parent) {
+    // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
+    // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
+    // makes the parent required again.
+    // Only a task with no open work under it: a detached task would hide its open sub-issues from
+    // the parent's native tree, and parent completion walks that tree.
+    const plan = this.planContext;
+    const nativeOptional = issue.state === 'closed' && isFinished(outcome, desired)
+      && !(issue.open_sub_issues > 0) && !(observed.subIssues.get(issueNumber) || []).some(sub => observed.issues.get(sub.number)?.state !== 'closed')
+      && Boolean(plan) && !hasUnfinishedDescendant(plan.parent, issueNumber, number => plan.children.get(number)?.doc || null, number => observed.issues.get(number));
+    if (outcome.parent && !nativeOptional) {
       if (issue.parent === null) {
         findings.push({ code: 'NATIVE_PARENT_MISSING', issue: issueNumber, detail: `expected under #${outcome.parent}` });
         effects.push({ kind: 'attach', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id });
@@ -4916,7 +4990,7 @@ class Reconciler {
         findings.push({ code: 'NATIVE_PARENT_WRONG', issue: issueNumber, detail: `under ${typeof issue.parent === 'number' ? `#${issue.parent}` : issue.parent}, expected #${outcome.parent}` });
         effects.push({ kind: 'reparent', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id, from: issue.parent });
       }
-    } else if (issue.parent !== null) {
+    } else if (!outcome.parent && issue.parent !== null) {
       findings.push({ code: 'NATIVE_PARENT_UNEXPECTED', issue: issueNumber, detail: `natively under #${issue.parent} but the catalogue names no parent; not changed` });
     }
     // Dependencies are read and shown; they never imply parentage.
@@ -5641,6 +5715,7 @@ class Reconciler {
       }
     }
     findings.push(...(observed.prGraph?.withoutTask || []).map(pr=>({code:'PR_WITHOUT_TASK',issue:pr.number})));
+    this.planContext = { parent, children };
     this.diffParentLifecycle(parent, observed, effects, findings, holds);
     const desiredDocs = new Map();
     for (const outcome of parent.outcomes) {

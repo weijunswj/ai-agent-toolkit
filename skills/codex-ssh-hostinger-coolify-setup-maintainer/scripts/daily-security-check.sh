@@ -259,9 +259,13 @@ send_email_notification() {
     return 1
   fi
 }
+# Returns non-zero when a configured notifier failed, so the run (and its systemd unit) fails too.
+NOTIFY_FAILED=0
 send_notifications() {
-  send_telegram_notification && printf 'Telegram notification sent or not configured.\n' || printf 'Telegram notification failed; check systemd journal.\n' >&2
-  send_email_notification && printf 'Email notification sent or not configured.\n' || printf 'Email notification failed; check systemd journal.\n' >&2
+  if send_telegram_notification; then printf 'Telegram notification sent or not configured.\n'
+  else printf 'Telegram notification failed: the owner has not been told about this report.\n' >&2; NOTIFY_FAILED=1; fi
+  if send_email_notification; then printf 'Email notification sent or not configured.\n'
+  else printf 'Email notification failed: the owner has not been told about this report.\n' >&2; NOTIFY_FAILED=1; fi
 }
 
 {
@@ -424,7 +428,7 @@ notify_targets="$(notification_targets)"
 if [ -n "$notify_targets" ]; then
   status_line PASS 'Daily notification configured' "$notify_targets configured" 'Verify delivery after timer installation.'
 else
-  status_line WARN 'Daily notification configured' 'No Telegram or local email notifier configured' 'Configure owner-controlled notification env if daily alerts are desired.'
+  status_line FAIL 'Daily notification configured' 'No Telegram or local email notifier configured, so nobody but this host sees the report' 'Required: the owner sets NOTIFY_TELEGRAM_* or NOTIFY_EMAIL_TO in the env file and reads the daily notification.'
 fi
 
 append_block 'Disk Details' 'df -h'
@@ -454,3 +458,16 @@ cp "$REPORT" "$LATEST"
 printf 'Wrote %s and %s\n' "$REPORT" "$LATEST"
 printf 'Overall status: %s\n' "$overall"
 send_notifications
+
+# Exit codes: 0 PASS or WARN delivered to the owner; 2 overall FAIL; 3 a configured notifier failed,
+# so the owner has not been told. A non-zero exit fails the systemd unit, so the failure shows in
+# systemctl --failed and any OnFailure= hook instead of only in a report nobody opens.
+if [ "$NOTIFY_FAILED" -ne 0 ]; then
+  printf 'ACTION REQUIRED: the daily notification failed to send. Tell the owner, fix the notifier settings in the env file, then rerun. Report: %s\n' "$REPORT" >&2
+  exit 3
+fi
+if [ "$overall" = FAIL ]; then
+  printf 'ACTION REQUIRED: overall status FAIL (%s FAIL rows). The owner reads this report and approves each next step. Report: %s\n' "$FAIL_COUNT" "$REPORT" >&2
+  exit 2
+fi
+exit 0

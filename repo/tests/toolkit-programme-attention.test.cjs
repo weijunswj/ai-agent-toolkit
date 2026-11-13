@@ -748,3 +748,51 @@ test('work queue: a stalled-task finding is never acknowledged, leads the list, 
   const other = list.find(entry => entry.code === 'CLOSING_COMMENT_MISSING');
   assert.equal(state.answerFinding(doc, { id: other.id, state: 'acknowledged', now: at(6) }).attention.find(entry => entry.id === other.id).state, 'acknowledged');
 });
+
+test('work queue: a disposed stalled-task finding that is still seen stays disposed', () => {
+  const at = minute => new Date(Date.parse('2026-11-13T00:00:00Z') + minute * 60000).toISOString();
+  const seen = [{ code: 'TASK_IDLE', issue: 835 }];
+  const list = state.foldAttention([], { source: 'reconcile', complete: true, now: at(0), seen });
+  const disposed = state.answerFinding({ attention: list, private: {} }, { id: list[0].id, state: 'disposed', reason: 'blocked by the vendor fix', now: at(1) });
+  const still = state.foldAttention(disposed.attention, { source: 'reconcile', complete: true, now: at(60), seen });
+  assert.equal(still.find(entry => entry.id === list[0].id).state, 'disposed', 'the same stall keeps its answer');
+  assert.equal(state.workQueue(still).length, 0);
+});
+
+test('work queue: an older acknowledged stalled-task finding keeps its marker on CURRENT', () => {
+  const now = '2026-11-13T10:00:00.000Z';
+  const entry = { id: state.findingId('reconcile', 'TASK_IDLE', 835, ''), source: 'reconcile', code: 'TASK_IDLE', issue: 835, head: null, state: 'acknowledged', first_seen: now, changed_at: now };
+  const body = state.renderCurrentBlockBody({ revision: 1, outcomes: [], attention: [entry] }, new Map(), new Map(), now);
+  assert.match(body, /\*\*Work queue\*\* \(the controller acts on each now\)\n- \(acknowledged\) TASK_IDLE #835: /);
+});
+
+test('E3: the session-start line names the longest-stalled work-queue task and its next step', () => {
+  const dir = tmp();
+  const now = '2026-11-13T10:00:00.000Z';
+  const deps = { attentionDir: dir, now: () => now };
+  const entry = (code, issue, changed) => ({ id: state.findingId('reconcile', code, issue, ''), source: 'reconcile', code, issue, head: null, state: 'new', first_seen: changed, changed_at: changed });
+  const list = [entry('TASK_IDLE', 835, '2026-11-13T06:00:00.000Z'), entry('TASK_MERGED_OPEN', 877, '2026-11-13T00:03:00.000Z'), entry('NEEDS_PLACEMENT', 470, '2026-11-13T09:00:00.000Z')];
+  const [oldest] = state.workQueue(list);
+  cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true,
+    queue: { count: 2, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.changed_at, next: state.FINDING_CODES[oldest.code].next_action } } }, deps);
+  const line = cache.sessionAttention('acme/app', deps).line;
+  assert.match(line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Longest stalled on the work queue of 2: #877 \(TASK_MERGED_OPEN since 2026-11-13 00:03Z\); next step: judge its done-when, [^.]*\. Run programme\.cjs attention for the list$/);
+  // A cache from before this field, or with a malformed one, shows the plain line.
+  cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
+  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Run programme\.cjs attention/);
+  for (const bad of [{ count: 0, oldest: { issue: 1, code: 'TASK_IDLE', since: now, next: 'x' } }, { count: 1, oldest: { issue: 1, code: 'TASK_IDLE', since: now, next: 'a\nb' } }, { count: 1, oldest: { issue: 1, code: 'lower', since: now, next: 'x' } }]) {
+    assert.equal(cache.queueText(bad), null, JSON.stringify(bad));
+  }
+});
+
+test('E3: attention writes the longest-stalled work-queue task into this computer\'s cache, and no free text', () => {
+  const fx = fixture();
+  fx.run(['refresh']);
+  const at = '2026-11-13T00:03:00.000Z';
+  fx.store.mutate('parent', 421, { writer: controller, change: doc => ({ ...doc, attention: [...(doc.attention || []),
+    { id: state.findingId('reconcile', 'TASK_MERGED_OPEN', 423, ''), source: 'reconcile', code: 'TASK_MERGED_OPEN', issue: 423, head: null, state: 'new', first_seen: at, changed_at: at }] }) });
+  fx.run(['attention']);
+  const written = cache.readCache('acme/app', { attentionDir: fx.attentionDir });
+  assert.deepEqual(written.queue, { count: 1, oldest: { issue: 423, code: 'TASK_MERGED_OPEN', since: at, next: state.FINDING_CODES.TASK_MERGED_OPEN.next_action } });
+  assert.match(cache.queueText(written.queue), /^Longest stalled on the work queue: #423 \(TASK_MERGED_OPEN since 2026-11-13 00:03Z\); next step: judge/);
+});

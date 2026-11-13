@@ -997,7 +997,12 @@ test('prepare-n8n-template.js sanitizes reusable config literals and expression 
     ],
   }));
 
-  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  // The Pinecone expression keeps a URL the sanitiser cannot rewrite: without review the run fails.
+  const unreviewed = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  assert.equal(unreviewed.status, 2, unreviewed.stderr);
+  assert.match(unreviewed.stderr, /Expression may still contain URL at Resolve Pinecone Index Host/);
+
+  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet', '--accept-warnings'], { cwd });
 
   assert.equal(result.status, 0, result.stderr);
   const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
@@ -1060,7 +1065,11 @@ test('prepare-n8n-template.js keeps node names stable when replacing config lite
     },
   }));
 
-  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  // Its node names look config-like on purpose: without review the run fails, with review it passes.
+  const unreviewed = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  assert.equal(unreviewed.status, 2, unreviewed.stderr);
+  assert.match(unreviewed.stderr, /Possible config-like stable metadata/);
+  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet', '--accept-warnings'], { cwd });
 
   assert.equal(result.status, 0, result.stderr);
   const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
@@ -1165,6 +1174,20 @@ test('prepare-n8n-template.js does not warn on normal workflow metadata names', 
   }), {});
 
   assert.equal(warnings.some((warning) => warning.includes('Possible config-like stable metadata')), false);
+});
+
+test('prepare-n8n-template.js treats config-like metadata as a finding to review, even with --quiet', () => {
+  const cwd = tempDir();
+  const inputPath = path.join(cwd, 'input.json');
+  const outputPath = path.join(cwd, 'out', 'template.json');
+  writeJson(inputPath, safeWorkflow({ name: 'Use example-workflow-index-rag template' }));
+
+  const quiet = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  assert.equal(quiet.status, 2, quiet.stderr);
+  assert.match(quiet.stderr, /Possible config-like stable metadata at workflow\.name/);
+
+  const accepted = runNode(sanitizerScript, [inputPath, outputPath, '--quiet', '--accept-warnings'], { cwd });
+  assert.equal(accepted.status, 0, accepted.stderr);
 });
 
 test('prepare-n8n-template.js warns on metadata config-like literals without rewriting node references', () => {
@@ -1355,6 +1378,174 @@ test('validate-n8n-workflows.cjs requires n8n-workflows unless prepared director
   assert.match(preparedImportResult.stdout, /\.tmp[\\/]n8n-live-import[\\/]safe\.live-import\.json/);
   assert.doesNotMatch(preparedImportResult.stdout, /unsafe\.live-compare\.json/);
   assert.doesNotMatch(preparedImportResult.stderr, /credentials\.id|real-looking webhookId|must have active: false/);
+});
+
+function personalDataWorkflow() {
+  return safeWorkflow({
+    nodes: [
+      {
+        id: 'http_1',
+        name: 'HTTP Request',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [0, 0],
+        parameters: {
+          url: '=https://orders.acme-real.test/api/{{ $json.id }}',
+          sendTo: '={{ "ops.lead@acme-real.test" }}',
+        },
+      },
+    ],
+  });
+}
+
+test('validate-n8n-workflows.cjs fails a repo template with a real email or production URL and never prints the value', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'leaky.json'), personalDataWorkflow());
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, 'personal data in a committed template is an error by default');
+  assert.match(result.stderr, /FAIL: n8n-workflows[\\/]leaky\.json contains 1 non-placeholder email\(s\) at nodes\.0\.parameters\.sendTo/);
+  assert.match(result.stderr, /FAIL: n8n-workflows[\\/]leaky\.json contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.url/);
+  assert.doesNotMatch(result.stdout + result.stderr, /ops\.lead@acme-real\.test|orders\.acme-real\.test/, 'the log names the place, never the value');
+  assert.match(result.stderr, /allow the host in n8n-workflow-policy\.json allowedUrlHosts/);
+  assert.match(result.stderr, /allow the domain in n8n-workflow-policy\.json allowedEmailDomains/);
+});
+
+function urlWorkflow(parameters) {
+  return safeWorkflow({
+    nodes: [{ id: 'http_1', name: 'HTTP Request', type: 'n8n-nodes-base.httpRequest', typeVersion: 4, position: [0, 0], parameters }],
+  });
+}
+
+test('validate-n8n-workflows.cjs does not count an expression-built host as a production URL', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'expr.json'), urlWorkflow({
+    url: '=https://{{ $vars.API_HOST }}/v1/items',
+    other: '=https://{{$vars.API_HOST}}/v1/items',
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /production-looking URL/);
+});
+
+test('validate-n8n-workflows.cjs still fails a real host hidden next to an expression or in prose', () => {
+  const rows = [
+    '=https://prod.company.com?id={{ $json.id }}',
+    '=https://prod.company.com:{{ $env.PORT }}/v1',
+    '=https://{{ $env.U }}@prod.company.com/v1',
+    'https://prod.company.com:99999/v1',
+    'Prod at [https://prod.company.com] today',
+    'Use `https://prod.company.com` here',
+    '=https://prod.company.com/{{ $json.id }}',
+  ];
+  for (const value of rows) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({ url: value }));
+    const result = runNode(validateScript, [], { cwd });
+    assert.notEqual(result.status, 0, `${value} must fail`);
+    assert.match(result.stderr, /contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.url/, value);
+    assert.doesNotMatch(result.stdout + result.stderr, /prod\.company\.com/, `${value}: the log never prints the host`);
+  }
+  for (const value of ['https://{{a}}.company.com/', '=https://{{ $vars.API_HOST }}/v1']) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({ url: value }));
+    const result = runNode(validateScript, [], { cwd });
+    assert.equal(result.status, 0, `${value} has no real host: ${result.stderr}`);
+  }
+});
+
+test('validate-n8n-workflows.cjs still fails a credential in the user info or query of an allowed public host', () => {
+  const stripeKey = ['sk', 'live', 'Abc123Def456Ghi789Jkl012'].join('_');
+  const hubspotKey = ['0f1e2d3c', '4b5a', '4978', '8695', 'a4b3c2d1e0f9'].join('-');
+  for (const value of [
+    `https://${stripeKey}:@api.stripe.com/v1/charges`,
+    `https://api.hubapi.com/contacts/v1/lists?count=10&hapikey=${hubspotKey}`,
+    `https://api.openai.com/v1/models?api_key=${hubspotKey}`,
+  ]) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({ url: value }));
+    const result = runNode(validateScript, [], { cwd });
+    assert.notEqual(result.status, 0, `${value} must fail`);
+    assert.match(result.stderr, /production-looking URL\(s\) at nodes\.0\.parameters\.url/, value);
+    assert.doesNotMatch(result.stdout + result.stderr, new RegExp(`${stripeKey}|${hubspotKey}`), 'the log never prints the credential');
+  }
+  for (const value of ['=https://generativelanguage.googleapis.com/v1/models?key={{ $env.KEY }}', '=https://{{ $env.U }}@api.openai.com/v1/models']) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({ url: value }));
+    const result = runNode(validateScript, [], { cwd });
+    assert.equal(result.status, 0, `${value} carries no literal credential: ${result.stderr}`);
+  }
+});
+
+test('validate-n8n-workflows.cjs passes a vanilla OpenAI HTTP Request with no policy file and still fails a company host', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'openai.json'), urlWorkflow({
+    url: 'https://api.openai.com/v1/chat/completions',
+    docs: 'https://docs.n8n.io/integrations/',
+  }));
+  const vanilla = runNode(validateScript, [], { cwd });
+  assert.equal(vanilla.status, 0, vanilla.stderr);
+  assert.doesNotMatch(vanilla.stderr, /production-looking URL/);
+
+  writeJson(path.join(cwd, 'n8n-workflows', 'company.json'), urlWorkflow({ url: 'https://crm.acme-real.test/v1/leads' }));
+  const company = runNode(validateScript, [], { cwd });
+  assert.notEqual(company.status, 0, 'a private host is not on the built-in list');
+  assert.match(company.stderr, /company\.json contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.url/);
+  assert.doesNotMatch(company.stderr, /openai\.json contains/);
+});
+
+test('validate-n8n-workflows.cjs allows a company host from the policy file and keeps the default and built-in hosts', () => {
+  const cwd = tempDir();
+  const workflowDir = path.join(cwd, 'n8n-workflows');
+  writeJson(path.join(workflowDir, 'api.json'), urlWorkflow({
+    url: 'https://crm.acme-real.test/v1/leads',
+    openai: 'https://api.openai.com/v1/chat/completions',
+    docs: 'https://n8n.example.com/callback',
+    contact: 'ops@example.com',
+  }));
+
+  const blocked = runNode(validateScript, [], { cwd });
+  assert.notEqual(blocked.status, 0, 'a company host is not allowed until the owner allows it');
+
+  writeJson(path.join(cwd, 'n8n-workflow-policy.json'), { allowedUrlHosts: ['acme-real.test'] });
+  const allowed = runNode(validateScript, [], { cwd });
+  assert.equal(allowed.status, 0, allowed.stderr);
+
+  // The live import validates the workflow folder by path from the repository root, as here.
+  const liveImportStyle = runNode(validateScript, [workflowDir], { cwd });
+  assert.equal(liveImportStyle.status, 0, liveImportStyle.stderr);
+  assert.doesNotMatch(liveImportStyle.stderr, /production-looking URL|non-placeholder email/, 'defaults and built-in hosts stay allowed');
+});
+
+test('validate-n8n-workflows.cjs keeps email and URL findings as warnings in prepared-import mode, still without the value', () => {
+  const cwd = tempDir();
+  const preparedDir = path.join(cwd, '.tmp', 'n8n-live-import');
+  writeJson(path.join(preparedDir, 'bound.live-import.json'), personalDataWorkflow());
+
+  const result = runNode(validateScript, ['--mode', 'prepared-import', preparedDir], { cwd });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /WARN: .*contains 1 non-placeholder email\(s\) at nodes\.0\.parameters\.sendTo/);
+  assert.doesNotMatch(result.stdout + result.stderr, /ops\.lead@acme-real\.test|orders\.acme-real\.test/);
+});
+
+test('prepare-n8n-template.js exits non-zero when a real email or URL remains, even with --quiet, unless --accept-warnings', () => {
+  const cwd = tempDir();
+  const inputPath = path.join(cwd, 'input.json');
+  const outputPath = path.join(cwd, 'out', 'template.json');
+  writeJson(inputPath, personalDataWorkflow());
+
+  const quiet = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  assert.notEqual(quiet.status, 0, 'a remaining real email or URL is not a pass');
+  assert.match(quiet.stderr, /Possible real email remains at /);
+  assert.match(quiet.stderr, /--accept-warnings/);
+  assert.equal(fs.existsSync(outputPath), true, 'the output is still written for review');
+
+  const accepted = runNode(sanitizerScript, [inputPath, outputPath, '--quiet', '--accept-warnings'], { cwd });
+  assert.equal(accepted.status, 0, accepted.stderr);
 });
 
 test('validate-n8n-workflows.cjs prepared-import mode still fails possible secrets', () => {

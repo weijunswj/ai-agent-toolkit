@@ -25,7 +25,7 @@ With automatic updates on (setup recommends it), Toolkit checks for a newer `mai
 
 ## Remove
 
-Say `remove toolkit` in Claude Code or Codex. It lists everything Toolkit put on this computer, removes it after your OK, and uninstalls the plugin with the app's command line. Details: [Remove Toolkit from this computer](repo/docs/TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
+Say `remove toolkit` in Claude Code or Codex. It asks whether to remove Toolkit from only that app or from every app, lists what Toolkit put there, removes it after your OK, and uninstalls the plugin with the app's command line. Scheduled tasks and the Toolkit folder stay while another app still has the plugin. Details: [Remove Toolkit from this computer](repo/docs/TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
 
 - **Left for you:** If an app's command line is not available, uninstall the plugin in that app (Claude Code: `/plugin`; Codex: Plugins), then say `remove toolkit` again to finish.
 - **Kept on purpose:** Your keys, the list of them in `~/.ai-agent-toolkit/env`, and the backups in `~/.ai-agent-toolkit/backups`. Delete those two folders yourself once you no longer need them.
@@ -75,7 +75,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.92.0 sha256=a57c3a0c239c -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.93.1 sha256=a57c3a0c239c -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical copyable product surface; each skill folder is the install unit and is edited directly. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

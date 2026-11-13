@@ -1415,7 +1415,7 @@ test('a broken merge hold refuses state-changing tools that mention merge or pus
   }
 });
 
-test('the Claude Code hook records the typed approval and enforces it; cloud sessions are not covered', (t) => {
+test('the Claude Code hook records the typed approval and enforces it; cloud sessions are held too', (t) => {
   const ctx = context(t);
   const merge = { ...connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA }), cwd: ctx.repo };
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
@@ -1430,7 +1430,8 @@ test('the Claude Code hook records the typed approval and enforces it; cloud ses
   // One approval, one merge: the governance question changes nothing about that.
   assert.equal(new hold.MergeApprovals(ctx.options).find('owner/a', 618), null, 'the merge used the approval');
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
-  assert.deepEqual(claudeHook.respond('PreToolUse', merge, { environment: { CLAUDE_CODE_REMOTE: 'true' }, ...ctx.options }), {});
+  // A cloud session runs the same hold, so it is refused too.
+  assert.equal(claudeHook.respond('PreToolUse', merge, { environment: { CLAUDE_CODE_REMOTE: 'true' }, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('the Codex hook refuses, records the user\'s approval, allows one merge and refuses again', (t) => {

@@ -114,6 +114,23 @@
     },
     {
       "file": "repo/CONTROLLER.md",
+      "rule": "**Findings are the controller's work:**",
+      "covers": "The reconciler keeps each programme finding with its controller next action until it is answered, and the Projects daily check-in turns failing tasks, PRs that need a step and long-missing project tasks into first-line prefixes the coordinator must act on. Judging the action and deadline for any other finding is the controller's.",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/toolkit-programme-attention.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-projects-tasks.cjs",
+          "test": "repo/tests/toolkit-projects-tasks.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
       "rule": "Record standing authority's owner/provenance",
       "instruction_only": "Native host controls hold standing authority; Toolkit code records none of it and cannot see uncertain effects."
     },
@@ -359,6 +376,11 @@
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Promises:**",
       "instruction_only": "Promises live in free text (PR, issue comments or project memory); the hourly nudge reads them, but no code parses them."
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
+      "rule": "**Findings:**",
+      "instruction_only": "Which action fits a finding, and when a repeat or missed deadline needs the owner, is a judgement per finding; the check-in prefixes and programme attention that feed it are mapped on the core rule."
     },
     {
       "file": "repo/controller/evidence-and-finish.md",

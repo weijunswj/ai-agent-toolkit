@@ -25,3 +25,5 @@ Both folders are created at the repo root, not inside the copied helper folder. 
 The `.cmd` wrapper invokes the co-located PowerShell script with `%~dp0sanitise-n8n-template.ps1` and does not change directory itself. The PowerShell script resolves the repo root from its script location, sets its working directory to that repo root, and executes the co-located `prepare-n8n-template.js` script by absolute path.
 
 Use `-DryRun` with the PowerShell script to confirm paths without writing sanitized template files.
+
+When a real email, URL or ID may remain in a sanitized template (an expression the sanitizer cannot rewrite, for example), `prepare-n8n-template.js` still writes the file but prints each finding, even with `--quiet`, and exits 2; the PowerShell script reports it as needing review and exits 2. Fix the finding, or rerun with `--accept-warnings` (`-AcceptWarnings`) once you have reviewed it.

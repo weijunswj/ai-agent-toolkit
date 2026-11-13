@@ -5732,8 +5732,8 @@
     },
     {
       "id": "CLOSURE.cloud-merge-clean",
-      "source": "closure reader boundary regression",
-      "kind": "benign",
+      "source": "closure reader boundary regression; cloud sessions run the merge hold, so an unapproved merge is refused before the closure check",
+      "kind": "hostile",
       "hosts": [
         "claude"
       ],
@@ -5754,14 +5754,14 @@
         }
       },
       "expect": {
-        "decision": "allow"
+        "decision": "deny"
       },
       "status": "pass"
     },
     {
       "id": "CLOSURE.cloud-merge-unknown",
-      "source": "closure reader boundary regression",
-      "kind": "benign",
+      "source": "closure reader boundary regression; cloud sessions run the merge hold, so an unapproved merge is refused before the closure check",
+      "kind": "hostile",
       "hosts": [
         "claude"
       ],
@@ -5782,7 +5782,7 @@
         }
       },
       "expect": {
-        "decision": "allow"
+        "decision": "deny"
       },
       "status": "pass"
     },

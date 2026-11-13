@@ -2,7 +2,7 @@
 const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone } = require('./toolkit-governance-gate-support.cjs');
 
 // Split to keep the per-file time budget.
-require('node:test')('cloud connector merge overrides refuse closing text and advise unknowns without a doubled prefix',()=>{
+require('node:test')('cloud connector merges are held: closing text and a missing approval both refuse',()=>{
   const assert=require('node:assert/strict');
   const hook=require('../scripts/toolkit-governance-hook.cjs');
   const {IssueClosureGuard}=require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
@@ -14,11 +14,14 @@ require('node:test')('cloud connector merge overrides refuse closing text and ad
     const input={tool_name:'mcp__github__merge_pull_request',tool_input:{owner:'example.test',repo:'app',pull_number:7,[key]:'Closes #1'}};
     const result=hook.respond('PreToolUse',input,{environment:{CLAUDE_CODE_REMOTE:'true'},guard});
     assert.equal(result.hookSpecificOutput.permissionDecision,'deny',key);
-    input.tool_input[key]={};
-    const unknown=hook.respond('PreToolUse',input,{environment:{CLAUDE_CODE_REMOTE:'true'},guard});
-    assert.match(unknown.systemMessage,/Toolkit advisory:/);assert.doesNotMatch(unknown.systemMessage,/advisory: Toolkit:/);
-    input.tool_input[key]='Refs #1';
-    assert.deepEqual(hook.respond('PreToolUse',input,{environment:{CLAUDE_CODE_REMOTE:'true'},guard}),{});
+    // The merge hold runs in cloud sessions too: with no recorded approval and no standing switch,
+    // an unreadable or clean message is still refused, by the hold rather than the closure check.
+    for(const value of [{},'Refs #1']) {
+      input.tool_input[key]=value;
+      const held=hook.respond('PreToolUse',input,{environment:{CLAUDE_CODE_REMOTE:'true'},guard});
+      assert.equal(held.hookSpecificOutput.permissionDecision,'deny',key);
+      assert.equal(held.systemMessage,undefined);
+    }
   }
   const both={tool_name:'mcp__github__merge_pull_request',tool_input:{owner:'example.test',repo:'app',pull_number:7,commit_message:'Safe',commitMessage:'Closes #1'}};
   assert.equal(hook.respond('PreToolUse',both,{environment:{CLAUDE_CODE_REMOTE:'true'},guard}).hookSpecificOutput.permissionDecision,'deny','a clean alias cannot mask closing text in another supplied alias');
