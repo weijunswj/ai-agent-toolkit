@@ -63,9 +63,9 @@ class ToolkitGovernanceCli {
   // `securityFileWriter` are only for tests, as are `discoveryGh` (discovery's GitHub reader) and
   // `refresh` (the merged-binding refresh `status` runs first), `hookReader` (the Hooks: lines) and
   // `queueReader` (the offline queue count for a repository root) and `appReader` (the governance App
-  // presence reads).
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null } = {}) {
-    this.#proposals = new GovernanceProposals({ registryOptions, transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
+  // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null} = {}) {
+    this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
     this.#stdout = stdout;
     this.#stderr = stderr;
     this.#ask = ask;
@@ -277,7 +277,7 @@ class ToolkitGovernanceCli {
     let binding = null;
     try { binding = JSON.parse(fs.readFileSync(path.join(this.#cwd, governance.BINDING_FILE), 'utf8')); } catch { /* prepare explains missing adoption */ }
     const result = this.#proposals.publish(this.#cwd, run, binding);
-    this.#print(json, result, [result.text, ...this.#appLines(result.proposal, binding)]);
+    this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...this.#appLines(result.proposal, binding)]);
     return 0;
   }
 
