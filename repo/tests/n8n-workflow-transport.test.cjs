@@ -997,7 +997,12 @@ test('prepare-n8n-template.js sanitizes reusable config literals and expression 
     ],
   }));
 
-  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  // The Pinecone expression keeps a URL the sanitiser cannot rewrite: without review the run fails.
+  const unreviewed = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  assert.equal(unreviewed.status, 2, unreviewed.stderr);
+  assert.match(unreviewed.stderr, /Expression may still contain URL at Resolve Pinecone Index Host/);
+
+  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet', '--accept-warnings'], { cwd });
 
   assert.equal(result.status, 0, result.stderr);
   const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
@@ -1355,6 +1360,64 @@ test('validate-n8n-workflows.cjs requires n8n-workflows unless prepared director
   assert.match(preparedImportResult.stdout, /\.tmp[\\/]n8n-live-import[\\/]safe\.live-import\.json/);
   assert.doesNotMatch(preparedImportResult.stdout, /unsafe\.live-compare\.json/);
   assert.doesNotMatch(preparedImportResult.stderr, /credentials\.id|real-looking webhookId|must have active: false/);
+});
+
+function personalDataWorkflow() {
+  return safeWorkflow({
+    nodes: [
+      {
+        id: 'http_1',
+        name: 'HTTP Request',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [0, 0],
+        parameters: {
+          url: '=https://orders.acme-real.test/api/{{ $json.id }}',
+          sendTo: '={{ "ops.lead@acme-real.test" }}',
+        },
+      },
+    ],
+  });
+}
+
+test('validate-n8n-workflows.cjs fails a repo template with a real email or production URL and never prints the value', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'leaky.json'), personalDataWorkflow());
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.notEqual(result.status, 0, 'personal data in a committed template is an error by default');
+  assert.match(result.stderr, /FAIL: n8n-workflows[\\/]leaky\.json contains 1 non-placeholder email\(s\) at nodes\.0\.parameters\.sendTo/);
+  assert.match(result.stderr, /FAIL: n8n-workflows[\\/]leaky\.json contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.url/);
+  assert.doesNotMatch(result.stdout + result.stderr, /ops\.lead@acme-real\.test|orders\.acme-real\.test/, 'the log names the place, never the value');
+});
+
+test('validate-n8n-workflows.cjs keeps email and URL findings as warnings in prepared-import mode, still without the value', () => {
+  const cwd = tempDir();
+  const preparedDir = path.join(cwd, '.tmp', 'n8n-live-import');
+  writeJson(path.join(preparedDir, 'bound.live-import.json'), personalDataWorkflow());
+
+  const result = runNode(validateScript, ['--mode', 'prepared-import', preparedDir], { cwd });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /WARN: .*contains 1 non-placeholder email\(s\) at nodes\.0\.parameters\.sendTo/);
+  assert.doesNotMatch(result.stdout + result.stderr, /ops\.lead@acme-real\.test|orders\.acme-real\.test/);
+});
+
+test('prepare-n8n-template.js exits non-zero when a real email or URL remains, even with --quiet, unless --accept-warnings', () => {
+  const cwd = tempDir();
+  const inputPath = path.join(cwd, 'input.json');
+  const outputPath = path.join(cwd, 'out', 'template.json');
+  writeJson(inputPath, personalDataWorkflow());
+
+  const quiet = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  assert.notEqual(quiet.status, 0, 'a remaining real email or URL is not a pass');
+  assert.match(quiet.stderr, /Possible real email remains at /);
+  assert.match(quiet.stderr, /--accept-warnings/);
+  assert.equal(fs.existsSync(outputPath), true, 'the output is still written for review');
+
+  const accepted = runNode(sanitizerScript, [inputPath, outputPath, '--quiet', '--accept-warnings'], { cwd });
+  assert.equal(accepted.status, 0, accepted.stderr);
 });
 
 test('validate-n8n-workflows.cjs prepared-import mode still fails possible secrets', () => {

@@ -79,6 +79,7 @@ Recommended for Linux servers:
 # /etc/systemd/system/n8n-production-backup.service
 [Unit]
 Description=n8n production backup
+OnFailure=n8n-production-backup-failed.service
 
 [Service]
 Type=oneshot
@@ -101,21 +102,41 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-Enable only after the owner approves the server change:
+A failed backup must reach the owner, not only the journal: the backup unit names a failure alert unit with `OnFailure=`. The owner reads the alert and decides the next step. This example mails the last journal lines through the host's mailer; swap the command for the owner's chosen channel (for example a webhook with `curl`), keeping any token in the env file, never in the unit:
+
+```ini
+# /etc/systemd/system/n8n-production-backup-failed.service
+[Unit]
+Description=Tell the owner the n8n production backup failed
+
+[Service]
+Type=oneshot
+# Holds BACKUP_ALERT_TO=<owner address>; mode 600, owned by root.
+EnvironmentFile=/etc/n8n-production-backup-alert.env
+ExecStart=/bin/sh -c 'journalctl -u n8n-production-backup.service -n 40 --no-pager | mail -s "n8n production backup FAILED on %H" "$BACKUP_ALERT_TO"'
+```
+
+Enable only after the owner approves the server change, and test the alert before trusting the timer:
 
 ```bash
 sudo systemctl daemon-reload
+sudo systemctl start n8n-production-backup-failed.service
 sudo systemctl enable --now n8n-production-backup.timer
 systemctl list-timers n8n-production-backup.timer
 ```
+
+The backup is not scheduled until the owner confirms the test alert arrived.
 
 ## Schedule With cron
 
 Cron is also acceptable when that is the server standard:
 
 ```cron
-15 3 * * * cd /data/coolify/applications/<n8n-resource> && N8N_BACKUP_ROOT=/data/backups/n8n-production N8N_BACKUP_RETENTION_DAYS=30 /usr/local/sbin/n8n-production-backup >> /data/backups/n8n-production/cron.log 2>&1
+MAILTO=<owner address>
+15 3 * * * cd /data/coolify/applications/<n8n-resource> && N8N_BACKUP_ROOT=/data/backups/n8n-production N8N_BACKUP_RETENTION_DAYS=30 /usr/local/sbin/n8n-production-backup >> /data/backups/n8n-production/cron.log 2>&1 || echo "n8n production backup FAILED on $(hostname); see /data/backups/n8n-production/cron.log"
 ```
+
+The log redirect keeps a good run quiet; a failed run prints one line, and cron mails it to `MAILTO`, which needs a working mailer on the host. The owner reads that mail. Test it once by running the line with a bad `N8N_BACKUP_ROOT` such as `/`.
 
 Use systemd or cron for Linux server scheduling. Do not use Windows Task Scheduler for this production/server path.
 

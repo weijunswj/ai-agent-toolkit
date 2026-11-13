@@ -45,6 +45,7 @@ async function runDailyCheckScenario(scriptRelPath, scenario) {
 
   const command = String.raw`
 set -euo pipefail
+rc=0
 script="$1"
 scenario="$2"
 tmp="$(mktemp -d)"
@@ -149,8 +150,9 @@ case "$scenario" in
 esac
 STUB
   chmod +x "$tmp/bin/journalctl"
-  PATH="$tmp/bin:$PATH" JOURNAL_SCENARIO="$scenario" MAINTENANCE_ROOT="$tmp/maintenance" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
+  PATH="$tmp/bin:$PATH" JOURNAL_SCENARIO="$scenario" MAINTENANCE_ROOT="$tmp/maintenance" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt" || rc=$?
   test -f sentinel.txt
+  test "$rc" -eq 2
   report="$tmp/maintenance/reports/latest-security-check.md"
 
   case "$scenario" in
@@ -208,7 +210,7 @@ fi
 
 case "$scenario" in
   unsafe)
-    MAINTENANCE_ROOT="$tmp/maintenance" BACKUP_PATHS="-delete" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
+    MAINTENANCE_ROOT="$tmp/maintenance" BACKUP_PATHS="-delete" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt" || rc=$?
     test -f sentinel.txt
     report="$tmp/maintenance/reports/latest-security-check.md"
     grep -q 'Backup freshness -delete' "$report"
@@ -216,11 +218,12 @@ case "$scenario" in
     ! grep -q 'No files found' "$report"
     grep -q 'Intrusion signal:' "$report"
     grep -q 'Daily notification configured' "$report"
+    test "$rc" -eq 2
     ;;
   absolute)
     mkdir -p "$tmp/backups"
     printf backup > "$tmp/backups/backup.txt"
-    MAINTENANCE_ROOT="$tmp/maintenance" BACKUP_PATHS="$tmp/backups" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
+    MAINTENANCE_ROOT="$tmp/maintenance" BACKUP_PATHS="$tmp/backups" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt" || rc=$?
     test -f sentinel.txt
     report="$tmp/maintenance/reports/latest-security-check.md"
     grep -q 'Backup freshness ' "$report"
@@ -228,6 +231,27 @@ case "$scenario" in
     grep -q 'Newest file: backup.txt' "$report"
     ! grep -q 'Rejected unsafe backup path' "$report"
     ! grep -q 'Rejected non-absolute backup path' "$report"
+    test "$rc" -eq 2
+    ;;
+  no-notifier)
+    MAINTENANCE_ROOT="$tmp/maintenance" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt" || rc=$?
+    report="$tmp/maintenance/reports/latest-security-check.md"
+    test "$rc" -eq 2
+    grep -Fq '| Daily notification configured | FAIL | No Telegram or local email notifier configured, so nobody but this host sees the report |' "$report"
+    grep -q '^## Overall status: FAIL' "$report"
+    grep -q 'ACTION REQUIRED: overall status FAIL' "$tmp/stderr.txt"
+    ;;
+  telegram-fails)
+    cat > "$tmp/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+exit 22
+STUB
+    chmod +x "$tmp/bin/curl"
+    PATH="$tmp/bin:$PATH" MAINTENANCE_ROOT="$tmp/maintenance" NOTIFY_TELEGRAM_BOT_TOKEN="super-secret-token" NOTIFY_TELEGRAM_CHAT_ID="12345" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt" || rc=$?
+    test "$rc" -eq 3
+    grep -q 'Telegram notification failed: the owner has not been told' "$tmp/stderr.txt"
+    grep -q 'ACTION REQUIRED: the daily notification failed to send' "$tmp/stderr.txt"
+    ! grep -q 'check systemd journal' "$tmp/stderr.txt"
     ;;
   telegram)
     export CURL_ARGS_FILE="$tmp/curl-args.txt"
@@ -242,12 +266,13 @@ done
 exit 0
 STUB
     chmod +x "$tmp/bin/curl"
-    PATH="$tmp/bin:$PATH" MAINTENANCE_ROOT="$tmp/maintenance" NOTIFY_TELEGRAM_BOT_TOKEN="super-secret-token" NOTIFY_TELEGRAM_CHAT_ID="12345" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
+    PATH="$tmp/bin:$PATH" MAINTENANCE_ROOT="$tmp/maintenance" NOTIFY_TELEGRAM_BOT_TOKEN="super-secret-token" NOTIFY_TELEGRAM_CHAT_ID="12345" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt" || rc=$?
     test -f sentinel.txt
     report="$tmp/maintenance/reports/latest-security-check.md"
     grep -q 'Daily notification configured' "$report"
     grep -q 'telegram configured' "$report"
     grep -q 'Telegram notification sent or not configured' "$tmp/stdout.txt"
+    test "$rc" -eq 0
     ! grep -R -q 'super-secret-token' "$report" "$tmp/stdout.txt" "$tmp/stderr.txt" "$tmp/curl-args.txt"
     ;;
   *)
@@ -288,6 +313,14 @@ test.describe('daily security check scenarios', { concurrency: 4 }, () => {
     for (const scriptRelPath of scripts) {
       await runDailyCheckScenario(scriptRelPath, 'absolute');
     }
+  });
+
+  test('daily security check fails when no notifier is set, so nobody is left unaware', async () => {
+    await runDailyCheckScenario(authoritativeDailyCheck, 'no-notifier');
+  });
+
+  test('daily security check exits non-zero and says so when the notification fails to send', async () => {
+    await runDailyCheckScenario(authoritativeDailyCheck, 'telegram-fails');
   });
 
   test('daily security check can send Telegram notification without leaking token', async () => {

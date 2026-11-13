@@ -157,6 +157,27 @@ function walk(value, visitor, trail = []) {
   }
 }
 
+// Distinct unsafe values and the places they appear, without the values themselves.
+function findUnsafeStringPlaces(workflow, regex, isAllowed) {
+  const values = new Set();
+  const places = [];
+  const visit = (value, trail) => {
+    if (typeof value === 'string') {
+      const unsafe = (value.match(regex) || []).filter((match) => !isAllowed(match));
+      if (unsafe.length > 0) {
+        unsafe.forEach((match) => values.add(match));
+        places.push(trail.join('.') || '(root)');
+      }
+      return;
+    }
+    if (Array.isArray(value)) value.forEach((item, index) => visit(item, trail.concat(index)));
+    else if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) visit(child, trail.concat(key));
+  };
+  visit(workflow, []);
+  const shown = places.slice(0, 5).join(', ') + (places.length > 5 ? ` and ${places.length - 5} more` : '');
+  return { count: values.size, places: shown };
+}
+
 function trailString(trail) {
   return trail.join('.');
 }
@@ -505,16 +526,18 @@ for (const filePath of files) {
     }
   }
 
-  const emails = text.match(emailRegex) || [];
-  const unsafeEmails = [...new Set(emails.filter((email) => !helpers.allowedEmail(email)))];
-  if (unsafeEmails.length > 0) {
-    warn(`${relative} contains non-placeholder email(s): ${unsafeEmails.join(', ')}`);
+  // A real email or production URL in a committed template is personal or environment data, so it
+  // fails by default; a prepared import holds locally bound values, so there it stays a warning.
+  // Either way the log names the place, never the value, so the finding does not leak it again.
+  const personalDataFinding = preparedImportMode ? warn : fail;
+  const unsafeEmailPlaces = findUnsafeStringPlaces(workflow, emailRegex, helpers.allowedEmail);
+  if (unsafeEmailPlaces.count > 0) {
+    personalDataFinding(`${relative} contains ${unsafeEmailPlaces.count} non-placeholder email(s) at ${unsafeEmailPlaces.places}. Replace with a placeholder or allow the domain in the policy.`);
   }
 
-  const urls = text.match(urlRegex) || [];
-  const unsafeUrls = [...new Set(urls.filter((url) => !helpers.allowedUrl(url)))];
-  if (unsafeUrls.length > 0) {
-    warn(`${relative} contains production-looking URL(s): ${unsafeUrls.join(', ')}`);
+  const unsafeUrlPlaces = findUnsafeStringPlaces(workflow, urlRegex, helpers.allowedUrl);
+  if (unsafeUrlPlaces.count > 0) {
+    personalDataFinding(`${relative} contains ${unsafeUrlPlaces.count} production-looking URL(s) at ${unsafeUrlPlaces.places}. Replace with a placeholder or allow the host in the policy.`);
   }
 
   if (policy.warnOnGoogleIds) {

@@ -1,6 +1,7 @@
 param(
   [switch]$PreserveUnicode,
   [switch]$AllowEmpty,
+  [switch]$AcceptWarnings,
   [switch]$DryRun
 )
 
@@ -161,6 +162,7 @@ Write-Section "Workflows"
 
 $preparedCount = 0
 $failedCount = 0
+$reviewCount = 0
 
 foreach ($workflowFile in $workflowFiles) {
   $outputFile = Join-Path $OutputDirFull (Get-OutputFileName $workflowFile)
@@ -191,7 +193,17 @@ foreach ($workflowFile in $workflowFiles) {
     $nodeArgs += "--allow-empty"
   }
 
+  if ($AcceptWarnings) {
+    $nodeArgs += "--accept-warnings"
+  }
+
   & node @nodeArgs
+  # Exit 2: the template was written but may still hold a real email, URL or ID. It needs review.
+  if ($LASTEXITCODE -eq 2) {
+    $reviewCount += 1
+    Write-Step "WARN" "$($workflowFile.Name) sanitised, but $outputName may still hold real data (listed above). Fix it, or rerun with -AcceptWarnings once reviewed."
+    continue
+  }
   if ($LASTEXITCODE -ne 0) {
     $failedCount += 1
     Write-Step "FAIL" "$($workflowFile.Name) could not be sanitised."
@@ -204,6 +216,7 @@ foreach ($workflowFile in $workflowFiles) {
 
 Write-Section "Summary"
 Write-Host ("Sanitised : {0}" -f $preparedCount)
+Write-Host ("Review    : {0}" -f $reviewCount)
 Write-Host ("Failed    : {0}" -f $failedCount)
 
 if ($DryRun) {
@@ -222,6 +235,12 @@ Write-Host "Do not blindly commit files from $OutputDir. Check placeholders, sti
 
 if ($failedCount -gt 0) {
   exit 1
+}
+
+if ($reviewCount -gt 0) {
+  Write-Host ""
+  Write-Host ("ACTION REQUIRED: {0} template(s) may still hold real data. Fix them, or rerun with -AcceptWarnings once reviewed." -f $reviewCount) -ForegroundColor Yellow
+  exit 2
 }
 
 exit 0

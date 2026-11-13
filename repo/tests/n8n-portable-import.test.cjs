@@ -2326,6 +2326,44 @@ test('no-change reports retain optional credential metadata without required act
   assert.doesNotMatch(JSON.stringify(report), /CREATE_CREDENTIAL/);
 });
 
+test('an import that needs an n8n restart reports ACTION_REQUIRED with a restart next action, never "no further action"', () => {
+  const report = reports.createReport({
+    result: 'ACTION_REQUIRED',
+    code: 'N8N_IMPORT_RESTART_REQUIRED',
+    phase: 'postcondition',
+    mutation: { attempted: true, performed: true },
+    activeState: 'inactive',
+    nextAction: { code: 'NONE', message: 'No further import action is required.' },
+  });
+  assert.equal(report.result, 'ACTION_REQUIRED');
+  assert.equal(report.nextAction.code, 'RESTART_N8N_AND_CONFIRM');
+  assert.match(report.nextAction.message, /restart n8n/i);
+  assert.match(report.nextAction.message, /owner/i);
+  assert.doesNotMatch(report.nextAction.message, /no further/i);
+  assert.match(reports.EXPLANATIONS.N8N_IMPORT_RESTART_REQUIRED, /restart/i);
+
+  const unbound = reports.createReport({ result: 'ACTION_REQUIRED', code: 'N8N_IMPORT_CREDENTIALS_UNBOUND', mutation: { attempted: true, performed: true } });
+  assert.equal(unbound.nextAction.code, 'REATTACH_CREDENTIALS_AND_CONFIRM');
+  assert.match(unbound.nextAction.message, /reattach/i);
+});
+
+test('the live import routes restart warnings and unbound credentials to ACTION_REQUIRED before any success line', () => {
+  const importScript = fs.readFileSync(path.join(helperRoot, 'import-n8n-workflows-live.ps1'), 'utf8');
+  const nextSteps = importScript.match(/Write-Section "Next Action Steps"[\s\S]*?\n\} finally \{/);
+  assert.ok(nextSteps, 'the Next Action Steps block is found');
+  const block = nextSteps[0];
+  const restartAt = block.indexOf('"ACTION_REQUIRED" "N8N_IMPORT_RESTART_REQUIRED"');
+  const unboundAt = block.indexOf('"ACTION_REQUIRED" "N8N_IMPORT_CREDENTIALS_UNBOUND"');
+  const successAt = block.indexOf('"SUCCESS" "N8N_IMPORT_SUCCESS"');
+  assert.ok(restartAt > 0, 'a restart warning is reported as ACTION_REQUIRED');
+  assert.ok(unboundAt > 0, 'unbound credentials are reported as ACTION_REQUIRED');
+  assert.ok(restartAt < successAt && unboundAt < successAt, 'both are checked before the success report');
+  assert.match(block, /RequiresRestartWarning/);
+  assert.match(block, /CredentialsUnbound/);
+  assert.match(block, /Restart n8n/);
+  assert.doesNotMatch(importScript, /Reattach credentials in n8n after import if needed/);
+});
+
 test('PowerShell surfaces are PS 5.1-compatible, do not restart, and make valid import confirmation optional', () => {
   const importScript = fs.readFileSync(path.join(helperRoot, 'import-n8n-workflows-live.ps1'), 'utf8');
   const menuScript = fs.readFileSync(path.join(helperRoot, 'n8n-workflow-sync-menu.ps1'), 'utf8');

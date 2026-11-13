@@ -24,6 +24,8 @@ const STABLE_CODES = new Set([
   'N8N_POLICY_VALIDATION_FAILED',
   'N8N_IMPORT_NO_CHANGES',
   'N8N_IMPORT_SUCCESS',
+  'N8N_IMPORT_RESTART_REQUIRED',
+  'N8N_IMPORT_CREDENTIALS_UNBOUND',
   'N8N_EXPORT_NO_CHANGES',
   'N8N_EXPORT_SUCCESS',
   'N8N_POSTCONDITION_FAILED',
@@ -48,6 +50,8 @@ const EXPLANATIONS = Object.freeze({
   N8N_POLICY_VALIDATION_FAILED: 'The canonical workflow or deployment policy failed validation.',
   N8N_IMPORT_NO_CHANGES: 'The effective prepared workflow already matches the target.',
   N8N_IMPORT_SUCCESS: 'The prepared workflow imported and the unpublished postcondition was verified.',
+  N8N_IMPORT_RESTART_REQUIRED: 'The workflow imported unpublished, but it updated a previously published or scheduled workflow, so its old cron triggers may keep running until n8n is restarted.',
+  N8N_IMPORT_CREDENTIALS_UNBOUND: 'The workflow imported as a new unpublished workflow without restored credential bindings, so any credential it uses must be reattached in n8n.',
   N8N_EXPORT_NO_CHANGES: 'Canonical export completed without changing a workflow source file.',
   N8N_EXPORT_SUCCESS: 'Canonical workflow source and portable declarations were exported safely.',
   N8N_POSTCONDITION_FAILED: 'The workflow import completed but the required unpublished state could not be verified.',
@@ -122,6 +126,14 @@ function nextActionForCode(code, context = {}) {
     N8N_CREDENTIAL_CLEANUP_FAILED: {
       code: 'COMPLETE_CREDENTIAL_TEMP_CLEANUP',
       message: 'Complete exact cleanup of the encrypted credential temporary area before retrying.',
+    },
+    N8N_IMPORT_RESTART_REQUIRED: {
+      code: 'RESTART_N8N_AND_CONFIRM',
+      message: 'Restart n8n (the owner approves the restart), then confirm the old schedule stopped before trusting the published state.',
+    },
+    N8N_IMPORT_CREDENTIALS_UNBOUND: {
+      code: 'REATTACH_CREDENTIALS_AND_CONFIRM',
+      message: 'Reattach the credentials each imported workflow uses in n8n, then tell the owner which workflows were checked.',
     },
     N8N_POSTCONDITION_FAILED: {
       code: 'STOP_AND_ESCALATE_POSTCONDITION',
