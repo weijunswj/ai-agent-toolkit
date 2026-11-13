@@ -235,6 +235,9 @@ function catchup(cwd, manifest, options) {
   const missing = manifest.members.filter(member => !isAncestor(cwd, member.head, 'HEAD')).map(member => `#${member.pr}`);
   if (missing.length) throw new TrainError(`the checkout is not this train: ${missing.join(', ')} not on ${branch}`, 1);
   if (isAncestor(cwd, main, 'HEAD')) throw new TrainError('main is already inside the train; nothing to catch up', 1);
+  if (git(cwd, ['rev-list', '--parents', '-n', '1', 'HEAD']).stdout.split(/\s+/).length !== 3) {
+    throw new TrainError('the train already carries its bump: only a stacked train (built with --onto) catches up; rebuild this one on main', 1);
+  }
   const merged = git(cwd, ['-c', 'rerere.enabled=false', 'merge', '--no-ff', '--no-edit', '-m', `Merge train: catch up with main at ${main.slice(0, 12)}`, main], { allowFail: true });
   if (merged.status !== 0) {
     git(cwd, ['merge', '--abort'], { allowFail: true });
