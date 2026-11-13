@@ -76,6 +76,12 @@ function binding({ governance = 'enabled', repository = 'owner/repository', stor
     store: { kind: 'github', repository: store, branch: 'main', path: 'state/' }, required_checks: [], ...(publicState ? { state: { kind: 'branch', branch: state.STATE_BRANCH, path: state.STATE_PATH } } : {}) };
 }
 
+// The same programme file as version 1: no governance key, one parent, and it reads as enabled.
+function bindingV1() {
+  return { schema: state.SCHEMA.binding, repository: 'owner/repository', parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
+    store: { kind: 'github', repository: 'owner/evidence', branch: 'main', path: 'state/' }, required_checks: [] };
+}
+
 function runAction(mode, { env = {}, file = binding(), refresh = null } = {}) {
   const notices = [], failures = [], outputs = [], summaries = [], refreshes = [];
   const runner = new (action().ProgrammeSweepAction)({
@@ -116,8 +122,7 @@ for (const [label, file] of [['absent', null], ['disabled', binding({ governance
 }
 
 test('action: a version 1 binding reads as enabled, as bindingEnabled says, and names its store', () => {
-  const v1 = { schema: state.SCHEMA.binding, repository: 'owner/repository', parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
-    store: { kind: 'github', repository: 'owner/evidence', branch: 'main', path: 'state/' }, required_checks: [] };
+  const v1 = bindingV1();
   assert.equal(state.bindingEnabled(state.validateBinding(v1)), true);
   const result = runAction('store', { file: v1 });
   assert.equal(result.code, 0);
@@ -214,6 +219,7 @@ const identity = { repository_id: 'example-identity', remote: { canonical: 'http
 
 for (const [label, options, expect] of [
   ['present and enabled', {}, entry => entry.binding?.governance === 'enabled'],
+  ['version 1, which reads as enabled', { text: JSON.stringify(bindingV1()) }, entry => entry.binding?.parent_issue === 421 && entry.binding.schema === state.SCHEMA.binding],
   ['absent', { status: 404 }, entry => entry.binding === null && entry.status === 'absent'],
   ['invalid', { text: '{"schema":' }, entry => entry.binding === null && entry.status === 'present'],
   ['disabled', { text: JSON.stringify({ schema: state.SCHEMA.bindingV2, repository: 'owner/repository', governance: 'disabled' }) }, entry => entry.binding === null],
