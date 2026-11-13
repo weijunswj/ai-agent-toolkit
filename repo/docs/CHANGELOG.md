@@ -1,5 +1,18 @@
 # Toolkit Changelog
 
+## 3.91.7
+
+### Fixed
+
+- **Programme file reading:** the cloud sweep gate and `toolkit permissions` now read the programme file the same way the sweep does. A hand-edited version 1 file that also carries a version 2 key, such as `governance: "disabled"`, no longer counts as governance on: the gate skips with a warning that the file is not valid, and `toolkit permissions` offers no repo block.
+- **Remove Toolkit test:** the setup skill test now fails if the line allowing an app's own uninstall tool moves in front of the user's yes.
+
+## 3.91.6
+
+### Fixed
+
+- Programme Sweep: a run started by hand from a branch or tag other than the default branch now stops with one warning before any App token is minted, and footer cleaning runs only after a programme refresh that ran on the run's own commit, so a skipped or failed refresh edits no posts.
+
 ## 3.91.5
 
 ### Fixed
