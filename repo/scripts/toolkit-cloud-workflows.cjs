@@ -7,29 +7,25 @@
 // The copies are rendered from the Toolkit's own workflow files at the commit this checkout is on,
 // read from git, never from the working tree. Each copy checks the Toolkit out at that same commit
 // into `.toolkit/` (public, no token) and runs the scripts from there, while the binding and the
-// working folder stay the governed repository's own. The render changes only:
-//   - a managed header line naming the Toolkit commit and the copy's hash, so --check can tell a
-//     current copy from a stale or hand-edited one,
-//   - each Toolkit-script checkout, which names the Toolkit repository, the pinned commit and `.toolkit/`,
-//   - `node repo/scripts/` paths, which become `node .toolkit/repo/scripts/`,
-//   - the gate's CI trigger, which follows the repository's own CI workflow or is left out.
-// A source file that no longer matches what the render expects stops it, so a change to the
-// workflows breaks the tests instead of producing a wrong copy.
+// working folder stay the governed repository's own. The render itself is
+// toolkit-cloud-workflows-render.cjs; its header says what it changes. Each copy carries a managed
+// header line naming the Toolkit commit and the copy's hash, so --check can tell a current copy from
+// a stale or hand-edited one. A copy from an older commit is also re-rendered at that commit, when
+// this checkout has it and the render file is unchanged since, so an edit whose hash was recomputed
+// still shows.
 //
 // Programme Sweep and its gate go to every governed repository. Shard Timings needs the Toolkit's
 // test-shard manifest and run summaries, so it is not copied; this script says so.
 //
 // Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check] [--json]
 // Exit codes: 0 done (or no drift), 1 drift found by --check, 2 not installed (the reason is printed).
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { TOOLKIT_REPOSITORY, TOOLKIT_PATH, MARKER, SHA, InstallError, normalise, withoutPins, bodyHash, render } = require('./toolkit-cloud-workflows-render.cjs');
 
 const TOOLKIT_ROOT = path.resolve(__dirname, '..', '..');
-const TOOLKIT_REPOSITORY = 'weijunswj/ai-agent-toolkit';
-const TOOLKIT_PATH = '.toolkit';
-const CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1';
+const RENDER_FILE = 'repo/scripts/toolkit-cloud-workflows-render.cjs';
 const WORKFLOWS = Object.freeze([
   Object.freeze({ id: 'programme-sweep', file: '.github/workflows/toolkit-programme-sweep.yml' }),
   Object.freeze({ id: 'programme-sweep-gate', file: '.github/workflows/toolkit-programme-sweep-gate.yml' }),
@@ -37,25 +33,13 @@ const WORKFLOWS = Object.freeze([
 const NOT_COPIED = Object.freeze([
   Object.freeze({ id: 'shard-timings', file: '.github/workflows/toolkit-shard-timings.yml', reason: 'it needs the Toolkit\'s test-shard manifest and run summaries' }),
 ]);
-const MARKER = /^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ([a-z-]+) toolkit=([0-9a-f]{40}) sha256=([0-9a-f]{12})$/m;
-const SHA = /^[0-9a-f]{40}$/;
-const NOTE = '# A copy of the Toolkit\'s own workflow, pinned to the Toolkit commit above. Do not edit it here: refresh the repository rules to update it.';
 const CI_FILE = /^[A-Za-z0-9_.-]+\.ya?ml$/;
 const USAGE = 'Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check] [--json]';
 
-class InstallError extends Error {
-  constructor(message) { super(message); this.name = 'InstallError'; }
-}
-
-const sha12 = text => crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 12);
-// The copy's hash leaves out each action's pinned version, so a Dependabot bump of a `uses:` pin reads
-// as an older copy (the next refresh puts the Toolkit's pins back), not as a hand edit.
-const bodyHash = body => sha12(body.replace(/^(\s+(?:- )?uses: [^@\s]+)@[^\n]*$/gm, '$1'));
 const TOOLKIT_REMOTE = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)weijunswj\/ai-agent-toolkit(?:\.git)?\/?$/i;
 // A Toolkit source checkout runs its own workflow files. This file has been there far longer than
 // the installer, so older Toolkit branches are recognised too.
 const isToolkitCheckout = dir => fs.existsSync(path.join(dir, 'repo', 'scripts', 'toolkit-governance-conformance.cjs'));
-const normalise = text => String(text).replace(/\r\n/g, '\n');
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, shell: false, maxBuffer: 4 * 1024 * 1024 });
@@ -86,53 +70,26 @@ function sourceText(file, commit, root = TOOLKIT_ROOT) {
   return normalise(result.stdout);
 }
 
-function replaceOnce(text, from, to, what) {
-  const at = text.indexOf(from);
-  if (at === -1 || text.indexOf(from, at + 1) !== -1) throw new InstallError(`the Toolkit's workflow changed shape (${what}); the render needs an update.`);
-  return text.slice(0, at) + to + text.slice(at + from.length);
-}
-
 // The name: line of the repository's CI workflow, for the gate's workflow_run trigger.
 function ciWorkflowName(text) {
   const match = /^name:\s*(['"]?)([A-Za-z0-9 _.-]{1,80})\1\s*$/m.exec(normalise(text));
   return match ? match[2].trim() : null;
 }
 
-function renderBody(id, source, commit, ci) {
-  const toolkitScript = `        with:\n          repository: ${TOOLKIT_REPOSITORY}\n          ref: ${commit}\n          path: ${TOOLKIT_PATH}\n`;
-  let text = source;
-  if (id === 'programme-sweep') {
-    text = replaceOnce(text, '      - name: Check out this run\'s commit\n        uses: ' + CHECKOUT + '\n        with:\n          ref: ${{ github.sha }}\n          persist-credentials: false\n',
-      '      - name: Check out this run\'s commit\n        uses: ' + CHECKOUT + '\n        with:\n          ref: ${{ github.sha }}\n          persist-credentials: false\n\n'
-      + '      - name: Check out the Toolkit\n        uses: ' + CHECKOUT + '\n' + toolkitScript + '          persist-credentials: false\n', 'sweep checkout');
-    text = replaceOnce(text, '      - name: Check out the follow-up script\n        uses: ' + CHECKOUT + '\n        with:\n          ref: ${{ github.sha }}\n',
-      '      - name: Check out the follow-up script\n        uses: ' + CHECKOUT + '\n' + toolkitScript, 'follow-up checkout');
-  } else {
-    text = replaceOnce(text, '      - name: Check out the gate from main\n        uses: ' + CHECKOUT + '\n        with:\n          ref: main\n',
-      '      - name: Check out the gate from the Toolkit\n        uses: ' + CHECKOUT + '\n' + toolkitScript, 'gate checkout');
-    if (ci) {
-      text = replaceOnce(text, '    workflows: [Validate]\n', `    workflows: [${JSON.stringify(ci.name)}]\n`, 'gate CI trigger');
-      text = replaceOnce(text, '          CI_WORKFLOW: validate.yml\n', `          CI_WORKFLOW: ${ci.file}\n`, 'gate CI workflow');
-    } else {
-      text = replaceOnce(text, '  workflow_run:\n    workflows: [Validate]\n    types: [completed]\n', '', 'gate CI trigger');
-      text = replaceOnce(text, '          CI_WORKFLOW: validate.yml\n', '', 'gate CI workflow');
-    }
-  }
-  const scripts = (text.match(/node repo\/scripts\//g) || []).length;
-  if (!scripts) throw new InstallError(`the Toolkit's workflow changed shape (${id} runs no Toolkit script); the render needs an update.`);
-  text = text.replace(/node repo\/scripts\//g, `node ${TOOLKIT_PATH}/repo/scripts/`);
-  return text;
-}
-
-// The rendered copy: one managed header line, then the body.
-function render(id, source, commit, ci = null) {
-  if (!SHA.test(commit)) throw new InstallError('the Toolkit commit must be a full 40-character SHA.');
-  const body = `${NOTE}\n${renderBody(id, normalise(source), commit, ci)}`;
-  return `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${commit} sha256=${bodyHash(body)}\n${body}`;
+// What the installer wrote at Toolkit commit `at`, or null when that cannot be known here: the commit
+// is not in this checkout, the render file differs there from the one running now, or that commit's
+// workflow files do not render. Nothing from that commit is run; only its workflow files are read.
+function renderAt(id, file, at, root, ci) {
+  if (!SHA.test(at) || !git(root, ['cat-file', '-e', `${at}^{commit}`]).ok) return null;
+  const then = git(root, ['show', `${at}:${RENDER_FILE}`]);
+  if (!then.ok || normalise(then.stdout) !== normalise(fs.readFileSync(require.resolve('./toolkit-cloud-workflows-render.cjs'), 'utf8'))) return null;
+  try { return render(id, sourceText(file, at, root), at, ci); } catch (error) { if (error instanceof InstallError) return null; throw error; }
 }
 
 // { state: 'current' | 'outdated' | 'edited' | 'unmanaged' | 'missing' } for an installed copy.
-function copyState(text, expected) {
+// `reference(commit)` gives what the installer wrote at the copy's own Toolkit commit, or null when
+// that cannot be known; with it, a copy that differs from its own render (pins aside) is a hand edit.
+function copyState(text, expected, reference = () => null) {
   if (text === null) return { state: 'missing' };
   const normalised = normalise(text);
   const marker = MARKER.exec(normalised);
@@ -146,7 +103,10 @@ function copyState(text, expected) {
   // changing either is still a hand edit.
   const named = [...body.matchAll(/^ {10}repository: (\S+)\n {10}ref: (\S+)$/gm)];
   if (!named.length || named.some(([, repository, ref]) => repository !== TOOLKIT_REPOSITORY || ref !== marker[2])) return { state: 'edited', toolkit: marker[2] };
-  return normalised === expected ? { state: 'current', toolkit: marker[2] } : { state: 'outdated', toolkit: marker[2] };
+  if (normalised === expected) return { state: 'current', toolkit: marker[2] };
+  const own = reference(marker[2]);
+  if (own !== null && withoutPins(normalised) !== withoutPins(normalise(own))) return { state: 'edited', toolkit: marker[2] };
+  return { state: 'outdated', toolkit: marker[2] };
 }
 
 function readOrNull(file) {
@@ -199,7 +159,9 @@ function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(roo
   const rows = WORKFLOWS.map(({ id, file }) => {
     const expected = render(id, sourceText(file, commit, root), commit, ciWorkflow);
     const absolute = path.join(target, ...file.split('/'));
-    return { id, file, absolute, expected, ...copyState(readOrNull(absolute), expected) };
+    // The copy's own commit is re-rendered with this plan's CI workflow, the one the copy follows.
+    const reference = at => (at === commit ? expected : renderAt(id, file, at, root, ciWorkflow));
+    return { id, file, absolute, expected, ...copyState(readOrNull(absolute), expected, reference) };
   });
   return { target, commit, ci: ciWorkflow, rows, not_copied: NOT_COPIED.map(({ id, reason }) => ({ id, reason })) };
 }
@@ -242,4 +204,4 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, NOT_COPIED, InstallError, apply, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
+module.exports = Object.freeze({ TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, NOT_COPIED, MARKER, InstallError, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });

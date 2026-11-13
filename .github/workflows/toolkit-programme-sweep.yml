@@ -6,7 +6,8 @@
 # task pages. The gate runs hourly and on issue, comment and pull request activity with only the
 # built-in token, and starts this workflow on main only when there is work, so a quiet hour costs
 # seconds.
-# It runs `programme.cjs refresh` from the commit it checked out, under the governance GitHub App:
+# It runs the Toolkit's `programme.cjs refresh` (from this run's commit in the Toolkit; a governed
+# repository's copy checks the Toolkit out at a pinned commit) under the governance GitHub App:
 # two installation tokens, one for this repository (issues, pull requests, checks) and one for the
 # evidence store (contents), each minted with only its own permissions. The built-in token is
 # contents read only, the checkout keeps no credentials, and no token or key is printed.

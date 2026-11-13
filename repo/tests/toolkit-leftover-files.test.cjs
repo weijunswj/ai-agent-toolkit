@@ -106,6 +106,32 @@ test('a block edited by hand is still listed, and says so; Windows line endings 
   assert.match(leftovers.describe({ folder: w.folder, readable: true, repositories: [widget] }).join('\n'), /TOOLKIT-GOVERNED-RULES inside the file, edited by hand since\./);
 });
 
+test('cloud sweep copies with the Toolkit marker are listed; an edited one says so; an unmarked one is not', t => {
+  const cloud = require('../scripts/toolkit-cloud-workflows.cjs');
+  const [sweep, gate] = cloud.WORKFLOWS;
+  const commit = 'c'.repeat(40);
+  const copy = (id, text = 'name: X\non: push\njobs: {}\n') => {
+    const body = `# A copy\n${text}`;
+    return `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${commit} sha256=${cloud.bodyHash(body)}\n${body}`;
+  };
+  const w = world(t, {
+    widget: { state: 'DISABLED', files: { [sweep.file]: copy(sweep.id).replace(/\n/g, '\r\n'), [gate.file]: `${copy(gate.id)}# my extra line\n` } },
+    mine: { state: 'UNDECIDED', files: { [sweep.file]: 'name: Mine\non: push\n', [gate.file]: copy(sweep.id) } },
+    governed: { state: 'ENABLED', files: { [sweep.file]: copy(sweep.id) } },
+  });
+  const report = w.scan();
+  const widget = w.of(report, 'widget');
+  assert.deepEqual(widget.files.map(item => [item.file, item.kind, item.proof, item.edited]), [
+    [sweep.file, 'workflow', 'Toolkit marker', false],
+    [gate.file, 'workflow', 'Toolkit marker', true],
+  ]);
+  assert.deepEqual(w.of(report, 'mine').files, [], 'an unmarked file, or a marker naming another workflow, is not listed');
+  assert.equal(w.of(report, 'governed').scanned, false);
+  const text = leftovers.describe(report).join('\n');
+  assert.match(text, /- \.github\/workflows\/toolkit-programme-sweep\.yml: a Toolkit cloud sweep copy\. With governance off it writes nothing, but its runs still start on GitHub, so removing it is suggested\./);
+  assert.match(text, /toolkit-programme-sweep-gate\.yml: a Toolkit cloud sweep copy, edited by hand since\./);
+});
+
 test('broken markers, an old shim block, a programme file that is not "off", and a check without the marker', t => {
   const w = world(t, { widget: { state: 'UNDECIDED', files: {
     'AGENTS.md': '<!-- AI-AGENT-TOOLKIT:x:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.0.0 sha256=000000000000 -->\nno end marker\n',
