@@ -530,10 +530,30 @@ test('L6: GitHub failures in the gate and follow-up end green with a notice; a s
     const blip = spawnSync(process.execPath, ['--require', preload, script, ...args], { env: { ...env, FOLLOW_UP_AT: '1' }, encoding: 'utf8', timeout: 30000 });
     assert.equal(blip.status, 0, `${args[0] || 'gate'}: ${blip.stderr}`);
     assert.match(blip.stdout, /^::notice::Programme Sweep (gate|follow-up) could not finish: GitHub answered 502 for GET actions\/workflows\/toolkit-programme-sweep\.yml\/runs\. The next start tries again\.$/m);
+    // L1 (G2 of this fix): a 404 or 403 is a set-up fault and stays red; a 429 is a blip.
+    for (const [status, code] of [[404, 1], [403, 1], [401, 1], [429, 0], [503, 0]]) {
+      const answer = path.join(dir, `fetch-${status}.cjs`);
+      fs.writeFileSync(answer, fs.readFileSync(preload, 'utf8').replace('status: 502', `status: ${status}`));
+      const result = spawnSync(process.execPath, ['--require', answer, script, ...args], { env: { ...env, FOLLOW_UP_AT: '1' }, encoding: 'utf8', timeout: 30000 });
+      assert.equal(result.status, code, `${args[0] || 'gate'} ${status}: ${result.stdout}${result.stderr}`);
+      if (code) assert.match(result.stderr, new RegExp(`GitHub answered ${status}`));
+    }
+    const { isBlip, GitHubAnswerError } = gateScript();
+    assert.equal(isBlip(Object.assign(new TypeError('fetch failed'), { cause: new Error('ECONNRESET') })), true, 'a dropped connection');
+    assert.equal(isBlip(new TypeError('Cannot read properties of undefined')), false, 'a code bug stays red');
+    assert.equal(isBlip(new GitHubAnswerError(500, 'x')), true);
     const unset = spawnSync(process.execPath, [script, ...args], { env: { PATH: process.env.PATH, FOLLOW_UP_AT: '1' }, encoding: 'utf8', timeout: 30000 });
     assert.equal(unset.status, 1, `${args[0] || 'gate'} without a token is a set-up fault`);
     assert.match(unset.stderr, /needs GITHUB_REPOSITORY and GH_TOKEN/);
   }
+});
+
+test('M1 (G2 of this fix): the gate resumes a private repository\'s mid-pass limit stop from its board note, about an hour after the reset', () => {
+  const { decide, RESET_WAIT_MS } = gateScript();
+  // The pass began 10 minutes before it ended; its board line carries the App-limit note.
+  const at = ago => decide({ event: 'schedule', now: T, lines: [PAUSED], changedSince: false, runs: [done(ago, ago + 10 * 60 * 1000)] });
+  assert.equal(at(30 * 60 * 1000).start, false, 'before the reset it waits');
+  assert.equal(at(RESET_WAIT_MS).start, true, 'after the reset the hourly start resumes it');
 });
 
 test('L3 and L7: at the App limit the footer step skips; a private repository leaves the wait to the hourly gate', () => {
@@ -545,11 +565,18 @@ test('L3 and L7: at the App limit the footer step skips; a private repository le
     const result = runAction('run', { env: minted, refresh: () => refresh });
     assert.ok(result.outputs.some(([name, value]) => name === 'at_limit' && value === 'true'));
     assert.ok(Number(result.outputs.find(([name]) => name === 'follow_up_at')?.[1]) >= Date.now() - 5000 + RESET_WAIT_MS - 60000, 'public: waits for the reset');
-    const hidden = runAction('run', { env: { ...minted, REPOSITORY_PRIVATE: 'true' }, refresh: () => refresh });
-    assert.equal(hidden.code, 0);
-    assert.equal(hidden.outputs.some(([name]) => name === 'follow_up_at'), false, 'no runner waits an hour on a private repository');
-    assert.deepEqual(hidden.notices, [action().NOTICES.private_wait]);
   }
+  // Private, stopped mid-way at the limit: no runner waits; the board note lets the gate resume it.
+  const hidden = runAction('run', { env: { ...minted, REPOSITORY_PRIVATE: 'true' }, refresh: () => rate });
+  assert.equal(hidden.code, 0);
+  assert.equal(hidden.outputs.some(([name]) => name === 'follow_up_at'), false, 'no runner waits an hour on a private repository');
+  assert.deepEqual(hidden.notices, [action().NOTICES.private_wait]);
+  // M1 (G2 of this fix): private and PAUSED read nothing and leave no board note, so the follow-up stays.
+  const before = Date.now();
+  const pausedPrivate = runAction('run', { env: { ...minted, REPOSITORY_PRIVATE: 'true' }, refresh: () => limited });
+  const at = Number(pausedPrivate.outputs.find(([name]) => name === 'follow_up_at')?.[1]);
+  assert.ok(at >= before + RESET_WAIT_MS && at <= Date.now() + RESET_WAIT_MS, 'a PAUSED pass on a private repository still follows up once the limit resets');
+  assert.deepEqual(pausedPrivate.notices, []);
   const quick = runAction('run', { env: { ...minted, REPOSITORY_PRIVATE: 'true' }, refresh: () => timed });
   assert.ok(quick.outputs.some(([name]) => name === 'follow_up_at'), 'a time-limit stop still follows up at once');
   assert.equal(quick.outputs.some(([name]) => name === 'at_limit'), false, 'footer cleaning runs after a time-limit stop');

@@ -21,8 +21,9 @@
 # so its own hourly allowance. A pass that stops early after reading something starts one follow-up
 # run itself: once GitHub's hourly App limit has reset (an hour and a minute after the pass began),
 # or at once after its own time limit, so a backlog keeps draining when GitHub drops an hourly start.
-# On a private repository only the immediate follow-up runs, since a runner waiting for the reset
-# costs paid minutes; the hourly gate resumes a pass stopped at the App limit instead. The follow-up
+# On a private repository a pass stopped mid-way at the App limit gets no waiting runner, since that
+# costs paid minutes; the hourly gate resumes it from its board note after the reset. A pass that
+# found the limit already at the margin leaves no note, so it keeps its one follow-up. The follow-up
 # also runs after a failed footer step, and after its wait it starts nothing when another sweep is
 # already queued, running or newer. It holds only the built-in token, allowed to read contents and
 # start workflow runs.

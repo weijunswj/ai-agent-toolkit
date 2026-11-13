@@ -78,9 +78,19 @@ function decide({ event, now, runs, lines, changedSince, followUpWaiting = false
   return { start: false, reason: 'nothing changed since the last sweep' };
 }
 
-// A fault in the run's own set-up (no repository or token): the run shows red. GitHub answers that
-// fail (a 5xx, a dropped connection) are only a notice, since the next start tries again.
+// A fault in the run's own set-up (no repository or token): the run shows red.
 class SetupError extends Error {}
+// A GitHub answer that was not OK, with its HTTP status.
+class GitHubAnswerError extends Error {
+  constructor(status, message) { super(message); this.status = status; }
+}
+// Only a GitHub blip is a notice, since the next start tries again: a 5xx, a 429 rate limit, or a
+// dropped connection (fetch's own TypeError carrying a cause). A 401, 403 or 404 means a set-up fault
+// (a missing workflow, a token without the permission) and any other error is a bug: both stay red.
+function isBlip(error) {
+  if (error instanceof GitHubAnswerError) return error.status >= 500 || error.status === 429;
+  return error instanceof TypeError && error.message === 'fetch failed';
+}
 
 async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Date.now(), log = line => process.stdout.write(`${line}\n`) } = {}) {
   const repository = env.GITHUB_REPOSITORY || '';
@@ -89,7 +99,7 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
   const call = async (method, route, body) => {
     const response = await fetchImpl(`${api}/repos/${repository}/${route}`, { method, body: body ? JSON.stringify(body) : undefined,
       headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${env.GH_TOKEN}`, 'x-github-api-version': '2022-11-28', ...(body ? { 'content-type': 'application/json' } : {}) } });
-    if (!response.ok) throw new Error(`GitHub answered ${response.status} for ${method} ${route.split('?')[0]}.`);
+    if (!response.ok) throw new GitHubAnswerError(response.status, `GitHub answered ${response.status} for ${method} ${route.split('?')[0]}.`);
     return response.status === 204 ? null : response.json();
   };
   // The binding merged on main decides governance, as everywhere else.
@@ -140,7 +150,7 @@ async function followUp({ env = process.env, fetchImpl = globalThis.fetch, now =
   const call = async (method, route, body) => {
     const response = await fetchImpl(`${api}/repos/${repository}/${route}`, { method, body: body ? JSON.stringify(body) : undefined,
       headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${env.GH_TOKEN}`, 'x-github-api-version': '2022-11-28', ...(body ? { 'content-type': 'application/json' } : {}) } });
-    if (!response.ok) throw new Error(`GitHub answered ${response.status} for ${method} ${route.split('?')[0]}.`);
+    if (!response.ok) throw new GitHubAnswerError(response.status, `GitHub answered ${response.status} for ${method} ${route.split('?')[0]}.`);
     return response.status === 204 ? null : response.json();
   };
   // Re-check after the wait: another sweep queued or running, or one started after this run, already
@@ -160,9 +170,10 @@ if (require.main === module) {
   const which = process.argv[2] === 'follow-up' ? 'follow-up' : 'gate';
   const run = which === 'follow-up' ? followUp() : gate();
   run.catch(error => {
-    if (error instanceof SetupError) { process.stderr.write(`Programme Sweep ${which} failed: ${error.message}\n`); process.exitCode = 1; return; }
-    process.stdout.write(`::notice::Programme Sweep ${which} could not finish: ${String(error?.message || 'GitHub did not answer').replace(/[\r\n]+/g, ' ')} The next start tries again.\n`);
+    if (!isBlip(error)) { process.stderr.write(`Programme Sweep ${which} failed: ${error?.message}\n`); process.exitCode = 1; return; }
+    const what = error instanceof GitHubAnswerError ? error.message : 'GitHub did not answer.';
+    process.stdout.write(`::notice::Programme Sweep ${which} could not finish: ${what} The next start tries again.\n`);
   });
 }
 
-module.exports = Object.freeze({ SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, parentsOf, decide, gate, followUp, SetupError });
+module.exports = Object.freeze({ SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, parentsOf, decide, gate, followUp, SetupError, GitHubAnswerError, isBlip });
