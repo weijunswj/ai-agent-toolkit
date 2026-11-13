@@ -34,7 +34,9 @@
           "name": "store",
           "repository": "evidence_store",
           "takes": [
-            "contents"
+            "contents",
+            "issues",
+            "pull_requests"
           ]
         }
       ]
