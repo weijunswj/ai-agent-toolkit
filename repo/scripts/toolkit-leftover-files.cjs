@@ -6,7 +6,8 @@
 // It looks at each GitHub checkout under the owner's GitHub folder (the same discovery the scheduled
 // task update uses). A repository whose governance is on, or could not be checked, is not scanned.
 // In the rest it lists only what is provably Toolkit's:
-//   - a Toolkit marker (a managed block inside an instruction file, or a vendored check's first line);
+//   - a Toolkit marker (a managed block inside an instruction file, a vendored check's first line, or
+//     the first line of a cloud sweep workflow copy);
 //   - a file that is byte for byte Toolkit's shipped copy, line endings aside.
 // The repository's programme file is its on/off decision, so it is always shown as kept.
 //
@@ -19,6 +20,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const blocks = require('./toolkit-managed-block.cjs');
+const cloud = require('./toolkit-cloud-workflows.cjs');
 
 const TEMPLATES = path.resolve(__dirname, '..', '..', 'skills', 'repository-agent-rules', 'repo-local');
 const DECISION_FILE = '.github/toolkit-programme.json';
@@ -83,6 +85,7 @@ class LeftoverScan {
       this.#pointer(root, result);
       this.#playbooks(root, result);
       this.#checks(root, result);
+      this.#workflows(root, result);
       this.#decision(root, result);
     } catch { return { root, name, scanned: false, reason: 'its files could not be read' }; }
     return result;
@@ -132,6 +135,19 @@ class LeftoverScan {
     }
   }
 
+  // A cloud sweep workflow copy whose first line is the Toolkit's marker for that same workflow. A
+  // same-named workflow without it may be the owner's, so it is not listed.
+  #workflows(root, result) {
+    for (const { id, file } of cloud.WORKFLOWS) {
+      const read = readInside(root, file);
+      if (!read) continue;
+      if (read.skipped) { result.unproven.push({ file, reason: read.skipped }); continue; }
+      const text = unix(read.text), marker = cloud.MARKER.exec(text);
+      if (!marker || text.indexOf(marker[0]) !== 0 || marker[1] !== id) continue;
+      result.files.push({ file, kind: 'workflow', proof: 'Toolkit marker', edited: cloud.bodyHash(text.slice(marker[0].length + 1)) !== marker[3] });
+    }
+  }
+
   // The programme file is the repository's decision, never a leftover.
   #decision(root, result) {
     const read = readInside(root, DECISION_FILE);
@@ -145,6 +161,7 @@ class LeftoverScan {
 function describeFile(item) {
   if (item.kind === 'block') return `- ${item.file}: Toolkit block ${item.block} inside the file${item.edited ? ', edited by hand since' : ''}. The rest of the file is yours.`;
   if (item.kind === 'check') return `- ${item.file}: a Toolkit check copy. It keeps working without governance; removing it is your choice, together with its workflow and settings.`;
+  if (item.kind === 'workflow') return `- ${item.file}: a Toolkit cloud sweep copy${item.edited ? ', edited by hand since' : ''}. With governance off it writes nothing, but its runs still start on GitHub, so removing it is suggested.`;
   return `- ${item.file}: ${item.proof}.`;
 }
 

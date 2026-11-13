@@ -312,7 +312,7 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   const out = [];
   for (const row of result.rows) {
     if (row.state === 'current') continue;
-    if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} is pinned to an older Toolkit commit; the next rules refresh updates it.`));
+    if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin or the CI workflow it follows); the next rules refresh updates it.`));
     else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so this repository's programme board gets no cloud sweep. Refresh the repository rules to fix it.`));
   }
   return out;
