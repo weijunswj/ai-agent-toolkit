@@ -173,7 +173,7 @@ function windowsCheckpointHookCommand(powershellPath = defaultWindowsPowerShellP
 }
 
 // The installed copy keeps the portable command and adds commandWindows to every Toolkit hook. The
-// governance prompt hold (UserPromptSubmit) runs the helper hook script, so it shares its launcher.
+// governance question (UserPromptSubmit) runs the helper hook script, so it shares its launcher.
 function renderInstalledWindowsHooks(hooks, powershellPath) {
   const rendered = structuredClone(hooks);
   rendered.hooks.SessionStart[0].hooks[0].commandWindows = windowsSessionStartCommand(powershellPath);
@@ -185,7 +185,7 @@ function renderInstalledWindowsHooks(hooks, powershellPath) {
 }
 
 // Every hook entry that runs the helper hook script: the helper PreToolUse group, the governance
-// PreToolUse group and the UserPromptSubmit prompt hold.
+// PreToolUse group and the UserPromptSubmit governance question.
 function helperScriptHooks(hooks) {
   const groups = [...(hooks?.hooks?.PreToolUse || []), ...(hooks?.hooks?.UserPromptSubmit || [])];
   return groups.flatMap(group => group?.hooks || []).filter(hook => hook?.command === sourceHelperHookCommand());

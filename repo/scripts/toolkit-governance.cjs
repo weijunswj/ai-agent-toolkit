@@ -195,7 +195,7 @@ class ToolkitGovernanceCli {
     if (result.cloud_jobs) {
       lines.push(...require('./toolkit-cloud-jobs.cjs').guideLines(result.cloud_jobs));
     }
-    lines.push('Prompt-hold enforcement:');
+    lines.push('Governance question hook:');
     for (const [host, status] of Object.entries(result.enforcement)) lines.push(`- ${host}: ${status.status} (${status.reason})`);
     this.#print(json, result, lines);
     return result.exit_code;
