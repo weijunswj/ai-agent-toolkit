@@ -111,6 +111,7 @@ function checkConformance(cwd, options = {}) {
   if (state.state === 'DISABLED') {
     if (state.rule === 'M2') findings.push(finding('REPOSITORY_DISABLED', 'info', 'The binding merged on the default branch sets governance to disabled; only an owner-merged pull request turns it back on.'));
     if (state.rule === 'M2') findings.push(...appFindings(state, options));
+    if (state.rule === 'M2') findings.push(...cloudWorkflowLeftovers(state));
     if (state.rule === 'S1') findings.push(finding('EVIDENCE_STORE', 'info', 'This repository is an evidence store a programme binding names: agent-managed, never governed, and never asked about.'));
     if (state.rule === 'R1s') findings.push(finding('SCRATCH_CLONE', 'info', "This repository is a scratch clone in another repository's ignored .tmp folder: never governed, and never asked about."));
     if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', state.rule === 'M2' ? 'Governance is disabled for this repository, so the governed block in AGENTS.md is not followed.' : ['S1', 'R1s'].includes(state.rule) ? 'This repository is not governed, so the governed block in AGENTS.md is not followed.' : 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
@@ -320,6 +321,18 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
     else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so this repository's programme board gets no cloud sweep. Refresh the repository rules to fix it.`));
   }
   return out;
+}
+
+// Cloud sweep copies left in a repository whose merged binding turns governance off. The pull request
+// that turns governance off removes them; a copy still here means it was made before that, or by hand.
+// Only a file carrying the Toolkit's rendered-copy marker counts. Report only, never a drift.
+function cloudWorkflowLeftovers(state) {
+  const workflows = require('./toolkit-cloud-workflows.cjs');
+  if (workflows.isToolkitCheckout(state.root)) return [];
+  const left = workflows.WORKFLOWS.map(row => row.file).filter(file => {
+    try { return workflows.MARKER.test(fs.readFileSync(path.join(state.root, ...file.split('/')), 'utf8').replace(/\r\n/g, '\n')); } catch { return false; }
+  });
+  return left.length ? [finding('CLOUD_WORKFLOW_LEFT_OVER', 'info', `Governance is off, but the cloud sweep copies are still here: ${left.join(', ')}. Remove them in a pull request; they do nothing while governance is off.`)] : [];
 }
 
 // The cloud jobs guide from the contract: each job and the tokens it mints from the governance App.
