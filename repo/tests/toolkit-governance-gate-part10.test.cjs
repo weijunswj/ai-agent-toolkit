@@ -82,16 +82,19 @@ test('H-15: prompts are never stored or echoed, and what Toolkit keeps never car
   assert.equal(fs.existsSync(ctx.heldPath), false);
 });
 
-test('cloud sessions leave an undecided repository unheld and write no governance state; the session line says why', (t) => {
+test('cloud sessions are not asked about an undecided repository and write no governance state; the session line says why', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   const environment = { CLAUDE_CODE_REMOTE: 'true' };
   const options = { registryOptions: ctx.options };
-  // The same inputs hold on a computer.
-  assert.equal(claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 'unnoted' }, { ...options, environment: {} }).decision, 'block');
-  assert.equal(claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, { ...options, environment: {} }).hookSpecificOutput.permissionDecision, 'deny');
+  // On a computer the same prompt passes with the governance note, and nothing is held.
+  const computerPrompt = claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 'unnoted' }, { ...options, environment: {} });
+  assert.equal(computerPrompt.decision, undefined);
+  assert.match(computerPrompt.hookSpecificOutput.additionalContext, /no governance decision yet, so it counts as off/);
+  assert.equal(claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, { ...options, environment: {} }).hookSpecificOutput?.permissionDecision, undefined);
   const cloudPrompt = claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 'cloud' }, { ...options, environment });
   assert.equal(cloudPrompt.decision, undefined);
+  assert.doesNotMatch(JSON.stringify(cloudPrompt), /no governance decision yet/);
   assert.deepEqual(claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, { ...options, environment }), {});
   assert.equal(claudeHook.respond('SessionStart', { cwd: repo, session_id: 's1', source: 'startup' }, { ...options, environment, refreshBinding: () => {} }).hookSpecificOutput.additionalContext, claudeHook.CLOUD_LINE);
   assert.deepEqual(claudeHook.respond('SessionStart', { cwd: ctx.root, session_id: 's2', source: 'startup' }, { ...options, environment, refreshBinding: () => {} }), {});
