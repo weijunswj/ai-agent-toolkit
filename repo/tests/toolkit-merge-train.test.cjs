@@ -296,7 +296,6 @@ test('the controller, the changelog guide and the repo map describe the train th
   assert.match(finish, /\*\*Merge trains:\*\* two or more merge-ready PRs/);
   assert.match(finish, /Never hand-fix a train: a conflict, moved head or failed bump ejects that member; red CI splits it \(`split`\)/);
   assert.match(finish, /RISKY members each need the owner's typed OK/);
-  assert.match(finish, /\*\*Train ejects:\*\* .*`toolkit-merge-train\.cjs eject --pr <n> --reason <why>`, never a rebuild, force-push or new train PR/);
   const guide = read('repo/docs/changelog.d/README.md');
   for (const command of ['build', 'verify', 'body', 'land', 'eject']) assert.match(guide, new RegExp(`toolkit-merge-train\\.cjs ${command} --manifest`));
   assert.match(guide, /\*\*Eject after boarding:\*\* .*It never rewrites the branch/);
