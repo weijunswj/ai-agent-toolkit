@@ -236,11 +236,14 @@ test('body lists every member with one Bump line, the strictest UAT line and eve
   assert.match(text, /^UAT: OWNER_TEST_NEEDED \(each member's own test after the merge: #2\)$/m);
   assert.equal(text.match(/^UAT: /gm).length, 1);
   assert.match(text, /^Refs #101$/m);
-  assert.match(text, /^Closes #7$/m);
+  assert.doesNotMatch(text, /^(Closes|Fixes|Resolves) /m, 'no closing line on a train that waits on an owner test');
+  assert.match(text, /^Refs #7 \(closed by #2's own closing line when the train lands\)$/m);
   assert.doesNotMatch(text, /Generated with|Co-Authored-By/);
   const quiet = train.body(train.checkManifest({ members: [f.member(3, '3'.repeat(40), { bump: 'none', uat: 'UAT: PASSED (owner OK)' })] }));
   assert.match(quiet, /^Bump: none$/m);
   assert.match(quiet, /^UAT: NOT_REQUIRED \(no member needs an owner test: #3\)$/m);
+  const closing = train.body(train.checkManifest({ members: [f.member(4, '4'.repeat(40), { links: ['Closes #8'] })] }));
+  assert.match(closing, /^Closes #8$/m, 'a train with no owner test keeps its closing lines');
 });
 
 test('split halves a red train for a bisect, and a train of one names its culprit', t => {
@@ -298,4 +301,22 @@ test('the controller, the changelog guide and the repo map describe the train th
   assert.match(guide, /\*\*Batches:\*\* several merge-ready pull requests land as one merge train that bumps once/);
   assert.match(read('repo/ARCHITECTURE.md'), /`repo\/scripts\/toolkit-merge-train\.cjs` \(`build`, `verify`, `body`, `split`, `land`; never merges/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Two or more ready PRs ride one merge train \(`CONTROLLER\.md`\)\./);
+});
+
+test('build refuses a branch checked out in another worktree and changes nothing', t => {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const other = path.join(f.root, 'other');
+  f.git('worktree', 'add', '--quiet', '-b', 'toolkit-train/busy', other, f.main);
+  f.git('switch', '--quiet', '--detach', f.main);
+  const before = f.git('rev-parse', 'toolkit-train/busy');
+  assert.throws(
+    () => train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }), '--branch', 'toolkit-train/busy', '--main', 'main'], f.repo),
+    /toolkit-train\/busy is checked out in another worktree/,
+  );
+  assert.equal(f.git('rev-parse', 'toolkit-train/busy'), before);
+  assert.equal(f.git('rev-parse', 'HEAD'), f.main);
+  assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: other, encoding: 'utf8' }).stdout, '');
+  const own = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }), '--branch', 'toolkit-train/free', '--main', 'main'], f.repo);
+  assert.equal(own.ok, true, 'a branch no other worktree holds still builds');
 });

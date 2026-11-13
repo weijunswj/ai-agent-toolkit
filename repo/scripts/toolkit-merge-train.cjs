@@ -26,7 +26,8 @@
 // any other repository takes no bump commit; "none" turns the bump off. The command runs without a
 // shell, with {level} as the highest member level and {base} as the main commit.
 //
-// build runs in a clean checkout of its own (a worktree): it resets --branch to --onto (default
+// build runs in a clean checkout of its own (a worktree) and refuses a --branch checked out in any
+// other worktree. It resets --branch to --onto (default
 // --main, default origin/main), merges each member head, ejects one that conflicts or is already on
 // main, then runs the bump command and commits the result. --onto another train's head combines new
 // members while that train waits on CI: such a stacked train takes no bump and cannot land; rebuild
@@ -166,6 +167,11 @@ function memberMessage(member) {
 
 function build(cwd, manifest, options) {
   const branch = safeRef(options.branch || '', '--branch');
+  const here = fs.realpathSync(git(cwd, ['rev-parse', '--show-toplevel']).stdout);
+  const elsewhere = git(cwd, ['worktree', 'list', '--porcelain']).stdout.split('\n\n')
+    .map(block => ({ tree: (block.match(/^worktree (.+)$/m) || [])[1], ref: (block.match(/^branch (.+)$/m) || [])[1] }))
+    .find(entry => entry.ref === `refs/heads/${branch}` && entry.tree && fs.existsSync(entry.tree) && fs.realpathSync(entry.tree) !== here);
+  if (elsewhere) throw new TrainError(`${branch} is checked out in another worktree (${elsewhere.tree}); pick another branch or free that checkout first`);
   if (git(cwd, ['status', '--porcelain']).stdout) throw new TrainError('build needs a clean checkout of its own; use a fresh worktree');
   const main = resolve(cwd, options.main, '--main');
   const onto = resolve(cwd, options.onto || options.main, '--onto');
@@ -300,7 +306,12 @@ function body(manifest) {
     level === 'none' ? 'Bump: none' : `Bump: ${level}`,
     uat,
     '',
-    ...members.flatMap(member => (member.links || []).map(line => line.trim())),
+    // A Closes line would close its issue before the owner's test, which the issue-closure guard
+    // refuses; on such a train it becomes Refs, and the member's own Closes line closes the issue
+    // when the train lands, since GitHub treats the member as merged.
+    ...members.flatMap(member => (member.links || []).map(line => line.trim()).map(line => (tests.length && !/^Refs /.test(line)
+      ? `Refs ${line.replace(/^\S+ /, '')} (closed by #${member.pr}'s own closing line when the train lands)`
+      : line))),
   ];
   while (lines[lines.length - 1] === '') lines.pop();
   return `${lines.join('\n')}\n`;
