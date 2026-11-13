@@ -955,6 +955,14 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
   assert.ok(first.includes('"ROTATE DUE: <n> | "'), 'ROTATE DUE is a first-line prefix');
   assert.ok(acting.includes('- `ROTATE DUE`: rotate each listed thread this turn'), 'the coordinator acts on ROTATE DUE');
   const device = fs.readFileSync(path.join(dir, 'reference', 'device-work.md'), 'utf8');
+  // Never fire_trigger: setup, the nudge home thread and Both gone read the new task back instead.
+  const recurring = fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8');
+  assert.ok(recurring.includes('4. Read it back with `get_trigger` (enabled, a future next run, bound to its home thread); never `fire_trigger` it: the first scheduled run is the proof.'));
+  assert.ok(recurring.includes('a fresh-session task is never fired (no `fire_trigger`), so its next scheduled run covers the gap.'));
+  assert.ok(periodic.includes('reads it back with `get_trigger` (never `fire_trigger`; its first scheduled run is the proof) and updates the `SCHEDULED TASKS:` line'));
+  for (const [name, text] of [['SKILL.md', fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8')], ['recurring-tasks.md', recurring], ['periodic-runs.md', periodic]]) {
+    assert.doesNotMatch(text, /fires it once|Fire it once|Test one run now|caught up by firing it/, name);
+  }
   assert.ok(device.includes('- **Rotate long Remote Control lanes too.**') && device.includes('you end its session with `stop_remote_control` once the handoff is read back'), 'Remote Control lanes rotate too');
   assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
   const freshAge = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
