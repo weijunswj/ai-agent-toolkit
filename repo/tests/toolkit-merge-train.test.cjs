@@ -303,10 +303,10 @@ test('the controller, the changelog guide and the repo map describe the train th
   // Every controller type learns the train is its own default: CONTROLLER.md routes the merge step
   // to the page that holds it, the Projects skill puts it ahead of the one-PR bump route, and the
   // hourly nudge flags ready PRs that should ride together.
-  assert.match(finish, /land as one train, chosen by the controller unasked; one PR, or one a train ejected, merges alone:/);
+  assert.match(finish, /land as one train, chosen by the controller unasked; a lone ready PR merges alone, and an ejected member rides the next train once fixed and delta-reviewed:/);
   assert.match(read('repo/CONTROLLER.md'), /\[Evidence, progress and finish\]\(controller\/evidence-and-finish\.md\) `[0-9a-f]{12}`: before merging,/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit PRs hold main's version\. Two or more ready PRs ride one merge train unasked \(`CONTROLLER\.md`\); else, before the check and any card, it merges `main` in/);
-  assert.match(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md'), /Flag `train due: <PR numbers>` when two or more PRs each have green CI and a G2 PASS or owner merge OK at their current head and no merge train holds them/);
+  assert.match(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md'), /Flag `train due: <PR numbers>` when two or more PRs each have green CI and a G2 PASS at their current head, carry no bump of their own and no merge train holds them/);
 });
 
 test('build refuses a branch checked out in another worktree and changes nothing', t => {
