@@ -106,3 +106,26 @@ test('the hook decision refuses a raw store push on both hosts, with the store c
     assert.match(decision.hookSpecificOutput.permissionDecisionReason, /toolkit-store\.cjs" save/);
   }
 });
+
+test('the merge hold shows the store-command message, not the pull request advice, for a refused store push', (t) => {
+  const f = fixture(t);
+  const hold = require('../scripts/toolkit-merge-hold.cjs');
+  // The merge hold needs the default branch: origin/main in each checkout, with origin's HEAD.
+  for (const root of [f.governed, f.store]) {
+    const remotes = path.join(root, '.git', 'refs', 'remotes', 'origin');
+    fs.mkdirSync(remotes, { recursive: true });
+    fs.writeFileSync(path.join(remotes, 'main'), `${'a'.repeat(40)}\n`);
+    fs.writeFileSync(path.join(remotes, 'HEAD'), 'ref: refs/remotes/origin/main\n');
+    childProcess.execFileSync('git', ['-C', root, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
+  }
+  const decide = (command, cwd) => hold.decide({ cwd, tool_name: 'Bash', tool_input: { command } }, { host: 'claude', registryOptions: f.registryOptions, environment: {} })?.deny || null;
+  const pushes = [[`git push ${STORE} main`, f.governed], [`git push ${STORE} HEAD:main`, f.governed]];
+  // Unbound, a store URL is only another repository's default branch: the pull request advice stands.
+  for (const [command, cwd] of pushes) assert.match(decide(command, cwd) || '', /default branch `main`.*push to another branch and open one/, command);
+  f.bind();
+  for (const [command, cwd] of pushes) assert.equal(decide(command, cwd), `Toolkit: ${guard.STORE_PUSH_MESSAGE}`, command);
+  // Pushes the merge hold lets through stay its business alone, and a push to the governed
+  // repository's own default branch keeps the pull request advice.
+  assert.equal(decide('git push origin feature', f.governed), null);
+  assert.match(decide('git push origin main', f.governed) || '', /push to another branch and open one/);
+});

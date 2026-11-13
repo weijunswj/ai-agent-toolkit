@@ -85,7 +85,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     (a sha field is not read); a call whose fields are missing, not readable or disagree is refused;
 //   - refused when written directly: any connector's auto-merge tool, GraphQL merges (the number cannot be read), the merge queue, branch merges,
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
-//     to the remote's default branch (evidence stores excepted, by name), a merge whose target is
+//     to the remote's default branch (evidence stores excepted, by name; a refused push the attribution
+//     guard reads as one to a bound store shows that guard's store-command message), a merge whose target is
 //     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
 //     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
 //     run through another shell or expression runner (bash -c, pwsh -Command, cmd /c, eval) is
@@ -505,6 +506,16 @@ function evidenceStoreAt(root, registryOptions = {}) {
 
 const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed']);
 
+// The attribution guard's store refusal when this command pushes to an evidence store this computer
+// has bound, else ''. A refused push whose target that guard reads as a bound store gets its message
+// (go through toolkit-store.cjs) instead of the default-branch advice (push another branch and open a
+// pull request), which is wrong for a store: its default branch is written directly, by the store
+// command, under standing permission. The push stays refused either way. A guard that cannot load
+// leaves the default-branch message.
+function storePushReason(text, cwd, registryOptions = {}, shell = null) {
+  try { return require('./toolkit-attribution-guard.cjs').storePushRefusal(text, cwd || process.cwd(), 0, registryOptions, shell); } catch { return ''; }
+}
+
 // The refusal for a git push in one segment, or ''. `variables` holds what earlier segments of the
 // same command assigned (assignmentOf).
 function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), shell = null } = {}) {
@@ -743,7 +754,7 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
     if (assigned) { assignVariable(variables, assigned); continue; }
     if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
     const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
-    if (reason) return refuse(reason);
+    if (reason) return refuse(storePushReason(text, cwd, registryOptions, shell) || reason);
   }
   return '';
 }
