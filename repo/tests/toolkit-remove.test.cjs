@@ -124,8 +124,8 @@ const MATRIX = [
   { row: 'changed by hand and named with --include', arrange: (w, e) => { e.live().state = 'Disabled'; }, include: true, kind: 'changed', action: 'remove', gone: true },
   { row: 'marker with its record lost', arrange: w => tasks.writeRegistry(w.home, []), kind: 'unrecorded', action: 'remove', gone: true },
   { row: 'disabled by the launcher, still the exact snapshot', arrange: (w, e) => disable(w, e), kind: 'disabled', action: 'remove', gone: true },
-  { row: 'disabled by the launcher, then changed', arrange: (w, e) => { disable(w, e); e.live().definition_xml = '<edited/>'; }, kind: null, gone: false },
-  { row: 'marker removed by hand', arrange: (w, e) => { e.live().description = 'mine now'; }, kind: null, gone: false },
+  { row: 'disabled by the launcher, then changed', arrange: (w, e) => { disable(w, e); e.live().definition_xml = '<edited/>'; }, kind: 'changed', action: 'keep', gone: false },
+  { row: 'marker removed by hand', arrange: (w, e) => { e.live().description = 'mine now'; }, kind: 'changed', action: 'keep', gone: false },
 ];
 function disable(w, e) {
   const live = e.live();
@@ -160,6 +160,19 @@ test('a record with no task behind it is cleared, and a task that is not Toolkit
   assert.equal(result.ok, true);
   assert.deepEqual(tasks.readRegistry(w.home).tasks, []);
   assert.deepEqual(w.scheduler.folders.get(folder).map(task => task.name), ['Someone else']);
+});
+
+// A task carrying a recorded task's marker in another folder was copied or moved by hand: kept.
+test('a marked copy of a recorded task in another folder is kept unless named', t => {
+  const w = world(t), e = enrol(t, w, 'widget');
+  const copy = { ...e.live(), name: 'My copy' };
+  w.scheduler.folders.set('MINE', [copy]);
+  const plan = owner(w).plan();
+  const item = plan.tasks.find(task => task.folder === 'MINE');
+  assert.equal(item.kind, 'changed');
+  assert.equal(item.action, 'keep');
+  owner(w).apply(plan.code);
+  assert.deepEqual(w.scheduler.folders.get('MINE').map(task => task.name), ['My copy']);
 });
 
 test('a folder that still holds another task is kept', t => {
@@ -304,7 +317,7 @@ test('Codex settings: the plan lists the raised project_doc_max_bytes line, its 
   assert.equal(fs.readFileSync(rules.codex, 'utf8'), original);
   assert.deepEqual(result.codex_settings, { file: '~/.codex/config.toml', result: 'restored-previous', backup: 'saved', load_check: 'verified' });
   assert.deepEqual(probes, [rules.codex]);
-  assert.match(removal.describeResult(result).join('\n'), /Codex settings ~\/\.codex\/config\.toml: restored-previous; Codex load check: verified/);
+  assert.match(removal.describeResult(result).join('\n'), /Codex settings ~\/\.codex\/config\.toml: put back to the earlier value; Codex load check: verified/);
   assert.deepEqual(fs.readFileSync(rules.claude), settings, 'other app settings stay byte for byte');
   assert.equal(owner(w, { rules: rules.factory }).plan().nothing, true);
 });
@@ -331,6 +344,25 @@ test('Codex settings: a config.toml Toolkit created for the line is deleted, and
   assert.equal(fs.readFileSync(rules.codex, 'utf8'), damaged);
   assert.equal(after.codex_settings, null);
   assert.equal(after.held_codex_settings.action, 'held');
+});
+
+// The plan said the damaged Codex line is left alone; removing the rules blocks must not turn that
+// planned hold into a failure or print the Codex line twice.
+test('Codex settings: damaged markers left alone while the rules blocks go is the planned outcome, shown once', t => {
+  const w = world(t);
+  const rules = realRules(w, []);
+  const damaged = `model = "example"\n${limitBlock('none')}\n# AI-AGENT-TOOLKIT:global-rules:END PROJECT-DOC-MAX-BYTES\n`;
+  fs.writeFileSync(rules.codex, damaged);
+  const plan = owner(w, { rules: rules.factory }).plan();
+  assert.equal(plan.codex_settings.action, 'held');
+  assert.ok(plan.rules.some(file => file.action === 'remove'), JSON.stringify(plan.rules));
+  const result = owner(w, { rules: rules.factory }).apply(plan.code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.codex_settings, null);
+  const text = removal.describeResult(result).join('\n');
+  assert.equal((text.match(/Codex settings/g) || []).length, 1, text);
+  assert.match(text, /Done\./);
+  assert.equal(fs.readFileSync(rules.codex, 'utf8'), damaged);
 });
 
 // ---- The other parts: app settings, helper agent files, skill copies and the Toolkit folder ----

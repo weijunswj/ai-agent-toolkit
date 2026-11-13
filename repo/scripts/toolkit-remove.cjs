@@ -141,7 +141,8 @@ class ToolkitRemoval {
     if (marker) {
       const entry = recorded.find(item => item.id === marker.id && item.folder === folder && !item.adopted) || null;
       const item = { ...base, id: marker.id, record: entry?.id || null, repository: entry?.repository || null };
-      if (!entry) return { ...item, kind: 'unrecorded' };
+      // A copy of a recorded task in another folder was moved or copied by hand: it is kept unless named.
+      if (!entry) return { ...item, kind: recorded.some(other => other.id === marker.id && !other.adopted) ? 'changed' : 'unrecorded' };
       const changed = entry.enrolled && JSON.stringify(ordered(windows.enrolledDefinition(live))) !== JSON.stringify(ordered(entry.enrolled));
       return { ...item, kind: changed ? 'changed' : 'toolkit' };
     }
@@ -152,7 +153,9 @@ class ToolkitRemoval {
     // The launcher rewrote this task's description when it disabled it, so the marker is gone. It is
     // still Toolkit's own only while it is byte for byte the snapshot the launcher recorded.
     const snapshot = entry.toolkit_missing === true && live.description === DISABLED_DESCRIPTION && entry.enrolled?.definition_xml;
-    return snapshot && live.definition_xml === snapshot ? { ...item, kind: 'disabled' } : null;
+    // Otherwise its record names a task that is still there but no longer Toolkit's: it is listed as
+    // kept, so its record and the shared runner it may still use stay too.
+    return snapshot && live.definition_xml === snapshot ? { ...item, kind: 'disabled' } : { ...item, kind: 'changed' };
   }
 
   // Toolkit's own task files under the user-state folder that go with the removed records.
@@ -207,7 +210,9 @@ class ToolkitRemoval {
         const removed = this.#rules().remove();
         rules = removed.files.map(file => ({ harness: file.harness, file: file.display || file.file, result: file.action, ...(file.backup ? { backup: 'saved' } : {}) }));
         const limit = removed.doc_limit;
-        if (limit && !['reported', 'unchanged'].includes(limit.action)) {
+        // A held line the plan already showed as left alone is the planned outcome, printed once below.
+        const plannedHold = limit?.action === 'held' && plan.codex_settings?.action === 'held';
+        if (limit && !plannedHold && !['reported', 'unchanged'].includes(limit.action)) {
           codex = { file: limit.display || plan.codex_settings?.file || null, result: limit.action === 'held' ? 'failed' : limit.action,
             ...(limit.action === 'held' ? { reason: tasks.safeText(limit.detail || 'left alone') } : {}), ...(limit.backup ? { backup: 'saved' } : {}),
             ...(limit.load_check?.status ? { load_check: limit.load_check.status } : {}) };
@@ -231,6 +236,11 @@ class ToolkitRemoval {
       folder_kept: others.some(part => part.key === 'toolkit_folder' && part.results.some(item => item.result === 'kept')) };
   }
 }
+
+// The rules remover's result codes, in plain words.
+const RESULT_WORDS = Object.freeze({ removed: 'removed', 'deleted-file': 'put back; the file Toolkit created for it is deleted', 'restored-previous': 'put back to the earlier value',
+  absent: 'nothing to remove', held: 'left alone', failed: 'failed', unchanged: 'unchanged', skipped: 'left alone', 'opted-out': 'already removed by you' });
+const words = code => RESULT_WORDS[code] || String(code).replace(/-/g, ' ');
 
 const NOT_TOUCHED = 'Not touched: your repositories, your keys (the env store and the credential store), the Claude Code preferences you chose at setup (listed above when there are any), and every setting, agent, skill and file you made yourself.';
 
@@ -294,9 +304,9 @@ function describeResult(result) {
   for (const item of result.kept) lines.push(`- ${taskLine(item)}: kept`);
   for (const item of result.folders) lines.push(`- Folder \\${item.folder}\\: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
   for (const item of result.steps) lines.push(`- ${item.step}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
-  for (const item of result.rules) lines.push(`- Global rules ${item.file || ''}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
+  for (const item of result.rules) lines.push(`- Global rules ${item.file || ''}: ${words(item.result)}${item.reason ? ` (${item.reason})` : ''}`);
   for (const item of result.held_rules) lines.push(`- Global rules ${item.file}: left alone, ${item.detail || item.state}`);
-  if (result.codex_settings) lines.push(`- Codex settings ${result.codex_settings.file || ''}: ${result.codex_settings.result}${result.codex_settings.reason ? ` (${result.codex_settings.reason})` : ''}${result.codex_settings.load_check ? `; Codex load check: ${result.codex_settings.load_check}` : ''}`);
+  if (result.codex_settings) lines.push(`- Codex settings ${result.codex_settings.file || ''}: ${words(result.codex_settings.result)}${result.codex_settings.reason ? ` (${result.codex_settings.reason})` : ''}${result.codex_settings.load_check ? `; Codex load check: ${result.codex_settings.load_check}` : ''}`);
   if (result.held_codex_settings) lines.push(`- Codex settings ${result.held_codex_settings.file}: left alone, ${result.held_codex_settings.detail || 'its Toolkit lines are damaged'}`);
   for (const part of result.parts || []) {
     for (const item of part.results) lines.push(`- ${item.what}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
