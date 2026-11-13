@@ -1431,26 +1431,70 @@ test('validate-n8n-workflows.cjs does not count an expression-built host as a pr
   assert.doesNotMatch(result.stderr, /production-looking URL/);
 });
 
-test('validate-n8n-workflows.cjs allows a public host from the policy file and keeps the default hosts', () => {
+test('validate-n8n-workflows.cjs still fails a real host hidden next to an expression or in prose', () => {
+  const rows = [
+    '=https://prod.company.com?id={{ $json.id }}',
+    '=https://prod.company.com:{{ $env.PORT }}/v1',
+    '=https://{{ $env.U }}@prod.company.com/v1',
+    'https://prod.company.com:99999/v1',
+    'Prod at [https://prod.company.com] today',
+    'Use `https://prod.company.com` here',
+    '=https://prod.company.com/{{ $json.id }}',
+  ];
+  for (const value of rows) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({ url: value }));
+    const result = runNode(validateScript, [], { cwd });
+    assert.notEqual(result.status, 0, `${value} must fail`);
+    assert.match(result.stderr, /contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.url/, value);
+    assert.doesNotMatch(result.stdout + result.stderr, /prod\.company\.com/, `${value}: the log never prints the host`);
+  }
+  for (const value of ['https://{{a}}.company.com/', '=https://{{ $vars.API_HOST }}/v1']) {
+    const cwd = tempDir();
+    writeJson(path.join(cwd, 'n8n-workflows', 'probe.json'), urlWorkflow({ url: value }));
+    const result = runNode(validateScript, [], { cwd });
+    assert.equal(result.status, 0, `${value} has no real host: ${result.stderr}`);
+  }
+});
+
+test('validate-n8n-workflows.cjs passes a vanilla OpenAI HTTP Request with no policy file and still fails a company host', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'openai.json'), urlWorkflow({
+    url: 'https://api.openai.com/v1/chat/completions',
+    docs: 'https://docs.n8n.io/integrations/',
+  }));
+  const vanilla = runNode(validateScript, [], { cwd });
+  assert.equal(vanilla.status, 0, vanilla.stderr);
+  assert.doesNotMatch(vanilla.stderr, /production-looking URL/);
+
+  writeJson(path.join(cwd, 'n8n-workflows', 'company.json'), urlWorkflow({ url: 'https://crm.acme-real.test/v1/leads' }));
+  const company = runNode(validateScript, [], { cwd });
+  assert.notEqual(company.status, 0, 'a private host is not on the built-in list');
+  assert.match(company.stderr, /company\.json contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.url/);
+  assert.doesNotMatch(company.stderr, /openai\.json contains/);
+});
+
+test('validate-n8n-workflows.cjs allows a company host from the policy file and keeps the default and built-in hosts', () => {
   const cwd = tempDir();
   const workflowDir = path.join(cwd, 'n8n-workflows');
   writeJson(path.join(workflowDir, 'api.json'), urlWorkflow({
-    url: 'https://api.openai.com/v1/chat/completions',
+    url: 'https://crm.acme-real.test/v1/leads',
+    openai: 'https://api.openai.com/v1/chat/completions',
     docs: 'https://n8n.example.com/callback',
     contact: 'ops@example.com',
   }));
 
   const blocked = runNode(validateScript, [], { cwd });
-  assert.notEqual(blocked.status, 0, 'a public API host is not allowed until the owner allows it');
+  assert.notEqual(blocked.status, 0, 'a company host is not allowed until the owner allows it');
 
-  writeJson(path.join(cwd, 'n8n-workflow-policy.json'), { allowedUrlHosts: ['api.openai.com'] });
+  writeJson(path.join(cwd, 'n8n-workflow-policy.json'), { allowedUrlHosts: ['acme-real.test'] });
   const allowed = runNode(validateScript, [], { cwd });
   assert.equal(allowed.status, 0, allowed.stderr);
 
   // The live import validates the workflow folder by path from the repository root, as here.
   const liveImportStyle = runNode(validateScript, [workflowDir], { cwd });
   assert.equal(liveImportStyle.status, 0, liveImportStyle.stderr);
-  assert.doesNotMatch(liveImportStyle.stderr, /production-looking URL|non-placeholder email/, 'example.com and n8n.example.com stay allowed');
+  assert.doesNotMatch(liveImportStyle.stderr, /production-looking URL|non-placeholder email/, 'defaults and built-in hosts stay allowed');
 });
 
 test('validate-n8n-workflows.cjs keeps email and URL findings as warnings in prepared-import mode, still without the value', () => {

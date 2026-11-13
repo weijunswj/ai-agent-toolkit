@@ -76,11 +76,11 @@ The explicit phases remain `PREPARED`, `INSTALLING`, `PRECOMMIT_VERIFIED`, `COMM
 
 An explicitly supplied import deployment-policy path is validated as a safe readable regular file inside the repository before live discovery or preparation, and its validated snapshot is rechecked before use. Required credential misses drive the create-and-rerun action. Optional zero-match requirements remain informational and do not turn an unchanged workflow into `ACTION_REQUIRED`; ambiguous or otherwise unsafe matches still fail closed. Failure receipts map each stable code to one concrete remedy, and Explain last failure displays that remedy without a self-referential loop.
 
-`validate-n8n-workflows.cjs` fails a workflow in the canonical folder (the live import checks it before importing) that holds a non-placeholder email or a production-looking URL; in `--mode prepared-import` those stay warnings, because locally bound values belong there. Either way it names the JSON path, never the value. A URL whose host is built from an expression (`https://{{ $vars.API_HOST }}/...`) holds no real host and is not a finding. To allow a public API host or a company email domain the workflow really needs, add it to `n8n-workflow-policy.json` at the repository root; entries add to the defaults (`example.com`, `n8n.example.com`), and a host also allows its subdomains:
+`validate-n8n-workflows.cjs` fails a workflow in the canonical folder (the live import checks it before importing) that holds a non-placeholder email or a production-looking URL; in `--mode prepared-import` those stay warnings, because locally bound values belong there. Either way it names the JSON path, never the value. A URL whose host itself is built from an expression (`https://{{ $vars.API_HOST }}/...`) holds no real host and is not a finding; a real host next to an expression (in the path, query, port or user info) is still one. Well-known public API hosts are allowed with no policy file; the list is `PUBLIC_API_HOSTS` at the top of `validate-n8n-workflows.cjs` (for example `api.openai.com`, `api.anthropic.com`, `www.googleapis.com`, `graph.microsoft.com`, `api.github.com` and `docs.n8n.io`). Private or unknown hosts still fail. To allow another host or a company email domain the workflow really needs, add it to `n8n-workflow-policy.json` at the repository root; entries add to the defaults (`example.com`, `n8n.example.com` and the public list), and a host also allows its subdomains:
 
 ```json
 {
-  "allowedUrlHosts": ["api.openai.com", "docs.n8n.io"],
+  "allowedUrlHosts": ["crm.example.org"],
   "allowedEmailDomains": ["example.org"]
 }
 ```

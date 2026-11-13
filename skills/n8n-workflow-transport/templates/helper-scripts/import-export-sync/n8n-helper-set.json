@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "ai-agent-toolkit n8n import-export helpers",
-  "setId": "5fc84953b282",
+  "setId": "1f1fcfd90eb2",
   "files": {
     "_export-n8n-workflows-live.cmd": "29c29daf078b49d808ed7798d6a97da76b8e929080478bf8ca3a6e47739df1e8",
     "_import-n8n-workflows-live.cmd": "2b66d00c559e052db51dab8cef11b2befee9750a506c7df4bb80bf0055cd1ab0",
@@ -22,6 +22,6 @@
     "resolve-n8n-docker-target.cjs": "6d8a80f1f4111a1730824f81b243e9180fdb573d451eaa6d959d2384352661a7",
     "should-import-n8n-workflow.cjs": "6402b889262f26a48b33bbdd774330fc752cac68ef16c36aecc59427418abd83",
     "sync-n8n-live-exports.cjs": "b527cd9935bcfb641cd0a24507e5f7cdcfe5b06c99841ebdb1a0b1543adfe4b8",
-    "validate-n8n-workflows.cjs": "0c15b33b9ab60646cd3fdc86e6a8be78c2e1de0d20beed08da91203dbe6af448"
+    "validate-n8n-workflows.cjs": "ace2980a05ae60ed2acf231857d9deb9c85d59d903c7570e1c895a9919cbbf6b"
   }
 }

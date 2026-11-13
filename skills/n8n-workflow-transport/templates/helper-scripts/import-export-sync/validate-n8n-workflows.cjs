@@ -4,6 +4,26 @@ const { riskyNodeLines, riskyNodes } = require('./n8n-risky-nodes.cjs');
 
 const CANONICAL_WORKFLOW_DIR = 'n8n-workflows';
 const DEFAULT_POLICY_FILE = 'n8n-workflow-policy.json';
+// Well-known public API hosts (and n8n's own docs) that a workflow may call without a policy
+// entry. They carry no owner data. Each also allows its subdomains, so list API hosts only, never
+// a domain whose subdomains serve private webhook URLs. Repositories add their own hosts in
+// n8n-workflow-policy.json allowedUrlHosts; private or unknown hosts still fail.
+const PUBLIC_API_HOSTS = Object.freeze([
+  'api.openai.com',
+  'api.anthropic.com',
+  'generativelanguage.googleapis.com',
+  'sheets.googleapis.com',
+  'www.googleapis.com',
+  'graph.microsoft.com',
+  'api.github.com',
+  'api.notion.com',
+  'api.airtable.com',
+  'api.hubapi.com',
+  'api.stripe.com',
+  'api.twilio.com',
+  'api.sendgrid.com',
+  'docs.n8n.io',
+]);
 
 function parseArgs(argv) {
   let workflowDirArg = null;
@@ -63,7 +83,7 @@ function loadPolicy(root, policyArg) {
       '^[A-Z0-9_]+_PLACEHOLDER$',
     ],
     allowedEmailDomains: ['example.com'],
-    allowedUrlHosts: ['example.com', 'n8n.example.com'],
+    allowedUrlHosts: ['example.com', 'n8n.example.com', ...PUBLIC_API_HOSTS],
     allowedLiteralValues: [],
     warnOnGoogleIds: true,
     failOnWarnings: false,
@@ -165,12 +185,16 @@ function walk(value, visitor, trail = []) {
 }
 
 // Distinct unsafe values and the places they appear, without the values themselves.
-function findUnsafeStringPlaces(workflow, regex, isAllowed) {
+function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
   const values = new Set();
   const places = [];
   const visit = (value, trail) => {
     if (typeof value === 'string') {
-      const unsafe = (value.match(regex) || []).filter((match) => !isAllowed(match));
+      // For URLs, collapse each {{ ... }} expression to one token first, so a space inside an
+      // expression does not end the match before a real host (https://{{ $env.U }}@host/...).
+      // Emails are matched as written, so one quoted inside an expression is still found.
+      const collapsed = options.collapseExpressions ? value.replace(/\{\{[\s\S]*?\}\}/g, '{{expr}}') : value;
+      const unsafe = (collapsed.match(regex) || []).filter((match) => !isAllowed(match));
       if (unsafe.length > 0) {
         unsafe.forEach((match) => values.add(match));
         places.push(trail.join('.') || '(root)');
@@ -213,17 +237,16 @@ function createPolicyHelpers(policy) {
 
   const allowedUrl = (url) => {
     if (isAllowedPlaceholder(url) || isAllowedLiteral(url)) return true;
-    // A host built from an expression ({{ ... }}) or one that does not parse holds no real host,
-    // so it is not a production URL finding.
-    const hostPart = url.replace(/^https?:\/\//i, '').split('/')[0];
-    if (hostPart.includes('{{')) return true;
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return true;
-    }
-    return policy.allowedUrlHosts.some((allowedHost) => hostMatches(parsed.hostname, allowedHost));
+    // Read the host the way a URL parser does: cut at / ? or #, drop user info and a port (literal
+    // or expression) and trailing prose punctuation. Only a host that is itself an expression
+    // ({{ ... }}) holds no real host and is skipped; anything else is checked, parseable or not.
+    const authority = url.replace(/^https?:\/\//i, '').split(/[/?#]/)[0];
+    const host = authority.slice(authority.lastIndexOf('@') + 1)
+      .replace(/:[^:\]]*$/, '')
+      .replace(/[\]`.,;]+$/, '')
+      .toLowerCase();
+    if (host.includes('{{')) return true;
+    return policy.allowedUrlHosts.some((allowedHost) => hostMatches(host, allowedHost));
   };
 
   return {
@@ -547,7 +570,7 @@ for (const filePath of files) {
     personalDataFinding(`${relative} contains ${unsafeEmailPlaces.count} non-placeholder email(s) at ${unsafeEmailPlaces.places}. Replace with a placeholder, or allow the domain in ${DEFAULT_POLICY_FILE} allowedEmailDomains.`);
   }
 
-  const unsafeUrlPlaces = findUnsafeStringPlaces(workflow, urlRegex, helpers.allowedUrl);
+  const unsafeUrlPlaces = findUnsafeStringPlaces(workflow, urlRegex, helpers.allowedUrl, { collapseExpressions: true });
   if (unsafeUrlPlaces.count > 0) {
     personalDataFinding(`${relative} contains ${unsafeUrlPlaces.count} production-looking URL(s) at ${unsafeUrlPlaces.places}. Replace with a placeholder, or allow the host in ${DEFAULT_POLICY_FILE} allowedUrlHosts.`);
   }
