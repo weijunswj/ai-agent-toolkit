@@ -3,9 +3,9 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-Toolkit setup choices - 11 questions across 5 sections
+Toolkit setup choices - 10 questions across 4 sections
 
-Bank reference: D5AD-XT9V-VR7H-WHC1
+Bank reference: BE0G-GQR5-PTK8-N8RX
 
 Quick index
 
@@ -19,8 +19,7 @@ Quick index
 3.1 Keep Toolkit available in Codex? - Recommended: A - Keep current
 3.2 Copy Toolkit's skills into Antigravity? - Recommended: A - Keep current
 Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
-4.1 May Codex merge finished task pull requests without you typing merge? - Recommended: B - On
-5.1 May Toolkit update scheduled tasks on this computer? - Recommended: A - No standing approval
+4.1 May Toolkit update scheduled tasks on this computer? - Recommended: A - No standing approval
 
 
 ## 1. Updates and reports
@@ -275,37 +274,9 @@ Status (nothing to answer): Toolkit hooks in Codex: All 6 on. Nothing to do.
 ---
 
 
-## 4. Toolkit settings
+## 4. Windows scheduled tasks
 
-### 4.1 May Codex merge finished task pull requests without you typing merge?
-
-**What this controls:** Sets this app's answer on this computer, only for repositories with Toolkit governance enabled, after review, required checks and your testing pass. Governance, hooks, setup and merge-rule changes still need your typed merge.
-
-**Current:** Off (no answer saved)
-
-**Verification:** verified
-
-**Recommended:** B - On
-
-**Recommended outcome:** On: merge finished tasks after their gates pass.
-
-**Why:** Finished tasks have passed review, checks and your testing; protected changes still wait for your typed merge.
-
-**Choices:**
-
-- **A. Keep current** - Keep Off (no answer saved); do not rewrite the saved answer.
-- **B. On** - Allow finished task pull requests to merge after the required gates pass.
-
-**After applying:** The app-local answer is saved separately from app settings. Rule-refresh pull requests always wait for your typed merge.
-
-**Selected:** B - On
-
----
-
-
-## 5. Windows scheduled tasks
-
-### 5.1 May Toolkit update scheduled tasks on this computer?
+### 4.1 May Toolkit update scheduled tasks on this computer?
 
 **What this controls:** Create, update and remove the listed fixed scheduled tasks on this computer across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.
 
@@ -341,9 +312,9 @@ Anything you do not list takes its recommendation.
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 13 questions across 5 sections
+Toolkit setup choices - 12 questions across 4 sections
 
-Bank reference: E3FC-K3C5-DNFX-KYTB
+Bank reference: PNXR-R20X-C53C-GDAY
 
 Quick index
 
@@ -358,8 +329,7 @@ Quick index
 3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: A - Keep current
 3.5 Claude Code setting: Read AGENTS.md too? - Recommended: B - Turn on
 3.6 Copy Toolkit's skills into Antigravity? - Recommended: A - Keep current
-4.1 May Claude Code merge finished task pull requests without you typing merge? - Recommended: B - On
-5.1 May Toolkit update scheduled tasks on this computer? - Recommended: A - No standing approval
+4.1 May Toolkit update scheduled tasks on this computer? - Recommended: A - No standing approval
 
 
 ## 1. Updates and reports
@@ -649,37 +619,9 @@ Quick index
 ---
 
 
-## 4. Toolkit settings
+## 4. Windows scheduled tasks
 
-### 4.1 May Claude Code merge finished task pull requests without you typing merge?
-
-**What this controls:** Sets this app's answer on this computer, only for repositories with Toolkit governance enabled, after review, required checks and your testing pass. Governance, hooks, setup and merge-rule changes still need your typed merge.
-
-**Current:** Off (no answer saved)
-
-**Verification:** verified
-
-**Recommended:** B - On
-
-**Recommended outcome:** On: merge finished tasks after their gates pass.
-
-**Why:** Finished tasks have passed review, checks and your testing; protected changes still wait for your typed merge.
-
-**Choices:**
-
-- **A. Keep current** - Keep Off (no answer saved); do not rewrite the saved answer.
-- **B. On** - Allow finished task pull requests to merge after the required gates pass.
-
-**After applying:** The app-local answer is saved separately from app settings. Rule-refresh pull requests always wait for your typed merge.
-
-**Selected:** B - On
-
----
-
-
-## 5. Windows scheduled tasks
-
-### 5.1 May Toolkit update scheduled tasks on this computer?
+### 4.1 May Toolkit update scheduled tasks on this computer?
 
 **What this controls:** Create, update and remove the listed fixed scheduled tasks on this computer across enrolled and discovered GitHub checkouts, including moved-checkout repair. New task kinds and hand-edited definitions ask again. Owner stops remain stopped. Cloud triggers, permission blocks and other tasks are excluded. Task kinds: TASK HEALTH, FOOTER SWEEP, PROGRAMME SWEEP and SHARD TIMINGS.
 

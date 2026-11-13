@@ -268,15 +268,21 @@ function bindingRequiredChecks(root, options = {}) {
   return binding ? [...binding.required_checks] : null;
 }
 
-// One resolver for setup, reporting and enforcement. The selected app's local answer is
-// the only switch. A fresh enabled v2 merged binding still bounds its repository scope.
-// Setup passes no root and displays `preference`; that never grants a repository merge.
+// The apps that run Toolkit's hooks. Anything else is an unknown host and never merges on its own.
+const HOSTS = Object.freeze(['codex', 'claude-code']);
+const normaliseHost = host => host === 'claude' ? 'claude-code' : HOSTS.includes(host) ? host : null;
+
+// The task auto-merge switch a parsed binding sets: 'after-gates', 'off', or null when it has none.
+function taskSwitchOf(binding) {
+  const value = binding && typeof binding.task_prs === 'object' && binding.task_prs ? binding.task_prs.auto_merge : undefined;
+  return value === 'after-gates' || value === 'off' ? value : null;
+}
+
+// One resolver for reporting and enforcement. The repository's merged binding is the only switch:
+// `task_prs.auto_merge` in a fresh, enabled, version 2 binding. No app-local file, label or
+// project line grants anything. `answered` is false when that binding sets no switch (the upgrade).
 function taskAutoMerge(root, options = {}) {
-  const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferences.cjs');
-  const preference = new TaskAutoMergePreferences({ host: options.host, ...(options.home ? { home: options.home } : {}) }).inspect();
-  const off = { auto_merge: 'off', answered: preference.status === 'saved', fresh: false,
-    source: preference.host ? `machine:${preference.host}` : 'unavailable', preference };
-  if (preference.status === 'blocked') return { ...off, reason: preference.host ? 'preference-blocked' : 'unknown-host' };
+  const off = { auto_merge: 'off', answered: false, fresh: false, source: 'binding' };
   if (!root) return { ...off, reason: 'repository-required' };
   try {
     const identity = readIdentity(root);
@@ -284,9 +290,42 @@ function taskAutoMerge(root, options = {}) {
     const now = typeof options.now === 'function' ? options.now() : new Date();
     const judged = judgeMerged(bindingCache.readBindingCache(identity, userStateDirectory(options)), identity, now);
     if (judged.status !== 'enabled' || judged.binding.schema !== 'toolkit.programme-binding.v2' || judged.fresh !== true) return { ...off, reason: 'fresh-enabled-binding-required' };
-    return { ...off, fresh: true, auto_merge: preference.value,
-      reason: preference.status === 'missing' ? 'no-answer-saved' : preference.value === 'off' ? 'machine-off' : 'machine-on' };
+    const value = taskSwitchOf(judged.binding);
+    if (!value) return { ...off, fresh: true, reason: 'no-switch-set' };
+    return { ...off, fresh: true, answered: true, auto_merge: value, reason: value === 'after-gates' ? 'repository-on' : 'repository-off' };
   } catch { return { ...off, reason: 'binding-unreadable' }; }
+}
+
+// Shown once a governed repository's merged binding sets no switch yet (the upgrade): a line, not a hold.
+const TASK_SWITCH_UPGRADE_LINE = 'Task auto-merge is off here until you set it; say refresh governance.';
+
+// The app-local answers older Toolkit versions saved. They grant nothing; this removes them, but
+// only once the repository's own switch is merged and read back fresh, so a computer never has no
+// switch at all. Returns the names removed (none when the switch is not yet read back).
+const LEGACY_TASK_ANSWERS = Object.freeze(HOSTS.map(host => `task-auto-merge.${host}.v1.json`));
+function retireLegacyTaskAnswers(root, options = {}) {
+  if (!taskAutoMerge(root, options).answered) return [];
+  const folder = userStateDirectory(options);
+  const removed = [];
+  for (const name of LEGACY_TASK_ANSWERS) {
+    for (const file of [name, `${name}.lock`]) {
+      try {
+        const stat = fs.lstatSync(path.join(folder, file));
+        if (!stat.isFile() && !stat.isSymbolicLink()) continue;
+        fs.unlinkSync(path.join(folder, file));
+        if (file === name) removed.push(name);
+      } catch { /* absent, or not removable: it grants nothing either way */ }
+    }
+  }
+  return removed;
+}
+
+// Whether this computer still holds an app-local answer from an older Toolkit version.
+function legacyTaskAnswersPresent(options = {}) {
+  try {
+    const folder = userStateDirectory(options);
+    return LEGACY_TASK_ANSWERS.some(name => fs.existsSync(path.join(folder, name)));
+  } catch { return false; }
 }
 
 // The dependency policy of a parsed binding: { auto_merge, github_actions }. Missing keys take the
@@ -619,6 +658,13 @@ module.exports = Object.freeze({
   bindingRequiredChecks,
   workingBindingRequiredChecks,
   taskAutoMerge,
+  taskSwitchOf,
+  retireLegacyTaskAnswers,
+  legacyTaskAnswersPresent,
+  LEGACY_TASK_ANSWERS,
+  TASK_SWITCH_UPGRADE_LINE,
+  HOSTS,
+  normaliseHost,
   committedBindingPolicy,
   workingBindingPolicy,
   userStateDirectory,

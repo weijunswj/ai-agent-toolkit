@@ -45,7 +45,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const governance = require('./toolkit-governance-state.cjs');
-const { normaliseHost } = require('./toolkit-task-auto-merge-preferences.cjs');
+const { normaliseHost } = governance;
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
 
 const HELD_BASENAME = 'held-prompts.v1.json';

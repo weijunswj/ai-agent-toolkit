@@ -16,18 +16,16 @@ function bankFor(host, extra = []) {
 }
 
 for (const host of ['codex', 'claude-code']) {
-  test(`${host}: only the task merge question is offered; refresh merging stays owner-only`, () => {
+  test(`${host}: setup asks no merge question; task auto-merge lives in each repository's governance`, () => {
     const { specs, args } = bankFor(host);
-    const rows = specs.filter(spec => /auto-?merge/i.test(spec.id));
-    assert.deepEqual(rows.map(row => row.id), ['task-auto-merge']);
-    assert.equal(args.setupChoices.taskAutoMerge, 'after-gates');
-    assert.match(rows[0].afterApplying, /Rule-refresh.*typed merge/);
-    assert.doesNotMatch(JSON.stringify(args), /refreshPrAutoMerge/);
+    assert.deepEqual(specs.filter(spec => /auto-?merge/i.test(`${spec.id} ${spec.title}`)).map(row => row.id), []);
+    assert.equal(args.setupChoices.taskAutoMerge, undefined);
+    assert.doesNotMatch(JSON.stringify(args), /refreshPrAutoMerge|taskAutoMerge/);
   });
 }
 
 test('the old auto-merge flags are rejected', () => {
-  for (const flag of ['--enable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge', '--keep-refresh-pr-auto-merge', '--refresh-pr-auto-merge']) {
+  for (const flag of ['--enable-refresh-pr-auto-merge', '--disable-refresh-pr-auto-merge', '--keep-refresh-pr-auto-merge', '--refresh-pr-auto-merge', '--task-auto-merge', '--task-auto-merge=after-gates']) {
     assert.throws(() => core.parseArgs([flag]), /Unknown|Unsupported/i, flag);
   }
 });

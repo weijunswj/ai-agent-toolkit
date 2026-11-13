@@ -994,7 +994,8 @@ function nestedRefusal(text) {
 }
 
 // The owner's standing answer for the repository of folder `cwd`: { repository, scope } when the
-// app-local answer is On, the merged binding enables governance and the user started this session;
+// repository's merged binding switches task auto-merge on, the app is a known one and the user
+// started this session;
 // otherwise a structured failure. `scope(head)` is the merge-scope verdict against this folder's copy of
 // the remote's default branch, or null when git cannot read it.
 function standingAnswer(input, cwd, { environment = process.env, registryOptions = {}, now, host = null } = {}) {
@@ -1005,14 +1006,16 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
   const checks = {
     repositoryValid: Boolean(repository && root),
-    autoMergeOn: answer?.preference?.status === 'saved' && answer.preference.value === 'after-gates',
+    knownHost: governance.normaliseHost(host) !== null,
+    autoMergeOn: answer?.auto_merge === 'after-gates',
     bindingFresh: answer?.fresh === true,
     ...sessionChecks(sessionId, environment || {}, registryOptions, now, host),
   };
   const reason = !checks.nativeSessionContext ? 'no-native-session-context'
     : !checks.repositoryValid ? 'no-repository'
-    : !checks.autoMergeOn ? 'auto-merge-off'
     : !checks.bindingFresh ? 'binding-not-fresh'
+    : !checks.autoMergeOn ? 'auto-merge-off'
+    : !checks.knownHost ? 'unknown-host'
     : !checks.sessionMarked ? 'no-session-mark'
     : checks.launcherMarker ? 'launcher-marker'
     : !checks.hostSessionMatches ? 'host-session-mismatch'
@@ -1033,7 +1036,8 @@ function standingReason(reason) {
   return {
     'no-native-session-context': "this terminal has no native session context; run the check in the session with Toolkit's hook",
     'no-repository': 'this folder has no usable GitHub repository',
-    'auto-merge-off': "this app's task auto-merge answer is not On or cannot be read",
+    'unknown-host': 'this app is not one Toolkit knows, so it never merges on a standing answer',
+    'auto-merge-off': "this repository's merged governance binding does not set task_prs.auto_merge to after-gates (refresh governance shows or changes it)",
     'binding-not-fresh': 'the enabled merged governance binding is missing, invalid or not fresh',
     'no-session-mark': 'this session has no readable session-start mark',
     'launcher-marker': 'a Toolkit launcher marker is present',

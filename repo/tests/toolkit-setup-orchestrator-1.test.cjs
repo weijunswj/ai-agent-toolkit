@@ -67,6 +67,7 @@ for (const host of ['codex', 'claude-code']) {
             update_report_open_enabled: state === 'legacy',
             ...(state === 'legacy' ? { targets: { retired: { enabled: true } } } : {}) }),
           '.ai-agent-toolkit/current/manifest.json': JSON.stringify({ schema_version: 1, assets: [] }),
+          // An older Toolkit's per-app answer: planning reads nothing from it and leaves it alone.
           [`.ai-agent-toolkit/user-state/task-auto-merge.${host}.v1.json`]: JSON.stringify({ schema: 'toolkit.task-auto-merge-preferences.v1', host, value: 'after-gates' }),
         };
         if (state !== 'missing') {
@@ -107,10 +108,9 @@ for (const host of ['codex', 'claude-code']) {
         `);
         const before = snapshotTree(root);
         const quotedPreload = preload.replace(/[\\"]/g, (char) => `\\${char}`);
-        const result = run([...mode, '--host', host, '--yes-recommended', '--task-auto-merge', 'after-gates',
+        const result = run([...mode, '--host', host, '--yes-recommended',
           '--enable-repo-auto-update', '--enable-codex-plugin-auto-refresh', '--claude-settings', 'enable'], {
           env: { ...env, NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require "${quotedPreload}"`].filter(Boolean).join(' ') },
-          taskAutoMergeQuestion: true,
         });
         assert.equal(result.status, 0, result.stderr || result.stdout);
         assert.doesNotMatch(result.stdout + result.stderr, /planning attempted/);

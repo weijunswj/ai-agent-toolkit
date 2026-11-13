@@ -203,11 +203,7 @@ function checkEvidenceAuthority(t, name, spec, allowed) {
     const entry = cache.readBindingCache(governance.readIdentity(ctx.other), stateDirectory);
     cache.writeCache(stateDirectory, { ...entry, status: 'absent', text: null, bytes_sha256: null });
   }
-  if (spec.taskOff) for (const host of ['codex', 'claude-code']) {
-    const { TaskAutoMergePreferences } = require('../scripts/toolkit-task-auto-merge-preferences.cjs');
-    const prefs = new TaskAutoMergePreferences({ home: ctx.options.registryOptions.home, host });
-    prefs.apply('off', prefs.inspect());
-  }
+  // spec.taskOff: these bindings set no task_prs, so the repository switch is already off.
   const repo = { full_name: 'owner/a', private: true, permissions: { push: true }, default_branch: 'main' };
   const pr = { number: 17, base: { repo: { full_name: 'owner/a' }, ref: 'main' }, head: { sha: SHA } };
   if (spec.metadata === 'public') repo.private = false;
@@ -421,8 +417,8 @@ test('the check command uses native hook context, writes nothing and leaves appr
       assert.equal(report.resumed, false);
       assert.equal(report.launcherMarker, false);
       assert.equal(report.forked, false);
-      assert.equal(report.eligible, false, 'no app answer in this fixture');
-      assert.equal(report.reason, 'auto-merge-off');
+      assert.equal(report.eligible, false, 'no merged binding, so no repository switch, in this fixture');
+      assert.equal(report.reason, 'binding-not-fresh');
       assert.doesNotMatch(verdict.deny, /private-|owner\/a|618|62405eb|prompt|epoch|user-state/);
       assert.deepEqual(snapshot(), before);
     }

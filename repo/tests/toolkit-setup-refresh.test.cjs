@@ -23,7 +23,6 @@ function settledState(host, overrides = {}) {
   const base = core.documentationFixtureState();
   const state = {
     ...base,
-    taskAutoMerge: { status: 'saved', value: 'after-gates', digest: 'saved' },
     scheduledTaskApproval: { decision: 'no' },
     ...(host === 'claude-code' ? {
       agentProfile: { supported: true, topology: 'root-only' },
@@ -123,9 +122,9 @@ for (const host of HOSTS) {
     const file = path.join(tempFolder(t), 'shapes.json');
     const state = settledState(host);
     const rows = core.refreshShapeRows(specsFor(host, state), state);
-    delete rows['task-auto-merge'];
+    delete rows['update-reports'];
     core.saveRefreshShapes(rows, host, { refreshShapePath: file });
-    assertBankShown(await refresh(host, state, file), /task pull requests.*it is new/);
+    assertBankShown(await refresh(host, state, file), /Update reports: it is new/);
   });
 
   test(`${host}: a changed question or choice list shows the full bank`, async (t) => {
@@ -140,14 +139,14 @@ for (const host of HOSTS) {
   test(`${host}: a newly recommended change shows the bank; one already declined stays silent`, async (t) => {
     const file = path.join(tempFolder(t), 'shapes.json');
     saveAnswered(file, host, settledState(host));
-    const off = settledState(host, { taskAutoMerge: { status: 'saved', value: 'off', digest: 'saved' } });
+    const off = settledState(host, { audit: audit => ({ ...audit, update_report_enabled: false }) });
     assertBankShown(await refresh(host, off, file), /setup now recommends a change/);
     // Answered with the recommendation showing: the owner kept Off, so later refreshes keep it.
     saveAnswered(file, host, off);
     const kept = await refresh(host, off, file);
     assertKept(kept);
-    assert.equal(kept.args.setupChoices.taskAutoMerge, 'keep');
-    assert.equal(kept.args.taskAutoMerge, 'off');
+    assert.equal(kept.args.setupChoices.updateReports, 'keep');
+    assert.equal(kept.args.updateReports, false);
   });
 
   test(`${host}: no saved record, or an unreadable one, shows the bank once`, async (t) => {
@@ -215,7 +214,7 @@ test('--refresh refuses every other answer source before any write', () => {
   const base = ['--execute', '--profile', 'auto-main', '--refresh'];
   for (const extra of [
     ['--yes-recommended'], ['--approve-codex-config-proposal'], ['--approve-high-helper-capacity'],
-    ['--task-auto-merge', 'keep'], ['--keep-repo-auto-update'], ['--codex-helper-count', '1'],
+    ['--keep-repo-auto-update'], ['--codex-helper-count', '1'],
     ['--update-report-retention-days', '3'], ['--repo-root', os.tmpdir()], ['--claude-settings', 'keep'],
     ['--scheduled-task-update', 'standing'], ['--codex-plugin-behavior', 'install'],
   ]) {

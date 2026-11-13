@@ -23,8 +23,7 @@ const { claudeAccountPluginFolders, claudeAppCopyLine } = require('./toolkit-cla
 const { CodexToolkitInstall, hookGaps, describeHookStates } = require('./toolkit-codex-install-state.cjs');
 const { GlobalRules } = require('./toolkit-global-rules.cjs');
 const { HOST_LABELS, detectAgentHost } = require('./agent-host-markers.cjs');
-const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferences.cjs');
-const { taskAutoMerge } = require('./toolkit-governance-state.cjs');
+const { legacyTaskAnswersPresent } = require('./toolkit-governance-state.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
 const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
 const { userStateDirectory } = require('./toolkit-user-state.cjs');
@@ -120,9 +119,10 @@ function parseNonNegativeInteger(value, flagName) {
   return number;
 }
 
+const TASK_AUTO_MERGE_MOVED = "Task auto-merge now lives in each repository's governance; say refresh governance to see or change it.";
+
 function emptySetupChoices() {
   return {
-    taskAutoMerge: '',
     scheduledTaskUpdate: '',
     managedCheckout: '',
     repoAutoUpdate: '',
@@ -229,11 +229,6 @@ function parseArgs(argv = process.argv.slice(2)) {
       const choice = next().toLowerCase();
       if (!['keep', 'standing', 'no'].includes(choice)) throw new Error('Unsupported scheduled-task update choice');
       args.setupChoices.scheduledTaskUpdate = choice;
-    }
-    else if (arg === '--task-auto-merge' || arg.startsWith('--task-auto-merge=')) {
-      const choice = (arg.includes('=') ? arg.slice('--task-auto-merge='.length) : next()).toLowerCase();
-      if (!['keep', 'off', 'after-gates'].includes(choice)) throw new Error(`Unsupported --task-auto-merge choice: ${choice}`);
-      args.setupChoices.taskAutoMerge = choice;
     }
     else if (arg === '--yes-recommended') args.yesRecommended = true;
     else if (arg === '--refresh') args.refresh = true;
@@ -390,7 +385,6 @@ function relNodeCommand(relScript, extraArgs = []) {
 function preferenceSummary(options) {
   const choices = options.setupChoices || emptySetupChoices();
   return {
-    task_auto_merge: choices.taskAutoMerge || 'question-required',
     repo_backed_auto_update: choices.repoAutoUpdate || 'question-required',
     host_native_plugin_cache_auto_refresh: options.host === 'codex'
       ? (choices.codexPluginAutoRefresh || 'question-required')
@@ -1289,7 +1283,6 @@ function collectCurrentState(args) {
     delegation: delegationState,
     delegationMigrationPreview,
     agentProfile,
-    taskAutoMerge: taskAutoMerge(null, { host: args.host }).preference,
     scheduledTaskApproval: require('./toolkit-update-scheduled-task.cjs').readApproval(os.homedir()),
     scheduledTasksSupported: process.platform === 'win32',
     ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect() } : {}),
@@ -1335,7 +1328,6 @@ function recommendedChoice(key, current, args) {
     return canPreserveManagedCheckout(current, args) && isStandardManagedCheckout(current) ? 'keep' : 'default';
   }
   if (key === 'scheduledTaskUpdate') return current.scheduledTaskApproval ? 'keep' : 'no';
-  if (key === 'taskAutoMerge') return 'after-gates';
   if (key === 'repoAutoUpdate') return 'enable';
   if (key === 'updateReports') return 'enable';
   if (key === 'codexDocLimit') return 'enable';
@@ -2056,33 +2048,6 @@ const answerable = (specs) => specs.filter((spec) => !spec.report_only);
 const statusLine = (spec) => `Status (nothing to answer): ${spec.title}: ${spec.current_short || spec.current}. ${spec.recommended_text}.`;
 const unanswered = (specs, args) => answerable(specs).filter((spec) => !choiceForKey(args, spec.key));
 
-function taskAutoMergeQuestion(args, current) {
-  const saved = current.taskAutoMerge || { status: 'missing', value: 'off', digest: null };
-  const blocked = saved.status === 'blocked';
-  const on = saved.value === 'after-gates' && saved.status === 'saved';
-  const label = args.host === 'codex' ? 'Codex' : 'Claude Code';
-  const state = blocked ? 'Could not read; automatic merging is blocked' : on ? 'On' : saved.status === 'missing' ? 'Off (no answer saved)' : 'Off';
-  return resolvedQuestion({
-    id: 'task-auto-merge', key: 'taskAutoMerge', section: 'Toolkit settings',
-    title: `May ${label} merge finished task pull requests without you typing merge?`,
-    prompt: `${label} task auto-merge choice`,
-    whatThisControls: "Sets this app's answer on this computer, only for repositories with Toolkit governance enabled, after review, required checks and your testing pass. Governance, hooks, setup and merge-rule changes still need your typed merge.",
-    choices: [
-      wizardChoice('after-gates', 'On', 'Allow finished task pull requests to merge after the required gates pass.'),
-      wizardChoice('off', 'Off', 'Wait for your typed merge for every task pull request.'),
-      wizardChoice('keep', 'Keep current', `Keep ${state}; do not rewrite the saved answer.`),
-    ],
-    currentChoice: blocked ? '' : on ? 'after-gates' : 'off',
-    recommendation: { value: recommendedChoice('taskAutoMerge', current, args), outcome: 'On: merge finished tasks after their gates pass.', reason: 'Finished tasks have passed review, checks and your testing; protected changes still wait for your typed merge.' },
-    selected: args.setupChoices.taskAutoMerge,
-    current: state, currentShort: state,
-    currentVerification: blocked ? 'unverified' : 'verified',
-    recordDigest: saved.digest || saved.status,
-    availability: { status: blocked ? 'blocked' : 'available', condition: blocked ? 'Repair the unreadable answer before setup writes anything.' : 'Available for this app on this computer.' },
-    afterApplying: 'The app-local answer is saved separately from app settings. Rule-refresh pull requests always wait for your typed merge.',
-  });
-}
-
 function setupQuestionSpecs(args, current) {
   const managedRecommendation = recommendedChoice('managedCheckout', current, args);
   const managedCurrent = currentManagedSourceOutcome(current, args);
@@ -2381,7 +2346,6 @@ function setupQuestionSpecs(args, current) {
   }
   // Both apps offer the Antigravity copy: it is one folder on this computer, whichever app sets it up.
   if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
-  specs.push(taskAutoMergeQuestion(args, current));
   if (current.scheduledTasksSupported) specs.push(resolvedQuestion({
     id: 'scheduled-task-update', key: 'scheduledTaskUpdate', section: 'Windows scheduled tasks',
     title: 'May Toolkit update scheduled tasks on this computer?', prompt: 'Scheduled task update approval',
@@ -2880,7 +2844,6 @@ function emitCompleteQuestionBank(specs, options = {}) {
 
 function assignChoice(args, key, choice) {
   if (key === 'scheduledTaskUpdate') args.setupChoices.scheduledTaskUpdate = choice;
-  else if (key === 'taskAutoMerge') args.setupChoices.taskAutoMerge = choice;
   else if (key === 'managedCheckout') args.setupChoices.managedCheckout = choice;
   else if (key === 'repoAutoUpdate') args.setupChoices.repoAutoUpdate = choice;
   else if (key === 'updateReports') args.setupChoices.updateReports = choice;
@@ -2897,7 +2860,6 @@ function assignChoice(args, key, choice) {
 
 function choiceForKey(args, key) {
   if (key === 'scheduledTaskUpdate') return args.setupChoices.scheduledTaskUpdate;
-  if (key === 'taskAutoMerge') return args.setupChoices.taskAutoMerge;
   if (key === 'managedCheckout') return args.setupChoices.managedCheckout;
   if (key === 'repoAutoUpdate') return args.setupChoices.repoAutoUpdate;
   if (key === 'updateReports') return args.setupChoices.updateReports;
@@ -3232,7 +3194,6 @@ async function consumeNonTtyAnswerPlan(answerPlan, specs, args, lines) {
 }
 
 function effectiveChoiceSummary(args, current, spec, value) {
-  if (spec.key === 'taskAutoMerge') return args.taskAutoMerge;
   if (spec.key === 'repoAutoUpdate') return args.repoAutoUpdate ? 'enable' : 'disable';
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
   if (spec.key === 'updateReportRetention') return `${args.updateReportRetentionDays} days`;
@@ -3636,8 +3597,6 @@ async function answerSetupQuestionBank(args, current, options = {}) {
 
 function applySetupChoices(args, current) {
   const choices = args.setupChoices;
-  if (current.taskAutoMerge?.status === 'blocked') throw new Error('Task auto-merge answer is unreadable; setup is blocked before writing.');
-  args.taskAutoMerge = choices.taskAutoMerge === 'keep' ? current.taskAutoMerge?.value || 'off' : choices.taskAutoMerge || 'off';
   if (choices.managedCheckout === 'keep') {
     if (!canPreserveManagedCheckout(current, args)) {
       throw new Error('The current Toolkit update source cannot be preserved safely. Choose the dedicated clean update copy or another location.');
@@ -4432,7 +4391,6 @@ class ToolkitSetupExecution {
     if (args.host === 'codex') this.#current = await detectCodexRuntimeAfterApproval(args, this.#current);
     await confirmSelectedDelegationProposal(args, this.#current, this.#questionBank);
     saveRefreshShapes(this.#questionBank.refresh_shapes, args.host);
-    new TaskAutoMergePreferences({ host: args.host }).verify(this.#current.taskAutoMerge);
     if (this.#current.scheduledTasksSupported && JSON.stringify(require('./toolkit-update-scheduled-task.cjs').readApproval(os.homedir())) !== JSON.stringify(this.#current.scheduledTaskApproval)) throw new Error('Scheduled-task approval changed; show a fresh question bank.');
   }
 
@@ -4455,8 +4413,6 @@ class ToolkitSetupExecution {
 
   async execute() {
     const args = this.#args;
-    const mergePreference = taskAutoMerge(null, { host: args.host }).preference;
-    if (mergePreference.status === 'blocked') throw new Error(mergePreference.detail);
     const early = updateBeforeChoices(args);
     if (early?.rerun) {
       console.log(early.rerun);
@@ -4478,8 +4434,8 @@ class ToolkitSetupExecution {
     if (this.#current.scheduledTasksSupported && ['standing', 'no'].includes(taskChoice)) {
       require('./toolkit-update-scheduled-task.cjs').saveApproval(os.homedir(), { decision: taskChoice, answer_ref: `setup-bank/${require('node:crypto').createHash('sha256').update(JSON.stringify(this.#questionBank)).digest('hex')}` }, JSON.parse(fs.readFileSync(path.join(args.repoRoot, 'repo/contracts/toolkit-local-bridge/version.json'), 'utf8')).version);
     }
-    const taskMerge = new TaskAutoMergePreferences({ host: args.host }).apply(args.setupChoices.taskAutoMerge, this.#current.taskAutoMerge);
-    console.log(`${HOST_LABELS[args.host] || args.host} task auto-merge: ${taskMerge.value === 'after-gates' ? 'On' : 'Off'} (${taskMerge.changed ? 'saved and read back' : 'kept'}).`);
+    // The old per-app answer grants nothing now; it is removed once a repository's switch is read back.
+    if (legacyTaskAnswersPresent()) console.log(TASK_AUTO_MERGE_MOVED);
     const localClone = fastForwardLocalClone(args);
     // The owned V1 zero cap prevents Codex's plugin CLI from loading config.
     // Apply only this already-approved repair before invoking that CLI; ordinary

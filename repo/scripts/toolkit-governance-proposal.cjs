@@ -351,6 +351,31 @@ class GitHubProposalTransport {
     if (!Array.isArray(prs) || prs.length === 100) fail('PROPOSAL_LIST_INCOMPLETE');
     return prs.filter(pr => pr.marked === true).map(pr => this.read(repository, pr.number));
   }
+  // One pull request that changes only the binding's task auto-merge switch. `mergedText` is the
+  // binding this computer read from the default branch; a default branch that has moved since is
+  // refused rather than overwritten. It carries no governance proposal marker, so it is never read
+  // as a governance decision, and it merges only by the owner (bindings are never auto-merge eligible).
+  publishSwitch(repository, mergedText, text, value) {
+    this.#auth();
+    const repo = this.#api(`repos/${repository}`), branch = repo.default_branch;
+    if (!cache.parseSymref(`ref: refs/heads/${branch}\tHEAD`)) fail('PROPOSAL_BASE_INVALID');
+    const base = this.#api(`repos/${repository}/git/ref/heads/${branch}`);
+    if (!SHA.test(base.object?.sha)) fail('PROPOSAL_BASE_INVALID');
+    const current = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}?ref=${base.object.sha}`);
+    if (current.type !== 'file' || current.encoding !== 'base64' || typeof current.content !== 'string') fail('PROPOSAL_BINDING_INVALID');
+    if (Buffer.from(current.content, 'base64').toString('utf8').replace(/\r\n/g, '\n') !== String(mergedText).replace(/\r\n/g, '\n')) fail('SWITCH_BASE_CHANGED');
+    const head = `toolkit/task-auto-merge-${value === 'after-gates' ? 'on' : 'off'}-${key(text + base.object.sha)}`;
+    const owner = repository.split('/')[0];
+    const open = this.#api(`repos/${repository}/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}`);
+    if (Array.isArray(open) && open[0]?.number) return { number: open[0].number, url: open[0].html_url, head: open[0].head?.sha || null };
+    if (this.#optional(`repos/${repository}/git/ref/heads/${head}`)) fail('SWITCH_BRANCH_EXISTS');
+    this.#api(`repos/${repository}/git/refs`, { ref: `refs/heads/${head}`, sha: base.object.sha });
+    const label = value === 'after-gates' ? 'on' : 'off';
+    const result = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}`, { message: `Set task auto-merge ${label} for this repository`, content: Buffer.from(text).toString('base64'), branch: head, sha: current.sha }, 'PUT');
+    if (!SHA.test(result.commit?.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
+    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set task auto-merge ${label} for this repository`, head, base: branch, body: `This changes only \`task_prs.auto_merge\` in \`${cache.BINDING_PATH}\` to \`${value}\`. It is this repository's one task auto-merge switch, read the same way by every app and the Projects controller.\n\n${label === 'on' ? 'On: a finished task pull request may merge once its review, required checks and testing pass. Governance, hooks, setup and merge-rule changes still wait for a typed merge.' : 'Off: every pull request waits for a typed merge.'}\n\nIt applies only after the owner merges it. After the merge, \`refresh governance\` reads it back and removes the old per-app answers on each computer.` });
+    return { number: pr.number, url: pr.html_url, head: result.commit.sha };
+  }
   publish(repository, binding, files = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
     if (binding.governance !== 'disabled' && !files['AGENTS.md']) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     this.#auth();

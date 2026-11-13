@@ -104,9 +104,6 @@ function withDocLimitAnswer(args, options) {
   // Older journeys resolve the independent Windows task permission explicitly.
   // Its own question/approval tests opt in to the unresolved row.
   if (!options.scheduledTaskQuestion && !options.codexDocLimitQuestion && args.some(arg => arg === '--execute' || arg === '--plan') && !args.includes('--scheduled-task-update')) args = [...args, '--scheduled-task-update', 'no'];
-  // Existing journeys keep the unrelated new setting; its own tests exercise the question.
-  if (!options.taskAutoMergeQuestion && !options.codexDocLimitQuestion && args.some(arg => arg === '--execute' || arg === '--plan')
-      && !args.some(arg => arg === '--task-auto-merge' || arg.startsWith('--task-auto-merge='))) args = [...args, '--task-auto-merge', 'keep'];
   if (options.codexDocLimitQuestion || !args.some((arg) => arg === '--execute' || arg === '--plan')
     || args.some((arg) => /^--(enable|disable|keep)-codex-doc-limit$/.test(arg))) return args;
   return [...args, '--keep-codex-doc-limit'];
