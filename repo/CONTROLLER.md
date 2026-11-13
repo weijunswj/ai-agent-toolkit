@@ -25,4 +25,4 @@ Record standing authority's owner/provenance, repository/destination, purpose, o
 These pages are part of this file: their rules bind like the rules above and were moved here word for word. Read every page on adoption, and the matching page again before its step. The hash is each page's content hash (`node repo/scripts/sync-controller-pages.cjs --write`), so a page change changes this file's blob.
 - [Roles and routes](controller/roles-and-routes.md) `e6ff6f4b8d5f`: before resolving a route or launching, relaying or reviewing a gate or helper.
 - [Gates](controller/gates.md) `598a51d675a6`: before admitting, running, accepting, reviewing or retiring a gate, and for human-facing text.
-- [Evidence, progress and finish](controller/evidence-and-finish.md) `ef3a46b0add5`: before storing evidence, cleaning up, recording a promise or finishing.
+- [Evidence, progress and finish](controller/evidence-and-finish.md) `94757acd0bcb`: before merging, storing evidence, cleaning up, recording a promise or finishing.

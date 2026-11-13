@@ -406,7 +406,7 @@ test('the merging agent bumps once at merge time; only older bumped PRs are reco
   assert.match(guide, /The merging agent bumps just before the merge, never the builder/);
   assert.match(guide, /`Bump: patch`, `Bump: minor` or `Bump: major`/);
   assert.match(guide, /An owner merge card goes up at the bumped head/);
-  assert.match(text, /Toolkit PRs hold main's version: before the check and any card, the merge thread merges `main` in, runs `bump-version\.cjs --next <level>` \(body `Bump:` line\) and waits for green CI\./);
+  assert.match(text, /Toolkit PRs hold main's version\. Two or more ready PRs ride one merge train unasked \(`CONTROLLER\.md`\); else, before the check and any card, it merges `main` in, runs `bump-version\.cjs --next <level>` \(body `Bump:` line\) and waits for green CI\./);
   assert.match(periodic, /Open Toolkit PRs hold main's version and the merge thread bumps each one at merge/);
   for (const surface of [text, root, guide]) assert.doesNotMatch(surface, /carry their own `bump-version|prepares its own Toolkit bump|## Prepare the branch bump/);
   // Older PRs that already carry a bump still reconcile: the workflow, then the hand command.
