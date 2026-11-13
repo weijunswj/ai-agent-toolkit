@@ -39,7 +39,7 @@ The script compares the merge-base version with the head to prove exactly one pa
 - The nudge is the sweep: review ALL unresolved threads and project-chat posts. Include top-level posts with replies from coordinator or user: the thread list omits them, so also page through project chat with small page limits (large pages overflow). List:
   1. threads that are blocked, failed or stopped, or working but idle for over 45 minutes;
   2. stale thread labels and each overdue promise under **Overdue promise:**, from the promise list (**Promises wiring**);
-  3. resolve candidates meeting all three resolve conditions (**Threads**), with the evidence for each;
+  3. resolve candidates whose output is recorded and with nothing left open (**Threads**), with the evidence for each and "relay unverified" where relay is not proven;
   4. local Remote Control sessions whose work is finished but which are still running;
   5. open pull requests with their CI state;
   6. open project-memory items and ALL unanswered owner items with no reply or reaction, in project chat and threads, plus your answers in reply threads with no owner reply or reaction since, each with its link and ask date;
@@ -47,6 +47,8 @@ The script compares the merge-base version with the head to prove exactly one pa
   8. whether the daily check-in exists and is armed;
   9. the guidebook: it checks the copy against a fresh clone of main each run and refreshes a stale library copy itself (**Guidebook copy**), reporting `BLOCK CHANGED` or `SKILL COPY FAILED` on its first line.
 - `UNRELAYED TASK RUNS`: skip tasks marked `stopped by owner`; handle each remaining run without `.done` the same turn using **Task run relay** in `reference/recurring-tasks.md`: post only without `.relayed`, write it after success, finish every prefix action, then write `.done`.
+- `RESOLVE DUE`: in this turn resolve each listed thread whose result you relayed; for one marked "relay unverified", first add its one-line result to your post, then resolve it. If a thread still owes something, leave it open and say what it owes. Also resolve on relay between runs (**Resolve on relay** in SKILL.md), so the nudge only catches leftovers.
+- `THREAD SCAN INCOMPLETE`: the resolve sweep did not run in full. Fix the cause the same turn (context exhaustion: rebuild the nudge on a fresh home thread as for `CONTEXT RESET DUE`, unless its entry says `stopped by owner`); a repeat on the next run goes to the owner.
 - `LANES UNDER CAP`: start queued items the same turn until the lane cap is full or a real limit holds, and say which limit when one does.
 - `CHECK-IN NOT ARMED` (including a deleted check-in): recreate it from the template the same turn, without asking, as in **Recurring tasks**, unless its entry says `stopped by owner`.
 - **Both gone:** the two tasks watch each other, but if both are deleted nothing fires. So on the first owner message or wake of each day, call `list_triggers` once (a cheap read); if either Toolkit task is missing and its entry does not say `stopped by owner`, start a cloud thread that recreates it from the template on `main` (rendered as in the swap, **Recurring tasks** step 2), fires it once and updates the `SCHEDULED TASKS:` line, and tell the owner once.

@@ -431,7 +431,8 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.ok(rendered('daily-check-in').includes('is missing (no such trigger in list_triggers'), 'check-in sees a deleted nudge');
   assert.match(nudge, /Each run posts one line in its home thread \(DELIVERY\), and the coordinator relays it to the project chat\./);
   assert.doesNotMatch(nudge, /It runs silently|read_project_chat \(limit 1\)/);
-  for (const required of ['all three hold', 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
+  for (const required of ['list a thread when (1) and (3) hold', 'relay unverified', 'RESOLVE DUE: <n> | ', 'THREAD SCAN INCOMPLETE: <read> of <total> | ',
+    'never report "none" for **Resolve:** from a partial scan', "the state file's resolve candidates that list_threads still shows unresolved", 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
   }
