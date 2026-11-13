@@ -141,7 +141,7 @@ test('PowerShell blocks people type themselves stay and are labelled', () => {
   assert.match(bridge, /explicit trusted checkout \(PowerShell, for a person to type\):\r?\n\r?\n```powershell\r?\n/);
   assert.match(fs.readFileSync(path.join(repoRoot, 'repo/docs/HOW-TO-USE.md'), 'utf8'), /managed clean Toolkit checkout \(PowerShell, for a person to type\):\r?\n\r?\n```powershell\r?\n/);
   assert.match(fs.readFileSync(path.join(repoRoot, 'repo/docs/TOOLKIT-ENV.md'), 'utf8'), /To run one yourself in PowerShell:\r?\n\r?\n```powershell\r?\nnode "\$env:USERPROFILE/);
+  // The README's Remove section has no command to type: `remove toolkit` runs them.
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
-  assert.match(readme, /\*\*Global rules\*\* \(PowerShell\): `node "\$env:USERPROFILE/);
-  assert.match(readme, /\*\*Automatic updates\*\* \(PowerShell\): `node "\$env:USERPROFILE/);
+  assert.doesNotMatch(readme.slice(readme.indexOf('## Remove'), readme.indexOf('## Skills')), /\(PowerShell\)|%USERPROFILE%/);
 });

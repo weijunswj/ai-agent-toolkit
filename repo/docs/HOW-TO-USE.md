@@ -79,7 +79,7 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 - `toolkit governance catalogue`: list the skills offered in this repository under its governance state. It changes nothing.
 - `toolkit governance security`: turn on GitHub's free dependency and security settings for a governed repository.
 - `toolkit governance migrate`: get the command that offers protection and security fixes; you run it in your own terminal and answer its question there.
-- `remove toolkit`: list Toolkit's scheduled tasks and rules on this computer, then remove them after your OK. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
+- `remove toolkit`: list everything Toolkit put on this computer, then remove it after your OK, plugin included. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
 - `merge N`: approve the merge of pull request N.
 
 `node repo/scripts/toolkit-commands.cjs` prints the same list.
