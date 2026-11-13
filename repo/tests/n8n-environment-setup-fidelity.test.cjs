@@ -79,3 +79,18 @@ test('n8n local setup has no retired pack manifest or project-module output', ()
   assert.equal(files.some((relPath) => relPath.endsWith('/pack.json') || relPath === 'pack.json'), false);
   assert.equal(files.some((relPath) => relPath.includes(legacyProjectToken) || relPath.includes(legacyCuratedToken)), false);
 });
+
+test('a failed scheduled n8n backup alerts the owner on both schedules', () => {
+  const readme = read('templates/production-server-backups/README.md');
+  const service = readme.match(/# \/etc\/systemd\/system\/n8n-production-backup\.service\n[\s\S]*?```/);
+  assert.ok(service, 'the systemd service unit is shown');
+  assert.match(service[0], /^OnFailure=n8n-production-backup-failed\.service$/m, 'the backup unit names a failure alert unit');
+  assert.match(readme, /# \/etc\/systemd\/system\/n8n-production-backup-failed\.service/);
+  assert.match(readme, /systemctl start n8n-production-backup-failed\.service/, 'the alert is tested before the timer is trusted');
+  const cron = readme.match(/```cron\n([\s\S]*?)```/);
+  assert.ok(cron, 'the cron example is shown');
+  assert.match(cron[1], /^MAILTO=/m, 'cron mails its output to the owner');
+  assert.match(cron[1], /\|\| echo "n8n production backup FAILED/, 'a failed cron run prints a line so cron mails it');
+  assert.doesNotMatch(cron[1], /%/, 'cron treats % as a newline');
+  assert.match(readme, /the owner reads/i);
+});
