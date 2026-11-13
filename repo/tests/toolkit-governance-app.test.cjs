@@ -321,3 +321,39 @@ test('check reports cloud sweep copies left behind once governance is off, and o
   assert.ok(found[0].message.includes(sweep) && !found[0].message.includes(gate));
   assert.equal(conformance.checkConformance(repo, options).exit_code, 0, 'a left-over copy never changes the exit code');
 });
+
+test('an organisation-owned repository gets the organisation App page; a personal one the personal page; unknown shows both', () => {
+  const org = new URL(app.creationLink('example-org/example-repo', 'Organization'));
+  assert.equal(`${org.origin}${org.pathname}`, 'https://github.com/organizations/example-org/settings/apps/new');
+  assert.equal(org.searchParams.get('public'), 'false', 'installable only on the organisation');
+  for (const [name, level] of Object.entries(app.APP.permissions)) assert.equal(org.searchParams.get(name), level, name);
+  const user = new URL(app.creationLink(SLUG, 'User'));
+  assert.equal(`${user.origin}${user.pathname}`, 'https://github.com/settings/apps/new');
+  assert.equal(app.creationLink(SLUG), app.creationLink(SLUG, 'User'), 'no owner type keeps the personal page');
+  const orgText = app.setupLines('example-org/example-repo', STORE, missing, 'Organization').join('\n');
+  assert.ok(orgText.includes(app.creationLink('example-org/example-repo', 'Organization')));
+  const pages = text => [...text.matchAll(/https:\/\/\S+/g)].map(([found]) => new URL(found)).filter(url => url.pathname.endsWith('/settings/apps/new')).map(url => `${url.origin}${url.pathname}`);
+  assert.deepEqual(pages(orgText), ['https://github.com/organizations/example-org/settings/apps/new'], 'an organisation never gets the personal page');
+  const userText = app.setupLines(SLUG, STORE, missing, 'User').join('\n');
+  assert.deepEqual(pages(userText), ['https://github.com/settings/apps/new'], 'a personal account never gets the organisation page');
+  const unknownText = app.setupLines(SLUG, STORE, missing, null).join('\n');
+  assert.deepEqual(pages(unknownText), ['https://github.com/settings/apps/new', 'https://github.com/organizations/example-owner/settings/apps/new'], 'unknown owner: both pages');
+  assert.match(unknownText, /If example-owner is an organisation/);
+  const finding = app.appFinding('ENABLED', 'example-org/example-repo', STORE, missing, [], 'Organization');
+  assert.deepEqual(pages(finding.message), ['https://github.com/organizations/example-org/settings/apps/new']);
+});
+
+test('ownerType reads only the repository, with GET, and anything unreadable is null', () => {
+  const calls = [];
+  const answer = value => args => { calls.push(args); return value; };
+  assert.equal(app.ownerType('example-org/example-repo', { reader: answer({ ok: true, value: { owner: { type: 'Organization' } } }) }), 'Organization');
+  assert.deepEqual(calls, [['repos/example-org/example-repo']]);
+  assert.equal(app.ownerType(SLUG, { reader: answer({ ok: true, value: { owner: { type: 'User' } } }) }), 'User');
+  assert.equal(app.ownerType(SLUG, { reader: answer({ ok: true, value: { owner: { type: 'Bot' } } }) }), null);
+  assert.equal(app.ownerType(SLUG, { reader: answer({ ok: false, reason: 'gh-request-failed' }) }), null);
+  assert.equal(app.ownerType(SLUG, { reader: () => { throw new Error('boom'); } }), null);
+  assert.equal(app.ownerType(SLUG, { offline: true, reader: () => assert.fail('no read offline') }), null);
+  const seen = [];
+  app.ownerType(SLUG, { reader: args => app.ghReader(args, { spawn: (command, list) => { seen.push(list); return { status: 0, stdout: '{"owner":{"type":"User"}}' }; } }) });
+  assert.deepEqual(seen, [['api', `repos/${SLUG}`]]);
+});

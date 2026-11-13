@@ -38,16 +38,35 @@ const BINDING_PATH = Object.freeze(['.github', 'toolkit-programme.json']);
 const BINDING_LIMIT = 64 * 1024;
 // The scheduled pass's own kill; the workflow stops the job three minutes after it.
 const { RESET_WAIT_MS } = require('./toolkit-programme-sweep-gate.cjs');
-const RUN_TIMEOUT_MS = require('../../skills/github-program-reconciler/scripts/programme-state.cjs').PASS_BUDGETS.scheduled.killMs;
+const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+const RUN_TIMEOUT_MS = programmeState.PASS_BUDGETS.scheduled.killMs;
+// A version 1 binding has no governance key and reads as enabled, as everywhere else.
+const { bindingEnabled } = programmeState;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const SAFE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BOT_LOGIN = /^[A-Za-z0-9-]{1,100}\[bot\]$/;
 const METRICS = /^[A-Za-z0-9_ =,.:/()-]{1,500}$/;
+// Record 808: nothing is skipped silently. Each skip is one warning that names the repository, the
+// reason and the fix: { reason, fix } here, joined by skipWarning.
+const CHECK = 'run toolkit governance check in a clone of this repository';
+const SKIPS = Object.freeze({
+  absent: Object.freeze({ reason: 'there is no programme file (.github/toolkit-programme.json) on the commit this run checked out', fix: 'turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows if this repository should not be governed' }),
+  too_large: Object.freeze({ reason: `the programme file is larger than ${BINDING_LIMIT} bytes`, fix: `${CHECK} and repair the programme file it names` }),
+  invalid: Object.freeze({ reason: 'the programme file is not a valid programme file', fix: `${CHECK} and repair what it names` }),
+  disabled: Object.freeze({ reason: 'the merged programme file turns governance off', fix: 'turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows' }),
+  foreign_store: Object.freeze({ reason: 'the evidence store belongs to another owner, so one governance App cannot reach it', fix: 'move the evidence store under this repository\'s owner; until then the computer\'s sweep keeps running' }),
+  public_state: Object.freeze({ reason: 'this repository keeps its state on a public branch; the cloud sweep does not run it yet', fix: 'none needed now: the computer\'s sweep stays until the cloud sweep supports it' }),
+  no_app: Object.freeze({ reason: `the governance GitHub App is not set up here (repository variable ${CLIENT_ID_VARIABLE}, secret ${PRIVATE_KEY_SECRET})`, fix: 'set both from this repository\'s own App; toolkit governance check lists what the App needs' }),
+});
+function skipWarning(repository, status, detail = {}) {
+  const skip = status === 'other_repository'
+    ? { reason: `the programme file names ${detail.named || 'another repository'}, not this repository`, fix: `${CHECK} and set the programme file's repository to this one` }
+    : status === 'foreign_store' && detail.store
+      ? { ...SKIPS.foreign_store, reason: `the evidence store ${detail.store} belongs to another owner, so one governance App cannot reach it` }
+      : SKIPS[status] || SKIPS.invalid;
+  return `Programme Sweep skipped on ${repository || 'this repository'}: ${skip.reason}. Fix: ${skip.fix}.`;
+}
 const NOTICES = Object.freeze({
-  ungoverned: 'Programme Sweep skipped: this repository has no enabled programme binding on the commit this run checked out.',
-  foreign_store: 'Programme Sweep skipped: the evidence store belongs to another owner, so one governance App cannot reach it.',
-  public_state: 'Programme Sweep skipped: this repository keeps its state on a public branch; the cloud sweep does not run it yet, so the computer\'s sweep stays.',
-  no_app: `Programme Sweep skipped: the governance GitHub App is not set up here. Set the repository variable ${CLIENT_ID_VARIABLE} and the secret ${PRIVATE_KEY_SECRET}; toolkit governance check lists what the App needs.`,
   main_moved: 'Programme Sweep skipped: the default branch moved while this run was starting; the next run picks it up.',
   queued: 'Programme Sweep queued: another sweep is running; the next hourly run will retry.',
   private_wait: 'Programme Sweep follow-up left to the hourly gate: this repository is private, so no runner waits for GitHub\'s hourly App limit to reset; the gate resumes the saved place after the reset.',
@@ -64,20 +83,21 @@ const FOOTER_FAILED = new Set(['FAILED', 'STILL_FOOTED', 'MISMATCH']);
 const FOOTER_SCRIPT = ['repo', 'scripts', 'toolkit-github-footer-sweep.cjs'];
 const TOOLKIT_ROOT = path.resolve(__dirname, '..', '..');
 
-// The binding this run checked out: { status, store } with status enabled, ungoverned, foreign_store or public_state.
+// The binding this run checked out: { status, store } with status enabled, ungoverned (with its reason), foreign_store or public_state.
 function readCheckedOutBinding({ root, env, readFile = fs.readFileSync, validateBinding }) {
   const repository = env.GITHUB_REPOSITORY;
-  if (!SAFE_REPOSITORY.test(repository || '')) return { status: 'ungoverned' };
+  if (!SAFE_REPOSITORY.test(repository || '')) return { status: 'ungoverned', reason: 'invalid' };
   let bytes;
-  try { bytes = readFile(path.join(root, ...BINDING_PATH)); } catch { return { status: 'ungoverned' }; }
+  try { bytes = readFile(path.join(root, ...BINDING_PATH)); } catch { return { status: 'ungoverned', reason: 'absent' }; }
   const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes), 'utf8');
-  if (buffer.length > BINDING_LIMIT) return { status: 'ungoverned' };
+  if (buffer.length > BINDING_LIMIT) return { status: 'ungoverned', reason: 'too_large' };
   let binding;
-  try { binding = validateBinding(JSON.parse(buffer.toString('utf8'))); } catch { return { status: 'ungoverned' }; }
-  if (binding.governance !== 'enabled' || String(binding.repository).toLowerCase() !== repository.toLowerCase()) return { status: 'ungoverned' };
+  try { binding = validateBinding(JSON.parse(buffer.toString('utf8'))); } catch { return { status: 'ungoverned', reason: 'invalid' }; }
+  if (!bindingEnabled(binding)) return { status: 'ungoverned', reason: 'disabled' };
+  if (String(binding.repository).toLowerCase() !== repository.toLowerCase()) return { status: 'ungoverned', reason: 'other_repository', named: String(binding.repository) };
   if (binding.state) return { status: 'public_state' };
   const store = String(binding.store?.repository || '');
-  if (!SAFE_REPOSITORY.test(store) || store.split('/')[0].toLowerCase() !== repository.split('/')[0].toLowerCase()) return { status: 'foreign_store' };
+  if (!SAFE_REPOSITORY.test(store) || store.split('/')[0].toLowerCase() !== repository.split('/')[0].toLowerCase()) return { status: 'foreign_store', store: SAFE_REPOSITORY.test(store) ? store : null };
   return { status: 'enabled', store };
 }
 
@@ -206,7 +226,7 @@ class ProgrammeSweepAction {
   // Step one: the store to mint a token for, or a notice and nothing more.
   store() {
     const binding = readCheckedOutBinding({ root: this.root, env: this.env, readFile: this.readFile, validateBinding: this.validateBinding });
-    if (binding.status !== 'enabled') { this.notice(NOTICES[binding.status]); this.output('store', ''); return 0; }
+    if (binding.status !== 'enabled') { this.warning(skipWarning(this.env.GITHUB_REPOSITORY, binding.reason || binding.status, binding)); this.output('store', ''); return 0; }
     this.output('store', binding.store.split('/')[1]);
     this.output('store_repository', binding.store);
     return 0;
@@ -216,7 +236,7 @@ class ProgrammeSweepAction {
   run() {
     const env = this.env;
     if (!env.STORE_REPOSITORY) return 0;
-    if (!env.APP_CLIENT_ID_SET || env.APP_CLIENT_ID_SET === 'false') { this.notice(NOTICES.no_app); return 0; }
+    if (!env.APP_CLIENT_ID_SET || env.APP_CLIENT_ID_SET === 'false') { this.warning(skipWarning(env.GITHUB_REPOSITORY, 'no_app')); return 0; }
     if (env.MINT_OUTCOME !== 'success/success' || !env.GOVERNED_TOKEN || !env.STORE_TOKEN || !BOT_LOGIN.test(env.SWEEP_LOGIN || '')) {
       this.failure(SIGN_IN_FAILURE); return 1;
     }
@@ -224,7 +244,8 @@ class ProgrammeSweepAction {
     let result;
     try { result = this.refresh({ root: this.root, env }); } catch { this.failure(GENERAL_FAILURE); return 1; }
     if (result.code === 'GH_AUTH') { this.failure(SIGN_IN_FAILURE); return 1; }
-    if (result.code === 'MAIN_MOVED' || result.code === 'CLOUD_PUBLIC_STATE') { this.notice(result.code === 'MAIN_MOVED' ? NOTICES.main_moved : NOTICES.public_state); return 0; }
+    if (result.code === 'MAIN_MOVED') { this.notice(NOTICES.main_moved); return 0; }
+    if (result.code === 'CLOUD_PUBLIC_STATE') { this.warning(skipWarning(env.GITHUB_REPOSITORY, 'public_state')); return 0; }
     const held = result.status === 1 && Array.isArray(result.report?.holds) && result.report.holds.length > 0;
     if (result.status !== 0 && !held) { this.failure(failureLine(result)); return 1; }
     const line = summaryLine(result.report);
@@ -251,4 +272,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, atAppLimit, followUpAt, ProgrammeSweepAction });
+module.exports = Object.freeze({ TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, atAppLimit, followUpAt, ProgrammeSweepAction });
