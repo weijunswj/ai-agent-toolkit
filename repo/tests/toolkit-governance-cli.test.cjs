@@ -372,7 +372,8 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   recordMerged(stale, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'disabled' }) });
   const ignored = await run(ctx, stale, ['check', '--json']);
   assert.equal(ignored.code, 0);
-  assert.deepEqual(JSON.parse(ignored.stdout).findings.map(entry => entry.id), ['REPOSITORY_DISABLED', 'GOVERNED_BLOCK_IGNORED']);
+  // Its cloud sweep copies were never removed, so they are reported as left over (info, exit 0).
+  assert.deepEqual(JSON.parse(ignored.stdout).findings.map(entry => entry.id), ['REPOSITORY_DISABLED', 'CLOUD_WORKFLOW_LEFT_OVER', 'GOVERNED_BLOCK_IGNORED']);
   // DISABLED and UNDECIDED repositories never ask GitHub about default-branch protection.
   for (const repo of [stale, unasked]) {
     let asked = false;

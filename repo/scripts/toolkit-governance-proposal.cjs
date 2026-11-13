@@ -18,11 +18,42 @@ const PROMPT_INTERVAL_MS = 60000;
 const SHA = /^[a-f0-9]{40}$/;
 const EPOCH = /^[a-f0-9]{32}$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
+const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(workflow => workflow.file);
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
 const ADOPTION_HELP = 'Run toolkit governance discover, reuse the adoption proposal and ask only for missing parent, separate evidence store or required checks. Verify the store is private. Use repository-agent-rules to prepare the binding, governed block and supporting rules before publishing them together.';
 
+// The cloud sweep copies a governed repository needs, pinned to this Toolkit checkout's own commit,
+// which must be on its main branch:
+// { files: { path: text }, warning }. Turning governance on carries them in the same pull request as
+// the binding, so a repository never gets one without the other. A Toolkit source checkout runs its
+// own workflow files, so it gets nothing and no warning. When the copies cannot be rendered, the
+// existing ones (if any) still travel and the warning names the reason and the fix.
+const CLOUD_FIX = 'run node repo/scripts/toolkit-cloud-workflows.cjs --repo <this repository> from a Toolkit checkout on main, commit the copies to the governance pull request, then run toolkit governance check';
+// `root` and `commit` (the Toolkit checkout and the commit to pin) are only for tests.
+function cloudWorkflowFiles(cwd, { root = null, commit = null } = {}) {
+  const workflows = require('./toolkit-cloud-workflows.cjs');
+  if (workflows.isToolkitCheckout(cwd)) return { files: {}, warning: null };
+  try {
+    const result = workflows.plan({ repo: cwd, ...(root ? { root } : {}), ...(commit ? { commit } : {}) });
+    const unmanaged = result.rows.find(row => row.state === 'unmanaged');
+    if (unmanaged) throw new workflows.InstallError(`${unmanaged.file} exists and is not a Toolkit copy; move it aside first`);
+    return { files: Object.fromEntries(result.rows.map(row => [row.file, row.expected])), warning: null };
+  } catch (error) {
+    if (!(error instanceof workflows.InstallError)) throw error;
+    return { files: {}, warning: `Toolkit: the cloud sweep copies were not refreshed in this pull request (${String(error.message).replace(/\.$/, '')}). To fix it, ${CLOUD_FIX}.` };
+  }
+}
+
+// A version 1 binding moved to version 2 with the same meaning: enabled, its one parent in `parents`.
+const BINDING_V2 = 'toolkit.programme-binding.v2';
+function bindingV2(binding) {
+  if (!binding || binding.schema !== 'toolkit.programme-binding.v1') return binding;
+  const { schema, repository, parent_issue: issue, record_prefix, writer_prefix, ...rest } = binding;
+  return { schema: BINDING_V2, repository, governance: 'enabled', parents: [{ issue, record_prefix, ...(writer_prefix === undefined ? {} : { writer_prefix }) }], ...rest };
+}
+
 // Only the instruction skill's prepared surfaces join the binding. Product files and backups do not.
-function adoptionFiles(cwd, text) {
+function adoptionFiles(cwd, text, cloud = { files: {} }) {
   const governance = require('./toolkit-governance-state.cjs');
   const block = governance.readGovernedBlock(cwd);
   if (!block.present || block.legacy || block.marker_errors) fail('PROPOSAL_ADOPTION_INCOMPLETE');
@@ -30,7 +61,7 @@ function adoptionFiles(cwd, text) {
   const names = ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md',
     ...playbooks.map(name => `docs/agent-playbooks/${name}`),
     ...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json',
-    ...require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(workflow => workflow.file)];
+    ...cloudFiles()];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
     const file = path.join(cwd, name);
@@ -44,7 +75,7 @@ function adoptionFiles(cwd, text) {
     if (!stat.isFile() || stat.size > LIMIT) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     files[name] = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
   }
-  return files;
+  return { ...files, ...cloud.files };
 }
 function proposalText(proposals) {
   if (proposals.length > 1) return `Toolkit: conflicting governance proposals are waiting: ${proposals.map(item => item.url).join(', ')}. Ask the owner which proposal to keep. None decides governance.`;
@@ -52,8 +83,9 @@ function proposalText(proposals) {
 }
 
 class GovernanceProposals {
-  #directory; #now; #transport; #identityReader;
-  constructor({ registryOptions = {}, now = () => new Date(), transport = null, identityReader = null } = {}) {
+  #directory; #now; #transport; #identityReader; #cloudWorkflows;
+  constructor({ registryOptions = {}, now = () => new Date(), transport = null, identityReader = null, cloudWorkflows = cloudWorkflowFiles } = {}) {
+    this.#cloudWorkflows = cloudWorkflows;
     this.#directory = userStateDirectory(registryOptions);
     this.#now = now;
     this.#transport = transport;
@@ -193,7 +225,7 @@ class GovernanceProposals {
     const value = this.#read(identity.repository_id), request = value?.requests.find(item => item.run === run);
     if (!request || !['yes', 'no'].includes(request.answer) || !cache.isFresh({ fetched_at: request.at }, this.#now())) fail('PROPOSAL_RECEIPT_REQUIRED');
     const repository = governance.remoteSlug(identity.remote);
-    const proposal = request.answer === 'no' ? { schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' } : binding;
+    const proposal = request.answer === 'no' ? { schema: BINDING_V2, repository, governance: 'disabled' } : bindingV2(binding);
     if (!proposal || governance.bindingProblems(proposal, identity).length || (request.answer === 'yes' && proposal.governance === 'disabled')) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     return { identity, request, repository, binding: proposal, text: `${JSON.stringify(proposal, null, 2)}\n` };
   }
@@ -207,15 +239,16 @@ class GovernanceProposals {
     if (checked.canWrite === false) fail('PROPOSAL_WRITE_REQUIRED');
     const matches = checked.proposals.filter(item => item.answer === prepared.request.answer);
     if (checked.proposals.some(item => item.answer !== prepared.request.answer) || matches.length > 1) fail('PROPOSAL_CONFLICT');
+    const cloud = prepared.request.answer === 'yes' && !matches[0] ? this.#cloudWorkflows(cwd) : { files: {}, warning: null };
     const proposal = matches[0] || this.#transport.publish(prepared.repository, prepared.binding,
-      prepared.request.answer === 'yes' ? adoptionFiles(cwd, prepared.text) : { [cache.BINDING_PATH]: prepared.text });
+      prepared.request.answer === 'yes' ? adoptionFiles(cwd, prepared.text, cloud) : { [cache.BINDING_PATH]: prepared.text });
     const readback = this.#transport.read(prepared.repository, proposal.number);
     if (!validProposal(readback, prepared.repository) || readback.head !== proposal.head || readback.answer !== prepared.request.answer) fail('PROPOSAL_PUBLISH_READBACK_FAILED');
     this.#update(prepared.identity.repository_id, value => {
       value.requests = value.requests.map(item => item.run === run ? { ...item, proposal: readback.number, head: readback.head } : item);
       value.proposals = [readback]; value.checked_at = this.#now().toISOString(); value.error = null;
     });
-    return { proposal: readback, text: proposalText([readback]) };
+    return { proposal: readback, text: proposalText([readback]), ...(cloud.warning ? { warning: cloud.warning } : {}) };
   }
 }
 
@@ -243,6 +276,14 @@ class GitHubProposalTransport {
   #optional(endpoint) {
     try { return this.#api(endpoint); }
     catch (error) { if (error.code === 'PROPOSAL_NOT_FOUND') return null; throw error; }
+  }
+  // The cloud sweep copies on the default branch at `ref` that carry the Toolkit's rendered-copy marker.
+  #cloudCopies(repository, ref) {
+    const { MARKER: COPY } = require('./toolkit-cloud-workflows-render.cjs');
+    return cloudFiles().filter(name => {
+      const file = this.#optional(`repos/${repository}/contents/${name}?ref=${ref}`);
+      return Boolean(file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' && COPY.test(Buffer.from(file.content, 'base64').toString('utf8').replace(/\r\n/g, '\n')));
+    });
   }
   #auth() {
     this.#run(['auth', 'status']);
@@ -286,11 +327,22 @@ class GitHubProposalTransport {
     const binding = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
     require('../../skills/github-program-reconciler/scripts/programme-state.cjs').validateBinding(binding);
     if (binding.repository.toLowerCase() !== repository.toLowerCase()) fail('PROPOSAL_BINDING_INVALID');
-    // Off needs only its programme file. An enabled adoption PR may also prepare governed rules;
-    // its complete external effects and checks still need the owner's merge approval.
+    // Off needs only its programme file, plus removing the Toolkit's cloud sweep copies. An enabled
+    // adoption PR may also prepare governed rules; its complete external effects and checks still
+    // need the owner's merge approval.
     if (binding.governance === 'disabled') {
       const files = this.#api(`repos/${repository}/pulls/${number}/files?per_page=100`);
-      if (pr.changed_files !== 1 || !Array.isArray(files) || files.length !== 1 || files[0].filename !== cache.BINDING_PATH || !['added', 'modified'].includes(files[0].status)) fail('PROPOSAL_SCOPE_INVALID');
+      const cloud = cloudFiles();
+      const valid = Array.isArray(files) && pr.changed_files === files.length
+        && files.filter(file => file.filename === cache.BINDING_PATH && ['added', 'modified'].includes(file.status)).length === 1
+        && files.every(file => file.filename === cache.BINDING_PATH || (cloud.includes(file.filename) && file.status === 'removed'));
+      if (!valid) fail('PROPOSAL_SCOPE_INVALID');
+      // A removed sweep path must have been the Toolkit's own marked copy where the PR started.
+      const removed = files.filter(file => file.status === 'removed').map(file => file.filename);
+      if (removed.length) {
+        const marked = SHA.test(pr.base?.sha || '') ? this.#cloudCopies(repository, pr.base.sha) : [];
+        if (removed.some(name => !marked.includes(name))) fail('PROPOSAL_SCOPE_INVALID');
+      }
     }
     return { repository, number: pr.number, head: pr.head.sha, url: pr.html_url, answer: binding.governance === 'disabled' ? 'no' : 'yes', state: pr.state };
   }
@@ -307,7 +359,10 @@ class GitHubProposalTransport {
     const base = this.#api(`repos/${repository}/git/ref/heads/${branch}`);
     if (!SHA.test(base.object?.sha)) fail('PROPOSAL_BASE_INVALID');
     const text = `${JSON.stringify(binding, null, 2)}\n`;
-    const head = `toolkit/governance-${binding.governance === 'disabled' ? 'off' : 'on'}-${key(JSON.stringify(files) + base.object.sha)}`;
+    // Turning governance off also removes the Toolkit's cloud sweep copies that the default branch
+    // holds. Only a file carrying the Toolkit's rendered-copy marker is removed; anything else stays.
+    const removals = binding.governance === 'disabled' ? this.#cloudCopies(repository, base.object.sha) : [];
+    const head = `toolkit/governance-${binding.governance === 'disabled' ? 'off' : 'on'}-${key(JSON.stringify(files) + JSON.stringify(removals) + base.object.sha)}`;
     const commit = this.#api(`repos/${repository}/git/commits/${base.object.sha}`);
     const existing = this.#bindingEntry(repository, commit.tree.sha);
     const previous = this.#optional(`repos/${repository}/git/ref/heads/${head}`);
@@ -317,26 +372,32 @@ class GitHubProposalTransport {
     if (headSha !== base.object.sha) {
       // Recover only our exact prepared commit. A branch someone changed is never overwritten.
       const diff = this.#api(`repos/${repository}/compare/${base.object.sha}...${headSha}`);
-      if (diff.total_commits !== 1 || diff.merge_base_commit?.sha !== base.object.sha || !diff.files?.length || diff.files.some(file => !Object.hasOwn(files, file.filename))) fail('PROPOSAL_BRANCH_CHANGED');
+      // The branch must hold exactly this proposal: its files, and every removal it lists, done.
+      if (diff.total_commits !== 1 || diff.merge_base_commit?.sha !== base.object.sha || !diff.files?.length
+        || diff.files.some(file => !Object.hasOwn(files, file.filename) && !(removals.includes(file.filename) && file.status === 'removed'))
+        || removals.some(name => !diff.files.some(file => file.filename === name && file.status === 'removed'))) fail('PROPOSAL_BRANCH_CHANGED');
       for (const [name, content] of Object.entries(files)) {
         const file = this.#api(`repos/${repository}/contents/${name}?ref=${headSha}`);
         if (file.type !== 'file' || file.encoding !== 'base64' || typeof file.content !== 'string' || Buffer.from(file.content, 'base64').toString('utf8') !== content) fail('PROPOSAL_BRANCH_CHANGED');
       }
     } else {
-      if (binding.governance === 'disabled') {
+      if (binding.governance === 'disabled' && !removals.length) {
         const result = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}`, { message: 'Set repository governance off', content: Buffer.from(text).toString('base64'), branch: head, ...(existing ? { sha: existing.sha } : {}) }, 'PUT');
         headSha = result.commit?.sha;
       } else {
-        const tree = this.#api(`repos/${repository}/git/trees`, { base_tree: commit.tree.sha, tree: Object.entries(files).map(([name, content]) => ({ path: name, mode: '100644', type: 'blob', content })) });
-        const result = this.#api(`repos/${repository}/git/commits`, { message: 'Prepare repository governance and rules', tree: tree.sha, parents: [base.object.sha] });
+        const tree = this.#api(`repos/${repository}/git/trees`, { base_tree: commit.tree.sha, tree: [
+          ...Object.entries(files).map(([name, content]) => ({ path: name, mode: '100644', type: 'blob', content })),
+          ...removals.map(name => ({ path: name, mode: '100644', type: 'blob', sha: null })),
+        ] });
+        const result = this.#api(`repos/${repository}/git/commits`, { message: binding.governance === 'disabled' ? 'Set repository governance off' : 'Prepare repository governance and rules', tree: tree.sha, parents: [base.object.sha] });
         headSha = result.sha;
         if (!SHA.test(headSha)) fail('PROPOSAL_COMMIT_INVALID');
         this.#api(`repos/${repository}/git/refs/heads/${head}`, { sha: headSha, force: false }, 'PATCH');
       }
       if (!SHA.test(headSha)) fail('PROPOSAL_COMMIT_INVALID');
     }
-    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials, deployment or app task merge preferences.\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\nPlease merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
+    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials, deployment or app task merge preferences.\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud sweep copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
     return { number: pr.number, head: headSha };
   }
 }
-module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, proposalText, SCHEMA, MARKER, PROMPT_BUDGET_MS });
+module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, proposalText, bindingV2, cloudWorkflowFiles, SCHEMA, MARKER, PROMPT_BUDGET_MS });

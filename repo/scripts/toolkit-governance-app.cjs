@@ -126,16 +126,35 @@ function saveCommands(slug, which = 'both') {
 
 const found = state => state.variable === 'found' || state.secret === 'found';
 
+// The repository's Actions settings page for variables or secrets (Settings, Secrets and variables,
+// Actions). Repository level for personal and organisation repositories alike.
+const settingsPage = (slug, kind) => `https://github.com/${slug}/settings/${kind}/actions`;
+
+// The owner's by-hand steps on GitHub's website for `which` ('both', 'variable' or 'secret'): the
+// lead way to save the App's values. Each step first has the owner look for the name and stop when
+// it is already listed, so a by-hand save never overwrites another App either.
+function manualSteps(slug, which = 'both') {
+  const steps = {
+    variable: `Variables tab (${settingsPage(slug, 'variables')}): if ${APP.variable} is already listed, stop and reuse that App. Otherwise select New repository variable, Name ${APP.variable}, Value the Client ID, then Add variable.`,
+    secret: `Secrets tab (${settingsPage(slug, 'secrets')}): if ${APP.secret} is already listed, stop and reuse that App. Otherwise select New repository secret, Name ${APP.secret}. For Secret, open the .pem file in a text editor (Notepad works) and paste all of it, the BEGIN and END lines included, then Add secret.`,
+  };
+  const keys = which === 'both' ? ['variable', 'secret'] : [which];
+  return [
+    `   By hand on GitHub: open ${slug}, Settings, Secrets and variables, Actions.`,
+    ...keys.map((key, index) => `   ${String.fromCharCode(97 + index)}. ${steps[key]}`),
+  ];
+}
+
 function setupLines(slug, store, state, owner = null) {
   if (set(state)) return [`Governance GitHub App: the variable and the secret are set on ${slug}. Reuse that App: do not set it up again. The first governance job run proves the App is installed.`];
   if (found(state)) return [
     `Governance GitHub App: ${slug} already has part of an App setup (variable ${state.variable}, secret ${state.secret}). Reuse that App: set only what is missing, from the same App (the same Client ID and a private key generated for it). Toolkit never overwrites it for you.`,
     ...(state.variable === 'found' && state.secret === 'found' ? [] : state.variable === 'found'
-      ? [`To set only the missing secret, from the App whose Client ID is already saved here:`, ...saveCommands(slug, 'secret')]
+      ? [`To set only the missing secret, from the App whose Client ID is already saved here:`, ...manualSteps(slug, 'secret'), '   Or from the command line, with gh signed in:', ...saveCommands(slug, 'secret'), '   Then delete the .pem file.']
       : state.secret === 'found'
-        ? [`To set only the missing variable, the Client ID of the App whose key is already saved here:`, ...saveCommands(slug, 'variable')]
+        ? [`To set only the missing variable, the Client ID of the App whose key is already saved here:`, ...manualSteps(slug, 'variable'), '   Or from the command line, with gh signed in:', ...saveCommands(slug, 'variable')]
         : []),
-    `To replace it with a different App instead, save the new Client ID and key with these commands; they ask you to type replace first:`,
+    `To replace it with a different App instead, on the same Variables and Secrets tabs edit each saved value to the new App's Client ID and whole key, or use these commands, which ask you to type replace first:`,
     ...saveCommands(slug),
     'Then remove this repository from the old App\'s installation (Installed GitHub Apps, Configure, Repository access).',
   ];
@@ -147,8 +166,12 @@ function setupLines(slug, store, state, owner = null) {
     `   Check the page: webhook "Active" unticked, installable only on this account, repository permissions ${permissionText()}, and everything else, Workflows included, no access. If GitHub says the name is taken, pick another; names are unique across GitHub.`,
     '2. On the App\'s page, copy the Client ID and generate a private key (a .pem file downloads).',
     `3. Install App, Only select repositories: ${repositories}.`,
-    `4. Save both on ${slug}, then delete the .pem file. If someone else has set up an App here meanwhile, these ask you to type replace before overwriting it:`,
+    `4. Save both on ${slug}:`,
+    ...manualSteps(slug),
+    '   Or from the command line, with gh signed in (these ask you to type replace before overwriting an App someone else set up here meanwhile):',
     ...saveCommands(slug),
+    '5. Delete the .pem file once the secret is saved. It is the App\'s password and never expires; the App\'s page can generate a new key any time.',
+    `6. Check both halves are in place: run toolkit governance check in ${slug}. It should report the App's variable and secret as set and the cloud sweep copies (.github/workflows/toolkit-programme-sweep.yml and its gate, which the governance pull request carries) as current.`,
     'Use one App per governed repository, even if another repository already has one: GitHub gives each App installation its own hourly allowance, so a busy repository never slows this one. toolkit governance check cannot tell whether two repositories share an App, because it reads only the variable and secret names.',
   ];
 }
@@ -157,11 +180,14 @@ function removalLines(slug, state, others) {
   const installation = 'Installed GitHub Apps, Configure, Repository access';
   if (none(state)) return [`Governance GitHub App: no App variable or secret is left on ${slug}. If the App's installation still lists ${slug}, remove it there (${installation}).`];
   return [
-    `Governance GitHub App: after you merge the pull request that turns governance off, remove what ${slug} no longer needs. Toolkit never deletes it for you:`,
-    `1. gh variable delete ${APP.variable} --repo ${slug}`,
+    `Governance GitHub App: the pull request that turns governance off also removes the cloud sweep copies (.github/workflows/toolkit-programme-sweep.yml and its gate). After you merge it, remove the App's variable and secret from ${slug} yourself. Toolkit never deletes them for you:`,
+    `1. By hand on GitHub: open ${slug}, Settings, Secrets and variables, Actions. Delete ${APP.variable} on the Variables tab (${settingsPage(slug, 'variables')}) and ${APP.secret} on the Secrets tab (${settingsPage(slug, 'secrets')}).`,
+    '   Or from the command line, with gh signed in:',
+    `   gh variable delete ${APP.variable} --repo ${slug}`,
     `   gh secret delete ${APP.secret} --repo ${slug}`,
     `2. Remove ${slug} from the App's installation: GitHub Settings, Applications, ${installation}.`,
     '3. If no other repository uses the App (with one App per repository, none does), also remove the evidence store from the installation, uninstall the App and delete it (the App\'s settings, Advanced, Delete GitHub App); its private keys stop working.',
+    `4. Check both halves are gone: run toolkit governance check in ${slug}. It should report no App variable or secret left over and no cloud sweep copies.`,
     others.length
       ? `This computer knows these repositories still use governance: ${others.join(', ')}. Other computers may know more.`
       : 'This computer knows no other repository that still uses governance. Other computers may know more, so check before deleting the App.',
@@ -179,4 +205,4 @@ function appFinding(stateName, slug, store, state, others, owner = null) {
   return null;
 }
 
-module.exports = Object.freeze({ APP, NAME_LIMIT, appName, permissionLabel, creationLink, ownerType, saveCommands, ghReader, presence, setupLines, removalLines, appFinding });
+module.exports = Object.freeze({ APP, NAME_LIMIT, appName, permissionLabel, creationLink, ownerType, manualSteps, saveCommands, ghReader, presence, setupLines, removalLines, appFinding });
