@@ -232,7 +232,7 @@ class ToolkitRemoval {
   }
 }
 
-const NOT_TOUCHED = 'Not touched: your repositories, your keys (the env store and the credential store), and every setting, agent, skill and file you made yourself.';
+const NOT_TOUCHED = 'Not touched: your repositories, your keys (the env store and the credential store), the Claude Code preferences you chose at setup (listed above when there are any), and every setting, agent, skill and file you made yourself.';
 
 // The plugin uninstall lines for each app that still has the Toolkit plugin, and the app screen to use
 // when its command line is not available.
@@ -305,7 +305,9 @@ function describeResult(result) {
   if (!result.tasks.length && !result.steps.length && !result.rules.length && !result.codex_settings && !partsDone) lines.push("Nothing of Toolkit's was left to remove.");
   lines.push('', result.ok ? 'Done.' : 'Some steps failed. Nothing else was changed; run plan again to see what is left.');
   if (result.plugins?.length) lines.push('', ...pluginLines(result.plugins, { after: true }));
-  if (result.folder_kept) lines.push('', 'The Toolkit folder stays until the plugin is uninstalled. Then say `remove toolkit` again to remove it.');
+  // After the plugin goes, the remove toolkit skill may be gone too, so the exact line is printed.
+  if (result.folder_kept) lines.push('', 'The Toolkit folder stays until the plugin is uninstalled. Then say `remove toolkit` again, or run this in PowerShell and follow it:',
+    `node "${path.resolve(__filename)}" plan`);
   if (!result.plugins?.length && !result.folder_kept) lines.push('', 'Start a new session in each app so nothing of Toolkit stays loaded.');
   lines.push(NOT_TOUCHED);
   return lines;

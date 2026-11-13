@@ -68,6 +68,27 @@ class ClaudeDepthPart {
   }
 }
 
+// The Claude Code preferences setup turned on (no AI attribution, session messages, model switching,
+// reading AGENTS.md). Listed, never changed: they are choices the owner made at setup, and turning
+// attribution back on would put trailers back in commits. The listing says how to change one by hand.
+class ClaudeUserSettingsPart {
+  key = 'claude_preferences'; title = 'Claude Code preferences you chose at setup';
+  #settings; #file;
+  constructor({ environment = process.env, home = os.homedir(), settings } = {}) {
+    if (settings) this.#settings = settings;
+    else {
+      const { ClaudeUserSettings } = require('./toolkit-claude-user-settings.cjs');
+      this.#settings = new ClaudeUserSettings({ environment, controlRoot: environment.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(home, '.ai-agent-toolkit', 'agent-control') });
+    }
+    this.#file = display(home, path.join(claudeConfigDir(environment, home), 'settings.json'));
+  }
+  plan() {
+    return this.#settings.inspect().filter(entry => entry.state === 'toolkit-value' || (entry.state === 'off-value' && entry.toolkit))
+      .map(entry => ({ what: `${this.#file}: ${entry.label} (${entry.id})`, action: 'keep', detail: 'set at setup and kept as your own; edit settings.json to change it' }));
+  }
+  apply() { return []; }
+}
+
 // Toolkit's helper-capacity block in Codex's config.toml.
 class CodexHelperLimitPart {
   key = 'codex_helper_limit'; title = 'Codex helper limit';
@@ -249,8 +270,8 @@ function removeExcept(target, keep) {
 
 // The parts in the order apply runs them: settings, then files, then the folder last.
 function defaultParts({ environment = process.env, home = os.homedir() } = {}) {
-  return [new ClaudeDepthPart({ environment, home }), new CodexHelperLimitPart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
+  return [new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }), new CodexHelperLimitPart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
     new SkillCopiesPart({ home }), new ToolkitFolderPart({ home, environment })];
 }
 
-module.exports = { ClaudeDepthPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };
+module.exports = { ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };

@@ -350,6 +350,8 @@ function fullHome(t) {
   fs.mkdirSync(environment.CLAUDE_CONFIG_DIR, { recursive: true });
   fs.writeFileSync(path.join(environment.CLAUDE_CONFIG_DIR, 'settings.json'), '{\n  "theme": "dark"\n}\n');
   assert.equal(depth.apply('enable').changed, true);
+  const { ClaudeUserSettings } = require('../scripts/toolkit-claude-user-settings.cjs');
+  new ClaudeUserSettings({ environment, controlRoot: control }).apply({ attribution: 'enable' });
   const agents = { claude: path.join(environment.CLAUDE_CONFIG_DIR, 'agents'), codex: path.join(environment.CODEX_HOME, 'agents') };
   fs.mkdirSync(agents.claude, { recursive: true }); fs.mkdirSync(agents.codex, { recursive: true });
   fs.writeFileSync(path.join(agents.claude, 'toolkit-g0.md'), `---\nname: toolkit-g0\n---\n${claudeHelpers.MARKER}\n`);
@@ -367,6 +369,7 @@ function fullHome(t) {
     inspectCodexDelegationConfig() { return this.owned ? { ownership: 'toolkit-managed-v2', helper_count: 2 } : { ownership: 'none', status: 'unconfigured' }; },
     removeCodexDelegation(file, options) { this.calls.push([file, options]); this.owned = false; return { status: 'removed', changed: true }; } };
   const list = [new parts.ClaudeDepthPart({ environment: { ...environment, AI_AGENT_TOOLKIT_CONTROL_ROOT: control }, home }),
+    new parts.ClaudeUserSettingsPart({ environment: { ...environment, AI_AGENT_TOOLKIT_CONTROL_ROOT: control }, home }),
     new parts.CodexHelperLimitPart({ environment, home, delegation }), new parts.HelperAgentFilesPart({ environment, home }),
     new parts.SkillCopiesPart({ home, toolkitRoot: REPO_ROOT }), new parts.ToolkitFolderPart({ home, environment, plugins: () => installed })];
   const make = () => new removal.ToolkitRemoval({ home, parts: list, plugins: () => installed });
@@ -380,6 +383,8 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.equal(plan.nothing, false);
   assert.deepEqual(plan.plugins, ['claude-code']);
   assert.match(text, /Claude Code subagent limit:\n- ~\/\.claude\/settings\.json: the subagent limit CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: removed/);
+  assert.match(text, /Claude Code preferences you chose at setup:\n- ~\/\.claude\/settings\.json: No AI attribution in commits and pull requests \(attribution\): kept, set at setup and kept as your own/);
+  assert.match(text, /Not touched: [^\n]*the Claude Code preferences you chose at setup/);
   assert.match(text, /Codex helper limit:\n- ~\/\.codex\/config\.toml: Toolkit's helper limit block: removed \(toolkit-managed-v2, 2 helpers; Codex may then use its own higher default/);
   assert.match(text, /- ~\/\.claude\/agents\/toolkit-g0\.md: removed\n- ~\/\.codex\/agents\/toolkit-g1\.toml: removed/);
   assert.doesNotMatch(text, /my-reviewer|my-skill/);
@@ -397,7 +402,7 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   const first = h.make().apply(plan.code);
   assert.equal(first.ok, true, JSON.stringify(first));
   const settings = JSON.parse(fs.readFileSync(path.join(h.environment.CLAUDE_CONFIG_DIR, 'settings.json'), 'utf8'));
-  assert.deepEqual(settings, { theme: 'dark' });
+  assert.deepEqual(settings, { theme: 'dark', attribution: false }, 'the depth limit goes; the attribution preference stays');
   assert.equal(h.delegation.calls.length, 1);
   assert.equal(h.delegation.calls[0][1].approveCapacityResetRisk, true);
   assert.deepEqual(fs.readdirSync(h.agents.claude), ['my-reviewer.md']);
@@ -408,7 +413,7 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   const after = removal.describeResult(first).join('\n');
   assert.match(after, /~\/\.ai-agent-toolkit: kept \(the Claude Code plugin is still installed/);
   assert.match(after, /Last step, uninstall the plugin[^\n]*\n- Claude Code: `claude plugin uninstall/);
-  assert.match(after, /say `remove toolkit` again/);
+  assert.match(after, /say `remove toolkit` again, or run this in PowerShell and follow it:\nnode "[^"]*toolkit-remove\.cjs" plan/);
   // Once the plugin is gone, a second run lists only the folder and removes Toolkit's entries.
   h.installed['claude-code'] = false;
   const second = h.make().plan();
