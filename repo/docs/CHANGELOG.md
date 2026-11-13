@@ -1,5 +1,33 @@
 # Toolkit Changelog
 
+## 3.91.0 (reinstall after remove toolkit without hand repair)
+
+### Fixed
+
+- **Cloud sweep follow-up:** after its wait the follow-up starts nothing when another sweep is already queued, running or newer. It also runs when the footer step fails, and its built-in token can read contents, so the checkout works on a private repository.
+- **No paid waits:** on a private repository no runner waits an hour after a pass stopped mid-way at GitHub's hourly App limit; the hourly gate resumes it from its board note. A pass that found the limit already at the margin keeps its one follow-up, and a pass stopped by its own time limit still follows up at once.
+- **Footer cleaning at the limit:** a run that stopped at GitHub's hourly App limit skips footer cleaning, so it never spends the safety margin.
+- **No red runs on a GitHub blip:** a 5xx, a 429 or a dropped connection in the gate or the follow-up ends the run green with a notice; the next start tries again. A missing token or repository, a 401, 403 or 404, and any other error still show red.
+- **Cloud jobs contract:** the programme sweep's row names the gate workflow that holds its hourly cron, and `toolkit governance check` says the gate starts the sweep.
+- **Store push refusal:** the store command the raw-push refusal prints now includes `--store`, a path in the store and `--repo-root`, so it runs as printed from the store folder.
+- **Going back a folder:** the merge hold now reads `cd -` and `Set-Location -` as a step back to the folder before (bash's previous folder, or any folder in PowerShell's location history) instead of a folder named `-`, so `cd <store>; cd -; git push origin main` is judged in the folder the push really runs in. `cd -- -` and `Set-Location -Path -` step back too, and a bare `cd` goes home first, so `cd <repo>; cd; cd -` comes back to the repository. A push after a step back to a folder the same command never showed, after a bare `pushd`, or after `pushd +N`/`-N`, is refused with advice to name the folder.
+- **Switches are not folders:** `Push-Location <folder> -PassThru`, `-StackName <name>`, `-Path`/`-LiteralPath`, `cd -L`/`-P`, `pushd -n` and cmd's `cd /d` now give the merge hold the real folder.
+- **Timing test:** the closure scanner timing test may now grow its baseline to 2 MiB, so a fast Windows runner no longer compares a sample of under 5 ms.
+- **Re-runs clear CI:** each run attempt of a test shard uploads its own summary artifact, and the `validate` check keeps the newest attempt of each shard, so re-running a failed shard can turn `validate` green.
+- The leftover-files scan now lists the cloud sweep workflow copies in repositories with governance off, and says when one was edited by hand.
+- The cloud sweep workflows' header comments now hold both in the Toolkit and in a governed repository's copy (CI trigger, where the gate script and the refresh come from).
+- `toolkit governance check` re-renders a cloud sweep copy at its own Toolkit commit, when the checkout has it and the render is unchanged since, so a hand edit with a recomputed hash shows as drift instead of an older copy. It uses the CI workflow the copy itself names, so renaming or removing that workflow only makes the copy outdated. This covers copies pinned from this release on: the render now lives in `repo/scripts/toolkit-cloud-workflows-render.cjs`, so copies pinned before it keep the hash check until their next rules refresh.
+- The governance check's note for an out-of-date copy now says it differs from what a refresh writes (an older Toolkit commit, an action pin or the CI workflow it follows), not only that its commit is older.
+
+### Changed
+
+- **Codex hook records:** `remove toolkit` now also takes out Codex's approval records for the Toolkit hooks (`[hooks.state."ai-agent-toolkit@ai-agent-toolkit-local:..."]` in `config.toml`) and the empty Toolkit plugin cache folder, once the Codex plugin is uninstalled. It backs up the file first, and the edit must read, with Python's `tomllib`, as the old file without exactly those tables; otherwise the file is left alone with a by-hand step.
+- **Codex reinstall:** Codex setup no longer treats leftover Toolkit hook records alone as an earlier install. A computer cleaned by an older `remove toolkit` now installs the plugin without being asked for the old marketplace folder.
+- **Reinstall note:** `remove toolkit` saves a note in the kept backups (`~/.ai-agent-toolkit/backups/remove-toolkit/reinstall.json`). It names the helper stack each app had and the checkouts whose scheduled tasks it removed; no keys.
+  - `setup toolkit` puts the helper agents back for that stack where none are installed.
+  - On Windows, setup lists the removed tasks with their exact `plan` and `apply` lines for the owner's OK. It never creates the tasks itself.
+- **MCP key warning:** The removal plan lists each MCP server whose key helper runs `toolkit-env.cjs` from inside the Toolkit folder. Such a server gets no key until Toolkit is reinstalled, and its key stays in the credential store.
+
 ## 3.90.0
 
 ### Added
