@@ -166,10 +166,14 @@ function appFindings(state, options) {
   let slug = null;
   try { const identity = governance.readIdentity(state.root); slug = identity.valid ? governance.remoteSlug(identity.remote) : null; } catch { slug = null; }
   if (!slug) return [];
-  const appState = governanceApp.presence(slug, { reader: options.appReader || governanceApp.ghReader,
-    offline: options.offline === true || (!options.appReader && (options.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1')) });
+  const read = { reader: options.appReader || governanceApp.ghReader,
+    offline: options.offline === true || (!options.appReader && (options.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1')) };
+  const appState = governanceApp.presence(slug, read);
   const others = governance.enabledRepositories(options).filter(name => name.toLowerCase() !== slug.toLowerCase());
-  const found = governanceApp.appFinding(state.state, slug, governance.bindingStoreRepository(state.root, options), appState, others);
+  // The owner type picks the App page, so it is read only when the setup steps will show.
+  const setup = state.state === 'ENABLED' && !(appState.variable === 'found' || appState.secret === 'found');
+  const owner = setup ? governanceApp.ownerType(slug, read) : null;
+  const found = governanceApp.appFinding(state.state, slug, governance.bindingStoreRepository(state.root, options), appState, others, owner);
   return found ? [found] : [];
 }
 

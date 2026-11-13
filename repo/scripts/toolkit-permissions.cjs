@@ -188,7 +188,8 @@ class PermissionBlocks {
     const root = this.#path.basename(common) === '.git' ? this.#path.dirname(common) : this.#git(start, ['rev-parse', '--show-toplevel']);
     if (!root) return { ok: false, reason: 'the repository\'s main folder could not be found.' };
     const binding = this.#readJson(this.#path.join(root, '.github', 'toolkit-programme.json'));
-    if (!binding || binding.governance !== 'enabled') return { ok: false, reason: 'this repository has no Toolkit programme file with governance enabled.' };
+    // A version 1 programme file has no governance key and reads as enabled (programme-state's bindingEnabled).
+    if (!binding || !(binding.schema === 'toolkit.programme-binding.v1' || binding.governance === 'enabled')) return { ok: false, reason: 'this repository has no Toolkit programme file with governance enabled.' };
     return { ok: true, root, binding };
   }
 
