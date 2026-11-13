@@ -22,10 +22,11 @@ test('contract: the programme sweep row has two narrow tokens and no personal to
   const row = source.jobs.find(job => job.id === 'programme-sweep');
   assert.deepEqual(row.tokens, [
     { name: 'governed', repository: 'governed_repository', takes: ['contents', 'issues', 'pull_requests', 'checks', 'statuses'], read_only: ['contents'] },
-    { name: 'store', repository: 'evidence_store', takes: ['contents'] },
+    { name: 'store', repository: 'evidence_store', takes: ['contents', 'issues', 'pull_requests'] },
   ]);
   assert.deepEqual(jobs().tokenPermissions(row.tokens[0]), { contents: 'read', issues: 'write', pull_requests: 'write', checks: 'read', statuses: 'read' });
-  assert.deepEqual(jobs().tokenPermissions(row.tokens[1]), { contents: 'write' });
+  // Issues and pull requests write let the footer cleaning edit the owner's posts in the store.
+  assert.deepEqual(jobs().tokenPermissions(row.tokens[1]), { contents: 'write', issues: 'write', pull_requests: 'write' });
   assert.doesNotMatch(JSON.stringify(source), /TOOLKIT_GOVERNANCE_TOKEN|secret_name/);
 });
 
@@ -34,7 +35,7 @@ test('guide: the lines the check prints use the App\'s own names, levels and var
   const lines = jobs().guideLines(guide);
   assert.equal(lines[0], 'Cloud jobs: one governance GitHub App, variable TOOLKIT_GOVERNANCE_APP_CLIENT_ID and secret TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY');
   assert.ok(lines.includes('  Governed repository token: Contents read-only, Issues read and write, Pull requests read and write, Checks read-only, Commit statuses read-only'), lines.join('\n'));
-  assert.ok(lines.includes('  Evidence store token: Contents read and write'));
+  assert.ok(lines.includes('  Evidence store token: Contents read and write, Issues read and write, Pull requests read and write'), lines.join('\n'));
   assert.ok(lines.includes('Never grant: administration, secrets, workflows, account.'));
   // The same words as the App's setup steps, from the same helper.
   const app = governanceApp();
@@ -80,7 +81,7 @@ for (const [label, change] of [
   ['an unknown permission', source => { source.jobs[0].tokens[0].takes.push('actions'); }],
   ['a level written into the row', source => { source.jobs[0].tokens[1].permissions = { contents: 'write' }; }],
   ['a permission taken twice', source => { source.jobs[0].tokens[1].takes.push('contents'); }],
-  ['read-only on a permission not taken', source => { source.jobs[0].tokens[1].read_only = ['issues']; }],
+  ['read-only on a permission not taken', source => { source.jobs[0].tokens[1].read_only = ['checks']; }],
   ['read-only on a permission the App only reads', source => { source.jobs[0].tokens[0].read_only.push('checks'); }],
   ['an empty read-only list', source => { source.jobs[0].tokens[1].read_only = []; }],
   ['no permissions', source => { source.jobs[0].tokens[1].takes = []; }],

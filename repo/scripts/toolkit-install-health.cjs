@@ -12,9 +12,9 @@
 // record in the Toolkit hub, the Toolkit helper definitions and global rules (each refreshed
 // when stale), the Toolkit-owned Claude Code depth setting against the selected topology, and,
 // once toolkit env is in use, its store and connected MCP entries (by key name only).
-// Notices that block nothing: an older saved Projects controller skill, an older Toolkit copy
-// from the user's claude.ai account in the Claude desktop app (read only; claude.ai alone updates it),
-// and Codex running an older Toolkit or with Toolkit hooks off (read from the Codex files only).
+// Notices that block nothing: an older saved Projects controller skill, and an older Toolkit copy
+// from the user's claude.ai account in the Claude desktop app (read only; claude.ai alone updates it).
+// It never reports Codex's Toolkit state: Codex reports that in its own setup and checks.
 //
 // Usage (session-start hook): node repo/scripts/toolkit-install-health.cjs --session-start [--hub <path>]
 // Prints the result as JSON. Exit 0 when the check ran, 1 when it could not run.
