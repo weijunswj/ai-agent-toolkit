@@ -13,6 +13,7 @@
 //   node repo/scripts/toolkit-merge-train.cjs verify --manifest <file> --head <ref> [--main <ref>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs body   --manifest <file> [--json]
 //   node repo/scripts/toolkit-merge-train.cjs split  --manifest <file> --out-prefix <path> [--json]
+//   node repo/scripts/toolkit-merge-train.cjs eject  --manifest <file> --pr <member PR> --reason <text> [--main <ref>] [--out <file>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs land   --manifest <file> --pr <train PR> --head <sha> [--main <ref>] [--live <file>] [--json]
 //
 // The manifest (JSON) lists the members in the order they board:
@@ -34,9 +35,24 @@
 // it on main once the earlier train has merged. --out writes the boarded manifest, with the ejected
 // members and their reasons under "ejected", for verify, body and land.
 //
+// eject takes a boarded member off a train that is already pushed, without rewriting its history,
+// so the train keeps its branch and pull request. Run in a clean checkout of the train, it adds
+// revert commits on top: when the train ends in its bump, first a revert of that bump, then a revert
+// of the member's boarding merge (`git revert -m 1`), then a fresh bump at the remaining members'
+// level. It moves the member to "ejected" with its boarding merge and every revert it made, and
+// writes the manifest back (or to --out). A revert that does not apply cleanly (a later member
+// builds on the ejected one) is refused and the checkout left as it was. The ejected pull request
+// stays open: its commits are in the train, so GitHub would mark it merged if the train landed with
+// it still at that head; land refuses that until its branch moves on or it closes. It rejoins only a
+// later train, after its branch merges main and reverts the eject revert, with a fresh review.
+//
 // verify walks the train's first-parent commits after main and refuses anything that is not a
 // member merge or a main catch-up merge whose tree equals Git's own clean merge, or a last bump
 // commit whose tree equals a fresh run of the bump command. Every member must board exactly once.
+// It also accepts exactly the reverts recorded under "ejected": each must equal Git's own revert of
+// an earlier train commit (an ejected member's boarding merge, or a bump that a later bump replaced),
+// and every recorded revert must be there. Each bump is checked at the level of the members on board
+// when it was made.
 // land re-runs verify, requires main to be inside the train (else main moved: rebuild), every
 // member's pull request open at its boarded head, the train pull request at --head and an owner OK
 // for every RISKY member, then names the pull request and head to merge. --live reads those pull request facts from
@@ -55,7 +71,7 @@ const TIERS = Object.freeze(['LIGHT', 'NORMAL', 'RISKY']);
 const TOOLKIT_BUMP = 'node repo/scripts/bump-version.cjs --next {level} --base {base}';
 const UAT_LINE = /^UAT: (NOT_REQUIRED|OWNER_TEST_NEEDED|PASSED)\b/;
 const LINK_LINE = /^(Closes|Fixes|Resolves|Refs) #\d+$/;
-const COMMANDS = Object.freeze(['build', 'verify', 'body', 'split', 'land']);
+const COMMANDS = Object.freeze(['build', 'verify', 'body', 'split', 'land', 'eject']);
 
 class TrainError extends Error {
   constructor(message, code = 2) { super(message); this.code = code; }
@@ -136,7 +152,47 @@ function checkManifest(value) {
       throw new TrainError(`${where}: "owner_ok" must link the owner's typed merge OK`);
     }
   }
+  checkEjected(value, seenPr);
   return value;
+}
+
+// "ejected" lists members that left the train: by build (no "merge") or by eject after boarding
+// ("merge" is its boarding merge commit, "bump" its level, "reverts" every revert commit eject added for it).
+function checkEjected(value, memberPrs) {
+  if (value.ejected === undefined) return;
+  if (!Array.isArray(value.ejected)) throw new TrainError('"ejected" must be a list');
+  const seenCommit = new Set();
+  for (const entry of value.ejected) {
+    const where = `ejected ${JSON.stringify(entry && entry.pr)}`;
+    if (!entry || !Number.isInteger(entry.pr) || entry.pr <= 0) throw new TrainError(`${where}: "pr" must be a pull request number`);
+    if (typeof entry.head !== 'string' || !entry.head) throw new TrainError(`${where}: "head" must name the head it was ejected at`);
+    if (entry.merge === undefined && entry.reverts === undefined) continue;
+    if (memberPrs.has(entry.pr)) throw new TrainError(`${where} left this train after boarding: it rejoins only a later train`);
+    if (!SHA.test(entry.head)) throw new TrainError(`${where}: "head" must be a full SHA`);
+    if (!SHA.test(entry.merge || '')) throw new TrainError(`${where}: "merge" must be its boarding merge commit as a full SHA`);
+    if (!['none', ...LEVELS].includes(entry.bump)) throw new TrainError(`${where}: "bump" must keep its level, so the bump it rode in still checks`);
+    if (!Array.isArray(entry.reverts) || !entry.reverts.length) throw new TrainError(`${where}: "reverts" must list the revert commits eject made`);
+    for (const revert of entry.reverts) {
+      if (!revert || !SHA.test(revert.commit || '') || !SHA.test(revert.of || '')) throw new TrainError(`${where}: each revert needs "commit" and "of" as full SHAs`);
+      if (seenCommit.has(revert.commit) || seenCommit.has(`of:${revert.of}`)) throw new TrainError(`${where}: revert ${revert.commit.slice(0, 12)} is recorded twice`);
+      seenCommit.add(revert.commit);
+      seenCommit.add(`of:${revert.of}`);
+    }
+    if (!entry.reverts.some(revert => revert.of === entry.merge)) throw new TrainError(`${where}: no recorded revert undoes its boarding merge`);
+  }
+}
+
+// Members that left the train after boarding, keyed by their ejected head.
+function boardedThenEjected(manifest) {
+  return (manifest.ejected || []).filter(entry => entry.merge);
+}
+
+// Git's own revert of `target` (its first parent as mainline) on top of `onto`: the tree, or null on a conflict.
+function cleanRevertTree(cwd, target, onto) {
+  const out = git(cwd, ['merge-tree', '--write-tree', '--no-messages', `--merge-base=${target}`, onto, `${target}^1`], { allowFail: true });
+  if (out.status !== 0) return null;
+  const tree = out.stdout.split('\n')[0].trim();
+  return SHA.test(tree) ? tree : null;
 }
 
 function trainLevel(members) {
@@ -223,6 +279,82 @@ function build(cwd, manifest, options) {
   return { ok: boarded.length > 0, branch, head, main, onto, stacked, level, bump, boarded: boarded.map(member => member.pr), ejected: out.ejected };
 }
 
+function eject(cwd, manifest, options) {
+  if (!Number.isInteger(options.pr) || options.pr <= 0) throw new TrainError('--pr must be the member pull request to eject');
+  const reason = String(options.reason || '').trim();
+  if (!reason || reason.includes('\n')) throw new TrainError('--reason must say in one line why the member leaves the train');
+  if (git(cwd, ['status', '--porcelain']).stdout) throw new TrainError('eject needs a clean checkout of the train; use its own worktree');
+  const member = manifest.members.find(entry => entry.pr === options.pr);
+  if (!member) throw new TrainError(`#${options.pr} is not a member of this train`, 1);
+  const remaining = manifest.members.filter(entry => entry !== member);
+  if (!remaining.length) throw new TrainError(`#${options.pr} is the train's last member: close the train pull request instead`, 1);
+  const main = resolve(cwd, options.main, '--main');
+  const start = git(cwd, ['rev-parse', 'HEAD']).stdout;
+  const checked = verify(cwd, manifest, { main: options.main, head: start });
+  if (!checked.ok) return { ok: false, pr: options.pr, head: start, main, problems: ['the checkout does not verify as this train, so nothing was ejected', ...checked.problems] };
+  const commits = git(cwd, ['rev-list', '--first-parent', '--reverse', '--parents', `${main}..HEAD`]).stdout.split('\n').map(line => line.trim().split(/\s+/));
+  const board = commits.find(([, , second]) => second === member.head)[0];
+  const recorded = new Set(boardedThenEjected(manifest).flatMap(entry => entry.reverts.map(revert => revert.commit)));
+  const [lastCommit, ...lastParents] = commits[commits.length - 1];
+  const bump = lastParents.length === 1 && !recorded.has(lastCommit) ? lastCommit : null;
+  const made = [];
+  const undo = problem => {
+    git(cwd, ['revert', '--abort'], { allowFail: true });
+    git(cwd, ['reset', '--quiet', '--hard', start], { allowFail: true });
+    git(cwd, ['clean', '--quiet', '-fd'], { allowFail: true });
+    return { ok: false, pr: options.pr, head: start, main, problems: [problem] };
+  };
+  const revert = (target, mainline, message) => {
+    const args = ['-c', 'rerere.enabled=false', 'revert', '--no-commit', ...(mainline ? ['-m', '1'] : []), target];
+    if (git(cwd, args, { allowFail: true }).status !== 0) return false;
+    git(cwd, ['commit', '--quiet', '--no-verify', '--allow-empty', '-m', message]);
+    made.push({ commit: git(cwd, ['rev-parse', 'HEAD']).stdout, of: target });
+    return true;
+  };
+  // The bump is reverted first: it folded the member's notes, so the member cannot be reverted under it.
+  if (bump && !revert(bump, false, `Merge train: eject #${member.pr}, revert the bump to re-bump without it`)) {
+    return undo('the bump does not revert cleanly; rebuild the train instead');
+  }
+  if (!revert(board, true, `Merge train: eject #${member.pr} (${reason})`)) {
+    return undo(`#${member.pr}'s boarding does not revert cleanly: a later member builds on it, so eject that member first`);
+  }
+  let rebump = null;
+  if (bump) {
+    const level = trainLevel(remaining);
+    const argv = bumpArgv(cwd, manifest, level, main);
+    if (argv) {
+      try {
+        runBump(cwd, argv);
+      } catch (error) {
+        return undo(`${error.message}; nothing was ejected`);
+      }
+      git(cwd, ['add', '--all']);
+      if (git(cwd, ['diff', '--cached', '--quiet'], { allowFail: true }).status !== 0) {
+        git(cwd, ['commit', '--quiet', '--no-verify', '-m', `Merge train: bump ${level} for ${remaining.map(entry => `#${entry.pr}`).join(', ')}`]);
+        rebump = git(cwd, ['rev-parse', 'HEAD']).stdout;
+      }
+    }
+  }
+  const boardRevert = made.find(entry => entry.of === board).commit;
+  const out = {
+    ...manifest,
+    members: remaining,
+    ejected: [...(manifest.ejected || []), { pr: member.pr, head: member.head, bump: member.bump, reason, merge: board, reverts: made }],
+  };
+  fs.writeFileSync(options.out || options.manifest, `${JSON.stringify(out, null, 2)}\n`);
+  return {
+    ok: true,
+    pr: member.pr,
+    head: git(cwd, ['rev-parse', 'HEAD']).stdout,
+    main,
+    reverts: made,
+    bump: rebump,
+    members: remaining.map(entry => entry.pr),
+    next: `push the train branch (no force), run verify and wait for CI; #${member.pr} stays open and must move off ${member.head.slice(0, 12)} or close before the train lands`,
+    rejoin: `after this train lands, on #${member.pr}'s branch: merge main, then git revert --no-edit ${boardRevert}, fix it and pass a fresh review; it boards a later train`,
+  };
+}
+
 function reproducesBump(cwd, manifest, commit, parent, level, main) {
   const argv = bumpArgv(cwd, manifest, level, main);
   if (!argv) return 'the train has no bump to make, so a plain commit is not allowed';
@@ -252,16 +384,24 @@ function verify(cwd, manifest, options) {
   const head = resolve(cwd, options.head || '', '--head');
   const problems = [];
   const byHead = new Map(manifest.members.map(member => [member.head, member]));
+  const left = boardedThenEjected(manifest);
+  const leftByHead = new Map(left.map(entry => [entry.head, entry]));
+  const reverts = new Map(left.flatMap(entry => entry.reverts.map(revert => [revert.commit, { ...revert, entry }])));
   const seen = new Map();
   const listed = git(cwd, ['rev-list', '--first-parent', '--reverse', '--parents', `${main}..${head}`]).stdout;
   const commits = listed ? listed.split('\n').map(line => line.trim().split(/\s+/)) : [];
   if (!commits.length) problems.push('the train holds nothing that main does not');
   const level = trainLevel(manifest.members);
+  const position = new Map(commits.map(([commit], index) => [commit, index]));
+  const onBoard = new Map(); // boarding merge commit -> member or ejected entry, while it is not reverted
+  const plain = []; // bump commits, by index
+  const reverted = new Set();
+  const seenReverts = new Set();
   commits.forEach(([commit, ...parents], index) => {
     const short = commit.slice(0, 12);
     if (parents.length === 2) {
       const [first, second] = parents;
-      const member = byHead.get(second);
+      const member = byHead.get(second) || leftByHead.get(second);
       if (!member && !isAncestor(cwd, second, main)) {
         problems.push(`${short} merges ${second.slice(0, 12)}, which is neither a member's reviewed head nor main`);
         return;
@@ -269,6 +409,8 @@ function verify(cwd, manifest, options) {
       if (member) {
         if (seen.has(member.pr)) problems.push(`#${member.pr} boards twice`);
         seen.set(member.pr, commit);
+        onBoard.set(commit, member);
+        if (leftByHead.has(second) && member.merge !== commit) problems.push(`${short} boards ejected #${member.pr}, but its recorded boarding merge is ${member.merge.slice(0, 12)}`);
       }
       const clean = cleanMergeTree(cwd, first, second);
       if (!clean) problems.push(`${short} is a merge Git cannot make cleanly: a hand-resolved conflict is not allowed`);
@@ -276,12 +418,41 @@ function verify(cwd, manifest, options) {
       return;
     }
     if (parents.length > 2) { problems.push(`${short} merges more than two commits at once`); return; }
-    if (index !== commits.length - 1) { problems.push(`${short} is a commit of its own inside the train: only member merges and one last bump commit are allowed`); return; }
-    const reason = reproducesBump(cwd, manifest, commit, parents[0], level, main);
+    const revert = reverts.get(commit);
+    if (revert) {
+      seenReverts.add(commit);
+      const where = position.get(revert.of);
+      if (where === undefined || where >= index) { problems.push(`${short} reverts ${revert.of.slice(0, 12)}, which is not an earlier commit of this train`); return; }
+      if (reverted.has(revert.of)) { problems.push(`${short} reverts ${revert.of.slice(0, 12)} a second time`); return; }
+      const target = onBoard.get(revert.of);
+      if (target && target !== revert.entry) { problems.push(`${short} reverts the boarding of #${target.pr}, but the revert is recorded for #${revert.entry.pr}`); return; }
+      if (!target && !plain.includes(where)) { problems.push(`${short} reverts ${revert.of.slice(0, 12)}, which is neither a boarding merge nor a bump`); return; }
+      reverted.add(revert.of);
+      onBoard.delete(revert.of);
+      const clean = cleanRevertTree(cwd, revert.of, parents[0]);
+      if (!clean) problems.push(`${short} is a revert Git cannot make cleanly: a hand-resolved revert is not allowed`);
+      else if (clean !== git(cwd, ['rev-parse', `${commit}^{tree}`]).stdout) problems.push(`${short} differs from Git's own revert of ${revert.of.slice(0, 12)}: the revert was edited`);
+      return;
+    }
+    plain.push(index);
+    // A bump is made at the level of the members on board at that point.
+    const reason = reproducesBump(cwd, manifest, commit, parents[0], trainLevel([...onBoard.values()]), main);
     if (reason) problems.push(`${short}: ${reason}`);
   });
+  const last = commits.length - 1;
+  for (const index of plain) {
+    if (index !== last && !reverted.has(commits[index][0])) {
+      problems.push(`${commits[index][0].slice(0, 12)} is a commit of its own inside the train: only member merges, recorded eject reverts and one last bump commit are allowed`);
+    }
+  }
   for (const member of manifest.members) {
     if (!seen.has(member.pr)) problems.push(`#${member.pr} at ${member.head.slice(0, 12)} is not on the train`);
+  }
+  for (const entry of left) {
+    if (!reverted.has(entry.merge)) problems.push(`ejected #${entry.pr}: its boarding merge ${entry.merge.slice(0, 12)} is not reverted on the train`);
+    for (const revert of entry.reverts) {
+      if (!seenReverts.has(revert.commit)) problems.push(`ejected #${entry.pr}: recorded revert ${revert.commit.slice(0, 12)} is not on the train`);
+    }
   }
   return { ok: problems.length === 0, head, main, members: manifest.members.map(member => member.pr), level, problems };
 }
@@ -302,6 +473,10 @@ function body(manifest) {
     '|---|---|---|---|---|',
     ...members.map(member => `| #${member.pr} | \`${member.head}\` | ${member.tier} | ${member.bump} | ${member.g2} |`),
     '',
+    ...boardedThenEjected(manifest).flatMap(entry => [
+      `Ejected: #${entry.pr} at \`${entry.head.slice(0, 12)}\` (${entry.reason || 'no reason recorded'}); its boarding is reverted by \`${entry.reverts.find(revert => revert.of === entry.merge).commit.slice(0, 12)}\`, so it does not land with this train.`,
+      '',
+    ]),
     `Tier: ${trainTier(members)}`,
     level === 'none' ? 'Bump: none' : `Bump: ${level}`,
     uat,
@@ -358,6 +533,14 @@ function land(cwd, manifest, options) {
     if (facts.head !== member.head) problems.push(`#${member.pr} moved to ${String(facts.head).slice(0, 12)} after boarding: eject it until its review passes the new head`);
     if (member.tier === 'RISKY' && !member.owner_ok) problems.push(`#${member.pr} is RISKY and has no owner merge OK recorded`);
   }
+  // An ejected member's commits stay in the train, reverted: GitHub marks its pull request merged
+  // when the train lands if its head is still the one that boarded.
+  for (const entry of boardedThenEjected(manifest)) {
+    const facts = livePr(manifest.repository, entry.pr, options.live);
+    if (facts.state === 'OPEN' && facts.head === entry.head) {
+      problems.push(`ejected #${entry.pr} is still open at ${entry.head.slice(0, 12)}, which the train carries: GitHub would mark it merged; push its next commit or close it first`);
+    }
+  }
   return {
     ok: problems.length === 0,
     pr: options.pr,
@@ -372,7 +555,7 @@ function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (!COMMANDS.includes(command)) throw new TrainError(`usage: toolkit-merge-train.cjs <${COMMANDS.join('|')}> --manifest <file> ...`);
   const options = { command, main: 'origin/main', json: false };
-  const takes = new Set(['--manifest', '--branch', '--main', '--onto', '--out', '--head', '--out-prefix', '--pr', '--live']);
+  const takes = new Set(['--manifest', '--branch', '--main', '--onto', '--out', '--head', '--out-prefix', '--pr', '--live', '--reason']);
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (arg === '--json') { options.json = true; continue; }
@@ -395,6 +578,7 @@ function run(argv, cwd = process.cwd()) {
     if (!options.outPrefix) throw new TrainError('--out-prefix is required');
     return split(manifest, options.outPrefix);
   }
+  if (options.command === 'eject') return eject(cwd, manifest, options);
   return land(cwd, manifest, options);
 }
 
@@ -424,4 +608,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { TOOLKIT_BUMP, TrainError, body, build, checkManifest, land, run, split, trainLevel, trainTier, verify };
+module.exports = { TOOLKIT_BUMP, TrainError, body, build, checkManifest, eject, land, run, split, trainLevel, trainTier, verify };
