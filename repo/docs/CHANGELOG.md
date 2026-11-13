@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.84.1
+
+### Fixed
+
+- The install check's header comment no longer says it reports Codex's Toolkit state.
+
 ## 3.84.0
 
 ### Added
