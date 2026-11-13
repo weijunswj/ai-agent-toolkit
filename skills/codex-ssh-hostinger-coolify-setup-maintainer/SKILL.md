@@ -22,7 +22,7 @@ Do not replace the n8n-specific Hostinger Coolify VPS deployment reference with 
 - Do not print secrets, tokens, private keys, cookies, database URLs, or env files.
 - Do not ask the user to paste SSH private keys or production passwords into chat; use owner-controlled SSH/session tooling and owner-entered secrets.
 - Prefer SSH key-only access, such as Ed25519 or strong RSA keys, but do not disable password authentication or change sshd configuration until key access, owner recovery access, the current session, and a second SSH session are verified.
-- Treat `daily-security-check.sh` as read-only reporting and optional owner-configured notification delivery only: no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
+- Treat `daily-security-check.sh` as read-only reporting and required owner-configured notification delivery only (the owner reads it; a FAIL or a failed send exits non-zero): no package changes, service restarts, Docker mutations, firewall changes, or remediation actions.
 - Treat upgrade advice as read-only reporting only: suggest cleanup, optimization, archival, workload split, storage resize, VPS resize, or managed-provider upgrade when evidence shows pressure, but never change billing or capacity without explicit owner approval.
 - Treat intrusion checks as signals, not proof that no intrusion occurred.
 - Store Telegram/email notification secrets only in owner-managed server config outside chat.

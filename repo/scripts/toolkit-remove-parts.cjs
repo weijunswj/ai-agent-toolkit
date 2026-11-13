@@ -8,6 +8,9 @@
 //   plan()        read-only; [{ what, action: 'remove' | 'keep' | 'held', detail? }]. The plan code
 //                 covers this list, so a list that changes after the owner saw it removes nothing.
 //   apply(items)  removes the items planned as 'remove'; [{ what, result, reason? }].
+//   app           whose part it is: 'codex', 'claude-code', 'shared' (used by every app) or 'any' (always
+//                 runs). An item's own `app` wins, for parts that span apps. `remove toolkit` runs in one
+//                 app and plans only that app's items; shared items wait while another app keeps Toolkit.
 //
 // The Toolkit folder (~/.ai-agent-toolkit) goes last, and only once neither the Claude Code nor the
 // Codex plugin is installed, because a plugin that is still installed reads its records there.
@@ -42,7 +45,7 @@ function attempt(item, run) {
 
 // Claude Code's CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH, only while it holds the value Toolkit recorded.
 class ClaudeDepthPart {
-  key = 'claude_settings'; title = 'Claude Code subagent limit';
+  key = 'claude_settings'; title = 'Claude Code subagent limit'; app = 'claude-code';
   #setting; #what;
   constructor({ environment = process.env, home = os.homedir(), setting } = {}) {
     if (setting) this.#setting = setting;
@@ -72,7 +75,7 @@ class ClaudeDepthPart {
 // reading AGENTS.md). Listed, never changed: they are choices the owner made at setup, and turning
 // attribution back on would put trailers back in commits. The listing says how to change one by hand.
 class ClaudeUserSettingsPart {
-  key = 'claude_preferences'; title = 'Claude Code preferences you chose at setup';
+  key = 'claude_preferences'; title = 'Claude Code preferences you chose at setup'; app = 'claude-code';
   #settings; #file;
   constructor({ environment = process.env, home = os.homedir(), settings } = {}) {
     if (settings) this.#settings = settings;
@@ -91,7 +94,7 @@ class ClaudeUserSettingsPart {
 
 // Toolkit's helper-capacity block in Codex's config.toml.
 class CodexHelperLimitPart {
-  key = 'codex_helper_limit'; title = 'Codex helper limit';
+  key = 'codex_helper_limit'; title = 'Codex helper limit'; app = 'codex';
   #delegation; #configPath; #what;
   constructor({ environment = process.env, home = os.homedir(), delegation, configPath } = {}) {
     this.#delegation = delegation || require('./codex-delegation-config.cjs');
@@ -127,13 +130,13 @@ class HelperAgentFilesPart {
   constructor({ environment = process.env, home = os.homedir(), folders } = {}) {
     this.#home = home;
     this.#folders = folders || [
-      { dir: path.join(claudeConfigDir(environment, home), 'agents'), marker: require('./toolkit-claude-helper-agents.cjs').MARKER },
-      { dir: path.join(codexHomeDir(environment, home), 'agents'), marker: require('./toolkit-codex-helper-agents.cjs').MARKER },
+      { dir: path.join(claudeConfigDir(environment, home), 'agents'), marker: require('./toolkit-claude-helper-agents.cjs').MARKER, app: 'claude-code' },
+      { dir: path.join(codexHomeDir(environment, home), 'agents'), marker: require('./toolkit-codex-helper-agents.cjs').MARKER, app: 'codex' },
     ];
   }
   #found() {
     const found = [];
-    for (const { dir, marker } of this.#folders) {
+    for (const { dir, marker, app = 'shared' } of this.#folders) {
       let entries = [];
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
       for (const entry of entries) {
@@ -141,12 +144,12 @@ class HelperAgentFilesPart {
         const file = path.join(dir, entry.name);
         let text = '';
         try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
-        if (text.includes(marker)) found.push({ file, marker });
+        if (text.includes(marker)) found.push({ file, marker, app });
       }
     }
     return found.sort((a, b) => a.file.localeCompare(b.file));
   }
-  plan() { return this.#found().map(({ file }) => ({ what: display(this.#home, file), action: 'remove' })); }
+  plan() { return this.#found().map(({ file, app }) => ({ what: display(this.#home, file), action: 'remove', app })); }
   apply(items) {
     const found = this.#found();
     return items.filter(item => item.action === 'remove').map(item => attempt(item, () => {
@@ -163,25 +166,36 @@ class HelperAgentFilesPart {
 // Skill folders Toolkit copied and recorded: the official n8n skills and the Antigravity copies.
 class SkillCopiesPart {
   key = 'skill_copies'; title = 'Skill folders Toolkit copied';
-  #owners; #home;
-  constructor({ home = os.homedir(), toolkitRoot = path.resolve(__dirname, '..', '..'), owners } = {}) {
+  #owners; #home; #apps;
+  constructor({ environment = process.env, home = os.homedir(), toolkitRoot = path.resolve(__dirname, '..', '..'), owners } = {}) {
     this.#home = home;
+    // The app that reads each copy folder: Claude Code its skills folder, Codex ~/.agents/skills; any
+    // other folder (Antigravity's) is shared.
+    this.#apps = [{ dir: path.join(claudeConfigDir(environment, home), 'skills'), app: 'claude-code' }, { dir: path.join(home, '.agents', 'skills'), app: 'codex' }];
     if (owners) { this.#owners = owners; return; }
     const { OfficialN8nSkills } = require('./toolkit-n8n-official-skills.cjs');
     const { AntigravityGlobalSkills } = require('./toolkit-antigravity-project-skills.cjs');
     this.#owners = [new OfficialN8nSkills({ toolkitRoot, host: 'claude-code', homeDir: home, antigravity: true }), new AntigravityGlobalSkills({ toolkitRoot, homeDir: home })];
   }
+  #appOf(target) {
+    const hit = this.#apps.find(entry => path.resolve(entry.dir).toLowerCase() === path.resolve(target).toLowerCase());
+    return hit ? hit.app : 'shared';
+  }
   plan() {
-    return this.#owners.flatMap(owner => owner.recorded()).map(({ target, skill }) => ({ what: display(this.#home, path.join(target, skill)), action: 'remove' }))
+    return this.#owners.flatMap(owner => owner.recorded()).map(({ target, skill }) => ({ what: display(this.#home, path.join(target, skill)), action: 'remove', app: this.#appOf(target), target: display(this.#home, target) }))
       .sort((a, b) => a.what.localeCompare(b.what));
   }
+  // Removes the recorded copies only in the folders the plan listed, so another app's copies stay.
   apply(items) {
     if (!items.some(item => item.action === 'remove')) return [];
+    const targets = new Set(items.filter(item => item.action === 'remove').map(item => item.target));
     const removed = new Set();
     const failures = [];
     for (const owner of this.#owners) {
-      try { for (const { target, skill } of owner.remove()) removed.add(display(this.#home, path.join(target, skill))); }
-      catch (error) { failures.push(safe(error)); }
+      for (const target of [...new Set(owner.recorded().map(entry => entry.target))].filter(dir => targets.has(display(this.#home, dir)))) {
+        try { for (const { target: dir, skill } of owner.remove(target)) removed.add(display(this.#home, path.join(dir, skill))); }
+        catch (error) { failures.push(safe(error)); }
+      }
     }
     return items.filter(item => item.action === 'remove').map(item => removed.has(item.what) ? { what: item.what, result: 'removed' }
       : failures.length ? { what: item.what, result: 'failed', reason: failures.join('; ') } : { what: item.what, result: 'already gone' });
@@ -192,7 +206,7 @@ class SkillCopiesPart {
 // name and the checkouts whose Toolkit tasks go, so `setup toolkit` can put them back later. Saved
 // first, into the kept backups folder. Its content is in the plan, so the owner sees it.
 class ReinstallNotePart {
-  key = 'reinstall_note'; title = 'Kept for a later reinstall';
+  key = 'reinstall_note'; title = 'Kept for a later reinstall'; app = 'any';
   #home; #helpers; #registry;
   constructor({ environment = process.env, home = os.homedir(), helpers, registry } = {}) {
     this.#home = home;
@@ -230,7 +244,7 @@ class ReinstallNotePart {
 // The edit is checked with Python's tomllib: the new file must parse and equal the old one without
 // exactly those tables. Without Python, or on any difference, the file is left alone.
 class CodexHookStatePart {
-  key = 'codex_hook_state'; title = 'Codex hook records for Toolkit';
+  key = 'codex_hook_state'; title = 'Codex hook records for Toolkit'; app = 'codex';
   #home; #codexHome; #plugins; #parse; #now;
   constructor({ environment = process.env, home = os.homedir(), plugins, parse, now = () => new Date() } = {}) {
     this.#home = home;
@@ -329,7 +343,7 @@ class McpKeyHelpersPart {
       if (!servers || typeof servers !== 'object') return;
       for (const [name, entry] of Object.entries(servers)) {
         const parts = [entry?.headersHelper, entry?.command, ...(Array.isArray(entry?.args) ? entry.args : [])];
-        if (parts.some(part => this.#inFolder(part))) found.push(`Claude Code ${scope}: ${name}`);
+        if (parts.some(part => this.#inFolder(part))) found.push({ what: `Claude Code ${scope}: ${name}`, app: 'claude-code' });
       }
     };
     scan(parsed?.mcpServers, 'user server');
@@ -347,10 +361,10 @@ class McpKeyHelpersPart {
       if (/^\s*\[/.test(line)) { server = null; continue; }
       if (server && this.#inFolder(line)) found.add(`Codex server: ${server}`);
     }
-    return [...found];
+    return [...found].map(what => ({ what, app: 'codex' }));
   }
   plan() {
-    return [...this.#claude(), ...this.#codex()].sort().map(what => ({ what, action: 'keep',
+    return [...this.#claude(), ...this.#codex()].sort((a, b) => a.what.localeCompare(b.what)).map(({ what, app }) => ({ what, app, action: 'keep',
       detail: 'its settings stay, but it gets no key until Toolkit is reinstalled; the key stays in the credential store' }));
   }
   apply() { return []; }
@@ -381,7 +395,7 @@ const PLUGIN_STEPS = Object.freeze({
 
 // Toolkit's own entries in ~/.ai-agent-toolkit. Removed only when no Toolkit plugin is installed.
 class ToolkitFolderPart {
-  key = 'toolkit_folder'; title = 'Toolkit folder';
+  key = 'toolkit_folder'; title = 'Toolkit folder'; app = 'shared';
   #home; #root; #plugins;
   constructor({ home = os.homedir(), environment = process.env, plugins } = {}) {
     this.#home = home;
@@ -441,7 +455,7 @@ function removeExcept(target, keep) {
 function defaultParts({ environment = process.env, home = os.homedir() } = {}) {
   return [new ReinstallNotePart({ environment, home }), new McpKeyHelpersPart({ environment, home }), new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }),
     new CodexHelperLimitPart({ environment, home }), new CodexHookStatePart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
-    new SkillCopiesPart({ home }), new ToolkitFolderPart({ home, environment })];
+    new SkillCopiesPart({ environment, home }), new ToolkitFolderPart({ home, environment })];
 }
 
 module.exports = { ReinstallNotePart, CodexHookStatePart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };
