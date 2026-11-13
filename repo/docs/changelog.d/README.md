@@ -18,10 +18,30 @@ node repo/scripts/bump-version.cjs --next major
 
 - **Patch or minor:** `minor` when the branch adds a feature, a skill, a command or a new rule; `patch` for fixes and wording.
 - **Then:** commit that as the branch's last commit, push it, wait for green CI and merge that head. A clean main merge and the version-only commit need no new review; a source conflict gets a delta review. An owner merge card goes up at the bumped head.
-- **Batches:** a combined integration branch for several pull requests bumps once, for all of them.
+- **Batches:** several merge-ready pull requests land as one merge train that bumps once, for all of them (below).
 - **Why at merge:** a version taken by an earlier merge would otherwise force a re-bump, new CI and a stale merge card on every other open pull request.
 - **Major releases:** use `--next major` for an owner-chosen major release.
 - **Projects skill Version date:** the date is today's date in UTC, so a merge in the early morning east of UTC may carry the previous day's date.
+## Merge trains
+
+A merge train lands several reviewed pull requests with one bump and one CI run. Each member keeps its own commits and review: it boards at the exact head its review passed, as its own merge commit, and GitHub shows it as merged once the train merges. The train never carries a hand-made fix.
+
+```text
+node repo/scripts/toolkit-merge-train.cjs build --manifest train.json --branch toolkit-train/<name> --out boarded.json
+node repo/scripts/toolkit-merge-train.cjs verify --manifest boarded.json --head toolkit-train/<name>
+node repo/scripts/toolkit-merge-train.cjs body --manifest boarded.json
+node repo/scripts/toolkit-merge-train.cjs land --manifest boarded.json --pr <train PR> --head <train head SHA>
+```
+
+- **Manifest:** each member's pull request number, reviewed head (full SHA), review link, tier, `Bump:` level, `UAT:` line, closing lines and, for RISKY members, the owner's typed merge OK. Members hold main's version, like any open pull request.
+- **Build:** run it in a worktree of its own. It merges each member head in order, ejects one that conflicts or is already on main, then runs the bump once at the highest member level. A bump that fails (a member already carrying its own bump) stops the build with a clean tree.
+- **Verify:** proves the train holds only member merges and main catch-up merges identical to Git's own clean merge, plus one last commit identical to a fresh bump. Run it before pushing and again before the merge.
+- **The train pull request:** its body is the `body` output under the usual header, so it lists every member, one `Bump:` line, the strictest `UAT:` line and every member's closing lines. Its tier is the highest member tier.
+- **Land:** re-runs verify and checks main has not moved, every member is open at its boarded head, the train pull request is at the given head and every RISKY member has the owner's OK. It prints the one merge command; it never merges.
+- **Red CI:** never patch the train. `split --out-prefix half` writes two halves; rebuild and test each until the culprit is out, then land the rest.
+- **While CI runs:** `build --onto <running train head>` combines the next members early to find conflicts. A stacked train takes no bump and cannot land; rebuild it on main once the earlier train merges.
+- **Native merge queue:** GitHub offers it only to some organisation-owned repositories, and it cannot run this bump, so trains do not use it.
+
 ## When main moves
 
 A pull request that holds main's version needs nothing when main moves. Only an older pull request that already carries its own bump falls behind; for those, the re-bump workflow below runs after each merge, and the hand command is its fallback:

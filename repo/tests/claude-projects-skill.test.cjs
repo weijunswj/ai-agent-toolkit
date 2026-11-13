@@ -401,7 +401,7 @@ test('the merging agent bumps once at merge time; only older bumped PRs are reco
   const map = read('repo/ARCHITECTURE.md');
   // An open PR holds main's version and names its level; the merger bumps once, at merge time.
   assert.match(root, /holds `main`'s version, carries a \[changelog fragment\]\(repo\/docs\/changelog\.d\/README\.md\) and names its level in one body line, `Bump: patch\|minor\|major`/);
-  assert.match(root, /The merging agent bumps once, at merge time: on the PR branch it merges `main`, runs `node repo\/scripts\/bump-version\.cjs --next <level>`, pushes, waits for green CI and merges that head \(a batch branch bumps once for all its PRs\)/);
+  assert.match(root, /The merging agent bumps once, at merge time: on the PR branch it merges `main`, runs `node repo\/scripts\/bump-version\.cjs --next <level>`, pushes, waits for green CI and merges that head \(a merge train, `repo\/scripts\/toolkit-merge-train\.cjs`, bumps once for all its PRs\)/);
   assert.match(root, /a source conflict gets a delta review/);
   assert.match(guide, /The merging agent bumps just before the merge, never the builder/);
   assert.match(guide, /`Bump: patch`, `Bump: minor` or `Bump: major`/);
