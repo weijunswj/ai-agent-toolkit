@@ -1,6 +1,6 @@
 ---
 name: release-readiness-audit
-description: Use when running a guarded final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready", "/goal" readiness remediation, security-readiness check, or final readiness check. Performs preflight only until explicit confirmation authorizes scope.
+description: Use for a guarded final, completion, production-readiness, release-candidate or launch-readiness audit, QA pass, "make sure everything works", "is this production ready" or "/goal" readiness work. Also a security-readiness or final readiness check. Performs preflight only until explicit confirmation authorizes scope.
 ---
 
 # Release Readiness Audit

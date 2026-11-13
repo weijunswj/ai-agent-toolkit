@@ -1691,10 +1691,13 @@ const copyFailure = (error) => (error?.code ? `file error ${error.code}` : error
 // The n8n Skills plugin would load the same skills twice: after a good copy, Claude Code's user-scope
 // plugin is turned off; Codex has no supported switch, so the summary says how.
 function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: antigravityState(args).copies }),
-  disablePlugin = (id) => disableUserPlugin(id, { claudeCli: args.claudeCli })) {
+  disablePlugin = (id) => disableUserPlugin(id, { claudeCli: args.claudeCli }), notice = null) {
   let summary;
-  try { summary = n8nSkillsSummary(owner.install()); }
-  catch (error) { return `not copied (${copyFailure(error)}).`; }
+  try {
+    const result = owner.install();
+    notice?.addCopies(result);
+    summary = n8nSkillsSummary(result);
+  } catch (error) { return `not copied (${copyFailure(error)}).`; }
   if (args.host !== 'claude-code') return `${summary}. If the n8n Skills plugin is installed, turn it off in the Codex app's plugin settings so the skills do not load twice.`;
   try { return disablePlugin(N8N_SKILLS_PLUGIN) ? `${summary}. Turned off the n8n Skills plugin so the skills do not load twice.` : `${summary}.`; }
   catch (error) { return `${summary}. Could not turn off the n8n Skills plugin (${error.message}); run \`claude plugin disable ${N8N_SKILLS_PLUGIN}\` so the skills do not load twice.`; }
@@ -1758,13 +1761,19 @@ function antigravitySkillsQuestion(args, current) {
 
 // Applies the owner's answer for Toolkit's skills in Antigravity; keep changes nothing.
 function applyAntigravitySkills(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot }),
-  n8n = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: true })) {
+  n8n = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: true }), notice = null) {
   const choice = args.setupChoices.antigravitySkills || 'keep';
   try {
-    if (choice === 'copy') return `${globalCopySummary(owner.install())}.`;
+    if (choice === 'copy') {
+      const result = owner.install();
+      notice?.addAntigravity(result.copied.length + (result.pruned?.length || 0));
+      return `${globalCopySummary(result)}.`;
+    }
     if (choice === 'remove') {
       // Toolkit's n8n skill copies in Antigravity go with them.
-      return `removed ${owner.remove().length + n8n.remove(n8n.antigravityTarget()).length} Toolkit skill folders.`;
+      const removed = owner.remove().length + n8n.remove(n8n.antigravityTarget()).length;
+      notice?.addAntigravity(removed);
+      return `removed ${removed} Toolkit skill folders.`;
     }
   } catch (error) { return `not changed (${copyFailure(error)}).`; }
   return '';
@@ -4332,6 +4341,46 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   if (installCheck) printInstallCheck(installCheck);
 }
 
+// Apps whose open sessions keep using the old Toolkit skill files or rules after this run changed
+// them (Codex, for one, keeps the old plugin folder's skill paths). Setup ends with one line that
+// names each such app, and prints nothing when this run changed none.
+function newSessionAntigravityTarget(args) {
+  try { return new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host }).antigravityTarget(); } catch { return null; }
+}
+
+const NEW_SESSION_APP_ORDER = Object.freeze(['Claude Code', 'Codex', 'Antigravity']);
+class NewSessionNotice {
+  #host; #antigravityTarget; #apps = new Set();
+  constructor(host, { antigravityTarget = null } = {}) { this.#host = host; this.#antigravityTarget = antigravityTarget; }
+  #add(app) { if (app) this.#apps.add(app); return this; }
+  // Codex reports a refresh as updated_this_run; Claude Code reports an install as restart_required.
+  addNativePlugin(cache) {
+    const changed = this.#host === 'codex' ? cache?.updated_this_run === true : cache?.restart_required === true;
+    return changed ? this.#add(HOST_LABELS[this.#host]) : this;
+  }
+  addGlobalRules(result) { return result?.status === 'updated' ? this.#add(HOST_LABELS[this.#host]) : this; }
+  // Claude Code's install check refreshes its global rules and helper definitions and marks a write updated.
+  addInstallCheck(result) {
+    return (result?.checks || []).some((check) => check.updated === true) ? this.#add(HOST_LABELS[this.#host]) : this;
+  }
+  addAntigravity(changedCount) { return changedCount > 0 ? this.#add('Antigravity') : this; }
+  // A skill-copy result: only copied, pruned or removed folders count; current and hand copies do not.
+  addCopies(result) {
+    for (const row of [...(result?.copied || []), ...(result?.pruned || []), ...(result?.antigravityRemoved || [])]) {
+      this.#add(this.#antigravityTarget && row?.target === this.#antigravityTarget ? 'Antigravity' : HOST_LABELS[this.#host]);
+    }
+    return this;
+  }
+  apps() { return NEW_SESSION_APP_ORDER.filter((app) => this.#apps.has(app)); }
+  lines() {
+    const apps = this.apps();
+    if (!apps.length) return [];
+    const named = apps.length === 1 ? apps[0] : `${apps.slice(0, -1).join(', ')} and ${apps.at(-1)}`;
+    return ['## Start a new session',
+      `Start a new session in ${named}, and close sessions opened before this run: this run changed Toolkit skill files or rules, and open sessions keep using the old ones.`];
+  }
+}
+
 const INSTALL_CHECK_WORDS = Object.freeze({ 'passed': 'passed', 'restart-required': 'new session needed', 'action-required': 'action required' });
 
 function printInstallCheck(result) {
@@ -4450,8 +4499,9 @@ class ToolkitSetupExecution {
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
     const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
     // The Antigravity answer first: the n8n skills reach Antigravity only when Toolkit's skills are there.
-    const antigravitySkills = applyAntigravitySkills(args);
-    const n8nSkills = installOfficialN8nSkills(args);
+    const notice = new NewSessionNotice(args.host, { antigravityTarget: newSessionAntigravityTarget(args) }).addNativePlugin(nativeCache);
+    const antigravitySkills = applyAntigravitySkills(args, undefined, undefined, notice);
+    const n8nSkills = installOfficialN8nSkills(args, undefined, undefined, notice);
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
@@ -4459,6 +4509,9 @@ class ToolkitSetupExecution {
     offerRemovedTasks(args);
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
+    notice.addGlobalRules(globalRules).addInstallCheck(installCheck);
+    const closing = notice.lines();
+    if (closing.length) console.log(['', ...closing].join('\n'));
     return scheduledTaskUpdate?.held || installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
   }
 }
@@ -4620,6 +4673,7 @@ const {
 
 module.exports = {
   assertSupportedComputer,
+  NewSessionNotice,
   applyScheduledTasks,
   offerRemovedTasks,
   gitFailureHint,
