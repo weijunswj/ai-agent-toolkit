@@ -564,3 +564,23 @@ test('land refuses while the ejected pull request points at any commit the train
   const refused = train.run(['land', '--manifest', out, '--pr', '70', '--head', ejected.head, '--main', 'main', '--live', live], f.repo);
   assert.ok(refused.problems.some(problem => new RegExp(`ejected #2 is still open at ${early.slice(0, 12)}, which the train carries`).test(problem)), refused.problems.join('\n'));
 });
+
+test('verify refuses a train on main that drops its bump, and a stacked train needs none', t => {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const two = f.branch('pr-2', { 'c.txt': 'c\n' });
+  const { result, out } = built(f, [f.member(1, one), f.member(2, two, { bump: 'minor' })]);
+  const noBump = f.git('rev-parse', `${result.head}~1`);
+  const dropped = train.run(['verify', '--manifest', out, '--head', noBump, '--main', 'main'], f.repo);
+  assert.equal(dropped.ok, false);
+  assert.ok(dropped.problems.some(problem => /the train does not end in its bump: its members need a minor bump commit last/.test(problem)), dropped.problems.join('\n'));
+  const quiet = path.join(f.root, 'quiet.json');
+  fs.writeFileSync(quiet, JSON.stringify({ ...JSON.parse(fs.readFileSync(out, 'utf8')), members: [f.member(1, one, { bump: 'none' }), f.member(2, two, { bump: 'none' })] }));
+  assert.equal(train.run(['verify', '--manifest', quiet, '--head', noBump, '--main', 'main'], f.repo).ok, true, 'members that need no bump need no bump commit');
+  const three = f.branch('pr-3', { 'd.txt': 'd\n' });
+  const stackedOut = path.join(f.root, 'stacked.json');
+  const stacked = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(3, three)] }, 'stacked-in.json'), '--branch', 'toolkit-train/next', '--main', 'main', '--onto', result.head, '--out', stackedOut], f.repo);
+  assert.equal(JSON.parse(fs.readFileSync(stackedOut, 'utf8')).stacked, true);
+  assert.equal(train.run(['verify', '--manifest', stackedOut, '--head', stacked.head, '--main', result.head], f.repo).ok, true);
+  assert.throws(() => train.checkManifest({ members: [f.member(4, '4'.repeat(40))], stacked: 'yes' }), /"stacked" must be true or false/);
+});

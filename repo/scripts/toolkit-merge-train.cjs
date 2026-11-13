@@ -54,6 +54,7 @@
 // verify walks the train's first-parent commits after main and refuses anything that is not a
 // member merge or a main catch-up merge whose tree equals Git's own clean merge, or a last bump
 // commit whose tree equals a fresh run of the bump command. Every member must board exactly once.
+// A train whose members need a bump must end in it, unless build marked it "stacked" (--onto).
 // It also accepts exactly the reverts recorded under "ejected": each must equal Git's own revert of
 // an earlier train commit (an ejected member's boarding merge, or a bump that a later bump replaced),
 // and every recorded revert must be there. Each bump is checked at the level of the members on board
@@ -161,6 +162,7 @@ function checkManifest(value) {
       throw new TrainError(`${where}: "owner_ok" must link the owner's typed merge OK`);
     }
   }
+  if (value.stacked !== undefined && typeof value.stacked !== 'boolean') throw new TrainError('"stacked" must be true or false');
   checkEjected(value, seenPr);
   return value;
 }
@@ -289,7 +291,7 @@ function build(cwd, manifest, options) {
       } catch (error) {
         git(cwd, ['reset', '--quiet', '--hard', 'HEAD'], { allowFail: true });
         git(cwd, ['clean', '--quiet', '-fd'], { allowFail: true });
-        const out = { ...manifest, members: boarded, ejected: ejected.map(({ pr, head: sha, reason }) => ({ pr, head: sha, reason })) };
+        const out = { ...manifest, members: boarded, ejected: ejected.map(({ pr, head: sha, reason }) => ({ pr, head: sha, reason })), stacked: stacked || undefined };
         if (options.out) fs.writeFileSync(options.out, `${JSON.stringify(out, null, 2)}\n`);
         return {
           ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, onto, stacked, level, bump: null,
@@ -305,7 +307,7 @@ function build(cwd, manifest, options) {
     }
   }
   const head = git(cwd, ['rev-parse', 'HEAD']).stdout;
-  const out = { ...manifest, members: boarded, ejected: ejected.map(({ pr, head: sha, reason }) => ({ pr, head: sha, reason })) };
+  const out = { ...manifest, members: boarded, ejected: ejected.map(({ pr, head: sha, reason }) => ({ pr, head: sha, reason })), stacked: stacked || undefined };
   if (options.out) fs.writeFileSync(options.out, `${JSON.stringify(out, null, 2)}\n`);
   return { ok: boarded.length > 0, branch, head, main, onto, stacked, level, bump, boarded: boarded.map(member => member.pr), ejected: out.ejected };
 }
@@ -475,6 +477,11 @@ function verify(cwd, manifest, options) {
     if (reason) problems.push(`${short}: ${reason}`);
   });
   const last = commits.length - 1;
+  // A train on main must end in its bump when its members need one; only a stacked train (built
+  // with --onto, marked "stacked") goes without. A bump that would change nothing needs no commit.
+  if (commits.length && !manifest.stacked && bumpArgv(cwd, manifest, level, main) && !plain.includes(last)) {
+    if (reproducesBump(cwd, manifest, head, head, level, main)) problems.push(`the train does not end in its bump: its members need a ${level} bump commit last`);
+  }
   for (const index of plain) {
     if (index !== last && !reverted.has(commits[index][0])) {
       problems.push(`${commits[index][0].slice(0, 12)} is a commit of its own inside the train: only member merges, recorded eject reverts and one last bump commit are allowed`);

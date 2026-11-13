@@ -1,3 +1,4 @@
 ### Added
 
 - Merge trains: `toolkit-merge-train.cjs eject` takes a member off a train that is already pushed without rewriting it. It adds revert commits on top (the bump, the member's boarding merge, then a fresh bump for the members left) and records them in the manifest; `verify` accepts exactly those reverts, so the train keeps its branch and pull request. `land` refuses while the ejected pull request is still open at the head the train carries, and `eject` prints the steps for it to rejoin a later train. A later `build` ejects, and `verify` refuses, a rejoining member that has not restored its ejected change, which would otherwise stay silently reverted.
+- Merge trains: `verify` now refuses a train on main whose members need a bump but that does not end in its bump commit; `build` marks a train built with `--onto` as `stacked`, which goes without.
