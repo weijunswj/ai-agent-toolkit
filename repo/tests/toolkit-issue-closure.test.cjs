@@ -590,6 +590,13 @@ test('hash values, data-owner groups, cmd scripts, runners and argument forms ca
     [`gh ('issue','close','1')`, powershell], [`gh issue ('close') 1 -R ${repo}`, powershell],
     [`gh api ('repos/${repo}/issues/1') -X PATCH -f state=closed`, powershell],
     ['gh api @params', powershell], ['gh api $e -X PATCH @f', powershell], ['gh pr edit 7 --add-label x @rest', powershell],
+    [`@{a=iex '${close}'}`, powershell], [`@{a=Invoke-Expression '${close}'}`, powershell], [`@{a=pwsh -c '${close}'}`, powershell],
+    [`@{a=bash -c '${close}'}`, powershell], [`@{a=cmd /c "${close}"}`, powershell],
+    [`@{a=Start-Process gh -ArgumentList 'issue close 1 -R ${repo}'}`, powershell],
+    [`sh -c '$1' x '${close}'`, all], [`sh -c "$1" x '${close}'`, ['PowerShell']], [`sh -c 'eval "$1"' x '${close}'`, all],
+    [`Write-Host {${close}}.Invoke()`, all], [`cat {${close}}.Invoke()`, all],
+    ['cmd /c "echo `" & ' + close + ' & rem `""', ['PowerShell']],
+    [`iex ('gh issue' + ' close 1 -R ${repo}')`, powershell], [`iex ('gh {0} close 1 -R ${repo}' -f 'issue')`, powershell],
   ];
   for (const [command, tools] of hostile) for (const tool_name of tools) {
     const result = adapter.issueClosureDecision({ tool_name, tool_input: { command } }, { guard });
@@ -599,7 +606,8 @@ test('hash values, data-owner groups, cmd scripts, runners and argument forms ca
   const controls = [
     [`Write-Host 'gh issue close 1'`, all], [`Write-Output @{a='gh issue close 1'}`, all], ['gh api $url', all],
     [`gh pr create -R ${repo} --title T --body 'Refs #1' --assignee @me`, all], [`gh pr edit 7 -R ${repo} --add-reviewer @me`, all],
-    ['a=gh issue close 1', ['Bash']], [`<# gh issue close 1 #> gh pr view 7`, powershell], ['cmd /c "echo gh issue close 1"', all],
+    ['a=gh issue close 1', ['Bash']], ['@{a=Write-Host x}', powershell], ['$h=@{a=1}', powershell], [`sh -c 'echo "$1"' x 'gh pr view 7'`, all],
+    [`$p=@{a=1}; Invoke-RestMethod @p`, powershell], ['GH_REPO=o/r gh pr view 7', all], [`<# gh issue close 1 #> gh pr view 7`, powershell], ['cmd /c "echo gh issue close 1"', all],
     [`query='query { a }'; gh api graphql -f query="$query"; gh api graphql -f query="$query"`, all],
     [`query='query { a }'; gh api graphql -F query="$query"; gh api graphql --raw-field query="$query"`, all],
   ];
