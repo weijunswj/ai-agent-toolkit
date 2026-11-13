@@ -337,6 +337,14 @@ test('the controller, the changelog guide and the repo map describe the train th
   // to the page that holds it, the Projects skill puts it ahead of the one-PR bump route, and the
   // hourly nudge flags ready PRs that should ride together.
   assert.match(finish, /land as one train, chosen by the controller unasked; a lone ready PR merges alone, and an ejected member rides the next train once fixed and delta-reviewed:/);
+  // A train lane is mechanical: no G0 or G1, the small tier, no conflict fixes, and no G2 of its
+  // own unless verify lists files two or more members change.
+  const roles = read('repo/controller/roles-and-routes.md');
+  assert.match(roles, /\*\*Merge-train lanes:\*\* running a train \(`toolkit-merge-train\.cjs` build, verify, body, land\) is mechanical: no G0 or G1, the small tier at medium effort/);
+  assert.match(roles, /The lane never resolves a conflict or edits code; it ejects the member, whose builder fixes it\./);
+  assert.match(roles, /The train needs no G2 of its own once `verify` passes and CI is green; only files `verify` lists under `overlap` \(two or more members change them\) get a short delta review\./);
+  assert.match(read('repo/CONTROLLER.md'), /\[Roles and routes\]\(controller\/roles-and-routes\.md\) `[0-9a-f]{12}`: before resolving a route or launching, relaying or reviewing a gate, helper or merge-train lane\./);
+  assert.match(read('skills/agent-cost-control/SKILL.md'), /\*\*A merge-train lane is on the ladder\.\*\* Building, verifying and landing a merge train is mechanical and needs no G0 or G1: step 1 \(small, medium\)\. It never resolves a conflict or edits code/);
   assert.match(read('repo/CONTROLLER.md'), /\[Evidence, progress and finish\]\(controller\/evidence-and-finish\.md\) `[0-9a-f]{12}`: before merging,/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /Toolkit PRs hold main's version\. Two or more ready PRs ride one merge train unasked \(`CONTROLLER\.md`\); else, before the check and any card, it merges `main` in/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md'), /Flag `train due: <PR numbers>` when two or more PRs each have green CI and a G2 PASS at their current head, carry no bump of their own and no merge train holds them/);

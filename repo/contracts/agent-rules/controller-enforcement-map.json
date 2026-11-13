@@ -218,6 +218,18 @@
     },
     {
       "file": "repo/controller/roles-and-routes.md",
+      "rule": "**Merge-train lanes:**",
+      "covers": "The merge-train script's verify lists the files two or more members change, so the controller sees when a train needs a delta review; a hand-resolved or edited merge fails verify, so a lane cannot fix a conflict inside the train. The lane's model tier and skipping G0 and G1 stay instruction-only.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train.cjs",
+          "test": "repo/tests/toolkit-merge-train.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/roles-and-routes.md",
       "rule": "Subagents are helpers, never gates",
       "covers": "The helper guard checks a helper launch against its pinned route and refuses one that would launch another agent, when a host hook calls it; the depth setting keeps spawn depth at one. Reading run logs is instruction-only.",
       "enforced_by": [
