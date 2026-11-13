@@ -4,6 +4,26 @@ const { riskyNodeLines, riskyNodes } = require('./n8n-risky-nodes.cjs');
 
 const CANONICAL_WORKFLOW_DIR = 'n8n-workflows';
 const DEFAULT_POLICY_FILE = 'n8n-workflow-policy.json';
+// Well-known public API hosts (and n8n's own docs) that a workflow may call without a policy
+// entry. They carry no owner data. Each also allows its subdomains, so list API hosts only, never
+// a domain whose subdomains serve private webhook URLs. Repositories add their own hosts in
+// n8n-workflow-policy.json allowedUrlHosts; private or unknown hosts still fail.
+const PUBLIC_API_HOSTS = Object.freeze([
+  'api.openai.com',
+  'api.anthropic.com',
+  'generativelanguage.googleapis.com',
+  'sheets.googleapis.com',
+  'www.googleapis.com',
+  'graph.microsoft.com',
+  'api.github.com',
+  'api.notion.com',
+  'api.airtable.com',
+  'api.hubapi.com',
+  'api.stripe.com',
+  'api.twilio.com',
+  'api.sendgrid.com',
+  'docs.n8n.io',
+]);
 
 function parseArgs(argv) {
   let workflowDirArg = null;
@@ -63,7 +83,7 @@ function loadPolicy(root, policyArg) {
       '^[A-Z0-9_]+_PLACEHOLDER$',
     ],
     allowedEmailDomains: ['example.com'],
-    allowedUrlHosts: ['example.com', 'n8n.example.com'],
+    allowedUrlHosts: ['example.com', 'n8n.example.com', ...PUBLIC_API_HOSTS],
     allowedLiteralValues: [],
     warnOnGoogleIds: true,
     failOnWarnings: false,
@@ -87,8 +107,15 @@ function loadPolicy(root, policyArg) {
       ...defaults.allowedPlaceholders,
       ...(Array.isArray(policy.allowedPlaceholders) ? policy.allowedPlaceholders : []),
     ],
-    allowedEmailDomains: Array.isArray(policy.allowedEmailDomains) ? policy.allowedEmailDomains : defaults.allowedEmailDomains,
-    allowedUrlHosts: Array.isArray(policy.allowedUrlHosts) ? policy.allowedUrlHosts : defaults.allowedUrlHosts,
+    // Owner entries add to the defaults, so allowing one host never drops example.com.
+    allowedEmailDomains: [
+      ...defaults.allowedEmailDomains,
+      ...(Array.isArray(policy.allowedEmailDomains) ? policy.allowedEmailDomains : []),
+    ],
+    allowedUrlHosts: [
+      ...defaults.allowedUrlHosts,
+      ...(Array.isArray(policy.allowedUrlHosts) ? policy.allowedUrlHosts : []),
+    ],
     allowedLiteralValues: Array.isArray(policy.allowedLiteralValues) ? policy.allowedLiteralValues : defaults.allowedLiteralValues,
     warnOnGoogleIds: policy.warnOnGoogleIds !== undefined ? Boolean(policy.warnOnGoogleIds) : defaults.warnOnGoogleIds,
     failOnWarnings: policy.failOnWarnings !== undefined ? Boolean(policy.failOnWarnings) : defaults.failOnWarnings,
@@ -130,6 +157,7 @@ const secretPatterns = [
   { label: 'sk-prefixed API key', regex: /sk-[A-Za-z0-9_-]{20,}/g },
   { label: 'Google API key', regex: /AIza[0-9A-Za-z_-]{20,}/g },
   { label: 'Pinecone-looking API key', regex: /pcsk_[A-Za-z0-9_-]{20,}/gi },
+  { label: 'Stripe-looking secret key', regex: /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g },
   { label: 'Bearer token', regex: /Bearer\s+[A-Za-z0-9._-]{20,}/gi },
   { label: 'JWT-looking token', regex: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
 ];
@@ -155,6 +183,31 @@ function walk(value, visitor, trail = []) {
       walk(child, visitor, trail.concat(key));
     }
   }
+}
+
+// Distinct unsafe values and the places they appear, without the values themselves.
+function findUnsafeStringPlaces(workflow, regex, isAllowed, options = {}) {
+  const values = new Set();
+  const places = [];
+  const visit = (value, trail) => {
+    if (typeof value === 'string') {
+      // For URLs, collapse each {{ ... }} expression to one token first, so a space inside an
+      // expression does not end the match before a real host (https://{{ $env.U }}@host/...).
+      // Emails are matched as written, so one quoted inside an expression is still found.
+      const collapsed = options.collapseExpressions ? value.replace(/\{\{[\s\S]*?\}\}/g, '{{expr}}') : value;
+      const unsafe = (collapsed.match(regex) || []).filter((match) => !isAllowed(match));
+      if (unsafe.length > 0) {
+        unsafe.forEach((match) => values.add(match));
+        places.push(trail.join('.') || '(root)');
+      }
+      return;
+    }
+    if (Array.isArray(value)) value.forEach((item, index) => visit(item, trail.concat(index)));
+    else if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) visit(child, trail.concat(key));
+  };
+  visit(workflow, []);
+  const shown = places.slice(0, 5).join(', ') + (places.length > 5 ? ` and ${places.length - 5} more` : '');
+  return { count: values.size, places: shown };
 }
 
 function trailString(trail) {
@@ -185,12 +238,22 @@ function createPolicyHelpers(policy) {
 
   const allowedUrl = (url) => {
     if (isAllowedPlaceholder(url) || isAllowedLiteral(url)) return true;
-    try {
-      const parsed = new URL(url);
-      return policy.allowedUrlHosts.some((allowedHost) => hostMatches(parsed.hostname, allowedHost));
-    } catch {
-      return false;
-    }
+    // Read the host the way a URL parser does: cut at / ? or #, drop user info and a port (literal
+    // or expression) and trailing prose punctuation. Only a host that is itself an expression
+    // ({{ ... }}) holds no real host and is skipped; anything else is checked, parseable or not.
+    const authority = url.replace(/^https?:\/\//i, '').split(/[/?#]/)[0];
+    // An allowed host clears only the host. Literal user info, or a literal value for a
+    // credential-named query parameter, is a finding on any host: it is how keys get pasted.
+    const at = authority.lastIndexOf('@');
+    if (at > 0 && !/^\{\{expr\}\}$/.test(authority.slice(0, at))) return false;
+    const query = url.split('?')[1] || '';
+    if (/(?:^|[&;])(?:key|api_?key|apikey|hapikey|access_token|token|secret|password|client_secret|sig|signature)=(?!\{\{)[^&#]+/i.test(query)) return false;
+    const host = authority.slice(at + 1)
+      .replace(/:[^:\]]*$/, '')
+      .replace(/[\]`.,;]+$/, '')
+      .toLowerCase();
+    if (host.includes('{{')) return true;
+    return policy.allowedUrlHosts.some((allowedHost) => hostMatches(host, allowedHost));
   };
 
   return {
@@ -505,16 +568,18 @@ for (const filePath of files) {
     }
   }
 
-  const emails = text.match(emailRegex) || [];
-  const unsafeEmails = [...new Set(emails.filter((email) => !helpers.allowedEmail(email)))];
-  if (unsafeEmails.length > 0) {
-    warn(`${relative} contains non-placeholder email(s): ${unsafeEmails.join(', ')}`);
+  // A real email or production URL in a committed template is personal or environment data, so it
+  // fails by default; a prepared import holds locally bound values, so there it stays a warning.
+  // Either way the log names the place, never the value, so the finding does not leak it again.
+  const personalDataFinding = preparedImportMode ? warn : fail;
+  const unsafeEmailPlaces = findUnsafeStringPlaces(workflow, emailRegex, helpers.allowedEmail);
+  if (unsafeEmailPlaces.count > 0) {
+    personalDataFinding(`${relative} contains ${unsafeEmailPlaces.count} non-placeholder email(s) at ${unsafeEmailPlaces.places}. Replace with a placeholder, or allow the domain in ${DEFAULT_POLICY_FILE} allowedEmailDomains.`);
   }
 
-  const urls = text.match(urlRegex) || [];
-  const unsafeUrls = [...new Set(urls.filter((url) => !helpers.allowedUrl(url)))];
-  if (unsafeUrls.length > 0) {
-    warn(`${relative} contains production-looking URL(s): ${unsafeUrls.join(', ')}`);
+  const unsafeUrlPlaces = findUnsafeStringPlaces(workflow, urlRegex, helpers.allowedUrl, { collapseExpressions: true });
+  if (unsafeUrlPlaces.count > 0) {
+    personalDataFinding(`${relative} contains ${unsafeUrlPlaces.count} production-looking URL(s) at ${unsafeUrlPlaces.places}. Replace with a placeholder, or allow the host in ${DEFAULT_POLICY_FILE} allowedUrlHosts.`);
   }
 
   if (policy.warnOnGoogleIds) {

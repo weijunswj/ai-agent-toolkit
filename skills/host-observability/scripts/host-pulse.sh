@@ -88,10 +88,11 @@ load_thresholds() {
     LOAD_REVIEW_PCT:80 LOAD_UPGRADE_PCT:150 LOAD_EMERGENCY_PCT:300 \
     LOAD_SUSTAIN_PULSES:2 DISK_GROWTH_REVIEW_POINTS:5 \
     OOM_REVIEW_KILLS:1 OOM_UPGRADE_KILLS:2 RESTART_REVIEW_COUNT:1 RESTART_UPGRADE_COUNT:3 \
-    PULSE_STALE_MINUTES:60 REPORT_KEEP:72; do
+    PULSE_STALE_MINUTES:60 REPORT_KEEP:72 REMIND_EVERY_PULSES:24; do
     set_threshold "${pair%%:*}" "${pair##*:}"
   done
   [ "$LOAD_SUSTAIN_PULSES" -ge 1 ] || LOAD_SUSTAIN_PULSES=1
+  [ "$REMIND_EVERY_PULSES" -ge 1 ] || REMIND_EVERY_PULSES=24
 }
 
 classify_pct() {
@@ -386,6 +387,15 @@ ping_heartbeat() {
     add_row OBSERVABILITY_DEGRADED 'Off-host heartbeat' 'Not pinged: the alert failed to send and no HEARTBEAT_FAIL_URL is set, so the off-host monitor raises its missed-ping alarm'
     return
   fi
+  # The same for an emergency or degraded host: the normal ping would tell the off-host monitor the
+  # host is healthy, so skip it and let the missed-ping alarm reach the owner.
+  if [ "$url" = "$HEARTBEAT_URL" ]; then
+    case "$pre" in
+      EMERGENCY_PRESSURE|OBSERVABILITY_DEGRADED)
+        add_row OBSERVABILITY_DEGRADED 'Off-host heartbeat' "Not pinged: the host is $pre and no HEARTBEAT_FAIL_URL is set, so the off-host monitor raises its missed-ping alarm"
+        return ;;
+    esac
+  fi
   if curl_private "$url" -o /dev/null; then
     if [ "$url" = "$HEARTBEAT_URL" ]; then add_row NORMAL 'Off-host heartbeat' 'Pinged'
     else add_row NORMAL 'Off-host heartbeat' 'Pinged the failure URL'; fi
@@ -532,17 +542,29 @@ if [ "${#FAILING_KEYS[@]}" -gt 0 ]; then
 fi
 LAST_SENT="$(state_get "$STATE_FILE" last_sent_signature)"
 PENDING="$(state_get "$STATE_FILE" alert_pending)"
+# Pulses since the last sent alert. A state that is not NORMAL, or failing services, that stays the
+# same is re-sent every REMIND_EVERY_PULSES pulses, so it is never reported once and then forgotten.
+SINCE_ALERT="$(state_get "$STATE_FILE" pulses_since_alert)"
+is_uint "$SINCE_ALERT" || SINCE_ALERT=0
+SINCE_ALERT=$((SINCE_ALERT + 1))
+REMIND=0
+if [ "$SIGNATURE" = "$LAST_SENT" ] && [ "$SINCE_ALERT" -ge "$REMIND_EVERY_PULSES" ] && { [ "$PRE_STATE" != NORMAL ] || [ "$SERVICES" != OK ]; }; then
+  REMIND=1
+fi
 DELIVERY='not needed (no change since the last alert)'
 NEW_SENT="$LAST_SENT"; NEW_PENDING=0
 if [ "$ALERTING_READY" -ne 1 ]; then
   DELIVERY='not attempted: alerting is not ready (see the Alerting row)'
-elif [ "$PRE_STATE" = EMERGENCY_PRESSURE ] || [ "$SIGNATURE" != "$LAST_SENT" ] || [ "${PENDING:-0}" = 1 ] || [ "${#NOTICES[@]}" -gt 0 ]; then
+elif [ "$PRE_STATE" = EMERGENCY_PRESSURE ] || [ "$SIGNATURE" != "$LAST_SENT" ] || [ "${PENDING:-0}" = 1 ] || [ "${#NOTICES[@]}" -gt 0 ] || [ "$REMIND" = 1 ]; then
   BODY="$(mktemp "$STATE_DIR/.alert.XXXXXX")"
   alert_body "$PRE_STATE" "$SERVICES" > "$BODY"
   SUBJECT="host-observability $HOST_LABEL: $PRE_STATE"
   [ "$SERVICES" = OK ] || SUBJECT="$SUBJECT, services $SERVICES"
+  [ "$REMIND" != 1 ] || SUBJECT="$SUBJECT (reminder, unchanged for $SINCE_ALERT pulses)"
   if outcome="$(send_alert "$SUBJECT" "$BODY")"; then
     DELIVERY="sent ($outcome)"; NEW_SENT="$SIGNATURE"
+    [ "$REMIND" != 1 ] || DELIVERY="$DELIVERY; reminder: unchanged for $SINCE_ALERT pulses"
+    SINCE_ALERT=0
   else
     DELIVERY="FAILED ($outcome); the next pulse retries"; NEW_PENDING=1
     add_row OBSERVABILITY_DEGRADED 'Alert delivery' "Failed ($outcome); the owner is not hearing about this host"
@@ -572,6 +594,7 @@ state_write "$STATE_FILE" \
   "docker_restarts=$CURRENT_RESTARTS" \
   "last_sent_signature=$NEW_SENT" \
   "alert_pending=$NEW_PENDING" \
+  "pulses_since_alert=$SINCE_ALERT" \
   ${STATE_EXTRA[@]+"${STATE_EXTRA[@]}"}
 
 printf 'State: %s\nServices: %s\nReport: %s\nAlert: %s\n' "$OVERALL" "$SERVICES" "$REPORT" "$DELIVERY" | redact_secrets
