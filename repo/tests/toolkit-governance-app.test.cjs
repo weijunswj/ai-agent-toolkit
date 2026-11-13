@@ -179,54 +179,78 @@ test('check reports the App while governance is on and left-overs once it is off
   assert.deepEqual(ids(missing), []);
 });
 
-test('an existing setup is reused: no new App link, and every save command asks for a typed replace first', () => {
-  for (const state of [{ variable: 'found', secret: 'missing' }, { variable: 'missing', secret: 'found' }]) {
-    const text = app.setupLines(SLUG, STORE, state).join('\n');
+test('an existing setup is reused: no new App link, single-name commands for what is missing, and a guarded replace', () => {
+  for (const [state, missingName] of [[{ variable: 'found', secret: 'missing' }, 'secret'], [{ variable: 'missing', secret: 'found' }, 'variable']]) {
+    const lines = app.setupLines(SLUG, STORE, state);
+    const text = lines.join('\n');
     assert.match(text, /already has part of an App setup/);
     assert.match(text, /Reuse that App: set only what is missing, from the same App/);
     assert.ok(!text.includes(app.creationLink(SLUG)), 'no new App is offered over an existing one');
+    assert.match(text, new RegExp(`To set only the missing ${missingName}`));
+    for (const line of app.saveCommands(SLUG, missingName)) assert.ok(lines.includes(line), line);
     assert.match(text, /type replace first/);
     assert.match(text, /remove this repository from the old App's installation/);
   }
   // Every printed save step is guarded, whatever the state, and the names never change.
   for (const state of [missing, { variable: 'unverified', secret: 'unverified', reason: 'offline' }, { variable: 'found', secret: 'missing' }]) {
     const lines = app.setupLines(SLUG, STORE, state).filter(line => /gh (variable|secret) set/.test(line));
-    assert.equal(lines.length, 2, JSON.stringify(state));
+    assert.ok(lines.length >= 2, JSON.stringify(state));
     for (const line of lines) {
       assert.match(line, /Type replace to overwrite it/);
-      assert.ok(line.includes('TOOLKIT_GOVERNANCE_APP_CLIENT_ID') && line.includes('TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY'));
+      assert.match(line, /Could not read the names\. Nothing changed\./);
+      for (const [name, write] of [['TOOLKIT_GOVERNANCE_APP_CLIENT_ID', 'gh variable set'], ['TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY', 'gh secret set']]) {
+        if (line.includes(write)) assert.ok(line.split(name).length >= 3, `${name} is checked before it is written`);
+      }
       assert.ok(line.indexOf(' list --repo ') < line.indexOf(' set '), 'names are listed before anything is set');
     }
   }
+  // The single-name commands write only their own name.
+  assert.doesNotMatch(app.saveCommands(SLUG, 'secret').join('\n'), /gh variable set/);
+  assert.doesNotMatch(app.saveCommands(SLUG, 'variable').join('\n'), /gh secret set/);
+  // The POSIX line never uses read -p, which zsh and dash do not support.
+  for (const which of ['both', 'variable', 'secret']) assert.doesNotMatch(app.saveCommands(SLUG, which)[1], /read -r -p|read -p/);
 });
 
-test('the macOS or Linux save command overwrites an existing setup only after a typed replace', { skip: process.platform === 'win32' }, t => {
+const shells = ['bash', 'dash', 'zsh'].filter(shell => process.platform !== 'win32' && childProcess.spawnSync(shell, ['-c', 'exit 0']).status === 0);
+
+test('the macOS or Linux save command overwrites an existing setup only after a typed replace, and stops when names cannot be read', { skip: shells.length === 0 }, t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-app-guard-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'gh'), [
-    '#!/bin/bash',
+    '#!/bin/sh',
     'case "$1 $2" in',
-    '  "variable list") [ -n "$HAS_VARIABLE" ] && echo TOOLKIT_GOVERNANCE_APP_CLIENT_ID; echo OTHER_VARIABLE;;',
-    '  "secret list") [ -n "$HAS_SECRET" ] && echo TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY; echo OTHER_SECRET;;',
+    '  "variable list") [ -n "$FAIL_VARIABLE_LIST" ] && exit 1; [ -n "$HAS_VARIABLE" ] && echo TOOLKIT_GOVERNANCE_APP_CLIENT_ID; echo OTHER_VARIABLE;;',
+    '  "secret list") [ -n "$FAIL_SECRET_LIST" ] && exit 1; [ -n "$HAS_SECRET" ] && echo TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY; echo OTHER_SECRET;;',
     '  *) echo "$1 $2" >> "$WRITES"; cat > /dev/null;;',
     'esac',
     '',
   ].join('\n'), { mode: 0o755 });
   fs.writeFileSync(path.join(dir, '<key file>.pem'), 'not a key\n');
-  const script = app.saveCommands(SLUG)[1].replace(/^\s*macOS or Linux: /, '');
-  const run = (answer, env) => {
-    const writes = path.join(dir, `writes-${Math.random().toString(16).slice(2)}`);
-    const result = childProcess.spawnSync('bash', ['-c', script], { cwd: dir, input: `${answer}\n`, encoding: 'utf8',
-      env: { ...process.env, ...env, WRITES: writes, PATH: `${dir}${path.delimiter}${process.env.PATH}` } });
-    assert.equal(result.status, 0, result.stderr);
-    return { out: result.stdout, writes: fs.existsSync(writes) ? fs.readFileSync(writes, 'utf8').trim().split('\n') : [] };
-  };
-  assert.deepEqual(run('', {}).writes, ['variable set', 'secret set'], 'a fresh repository is saved without a question');
-  for (const env of [{ HAS_VARIABLE: '1' }, { HAS_SECRET: '1' }]) {
-    const kept = run('yes', env);
-    assert.deepEqual(kept.writes, [], JSON.stringify(env));
-    assert.match(kept.out, /Kept the existing App\. Nothing changed\./);
-    assert.deepEqual(run('replace', env).writes, ['variable set', 'secret set'], JSON.stringify(env));
+  for (const shell of shells) {
+    const run = (which, answer, env) => {
+      const script = app.saveCommands(SLUG, which)[1].replace(/^\s*macOS or Linux: /, '');
+      const writes = path.join(dir, `writes-${Math.random().toString(16).slice(2)}`);
+      const result = childProcess.spawnSync(shell, ['-c', script], { cwd: dir, input: `${answer}\n`, encoding: 'utf8',
+        env: { ...process.env, ...env, WRITES: writes, PATH: `${dir}${path.delimiter}${process.env.PATH}` } });
+      assert.equal(result.status, 0, `${shell}: ${result.stderr}`);
+      return { out: result.stdout, writes: fs.existsSync(writes) ? fs.readFileSync(writes, 'utf8').trim().split('\n') : [] };
+    };
+    assert.deepEqual(run('both', '', {}).writes, ['variable set', 'secret set'], `${shell}: a fresh repository is saved without a question`);
+    for (const env of [{ HAS_VARIABLE: '1' }, { HAS_SECRET: '1' }]) {
+      const kept = run('both', 'yes', env);
+      assert.deepEqual(kept.writes, [], `${shell} ${JSON.stringify(env)}`);
+      assert.match(kept.out, /Kept the existing App\. Nothing changed\./);
+      assert.deepEqual(run('both', 'replace', env).writes, ['variable set', 'secret set'], `${shell} ${JSON.stringify(env)}`);
+    }
+    assert.deepEqual(run('both', '', { HAS_VARIABLE: '1', HAS_SECRET: '1' }).writes, [], `${shell}: no answer, as from an agent, keeps the existing App`);
+    for (const env of [{ FAIL_VARIABLE_LIST: '1' }, { FAIL_SECRET_LIST: '1' }]) {
+      const unread = run('both', 'replace', env);
+      assert.deepEqual(unread.writes, [], `${shell} ${JSON.stringify(env)}`);
+      assert.match(unread.out, /Could not read the names\. Nothing changed\./);
+    }
+    // Filling in what is missing writes only that name, without a question, next to the other one.
+    assert.deepEqual(run('secret', '', { HAS_VARIABLE: '1' }).writes, ['secret set'], shell);
+    assert.deepEqual(run('variable', '', { HAS_SECRET: '1' }).writes, ['variable set'], shell);
+    assert.deepEqual(run('secret', '', { HAS_VARIABLE: '1', HAS_SECRET: '1' }).writes, [], `${shell}: an existing secret is kept`);
   }
-  assert.deepEqual(run('', { HAS_VARIABLE: '1', HAS_SECRET: '1' }).writes, [], 'no answer, as from an agent, keeps the existing App');
 });

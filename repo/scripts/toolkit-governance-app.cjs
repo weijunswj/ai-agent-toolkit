@@ -69,17 +69,31 @@ const set = state => state.variable === 'found' && state.secret === 'found';
 const none = state => state.variable === 'missing' && state.secret === 'missing';
 const unknown = state => state.variable === 'unverified' || state.secret === 'unverified';
 
-// The owner's save commands. Each first lists the repository's variable and secret names and, when
-// either fixed name is already there, asks for a typed "replace" before overwriting; any other answer
-// keeps the existing App and changes nothing. The names never change, so every repository is found
-// and cleaned the same way.
-function saveCommands(slug) {
+// The owner's save commands for `which` ('both', 'variable' or 'secret'). Each first lists the
+// repository's variable and secret names and stops, changing nothing, when either list cannot be read.
+// When a name it would write is already there, it asks for a typed "replace" before overwriting; any
+// other answer, or none, keeps the existing App. The names never change, so every repository is found
+// and cleaned the same way. The macOS or Linux line uses only POSIX shell (no read -p), so it runs in
+// bash, zsh and dash alike.
+function saveCommands(slug, which = 'both') {
+  const writes = which === 'both' ? [APP.variable, APP.secret] : [APP[which]];
   const ask = `${slug} already has a governance App set up. Type replace to overwrite it`;
   const kept = 'Kept the existing App. Nothing changed.';
-  const names = `gh variable list --repo ${slug} --json name --jq '.[].name'; gh secret list --repo ${slug} --json name --jq '.[].name'`;
+  const unread = 'Could not read the names. Nothing changed.';
+  const list = kind => `gh ${kind} list --repo ${slug} --json name --jq '.[].name'`;
+  const ps = {
+    variable: `gh variable set ${APP.variable} --repo ${slug} --body "<Client ID>"`,
+    secret: `Get-Content -Raw "<key file>.pem" | gh secret set ${APP.secret} --repo ${slug}`,
+  };
+  const sh = {
+    variable: `gh variable set ${APP.variable} --repo ${slug} --body "<Client ID>"`,
+    secret: `gh secret set ${APP.secret} --repo ${slug} < "<key file>.pem"`,
+  };
+  const keys = which === 'both' ? ['variable', 'secret'] : [which];
+  const psFound = writes.map(name => `$names -contains '${name}'`).join(' -or ');
   return [
-    `   PowerShell: $names = @(${names}); if (($names -contains '${APP.variable}' -or $names -contains '${APP.secret}') -and (Read-Host '${ask}') -ne 'replace') { '${kept}' } else { gh variable set ${APP.variable} --repo ${slug} --body "<Client ID>"; Get-Content -Raw "<key file>.pem" | gh secret set ${APP.secret} --repo ${slug} }`,
-    `   macOS or Linux: names=$(${names}); if printf '%s\\n' "$names" | grep -qxE '${APP.variable}|${APP.secret}' && { read -r -p '${ask}: ' answer; [ "$answer" != replace ]; }; then echo '${kept}'; else gh variable set ${APP.variable} --repo ${slug} --body "<Client ID>" && gh secret set ${APP.secret} --repo ${slug} < "<key file>.pem"; fi`,
+    `   PowerShell: $v = ${list('variable')}; $ok = $LASTEXITCODE -eq 0; $s = ${list('secret')}; $names = @($v) + @($s); if (-not $ok -or $LASTEXITCODE -ne 0) { '${unread}' } elseif ((${psFound}) -and (Read-Host '${ask}') -ne 'replace') { '${kept}' } else { ${keys.map(key => ps[key]).join('; ')} }`,
+    `   macOS or Linux: if ! v=$(${list('variable')}) || ! s=$(${list('secret')}); then echo '${unread}'; elif printf '%s\\n%s\\n' "$v" "$s" | grep -qxE '${writes.join('|')}' && { printf '%s: ' '${ask}'; read -r answer; [ "$answer" != replace ]; }; then echo '${kept}'; else ${keys.map(key => sh[key]).join(' && ')}; fi`,
   ];
 }
 
@@ -89,6 +103,11 @@ function setupLines(slug, store, state) {
   if (set(state)) return [`Governance GitHub App: the variable and the secret are set on ${slug}. Reuse that App: do not set it up again. The first governance job run proves the App is installed.`];
   if (found(state)) return [
     `Governance GitHub App: ${slug} already has part of an App setup (variable ${state.variable}, secret ${state.secret}). Reuse that App: set only what is missing, from the same App (the same Client ID and a private key generated for it). Toolkit never overwrites it for you.`,
+    ...(state.variable === 'found' && state.secret === 'found' ? [] : state.variable === 'found'
+      ? [`To set only the missing secret, from the App whose Client ID is already saved here:`, ...saveCommands(slug, 'secret')]
+      : state.secret === 'found'
+        ? [`To set only the missing variable, the Client ID of the App whose key is already saved here:`, ...saveCommands(slug, 'variable')]
+        : []),
     `To replace it with a different App instead, save the new Client ID and key with these commands; they ask you to type replace first:`,
     ...saveCommands(slug),
     'Then remove this repository from the old App\'s installation (Installed GitHub Apps, Configure, Repository access).',
