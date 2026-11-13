@@ -3583,7 +3583,7 @@ const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
     pullRequest(number: $number) {
-      number state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
+      number body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
       commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) {
         pageInfo { hasNextPage }
         nodes {
@@ -3612,7 +3612,7 @@ class ProgrammeGraphReader {
     for (let start = 0; start < unique.length; start += 20) {
       const batch = unique.slice(start, start + 20);
       if (!batch.every(number => Number.isSafeInteger(number) && number > 0)) throw new ProgrammeError('USAGE', 'Pull request numbers must be positive integers.');
-      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
+      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
       const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name} ${selection}}}`, variables: { owner, name } });
       if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
       const repo = response.json?.data?.repository;
@@ -3626,7 +3626,7 @@ class ProgrammeGraphReader {
         const commit = pr.commits?.nodes?.[0]?.commit;
         const rollup = commit?.statusCheckRollup;
         result.set(number, { number, title: pr.title, state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
-          merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null, head: pr.headRefOid, base: pr.baseRefName,
+          carrier: trainCarrier(pr), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null, head: pr.headRefOid, base: pr.baseRefName,
           default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable, rollupOid: commit?.oid || null,
           complete: !rollup?.contexts?.pageInfo?.hasNextPage,
           contexts: (rollup?.contexts?.nodes || []).map(node => ({ kind: node.__typename, name: node.name || node.context,
@@ -3648,7 +3648,7 @@ class ProgrammeGraphReader {
     const status = request(`commits/${pr.head.sha}/status`);
     return { number: pr.number, title: pr.title, state: pr.merged ? 'MERGED' : pr.state === 'closed' ? 'CLOSED' : pr.draft ? 'DRAFT' : 'OPEN',
       head: pr.head.sha, base: pr.base?.ref, default_branch: pr.base?.repo?.default_branch || null, mergeable: pr.mergeable,
-      merged_at: pr.merged_at || null, merge_sha: pr.merge_commit_sha || null, rollupOid: pr.head.sha,
+      carrier: trainCarrier(pr), merged_at: pr.merged_at || null, merge_sha: pr.merge_commit_sha || null, rollupOid: pr.head.sha,
       complete: Array.isArray(checks.check_runs) && checks.total_count === checks.check_runs.length && Array.isArray(status.statuses) && status.total_count === status.statuses.length,
       contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: check.status, conclusion: check.conclusion, required: false })),
         ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: context.state, required: false }))] };
@@ -3769,7 +3769,7 @@ class ProgrammeGraphReader {
     return {
       number: pr.number,
       state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
-      merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
+      carrier: trainCarrier(pr), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
       rollupOid: commit?.oid || null,
       complete: !rollup?.contexts?.pageInfo?.hasNextPage,
@@ -3801,7 +3801,7 @@ class ProgrammeGraphReader {
       if (response.status !== 200) throw ghFailure(response, 'Listing merged pull requests');
       if (!Array.isArray(response.json)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The closed PR list was not readable.');
       for (const pr of response.json) {
-        if (!pr.merged_at) continue;
+        if (!pr.merged_at || trainCarrier(pr)) continue;
         const match = mergedCandidate({ number: pr.number, merged: true, mergedAt: pr.merged_at,
           repository: pr.base?.repo ? { nameWithOwner: pr.base.repo.full_name } : { nameWithOwner: this.repository } }, this.repository);
         if (match) all.push({ ...match, body: pr.body || '' });
@@ -3840,11 +3840,11 @@ class ProgrammeGraphReader {
     const [owner, name] = this.repository.split('/');
     const fields = numbers.map(number => `i${number}: issue(number: ${number}) {
       closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
-        pageInfo { hasNextPage } nodes { number state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
+        pageInfo { hasNextPage } nodes { number body state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
       }
       timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
         pageInfo { hasNextPage } nodes { ... on CrossReferencedEvent {
-          source { __typename ... on PullRequest { number state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
+          source { __typename ... on PullRequest { number body state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
         } }
       }
     }`).join('\n');
@@ -3861,7 +3861,8 @@ class ProgrammeGraphReader {
       const closing = issue?.closedByPullRequestsReferences;
       const timeline = issue?.timelineItems;
       const complete = [closing, timeline].every(connection => connection?.pageInfo?.hasNextPage === false && Array.isArray(connection.nodes));
-      const nodes = complete ? [...closing.nodes, ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest')] : [];
+      // A merge train carries its members' work; the member PR, never the train, is the task's PR.
+      const nodes = complete ? [...closing.nodes, ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest')].filter(node => !trainCarrier(node)) : [];
       const history = nodes.map(node => graphPr(node, this.repository)).filter(Boolean);
       return [number, { complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
         candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(Boolean), history }];
@@ -4051,6 +4052,8 @@ class ProgrammeInventory {
 function referencedIssues(prs) {
   const references = new Map();
   for (const pr of prs) {
+    // A merge train Refs every member's task; its members answer for them, so it names none.
+    if (trainCarrier(pr)) continue;
     for (const match of String(pr.body || '').matchAll(/\b(?:refs|completes|closes|fixes|resolves)\b:?\s+((?:#\d+(?:\s*(?:,|and)\s*)?)+)/gi)) {
       for (const [, number] of match[1].matchAll(/#(\d+)/g)) {
         const list = references.get(Number(number)) || [];
@@ -4200,6 +4203,12 @@ const CLOSE_FIELDS = ['lifecycle', 'completed_at', 'before_close', 'closed_by_sw
 const GRAPH_BOTS = new Set(['dependabot[bot]', 'github-actions[bot]', 'app/github-actions']);
 // The weekly timing refresh may use the owner's gh sign-in rather than an Actions token.
 const GRAPH_GENERATED_BRANCH_PREFIX = 'toolkit/shard-timings-';
+// A merge train pull request (its body carries the train's member table) carries its members'
+// work. It joins no task's PR history, PATH or STATUS blocks or backfill, and is never a PR without
+// a task; each member PR, merged indirectly when the train lands, stays its own task's PR.
+function trainCarrier(pr) {
+  return Boolean(pr && (pr.carrier === true || require('./issue-closure.cjs').mergeTrainMembers(pr.body)));
+}
 const excludedGraphPr = pr => Boolean(pr && (GRAPH_BOTS.has(pr.author) || pr.branch?.startsWith(GRAPH_GENERATED_BRANCH_PREFIX)));
 
 function graphPr(pr, repository) {
@@ -4703,7 +4712,7 @@ class Reconciler {
           const current=prs.get(number);
           if(current) {
             const listedCurrent=listed.find(pr=>pr.number===current.number);
-            if(listedCurrent) history.push(listedCurrent);
+            if(listedCurrent && !trainCarrier(listedCurrent)) history.push(listedCurrent);
           }
           // Incremental list reads omit old closes. Reconfirm a saved terminal PR not covered by
           // task links or the list, including its merge time so the saved order stays meaningful.
@@ -4711,9 +4720,12 @@ class Reconciler {
             for (const previous of prior.filter(pr=>pr.state !== 'OPEN')) {
               if (history.some(pr=>pr.number===previous.number)) continue;
               let item=listed.find(pr=>pr.number===previous.number);
+              // A merge train saved before carriers were known leaves the history here.
+              if (item && trainCarrier(item)) continue;
               if (!item) {
                 if (!prCache.has(previous.number)) spend();
                 const pr=readPr(previous.number);
+                if (trainCarrier(pr)) continue;
                 item=pr && graphPr({...pr,merged:pr.state==='MERGED',mergedAt:pr.merged_at,mergeCommit:{oid:pr.merge_sha},repository:{nameWithOwner:this.binding.repository}},this.binding.repository);
               }
               if (!item) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','A saved PR history entry could not be confirmed.');
@@ -4740,10 +4752,10 @@ class Reconciler {
     }
     const complete = listsComplete && [...discovery.values()].every(entry=>entry.complete);
     for(const [number,pr] of selectedPrs) if(discovery.get(number)?.complete) prs.set(number,pr);
-    const withoutTask = complete ? listed.filter(pr=> !excludedGraphPr(pr) && !linked.has(pr.number)
+    const withoutTask = complete ? listed.filter(pr=> !excludedGraphPr(pr) && !trainCarrier(pr) && !linked.has(pr.number)
       && (pr.state==='OPEN' || watermark && Date.parse(pr.closed_at) > Date.parse(watermark))) : [];
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
-      && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
+      && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)) && !trainCarrier(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
     return {discovery,histories,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests:requests+pages,pages,watermark,scanStarted,closedListed,closedComplete};
   }

@@ -549,6 +549,45 @@ for (const [label, body, options] of [
 ]) test(`closing words stay allowed when ${label}`, () => {
   assert.equal(ownerTestSetup(body, options).checkTexts(['Closes #1']).status, 'allowed');
 });
+// A merge train carries its members: its one UAT line is the strictest member's, so it must not
+// hold an issue that one of its merged members references and answers for with its own UAT line.
+const TRAIN_BODY = members => ['## Merge train', '', '| Member | Reviewed head | Tier | Bump | Review |', '|---|---|---|---|---|',
+  ...members.map(pr => `| #${pr} | \`${String(pr % 10).repeat(40)}\` | NORMAL | patch | PASS |`), '',
+  `UAT: OWNER_TEST_NEEDED (each member's own test after the merge: #${members[0]})`, '', 'Refs #1'].join('\n');
+function timelineGuard(sources) {
+  const github = new FakeGitHub({ repository: repo });
+  github.addIssue(1);
+  const events = sources.map(({ number, body, merged = true }) => ({ event: 'cross-referenced', source: { issue: { number, body,
+    repository_url: `https://api.github.com/repos/${repo}`, pull_request: { merged_at: merged ? '2026-11-12T10:00:00Z' : null } } } }));
+  github.intercept(call => (call.method === 'GET' && /\/issues\/1\/timeline\?/.test(call.path) ? { status: 200, json: events } : undefined));
+  const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
+  return new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state });
+}
+test('a merged train does not hold an issue its merged member answers for with UAT: NOT_REQUIRED', () => {
+  const guard = timelineGuard([{ number: 970, body: TRAIN_BODY([948, 947]) }, { number: 947, body: 'Closes #1\n\nUAT: NOT_REQUIRED (internal)' }]);
+  assert.equal(guard.checkTexts(['Closes #1']).status, 'allowed');
+});
+test('a merged train still holds when its referencing member itself waits on the owner', () => {
+  const guard = timelineGuard([{ number: 970, body: TRAIN_BODY([948, 947]) }, { number: 948, body: 'Refs #1\n\nUAT: OWNER_TEST_NEEDED (try it)' }]);
+  const result = guard.checkTexts(['Closes #1']);
+  assert.equal(result.status, 'refused');
+  assert.match(result.reason, /merged PR #948,/);
+});
+for (const [label, sources] of [
+  ['no member references the issue', [{ number: 970, body: TRAIN_BODY([948, 947]) }]],
+  ['the referencing PR is not one of its members', [{ number: 970, body: TRAIN_BODY([948, 947]) }, { number: 950, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)' }]],
+  ['the referencing member is not merged', [{ number: 970, body: TRAIN_BODY([948, 947]) }, { number: 947, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', merged: false }]],
+  ['the body lacks the member table', [{ number: 970, body: TRAIN_BODY([947]).replace(/^\| Member .*$/m, '') }, { number: 947, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)' }]],
+]) test(`a merged train keeps its own hold when ${label}`, () => {
+  const result = timelineGuard(sources).checkTexts(['Closes #1']);
+  assert.equal(result.status, 'refused');
+  assert.match(result.reason, /merged PR #970,/);
+});
+test('mergeTrainMembers reads only a train body', () => {
+  const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  assert.deepEqual(mergeTrainMembers(TRAIN_BODY([948, 947])), [947, 948]);
+  for (const body of ['Refs #1', TRAIN_BODY([947]).replace('## Merge train', '## Notes'), TRAIN_BODY([947]).replace(/^\| #947 .*$/m, ''), null]) assert.equal(mergeTrainMembers(body), null);
+});
 test('without a UAT reader (the skill copied alone) the merged-PR check is skipped', () => {
   const github = new FakeGitHub({ repository: repo });
   github.addIssue(1);

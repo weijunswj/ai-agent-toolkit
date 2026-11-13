@@ -56,6 +56,19 @@ function owedUat(body) {
   return null;
 }
 
+// A merge train pull request carries its members: it merges each member's reviewed head, Refs
+// every member's task and holds one UAT line for the whole train (the strictest member's). Its body
+// is recognised by the `## Merge train` heading and member table that toolkit-merge-train.cjs body
+// writes. Returns the member PR numbers, sorted, or null for any other body.
+const TRAIN_HEADING = /^## Merge train[ \t]*$/m;
+const TRAIN_TABLE = /^\| Member \| Reviewed head \|/m;
+const TRAIN_ROW = /^\| #([1-9][0-9]*) \| `[0-9a-f]{40}` \|/gm;
+function mergeTrainMembers(body) {
+  if (typeof body !== 'string' || body.length > 1024 * 1024 || !TRAIN_HEADING.test(body) || !TRAIN_TABLE.test(body)) return null;
+  const members = [...new Set([...body.matchAll(TRAIN_ROW)].map(match => Number(match[1])))].filter(Number.isSafeInteger);
+  return members.length ? members.sort((a, b) => a - b) : null;
+}
+
 const allowed = extra => ({ status: 'allowed', ...extra });
 const unknown = reason => ({ status: 'unknown', reason });
 class IssueClosureGuard {
@@ -73,14 +86,24 @@ class IssueClosureGuard {
   ownerTestPrs(repository, number, budget) {
     if (typeof this.uatState !== 'function') return [];
     const events = this.pages(`repos/${repository}/issues/${number}/timeline`, budget);
-    const found = new Set();
+    const merged = new Map();
     for (const event of events) {
       if (event?.event !== 'cross-referenced') continue;
       const source = event.source?.issue;
       if (!source?.pull_request?.merged_at || !Number.isSafeInteger(source.number)) continue;
       const from = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\//.exec(source.repository_url ? `${source.repository_url}/` : '')?.[1]?.toLowerCase();
       if (from !== repository.toLowerCase()) continue;
-      if (this.uatState(typeof source.body === 'string' ? source.body : '') === 'OWNER_TEST_NEEDED') found.add(source.number);
+      merged.set(source.number, typeof source.body === 'string' ? source.body : '');
+    }
+    const found = new Set();
+    for (const [pr, body] of merged) {
+      if (this.uatState(body) !== 'OWNER_TEST_NEEDED') continue;
+      // A merge train's UAT line is its strictest member's. Where one of its own merged members
+      // references this task, that member's UAT line answers for it (checked as its own source);
+      // a train no merged member backs keeps its own hold.
+      const members = mergeTrainMembers(body);
+      if (members && members.some(member => member !== pr && merged.has(member))) continue;
+      found.add(pr);
     }
     return [...found].sort((a, b) => a - b);
   }
@@ -214,4 +237,4 @@ class IssueClosureGuard {
     } catch (error) { return unknown(`PR metadata or commits could not be read completely. ${error.message} Retry with a current explicit PR and head.`); }
   }
 }
-module.exports = { closingReferences, owedUat, IssueClosureGuard };
+module.exports = { closingReferences, owedUat, mergeTrainMembers, IssueClosureGuard };

@@ -491,6 +491,19 @@ test('closing and timeline sources union with body matches; latest merge wins, t
   }
 });
 
+test('completed discovery never selects a merge train over its member, even on an exact merge-time tie', () => {
+  const { github, reconciler } = completedFixture();
+  const at = '2026-11-13T06:39:05Z';
+  const train = ['## Merge train', '', '| Member | Reviewed head | Tier | Bump | Review |', '|---|---|---|---|---|',
+    `| #200 | \`${SHA_A}\` | NORMAL | patch | PASS |`, '', 'UAT: NOT_REQUIRED (internal)', '', 'Refs #100'].join('\n');
+  github.addPr(200, { head: SHA_A, merged: true, mergedAt: at, body: 'Closes #100' });
+  github.addPr(219, { head: SHA_A, merged: true, mergedAt: at, body: train });
+  github.issuePrLinks.set(100, { closing: [200], timeline: [219] });
+  const plan = reconciler().plan();
+  assert.equal(plan.observed.prs.get(100)?.number, 200);
+  assert.deepEqual(plan.effects.find(effect => effect.backfill).backfill.candidates.map(pr => pr.number), [200]);
+});
+
 // Closure matrix: command x role x state. No acceptance or finality follows a discovered PR.
 for (const row of [
   { name: 'dry run by an observer', apply: false, role: 'observer', state: 'completed', expected: null },
