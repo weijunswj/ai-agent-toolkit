@@ -1,5 +1,30 @@
 # Toolkit Changelog
 
+## 3.91.8
+
+### Fixed
+
+- **Skill descriptions in Codex:** Codex lists each skill with only about the first 200 characters of its description, so a trigger written further down was never seen there. `remove toolkit` and its full removal plan now open the setup skill's description (Codex had asked whether "remove" meant the computer, the repository or governance instead of showing the plan), and the Toolkit env and release-readiness skills put their trigger phrases first too. A check now keeps every quoted phrase or command in a skill description within the first 195 characters, and every description within 1,024 characters (the programme reconciler's was 1,051).
+
+## 3.91.7
+
+### Fixed
+
+- **Programme file reading:** the cloud sweep gate and `toolkit permissions` now read the programme file the same way the sweep does. A hand-edited version 1 file that also carries a version 2 key, such as `governance: "disabled"`, no longer counts as governance on: the gate skips with a warning that the file is not valid, and `toolkit permissions` offers no repo block.
+- **Remove Toolkit test:** the setup skill test now fails if the line allowing an app's own uninstall tool moves in front of the user's yes.
+
+## 3.91.6
+
+### Fixed
+
+- Programme Sweep: a run started by hand from a branch or tag other than the default branch now stops with one warning before any App token is minted, and footer cleaning runs only after a programme refresh that ran on the run's own commit, so a skipped or failed refresh edits no posts.
+
+## 3.91.5
+
+### Fixed
+
+- **Remove Toolkit in Codex:** `remove toolkit` always runs the full removal plan (scheduled tasks, app settings, hook records, helpers, skill copies, global rules, reinstall note and the Toolkit folder) after the user's OK. The setup skill's listing now names the plan script and says the app's own plugin uninstall tool is never the answer on its own, so a Codex session that cannot open the skill file still routes to the plan. Codex's own uninstall tool may do the Codex uninstall step once the user has said yes.
+
 ## 3.91.4
 
 ### Fixed

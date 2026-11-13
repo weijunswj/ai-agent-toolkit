@@ -1,6 +1,6 @@
 ---
 name: toolkit-env
-description: Use when the user wants to see, check, change, add or remove their env keys, API keys, tokens or secrets, in any words, or connect an app or MCP server to one. Covers "show env", "let me see my keys", "what's in my env", "I need to update my OpenAI key", "add the Stripe test key", "remove the old n8n token", "rotate my Neon key" and "toolkit env". Values stay in the computer's own credential store and never pass through chat.
+description: Use for "toolkit env", "show env" or any ask, in any words, to see, check, change, add or remove env keys, API keys, tokens or secrets (rotating one too), or to connect an app or MCP server to one. Values stay in the computer's own credential store and never pass through chat.
 ---
 
 # Toolkit Env
