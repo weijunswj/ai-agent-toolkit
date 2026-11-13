@@ -755,10 +755,18 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   // Every refused push is named, each reason once: a command that pushes both a default branch and
   // a bound store gets the pull request advice and the store-command message.
   const reasons = [];
+  // pushd and Push-Location save the folder they leave; popd and Pop-Location go back to the last
+  // one saved, or to the starting folder when none is.
+  const saved = [];
   for (const words of parts) {
     const assigned = assignmentOf(words);
     if (assigned) { assignVariable(variables, assigned); continue; }
-    if (/^(?:cd|pushd|chdir|set-location|sl|push-location)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
+    if (/^(?:popd|pop-location)$/i.test(words[0])) { root = saved.length ? saved.pop() : cwd; continue; }
+    if (/^(?:cd|pushd|chdir|set-location|sl|push-location)$/i.test(words[0]) && words.length >= 2) {
+      if (/^(?:pushd|push-location)$/i.test(words[0])) saved.push(root);
+      root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell));
+      continue;
+    }
     const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
     if (reason && !reasons.includes(reason)) reasons.push(reason);
   }

@@ -1134,9 +1134,11 @@ test('a push to the default branch is refused; other branches and evidence store
     [feature, 'git push --all origin'], [feature, 'git merge work && git checkout main && git push origin main'],
     [ctx.root, 'cd feature && git push origin HEAD:main'], [ctx.root, `git -C ${feature} push origin +work:main`],
     [ctx.root, `Push-Location ${feature}; git push origin HEAD:main`], [store, `Push-Location ${ctx.repo}; git push`],
+    [ctx.repo, `Push-Location ${store}; Pop-Location; git push origin main`], [ctx.repo, `pushd ${store}; popd; git push origin main`],
+    [ctx.repo, `pushd ${store} && pushd ${feature} && popd && popd && git push origin main`], [store, `popd; git -C ${ctx.repo} push`],
   ];
   for (const [cwd, command] of refused) assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, command);
-  const allowed = [[feature, 'git push'], [feature, 'git push -u origin HEAD'], [feature, 'git push origin work'], [store, 'git push origin main'], [fresh, 'git push -u origin main'], [ctx.repo, `Push-Location ${store}; git push origin main`]];
+  const allowed = [[feature, 'git push'], [feature, 'git push -u origin HEAD'], [feature, 'git push origin work'], [store, 'git push origin main'], [fresh, 'git push -u origin main'], [ctx.repo, `Push-Location ${store}; git push origin main`], [ctx.repo, `pushd ${feature}; pushd ${store}; popd; git push origin work`]];
   for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
   // A merge after Push-Location cannot be placed in a repository, like one after cd.
   typed(ctx, 'merge 618');

@@ -1,4 +1,5 @@
 ### Fixed
 
 - **Store push refusal wording:** the default-branch merge hold now follows `Push-Location` like `cd` and `Set-Location`, so a push to an evidence store reached that way is judged in the store's own folder and refused by the store guard with the store-command message. Before, it was judged in the starting folder and got "push to another branch and open one", which is wrong for a store and made an agent hold back the store command too. A default-branch push whose remote is a bound store not named `TRANSPORT-*` also shows the store-command message. The push stays refused either way, and a command with several refused pushes names each reason once.
+- **Folder stack:** the merge hold now goes back a folder on `popd` and `Pop-Location`, so `Push-Location <folder>; Pop-Location; git push origin main` (or the `pushd`/`popd` pair) is judged in the folder the push really runs in, and a default-branch push there is refused.
 - **Merge target after `Push-Location`:** a merge that names no repository, after a `Push-Location` in the same command, is now refused like one after `cd`, because its repository cannot be told.
