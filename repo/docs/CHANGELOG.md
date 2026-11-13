@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.94.0
+
+### Added
+
+- **Finished tasks leave the programme parent on their own:** GitHub caps a parent issue at 100 sub-issues. With the new version 2 binding switch `detach_finished_children: true`, the controller's reconcile and sweep unlink a closed `COMPLETED` or `RETIRED` task from its native parent once no open sub-issue, unfinished task or open PR still needs it there. Nothing is closed or deleted, at most 25 tasks leave per pass, each is checked again just before the write, and every detach is recorded on the parent's state. The task stays in the catalogue and on the graph, and a reopened task is attached again. Without the switch nothing changes.
+
 ## 3.93.1 (PR edits no longer cancel CI checks; Work queue named at session start)
 
 ### Fixed
