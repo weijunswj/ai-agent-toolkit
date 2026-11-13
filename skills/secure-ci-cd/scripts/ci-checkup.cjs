@@ -888,7 +888,7 @@ function recentRuns(root, runs, tools) {
 
 // Delivery speed read from the workflow files alone: edits that rerun heavy jobs, and concurrency
 // that keeps stale runs or cancels useful ones. Every item is a CHECK: the agent judges the fix.
-const CANCEL_PR_COMMITS = "${{ github.event_name == 'pull_request' && github.event.action != 'edited' }}";
+const CANCEL_PR_COMMITS = "${{ startsWith(github.event_name, 'pull_request') && github.event.action != 'edited' }}";
 function checkDelivery(workflows) {
   const items = [];
   for (const workflow of workflows) {
