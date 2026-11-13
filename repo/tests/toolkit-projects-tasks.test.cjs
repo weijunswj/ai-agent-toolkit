@@ -938,6 +938,11 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
   for (const required of ['- **Task lines are work.**', 'never ends your turn with `no_reply_needed`', 'The same prefix on two runs in a row that you already handled also goes to the owner once',
     '- `COORDINATOR BEHIND`:', "then write each run's own `.relayed` and `.done`", '- `NEEDS SETUP`:', "briefing the new home with the run's `handoff.md`"]) assert.ok(acting.includes(required), required);
   assert.ok(periodic.includes('- **Task lines are work** (as in **Acting on the nudge report**).'), 'the check-in follows the same rule');
+  assert.ok(acting.includes("that confirmed ping completes the prefix's action, so write `.done`"), 'a blocked prefix still closes its run');
+  assert.ok(periodic.includes('  - `NEEDS SETUP`: as under **Acting on the nudge report**.'), 'the check-in acts on NEEDS SETUP');
+  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
+  const freshAge = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
+  assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
   const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
   assert.match(skill, /\*\*Every task run reaches the project chat\.\*\*[^\n]*a prefixed line is work, never `no_reply_needed`\./);
 });
