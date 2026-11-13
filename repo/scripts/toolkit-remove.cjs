@@ -219,7 +219,7 @@ class ToolkitRemoval {
       const planned = plan.parts.find(item => item.key === part.key)?.items || [];
       let done;
       try { done = part.apply(planned); } catch (error) { done = [{ what: part.title, result: 'failed', reason: tasks.safeText(error.message) }]; }
-      return { key: part.key, title: part.title, results: done, held: planned.filter(item => item.action !== 'remove') };
+      return { key: part.key, title: part.title, results: done, held: planned.filter(item => !['remove', 'save'].includes(item.action)) };
     });
     let installed = {};
     try { installed = this.#plugins() || {}; } catch { installed = {}; }
@@ -245,6 +245,7 @@ function pluginLines(hosts, { after = false } = {}) {
 function partPlanLine(item) {
   if (item.action === 'remove') return `- ${item.what}: removed${item.detail ? ` (${item.detail})` : ''}`;
   if (item.action === 'held') return `- ${item.what}: left alone, ${item.detail || 'it could not be read'}`;
+  if (item.action === 'save') return `- ${item.what}: saved${item.detail ? `, ${item.detail}` : ''}`;
   return `- ${item.what}: kept${item.detail ? `, ${item.detail}` : ''}`;
 }
 
