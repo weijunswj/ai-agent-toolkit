@@ -105,12 +105,29 @@ test('cloud workflows: install, check, refresh and the refusals', t => {
   // A copy rendered at another commit is outdated.
   fs.writeFileSync(sweepFile, workflows.render('programme-sweep', source(SWEEP.file), OTHER));
   assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'outdated');
+  // A Dependabot bump of an action pin reads as an older copy, not a hand edit.
+  workflows.apply(workflows.plan({ repo, root: ROOT, commit: COMMIT }));
+  const bumped = fs.readFileSync(sweepFile, 'utf8').replace(/actions\/setup-node@[0-9a-f]{40} # v[\d.]+/, `actions/setup-node@${'b'.repeat(40)} # v99.0.0`);
+  fs.writeFileSync(sweepFile, bumped);
+  assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'outdated');
+  // A hand edit of the Toolkit checkout with a recomputed hash is still an edit.
+  const pinned = workflows.render('programme-sweep', source(SWEEP.file), COMMIT);
+  const lines = pinned.split('\n');
+  const forged = lines.slice(1).join('\n').replace(`ref: ${COMMIT}\n          path: .toolkit\n          persist-credentials: false\n\n`, `ref: ${OTHER}\n          path: .toolkit\n          persist-credentials: false\n\n`);
+  const crypto = require('node:crypto');
+  const hash = crypto.createHash('sha256').update(forged.replace(/^(\s+uses: [^@\s]+)@[^\n]*$/gm, '$1'), 'utf8').digest('hex').slice(0, 12);
+  fs.writeFileSync(sweepFile, `${lines[0].replace(/sha256=[0-9a-f]{12}/, `sha256=${hash}`)}\n${forged}`);
+  assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'edited');
   // The CI workflow named on install is kept by a later refresh without the option.
   fs.writeFileSync(path.join(repo, '.github/workflows/ci.yml'), 'name: CI\non: push\n');
   assert.equal(run(['--repo', repo, '--ci-workflow', 'ci.yml']), 0);
   assert.equal(run(['--repo', repo]), 0);
   assert.match(fs.readFileSync(path.join(repo, GATE.file), 'utf8'), /CI_WORKFLOW: ci\.yml/);
   assert.equal(run(['--repo', repo, '--check']), 0);
+  // Once that CI workflow is gone, a refresh drops the CI trigger instead of failing.
+  fs.rmSync(path.join(repo, '.github/workflows/ci.yml'));
+  assert.equal(run(['--repo', repo]), 0);
+  assert.doesNotMatch(fs.readFileSync(path.join(repo, GATE.file), 'utf8'), /CI_WORKFLOW|workflow_run:/);
   assert.equal(run(['--repo', repo, '--ci-workflow', 'missing.yml']), 2);
   assert.equal(run(['--repo', repo, '--ci-workflow', '../x.yml']), 2);
   // A same-named file that is not a Toolkit copy is never overwritten.
@@ -124,12 +141,21 @@ test('cloud workflows: a Toolkit checkout, another default branch and an unpubli
   const err = capture();
   assert.equal(workflows.main(['--repo', ROOT], { out: capture(), err, root: ROOT, commit: COMMIT }), 2);
   assert.match(err.text(), /Toolkit source checkout/);
+  // An older Toolkit branch, from before the installer, is recognised too.
+  const older = tempRepo(t);
+  fs.mkdirSync(path.join(older, 'repo', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(older, 'repo', 'scripts', 'toolkit-governance-conformance.cjs'), '');
+  assert.equal(workflows.isToolkitCheckout(older), true);
+  assert.deepEqual(conformance.cloudWorkflowFindings({ root: older }, ROOT, { cloudWorkflowsCommit: COMMIT }), []);
   const repo = tempRepo(t);
   git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk']);
   assert.throws(() => workflows.plan({ repo, root: ROOT, commit: COMMIT }), /default branch is trunk/);
   // The pinned commit must be on origin/main of the Toolkit checkout.
   const toolkit = tempRepo(t);
   git(toolkit, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '--quiet', '--allow-empty', '-m', 'one']);
+  git(toolkit, ['remote', 'add', 'origin', 'https://github.com/someone-else/ai-agent-toolkit.git']);
+  assert.throws(() => workflows.toolkitCommit(toolkit), /origin is not weijunswj\/ai-agent-toolkit/, 'a fork\'s commit is never pinned');
+  git(toolkit, ['remote', 'set-url', 'origin', 'https://github.com/weijunswj/ai-agent-toolkit.git']);
   assert.throws(() => workflows.toolkitCommit(toolkit), /not on origin\/main/);
   git(toolkit, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
   assert.equal(workflows.toolkitCommit(toolkit), git(toolkit, ['rev-parse', 'HEAD']));

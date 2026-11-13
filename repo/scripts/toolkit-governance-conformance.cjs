@@ -300,10 +300,10 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
 // hand-edited copy is drift; one rendered from an older Toolkit commit is only noted, since every
 // rules refresh updates it. The Toolkit's own checkout runs its own files and is skipped.
 function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
-  if (fs.existsSync(path.join(state.root, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'))) return [];
+  const workflows = require('./toolkit-cloud-workflows.cjs');
+  if (workflows.isToolkitCheckout(state.root)) return [];
   let result;
   try {
-    const workflows = require('./toolkit-cloud-workflows.cjs');
     // The check compares with this checkout's own commit; only an install needs it to be on main.
     result = workflows.plan({ repo: state.root, root: toolkitRoot, commit: options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot) });
   } catch (error) {

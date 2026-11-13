@@ -48,6 +48,13 @@ class InstallError extends Error {
 }
 
 const sha12 = text => crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 12);
+// The copy's hash leaves out each action's pinned version, so a Dependabot bump of a `uses:` pin reads
+// as an older copy (the next refresh puts the Toolkit's pins back), not as a hand edit.
+const bodyHash = body => sha12(body.replace(/^(\s+uses: [^@\s]+)@[^\n]*$/gm, '$1'));
+const TOOLKIT_REMOTE = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)weijunswj\/ai-agent-toolkit(?:\.git)?\/?$/i;
+// A Toolkit source checkout runs its own workflow files. This file has been there far longer than
+// the installer, so older Toolkit branches are recognised too.
+const isToolkitCheckout = dir => fs.existsSync(path.join(dir, 'repo', 'scripts', 'toolkit-governance-conformance.cjs'));
 const normalise = text => String(text).replace(/\r\n/g, '\n');
 
 function git(cwd, args) {
@@ -65,6 +72,8 @@ function toolkitHead(root = TOOLKIT_ROOT) {
 
 function toolkitCommit(root = TOOLKIT_ROOT) {
   const head = toolkitHead(root);
+  const remote = git(root, ['remote', 'get-url', 'origin']).stdout.trim();
+  if (!TOOLKIT_REMOTE.test(remote)) throw new InstallError(`the Toolkit checkout's origin is not ${TOOLKIT_REPOSITORY}, so its commit could not be fetched from there.`);
   if (!git(root, ['merge-base', '--is-ancestor', head, 'refs/remotes/origin/main']).ok) {
     throw new InstallError(`Toolkit commit ${head.slice(0, 7)} is not on origin/main, so GitHub could not fetch it. Update the Toolkit checkout to main first.`);
   }
@@ -119,7 +128,7 @@ function renderBody(id, source, commit, ci) {
 function render(id, source, commit, ci = null) {
   if (!SHA.test(commit)) throw new InstallError('the Toolkit commit must be a full 40-character SHA.');
   const body = `${NOTE}\n${renderBody(id, normalise(source), commit, ci)}`;
-  return `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${commit} sha256=${sha12(body)}\n${body}`;
+  return `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${commit} sha256=${bodyHash(body)}\n${body}`;
 }
 
 // { state: 'current' | 'outdated' | 'edited' | 'unmanaged' | 'missing' } for an installed copy.
@@ -129,7 +138,11 @@ function copyState(text, expected) {
   const marker = MARKER.exec(normalised);
   if (!marker || normalised.indexOf(marker[0]) !== 0) return { state: 'unmanaged' };
   const body = normalised.slice(marker[0].length + 1);
-  if (sha12(body) !== marker[3]) return { state: 'edited', toolkit: marker[2] };
+  if (bodyHash(body) !== marker[3]) return { state: 'edited', toolkit: marker[2] };
+  // Every Toolkit checkout must name the Toolkit and the commit in the header; a hash recomputed after
+  // changing either is still a hand edit.
+  const named = [...body.matchAll(/^ {10}repository: (\S+)\n {10}ref: (\S+)$/gm)];
+  if (!named.length || named.some(([, repository, ref]) => repository !== TOOLKIT_REPOSITORY || ref !== marker[2])) return { state: 'edited', toolkit: marker[2] };
   return normalised === expected ? { state: 'current', toolkit: marker[2] } : { state: 'outdated', toolkit: marker[2] };
 }
 
@@ -159,16 +172,18 @@ function parseArgs(argv) {
 function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(root) }) {
   const target = path.resolve(repo);
   if (!fs.existsSync(path.join(target, '.git'))) throw new InstallError(`${target} is not a git checkout.`);
-  if (fs.existsSync(path.join(target, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'))) {
+  if (isToolkitCheckout(target)) {
     throw new InstallError('this is a Toolkit source checkout, which runs its own workflow files.');
   }
   const head = git(target, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']).stdout.trim();
   if (head && head !== 'refs/remotes/origin/main') throw new InstallError(`the default branch is ${head.replace('refs/remotes/origin/', '')}; the cloud sweep runs only on a main branch.`);
-  // Without --ci-workflow, an installed gate copy keeps the CI workflow it already follows.
+  // Without --ci-workflow, an installed gate copy keeps the CI workflow it already follows, while that
+  // workflow is still there with a plain name; otherwise the CI trigger is left out.
   if (!ci) {
     const installed = readOrNull(path.join(target, ...WORKFLOWS[1].file.split('/')));
     const kept = installed && MARKER.test(normalise(installed)) ? /^ {10}CI_WORKFLOW: (\S+)$/m.exec(normalise(installed)) : null;
-    if (kept && CI_FILE.test(kept[1])) ci = kept[1];
+    const keptText = kept && CI_FILE.test(kept[1]) ? readOrNull(path.join(target, '.github', 'workflows', kept[1])) : null;
+    if (keptText !== null && ciWorkflowName(keptText)) ci = kept[1];
   }
   let ciWorkflow = null;
   if (ci) {
@@ -224,4 +239,4 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ TOOLKIT_REPOSITORY, toolkitHead, TOOLKIT_PATH, WORKFLOWS, NOT_COPIED, InstallError, apply, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
+module.exports = Object.freeze({ TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, NOT_COPIED, InstallError, apply, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
