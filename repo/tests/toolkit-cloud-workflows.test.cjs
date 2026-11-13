@@ -110,12 +110,15 @@ test('cloud workflows: install, check, refresh and the refusals', t => {
   const bumped = fs.readFileSync(sweepFile, 'utf8').replace(/actions\/setup-node@[0-9a-f]{40} # v[\d.]+/, `actions/setup-node@${'b'.repeat(40)} # v99.0.0`);
   fs.writeFileSync(sweepFile, bumped);
   assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'outdated');
+  // A pin moved to a branch is a hand edit, even though the hash leaves pins out.
+  fs.writeFileSync(sweepFile, bumped.replace(/actions\/create-github-app-token@[0-9a-f]{40} # v[\d.]+/, 'actions/create-github-app-token@main'));
+  assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'edited');
   // A hand edit of the Toolkit checkout with a recomputed hash is still an edit.
   const pinned = workflows.render('programme-sweep', source(SWEEP.file), COMMIT);
   const lines = pinned.split('\n');
   const forged = lines.slice(1).join('\n').replace(`ref: ${COMMIT}\n          path: .toolkit\n          persist-credentials: false\n\n`, `ref: ${OTHER}\n          path: .toolkit\n          persist-credentials: false\n\n`);
   const crypto = require('node:crypto');
-  const hash = crypto.createHash('sha256').update(forged.replace(/^(\s+uses: [^@\s]+)@[^\n]*$/gm, '$1'), 'utf8').digest('hex').slice(0, 12);
+  const hash = crypto.createHash('sha256').update(forged.replace(/^(\s+(?:- )?uses: [^@\s]+)@[^\n]*$/gm, '$1'), 'utf8').digest('hex').slice(0, 12);
   fs.writeFileSync(sweepFile, `${lines[0].replace(/sha256=[0-9a-f]{12}/, `sha256=${hash}`)}\n${forged}`);
   assert.equal(workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows.find(row => row.id === 'programme-sweep').state, 'edited');
   // The CI workflow named on install is kept by a later refresh without the option.

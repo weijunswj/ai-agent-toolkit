@@ -50,7 +50,7 @@ class InstallError extends Error {
 const sha12 = text => crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 12);
 // The copy's hash leaves out each action's pinned version, so a Dependabot bump of a `uses:` pin reads
 // as an older copy (the next refresh puts the Toolkit's pins back), not as a hand edit.
-const bodyHash = body => sha12(body.replace(/^(\s+uses: [^@\s]+)@[^\n]*$/gm, '$1'));
+const bodyHash = body => sha12(body.replace(/^(\s+(?:- )?uses: [^@\s]+)@[^\n]*$/gm, '$1'));
 const TOOLKIT_REMOTE = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)weijunswj\/ai-agent-toolkit(?:\.git)?\/?$/i;
 // A Toolkit source checkout runs its own workflow files. This file has been there far longer than
 // the installer, so older Toolkit branches are recognised too.
@@ -139,6 +139,9 @@ function copyState(text, expected) {
   if (!marker || normalised.indexOf(marker[0]) !== 0) return { state: 'unmanaged' };
   const body = normalised.slice(marker[0].length + 1);
   if (bodyHash(body) !== marker[3]) return { state: 'edited', toolkit: marker[2] };
+  // The hash leaves pins out, so each pin must still be a full commit SHA: a move to a branch or tag
+  // is a hand edit.
+  if ([...body.matchAll(/^\s+(?:- )?uses: ([^\n]*)$/gm)].some(([, value]) => !/^[^@\s]+@[0-9a-f]{40}(?: # [^\n]*)?$/.test(value))) return { state: 'edited', toolkit: marker[2] };
   // Every Toolkit checkout must name the Toolkit and the commit in the header; a hash recomputed after
   // changing either is still a hand edit.
   const named = [...body.matchAll(/^ {10}repository: (\S+)\n {10}ref: (\S+)$/gm)];
