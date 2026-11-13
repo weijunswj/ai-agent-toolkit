@@ -630,3 +630,22 @@ test('packaging table classes every skill and keeps internal skills out of the p
   assert.deepEqual(rows.filter((row) => row.cls === 'internal').map((row) => row.name).sort(), [...INTERNAL_SKILLS].sort());
   for (const row of rows) assert.equal(row.antigravity, row.cls === 'portable' ? 'Yes' : 'No', row.name);
 });
+
+test('every skill description keeps its trigger phrases where Codex shows them', () => {
+  // Codex desktop lists each skill with only about the first 200 characters of its description (a
+  // 13 November session cut every long one at 202 to 206). A quoted phrase or command past that point
+  // is never seen there, so `remove toolkit` once read as "computer, repository or governance?".
+  const SHOWN = 195;
+  const skillsRoot = path.join(repoRoot, 'skills');
+  for (const name of fs.readdirSync(skillsRoot)) {
+    const file = path.join(skillsRoot, name, 'SKILL.md');
+    if (!fs.existsSync(file)) continue;
+    const line = fs.readFileSync(file, 'utf8').split(/\r?\n/).find(text => text.startsWith('description: '));
+    assert.ok(line, `${name} has a description`);
+    const description = line.slice('description: '.length);
+    assert.ok(description.length <= 1024, `${name} description ${description.length} characters`);
+    for (const match of description.matchAll(/"[^"]*"|`[^`]*`/g)) {
+      assert.ok(match.index + match[0].length <= SHOWN, `${name}: ${match[0]} ends at ${match.index + match[0].length}, past ${SHOWN}`);
+    }
+  }
+});
