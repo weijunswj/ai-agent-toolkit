@@ -163,3 +163,31 @@ test('snapshot: fallback over budget stops before writes', () => {
   const store = new state.StateStore({ transport, store: f.store.store, now: () => NOW });
   assert.throws(() => store.readSnapshot(), error => error.code === 'PASS_STOPPED' && error.reason === 'GitHub GraphQL unavailable' && error.noWrite === true);
 });
+
+// The Contents API leaves out the text of a file over 1 MB (encoding "none", empty content).
+function contentsWithoutText(f, file) {
+  f.github.intercept(call => {
+    if (call.method !== 'GET' || !call.path.includes(`/contents/${file}`)) return undefined;
+    const answer = f.github.route(call.method, call.path, call.body);
+    if (answer.status === 200) answer.json = { ...answer.json, encoding: 'none', content: '' };
+    return answer;
+  });
+}
+
+test('read: a document too large for the Contents API is read whole by its blob id', () => {
+  const f = fixture();
+  const small = f.store.read('child', 500);
+  contentsWithoutText(f, 'state/issue-500.json');
+  const calls = f.github.calls.length;
+  const large = f.store.read('child', 500);
+  assert.equal(large.sha, small.sha);
+  assert.equal(state.canonicalText(large.doc), state.canonicalText(small.doc));
+  assert.equal(f.github.calls.slice(calls).filter(call => /\/git\/blobs\//.test(call.path)).length, 1, 'one blob read');
+});
+
+test('read: a large document whose blob cannot be read stops with the failed read', () => {
+  const f = fixture();
+  contentsWithoutText(f, 'state/issue-500.json');
+  f.github.intercept(call => (/\/git\/blobs\//.test(call.path) ? { status: 404, json: { message: 'Not Found' } } : undefined));
+  assert.throws(() => f.store.read('child', 500), error => Boolean(error.code) && error.code !== 'STATE_INVALID');
+});

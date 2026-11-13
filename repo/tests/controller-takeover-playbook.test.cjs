@@ -106,7 +106,8 @@ const capabilityControls = ['ChatGPT web cannot write GitHub.', 'Codex has a she
   'Antigravity has no hooks.', 'Claude Projects lacks a shell.', 'A Projects thread cannot run gh.',
   '| **Codex** | shell |', '| `ChatGPT web` | connector only |', 'Codex\nhas a shell.',
   'Cursor has hooks.', 'Claude Desktop has a shell.', 'A web chat cannot run a shell.', 'A Projects worker can run gh.',
-  '| _Codex_ | shell |', '_Codex has a shell._'];
+  '| _Codex_ | shell |', '_Codex has a shell._',
+  'claude.ai can run gh.', '| Codex CLI | shell |', '_Codex_ has a shell.'];
 
 test('T12 capabilities come from probes and host evidence, never a surface lookup', () => {
   const text = read(PLAYBOOK);
