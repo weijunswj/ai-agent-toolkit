@@ -120,6 +120,27 @@ test('verify lists files two or more members change and says which review the tr
   assert.equal(flagged.review, 'delta review of the shared files');
 });
 
+test('build caps a train at six members and body carries every member\'s Pack changes lines', t => {
+  const f = fixture(t);
+  const heads = [1, 2, 3, 4, 5, 6, 7].map(pr => f.branch(`pr-${pr}`, { [`m${pr}.txt`]: `${pr}\n` }));
+  assert.equal(train.MAX_MEMBERS, 6);
+  assert.throws(
+    () => train.run(['build', '--manifest', f.manifestFile({ members: heads.map((head, index) => f.member(index + 1, head)) }), '--branch', 'toolkit-train/full', '--main', 'main'], f.repo),
+    /a train holds at most 6 members; board the rest on the next train/,
+  );
+  assert.equal(f.git('branch', '--list', 'toolkit-train/full'), '', 'a refused train creates no branch');
+  const text = train.body({ members: [
+    f.member(1, heads[0], { pack_changes: ['merge-07: now refuses a moved head'] }),
+    f.member(2, heads[1]),
+    f.member(3, heads[2], { pack_changes: ['push-12: message wording'] }),
+  ] }).split('\n');
+  const at = text.indexOf('## Pack changes');
+  assert.ok(at > 0, 'the train body has one Pack changes heading');
+  assert.deepEqual(text.slice(at + 2, at + 4), ['merge-07: now refuses a moved head', 'push-12: message wording']);
+  assert.equal(text.filter(line => line === '## Pack changes').length, 1);
+  assert.throws(() => train.checkManifest({ members: [f.member(1, heads[0], { pack_changes: ['two\nlines'] })] }), /"pack_changes" must be/);
+});
+
 test('a member that conflicts is ejected, never hand-fixed, and the rest still land', t => {
   const f = fixture(t);
   const one = f.branch('pr-1', { 'a.txt': 'one\nTWO from 1\nthree\n' });
@@ -401,6 +422,8 @@ test('the controller, the changelog guide and the repo map describe the train th
   assert.match(roles, /\*\*Merge-train lanes:\*\* running a train \(`toolkit-merge-train\.cjs` build, catchup, verify, body, land\) is mechanical: no G0 or G1, the small tier at medium effort/);
   assert.match(roles, /The lane never resolves a conflict or edits code; it ejects the member, whose builder fixes it\./);
   assert.match(roles, /The train needs no G2 of its own once `verify` passes and CI is green; only files `verify` lists under `overlap` \(two or more members change them\) get a short delta review\./);
+  assert.match(roles, /A train holds 4 to 6 members \(`build` refuses a seventh\); later ready PRs board the next\. A member that fails CI or its delta review is ejected at once and the rest carry on/);
+  assert.match(roles, /Never edit a train or member PR body while its CI runs; queue the edit until CI ends\. At boarding, copy each member's `Pack changes` lines into its manifest entry \(`pack_changes`\)/);
   assert.match(read('repo/CONTROLLER.md'), /\[Roles and routes\]\(controller\/roles-and-routes\.md\) `[0-9a-f]{12}`: before resolving a route or launching, relaying or reviewing a gate, helper or merge-train lane\./);
   assert.match(read('skills/agent-cost-control/SKILL.md'), /\*\*A merge-train lane is on the ladder\.\*\* Building, verifying and landing a merge train is mechanical and needs no G0 or G1: step 1 \(small, medium\)\. It never resolves a conflict or edits code/);
   assert.match(read('repo/CONTROLLER.md'), /\[Evidence, progress and finish\]\(controller\/evidence-and-finish\.md\) `[0-9a-f]{12}`: before merging,/);

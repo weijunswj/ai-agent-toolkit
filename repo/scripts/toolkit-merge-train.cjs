@@ -22,7 +22,9 @@
 //     "members": [ { "pr": 12, "head": "<40-hex SHA the review passed>", "g2": "<report link>",
 //                    "tier": "LIGHT|NORMAL|RISKY", "bump": "patch|minor|major|none",
 //                    "uat": "UAT: NOT_REQUIRED (...)", "links": ["Closes #34"],
-//                    "owner_ok": "<link to the owner's typed merge OK; RISKY members only>" } ] }
+//                    "owner_ok": "<link to the owner's typed merge OK; RISKY members only>",
+//                    "pack_changes": ["<row id>: <why>", ...]   (optional: the member's own "Pack changes" lines) } ] }
+// build takes at most six members; body copies every member's pack_changes under one "## Pack changes".
 // With no bump_command, a repository holding repo/scripts/bump-version.cjs uses the line above and
 // any other repository takes no bump commit; "none" turns the bump off. The command runs without a
 // shell, with {level} as the highest member level and {base} as the main commit.
@@ -60,6 +62,8 @@ const TIERS = Object.freeze(['LIGHT', 'NORMAL', 'RISKY']);
 const TOOLKIT_BUMP = 'node repo/scripts/bump-version.cjs --next {level} --base {base}';
 const UAT_LINE = /^UAT: (NOT_REQUIRED|OWNER_TEST_NEEDED|PASSED)\b/;
 const LINK_LINE = /^(Closes|Fixes|Resolves|Refs) #\d+$/;
+// A train holds at most this many members; the next ready PRs board the next train.
+const MAX_MEMBERS = 6;
 const COMMANDS = Object.freeze(['build', 'catchup', 'verify', 'body', 'split', 'land']);
 
 class TrainError extends Error {
@@ -137,6 +141,9 @@ function checkManifest(value) {
     if (member.links !== undefined && (!Array.isArray(member.links) || !member.links.every(line => typeof line === 'string' && LINK_LINE.test(line.trim())))) {
       throw new TrainError(`${where}: "links" lines must each be "Closes #n", "Fixes #n", "Resolves #n" or "Refs #n"`);
     }
+    if (member.pack_changes !== undefined && (!Array.isArray(member.pack_changes) || !member.pack_changes.every(line => typeof line === 'string' && line.trim() && !line.includes('\n')))) {
+      throw new TrainError(`${where}: "pack_changes" must be the member's own "Pack changes" lines, one string each`);
+    }
     if (member.owner_ok !== undefined && (typeof member.owner_ok !== 'string' || !member.owner_ok.trim())) {
       throw new TrainError(`${where}: "owner_ok" must link the owner's typed merge OK`);
     }
@@ -172,6 +179,9 @@ function memberMessage(member) {
 
 function build(cwd, manifest, options) {
   const branch = safeRef(options.branch || '', '--branch');
+  if (manifest.members.length > MAX_MEMBERS) {
+    throw new TrainError(`a train holds at most ${MAX_MEMBERS} members; board the rest on the next train`, 1);
+  }
   const here = fs.realpathSync(git(cwd, ['rev-parse', '--show-toplevel']).stdout);
   const elsewhere = git(cwd, ['worktree', 'list', '--porcelain']).stdout.split('\n\n')
     .map(block => ({ tree: (block.match(/^worktree (.+)$/m) || [])[1], ref: (block.match(/^branch (.+)$/m) || [])[1] }))
@@ -368,6 +378,9 @@ function body(manifest) {
       ? `Refs ${line.replace(/^\S+ /, '')} (closed by #${member.pr}'s own closing line when the train lands)`
       : line))),
   ];
+  // Hook-pack rows a member changed stay explained on the train, or the pack check fails it.
+  const pack = members.flatMap(member => (member.pack_changes || []).map(line => line.trim()));
+  if (pack.length) lines.push('', '## Pack changes', '', ...pack);
   while (lines[lines.length - 1] === '') lines.pop();
   return `${lines.join('\n')}\n`;
 }
@@ -480,4 +493,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { TOOLKIT_BUMP, TrainError, body, build, catchup, checkManifest, land, run, split, trainLevel, trainTier, verify };
+module.exports = { MAX_MEMBERS, TOOLKIT_BUMP, TrainError, body, build, catchup, checkManifest, land, run, split, trainLevel, trainTier, verify };
