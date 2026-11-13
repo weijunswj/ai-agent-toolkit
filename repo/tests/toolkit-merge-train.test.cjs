@@ -424,6 +424,8 @@ test('the controller, the changelog guide and the repo map describe the train th
   assert.match(roles, /The train needs no G2 of its own once `verify` passes and CI is green; only files `verify` lists under `overlap` \(two or more members change them\) get a short delta review\./);
   assert.match(roles, /A train holds 4 to 6 members \(`build` refuses a seventh\); later ready PRs board the next\. A member that fails CI or its delta review is ejected at once and the rest carry on/);
   assert.match(roles, /Never edit a train or member PR body while its CI runs; queue the edit until CI ends\. At boarding, copy each member's `Pack changes` lines into its manifest entry \(`pack_changes`\)/);
+  assert.match(roles, /A stacked train's PR targets the running train's branch \(main's version check would call its fragments unfolded\) until that train lands, then main, before `catchup`\./);
+  assert.match(read('repo/docs/changelog.d/README.md'), /Open its pull request against the running train's branch, not main/);
   assert.match(read('repo/CONTROLLER.md'), /\[Roles and routes\]\(controller\/roles-and-routes\.md\) `[0-9a-f]{12}`: before resolving a route or launching, relaying or reviewing a gate, helper or merge-train lane\./);
   assert.match(read('skills/agent-cost-control/SKILL.md'), /\*\*A merge-train lane is on the ladder\.\*\* Building, verifying and landing a merge train is mechanical and needs no G0 or G1: step 1 \(small, medium\)\. It never resolves a conflict or edits code/);
   assert.match(read('repo/CONTROLLER.md'), /\[Evidence, progress and finish\]\(controller\/evidence-and-finish\.md\) `[0-9a-f]{12}`: before merging,/);
