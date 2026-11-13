@@ -473,7 +473,10 @@ test('the setup skill routes remove toolkit to the full plan, never the app unin
   const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8');
   const description = skill.split('\n').find(line => line.startsWith('description: ')).slice('description: '.length);
   assert.ok(description.length <= 1024, `description ${description.length} characters`);
-  assert.match(description, /`remove toolkit` to run the full removal plan \(`toolkit-remove\.cjs plan`[^)]*\), never the app's own plugin uninstall alone/);
+  // Codex desktop lists each skill with only about the first 200 characters of its description, so the
+  // remove route has to sit inside them (a 13 November Codex session showed this skill cut at 203).
+  const shown = description.slice(0, 195);
+  assert.match(shown, /"remove toolkit" \(full uninstall from this computer: show the `toolkit-remove\.cjs plan` list first, not the app's uninstall alone\)/);
   const section = skill.split('## Remove Toolkit from this computer')[1].split('\n## ')[0];
   assert.match(section, /Do this even when the app offers its own plugin uninstall tool \(such as Codex's `uninstall_plugin`\) or the plugin is already gone/);
   assert.match(section, /an app's own uninstall tool may do this step for that app/);
