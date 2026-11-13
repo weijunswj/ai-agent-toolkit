@@ -45,16 +45,19 @@ const SHELLS = /(?:^|[\\/])(?:bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|eval|invo
 // Read shell words in one pass: [{ words, offsets }] per command. Quotes protect separators; shell
 // escapes and both Bash and PowerShell line continuations stay inside the same command. Backslashes
 // in Windows paths stay.
-function shellCommands(text, { powershell = false, uncertainShell = false } = {}) {
+// A cmd script (`cmd: true`) has no backslash or backtick escapes, single quotes or # comments.
+// A command cut by an opening parenthesis is marked `opensGroup`: in PowerShell its next argument
+// is the group's value, which this reader does not see.
+function shellCommands(text, { powershell = false, uncertainShell = false, cmd = false } = {}) {
   const commands = [];
   let words = []; let offsets = []; let expanding = []; let expands = false; let word = ''; let started = false; let quote = ''; let offset = 0;
   const finishWord = () => { if (started) { words.push(word); offsets.push(offset); expanding.push(expands); } word = ''; started = false; expands = false; };
-  const finishCommand = () => { finishWord(); if (words.length) commands.push({ words, offsets, expanding }); words = []; offsets = []; expanding = []; };
+  const finishCommand = (opensGroup = false) => { finishWord(); if (words.length) commands.push(opensGroup ? { words, offsets, expanding, opensGroup } : { words, offsets, expanding }); words = []; offsets = []; expanding = []; };
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
     const next = text[index + 1];
     if (!started) offset = index;
-    if (quote !== "'" && (char === '\\' && !powershell || char === '`')) {
+    if (!cmd && quote !== "'" && (char === '\\' && !powershell || char === '`')) {
       // Preserve the generic reader's unquoted backslash while recording a literal dollar.
       if (!quote && char === '\\' && next === '$') { word += '\\$'; expands ||= powershell || uncertainShell; started = true; index++; continue; }
       if (next === '\n' || (next === '\r' && text[index + 2] === '\n')) {
@@ -74,13 +77,13 @@ function shellCommands(text, { powershell = false, uncertainShell = false } = {}
       } else word += char;
       continue;
     }
-    if (char === '"' || char === "'") { quote = char; started = true; continue; }
-    if (char === '#' && !started) {
+    if (char === '"' || char === "'" && !cmd) { quote = char; started = true; continue; }
+    if (char === '#' && !started && !cmd) {
       while (index + 1 < text.length && text[index + 1] !== '\n') index += 1;
       continue;
     }
     if (char === ';' || char === '|' || char === '\n' || char === '(' || char === ')' || (char === '&' && next === '&')) {
-      finishCommand();
+      finishCommand(char === '(');
       if ((char === '|' || char === '&') && next === char) index += 1;
     } else if (/\s/.test(char)) finishWord();
     else { word += char; started = true; }
@@ -399,14 +402,14 @@ function documentOpening(line, state) {
 }
 
 // Read documents once by lines, preserving the command on both sides of the opener.
-function readScript(text, { powershell = false, interpolation = false } = {}) {
+function readScript(text, { powershell = false, interpolation = false, cmd = false, uncertainShell = false, codexBash = false } = {}) {
   const docs = new Map(); const nested = [];
   const lines = text.split(/\r?\n/); const lastExact = new Map(); const lastTabbed = new Map();
   lines.forEach((line, i) => { lastExact.set(line, i); lastTabbed.set(line.replace(/^\t+/, ''), i); });
   const parts = []; const documentState = { quote: '', frames: [], powershell };
   for (let n = 0; n < lines.length; n++) {
     let line = lines[n];
-    const { here, doc } = interpolation ? {} : documentOpening(line, documentState);
+    const { here, doc } = interpolation || cmd ? {} : documentOpening(line, documentState);
     if (here || doc) {
       const marker = here ? here[1] + '@' : doc[3] ?? doc[5];
       if (((doc?.[1] ? lastTabbed : lastExact).get(marker) ?? -1) > n) {
@@ -433,18 +436,25 @@ function readScript(text, { powershell = false, interpolation = false } = {}) {
   }
   const source = parts.join('\n');
   const chunks = []; let prefixText = ''; let quote = ''; let unbalancedBlock = false; const blocks = [];
-  let noBlockComment = false; let bodyReadTo = -1; let noBody = false;
-  const runsGh = (prefix, body) => !DATA_COMMAND.test(programName(prefix.split(/\s/)[0])) && /\bgh\b/i.test(body);
+  let noBlockComment = cmd; let bodyReadTo = -1; let noBody = false; const blanks = new Set();
+  // A data command's block stays data, unless the block sits in a parenthesised group or is a
+  // hash literal (@{...}), whose values PowerShell runs before the data command sees them.
+  // Where PowerShell may run it, a script block followed by member access ({...}.Invoke(),
+  // {...}?.Invoke()) or piped on to an invoker (| % Invoke, | ForEach-Object { & $_ }) runs too.
+  const scriptBlocks = powershell || uncertainShell || codexBash;
+  const invoked = end => scriptBlocks && (/^\??\./.test(source.slice(end + 1, end + 3)) || /^[^;\n]*\|[^;\n]*?(?:^|[\s|{])(?:%|foreach-object|invoke-command|icm|&)(?=[\s{]|$)/i.test(source.slice(end + 1)));
+  const runsGh = (prefix, body, at, end) => (!DATA_COMMAND.test(programName(prefix.split(/\s/)[0])) || /\(/.test(prefix) || source[at - 1] === '@' || invoked(end)) && /\bgh\b/i.test(body);
+  const escapes = c => !cmd && (c === '\\' && !powershell || c === '`');
   const emit = value => { chunks.push(value); if (prefixText.length < 64) prefixText += value.slice(0, 64 - prefixText.length); };
   const boundary = () => { prefixText = ''; };
   const balanced = (start, open, close) => {
     let count = 1; let q = '';
     for (let j = start + 1; j < source.length; j++) {
       const c = source[j];
-      if (q !== "'" && (c === '\\' && !powershell || c === '`')) { j++; continue; }
+      if (q !== "'" && escapes(c)) { j++; continue; }
       if (q) { if (c === q) q = ''; continue; }
-      if (c === '"' || c === "'") { q = c; continue; }
-      if (c === '#' && /[\s;&|{}()]/.test(source[j - 1] || ' ')) { while (j + 1 < source.length && source[j + 1] !== '\n') j++; continue; }
+      if (c === '"' || c === "'" && !cmd) { q = c; continue; }
+      if (c === '#' && !cmd && /[\s;&|{}()]/.test(source[j - 1] || ' ')) { while (j + 1 < source.length && source[j + 1] !== '\n') j++; continue; }
       if (c === open) count++;
       if (c === close && --count === 0) return j;
     }
@@ -452,6 +462,7 @@ function readScript(text, { powershell = false, interpolation = false } = {}) {
   };
   for (let i = 0; i < source.length; i++) {
     const c = source[i];
+    if (blanks.has(i)) { emit(' '); continue; }
     if (quote !== "'" && c === '$' && source[i + 1] === '(') {
       const end = balanced(i + 1, '(', ')');
       if (end < 0) { emit(source.slice(i)); break; }
@@ -459,19 +470,24 @@ function readScript(text, { powershell = false, interpolation = false } = {}) {
       const cat = /^\s*cat\s+(__heredoc_\d+__)\s*$/.exec(inner);
       emit(cat ? `$(cat ${cat[1]})` : '$(__subst__)'); i = end; continue;
     }
-    if (quote !== "'" && c === '`' && !powershell) {
+    if (quote !== "'" && c === '`' && !powershell && !cmd) {
       let end = i + 1;
       while (end < source.length && source[end] !== '`') { if (source[end] === '\\') end++; end++; }
       if (end < source.length) { nested.push(source.slice(i + 1, end)); emit('$(__subst__)'); i = end; continue; }
     }
-    if (quote !== "'" && (c === '\\' && !powershell || c === '`')) { emit(c + (source[++i] || '')); continue; }
+    if (quote !== "'" && escapes(c)) { emit(c + (source[++i] || '')); continue; }
     // Quotes in expanding document bodies are text, not shell quoting. Only their
     // substitution spans execute; ordinary gh words in that text remain data.
     if (interpolation) { emit(c); continue; }
     if (quote) { if (c === quote) quote = ''; emit(c); continue; }
-    if (c === "'" || c === '"') { quote = c; emit(c); continue; }
+    if (c === '"' || c === "'" && !cmd) { quote = c; emit(c); continue; }
+    // iex(...) and Invoke-Expression(...) run the group's string: read it as an argument.
+    if (c === '(' && (powershell || uncertainShell || codexBash) && /(?:^|[\s;&|{(=])(?:iex|invoke-expression)\s*$/i.test(chunks.slice(-24).join(''))) {
+      const end = balanced(i, '(', ')');
+      if (end > 0) { blanks.add(end); emit(' '); continue; }
+    }
     if (c === '<' && source[i + 1] === '#' && !noBlockComment && (i === 0 || /[\s;&|{}]/.test(source[i - 1]))) { const close = source.indexOf('#>', i + 2); if (close >= 0) { emit(' '); i = close + 1; continue; } noBlockComment = true; }
-    if (c === '#' && (i === 0 || /[\s;&|{}]/.test(source[i - 1]))) { while (i + 1 < source.length && source[i + 1] !== '\n') i++; continue; }
+    if (c === '#' && !cmd && (i === 0 || /[\s;&|{}]/.test(source[i - 1]))) { while (i + 1 < source.length && source[i + 1] !== '\n') i++; continue; }
     if (c === '{') {
       if (unbalancedBlock) { emit(c); continue; }
       const prefix = prefixText.trim();
@@ -480,16 +496,16 @@ function readScript(text, { powershell = false, interpolation = false } = {}) {
       if (attached) {
         const end = balanced(i, '{', '}');
         if (end < 0) { emit(source.slice(i)); break; }
-        if (source[i - 1] !== '$' && runsGh(prefix, source.slice(i + 1, end))) nested.push({ text: source.slice(i + 1, end), hidden: true });
+        if (source[i - 1] !== '$' && runsGh(prefix, source.slice(i + 1, end), i, end)) nested.push({ text: source.slice(i + 1, end), hidden: true });
         emit(source.slice(i, end + 1)); i = end; continue;
       }
       if (!prefix || keyword || blocks.at(-1) === 'switch') {
         blocks.push(/^switch\b/i.test(prefix) ? 'switch' : 'block'); emit(';'); boundary(); continue;
       }
-      if (!powershell) { if (i > bodyReadTo && !noBody) { const end = balanced(i, '{', '}'); if (end < 0) noBody = true; else { bodyReadTo = end; if (runsGh(prefix, source.slice(i + 1, end))) nested.push({ text: source.slice(i + 1, end), hidden: true }); } } emit(c); continue; }
+      if (!powershell) { if (i > bodyReadTo && !noBody) { const end = balanced(i, '{', '}'); if (end < 0) noBody = true; else { bodyReadTo = end; if (runsGh(prefix, source.slice(i + 1, end), i, end)) nested.push({ text: source.slice(i + 1, end), hidden: true }); } } emit(c); continue; }
       const end = balanced(i, '{', '}');
       if (end < 0) { unbalancedBlock = true; emit(c); continue; }
-      if (runsGh(prefix, source.slice(i + 1, end))) nested.push({ text: source.slice(i + 1, end), hidden: true });
+      if (runsGh(prefix, source.slice(i + 1, end), i, end)) nested.push({ text: source.slice(i + 1, end), hidden: true });
       emit(" '__inert_block__' "); i = end; boundary(); continue;
     }
     if (c === '}' && blocks.length) { blocks.pop(); emit(';'); boundary(); continue; }
@@ -593,6 +609,17 @@ function startProcess(words, expanding, raw, offsets) {
 }
 
 function scriptCommands(text, opts = {}) { return executableCommands(text, 0, opts); }
+// Readings where PowerShell may run the command: its own tool, an unknown shell, or Codex Bash.
+function powershellLike(context) { return Boolean(context.powershell || context.uncertainShell || context.codexBash); }
+// A here-string or heredoc a runner takes as its script is read as that script.
+function documentScript(script, docs) {
+  let expands = false;
+  const text = script.replace(/(?:\$\(cat )?(__(?:heredoc|herestr)_\d+__)\)?/g, (whole, key) => {
+    const found = docs.get(key); if (!found) return whole;
+    expands ||= !found.literal; return found.value;
+  });
+  return { text, expands };
+}
 function scriptWords(words, expanding) {
   if (words.length === 1) return words[0];
   return words.map((word,i) => expanding[i] ? '"' + word.replace(/["\\]/g, '\\$&') + '"' : quoteWords([word])).join(' ');
@@ -616,6 +643,23 @@ function executableCommands(text, depth = 0, context = {}) {
     const hidden = Boolean(context.hidden || unwrapped.hidden);
     const nextContext = { ...context, hidden };
     movesTarget ||= unwrapped.movesTarget;
+    // PowerShell hash entries (@{a=gh ...}, @{a=iex '...'}) look like environment assignments but run
+    // their value: a value that starts gh, a runner or Start-Process is read as that command.
+    if (powershellLike(context)) {
+      const lead = command.words.length - words.length; let hashValue = false;
+      for (let at = 0; at < lead && !hashValue; at++) {
+        const value = /^[A-Za-z_][\w-]*=(.+)$/s.exec(command.words[at])?.[1];
+        if (!value) continue;
+        if (guardedGh(ghCommand([value, ...command.words.slice(at + 1, at + 8)]))) {
+          result.push({ words: [value, ...command.words.slice(at + 1)], expanding: command.expanding.slice(at), allWords: command.words, sourceWords: command.words, powershell: context.powershell, docs, movesTarget, hidden: true, offsets: command.offsets });
+          hashValue = true;
+        } else if (SHELLS.test(value) || /^(?:start-process|saps|start)$/i.test(programName(value))) {
+          result.push(...executableCommands(scriptWords([value, ...command.words.slice(at + 1)], command.expanding.slice(at)), depth + 1, { ...context, hidden: true, movesTarget }));
+          hashValue = true;
+        }
+      }
+      if (hashValue) continue;
+    }
     if (unwrapped.script !== undefined) { result.push(...executableCommands(unwrapped.script, depth + 1, { ...nextContext, outerExpansion: context.outerExpansion || unwrapped.scriptExpanding, movesTarget })); continue; }
     if (!words.length) { result.push({ words, expanding, allWords: command.words, sourceWords: command.words, powershell: context.powershell, docs, movesTarget, offsets: command.offsets }); continue; }
     if (/^(?:for|foreach|done|fi|esac)$/i.test(words[0])) continue;
@@ -638,12 +682,28 @@ function executableCommands(text, depth = 0, context = {}) {
       const here = kind === 'posix' ? words.findIndex(word => word.startsWith('<<<')) : -1;
       const expression = /^(?:eval|iex|invoke-expression)$/.test(program);
       script = expression ? words.slice(1).join(' ') : index >= 0 ? (kind === 'posix' ? words[scriptAt] : [attachedScript, ...words.slice(index + 1)].filter(Boolean).join(' ')) : here >= 0 ? words[here].slice(3) || words[here + 1] : program === 'powershell' ? words.slice(1).join(' ') : null;
+      // Words after a POSIX -c script are its $0, $1 ...; "$0" "$@" runs them as a command.
+      if (kind === 'posix' && index >= 0) {
+        const extra = words.slice(scriptAt + 1); const at = extra.findIndex((_, n) => guardedGh(ghCommand(extra.slice(n))));
+        if (at >= 0) { result.push({ words: extra.slice(at), expanding: expanding.slice(scriptAt + 1 + at), allWords: words, sourceWords: command.words, powershell: context.powershell, docs, movesTarget, hidden: true, offsets: command.offsets }); continue; }
+        // A single word ('$1' x 'gh issue close 1', eval "$1") can hold the whole command.
+        // ... or several words ($@, $*, $1 $2) can together: read them joined as well.
+        if (extra.some(word => /\bgh\b/i.test(word))) for (const part of [...extra, extra.join(' ')]) result.push(...executableCommands(part, depth + 1, { ...nextContext, powershell: false, uncertainShell: false, codexBash: false, cmd: false, hidden: true, movesTarget }));
+      }
+      // iex with a string built by +, -f, -join, a method call or a cast: the command text is not literal.
+      if (powershellLike(context) && /^(?:iex|invoke-expression)$/.test(program) && (command.opensGroup || words.slice(1).some(word => word === '+' || /^-(?:f|format|join)$/i.test(word) || /::|^\[/.test(word))) && /\bgh\b/i.test(command.opensGroup ? text : words.slice(1).join(' '))) {
+        result.push({ words: ['gh'], expanding: [false], allWords: words, docs, movesTarget, unreadableGh: true, unreadableReason: 'This command builds the text it runs with iex from joined or formatted strings, so Toolkit cannot tell what it runs and it was refused. Write the gh command out in full.', hidden });
+        continue;
+      }
       outerExpansion ||= expression ? expanding.slice(1).some(Boolean) : index >= 0 ? kind === 'posix' ? Boolean(expanding[scriptAt]) : expanding.slice(attachedScript ? index : index + 1).some(Boolean) : here >= 0 ? Boolean(expanding[here] || expanding[here + 1]) : program === 'powershell' && expanding.slice(1).some(Boolean);
     }
     if (script) {
-      const knownShell = POSIX_SHELL.test(program) || POWERSHELL.test(program);
-      const inner = executableCommands(script, depth + 1, { ...nextContext, cmd: program === 'cmd', powershell: POSIX_SHELL.test(program) ? false : POWERSHELL.test(program) ? true : context.powershell, uncertainShell: knownShell ? false : context.uncertainShell, outerExpansion, movesTarget });
+      const knownShell = POSIX_SHELL.test(program) || POWERSHELL.test(program) || program === 'cmd';
+      const fromDocument = documentScript(script, docs); script = fromDocument.text; outerExpansion ||= fromDocument.expands;
+      const inner = executableCommands(script, depth + 1, { ...nextContext, cmd: program === 'cmd', powershell: POWERSHELL.test(program) ? true : knownShell ? false : context.powershell, uncertainShell: knownShell ? false : context.uncertainShell, codexBash: knownShell ? false : context.codexBash, outerExpansion, movesTarget });
       result.push(...inner);
+      // PowerShell hands cmd.exe a script with legacy quoting, so embedded quotes may not quote there.
+      if (program === 'cmd' && powershellLike(context) && script.includes('"') && /\bgh\b/i.test(script)) result.push(...executableCommands(script.replace(/"/g, ' '), depth + 1, { ...nextContext, cmd: true, powershell: false, uncertainShell: false, codexBash: false, outerExpansion, movesTarget, hidden: true }));
       if (/^(?:eval|iex|invoke-expression)$/.test(program) && inner.some(command => command.movesTarget)) movesTarget = true;
       continue;
     }
@@ -655,7 +715,13 @@ function executableCommands(text, depth = 0, context = {}) {
       if (redirect && masked.slice(offset, offset + redirect[0].length) === redirect[0]) { if (words[i] === redirect[0]) i++; continue; }
       kept.push(words[i]); keptFlags.push(expanding[i] || context.powershell && words[i] === '{' && masked[offset] === '{');
     }
-    const record = { words: kept, expanding: keptFlags, allWords, sourceWords: command.words, powershell: context.powershell, docs, movesTarget, hidden, unreadableInput: allWords.some(word => docs.has(word)), offsets: command.offsets };
+    const record = { words: kept, expanding: keptFlags, allWords, sourceWords: command.words, powershell: context.powershell, psLike: powershellLike(context), docs, movesTarget, hidden, unreadableInput: allWords.some(word => docs.has(word)), offsets: command.offsets };
+    // gh (...) or gh api (...): PowerShell passes the group's value as the next argument.
+    const grouped = command.opensGroup && powershellLike(context) && ghCommand(kept);
+    if (grouped && (!grouped.noun || ['pr','issue'].includes(grouped.noun) && !grouped.verb || guardedGh(grouped))) {
+      result.push({ ...record, words: ['gh'], expanding: [false], unreadableGh: true, unreadableReason: 'This gh command takes arguments from a parenthesised expression, so Toolkit cannot tell what it runs and it was refused. Write the gh command out in full.' });
+      continue;
+    }
     result.push(record);
     if (ghCommand(kept) || DATA_COMMAND.test(programName(kept[0] || ''))) continue;
     for (let at = 0; at < kept.length; at++) {
