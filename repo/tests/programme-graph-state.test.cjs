@@ -408,15 +408,25 @@ test('a complete pass advances the private close watermark; old closes and paren
   assert.equal(f.parent().private.graph_pr_watermark,new Date(epoch+2*3600000).toISOString());
 });
 
-test('sixty-request ceiling is shared; truncated connections preserve the prior list and watermark',()=>{
+test('the discovery budget grows with the board; truncated connections preserve the prior list and watermark',()=>{
   const f=fixture(); pr(f,20,{body:'Refs #2'}); f.run(); const before=f.child(2).prs; const watermark=f.parent().private.graph_pr_watermark;
   f.github.issuePrLinks.set(2,{closingTruncated:true}); f.time(epoch+3600000);
-  const pass=f.pass(); const plan=pass.plan(); assert.equal(plan.complete,false); assert.ok(plan.observed.prGraph.requests<=60);
+  const tasks=f.parent().outcomes.length; const budget=state.discoveryBudget(tasks);
+  assert.equal(budget,state.DISCOVERY_BASE+Math.ceil(tasks/20)+2*tasks);
+  const pass=f.pass(); const plan=pass.plan(); assert.equal(plan.complete,false); assert.ok(plan.observed.prGraph.requests-plan.observed.prGraph.pages<=budget);
   pass.apply(plan); assert.deepEqual(f.child(2).prs,before); assert.equal(f.parent().private.graph_pr_watermark,watermark);
+  // List pages never stop discovery: sixty-one pages of each list are read whole.
+  const paged=f.pass();
+  paged.reader.graphPullRequests=(_status,page)=>{for(let i=0;i<61;i++)page();return [];};
+  const listed=paged.plan();
+  assert.ok(listed.observed.prGraph.requests>=122); assert.ok([...listed.observed.prGraph.discovery].filter(([number])=>number!==2).every(([,entry])=>entry.complete),'no task loses discovery to list pages (only #2 is truncated)');
+  // Task link reads are bounded by the grown budget, never by a fixed sixty.
   const bounded=f.pass();
-  bounded.reader.graphPullRequests=(_status,spend)=>{for(let i=0;i<61;i++)spend();return [];};
+  bounded.reader.issuePullRequestLinks=(_numbers,spend)=>{for(let i=0;i<budget+5;i++)spend();return new Map();};
   const large=bounded.plan();
-  assert.equal(large.observed.prGraph.requests,60); assert.equal(large.complete,false);
+  assert.equal(large.observed.prGraph.requests-large.observed.prGraph.pages,budget); assert.equal(large.complete,false);
+  // A board of 1,500 tasks gets a budget that covers its 75 link batches.
+  assert.ok(state.discoveryBudget(1500,0)-state.DISCOVERY_BASE>=75);
 });
 
 test('the locked CLI refresh copies facts and refuses terminal update patches from a non-holder',()=>{

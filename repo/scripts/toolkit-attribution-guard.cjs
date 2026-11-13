@@ -28,7 +28,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { SHELLS, ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { STORE_PUSH_MESSAGE, SHELLS, ShellCall, absoluteShellPath, githubSlug, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -389,13 +389,7 @@ function eachGitCommand(command, cwd, depth, shell, judge) {
 
 // ---- raw pushes to a bound evidence store ------------------------------------------------------
 
-const STORE_PUSH_MESSAGE = 'This is a raw git push to an evidence store this computer has bound. Store work goes through the store command, which checks the store, scans what it commits for secrets and pushes only the bound branch: node "<Toolkit folder>/repo/scripts/toolkit-store.cjs" save --path <file> --message <text> (run toolkit governance status first if it reports a stale binding). A push the owner wants by hand runs in their own terminal.';
-
-// owner/name, lower case, from a github.com remote URL; null for anything else.
-function githubSlug(url) {
-  const match = /^(?:(?:https?|git):\/\/(?:[^@/\s]+@)?(?:www\.)?github\.com(?::\d+)?\/|(?:[^@/\s:]+@)?(?:ssh\.)?github\.com:(?!\d+\/)|ssh:\/\/(?:[^@/\s]+@)?(?:ssh\.)?github\.com(?::\d+)?\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
-  return match ? match[1].toLowerCase() : null;
-}
+// STORE_PUSH_MESSAGE and githubSlug live in toolkit-shell-call.cjs, shared with the merge hold.
 
 // The url and pushurl values of each remote in the repository's own config, by remote name.
 function remoteUrls(configText) {
