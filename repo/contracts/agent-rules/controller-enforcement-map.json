@@ -333,6 +333,18 @@
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
+      "rule": "**Merge trains:**",
+      "covers": "The merge-train script refuses a train that holds anything but member merges at their reviewed heads, clean main catch-up merges and one reproducible bump, and its land check refuses a moved main, a moved member head or a RISKY member with no owner OK. Choosing which PRs ride together and running the merge stay instruction-only.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train.cjs",
+          "test": "repo/tests/toolkit-merge-train.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Promises:**",
       "instruction_only": "Promises live in free text (PR, issue comments or project memory); the hourly nudge reads them, but no code parses them."
     },
