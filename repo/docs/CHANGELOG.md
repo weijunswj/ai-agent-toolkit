@@ -1,5 +1,31 @@
 # Toolkit Changelog
 
+## 3.93.1 (PR edits no longer cancel CI checks; Work queue named at session start)
+
+### Fixed
+
+- The personal-data guard's git hooks now find the guard in the Toolkit's own checkout (`skills/secure-ci-cd/scripts/personal-data-guard.cjs`) when there is no `.github/scripts/` copy, so commits and pushes there run the real guard with no hand copy. With neither file present they still block.
+- In a Toolkit checkout the installer now installs or refreshes only the hooks (no guard copy, no workflow) instead of refusing, so rerunning it repairs an older hook. `--check` there reports an outdated hook as drift; no hooks at all is still fine.
+- The pre-push hook's plain-text step finds the check's in-repo source the same way, so a push from the Toolkit's own checkout runs it on the changed files, as other repositories with a copy already do.
+- In a Toolkit checkout, a leftover `.github/scripts/personal-data-guard.cjs` would run in place of the in-repo guard, so the installer warns about it and `--check` reports it as drift. A repository counts as the Toolkit only when it has both the guard source and the governance conformance script, so one stray file does not make another repository skip its guard copy and workflow.
+- **A pull request title or body edit no longer cancels the Validate run in progress.** The edit run now waits for it and then runs in full, so the newest event still finishes last and a fixed body still clears the required check. A new commit, an open or a reopen still cancels the older run.
+- **A cancelled Validate run reports `validate` as cancelled, not failed.** The aggregate job now runs with `if: ${{ !cancelled() }}`: it still runs and fails when a shard failed or timed out, but a run that was cancelled no longer fails with "no shard summaries". The secure CI/CD prompt template says the same for the final job.
+- **The programme sweep no longer reports a false `CHECKS_RED` from a cancelled run.** A cancelled result of a required check is set aside when the same check has another result at the head; a check whose only results were cancelled still counts as failed.
+- **Governance App check test:** the check that a missing governance App never changes the conformance exit code now runs the App reader for both a found and a missing App, and compares the drift findings as well as the exit code. Before, it ran offline, so the reader never ran and the check proved nothing.
+- **Code comment:** the evidence-store exemption comment in the governance state script sits above the function it describes again.
+- **Large state documents, single reads:** a gate, checkpoint or other single read of a state document over 1 MB now reads it whole by its blob id. The Contents API leaves out the text of such a file, so these reads used to stop with "too large to read".
+- The issue-closure check now refuses a `gh issue close` or closing PR write hidden in a PowerShell hash value (`@{a=gh ...}`), in a block inside a parenthesised group or hash literal after a data command, behind a `#` or `<#` or single quote inside a `cmd` script, in a here-string or heredoc given to `iex` or `pwsh -Command`, in `iex(...)`, or among the arguments after a POSIX `-c` script (as separate words, one word run by `$1` or `eval`, or several words joined by `$@`). A hash value that starts a runner or Start-Process, a data command's script block followed by `.Invoke()` or piped to an invoker, a PowerShell cmd script with embedded quotes and `iex` text built by `+`, `-f`, `-join` or a method call are read or refused too.
+- Where PowerShell may run the command, a guarded gh command with a parenthesised argument (`gh ('issue','close','1')`) or an `@name` splat is refused by name; reads such as `gh api $url` and flag values such as `--assignee @me` stay allowed.
+- Two `gh api graphql -f query="$query"` calls after one literal `query='...'` assignment are no longer refused with the wrong advice.
+
+### Changed
+
+- The Claude Code and Codex session-start attention line now names the longest-stalled work-queue task, its code, when it was flagged and its next step, read from this computer's attention cache.
+- A task natively blocked by another open task on the graph that is itself moving is no longer raised as idle; a blocker written only on the page is answered by a dispose naming it.
+- A refresh that could not read every open pull request raises no work-queue findings.
+- Work-queue rows show the acknowledged marker for a stalled-task finding acknowledged before acknowledgements were refused.
+- The controller takeover playbook says a work-queue finding takes an action or a dispose, never an acknowledgement.
+
 ## 3.93.0 (Coordinator resolves finished threads on relay; cloud merge hold; remove toolkit review fixes; one-app remove toolkit and a setup bank asked once)
 
 ### Changed
