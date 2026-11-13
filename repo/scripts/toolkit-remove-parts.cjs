@@ -178,7 +178,9 @@ function pluginState({ environment = process.env, home = os.homedir() } = {}) {
   const codexHome = codexHomeDir(environment, home);
   let config = '';
   try { config = fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'); } catch { config = ''; }
-  const table = new RegExp(`^\\s*\\[plugins\\."${PLUGIN_ID.replace(/[.@]/g, '\\$&')}"\\]`, 'm').test(config);
+  // A plain line compare: the table header is one line, possibly with a trailing comment.
+  const header = `[plugins."${PLUGIN_ID}"]`;
+  const table = config.split(/\r?\n/).some(line => { const text = line.trim(); return text === header || text.startsWith(`${header} #`); });
   const cache = fs.existsSync(path.join(codexHome, 'plugins', 'cache', MARKETPLACE, 'ai-agent-toolkit'));
   return { 'claude-code': claude, codex: table && cache };
 }
