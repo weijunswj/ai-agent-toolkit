@@ -1192,7 +1192,6 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
     $hasWorkflowId = -not [string]::IsNullOrWhiteSpace($workflowId)
     $generatedWorkflowIdForImport = $null
     $requiresRestartWarning = $false
-    $credentialsUnbound = $false
 
     Write-Step "CHECK" (Get-WorkflowCheckLabel $workflowFile $workflowId)
 
@@ -1273,8 +1272,7 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
 
         if (-not $BindingsFileExists) {
           $actionNote = "Reattach credentials in n8n if this workflow needs them."
-          $credentialsUnbound = $true
-          Write-Step "WARN" "$($workflowFile.Name) will import without restored credential bindings. After import, reattach every credential it uses in n8n; the run ends ACTION_REQUIRED until that is done."
+          Write-Step "WARN" "$($workflowFile.Name) will import without restored credential bindings. Reattach credentials in n8n after import if needed."
         }
       }
     }
@@ -1389,7 +1387,6 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
       IsArchivedInLive = $wasArchivedInLive
       UpdatesArchivedWorkflow = $willUpdateArchivedWorkflow
       RequiresRestartWarning = $requiresRestartWarning
-      CredentialsUnbound = $credentialsUnbound
       Action = $plannedAction
       TargetId = $targetLiveId
       Note = $actionNote
@@ -1980,27 +1977,8 @@ if ($importedCount -gt 0) {
     }
     Write-N8nOperationReport "ACTION_REQUIRED" "N8N_CREDENTIAL_MISSING" "postcondition" $true $true $preflight.PlannedImports $preflight.RequiredCredentialMisses "CREATE_CREDENTIALS_AND_RERUN" "Create each reported logical credential name and type, then rerun this unchanged command." "inactive"
   } else {
-    # A restart warning or an import without credential bindings is never "no further action":
-    # the run ends ACTION_REQUIRED with one next step for the operator, who tells the owner.
-    $restartImports = @($preflight.PlannedImports | Where-Object { $_.RequiresRestartWarning -eq $true })
-    $unboundImports = @($preflight.PlannedImports | Where-Object { $_.CredentialsUnbound -eq $true })
-    if ($restartImports.Count -gt 0) {
-      Write-Host "ACTION REQUIRED: Restart n8n before trusting the published state. On non multi-main n8n, the old cron triggers of these workflows may keep running until then:"
-      foreach ($restartImport in $restartImports) { Write-Host ("- {0}" -f $restartImport.File) }
-      Write-Host "The owner approves the restart; this helper never restarts n8n."
-      Write-N8nOperationReport "ACTION_REQUIRED" "N8N_IMPORT_RESTART_REQUIRED" "postcondition" $true $true $restartImports $preflight.OptionalCredentialMisses "RESTART_N8N_AND_CONFIRM" "Restart n8n (the owner approves the restart), then confirm the old schedule stopped before trusting the published state." "inactive"
-    }
-    if ($unboundImports.Count -gt 0) {
-      Write-Host "ACTION REQUIRED: these workflows imported without restored credential bindings. Reattach every credential they use in n8n:"
-      foreach ($unboundImport in $unboundImports) { Write-Host ("- {0}" -f $unboundImport.File) }
-      if ($restartImports.Count -eq 0) {
-        Write-N8nOperationReport "ACTION_REQUIRED" "N8N_IMPORT_CREDENTIALS_UNBOUND" "postcondition" $true $true $unboundImports $preflight.OptionalCredentialMisses "REATTACH_CREDENTIALS_AND_CONFIRM" "Reattach the credentials each imported workflow uses in n8n, then tell the owner which workflows were checked." "inactive"
-      }
-    }
-    if ($restartImports.Count -eq 0 -and $unboundImports.Count -eq 0) {
-      Write-Host "No further import action is required. Publishing remains a separate operator decision outside this helper."
-      Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_SUCCESS" "receipt" $true $true $preflight.PlannedImports $preflight.OptionalCredentialMisses "NONE" "No further import action is required." "inactive"
-    }
+    Write-Host "No further import action is required. Publishing remains a separate operator decision outside this helper."
+    Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_SUCCESS" "receipt" $true $true $preflight.PlannedImports $preflight.OptionalCredentialMisses "NONE" "No further import action is required." "inactive"
   }
 } else {
   Write-Host "1. No live workflow changes were imported."

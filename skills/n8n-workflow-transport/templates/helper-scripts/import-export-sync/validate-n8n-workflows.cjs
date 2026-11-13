@@ -87,8 +87,15 @@ function loadPolicy(root, policyArg) {
       ...defaults.allowedPlaceholders,
       ...(Array.isArray(policy.allowedPlaceholders) ? policy.allowedPlaceholders : []),
     ],
-    allowedEmailDomains: Array.isArray(policy.allowedEmailDomains) ? policy.allowedEmailDomains : defaults.allowedEmailDomains,
-    allowedUrlHosts: Array.isArray(policy.allowedUrlHosts) ? policy.allowedUrlHosts : defaults.allowedUrlHosts,
+    // Owner entries add to the defaults, so allowing one host never drops example.com.
+    allowedEmailDomains: [
+      ...defaults.allowedEmailDomains,
+      ...(Array.isArray(policy.allowedEmailDomains) ? policy.allowedEmailDomains : []),
+    ],
+    allowedUrlHosts: [
+      ...defaults.allowedUrlHosts,
+      ...(Array.isArray(policy.allowedUrlHosts) ? policy.allowedUrlHosts : []),
+    ],
     allowedLiteralValues: Array.isArray(policy.allowedLiteralValues) ? policy.allowedLiteralValues : defaults.allowedLiteralValues,
     warnOnGoogleIds: policy.warnOnGoogleIds !== undefined ? Boolean(policy.warnOnGoogleIds) : defaults.warnOnGoogleIds,
     failOnWarnings: policy.failOnWarnings !== undefined ? Boolean(policy.failOnWarnings) : defaults.failOnWarnings,
@@ -206,12 +213,17 @@ function createPolicyHelpers(policy) {
 
   const allowedUrl = (url) => {
     if (isAllowedPlaceholder(url) || isAllowedLiteral(url)) return true;
+    // A host built from an expression ({{ ... }}) or one that does not parse holds no real host,
+    // so it is not a production URL finding.
+    const hostPart = url.replace(/^https?:\/\//i, '').split('/')[0];
+    if (hostPart.includes('{{')) return true;
+    let parsed;
     try {
-      const parsed = new URL(url);
-      return policy.allowedUrlHosts.some((allowedHost) => hostMatches(parsed.hostname, allowedHost));
+      parsed = new URL(url);
     } catch {
-      return false;
+      return true;
     }
+    return policy.allowedUrlHosts.some((allowedHost) => hostMatches(parsed.hostname, allowedHost));
   };
 
   return {
@@ -532,12 +544,12 @@ for (const filePath of files) {
   const personalDataFinding = preparedImportMode ? warn : fail;
   const unsafeEmailPlaces = findUnsafeStringPlaces(workflow, emailRegex, helpers.allowedEmail);
   if (unsafeEmailPlaces.count > 0) {
-    personalDataFinding(`${relative} contains ${unsafeEmailPlaces.count} non-placeholder email(s) at ${unsafeEmailPlaces.places}. Replace with a placeholder or allow the domain in the policy.`);
+    personalDataFinding(`${relative} contains ${unsafeEmailPlaces.count} non-placeholder email(s) at ${unsafeEmailPlaces.places}. Replace with a placeholder, or allow the domain in ${DEFAULT_POLICY_FILE} allowedEmailDomains.`);
   }
 
   const unsafeUrlPlaces = findUnsafeStringPlaces(workflow, urlRegex, helpers.allowedUrl);
   if (unsafeUrlPlaces.count > 0) {
-    personalDataFinding(`${relative} contains ${unsafeUrlPlaces.count} production-looking URL(s) at ${unsafeUrlPlaces.places}. Replace with a placeholder or allow the host in the policy.`);
+    personalDataFinding(`${relative} contains ${unsafeUrlPlaces.count} production-looking URL(s) at ${unsafeUrlPlaces.places}. Replace with a placeholder, or allow the host in ${DEFAULT_POLICY_FILE} allowedUrlHosts.`);
   }
 
   if (policy.warnOnGoogleIds) {

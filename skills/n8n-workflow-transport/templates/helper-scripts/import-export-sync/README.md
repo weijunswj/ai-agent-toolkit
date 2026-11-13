@@ -76,9 +76,14 @@ The explicit phases remain `PREPARED`, `INSTALLING`, `PRECOMMIT_VERIFIED`, `COMM
 
 An explicitly supplied import deployment-policy path is validated as a safe readable regular file inside the repository before live discovery or preparation, and its validated snapshot is rechecked before use. Required credential misses drive the create-and-rerun action. Optional zero-match requirements remain informational and do not turn an unchanged workflow into `ACTION_REQUIRED`; ambiguous or otherwise unsafe matches still fail closed. Failure receipts map each stable code to one concrete remedy, and Explain last failure displays that remedy without a self-referential loop.
 
-An import that updates a previously published or scheduled workflow ends `ACTION_REQUIRED` (`N8N_IMPORT_RESTART_REQUIRED`) with one next step: restart n8n, with the owner's approval, before trusting the published state. An import that creates a workflow without restored credential bindings ends `ACTION_REQUIRED` (`N8N_IMPORT_CREDENTIALS_UNBOUND`) until its credentials are reattached. Neither ever reports "No further import action is required", and the helper itself never restarts n8n.
+`validate-n8n-workflows.cjs` fails a workflow in the canonical folder (the live import checks it before importing) that holds a non-placeholder email or a production-looking URL; in `--mode prepared-import` those stay warnings, because locally bound values belong there. Either way it names the JSON path, never the value. A URL whose host is built from an expression (`https://{{ $vars.API_HOST }}/...`) holds no real host and is not a finding. To allow a public API host or a company email domain the workflow really needs, add it to `n8n-workflow-policy.json` at the repository root; entries add to the defaults (`example.com`, `n8n.example.com`), and a host also allows its subdomains:
 
-`validate-n8n-workflows.cjs` fails a repository template that holds a non-placeholder email or a production-looking URL; in `--mode prepared-import` those stay warnings, because locally bound values belong there. Either way it names the JSON path, never the value. Allow a domain or host in the policy file when it is meant to be there.
+```json
+{
+  "allowedUrlHosts": ["api.openai.com", "docs.n8n.io"],
+  "allowedEmailDomains": ["example.org"]
+}
+```
 
 The helper never activates, executes, test-runs, publishes, or restarts n8n. An already-published (active) target is blocked because scheduled activity cannot be guaranteed to stop without a separate restart. n8n 2.x replaced activate/deactivate with publish/unpublish: a workflow counts as unpublished only when `active` is false and no published version (`activeVersionId`) is set; anything else, including a missing state, counts as live. The postcondition requires unpublished. `-RequireConfirmation` is compatibility-only menu behavior and is not the default.
 

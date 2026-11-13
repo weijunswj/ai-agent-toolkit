@@ -1065,7 +1065,11 @@ test('prepare-n8n-template.js keeps node names stable when replacing config lite
     },
   }));
 
-  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  // Its node names look config-like on purpose: without review the run fails, with review it passes.
+  const unreviewed = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  assert.equal(unreviewed.status, 2, unreviewed.stderr);
+  assert.match(unreviewed.stderr, /Possible config-like stable metadata/);
+  const result = runNode(sanitizerScript, [inputPath, outputPath, '--quiet', '--accept-warnings'], { cwd });
 
   assert.equal(result.status, 0, result.stderr);
   const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
@@ -1170,6 +1174,20 @@ test('prepare-n8n-template.js does not warn on normal workflow metadata names', 
   }), {});
 
   assert.equal(warnings.some((warning) => warning.includes('Possible config-like stable metadata')), false);
+});
+
+test('prepare-n8n-template.js treats config-like metadata as a finding to review, even with --quiet', () => {
+  const cwd = tempDir();
+  const inputPath = path.join(cwd, 'input.json');
+  const outputPath = path.join(cwd, 'out', 'template.json');
+  writeJson(inputPath, safeWorkflow({ name: 'Use example-workflow-index-rag template' }));
+
+  const quiet = runNode(sanitizerScript, [inputPath, outputPath, '--quiet'], { cwd });
+  assert.equal(quiet.status, 2, quiet.stderr);
+  assert.match(quiet.stderr, /Possible config-like stable metadata at workflow\.name/);
+
+  const accepted = runNode(sanitizerScript, [inputPath, outputPath, '--quiet', '--accept-warnings'], { cwd });
+  assert.equal(accepted.status, 0, accepted.stderr);
 });
 
 test('prepare-n8n-template.js warns on metadata config-like literals without rewriting node references', () => {
@@ -1390,6 +1408,49 @@ test('validate-n8n-workflows.cjs fails a repo template with a real email or prod
   assert.match(result.stderr, /FAIL: n8n-workflows[\\/]leaky\.json contains 1 non-placeholder email\(s\) at nodes\.0\.parameters\.sendTo/);
   assert.match(result.stderr, /FAIL: n8n-workflows[\\/]leaky\.json contains 1 production-looking URL\(s\) at nodes\.0\.parameters\.url/);
   assert.doesNotMatch(result.stdout + result.stderr, /ops\.lead@acme-real\.test|orders\.acme-real\.test/, 'the log names the place, never the value');
+  assert.match(result.stderr, /allow the host in n8n-workflow-policy\.json allowedUrlHosts/);
+  assert.match(result.stderr, /allow the domain in n8n-workflow-policy\.json allowedEmailDomains/);
+});
+
+function urlWorkflow(parameters) {
+  return safeWorkflow({
+    nodes: [{ id: 'http_1', name: 'HTTP Request', type: 'n8n-nodes-base.httpRequest', typeVersion: 4, position: [0, 0], parameters }],
+  });
+}
+
+test('validate-n8n-workflows.cjs does not count an expression-built host as a production URL', () => {
+  const cwd = tempDir();
+  writeJson(path.join(cwd, 'n8n-workflows', 'expr.json'), urlWorkflow({
+    url: '=https://{{ $vars.API_HOST }}/v1/items',
+    other: '=https://{{$vars.API_HOST}}/v1/items',
+  }));
+
+  const result = runNode(validateScript, [], { cwd });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /production-looking URL/);
+});
+
+test('validate-n8n-workflows.cjs allows a public host from the policy file and keeps the default hosts', () => {
+  const cwd = tempDir();
+  const workflowDir = path.join(cwd, 'n8n-workflows');
+  writeJson(path.join(workflowDir, 'api.json'), urlWorkflow({
+    url: 'https://api.openai.com/v1/chat/completions',
+    docs: 'https://n8n.example.com/callback',
+    contact: 'ops@example.com',
+  }));
+
+  const blocked = runNode(validateScript, [], { cwd });
+  assert.notEqual(blocked.status, 0, 'a public API host is not allowed until the owner allows it');
+
+  writeJson(path.join(cwd, 'n8n-workflow-policy.json'), { allowedUrlHosts: ['api.openai.com'] });
+  const allowed = runNode(validateScript, [], { cwd });
+  assert.equal(allowed.status, 0, allowed.stderr);
+
+  // The live import validates the workflow folder by path from the repository root, as here.
+  const liveImportStyle = runNode(validateScript, [workflowDir], { cwd });
+  assert.equal(liveImportStyle.status, 0, liveImportStyle.stderr);
+  assert.doesNotMatch(liveImportStyle.stderr, /production-looking URL|non-placeholder email/, 'example.com and n8n.example.com stay allowed');
 });
 
 test('validate-n8n-workflows.cjs keeps email and URL findings as warnings in prepared-import mode, still without the value', () => {

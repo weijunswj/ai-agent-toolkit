@@ -617,7 +617,7 @@ function main() {
     // "Replaced ..." notes say what the sanitiser already fixed. "... remains" findings mean real
     // data may still be in the output: they always print, even with --quiet, and fail the run
     // unless the operator reviewed them and passed --accept-warnings.
-    const remaining = warnings.filter((warning) => /\bremains at\b|may still contain/.test(warning));
+    const remaining = warnings.filter((warning) => /\bremains at\b|may still contain|config-like stable metadata/.test(warning));
     if (!options.quiet) {
       console.log(`Sanitised template: ${outputPath}`);
       console.log(`Nodes: ${template.nodes.length}`);

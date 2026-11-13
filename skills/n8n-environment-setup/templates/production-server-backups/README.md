@@ -136,7 +136,7 @@ MAILTO=<owner address>
 15 3 * * * cd /data/coolify/applications/<n8n-resource> && N8N_BACKUP_ROOT=/data/backups/n8n-production N8N_BACKUP_RETENTION_DAYS=30 /usr/local/sbin/n8n-production-backup >> /data/backups/n8n-production/cron.log 2>&1 || echo "n8n production backup FAILED on $(hostname); see /data/backups/n8n-production/cron.log"
 ```
 
-The log redirect keeps a good run quiet; a failed run prints one line, and cron mails it to `MAILTO`, which needs a working mailer on the host. The owner reads that mail. Test it once by running the line with a bad `N8N_BACKUP_ROOT` such as `/`.
+The log redirect keeps a good run quiet; a failed run prints one line, and cron mails it to `MAILTO`, which needs a working mailer on the host. The owner reads that mail. Test the mail path once without touching any backup folder, for example with `false || echo "n8n production backup FAILED on $(hostname); test"` as a one-off cron line, then remove it.
 
 Use systemd or cron for Linux server scheduling. Do not use Windows Task Scheduler for this production/server path.
 
