@@ -1180,8 +1180,11 @@ test('a push to the default branch is refused; other branches and evidence store
   // pushd swaps folders this command may not show.
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain, { recursive: true });
+  // Claude Code's Bash tool names its shell, so these run in the bash reading alone.
+  const bs = (cwd, command) => hold.decide(bash(cwd, command), { ...ctx.options, environment: {}, host: 'claude' })?.deny || '';
   for (const [cwd, command] of [[store, `cd ${ctx.repo}; cd; cd -; git push origin main`], [plain, `cd ${ctx.repo}; cd; cd -; git push origin main`], [ctx.repo, `cd ${store}; cd -- -; git push origin main`], [ctx.repo, `cd ${store}; pushd -; git push origin main`]]) {
-    assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, `Bash: ${command}`);
+    assert.match(bs(cwd, command), /default branch `main`/, `Bash: ${command}`);
+    assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, `Unknown shell: ${command}`);
   }
   assert.match(decide(ctx, bash(store, `pushd ${ctx.repo}; pushd; git push origin main`))?.deny || '', unknown, 'Bash: bare pushd');
   for (const [cwd, command] of [[ctx.repo, `Set-Location ${store}; Set-Location -Path -; git push origin main`], [ctx.repo, `Set-Location ${store}; Set-Location -Path:-; git push origin main`], [store, `Push-Location ${ctx.repo}; Pop-Location; Set-Location -; git push origin main`], [store, `Set-Location ${ctx.repo}; Set-Location; git push origin main`]]) {
