@@ -186,7 +186,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run the hook pack
-        run: node repo/scripts/toolkit-hook-pack.cjs run --family ${{ matrix.families }} --budget-seconds 420
+        run: node repo/scripts/toolkit-hook-pack.cjs run --family "${{ matrix.families }}" --budget-seconds 420
 
   personal-data:
     runs-on: ubuntu-latest

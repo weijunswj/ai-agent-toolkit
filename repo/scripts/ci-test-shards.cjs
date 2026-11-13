@@ -362,7 +362,8 @@ const CLOCK_AHEAD_JOB = [
 // Linux runs the full hook pack. Windows starts its hooks far more slowly, so it splits the pack
 // into four groups of families with about the same measured time, each in its own job: four jobs
 // instead of one per family, since every job waits for one of the account's 20 concurrent runner
-// slots. Both jobs are required, and fail-fast stays off for every group.
+// slots. The group is quoted because PowerShell would split an unquoted comma list into an array.
+// Both jobs are required, and fail-fast stays off for every group.
 const HOOK_PACK_JOB = [
   '  hook-pack:',
   '    runs-on: ${{ matrix.os }}',
@@ -394,7 +395,7 @@ const HOOK_PACK_WINDOWS_JOB = HOOK_PACK_JOB
   .replace('  hook-pack:', '  hook-pack-windows:')
   .replace('    runs-on: ${{ matrix.os }}', '    runs-on: windows-latest')
   .replace('        os: [ubuntu-latest]', "        families: ['attribution,closure-matrix', 'closure-shell,push', 'governance,issue-closure', 'fault,merge,task-governance']")
-  .replace(' run --budget-seconds 360', ' run --family ${{ matrix.families }} --budget-seconds 420');
+  .replace(' run --budget-seconds 360', ' run --family "${{ matrix.families }}" --budget-seconds 420');
 
 // The exact text of the personal-data job: every commit of the pull request or push, its messages,
 // branch name and pull request text, checked by the personal-data guard. The validate job waits
