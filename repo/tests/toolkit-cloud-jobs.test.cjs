@@ -30,6 +30,18 @@ test('contract: the programme sweep row has two narrow tokens and no personal to
   assert.doesNotMatch(JSON.stringify(source), /TOOLKIT_GOVERNANCE_TOKEN|secret_name/);
 });
 
+test('L5: the sweep row names the gate that holds its hourly cron', () => {
+  const row = contract().jobs.find(job => job.id === 'programme-sweep');
+  assert.equal(row.schedule.workflow, '.github/workflows/toolkit-programme-sweep-gate.yml');
+  assert.ok(fs.readFileSync(path.join(ROOT, row.schedule.workflow), 'utf8').includes(`- cron: '${row.schedule.cron}'`));
+  assert.doesNotMatch(fs.readFileSync(path.join(ROOT, row.workflow), 'utf8'), /^\s+schedule:/m, 'the sweep itself holds no cron');
+  const lines = jobs().guideLines(jobs().buildCloudJobsGuide({ root: ROOT }));
+  assert.ok(lines.includes('- programme-sweep: hourly (.github/workflows/toolkit-programme-sweep.yml, started by .github/workflows/toolkit-programme-sweep-gate.yml), replaces the computer\'s toolkit-programme-sweep'), lines.join('\n'));
+  // A row whose own workflow holds the cron needs no schedule workflow.
+  const shard = contract().jobs.find(job => job.id === 'shard-timings');
+  assert.equal(Object.hasOwn(shard.schedule, 'workflow'), false);
+});
+
 test('guide: the lines the check prints use the App\'s own names, levels and variable', () => {
   const guide = jobs().buildCloudJobsGuide({ root: ROOT });
   const lines = jobs().guideLines(guide);
@@ -90,6 +102,9 @@ for (const [label, change] of [
   ['a personal token field', source => { source.secret_name = 'TOOLKIT_GOVERNANCE_TOKEN'; }],
   ['a duplicate row', source => { source.jobs.push(structuredClone(source.jobs[0])); }],
   ['a changed never-granted list', source => { source.never_granted.pop(); }],
+  ['a schedule workflow that is the job\'s own', source => { source.jobs[0].schedule.workflow = source.jobs[0].workflow; }],
+  ['a schedule workflow outside the workflows folder', source => { source.jobs[0].schedule.workflow = 'gate.yml'; }],
+  ['an unknown schedule field', source => { source.jobs[0].schedule.runner = 'ubuntu'; }],
 ]) test(`contract: ${label} is refused`, () => {
   const source = contract();
   change(source);

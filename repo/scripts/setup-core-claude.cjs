@@ -359,11 +359,15 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
   // The last setup step on Claude Code: checks what this run installed, refreshing stale Toolkit
   // helper definitions, and returns the result the summary and exit code report.
   function runClaudeInstallCheck(args, nativeCache, delegation) {
+    const helperDefinitions = new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays });
+    // After `remove toolkit`, its reinstall note names the helper stack to put back.
+    const restored = require('./toolkit-reinstall-note.cjs').restoreHelpersLine('claude-code', helperDefinitions);
+    if (restored) console.log(restored);
     const check = new ToolkitInstallHealthCheck({
       toolkitRoot: args.repoRoot,
       expectedVersion: expectedToolkitVersion(args.repoRoot, 'claude-code'),
       hubPath: path.resolve(args.hub || path.join(os.homedir(), '.ai-agent-toolkit', 'current')),
-      helperDefinitions: new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays }),
+      helperDefinitions,
       globalRules: setupGlobalRules(args),
       depthSetting: new ClaudeSubagentDepthSetting(),
       envHealth: ToolkitEnv.forUser(),

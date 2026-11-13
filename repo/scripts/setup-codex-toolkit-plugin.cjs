@@ -1188,6 +1188,27 @@ function listToolkitCacheTree(base) {
   return entries.sort();
 }
 
+// Codex's own hook approval records for the Toolkit plugin's hooks: one
+// `[hooks.state."ai-agent-toolkit@ai-agent-toolkit-local:<hooks file>:<event>:<group>:<hook>"]` table
+// each. `codex plugin remove` leaves them behind. Returns their keys and the text without them; a
+// table runs from its header to the line before the next table header.
+const TOOLKIT_HOOK_STATE_HEADER = /^\s*\[\s*hooks\.state\.(["'])(ai-agent-toolkit@ai-agent-toolkit-local:[^"'\]]*)\1\s*\]\s*(?:#.*)?$/;
+function toolkitHookStateTables(configText) {
+  const keys = [];
+  const kept = [];
+  let skipping = false;
+  for (const line of String(configText || '').split(/(?<=\n)/)) {
+    const header = /^\s*\[/.test(line);
+    if (header) {
+      const match = line.replace(/\r?\n$/, '').match(TOOLKIT_HOOK_STATE_HEADER);
+      skipping = Boolean(match);
+      if (match) { keys.push(match[2]); continue; }
+    }
+    if (!skipping) kept.push(line);
+  }
+  return { keys, text: kept.join('') };
+}
+
 // Toolkit state proving that a Codex home already held an install: config naming the Toolkit
 // marketplace or plugin (enabled or disabled), an installed Toolkit entry in the native list, or
 // anything under the Toolkit marketplace cache. The native list hides a plugin whose marketplace is
@@ -1199,7 +1220,9 @@ function inspectResidualToolkitState(codexHome, pluginList = null) {
   const pluginConfig = inspectConfiguredPluginState(configText, pluginId());
   if (pluginConfig.status === 'enabled' || pluginConfig.status === 'disabled') {
     evidence.push(`Codex config still has [plugins."${pluginId()}"] (${pluginConfig.status})`);
-  } else if (configText.includes(TOOLKIT_MARKETPLACE_NAME)) {
+  // Codex's leftover hook approval records name the marketplace but say nothing about where it came
+  // from, so they are not install evidence; a fresh install reuses or replaces them.
+  } else if (toolkitHookStateTables(configText).text.includes(TOOLKIT_MARKETPLACE_NAME)) {
     evidence.push(`Codex config still names ${TOOLKIT_MARKETPLACE_NAME}`);
   }
   if (findInstalledEntry(pluginList)) evidence.push(`codex plugin list still reports ${pluginId()} as installed`);
@@ -1852,6 +1875,8 @@ module.exports = {
   defaultWindowsPowerShellPath,
   findTomlSection,
   inspectConfiguredPluginState,
+  inspectResidualToolkitState,
+  toolkitHookStateTables,
   localMarketplaceSection,
   parseTomlSectionValues,
   pluginId,

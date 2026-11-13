@@ -2,22 +2,25 @@
 #
 # It runs every hour at minute 41 (away from the top of the hour, when GitHub delays and drops
 # scheduled runs most), when a person opens, edits, closes or reopens an issue, adds a comment, or
-# opens, updates, closes or reopens a pull request into main, when a Validate run finishes (a CI
-# result changes no issue's update time), and when started by hand. It reads a
-# few small GitHub answers with the built-in token and either ends in seconds or starts the sweep
-# workflow (toolkit-programme-sweep.yml) on main. It starts it when no sweep has finished yet, when
-# the board says the last pass left a saved place (once GitHub's hourly App limit has reset, if that
-# is what stopped it), when an issue or pull request changed or a CI run finished since the last
-# successful sweep finished, or when six hours have passed. A start from activity waits until an hour
+# opens, updates, closes or reopens a pull request into main, when the repository's CI workflow
+# finishes, where the gate follows one (Validate in the Toolkit; a CI result changes no issue's
+# update time), and when started by hand. It reads a few small GitHub answers with the built-in token
+# and either ends in seconds or starts the sweep workflow (toolkit-programme-sweep.yml) on main. It
+# starts it when no sweep has finished yet, when the board says the last pass left a saved place
+# (once GitHub's hourly App limit has reset, if that is what stopped it), when an issue or pull
+# request changed since the last successful sweep finished (or a CI run finished, where the gate
+# follows a CI workflow), or when six hours have passed. A start from activity waits until an hour
 # after the last sweep; the hourly start then picks the change up. Activity during a running sweep
 # queues one more behind it. Nothing starts while a sweep is already queued.
 #
 # Activity from bots, the sweep's own App included, is ignored before a runner starts, so the
-# sweep's own page edits never start it again. The gate checks out only its own script from main,
+# sweep's own page edits never start it again. The gate checks out only the Toolkit's gate script
+# (from main in the Toolkit; a governed repository's copy takes it from the pinned Toolkit commit),
 # reads the binding merged on main, never holds the App's key or tokens, and its built-in token can only read
 # issues and contents and read and start workflow runs. One gate runs at a time, with one waiting;
 # a newer one replaces the waiting one. `pull_request_target` and `workflow_run` run main's copy of
-# this file, and nothing from the pull request or the CI run is checked out or run.
+# this file, and nothing from the pull request or the CI run is checked out or run. A GitHub blip (a
+# 5xx, a 429 or a dropped connection) ends the run green with a notice; the next start retries.
 name: Toolkit Programme Sweep Gate
 
 on:

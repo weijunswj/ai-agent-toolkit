@@ -81,6 +81,96 @@ test('cloud workflows: the gate copy checks the Toolkit out and follows the repo
   assert.equal(workflows.ciWorkflowName('on: push\n'), null);
 });
 
+test('cloud workflows: the copies carry no header line that only holds in the Toolkit', () => {
+  const copies = [
+    workflows.render('programme-sweep', source(SWEEP.file), COMMIT),
+    workflows.render('programme-sweep-gate', source(GATE.file), COMMIT),
+    workflows.render('programme-sweep-gate', source(GATE.file), COMMIT, { file: 'ci.yml', name: 'CI' }),
+  ];
+  const wrong = [/a Validate run finishes/, /only its own script from main/, /`programme\.cjs refresh` from the commit it checked out/, /when an issue or pull request changed or a CI run finished/];
+  for (const text of copies) for (const phrase of wrong) assert.doesNotMatch(text, phrase);
+  assert.match(copies[1], /where the gate follows one/);
+  assert.match(copies[0], /a governed\n# repository's copy checks the Toolkit out at a pinned commit/);
+});
+
+test('cloud workflows: a renamed or removed CI workflow leaves a faithful gate copy outdated, never edited', t => {
+  const toolkit = toolkitHistory(t);
+  for (const at of ['one', 'two']) {
+    const repo = tempRepo(t);
+    const ciFile = path.join(repo, '.github/workflows/ci.yml');
+    const gateFile = path.join(repo, GATE.file);
+    fs.mkdirSync(path.dirname(ciFile), { recursive: true });
+    fs.writeFileSync(ciFile, 'name: CI\non: push\n');
+    fs.writeFileSync(gateFile, workflows.render('programme-sweep-gate', source(GATE.file), toolkit[at], { file: 'ci.yml', name: 'CI' }));
+    const state = () => workflows.plan({ repo, root: toolkit.dir, commit: toolkit.two }).rows.find(row => row.id === 'programme-sweep-gate').state;
+    assert.equal(state(), at === 'two' ? 'current' : 'outdated', `${at}: faithful`);
+    fs.writeFileSync(ciFile, 'name: Build\non: push\n');
+    assert.equal(state(), 'outdated', `${at}: CI workflow renamed`);
+    fs.rmSync(ciFile);
+    assert.equal(state(), 'outdated', `${at}: CI workflow removed`);
+    assert.deepEqual(conformance.cloudWorkflowFindings({ root: repo }, toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).filter(entry => entry.severity === 'drift').map(entry => entry.message).filter(message => message.includes('gate')), [], `${at}: no drift`);
+    // Broken CI lines are a hand edit, even with the hash recomputed.
+    const text = fs.readFileSync(gateFile, 'utf8');
+    const lines = text.split('\n');
+    const body = lines.slice(1).join('\n').replace('    workflows: ["CI"]\n', '    workflows: [CI, Other]\n');
+    const hash = require('node:crypto').createHash('sha256').update(body.replace(/^(\s+(?:- )?uses: [^@\s]+)@[^\n]*$/gm, '$1'), 'utf8').digest('hex').slice(0, 12);
+    fs.writeFileSync(gateFile, `${lines[0].replace(/sha256=[0-9a-f]{12}/, `sha256=${hash}`)}\n${body}`);
+    assert.equal(state(), 'edited', `${at}: broken CI lines`);
+  }
+});
+
+// A throwaway Toolkit history: the real render file and workflow files at commit one, a workflow
+// comment changed at commit two, and optionally the render file changed at commit three.
+function toolkitHistory(t) {
+  const dir = tempRepo(t);
+  const put = (file, text) => { fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), text); };
+  const commit = message => { git(dir, ['add', '-A']); git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '--quiet', '-m', message]); return git(dir, ['rev-parse', 'HEAD']); };
+  const RENDER = 'repo/scripts/toolkit-cloud-workflows-render.cjs';
+  put(RENDER, source(RENDER));
+  for (const row of workflows.WORKFLOWS) put(row.file, source(row.file));
+  const one = commit('one');
+  put(SWEEP.file, source(SWEEP.file).replace('# Toolkit Programme Sweep:', '# Toolkit Programme Sweep (two):'));
+  const two = commit('two');
+  put(RENDER, `${source(RENDER)}// changed\n`);
+  const three = commit('three');
+  return { dir, one, two, three };
+}
+
+test('cloud workflows: an older copy is re-rendered at its own commit, so an edit with a recomputed hash is drift', t => {
+  const toolkit = toolkitHistory(t);
+  const repo = tempRepo(t);
+  const sweepFile = path.join(repo, SWEEP.file);
+  const state = () => workflows.plan({ repo, root: toolkit.dir, commit: toolkit.two }).rows.find(row => row.id === 'programme-sweep').state;
+  const older = workflows.render('programme-sweep', source(SWEEP.file), toolkit.one);
+  fs.mkdirSync(path.dirname(sweepFile), { recursive: true });
+  fs.writeFileSync(sweepFile, older);
+  assert.equal(state(), 'outdated', 'a faithful older copy is only a note');
+  fs.writeFileSync(sweepFile, older.replace(/actions\/setup-node@[0-9a-f]{40} # v[\d.]+/, `actions/setup-node@${'b'.repeat(40)} # v99.0.0`));
+  assert.equal(state(), 'outdated', 'a Dependabot pin bump is still only a note');
+  // An added step with the hash recomputed: the hash check alone cannot see it.
+  const forge = text => {
+    const lines = text.split('\n');
+    const body = lines.slice(1).join('\n').replace('      - name: Set up Node\n', '      - name: Extra\n        run: echo hi\n\n      - name: Set up Node\n');
+    const hash = require('node:crypto').createHash('sha256').update(body.replace(/^(\s+(?:- )?uses: [^@\s]+)@[^\n]*$/gm, '$1'), 'utf8').digest('hex').slice(0, 12);
+    return `${lines[0].replace(/sha256=[0-9a-f]{12}/, `sha256=${hash}`)}\n${body}`;
+  };
+  fs.writeFileSync(sweepFile, forge(older));
+  assert.equal(state(), 'edited', 'the re-render at the copy\'s own commit shows the added step');
+  fs.writeFileSync(sweepFile, forge(workflows.render('programme-sweep', source(SWEEP.file), toolkit.two)));
+  assert.equal(state(), 'edited', 'the same at the current commit');
+  // When the re-render cannot be trusted or made, the hash check is all there is.
+  const fallback = commit => workflows.plan({ repo, root: toolkit.dir, commit }).rows.find(row => row.id === 'programme-sweep').state;
+  fs.writeFileSync(sweepFile, forge(workflows.render('programme-sweep', source(SWEEP.file), toolkit.one)));
+  assert.equal(fallback(toolkit.three), 'edited', 'checked against commit one, whose render file matches the running one');
+  fs.writeFileSync(sweepFile, forge(workflows.render('programme-sweep', source(SWEEP.file), toolkit.three)));
+  assert.equal(workflows.plan({ repo, root: toolkit.dir, commit: toolkit.two }).rows.find(row => row.id === 'programme-sweep').state, 'outdated', 'the render file changed at that commit, so it is not re-rendered');
+  fs.writeFileSync(sweepFile, forge(workflows.render('programme-sweep', source(SWEEP.file), OTHER)));
+  assert.equal(state(), 'outdated', 'a commit this checkout does not have is not re-rendered');
+  assert.deepEqual(conformance.cloudWorkflowFindings({ root: repo }, toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).map(entry => entry.id).includes('CLOUD_WORKFLOW_OUTDATED'), true);
+  fs.writeFileSync(sweepFile, forge(older));
+  assert.ok(conformance.cloudWorkflowFindings({ root: repo }, toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).some(entry => entry.id === 'CLOUD_WORKFLOW_DRIFT' && entry.severity === 'drift'), 'conformance reports it as drift');
+});
+
 test('cloud workflows: a source that changed shape stops the render', () => {
   assert.throws(() => workflows.render('programme-sweep', source(SWEEP.file).replace("Check out this run's commit", 'Check out'), COMMIT), /changed shape/);
   assert.throws(() => workflows.render('programme-sweep-gate', source(GATE.file).replace('ref: main', 'ref: trunk'), COMMIT), /changed shape/);

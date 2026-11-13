@@ -4326,10 +4326,14 @@ function setupGlobalRules(args) {
 // Codex setup refreshes installed Toolkit helper agents to the stack each names and reports them.
 function runCodexHelperAgents(args) {
   let result;
-  try { result = new CodexHelperDefinitions({ repositoryRoot: args.repoRoot }).refresh(); }
+  const definitions = new CodexHelperDefinitions({ repositoryRoot: args.repoRoot });
+  // After `remove toolkit`, its reinstall note names the helper stack to put back.
+  const restored = require('./toolkit-reinstall-note.cjs').restoreHelpersLine('codex', definitions);
+  try { result = definitions.refresh(); }
   catch (error) { result = { status: 'held', detail: error.message }; }
   console.log('');
   console.log('## Toolkit helpers');
+  if (restored) console.log(restored);
   for (const line of describeCodexHelpers(result, '<managed-toolkit-checkout>')) console.log(line);
   return result;
 }
@@ -4422,6 +4426,7 @@ class ToolkitSetupExecution {
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const scheduledTaskUpdate = applyScheduledTasks(args);
+    offerRemovedTasks(args);
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
     return scheduledTaskUpdate?.held || installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
@@ -4461,6 +4466,16 @@ function applyScheduledTasks(args, { home = os.homedir(), updater, platform = pr
     if (Number.isFinite(result.timings_ms?.total)) log(`Scheduled tasks checked in ${Math.round(result.timings_ms.total / 1000)} s.`);
     return { held };
   } catch { log('Scheduled task update held; inspect the direct update plan. Native permission blocks remain stops.'); return { held: true }; }
+}
+
+// After `remove toolkit`, the scheduled tasks it removed are offered, never created: creating tasks
+// stays the owner's call whatever the standing approval says (that approval covers updates only).
+function offerRemovedTasks(args, { home = os.homedir(), platform = process.platform, log = console.log } = {}) {
+  if (platform !== 'win32') return [];
+  let offers = [];
+  try { offers = require('./toolkit-reinstall-note.cjs').taskOffers({ home, toolkitRoot: args.repoRoot }); } catch { offers = []; }
+  for (const line of require('./toolkit-reinstall-note.cjs').describeTaskOffers(offers)) log(line);
+  return offers;
 }
 
 function scheduledTaskHeldReasons(result) {
@@ -4576,6 +4591,7 @@ const {
 module.exports = {
   assertSupportedComputer,
   applyScheduledTasks,
+  offerRemovedTasks,
   gitFailureHint,
   nativePluginRebindFailure,
   installOfficialN8nSkills,

@@ -140,7 +140,9 @@ test('AT12: shipped matchers cover nested shell calls but not the outer code cel
 // Closure scans are linear (about the same time per character from 4K to 1M characters), but from
 // 16K to 64K the per-character cost still steps up, so on a busy runner a 5ms sample at 16K grew past
 // the 10x limit. Start at 16K, grow until the smaller sample takes 15ms, and keep the best of five.
-const SCAN_TIMING = Object.freeze({ startSize: 16384, maxSize: 524288, minMs: 15, runs: 5 });
+// The ceiling is 2M so a fast runner can still grow past 64K: with 512K the growth stopped at a
+// 64K sample of under 5ms, too short to time.
+const SCAN_TIMING = Object.freeze({ startSize: 16384, maxSize: 2097152, minMs: 15, runs: 5 });
 
 test('generic token values and offsets stay pinned while expansion follows quoting', () => {
   const source = "echo '$body' \"$body\" '\u0060literal\u0060' \\$body \"$ \"; gh pr edit 7";

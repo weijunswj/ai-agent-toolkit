@@ -54,8 +54,12 @@ function validateCloudJobsContract(contract) {
     if (!validText(job.id, /^[a-z][a-z0-9-]{0,63}$/) || ids.has(job.id)) fail('duplicate or invalid job id');
     ids.add(job.id);
     if (!validText(job.workflow, /^\.github\/workflows\/[A-Za-z0-9_.-]+\.ya?ml$/)) fail(`job ${job.id} workflow path`);
-    if (!hasExactKeys(job.schedule, ['cadence', 'cron']) || !validText(job.schedule.cadence, /^[a-z][a-z0-9-]{0,31}$/)
+    // `schedule.workflow` names the workflow that holds the cron when it is not the job's own (a gate
+    // that starts the job only when there is work).
+    const scheduleKeys = job.schedule && Object.hasOwn(job.schedule, 'workflow') ? ['cadence', 'cron', 'workflow'] : ['cadence', 'cron'];
+    if (!hasExactKeys(job.schedule, scheduleKeys) || !validText(job.schedule.cadence, /^[a-z][a-z0-9-]{0,31}$/)
       || !validText(job.schedule.cron, CRON, 64)) fail(`job ${job.id} schedule`);
+    if (scheduleKeys.length === 3 && (!validText(job.schedule.workflow, /^\.github\/workflows\/[A-Za-z0-9_.-]+\.ya?ml$/) || job.schedule.workflow === job.workflow)) fail(`job ${job.id} schedule workflow`);
     if (!validText(job.replaces_computer_job, /^[A-Za-z0-9_-]{1,100}$/)) fail(`job ${job.id} replacement`);
     if (!Array.isArray(job.tokens) || job.tokens.length < 1 || job.tokens.length > REPOSITORY_ROLES.length) fail(`job ${job.id} tokens`);
     const names = new Set();
@@ -93,7 +97,8 @@ function guideLines(guide) {
   const roles = { governed_repository: 'Governed repository', evidence_store: 'Evidence store' };
   const lines = [`Cloud jobs: one governance GitHub App, variable ${governanceApp.APP.variable} and secret ${governanceApp.APP.secret}`];
   for (const job of guide.jobs) {
-    lines.push(`- ${job.id}: ${job.schedule.cadence} (${job.workflow}), replaces the computer's ${job.replaces_computer_job}`);
+    const runs = job.schedule.workflow ? `${job.workflow}, started by ${job.schedule.workflow}` : job.workflow;
+    lines.push(`- ${job.id}: ${job.schedule.cadence} (${runs}), replaces the computer's ${job.replaces_computer_job}`);
     for (const token of job.tokens) {
       lines.push(`  ${roles[token.repository]} token: ${Object.entries(tokenPermissions(token)).map(([name, level]) => governanceApp.permissionLabel(name, level)).join(', ')}`);
     }

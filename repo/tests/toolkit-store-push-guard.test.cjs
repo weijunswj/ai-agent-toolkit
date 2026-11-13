@@ -140,3 +140,14 @@ test('the merge hold shows the store-command message, not the pull request advic
   assert.match(both, /push to another branch and open one/);
   assert.ok(both.includes(guard.STORE_PUSH_MESSAGE), both);
 });
+
+test('the refusal shows a store command that runs as printed: --store, and --repo-root for a run outside the governed repository', () => {
+  const message = guard.STORE_PUSH_MESSAGE;
+  const command = /node "<Toolkit folder>\/repo\/scripts\/toolkit-store\.cjs" save ([^(]+)\(/.exec(message);
+  assert.ok(command, message);
+  const flags = [...command[1].matchAll(/(--[a-z-]+) <[^>]+>/g)].map(([, flag]) => flag);
+  assert.deepEqual(flags, ['--store', '--path', '--message', '--repo-root']);
+  // Each flag the message names is one the store command's save accepts.
+  const usage = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-store.cjs'), 'utf8');
+  assert.match(usage, /save: \['--store', '--repo-root', '--path', '--message'\]/);
+});
