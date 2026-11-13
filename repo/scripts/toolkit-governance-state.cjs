@@ -354,7 +354,6 @@ function evidenceStoreRepositories(options = {}, now = new Date()) {
   return Object.freeze({ stores });
 }
 
-// A name or shared owner supplies no exemption.
 // The repositories ("owner/name") whose cached merged binding has governance on, sorted. Only a hint
 // for the governance App removal steps; this computer may not know every governed repository.
 function enabledRepositories(options = {}, now = new Date()) {
@@ -366,6 +365,7 @@ function enabledRepositories(options = {}, now = new Date()) {
   return found.sort();
 }
 
+// A name or shared owner supplies no exemption.
 function evidenceStoreOf(identity, scan) {
   const slug = remoteSlug(identity && identity.remote);
   if (!slug || !scan) return null;
