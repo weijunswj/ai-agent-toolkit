@@ -3,7 +3,7 @@
 - [ ] Pending - Review `/data/maintenance/reports/latest-security-check.md`.
 - [ ] Pending - Confirm PASS/WARN/FAIL summary for disk, memory, upgrade advisory, reboot marker, updates, firewall, listening ports, Docker, Coolify containers, auth failures, critical logs, intrusion signals, healthchecks, certificate expiry, notification delivery, and backup freshness where configured.
 - [ ] Pending - Review intrusion-signal sections for unexpected UID 0 users, sudo/wheel users, SSH authorized key inventory, SSH password-auth status when inspectable, cron files, systemd timers, recent successful logins, and auth failures. Treat them as signals, not proof that no intrusion occurred.
-- [ ] Pending - If daily notification is desired, confirm `/data/maintenance/daily-security-check.env` is mode 600 and configured for Telegram or local email by the owner outside chat.
+- [ ] Pending - Confirm `/data/maintenance/daily-security-check.env` is mode 600 and configured by the owner outside chat for Telegram or local email (required; without it the notification row is FAIL).
 - [ ] Pending - If `BACKUP_PATHS` is configured, confirm every entry is an absolute backup directory path. Relative paths and leading-dash paths are rejected because daily checks must remain read-only.
 - [ ] Pending - Review any upgrade advisory for sustained disk, memory, container, healthcheck, backup, database, storage, or provider-quota pressure. Suggest cleanup, optimization, or owner-approved upgrade only; do not change billing or capacity automatically.
 - [!] Needs owner approval - Escalate any firewall, reboot, destructive cleanup, DNS, env var, backup restore, or production restart remediation.
