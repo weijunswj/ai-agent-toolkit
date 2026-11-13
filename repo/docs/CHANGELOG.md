@@ -6,6 +6,7 @@
 
 - Controllers now run rolling merge trains on their own. While a landing is in flight, ready pull requests board the open train; when main frees, boarding closes, the train catches up with main, bumps once and merges after one CI run, and the next train opens at once. A lone ready pull request merges alone, and no pull request waits on a train. The Controller routes its merge step to the page that holds the train rule, the Claude Projects skill points there, and the hourly nudge flags ready pull requests that no train holds.
 - Running a merge train needs no planning or build gate and runs on the small model tier. The lane never fixes a conflict: it ejects the member and that member's builder fixes it. A train needs no review of its own once `verify` passes and CI is green; only files two or more members change get a short delta review.
+- The Claude Projects coordinator never resolves its own project-chat post or the reply thread under it, since that hides the chat message; quiet reply threads no longer close after six hours. It resolves a thread only when the thread has its own session, is no task home, every pull request it lists is merged or closed, nothing is owed by the owner and its last report is final. The hourly nudge sweeps blocked, review-ready and done threads against that checklist.
 
 ### Added
 

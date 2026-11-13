@@ -597,9 +597,9 @@ test('Projects keeps its Toolkit base layer current without touching the project
   for (const surface of [text, body, ...templates]) {
     assert.doesNotMatch(surface, /resolve window|idle window|default 2 days|IDLE-2D|thread default|weekday check-in|\* \* 1-5/i);
   }
-  assert.match(text, /\*\*Resolve on relay; the nudge is the backstop\.\*\* Threads never resolve themselves; you resolve a work thread or post the turn you relay its final result \(a merged or closed PR included\) or in the hourly pass, once all three hold: \(a\) its output is durably recorded[^\n]*\(b\) its latest result was relayed to the owner in project chat, or the owner replied after it; \(c\) nothing is open: owner question, decision or card, PR it owns or watches, or promised work\./);
+  assert.match(text, /\*\*Resolve on relay; the nudge is the backstop\.\*\* Threads never resolve themselves; you resolve a work thread the turn you relay its final result or in the hourly pass, only when all hold: \(a\) it has its own Claude session \(never your own project-chat post or the reply thread under it, as resolving it hides that message\) and is no task's home thread; \(b\) its output is durably recorded[^\n]*and every PR it lists is merged or closed; \(c\) its latest result was relayed to the owner in project chat, or the owner replied after it; \(d\) no owner test, card, question, decision or promised work is still owed; \(e\) its last report is final, not "waiting on CI"\. A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done\./);
   assert.match(body, /Threads never resolve themselves\. The coordinator resolves a thread on relaying its final result or in the hourly pass, once its output is recorded[^\n]*its result reached project chat or the owner replied after it, and nothing is open \(owner ask or card, a PR it owns or watches, promised work\)/);
-  assert.match(text, /resolving threads or posts that meet the resolve conditions are reversible housekeeping/);
+  assert.match(text, /resolving threads that meet the resolve conditions are reversible housekeeping/);
   // Block wording: attribution ban (the personal-data guard enforces it on PR text), home threads never resolved, post-edit rule.
   assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, session or thread links, or requester header\. Strip what the platform adds; CI fails it\./);
   assert.doesNotMatch(body, /Keep any attribution header/);
@@ -724,9 +724,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /never swap again for the same gap/);
   assert.match(text, /it writes a handoff file in the shared folder/);
   assert.match(text, /Never rotate your own coordinator thread/);
-  // Closing: work threads on saved and relayed output, chat reply threads after 6 quiet hours, home threads never.
-  assert.match(text, /A chat reply thread \(replies under your project-chat post\) also closes after 6 quiet hours \(`QUIET-6H`\)/);
-  assert.match(text, /idleness alone never closes a work thread/);
+  // Closing: work threads on saved and relayed output; never the coordinator's own post or its reply
+  // thread (no session of its own: resolving it hides the chat message); home threads never.
+  assert.doesNotMatch(text, /QUIET-6H/);
+  assert.match(text, /Idleness alone never closes a work thread/);
   assert.match(text, /a task's home thread is never resolved/);
   // Instructions sync applies itself under safeguards.
   for (const required of ['**Apply it yourself, without asking, with these safeguards.**', 'No saved copy, no change.',
