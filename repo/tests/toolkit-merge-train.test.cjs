@@ -280,6 +280,29 @@ test('once the running train lands, catchup merges main into the stacked train, 
   assert.throws(() => train.catchup(f.repo, manifest, { main: 'main' }), /already carries its bump: only a stacked train/);
 });
 
+test('a failed catch-up bump leaves the train at its pre-merge head, and verify refuses a train with no bump', t => {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const two = f.branch('pr-2', { 'c.txt': 'c\n' });
+  const first = built(f, [f.member(1, one)]);
+  const out = path.join(f.root, 'next.json');
+  train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two)] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo);
+  // A stacked train holds no bump, so verify refuses it until catchup adds one.
+  const early = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', first.result.head], f.repo);
+  assert.equal(early.ok, false);
+  assert.ok(early.problems.some(problem => /the train has no bump commit/.test(problem)), early.problems.join('\n'));
+  f.git('switch', '--quiet', 'main');
+  f.git('merge', '--quiet', '--no-ff', '--no-edit', first.result.head);
+  f.git('switch', '--quiet', 'toolkit-train/two');
+  const before = f.git('rev-parse', 'HEAD');
+  const broken = { ...JSON.parse(fs.readFileSync(out, 'utf8')), bump_command: 'node scripts/missing-bump.cjs {level}' };
+  const caught = train.catchup(f.repo, broken, { main: 'main' });
+  assert.equal(caught.ok, false);
+  assert.match(caught.problems[0], /the bump command failed/);
+  assert.equal(f.git('rev-parse', 'HEAD'), before, 'the catch-up merge is undone with the failed bump');
+  assert.equal(f.git('status', '--porcelain'), '');
+});
+
 test('catchup refuses a main that clashes with the stacked train and leaves the tree clean', t => {
   const f = fixture(t);
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
@@ -422,7 +445,7 @@ test('the controller, the changelog guide and the repo map describe the train th
   assert.match(roles, /\*\*Merge-train lanes:\*\* running a train \(`toolkit-merge-train\.cjs` build, catchup, verify, body, land\) is mechanical: no G0 or G1, the small tier at medium effort/);
   assert.match(roles, /The lane never resolves a conflict or edits code; it ejects the member, whose builder fixes it\./);
   assert.match(roles, /The train needs no G2 of its own once `verify` passes and CI is green; only files `verify` lists under `overlap` \(two or more members change them\) get a short delta review\./);
-  assert.match(roles, /A train holds 4 to 6 members \(`build` refuses a seventh\); later ready PRs board the next\. A member that fails CI or its delta review is ejected at once and the rest carry on/);
+  assert.match(roles, /A train holds at most 6 members \(`build` refuses a seventh\); later ready PRs board the next\. A member that fails CI or its delta review is ejected at once and the rest carry on/);
   assert.match(roles, /Never edit a train or member PR body while its CI runs; queue the edit until CI ends\./);
   assert.match(roles, /The train's merge ask goes up where `land` and the merge run, never relayed/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/reference/cloud-hook-parity.md'), /A merge train's merge thread is the train thread: it posts the card for the train PR at its head and runs `land` and the merge itself[\s\S]*Fallback: the owner types `merge PR N at <full SHA> as a merge commit` in the train thread\./);

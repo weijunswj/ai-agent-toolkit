@@ -248,6 +248,7 @@ function catchup(cwd, manifest, options) {
   if (git(cwd, ['rev-list', '--parents', '-n', '1', 'HEAD']).stdout.split(/\s+/).length !== 3) {
     throw new TrainError('the train already carries its bump: only a stacked train (built with --onto) catches up; rebuild this one on main', 1);
   }
+  const before = git(cwd, ['rev-parse', 'HEAD']).stdout;
   const merged = git(cwd, ['-c', 'rerere.enabled=false', 'merge', '--no-ff', '--no-edit', '-m', `Merge train: catch up with main at ${main.slice(0, 12)}`, main], { allowFail: true });
   if (merged.status !== 0) {
     git(cwd, ['merge', '--abort'], { allowFail: true });
@@ -260,7 +261,9 @@ function catchup(cwd, manifest, options) {
     try {
       runBump(cwd, argv);
     } catch (error) {
-      git(cwd, ['reset', '--quiet', '--hard', 'HEAD'], { allowFail: true });
+      // Undo the local catch-up merge too, so the train is left exactly as it was: a catch-up
+      // merge with no bump after it would not verify. Nothing here was pushed yet.
+      git(cwd, ['reset', '--quiet', '--hard', before], { allowFail: true });
       git(cwd, ['clean', '--quiet', '-fd'], { allowFail: true });
       return { ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, level, problems: [error.message] };
     }
@@ -332,6 +335,10 @@ function verify(cwd, manifest, options) {
   });
   for (const member of manifest.members) {
     if (!seen.has(member.pr)) problems.push(`#${member.pr} at ${member.head.slice(0, 12)} is not on the train`);
+  }
+  const last = commits[commits.length - 1];
+  if (last && last.length === 3 && bumpArgv(cwd, manifest, level, main)) {
+    problems.push('the train has no bump commit: build it on main, or run catchup on a stacked train, before verify');
   }
   const overlap = memberOverlap(cwd, manifest.members, main);
   const review = overlap.length ? 'delta review of the shared files' : 'none: verify and green CI suffice';
