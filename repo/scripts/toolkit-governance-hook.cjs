@@ -17,8 +17,9 @@
 // repository instead of crashing; hooks.json also sets onFailure: "block" for prompts and for the
 // state-changing tools (STATE_CHANGING_TOOLS below).
 //
-// Cloud sessions (CLAUDE_CODE_REMOTE=true) run every hold above too. Proven unsafe issue closures are
-// refused everywhere; an unknown closure check is advisory in the cloud. Governance still comes from
+// Cloud sessions (CLAUDE_CODE_REMOTE=true) run the merge hold too, but not the undecided-repository
+// hold. Proven unsafe issue closures are refused everywhere; an unknown closure check is advisory in
+// the cloud. Governance still comes from
 // the repository default branch.
 
 const fs = require('node:fs');
@@ -32,7 +33,7 @@ function readInput(text) {
   } catch { return {}; }
 }
 
-const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold and the undecided-repository hold run as on a computer. A Claude Projects thread's task auto-merge switch is the project line read from its session context; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
+const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the undecided-repository hold does not (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. A Claude Projects thread's task auto-merge switch is the project line read from its session context; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
 
 // Records this cloud session's Projects task auto-merge switch when the prompt starts with the
 // host's session context. Never throws; an unreadable or unwritable switch stays Off.
@@ -62,10 +63,11 @@ function exportHostSession(input, environment, gate) {
 function respond(event, input, options = {}) {
   options = { ...options, deadline: options.deadline ?? require('node:perf_hooks').performance.now() + 7500 };
 
-  // Cloud sessions run the same holds as local ones (local Toolkit is the base). Two differences:
-  // a Claude Projects thread's task auto-merge switch is read from the host's session context at
-  // the start of its first prompt (toolkit-projects-cloud.cjs), and an issue closure the cloud
-  // check cannot prove unsafe is advisory, since gh there may not be signed in.
+  // Cloud sessions run the merge hold as local ones do (local Toolkit is the base). Differences: a
+  // Claude Projects thread's task auto-merge switch is read from the host's session context at the
+  // start of its first prompt (toolkit-projects-cloud.cjs); an issue closure the cloud check cannot
+  // prove unsafe is advisory, since gh there may not be signed in; and the undecided-repository
+  // hold stays off, since a cloud container cannot keep the owner's answer (a Projects override).
   const cloud = cloudSession(options.environment || process.env);
   if (cloud) {
     options = { ...options, cloud: true };
@@ -88,14 +90,16 @@ function respond(event, input, options = {}) {
         const count = (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now });
         if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s). Any governance hold still applies.`;
       } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
-      const decision = new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
+      // Cloud override (Projects base-overrides list): the undecided-repository hold stays off in
+      // cloud sessions, which cannot keep the owner's answer, until the no-freeze question ships.
+      const decision = cloud ? { action: 'pass' } : new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: [decision.reason, approvalNote].filter(Boolean).join('\n') };
       const text = [decision.context, approvalNote, decision.context ? '' : typedCommandNote(gate, input.prompt)].filter(Boolean).join('\n');
       const context = text ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } } : {};
       return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
     if (event === 'PreToolUse') {
-      const decision = new gate.ToolGate(options).decide(input);
+      const decision = cloud ? null : new gate.ToolGate(options).decide(input);
       if (decision) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.deny } };
       const closure = closureDecision(input, options);
       if (closure.hookSpecificOutput) return closure;
@@ -110,10 +114,12 @@ function respond(event, input, options = {}) {
     }
     exportHostSession(input, options.environment || process.env, gate);
     gate.startSession(input, { ...options, host: 'claude-code' });
-    const line = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
-    let inside = false;
-    if (cloud) { try { inside = gate.insideRepository(input.cwd); } catch { inside = false; } }
-    const text = [line, inside ? CLOUD_LINE : ''].filter(Boolean).join('\n');
+    let text;
+    if (cloud) {
+      let inside = false;
+      try { inside = gate.insideRepository(input.cwd); } catch { inside = false; }
+      text = inside ? CLOUD_LINE : '';
+    } else text = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
   } catch {
     // A failed governance check outside a repository may still allow a merge there. Consume its

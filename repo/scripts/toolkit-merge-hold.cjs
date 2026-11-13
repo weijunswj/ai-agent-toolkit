@@ -1216,7 +1216,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   for (const merge of merges) {
     // Preserve specific authority refusals; closure safety still precedes approval consumption.
     const { refusal, approval } = judge(merge, approvals, standing, evidence);
-    if (refusal) return refusal;
+    if (refusal) return cloudCard(refusal, merge, environment);
     if (!consume) continue;
     const call = ShellCall.from(input);
     let mergeTexts = [];
@@ -1283,6 +1283,15 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   }
   if (consume) for (const approval of used) approvals.use(approval);
   return null;
+}
+
+// In a cloud session, a refusal for want of an approval also names the exact Projects merge card
+// that would count (toolkit-projects-cloud.cjs), so the merge thread asks with the right wording.
+function cloudCard(refusal, merge, environment) {
+  if (!environment || environment.CLAUDE_CODE_REMOTE !== 'true' || !refusal || typeof refusal.deny !== 'string') return refusal;
+  if (typeof merge.repository !== 'string' || !Number.isInteger(merge.pr) || !(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return refusal;
+  if (!/no unused approval|waits for the user's typed merge|needs the user's typed approval|approved .* but this merge names/.test(refusal.deny)) return refusal;
+  return { ...refusal, deny: `${refusal.deny} In a Claude Projects thread, post the merge card yourself with exactly the question "${projectsCloud.mergeCardQuestion(merge.repository, merge.pr, merge.sha)}", first option Merge and second Not now; the owner's tap on Merge counts for that head, once.` };
 }
 
 // Whether a tool call may be a merge or a push, for the hooks' failure path.

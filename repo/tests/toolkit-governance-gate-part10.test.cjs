@@ -80,21 +80,20 @@ test('H-15: held prompts stay private, are never echoed in the hold message, and
   assert.equal(Object.values(JSON.parse(fs.readFileSync(ctx.heldPath, 'utf8')).repositories)[0].length, gate.MAX_HELD);
 });
 
-test('cloud sessions hold an undecided repository as a computer does; the session line says the holds run', (t) => {
+test('cloud sessions leave an undecided repository unheld and write no governance state; the session line says why', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   const environment = { CLAUDE_CODE_REMOTE: 'true' };
-  const local = {};
   const options = { registryOptions: ctx.options };
-  for (const env of [environment, local]) {
-    assert.equal(claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 'unnoted' }, { ...options, environment: env }).decision, 'block');
-    assert.equal(claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, { ...options, environment: env }).hookSpecificOutput.permissionDecision, 'deny');
-  }
-  const start = claudeHook.respond('SessionStart', { cwd: repo, session_id: 's1', source: 'startup' }, { ...options, environment, refreshBinding: () => {} }).hookSpecificOutput.additionalContext;
-  assert.ok(start.endsWith(claudeHook.CLOUD_LINE));
-  assert.match(start, /no GitHub governance decision yet/);
-  const outside = claudeHook.respond('SessionStart', { cwd: ctx.root, session_id: 's2', source: 'startup' }, { ...options, environment, refreshBinding: () => {} }).hookSpecificOutput.additionalContext;
-  assert.equal(outside, claudeHook.respond('SessionStart', { cwd: ctx.root, session_id: 's3', source: 'startup' }, { ...options, environment: local, refreshBinding: () => {} }).hookSpecificOutput.additionalContext, 'outside a repository the cloud line is the local one');
+  // The same inputs hold on a computer.
+  assert.equal(claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 'unnoted' }, { ...options, environment: {} }).decision, 'block');
+  assert.equal(claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, { ...options, environment: {} }).hookSpecificOutput.permissionDecision, 'deny');
+  const cloudPrompt = claudeHook.respond('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 'cloud' }, { ...options, environment });
+  assert.equal(cloudPrompt.decision, undefined);
+  assert.deepEqual(claudeHook.respond('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }, { ...options, environment }), {});
+  assert.equal(claudeHook.respond('SessionStart', { cwd: repo, session_id: 's1', source: 'startup' }, { ...options, environment, refreshBinding: () => {} }).hookSpecificOutput.additionalContext, claudeHook.CLOUD_LINE);
+  assert.deepEqual(claudeHook.respond('SessionStart', { cwd: ctx.root, session_id: 's2', source: 'startup' }, { ...options, environment, refreshBinding: () => {} }), {});
+  writesNothingIn(repo);
 });
 
 test('cloud closure unknowns advise, proven open descendants refuse, and local unknowns name gh', () => {

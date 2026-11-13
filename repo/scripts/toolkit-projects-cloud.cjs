@@ -11,12 +11,15 @@
 //                    who tapped (actor_account_id, the same as the message's author-id). Only that
 //                    whole shape counts, for that pull request at that SHA, once (the decision id
 //                    is the delivery id the approval store keeps a receipt for).
-//   Auto-merge switch The project line `- Task auto-merge: On` in the host's session context, which
-//                    the host puts at the very start of a thread's first prompt as
-//                    `<session-context nonce="...">`, closed by `</session-context nonce="...">`
-//                    with the same nonce. Only that block counts: a line anywhere after it (a relay,
-//                    a citation, a note) is never read. Exactly one such line, On or Off; none, or
-//                    more than one, reads as Off.
+//   Auto-merge switch The project line `- Task auto-merge: On` in the owner's project instructions,
+//                    which the host puts at the very start of a thread's first prompt inside
+//                    `<session-context nonce="X">` ... `</session-context nonce="X">`, as one
+//                    `<project-instructions nonce="Y">` ... `</project-instructions nonce="Y">`
+//                    block. Only that block counts: the shared-file, repository and folder lists
+//                    beside it, and anything after the context (a relay, a citation, a note), are
+//                    never read. Exactly one such line, On or Off; none, or more than one, is Off.
+//                    It is a snapshot from the first prompt: a later change to the project line
+//                    reaches only threads started after it, and a new container forgets it (Off).
 //
 // Tripwire, not a lock: a fully forged top-level wake or session context with the right shape
 // would count, as for the typed `merge N` the Projects wake reader already accepts. Required CI and
@@ -78,8 +81,10 @@ function mergeCardTap(prompt) {
   return { repository: tap[1], pr: Number(tap[2]), sha: tap[3], id, sentAt: message['sent-at'] || null };
 }
 
-// 'on' or 'off' from the host's session context at the start of this prompt, or null when the
-// prompt does not start with one.
+// 'on' or 'off' from the owner's project instructions inside the host's session context at the
+// start of this prompt, or null when the prompt does not start with one. Only the
+// `<project-instructions nonce="Y">` block nested in it counts, up to its own closing tag: the rest
+// of the session context also lists shared files, repositories and folders, which agents can name.
 function switchSetting(prompt) {
   const text = String(prompt || '');
   if (text.length > MAX_PROMPT) return null;
@@ -87,7 +92,13 @@ function switchSetting(prompt) {
   if (!open) return null;
   const end = text.indexOf(`</session-context nonce="${open[1]}">`, open[0].length);
   if (end < 0) return 'off';
-  const lines = text.slice(open[0].length, end).split(/\r?\n/).filter(line => /^\s*-\s*Task auto-merge\s*:/i.test(line));
+  const context = text.slice(open[0].length, end);
+  const blocks = [...context.matchAll(/<project-instructions nonce="([A-Za-z0-9]{8,128})"[^<>]*>/g)];
+  if (blocks.length !== 1) return 'off';
+  const start = blocks[0].index + blocks[0][0].length;
+  const close = context.indexOf(`</project-instructions nonce="${blocks[0][1]}">`, start);
+  if (close < 0) return 'off';
+  const lines = context.slice(start, close).split(/\r?\n/).filter(line => /^\s*-\s*Task auto-merge\s*:/i.test(line));
   if (lines.length !== 1) return 'off';
   return /^\s*-\s*Task auto-merge\s*:\s*On\b/.test(lines[0]) ? 'on' : 'off';
 }
