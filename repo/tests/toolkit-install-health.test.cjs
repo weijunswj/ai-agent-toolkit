@@ -209,6 +209,22 @@ test('a same-run plugin install reports its facts and new session needed, never 
   assert.doesNotMatch(result.stdout, /Claude plugin status: refreshed/);
   assert.match(result.stdout, /Install check: new session needed\n/);
   assert.match(result.stdout, /Next step:\n1\. Start a new Claude Code session, and close sessions opened before the update, so it loads Toolkit \S+\. After that, each session start rechecks the update record, helper definitions, global rules and depth setting, and reports only a problem\./);
+  // Setup's last words name the app whose open sessions keep the old skill files.
+  assert.match(result.stdout, /\n## Start a new session\nStart a new session in Claude Code, and close sessions opened before this run: this run changed Toolkit skill files or rules, and open sessions keep using the old ones\.\n$/);
+});
+
+test('setup ends with the new-session line only when the run changed skill files or rules', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const first = claudeSetup(root, setupRepo, origin);
+  assert.equal(first.status, 0, first.stderr || first.stdout);
+  assert.match(first.stdout, /\n## Start a new session\nStart a new session in Claude Code, /, 'the first run writes the global rules');
+  // The fake bridge's log would make the managed checkout look dirty to the second run.
+  for (const log of ['BRIDGE_ARGS.log', 'CLAUDE_PLUGIN_SETUP.log']) fs.rmSync(path.join(setupRepo, log), { force: true });
+  const again = claudeSetup(root, setupRepo, origin);
+  assert.equal(again.status, 0, again.stderr || again.stdout);
+  assert.match(again.stdout, /Install check: passed\n/);
+  assert.doesNotMatch(again.stdout, /## Start a new session/, 'nothing changed, so no line');
 });
 
 test('setup refreshes Toolkit helper definitions made stale by a stack registry change', () => {
