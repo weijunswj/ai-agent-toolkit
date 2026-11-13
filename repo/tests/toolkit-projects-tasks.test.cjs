@@ -920,9 +920,9 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
 test('the check-in turns stuck work into prefixes the coordinator must act on, and the controller owns every finding', () => {
   const text = rendered('daily-check-in');
   // A failing or missed task is no longer advice only.
-  assert.match(text, /never in the prefix, except a task not stopped by the owner whose last run failed or that missed its last scheduled run: start the first line with "TASK FAILING: <names> \| "/);
+  assert.match(text, /never in the prefix, except an enabled task not stopped by the owner whose last run is read as failed, or as missing its last scheduled run: start the first line with "TASK FAILING: <names> \| "\. A task whose status cannot be read is "<name>: unverified" under \*\*Tasks:\*\*, and a disabled one stays advice\./);
   // An open PR that needs a step gets a prefix, review-notification PRs included.
-  assert.match(text, /An open PR with a failing check, a ready PR missing its UAT verdict, or an open PR with no update for 3 days \(review-notification PRs included\): start the first line with "PR ATTENTION: <n> \| "/);
+  assert.match(text, /An open PR with a failing check, a ready PR missing its UAT verdict, or an open PR with no update for 3 days \(review-notification PRs included\), unless the PR or its task records a wait with its blocker and the date it is due: start the first line with "PR ATTENTION: <n> \| "/);
   // A missing set reported before is not silenced forever: after 3 days it returns for the owner.
   const own = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'weijunswj/ai-agent-toolkit' }));
   assert.match(own, /with the date it was first reported; once that date is 3 or more days old, start the first line with it again, marked "3 days"/);

@@ -108,7 +108,7 @@
         {
           "kind": "reconciler",
           "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
-          "test": "repo/tests/toolkit-programme-state.test.cjs"
+          "test": "repo/tests/toolkit-programme-attention.test.cjs"
         },
         {
           "kind": "script",
