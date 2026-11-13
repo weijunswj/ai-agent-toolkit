@@ -317,11 +317,29 @@ function windowsRunner(lines, keys, end, indent) {
   return values.some((label) => /windows/i.test(label));
 }
 
-// Events named under `on:`: inline (`on: push`, `on: [push, pull_request]`) or as a block.
+// The top-level entries of a YAML flow value (`[a, b]` or `{a: x, b: {c: [d]}}`), each with its key
+// (or the bare item) and its own value text, cut at the matching bracket; a plain scalar is one entry.
+function flowEntries(text) {
+  const t = text.replace(/\s+#.*$/, '').trim();
+  if (!/^[[{]/.test(t)) return t ? [{ key: unquote(t), value: '' }] : [];
+  const out = [];
+  const push = (part) => { const m = part.match(/^\s*['"]?([\w-]+)['"]?\s*(?::\s*([\s\S]*))?$/); if (m) out.push({ key: m[1], value: (m[2] || '').trim() }); };
+  let depth = 0;
+  let start = 1;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === '[' || c === '{') depth++;
+    else if (c === ']' || c === '}') { depth--; if (depth === 0) { push(t.slice(start, i)); break; } }
+    else if (c === ',' && depth === 1) { push(t.slice(start, i)); start = i + 1; }
+  }
+  return out;
+}
+
+// Events named under `on:`: inline (`on: push`, `on: [push, pull_request]`, a flow map) or as a block.
 function triggerEvents(lines, onKey) {
   if (!onKey) return [];
   const inline = onKey.value.replace(/\s+#.*$/, '').trim();
-  if (inline) return (inline.match(/[A-Za-z_]+(?=\s*(?:[,:\]}]|$))/g) || []).filter((word) => !['types', 'branches', 'paths', 'tags', 'inputs', 'cron'].includes(word));
+  if (inline) return flowEntries(inline).map((entry) => entry.key);
   const end = blockEnd(lines, onKey.line, 0);
   const first = lines.slice(onKey.line + 1, end).find((line) => line.trim() && !line.trimStart().startsWith('#'));
   if (!first) return [];
@@ -364,13 +382,14 @@ function parseWorkflow(rel, text) {
   });
   // `edited` in the types of a pull request trigger: a title, body or base edit starts a new run.
   let prEdited = false;
+  const editedTypes = (text) => /\btypes\b[\s\S]*\bedited\b/.test(text);
+  if (onKey && flowEntries(onKey.value).some((entry) => /^pull_request(_target)?$/.test(entry.key) && editedTypes(entry.value))) prEdited = true;
   onLines.forEach((line, i) => {
-    const match = line.match(/^(\s*)(?:-\s+)?['"]?pull_request(?:_target)?['"]?\s*:(.*)$/);
-    const flow = i === 0 ? line.match(/pull_request(?:_target)?['"]?\s*:\s*(\{.*)$/) : null;
-    if (!match && !flow) return;
-    const block = [flow ? flow[1] : match[2]];
-    if (match) for (let j = i + 1; j < onLines.length && (!onLines[j].trim() || indentOf(onLines[j]) > match[1].length); j++) block.push(onLines[j].replace(/\s+#.*$/, ''));
-    if (/\btypes\b[\s\S]*\bedited\b/.test(block.join('\n'))) prEdited = true;
+    const match = i === 0 ? null : line.match(/^(\s*)(?:-\s+)?['"]?pull_request(?:_target)?['"]?\s*:(.*)$/);
+    if (!match) return;
+    const block = [match[2]];
+    for (let j = i + 1; j < onLines.length && (!onLines[j].trim() || indentOf(onLines[j]) > match[1].length); j++) block.push(onLines[j].replace(/\s+#.*$/, ''));
+    if (editedTypes(block.join('\n'))) prEdited = true;
   });
   const workflow = {
     rel,
@@ -869,18 +888,23 @@ function recentRuns(root, runs, tools) {
 
 // Delivery speed read from the workflow files alone: edits that rerun heavy jobs, and concurrency
 // that keeps stale runs or cancels useful ones. Every item is a CHECK: the agent judges the fix.
+const CANCEL_PR_COMMITS = "${{ github.event_name == 'pull_request' && github.event.action != 'edited' }}";
 function checkDelivery(workflows) {
   const items = [];
   for (const workflow of workflows) {
     const pr = workflow.events.some((event) => /^pull_request(_target)?$/.test(event));
     const heavy = workflow.jobs.filter((job) => !/github\.event\.action/.test(job.if));
     if (pr && workflow.prEdited && heavy.length >= 2) items.push(item('CHECK', 'speed.edits', workflow.rel, `an edit to the pull request title or body reruns ${heavy.length} jobs here${heavy.some((job) => job.matrix) ? ' (more with matrix legs)' : ''}, because edited is in the pull request types`, 'move the checks that read the title or body into a light workflow of their own and leave edited out of this one, or skip the heavy jobs when github.event.action is edited'));
-    const cancels = workflow.concurrency || workflow.jobs.find((job) => job.concurrency);
-    if (pr && !cancels) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'no concurrency group, so a run for an older commit keeps its job slots after a new push', "add concurrency with group ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }} and cancel-in-progress: ${{ github.event_name == 'pull_request' }}"));
+    const grouped = workflow.concurrency || workflow.jobs.find((job) => job.concurrency);
+    if (pr && !grouped) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'no concurrency group, so a run for an older commit keeps its job slots after a new push', `add concurrency with group \${{ github.workflow }}-\${{ github.event.pull_request.number || github.ref }} and cancel-in-progress: ${CANCEL_PR_COMMITS}`));
     const top = workflow.concurrency;
-    if (top && top.cancels && pr && workflow.prEdited && !/\bsha\b/.test(top.text)) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'cancel-in-progress with edited in the types: a title or body edit cancels the full run on the same commit and starts it again', 'split the edit checks into a light workflow, or add github.event.pull_request.head.sha to the group so an edit never cancels a run on the same commit'));
+    if (!top) continue;
+    // Every commit has its own SHA, so a pull request group keyed on it never cancels a stale run.
+    const perCommit = /\bhead\.sha\b/.test(top.text) || (/\bgithub\.sha\b/.test(top.text) && !/\bgithub\.(ref|head_ref)\b|pull_request\.number/.test(top.text));
+    if (pr && perCommit) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'the concurrency group is keyed on the commit SHA, so a new push never cancels the run for the older commit and stale runs keep their job slots', `key the group on the pull request number and use cancel-in-progress: ${CANCEL_PR_COMMITS}`));
+    if (top.cancels && pr && workflow.prEdited) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'cancel-in-progress with edited in the types: a title or body edit cancels the full run on the same commit and starts it again', `cancel only for new commits: cancel-in-progress: ${CANCEL_PR_COMMITS}, or split the edit checks into a light workflow`));
     // A group keyed on the run id or the commit gives every push its own group, so nothing cancels.
-    if (top && top.cancels && workflow.events.includes('push') && !/\brun_id\b|\bsha\b/.test(top.text)) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'cancel-in-progress is always on, so pushes to the default branch cancel each other and a merged commit may never finish its run', "cancel only pull request runs: cancel-in-progress: ${{ github.event_name == 'pull_request' }}"));
+    if (top.cancels && workflow.events.includes('push') && !/\bgithub\.(run_id|sha)\b/.test(top.text)) items.push(item('CHECK', 'speed.concurrency', workflow.rel, 'cancel-in-progress is always on, so pushes to the default branch cancel each other and a merged commit may never finish its run', `cancel only pull request runs: cancel-in-progress: ${CANCEL_PR_COMMITS}`));
   }
   return items;
 }
@@ -939,7 +963,7 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   for (const [workflowName, count] of measured.runJobs) {
     if (count * 2 <= cap) continue;
     const workflow = workflows.find((w) => (w.name || path.posix.basename(w.rel)) === workflowName || w.rel === workflowName);
-    items.push(item('CHECK', 'speed.slots', workflow ? workflow.rel : '', `one ${workflowName} run started ${count} jobs and the account runs at most ${cap} at once, so ${count >= cap ? 'one run fills every slot' : 'two runs at once'} and the next one queues`, `group small jobs and short matrix legs into fewer jobs (each one queues and repeats its setup), and skip jobs a change cannot affect; set concurrent_jobs in ${SETTINGS_REL} when the plan's cap is not ${DEFAULT_CONCURRENT_JOBS} (Free 20, Pro 40, Team 60)`));
+    items.push(item('CHECK', 'speed.slots', workflow ? workflow.rel : '', `one ${workflowName} run started ${count} jobs and the account runs at most ${cap} at once, so ${count >= cap ? 'one run can fill every slot and the next one queues' : 'two runs cannot run side by side'} (jobs that wait on other jobs start later, so the peak at once can be lower)`, `group small jobs and short matrix legs into fewer jobs (each one queues and repeats its setup), and skip jobs a change cannot affect; set concurrent_jobs in ${SETTINGS_REL} when the plan's cap is not ${DEFAULT_CONCURRENT_JOBS} (Free 20, Pro 40, Team 60)`));
   }
   for (const [name, seconds] of times) {
     if (budgets.job_seconds && seconds > budgets.job_seconds) items.push(item('GAP', 'speed.jobs', '', `${name} took ${Math.round(seconds)} s, over the ${budgets.job_seconds} s budget`, 'make the slow files fast or shard the job (fast-tests-and-sharding playbook)'));
