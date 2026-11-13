@@ -16,9 +16,6 @@
 //   - the last sweep finished six hours ago or more, so slower facts (checks, drift) still refresh.
 // A start from activity also waits until an hour after the last sweep finished; the hourly start
 // then picks the change up. Nothing starts while a sweep is queued or running.
-const fs = require('node:fs');
-const path = require('node:path');
-
 const SWEEP_WORKFLOW = 'toolkit-programme-sweep.yml';
 const BRANCH = 'main';
 const HOUR_MS = 60 * 60 * 1000;
@@ -67,8 +64,7 @@ function decide({ event, now, runs, lines, changedSince }) {
   return { start: false, reason: 'nothing changed since the last sweep' };
 }
 
-async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Date.now(), root = env.GITHUB_WORKSPACE || process.cwd(),
-  readFile = fs.readFileSync, log = line => process.stdout.write(`${line}\n`) } = {}) {
+async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Date.now(), log = line => process.stdout.write(`${line}\n`) } = {}) {
   const repository = env.GITHUB_REPOSITORY || '';
   if (!SAFE_REPOSITORY.test(repository) || !env.GH_TOKEN) throw new Error('The gate needs GITHUB_REPOSITORY and GH_TOKEN.');
   const api = (env.GITHUB_API_URL || 'https://api.github.com').replace(/\/$/, '');
@@ -78,8 +74,9 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     if (!response.ok) throw new Error(`GitHub answered ${response.status} for ${method} ${route.split('?')[0]}.`);
     return response.status === 204 ? null : response.json();
   };
+  // The binding merged on main decides governance, as everywhere else.
   let binding = null;
-  try { binding = JSON.parse(readFile(path.join(root, '.github', 'toolkit-programme.json'), 'utf8')); } catch { binding = null; }
+  try { binding = JSON.parse(Buffer.from((await call('GET', `contents/.github/toolkit-programme.json?ref=${BRANCH}`)).content || '', 'base64').toString('utf8')); } catch { binding = null; }
   const parents = parentsOf(binding);
   if (!parents) { log('Programme Sweep gate: governance is not enabled here; nothing to start.'); return { start: false, reason: 'governance off' }; }
   const runs = (await call('GET', `actions/workflows/${SWEEP_WORKFLOW}/runs?per_page=20`)).workflow_runs || [];

@@ -11,8 +11,8 @@
 # start then picks the change up. Nothing starts while a sweep is queued or running.
 #
 # Activity from bots, the sweep's own App included, is ignored before a runner starts, so the
-# sweep's own page edits never start it again. The gate checks out only its own script and the
-# binding from main, never holds the App's key or tokens, and its built-in token can only read
+# sweep's own page edits never start it again. The gate checks out only its own script from main,
+# reads the binding merged on main, never holds the App's key or tokens, and its built-in token can only read
 # issues and contents and read and start workflow runs. One gate runs at a time, with one waiting;
 # a newer one replaces the waiting one. `pull_request_target` runs main's copy of this file, and
 # nothing from the pull request is checked out or run.
@@ -30,7 +30,8 @@ on:
     types: [opened, synchronize, closed, reopened]
     branches: [main]
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
   group: toolkit-programme-sweep-gate-${{ github.repository }}
@@ -47,14 +48,12 @@ jobs:
       contents: read
       issues: read
     steps:
-      - name: Check out the gate and the binding from main
+      - name: Check out the gate from main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           persist-credentials: false
-          sparse-checkout: |
-            repo/scripts/toolkit-programme-sweep-gate.cjs
-            .github/toolkit-programme.json
+          sparse-checkout: repo/scripts/toolkit-programme-sweep-gate.cjs
           sparse-checkout-cone-mode: false
 
       - name: Start the sweep if there is work
