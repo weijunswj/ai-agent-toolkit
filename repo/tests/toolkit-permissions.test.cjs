@@ -138,6 +138,10 @@ test('missing pieces stop with a plain line and leave only the safe part', t => 
     assert.deepEqual(off.blocks.map(block => block.scope), ['computer']);
     assert.match(off.stops[0].stopped, /^no repo block: this repository has no Toolkit programme file with governance enabled/);
   }
+  // A version 1 programme file has no governance key and reads as enabled, as everywhere else.
+  const v1 = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs({ schema: 'toolkit.programme-binding.v1', parent_issue: 7, store: { kind: 'github', repository: 'Owner/Store' } }), run: fakeGit() }).build({});
+  assert.deepEqual(v1.blocks.map(block => block.scope), ['computer', 'repo']);
+  assert.deepEqual(v1.stops, []);
   const codex = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(), run: fakeGit() }).build({ host: 'codex' });
   assert.ok(codex.blocks[1].allow.every(line => !line.includes('merge')), 'no block carries a merge line');
   assert.match(codex.blocks[0].text, /prefix_rule\(\n {4}pattern = \["node","[^"]+programme\.cjs","refresh"\],\n {4}decision = "allow"/);

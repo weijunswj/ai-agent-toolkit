@@ -41,9 +41,13 @@ function boardLine(body) {
   return String(body || '').split(/\r?\n/).find(line => /^(?:Board updated: |⚠️ Board out of date |⚠️ Sweep stuck)/.test(line)) || null;
 }
 
+// A version 1 binding has no governance key and reads as enabled (programme-state's bindingEnabled;
+// a test keeps the two in step). This file reads the raw JSON and loads nothing else.
+const BINDING_V1 = 'toolkit.programme-binding.v1';
+
 // The parent issues the binding names, or null when governance is off or the binding is unreadable.
 function parentsOf(binding) {
-  if (!binding || binding.governance !== 'enabled') return null;
+  if (!binding || !(binding.schema === BINDING_V1 || binding.governance === 'enabled')) return null;
   const numbers = Array.isArray(binding.parents) ? binding.parents.map(parent => parent?.issue) : [binding.parent_issue];
   const valid = numbers.filter(number => Number.isSafeInteger(number) && number > 0);
   return valid.length ? valid : null;
@@ -106,7 +110,13 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
   let binding = null;
   try { binding = JSON.parse(Buffer.from((await call('GET', `contents/.github/toolkit-programme.json?ref=${BRANCH}`)).content || '', 'base64').toString('utf8')); } catch { binding = null; }
   const parents = parentsOf(binding);
-  if (!parents) { log('Programme Sweep gate: governance is not enabled here; nothing to start.'); return { start: false, reason: 'governance off' }; }
+  if (!parents) {
+    // Record 808: a skip is one visible warning that names the repository, the reason and the fix.
+    const why = !binding || typeof binding !== 'object' ? 'the programme file on main is missing or unreadable'
+      : !(binding.schema === BINDING_V1 || binding.governance === 'enabled') ? 'the programme file on main turns governance off' : 'the programme file on main names no parent issue';
+    log(`::warning::Programme Sweep gate skipped ${repository}: ${why}. Fix: run toolkit governance check in a clone of ${repository}; turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows if it should not be governed.`);
+    return { start: false, reason: 'governance off' };
+  }
   const runs = (await call('GET', `actions/workflows/${SWEEP_WORKFLOW}/runs?per_page=20`)).workflow_runs || [];
   const last = lastSweep(runs);
   const lines = [];
