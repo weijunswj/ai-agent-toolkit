@@ -46,7 +46,7 @@ test('contract: mint permissions match the row', () => {
   assert.doesNotMatch(step('Mint the governed repository token'), /owner:|repositories:/, 'the governed token is for this repository alone');
 });
 
-test('workflow: the key reaches only the mint steps, the tokens only the refresh step', () => {
+test('workflow: the key reaches only the mint steps, the tokens only the refresh and footer steps', () => {
   const text = workflow();
   assert.equal((text.match(/secrets\.TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY/g) || []).length, 2);
   for (const name of ['Mint the governed repository token', 'Mint the evidence store token']) {
@@ -54,9 +54,11 @@ test('workflow: the key reaches only the mint steps, the tokens only the refresh
     assert.match(step(name), /if: \$\{\{ vars\.TOOLKIT_GOVERNANCE_APP_CLIENT_ID != '' && steps\.binding\.outputs\.store != '' \}\}/);
     assert.match(step(name), /continue-on-error: true/);
   }
-  assert.equal((text.match(/outputs\.token/g) || []).length, 2);
-  assert.match(step('Refresh the programme'), /GOVERNED_TOKEN: \$\{\{ steps\.governed\.outputs\.token \}\}/);
-  assert.match(step('Refresh the programme'), /STORE_TOKEN: \$\{\{ steps\.store\.outputs\.token \}\}/);
+  assert.equal((text.match(/outputs\.token/g) || []).length, 4);
+  for (const name of ['Refresh the programme', "Clean the cloud footer from the owner's posts"]) {
+    assert.match(step(name), /GOVERNED_TOKEN: \$\{\{ steps\.governed\.outputs\.token \}\}/);
+    assert.match(step(name), /STORE_TOKEN: \$\{\{ steps\.store\.outputs\.token \}\}/);
+  }
   assert.doesNotMatch(text, /TOOLKIT_GOVERNANCE_TOKEN|GH_TOKEN: \$\{\{ secrets/, 'no personal token and no secret as GH_TOKEN');
 });
 
@@ -332,4 +334,92 @@ test('cloud: the CLI in installation mode runs refresh only', () => {
   for (const argv of [['reconcile', '--apply', '--controller', '--session', 'fixture'], ['show']]) {
     assert.throws(() => cli.openContext(cli.parseArgs(argv), { environment, transport: { request() { throw new Error('no request expected'); } }, originUrl: 'https://github.com/owner/repository.git', repoRoot: '.' }), { code: 'ROLE_REFUSED' });
   }
+});
+
+// Footer cleaning: the third step of the sweep.
+function runFooters({ env = {}, footers = null, now = Date.parse('2026-11-13T00:00:00Z') } = {}) {
+  const failures = [], summaries = [], warnings = [], calls = [];
+  const runner = new (action().ProgrammeSweepAction)({
+    env: { GITHUB_REPOSITORY: 'owner/repository', GITHUB_REPOSITORY_OWNER: 'owner', STORE_REPOSITORY: 'owner/evidence', GOVERNED_TOKEN: fakeToken, STORE_TOKEN: storeToken, PATH: process.env.PATH, ...env },
+    root: ROOT, nowMs: () => now,
+    footers: input => { calls.push(input); return footers ? footers(input) : { status: 0, results: [] }; },
+    failure: message => failures.push(message), summary: line => summaries.push(line), warning: message => warnings.push(message),
+  });
+  return { code: runner.cleanFooters(), failures, summaries, warnings, calls };
+}
+
+test('footers: each repository is cleaned under its own token, for the owner\'s posts in the last 26 hours', () => {
+  const result = runFooters();
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.calls.map(call => [call.repository, call.token, call.author, call.since]), [
+    ['owner/repository', fakeToken, 'owner', '2026-11-11T22:00:00.000Z'],
+    ['owner/evidence', storeToken, 'owner', '2026-11-11T22:00:00.000Z'],
+  ]);
+  assert.deepEqual(result.summaries, ['Footer cleaning since 2026-11-11T22:00:00.000Z: cleaned=0, skipped=0, review bodies refused=0, failed=0']);
+  const manual = runFooters({ env: { FOOTER_SINCE: '2026-11-01T00:00:00Z' } });
+  assert.equal(manual.calls[0].since, '2026-11-01T00:00:00.000Z', 'a manual run can reach further back');
+  const odd = runFooters({ env: { FOOTER_SINCE: 'yesterday-ish' } });
+  assert.equal(odd.calls[0].since, '2026-11-11T22:00:00.000Z', 'an unreadable time falls back to the window');
+});
+
+test('footers: without the App tokens nothing runs; a bad owner or repository fails before any edit', () => {
+  for (const missing of ['STORE_REPOSITORY', 'GOVERNED_TOKEN', 'STORE_TOKEN']) {
+    const result = runFooters({ env: { [missing]: '' } });
+    assert.deepEqual([result.code, result.calls.length], [0, 0], missing);
+  }
+  for (const env of [{ GITHUB_REPOSITORY_OWNER: 'app[bot]' }, { GITHUB_REPOSITORY_OWNER: '' }, { STORE_REPOSITORY: 'not a repo' }]) {
+    const result = runFooters({ env });
+    assert.deepEqual([result.code, result.calls.length], [1, 0], JSON.stringify(env));
+    assert.equal(result.failures[0], action().FOOTER_FAILURE);
+  }
+});
+
+test('footers: counts only reach the summary; refused review bodies warn; any other failure fails the step', () => {
+  const rows = [
+    { status: 'CLEANED', kind: 'issue_comment', url: 'https://github.com/owner/evidence/issues/1#issuecomment-9' },
+    { status: 'SKIPPED_OTHER_AUTHOR', kind: 'issue_comment', url: 'https://github.com/owner/repository/issues/2#issuecomment-8' },
+    { status: 'FAILED', kind: 'review', url: 'https://github.com/owner/repository/pull/3#pullrequestreview-7', detail: 'HTTP 403' },
+  ];
+  const warned = runFooters({ footers: () => ({ status: 1, results: rows }) });
+  assert.equal(warned.code, 0, 'a refused review body alone does not fail the sweep');
+  assert.deepEqual(warned.warnings, [action().FOOTER_REVIEW_WARNING]);
+  assert.match(warned.summaries[0], /cleaned=2, skipped=2, review bodies refused=2, failed=0$/);
+  assert.doesNotMatch(warned.summaries.join('\n'), /github\.com|issuecomment|HTTP 403/, 'no post, link or GitHub text');
+  for (const status of ['FAILED', 'STILL_FOOTED', 'MISMATCH']) {
+    const failed = runFooters({ footers: () => ({ status: 1, results: [{ status, kind: 'issue_comment' }] }) });
+    assert.equal(failed.code, 1, status);
+    assert.deepEqual(failed.failures, [action().FOOTER_FAILURE]);
+  }
+  const reviewMismatch = runFooters({ footers: () => ({ status: 1, results: [{ status: 'MISMATCH', kind: 'review' }] }) });
+  assert.equal(reviewMismatch.code, 1, 'a review edit that went through but read back wrong is a failure');
+  const unreadable = runFooters({ footers: () => ({ status: 1, results: null }) });
+  assert.equal(unreadable.code, 1);
+  const thrown = runFooters({ footers: () => { throw new Error(fakeToken); } });
+  assert.equal(thrown.code, 1);
+  assert.doesNotMatch([...thrown.failures, ...thrown.summaries].join('\n'), new RegExp(fakeToken));
+});
+
+test('footers: the child process gets only its own token and runs the footer sweep without a shell', () => {
+  const seen = [];
+  const spawn = (file, args, options) => { seen.push({ file, args, options }); return { status: 0, stdout: '{"apply":true,"results":[]}\n', stderr: '' }; };
+  const result = action().runFooterSweep({ root: ROOT, env: { PATH: '/bin', HOME: '/home/runner', GOVERNED_TOKEN: fakeToken, STORE_TOKEN: storeToken, GITHUB_TOKEN: 'built-in', TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY: 'key' },
+    repository: 'owner/evidence', token: storeToken, author: 'owner', since: '2026-11-11T22:00:00.000Z', spawn });
+  assert.deepEqual(result, { status: 0, results: [] });
+  assert.equal(seen[0].options.shell, false);
+  assert.deepEqual(seen[0].args.slice(1), ['--repo', 'owner/evidence', '--since', '2026-11-11T22:00:00.000Z', '--author', 'owner', '--apply', '--json']);
+  assert.equal(seen[0].options.env.GH_TOKEN, storeToken);
+  for (const name of ['GOVERNED_TOKEN', 'STORE_TOKEN', 'GITHUB_TOKEN', 'TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY']) assert.equal(seen[0].options.env[name], undefined, name);
+  assert.deepEqual(action().runFooterSweep({ root: ROOT, env: {}, repository: 'a/b', token: 't', author: 'a', since: 's', spawn: () => ({ status: 1, stdout: 'not json', stderr: '' }) }), { status: 1, results: null });
+});
+
+test('workflow: footer cleaning runs after the refresh, on minted tokens, and a manual run can widen its window', () => {
+  const text = workflow();
+  assert.match(text, /  workflow_dispatch:\r?\n    inputs:\r?\n      footer_since:\r?\n        description: .+\r?\n        required: false\r?\n        default: ''/);
+  const footers = step("Clean the cloud footer from the owner's posts");
+  assert.ok(text.indexOf("- name: Clean the cloud footer") > text.indexOf('- name: Refresh the programme'), 'after the refresh');
+  assert.match(footers, /if: \$\{\{ !cancelled\(\) && steps\.governed\.outcome == 'success' && steps\.store\.outcome == 'success' \}\}/);
+  assert.match(footers, /FOOTER_SINCE: \$\{\{ inputs\.footer_since \}\}/);
+  assert.match(footers, /run: node repo\/scripts\/toolkit-programme-sweep-action\.cjs footers\s*$/);
+  assert.doesNotMatch(footers, /secrets\./);
+  assert.match(step('Mint the evidence store token'), /permission-contents: write\r?\n\s+permission-issues: write\r?\n\s+permission-pull-requests: write/);
 });
