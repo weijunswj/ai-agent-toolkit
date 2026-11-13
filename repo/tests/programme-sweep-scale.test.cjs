@@ -203,6 +203,28 @@ test('limit hit mid-pass: the cloud pass stops at the margin, notes it calmly an
   assert.match(f.boardLine(), /^Board updated: .* SGT \(state revision \d+\)$/);
 });
 
+test('busy state branch: a pass that saves nothing keeps the changed-since bookmark, so the next pass reads those changes', t => {
+  const f = fixture(t, { count: 20 });
+  f.run({ cloud: true });
+  f.run({ cloud: true });
+  const before = f.github.readFile('state/sweep-lease.json').changed_since;
+  assert.ok(before, 'a finished pass sets the bookmark');
+  const changed = f.outcomes.slice(0, 3).map(outcome => outcome.issue);
+  for (const number of changed) Object.assign(f.github.issues.get(number), { state: 'closed', state_reason: 'completed', closed_at: f.github.tick(), updated_at: f.github.tick() });
+  // Every save races another writer: the pass stops with the state branch busy and saves nothing.
+  f.github.intercept(call => (call.method === 'PATCH' && call.path.includes('/git/refs/heads/') ? { status: 422, json: { message: 'Reference moved' } } : undefined));
+  const busy = f.run({ cloud: true });
+  assert.equal(busy.report.sweep.noWrite, true, JSON.stringify(busy.report.sweep));
+  assert.ok(busy.report.holds.some(hold => hold.code === 'PASS_STOPPED' && /state branch was busy/.test(hold.detail)), JSON.stringify(busy.report.holds));
+  assert.equal(f.github.readFile('state/sweep-lease.json').changed_since, before, 'the bookmark does not move past changes nobody saved');
+  f.github.hooks = [];
+  const next = f.run({ cloud: true });
+  assert.equal(next.code, 0, JSON.stringify(next.report.holds));
+  assert.ok(changed.every(number => next.report.sweep.tasks.includes(number)), `the changes are read again: ${JSON.stringify(next.report.sweep.tasks)}`);
+  assert.ok(changed.every(number => f.store.read('child', number).doc?.lifecycle === 'DONE'), 'and saved this time');
+  assert.ok(f.github.readFile('state/sweep-lease.json').changed_since > before, 'a pass that saves moves the bookmark on');
+});
+
 test('history: each unfinished pass is kept beside the lease, the lease keeps its old fields, the window is six hours', t => {
   const f = fixture(t, { count: 30 });
   // Finished passes write no history: the lease's last finish time already rules out "stuck".

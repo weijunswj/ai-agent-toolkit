@@ -639,8 +639,9 @@ const commands = {
     const report = commands.reconcile({ ...args, apply: true, inventory, queued }, context);
     if (context.sweepNotes && report.reads) context.sweepNotes.reads = report.reads;
     // A whole changed list moves the next pass's start to this pass's start; a list cut short moves it
-    // only to the update time it read up to, so the next pass carries on from there.
-    if (report.sweep) context.sweepOutcome = { changedSince: report.sweep.changedComplete ? context.requests?.serverStart || null : report.sweep.changedCursor || null, completeAt: report.sweep.board_time,
+    // only to the update time it read up to, so the next pass carries on from there. A pass that saved
+    // nothing keeps the old start, so the next pass reads those changes again.
+    if (report.sweep) context.sweepOutcome = { changedSince: report.sweep.noWrite ? null : report.sweep.changedComplete ? context.requests?.serverStart || null : report.sweep.changedCursor || null, completeAt: report.sweep.board_time,
       complete: report.sweep.complete && !report.holds.length, noWrite: report.sweep.noWrite, reason: report.sweep.reason, read: report.sweep.read ?? 0, left: report.sweep.left ?? 0 };
     if (context.requests) report.metrics = `Sweep: requests=${context.requests.count}, cap=${capText(context.requests.cap)}, tasks read=${report.sweep?.read ?? 0}, queue left=${report.sweep?.left ?? 0}, complete=${context.sweepOutcome?.complete ? 'yes' : 'no'}`;
     cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);

@@ -49,7 +49,7 @@ function fixture() {
   return { github, store, binding, full };
 }
 
-const unboard = body => body.split('\n').filter(line => !/^(?:Board updated: |⚠️ Board out of date )/.test(line)).join('\n');
+const unboard = body => body.split('\n').filter(line => !/^(?:Board updated: |⚠️ Board out of date |⚠️ Sweep stuck: )/.test(line)).join('\n');
 const view = f => ({
   parent: (({ revision, volatile, sweep, attention, ...rest }) => ({ ...rest, attention: (attention || []).map(({ first_seen, changed_at, ...entry }) => entry) }))(f.store.read('parent', 421).doc),
   children: [...Array.from({ length: 12 }, (_, i) => 500 + i), 800, 801, 802].map(issue => (({ volatile, ...doc }) => doc)(f.store.read('child', issue).doc)),
