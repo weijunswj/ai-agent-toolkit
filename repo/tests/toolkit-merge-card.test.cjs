@@ -457,9 +457,17 @@ test('through the Claude Code hook: the card is noted, the tap recorded, and a c
   const plain = { cwd: ctx.repo, session_id: 'user', tool_name: 'AskUserQuestion', tool_use_id: 'toolu_plain', tool_input: { questions: [{ question: 'Merge the two lists or keep them apart?', header: 'Lists', options: [{ label: 'Merge', description: 'One list.' }, { label: 'Keep apart', description: 'Two lists.' }] }] } };
   assert.deepEqual(claudeHook.respond('PreToolUse', plain, options), {});
   assert.deepEqual(claudeHook.respond('PostToolUse', { ...plain, tool_response: { questions: plain.tool_input.questions, answers: { 'Merge the two lists or keep them apart?': 'Merge' } } }, options), {});
-  // A cloud session: the hook is advisory there, so a card records nothing.
+  // A cloud session: the device card records nothing there.
   const cloud = { ...options, environment: { CLAUDE_CODE_REMOTE: 'true' } };
   assert.deepEqual(claudeHook.respond('PreToolUse', { ...ask, tool_use_id: 'toolu_cloud' }, cloud), {});
   assert.deepEqual(claudeHook.respond('PostToolUse', { ...answer, tool_use_id: 'toolu_cloud' }, cloud), {});
   assert.deepEqual(stored(ctx), []);
+  // The cloud guard itself: the same started session neither notes the card nor is offered one,
+  // even where the Projects card text does not apply (no full head SHA).
+  assert.equal(hold.cardAsked({ ...ask, tool_use_id: 'toolu_cloud_direct' }, { environment: { CLAUDE_CODE_REMOTE: 'true' }, registryOptions: options.registryOptions, now: options.now }), false);
+  const shortMerge = { ...command, tool_input: { command: 'gh pr merge 618 --repo owner/a --merge' } };
+  for (const input of [shortMerge, command]) {
+    const reason = claudeHook.respond('PreToolUse', input, cloud).hookSpecificOutput.permissionDecisionReason;
+    assert.doesNotMatch(reason, /AskUserQuestion|tap card|may tap instead of typing/, 'no device card offer in a cloud session');
+  }
 });
