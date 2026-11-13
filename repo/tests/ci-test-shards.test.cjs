@@ -190,9 +190,9 @@ test('Windows hook pack groups cover every corpus host case exactly once', () =>
   const corpus = pack.loadCorpus(ROOT);
   assert.deepEqual(corpus.errors, []);
   const job = WORKFLOW.split('\n  hook-pack-windows:\n')[1].split('\n  personal-data:\n')[0];
-  const groups = /families: \[([^\]]+)\]/.exec(job)[1].split(', ').map(group => /^'([a-z,-]+)'$/.exec(group)[1]);
+  const groups = /families: \[([^\]]+)\]/.exec(job)[1].split(', ').map(group => /^([a-z+-]+)$/.exec(group)[1]);
   assert.equal(groups.length, 4, 'four Windows jobs');
-  const families = groups.flatMap(group => group.split(','));
+  const families = groups.flatMap(group => group.split('+'));
   assert.equal(new Set(families).size, families.length, 'no family in two groups');
   assert.deepEqual([...families].sort(), [...new Set(corpus.rows.map(row => row.family))].sort());
   const cases = rows => rows.flatMap(row => row.hosts.map(host => `${row.id}:${host}`)).sort();
@@ -262,12 +262,12 @@ function assertDriftGuard(WORKFLOW) {
     ['the hook pack job removed', WORKFLOW.replace(/\n  hook-pack:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
     ['the hook pack dropped on Windows', WORKFLOW.replace('    runs-on: windows-latest\n    timeout-minutes: 15', '    runs-on: ubuntu-latest\n    timeout-minutes: 15')],
     ['the Windows pack job removed', WORKFLOW.replace(/\n  hook-pack-windows:\n[\s\S]*?(?=\n  personal-data:\n)/, '')],
-    ['the closure matrix family dropped', WORKFLOW.replace("'attribution,closure-matrix'", "'attribution'")],
-    ['the closure shell family dropped', WORKFLOW.replace("'closure-shell,push'", "'push'")],
-    ['a Windows family dropped', WORKFLOW.replace("'governance,issue-closure'", "'governance'")],
-    ['a Windows family duplicated', WORKFLOW.replace("'fault,merge,task-governance'", "'fault,merge,task-governance,push'")],
-    ['a Windows group dropped', WORKFLOW.replace(", 'fault,merge,task-governance']", ']')],
-    ['the Windows groups split back into one job per family', WORKFLOW.replace("'governance,issue-closure'", "governance, issue-closure")],
+    ['the closure matrix family dropped', WORKFLOW.replace('[attribution+closure-matrix,', '[attribution,')],
+    ['the closure shell family dropped', WORKFLOW.replace(' closure-shell+push,', ' push,')],
+    ['a Windows family dropped', WORKFLOW.replace(' governance+issue-closure,', ' governance,')],
+    ['a Windows family duplicated', WORKFLOW.replace('fault+merge+task-governance]', 'fault+merge+task-governance+push]')],
+    ['a Windows group dropped', WORKFLOW.replace(', fault+merge+task-governance]', ']')],
+    ['the Windows groups split back into one job per family', WORKFLOW.replace('governance+issue-closure', 'governance, issue-closure')],
     ['the Windows group left unquoted for PowerShell', WORKFLOW.replace('--family "${{ matrix.families }}"', '--family ${{ matrix.families }}')],
     ['a Windows family filter removed', WORKFLOW.replace(' --family "${{ matrix.families }}"', '')],
     ['the Windows pack budget raised', WORKFLOW.replace(' --family "${{ matrix.families }}" --budget-seconds 420', ' --family "${{ matrix.families }}" --budget-seconds 480')],

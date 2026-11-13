@@ -18,7 +18,7 @@
 // still fail and reports it when it starts passing, so its lane flips it to `pass` in the fix.
 //
 // Usage:
-//   node repo/scripts/toolkit-hook-pack.cjs run [--suite <kind>] [--family <name>[,<name>...]] [--rows <id,...>]
+//   node repo/scripts/toolkit-hook-pack.cjs run [--suite <kind>] [--family <name>[,<name>...]] (or <name>+<name>) [--rows <id,...>]
 //        [--host claude|codex] [--against <commit>] [--budget-seconds <n>] [--concurrency <n>]
 //   node repo/scripts/toolkit-hook-pack.cjs check-expectations [--base <ref>] [--body-file <file>]
 //   node repo/scripts/toolkit-hook-pack.cjs validate
@@ -832,8 +832,9 @@ function selectRows(rows, options) {
   }
   if (options.suite) selected = selected.filter(row => row.kind === options.suite);
   if (options.family) {
-    // A comma list runs several families in one process, so CI can group small Windows families.
-    const families = new Set(options.family.split(','));
+    // A list joined by commas or + runs several families in one process, so CI can group the
+    // Windows families (the workflow uses +, which needs no quoting in YAML or PowerShell).
+    const families = new Set(options.family.split(/[,+]/));
     for (const family of families) if (!rows.some(row => row.family === family)) throw new UsageError(`No family ${family} in the pack.`);
     selected = selected.filter(row => families.has(row.family));
   }

@@ -224,11 +224,12 @@ test('an expectation that changes, a removed row or a row lowered to known-bad n
   assert.equal(pack.explainedRows('no heading\n- A1: x').size, 0);
 });
 
-test('--family takes a comma list and selects exactly those families', () => {
+test('--family takes a list joined by commas or + and selects exactly those families', () => {
   const corpus = pack.loadCorpus();
   const picked = pack.selectRows(corpus.rows, pack.parseArgs(['run', '--family', 'push,fault']));
   assert.deepEqual([...new Set(picked.map(row => row.family))].sort(), ['fault', 'push']);
   assert.equal(picked.length, corpus.rows.filter(row => row.family === 'push' || row.family === 'fault').length);
+  assert.deepEqual(pack.selectRows(corpus.rows, pack.parseArgs(['run', '--family', 'push+fault'])), picked);
 });
 
 test('command-line options are checked before anything runs', async () => {
