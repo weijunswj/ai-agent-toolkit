@@ -496,4 +496,21 @@ test('follow-up time: only a pass that read something and left tasks follows up'
   assert.equal(followUpAt(report({ left: 0 }), 1000, 5000), 0);
   assert.equal(followUpAt(report({ reason: 'state branch busy' }), 1000, 5000), 0, 'the hourly start retries');
   assert.equal(followUpAt({}, 1000, 5000), 0);
+  // M5: a pass that found the limit already at the margin follows up once it resets, at most hourly.
+  assert.equal(followUpAt({ outcome: 'PAUSED', reason: 'GitHub rate limit' }, 1000, 5000), 1000 + RESET_WAIT_MS);
+  assert.equal(followUpAt({ outcome: 'QUEUED' }, 1000, 5000), 0, 'a run queued behind another sweep needs no follow-up');
+});
+
+test('M5: a run whose pass found the App limit at the margin ends green with the paused note and asks for one follow-up after the reset', () => {
+  const { RESET_WAIT_MS } = gateScript();
+  const before = Date.now();
+  const paused = runAction('run', { env: minted, refresh: () => ({ status: 0, code: null, report: { outcome: 'PAUSED', reason: 'GitHub rate limit' } }) });
+  assert.equal(paused.code, 0);
+  assert.deepEqual(paused.failures, []);
+  assert.match(paused.summaries[0], /^Programme Sweep paused: GitHub's hourly App limit/);
+  const at = Number(paused.outputs.find(([name]) => name === 'follow_up_at')?.[1]);
+  assert.ok(at >= before + RESET_WAIT_MS && at <= Date.now() + RESET_WAIT_MS, 'the follow-up waits for the reset, so it runs at most once an hour');
+  // A finished pass asks for nothing.
+  const done = runAction('run', { env: minted });
+  assert.equal(done.outputs.some(([name]) => name === 'follow_up_at'), false);
 });

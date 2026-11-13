@@ -13,7 +13,8 @@
 // HTTP status of a failed GitHub request, when there is one; GitHub's own error text, tokens and keys
 // are never printed. The job summary gets the pass's metrics line. When the pass stopped early and
 // read something, `follow_up_at` (milliseconds) tells the workflow's follow-up job when to start the
-// next run: once GitHub's hourly App limit has reset, or at once after the pass's time limit.
+// next run: once GitHub's hourly App limit has reset (also after a pass that found the limit already
+// at the margin and read nothing), or at once after the pass's time limit.
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -103,9 +104,13 @@ function summaryLine(report) {
   return `Programme Sweep: ${report.metrics}${held}`;
 }
 
-// When the next run should start after this pass, or 0 when the hourly start is enough. Only a pass
-// that read something and left tasks follows up, so a pass that cannot make progress never loops.
+// When the next run should start after this pass, or 0 when the hourly start is enough. A pass that
+// read something and left tasks follows up, so a pass that cannot make progress never loops. A pass
+// that found GitHub's hourly App count already at the margin read nothing, yet its run still counts
+// as the last sweep for the gate, so changes just before it would wait for the six-hour refresh: it
+// follows up once the limit has reset, which is at most once an hour.
 function followUpAt(report, started, now) {
+  if (report?.outcome === 'PAUSED') return started + RESET_WAIT_MS;
   const sweep = report?.sweep;
   if (!sweep || !(sweep.left > 0) || !(sweep.read > 0)) return 0;
   if (sweep.reason === 'GitHub rate limit') return started + RESET_WAIT_MS;

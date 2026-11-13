@@ -225,7 +225,7 @@ test('busy state branch: a pass that saves nothing keeps the changed-since bookm
   assert.ok(f.github.readFile('state/sweep-lease.json').changed_since > before, 'a pass that saves moves the bookmark on');
 });
 
-test('M4: a pass that starts below the margin ends calmly: exit 0, the pause note, no stop finding', t => {
+test('M4 / M5: a pass that starts below the margin ends calmly (exit 0, the pause note, no stop finding) and follows up once the limit resets', t => {
   const f = fixture(t, { count: 20 });
   f.run({ cloud: true });
   f.stale();
@@ -234,6 +234,7 @@ test('M4: a pass that starts below the margin ends calmly: exit 0, the pause not
   const low = limited(f.github, left);
   const before = f.page();
   const queueBefore = f.parent().sweep.queue;
+  const beforeSince = f.github.readFile('state/sweep-lease.json').changed_since;
   const result = f.run({ cloud: true, transport: low.transport });
   assert.equal(result.code, 0, 'not a failure: the job stays green');
   assert.deepEqual(result.report, { outcome: 'PAUSED', reason: 'GitHub rate limit' });
@@ -245,7 +246,10 @@ test('M4: a pass that starts below the margin ends calmly: exit 0, the pause not
   // The action turns it into a calm summary line and no follow-up.
   const action = require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-action.cjs'));
   assert.match(action.summaryLine(result.report), /^Programme Sweep paused: GitHub's hourly App limit/);
-  assert.equal(action.followUpAt(result.report, 1, 2), 0);
+  // M5: its run still counts as the last sweep for the gate, so it follows up once the limit resets.
+  const { RESET_WAIT_MS } = require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-gate.cjs'));
+  assert.equal(action.followUpAt(result.report, 1000, 2000), 1000 + RESET_WAIT_MS);
+  assert.equal(lease.changed_since, beforeSince, 'the changed-since bookmark is unmoved, so the follow-up reads the changes made before it');
   // A new hour: the next run reads the changes.
   left.core = 5000;
   const next = f.run({ cloud: true, transport: low.transport });
