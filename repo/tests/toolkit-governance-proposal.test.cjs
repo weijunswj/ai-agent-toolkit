@@ -559,8 +559,9 @@ test('no removes the marked cloud sweep copies in the same pull request, and onl
   const tree = calls.find(item => item.args[1].endsWith('/git/trees') && item.input).input.tree;
   assert.deepEqual(tree.map(entry => [entry.path, entry.sha === null ? 'removed' : 'written']), [['.github/toolkit-programme.json', 'written'], [sweep, 'removed']]);
   const body = calls.find(item => item.args[1].endsWith('/pulls') && item.input).input.body;
-  assert.match(body, new RegExp(`Removed files[^\\n]*\\n- ${sweep.replace(/\./g, '\\.')}`));
-  assert.doesNotMatch(body, new RegExp(gate.replace(/\./g, '\\.')));
+  const removed = body.slice(body.indexOf('Removed files'));
+  assert.ok(body.includes('Removed files') && removed.split('\n')[1] === `- ${sweep}`, body);
+  assert.ok(!body.includes(gate), 'the unmarked gate file is never listed');
 });
 
 test('an off pull request may remove the cloud sweep copies, and nothing else', () => {
