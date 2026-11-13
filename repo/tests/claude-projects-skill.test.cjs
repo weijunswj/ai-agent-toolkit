@@ -406,7 +406,7 @@ test('the merging agent bumps once at merge time; only older bumped PRs are reco
   assert.match(guide, /The merging agent bumps just before the merge, never the builder/);
   assert.match(guide, /`Bump: patch`, `Bump: minor` or `Bump: major`/);
   assert.match(guide, /An owner merge card goes up at the bumped head/);
-  assert.match(text, /Toolkit PRs hold main's version\. Two or more ready PRs ride one merge train unasked \(`CONTROLLER\.md`\); else, before the check and any card, it merges `main` in, runs `bump-version\.cjs --next <level>` \(body `Bump:` line\) and waits for green CI\./);
+  assert.match(text, /Toolkit PRs hold main's version\. Two or more ready PRs ride one merge train unasked \(cheap, no gates: `CONTROLLER\.md`\); else the merge thread, before the check and any card, merges `main` in, runs `bump-version\.cjs --next <level>` \(body `Bump:` line\) and waits for green CI\./);
   assert.match(periodic, /Open Toolkit PRs hold main's version and the merge thread bumps each one at merge/);
   for (const surface of [text, root, guide]) assert.doesNotMatch(surface, /carry their own `bump-version|prepares its own Toolkit bump|## Prepare the branch bump/);
   // Older PRs that already carry a bump still reconcile: the workflow, then the hand command.
@@ -437,8 +437,9 @@ test('the Projects controller skill has one source file with a Version line', ()
   assert.match(text, /The coordinator reads it only from the library copy \(\*\*Guidebook copy\*\*\); changes go into Toolkit through a PR, never into the copy\./);
   assert.match(text, /## Hourly nudge\n- Every project also runs an hourly stalled-work nudge, set up at project setup/);
   assert.match(text, /It must be a recurring routine: one-shot self-reminders have died silently/);
-  assert.match(text, /This is the only resolve pass/);
-  assert.match(text, /\*\*Resolve only in the hourly nudge\.\*\*/);
+  assert.match(text, /This is the backstop resolve pass \(`RESOLVE DUE`\)/);
+  assert.doesNotMatch(text, /This is the only resolve pass|Resolve only in the hourly nudge/);
+  assert.match(text, /\*\*Resolve on relay; the nudge is the backstop\.\*\*/);
   assert.doesNotMatch(text, /Active-work check-in|resolves threads and coordinator posts that have been idle past/);
 });
 
@@ -596,8 +597,8 @@ test('Projects keeps its Toolkit base layer current without touching the project
   for (const surface of [text, body, ...templates]) {
     assert.doesNotMatch(surface, /resolve window|idle window|default 2 days|IDLE-2D|thread default|weekday check-in|\* \* 1-5/i);
   }
-  assert.match(text, /\*\*Resolve only in the hourly nudge\.\*\* Threads never resolve themselves[^\n]*\(a\) its output is durably recorded[^\n]*\(b\) its latest result was relayed to the owner in project chat, or the owner replied after it; \(c\) no owner question or decision is open\. There is no waiting period/);
-  assert.match(body, /Threads never resolve themselves\. The coordinator resolves a thread in the hourly pass only when its output is durably recorded[^\n]*relayed to the owner in project chat or the owner replied after it, and no owner question or decision is open/);
+  assert.match(text, /\*\*Resolve on relay; the nudge is the backstop\.\*\* Threads never resolve themselves; you resolve a work thread or post the turn you relay its final result \(a merged or closed PR included\) or in the hourly pass, once all three hold: \(a\) its output is durably recorded[^\n]*\(b\) its latest result was relayed to the owner in project chat, or the owner replied after it; \(c\) nothing is open: owner question, decision or card, PR it owns or watches, or promised work\./);
+  assert.match(body, /Threads never resolve themselves\. The coordinator resolves a thread on relaying its final result or in the hourly pass, once its output is recorded[^\n]*its result reached project chat or the owner replied after it, and nothing is open \(owner ask or card, a PR it owns or watches, promised work\)/);
   assert.match(text, /resolving threads or posts that meet the resolve conditions are reversible housekeeping/);
   // Block wording: attribution ban (the personal-data guard enforces it on PR text), home threads never resolved, post-edit rule.
   assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, session or thread links, or requester header\. Strip what the platform adds; CI fails it\./);
@@ -724,7 +725,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /it writes a handoff file in the shared folder/);
   assert.match(text, /Never rotate your own coordinator thread/);
   // Closing: work threads on saved and relayed output, chat reply threads after 6 quiet hours, home threads never.
-  assert.match(text, /A chat reply thread \(the replies under one of your project-chat posts\) also closes on the first pass after 6 hours with no new message in it \(`QUIET-6H`\)/);
+  assert.match(text, /A chat reply thread \(replies under your project-chat post\) also closes after 6 quiet hours \(`QUIET-6H`\)/);
   assert.match(text, /idleness alone never closes a work thread/);
   assert.match(text, /a task's home thread is never resolved/);
   // Instructions sync applies itself under safeguards.
@@ -752,7 +753,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
     assert.ok(text.includes(required), required);
   }
   // The coordinator acts on every check-in prefix, in dependency order.
-  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`'];
+  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`', '`TASK FAILING`', '`PR ATTENTION`'];
   // The prefix list moved word for word from the skill's Daily check-in section into reference/periodic-runs.md.
   const section = text.slice(text.indexOf('## Acting on the check-in report'), text.indexOf('## Hourly nudge home thread'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));

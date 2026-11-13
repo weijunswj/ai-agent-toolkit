@@ -77,7 +77,7 @@ const SAFE_CONFIG_LITERAL_VALUES = new Set([
 ]);
 
 function usage(exitCode = 1) {
-  console.error(`Usage: node prepare-n8n-template.js <input.json> <output.template.json> [--preserve-unicode] [--allow-empty]`);
+  console.error(`Usage: node prepare-n8n-template.js <input.json> <output.template.json> [--preserve-unicode] [--allow-empty] [--quiet] [--accept-warnings]`);
   process.exit(exitCode);
 }
 
@@ -87,6 +87,7 @@ function parseArgs(argv) {
     preserveUnicode: false,
     allowEmpty: false,
     quiet: false,
+    acceptWarnings: false,
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -95,6 +96,7 @@ function parseArgs(argv) {
     else if (arg === '--preserve-unicode') options.preserveUnicode = true;
     else if (arg === '--allow-empty') options.allowEmpty = true;
     else if (arg === '--quiet') options.quiet = true;
+    else if (arg === '--accept-warnings') options.acceptWarnings = true;
     else if (arg.startsWith('--')) throw new Error(`Unknown option: ${arg}`);
     else positional.push(arg);
   }
@@ -612,6 +614,10 @@ function main() {
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.writeFileSync(outputPath, JSON.stringify(template, null, 2) + '\n');
 
+    // "Replaced ..." notes say what the sanitiser already fixed. "... remains" findings mean real
+    // data may still be in the output: they always print, even with --quiet, and fail the run
+    // unless the operator reviewed them and passed --accept-warnings.
+    const remaining = warnings.filter((warning) => /\bremains at\b|may still contain|config-like stable metadata/.test(warning));
     if (!options.quiet) {
       console.log(`Sanitised template: ${outputPath}`);
       console.log(`Nodes: ${template.nodes.length}`);
@@ -620,6 +626,13 @@ function main() {
         console.warn('\nWarnings:');
         for (const warning of warnings) console.warn(`- ${warning}`);
       }
+    } else if (remaining.length) {
+      console.warn('Warnings:');
+      for (const warning of remaining) console.warn(`- ${warning}`);
+    }
+    if (remaining.length && !options.acceptWarnings) {
+      console.error(`\nprepare-n8n-template: ${remaining.length} finding(s) above may still hold real data in ${outputPath}. Review and fix them, or rerun with --accept-warnings once reviewed.`);
+      process.exit(2);
     }
   } catch (error) {
     console.error(`prepare-n8n-template failed: ${error.message}`);

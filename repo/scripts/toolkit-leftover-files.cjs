@@ -117,6 +117,9 @@ class LeftoverScan {
   // Playbooks that are still Toolkit's shipped copy. A same-named file that differs may be the owner's.
   #playbooks(root, result) {
     const folder = path.join(this.#templates, 'docs', 'agent-playbooks');
+    // A linked docs or playbook folder is reported once, not once per shipped playbook name.
+    const parent = readInside(root, 'docs/agent-playbooks/.');
+    if (parent?.skipped === 'it is a symbolic link') { result.unproven.push({ file: 'docs/agent-playbooks', reason: parent.skipped }); return; }
     for (const name of fs.readdirSync(folder).filter(entry => entry.endsWith('.md')).sort()) {
       const file = `docs/agent-playbooks/${name}`, read = readInside(root, file);
       if (!read) continue;
@@ -152,6 +155,8 @@ class LeftoverScan {
   #decision(root, result) {
     const read = readInside(root, DECISION_FILE);
     if (!read) return;
+    // A link or unreadable file is not proven to be the decision, so it is reported as not listed.
+    if (read.skipped) { result.unproven.push({ file: DECISION_FILE, reason: read.skipped }); return; }
     let off = false;
     try { off = read.text ? JSON.parse(read.text).governance === 'disabled' : false; } catch { off = false; }
     result.kept.push({ file: DECISION_FILE, reason: off ? "it records this repository's \"governance off\" decision" : "it is the repository's programme file, which Toolkit reads for the on/off decision" });
