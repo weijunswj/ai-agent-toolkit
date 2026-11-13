@@ -374,6 +374,18 @@
     },
     {
       "file": "repo/controller/evidence-and-finish.md",
+      "rule": "**Train ejects:**",
+      "covers": "The merge-train script's eject adds only revert commits and a fresh bump on top of the train and records them; verify refuses any revert that is not recorded or differs from Git's own revert, land refuses while an ejected pull request is still open at the head the train carries, and a later build ejects (verify refuses) a member holding an ejected head without a revert of its eject revert. Choosing to eject stays instruction-only.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train.cjs",
+          "test": "repo/tests/toolkit-merge-train.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Promises:**",
       "instruction_only": "Promises live in free text (PR, issue comments or project memory); the hourly nudge reads them, but no code parses them."
     },
