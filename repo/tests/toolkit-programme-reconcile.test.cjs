@@ -991,6 +991,62 @@ test('closed COMPLETED and RETIRED tasks need no native parent: never attached, 
   assert.ok(kinds(reconciler().run()).includes('attach #459'));
 });
 
+// A closed task with open work under it keeps its native parent, and the parent closes only when
+// every catalogued task is finished, native or not.
+function completionFixture({ outcomes, issues }) {
+  const f = setup({ outcomes, issues });
+  Object.assign(f.binding, { schema: state.SCHEMA.bindingV2, governance: 'enabled', parents: [{ issue: 421, record_prefix: 'INT-TK421-' }],
+    parent_lifecycle: { reopen_incomplete: true, complete_when_children_closed: true } });
+  return f;
+}
+test('a detached closed task with open work under it is attached again and the parent never closes', () => {
+  for (const shape of ['native grandchild', 'catalogued grandchild']) {
+    const f = completionFixture({
+      outcomes: [
+        { issue: 600, label: 'Closed with open work', class: 'COMPLETED', parent: 421, order: 1 },
+        { issue: 601, label: 'Open grandchild', class: 'COMMITTED', parent: 600, order: 2 },
+        { issue: 602, label: 'Closed', class: 'COMPLETED', parent: 421, order: 3 },
+      ],
+      issues: github => {
+        github.addIssue(600, { state: 'closed' });
+        github.addIssue(601, { state: 'open', parent: shape === 'native grandchild' ? 600 : null });
+        github.addIssue(602, { state: 'closed', parent: 421 });
+      },
+    });
+    const dry = f.reconciler().run();
+    assert.ok(kinds(dry).includes('attach #600'), `${shape}: ${JSON.stringify(dry.effects.map(effect => effect.kind))}`);
+    assert.ok(codes(dry).includes('NATIVE_PARENT_MISSING #600'), shape);
+    assert.equal(dry.effects.some(effect => effect.kind === 'set_parent_state'), false, `${shape}: no close planned`);
+    f.reconciler().run({ apply: true });
+    assert.equal(f.github.issues.get(421).state, 'open', shape);
+    assert.equal(f.github.issues.get(600).parent, 421, shape);
+  }
+});
+test('an open catalogued task that cannot attach blocks parent completion', () => {
+  const f = completionFixture({
+    outcomes: [
+      { issue: 610, label: 'Closed', class: 'COMPLETED', parent: 421, order: 1 },
+      { issue: 611, label: 'Open, not attached', class: 'COMMITTED', parent: 421, order: 2 },
+    ],
+    issues: github => {
+      github.addIssue(610, { state: 'closed', parent: 421 });
+      github.addIssue(611, { state: 'open' });
+    },
+  });
+  // GitHub's sub-issue cap refuses the attach.
+  f.github.hooks.push(call => call.method === 'POST' && call.path.endsWith('/issues/421/sub_issues') ? { status: 422, json: { message: 'Sub-issue limit reached' } } : null);
+  const dry = f.reconciler().run();
+  assert.equal(dry.effects.some(effect => effect.kind === 'set_parent_state'), false, JSON.stringify(dry.effects.map(effect => effect.kind)));
+  f.reconciler().run({ apply: true });
+  assert.equal(f.github.issues.get(421).state, 'open');
+  // Once that task is closed too, the parent completes as before.
+  f.github.issues.get(611).state = 'closed';
+  f.github.hooks = [];
+  f.github.link(421, 611);
+  f.store.mutate('parent', 421, { writer, change: doc => { doc.outcomes.find(outcome => outcome.issue === 611).class = 'COMPLETED'; return doc; } });
+  assert.ok(f.reconciler().plan().effects.some(effect => effect.kind === 'set_parent_state' && effect.target.state === 'closed'));
+});
+
 test('apply shows state writes from the same pass on the parent without a second edit', () => {
   const outcomes = [{ issue: 423, class: 'COMMITTED', parent: 421, order: 1 }];
   const { github, store, reconciler } = setup({ outcomes, issues: github => {

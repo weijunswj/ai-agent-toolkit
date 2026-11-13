@@ -1520,6 +1520,28 @@ function isRetired(outcome, child) {
   return outcome.class === 'RETIRED' || child?.lifecycle === 'RETIRED';
 }
 
+// Catalogued tasks that still owe work: open on GitHub, or (when GitHub was not read for them) not
+// finished in their state document. `docOf` gives a task's document and `issueOf` what GitHub showed.
+function unfinishedOutcomes(parent, docOf, issueOf) {
+  return parent.outcomes.filter(outcome => {
+    const issue = issueOf(outcome.issue);
+    return issue ? issue.state !== 'closed' : !isFinished(outcome, docOf(outcome.issue));
+  });
+}
+
+// True when an unfinished catalogued task sits anywhere under `number` in the catalogue.
+function hasUnfinishedDescendant(parent, number, docOf, issueOf) {
+  const byIssue = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
+  return unfinishedOutcomes(parent, docOf, issueOf).some(outcome => {
+    const seen = new Set([outcome.issue]);
+    for (let at = outcome.parent; at && !seen.has(at); at = byIssue.get(at)?.parent) {
+      if (at === number) return true;
+      seen.add(at);
+    }
+    return false;
+  });
+}
+
 // A planned outcome with an open or draft PR is already in progress.
 function statusText(outcome, child) {
   if (isRetired(outcome, child)) return 'RETIRED';
@@ -4283,7 +4305,10 @@ class Reconciler {
         effects.push({ kind: 'set_parent_state', target: { issue: number, state: 'open', expected: lifecycleSnapshot(tree), repair } });
         effects.push({ kind: 'post_parent_repair', target: repair });
         findings.push({ code: 'PARENT_CLOSED_INCOMPLETE', issue: number, detail: 'The parent closed while native descendants remain open; lifecycle permission permits repair.' });
-      } else if (tree.issue.state === 'open' && tree.descendants.length && !open && policy.complete_when_children_closed) {
+      } else if (tree.issue.state === 'open' && tree.descendants.length && !open && policy.complete_when_children_closed
+        // Every catalogued task must be finished too: one that is not a native child (it could not
+        // attach, or was detached) is not in the tree.
+        && !unfinishedOutcomes(parent, number => this.planContext?.children.get(number)?.doc || null, number => observed.issues.get(number)).length) {
         const closure = new (require('./issue-closure.cjs').IssueClosureGuard)({ transport: this.reader.transport, repository: this.binding.repository, deadlineMs: 120000 });
         const full = closure.tree(this.binding.repository, number, closure.budget(), new Set(), { full: true });
         observed.lifecycle = full;
@@ -4491,7 +4516,8 @@ class Reconciler {
       return pr.state !== doc.pr.state || pr.head !== doc.pr.head || checks.state !== doc.pr.checks?.state;
     };
     const detachedFinished = number => TERMINAL_LIFECYCLES.includes(stored(number)?.lifecycle)
-      && isFinished(outcomes.find(outcome => outcome.issue === number), stored(number));
+      && isFinished(outcomes.find(outcome => outcome.issue === number), stored(number))
+      && !hasUnfinishedDescendant(parent, number, stored, () => null);
     const all = outcomes.map(outcome => outcome.issue);
     const share = new Set(all.filter(number => number % ROTATION_PASSES === queued.pass % ROTATION_PASSES));
     const reasons = [
@@ -4860,7 +4886,12 @@ class Reconciler {
     // Native parent. A closed COMPLETED or RETIRED task needs none: GitHub caps a parent at 100
     // sub-issues, so closed tasks may leave it. They are never attached or moved back; a reopen
     // makes the parent required again.
-    const nativeOptional = issue.state === 'closed' && isFinished(outcome, desired);
+    // Only a task with no open work under it: a detached task would hide its open sub-issues from
+    // the parent's native tree, and parent completion walks that tree.
+    const plan = this.planContext;
+    const nativeOptional = issue.state === 'closed' && isFinished(outcome, desired)
+      && !(issue.open_sub_issues > 0) && !(observed.subIssues.get(issueNumber) || []).some(sub => observed.issues.get(sub.number)?.state !== 'closed')
+      && Boolean(plan) && !hasUnfinishedDescendant(plan.parent, issueNumber, number => plan.children.get(number)?.doc || null, number => observed.issues.get(number));
     if (outcome.parent && !nativeOptional) {
       if (issue.parent === null) {
         findings.push({ code: 'NATIVE_PARENT_MISSING', issue: issueNumber, detail: `expected under #${outcome.parent}` });
@@ -5597,6 +5628,7 @@ class Reconciler {
       }
     }
     findings.push(...(observed.prGraph?.withoutTask || []).map(pr=>({code:'PR_WITHOUT_TASK',issue:pr.number})));
+    this.planContext = { parent, children };
     this.diffParentLifecycle(parent, observed, effects, findings, holds);
     const desiredDocs = new Map();
     for (const outcome of parent.outcomes) {
