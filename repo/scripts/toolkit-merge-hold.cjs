@@ -515,27 +515,29 @@ function boundStore(url, registryOptions = {}) {
 const UNKNOWN_FOLDER_PUSH = 'this command pushes after `cd -`, `Set-Location -` or `pushd +N`/`-N` returns to a folder Toolkit cannot see from this command alone, so it is refused. Name the folder with `cd <path>` or `git -C <path>` and retry.';
 
 // What a cd, chdir, pushd, Set-Location, sl or Push-Location segment moves to: { word } for a
-// folder, { back: true } for `-` (and `+` outside bash, PowerShell's step forward), { unknown: true }
-// for pushd's stack rotation (`+N`, `-N`), or null when it names no folder. Switches such as
-// -PassThru, -L or cmd's /d are skipped wherever they stand; -StackName skips its value; -Path,
-// -LiteralPath and -PSPath (also as -Path:value) take theirs.
+// folder, { back: true } for `-` (also after `--` or as -Path's value, and `+` outside bash,
+// PowerShell's step forward), { unknown: true } for pushd's stack rotation (`+N`, `-N`), or
+// { none: true } when it names no folder. Switches such as -PassThru, -L or cmd's /d are skipped
+// wherever they stand; -StackName skips its value; -Path, -LiteralPath and -PSPath (also as
+// -Path:value) take theirs, and only -Path reads `-` as a step back (-LiteralPath is literal).
 const LOCATION_PATH = /^-(?:path|literalpath|lp|pspath)$/i;
 const LOCATION_VALUE = /^-st(?:a(?:c(?:k(?:n(?:a(?:m(?:e)?)?)?)?)?)?)?$/i;
 function locationTarget(words, shell) {
   const pushd = /^pushd$/i.test(words[0]);
+  const named = (option, value) => (value === '-' && !/^-(?:literalpath|lp)$/i.test(option) ? { back: true } : { word: value });
   for (let at = 1; at < words.length; at += 1) {
     const word = words[at];
-    if (word === '--') return at + 1 < words.length ? { word: words[at + 1] } : null;
+    if (word === '--') return at + 1 < words.length ? (words[at + 1] === '-' ? { back: true } : { word: words[at + 1] }) : { none: true };
     if (word === '-' || (word === '+' && shell !== 'posix' && !pushd)) return { back: true };
     if (pushd && /^[+-]\d+$/.test(word)) return { unknown: true };
-    const inline = /^-(?:path|literalpath|lp|pspath):(.+)$/is.exec(word);
-    if (inline) return { word: inline[1] };
-    if (LOCATION_PATH.test(word)) return at + 1 < words.length ? { word: words[at + 1] } : null;
+    const inline = /^(-(?:path|literalpath|lp|pspath)):(.+)$/is.exec(word);
+    if (inline) return named(inline[1], inline[2]);
+    if (LOCATION_PATH.test(word)) return at + 1 < words.length ? named(word, words[at + 1]) : { none: true };
     if (LOCATION_VALUE.test(word)) { at += 1; continue; }
     if (/^-[A-Za-z@]/.test(word) || /^\/d$/i.test(word)) continue;
     return { word };
   }
-  return null;
+  return { none: true };
 }
 
 const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed']);
@@ -807,8 +809,17 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
     if (/^(?:popd|pop-location)$/i.test(words[0])) { if (saved.length) move(saved.pop()); continue; }
     if (/^(?:cd|pushd|chdir|set-location|sl|push-location)$/i.test(words[0])) {
       const target = locationTarget(words, shell);
-      if (!target) continue;
       if (/^(?:pushd|push-location)$/i.test(words[0])) saved.push(roots);
+      if (target.none) {
+        // No folder named: bash's cd goes home and its pushd swaps the top two saved folders (from a
+        // stack this command may not show, so unknown). PowerShell 7's Set-Location also goes home,
+        // Windows PowerShell's and cmd's stay put, and Push-Location saves the folder and stays; a
+        // reading whose shell is not bash takes both.
+        const home = roots.map(root => shellPath(root || process.cwd(), '~'));
+        if (/^pushd$/i.test(words[0])) move([null]);
+        else if (/^(?:cd|chdir|set-location|sl)$/i.test(words[0])) move(shell === 'posix' ? home : [...roots, ...home]);
+        continue;
+      }
       if (target.unknown) move([null]);
       else if (target.back) {
         backs += 1;

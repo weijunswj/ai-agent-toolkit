@@ -1176,6 +1176,20 @@ test('a push to the default branch is refused; other branches and evidence store
     assert.match(decide(ctx, bash(store, command))?.deny || '', /default branch `main`/, `Bash: ${command}`);
   }
   assert.equal(ps(ctx.repo, `Push-Location ${store} -PassThru; git push origin main`), '');
+  // A bare cd goes home (so a later cd - comes back), a cd -- - and -Path - still step back, and a bare
+  // pushd swaps folders this command may not show.
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain, { recursive: true });
+  for (const [cwd, command] of [[store, `cd ${ctx.repo}; cd; cd -; git push origin main`], [plain, `cd ${ctx.repo}; cd; cd -; git push origin main`], [ctx.repo, `cd ${store}; cd -- -; git push origin main`], [ctx.repo, `cd ${store}; pushd -; git push origin main`]]) {
+    assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, `Bash: ${command}`);
+  }
+  assert.match(decide(ctx, bash(store, `pushd ${ctx.repo}; pushd; git push origin main`))?.deny || '', unknown, 'Bash: bare pushd');
+  for (const [cwd, command] of [[ctx.repo, `Set-Location ${store}; Set-Location -Path -; git push origin main`], [ctx.repo, `Set-Location ${store}; Set-Location -Path:-; git push origin main`], [store, `Push-Location ${ctx.repo}; Pop-Location; Set-Location -; git push origin main`], [store, `Set-Location ${ctx.repo}; Set-Location; git push origin main`]]) {
+    assert.match(ps(cwd, command), /default branch `main`/, `PowerShell: ${command}`);
+  }
+  // -LiteralPath takes `-` as a folder name, not a step back to a folder this command never showed.
+  assert.equal(ps(store, 'Set-Location -LiteralPath -; git push origin main'), '');
+  assert.match(ps(store, 'Set-Location -Path -; git push origin main'), unknown);
   // A merge after Push-Location cannot be placed in a repository, like one after cd.
   typed(ctx, 'merge 618');
   assert.match(decide(ctx, bash(ctx.root, `Push-Location ${ctx.repo}; gh pr merge 618 --merge --match-head-commit ${SHA}`))?.deny || '', /changes folder or GH_REPO first/);
