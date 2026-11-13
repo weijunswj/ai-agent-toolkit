@@ -1,0 +1,6 @@
+### Changed
+
+- Controllers now own every finding: any warning, alert, failed or skipped check, review Low or owed step that a Toolkit check, task, hook, CI job, sweep or report raises gets an action and a deadline the turn it is seen. An acknowledgement, log line, count or relay is not an action, and a missed deadline or a repeat goes to the owner once with the exact step.
+- A review's Low findings now go on a follow-up task that joins the lane's next slice or starts within 3 days, and each real gap found by the CI check-up during planning gets its own slice or task.
+- The Projects daily check-in raises `TASK FAILING` for a task whose last run failed or missed its schedule, and `PR ATTENTION` for an open pull request with a failing check, a ready one with no UAT verdict, or one with no update for 3 days, review-notification pull requests included. A project whose missing tasks were reported 3 days ago is raised again so the owner can open that project.
+- Source-watch notification pull requests are triaged by the controller within 3 days. Release-readiness audits give every unresolved or deferred finding an owner and a tracked follow-up. Leftover-file scans offer the removal pull request in the same turn. The server daily security report escalates a warning seen three days running.

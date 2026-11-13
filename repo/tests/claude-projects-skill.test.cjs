@@ -752,7 +752,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
     assert.ok(text.includes(required), required);
   }
   // The coordinator acts on every check-in prefix, in dependency order.
-  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`'];
+  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`', '`TASK FAILING`', '`PR ATTENTION`'];
   // The prefix list moved word for word from the skill's Daily check-in section into reference/periodic-runs.md.
   const section = text.slice(text.indexOf('## Acting on the check-in report'), text.indexOf('## Hourly nudge home thread'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));
