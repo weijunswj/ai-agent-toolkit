@@ -381,7 +381,7 @@ test('only the project that runs the Toolkit repo watches other projects, and on
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['CONTEXT RESET DUE', 'GUIDEBOOK MISSING or SKILL COPY STALE', 'SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
+  const order = ['CONTEXT RESET DUE', 'GUIDEBOOK MISSING or SKILL COPY STALE', 'SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND', 'TASK FAILING', 'PR ATTENTION'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
@@ -916,4 +916,33 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
       assert.doesNotMatch(text, /type `continue`|skip the other steps from 2 to 6/);
     }
   }
+});
+
+test('the check-in turns stuck work into prefixes the coordinator must act on, and the controller owns every finding', () => {
+  const text = rendered('daily-check-in');
+  // A failing or missed task is no longer advice only.
+  assert.match(text, /never in the prefix, except an enabled task not stopped by the owner whose last run is read as failed, or as missing its last scheduled run: start the first line with "TASK FAILING: <names> \| "\. A task whose status cannot be read is "<name>: unverified" under \*\*Tasks:\*\*, and a disabled one stays advice\./);
+  // An open PR that needs a step gets a prefix, review-notification PRs included.
+  assert.match(text, /An open PR with a failing check, a ready PR missing its UAT verdict, or an open PR with no update for 3 days \(review-notification PRs included\), unless the PR or its task records a wait with its blocker and the date it is due: start the first line with "PR ATTENTION: <n> \| "/);
+  // A missing set reported before is not silenced forever: after 3 days it returns for the owner.
+  const own = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'weijunswj/ai-agent-toolkit' }));
+  assert.match(own, /with the date it was first reported; once that date is 3 or more days old, start the first line with it again, marked "3 days"/);
+  assert.match(own, /PROJECT TASKS MISSING set reported with the date it was first reported/);
+  const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
+  const periodic = fs.readFileSync(path.join(dir, 'reference', 'periodic-runs.md'), 'utf8');
+  const acting = periodic.slice(periodic.indexOf('## Acting on the check-in report'), periodic.indexOf('## Hourly nudge home thread'));
+  for (const required of ['  - `TASK FAILING`:', '  - `PR ATTENTION`:', 'Marked "3 days"', 'Every prefix is a finding the controller owns',
+    'the same prefix on two check-ins in a row goes to the owner once with the exact step']) assert.ok(acting.includes(required), required);
+  // The controller rule and its page: an action and a deadline the turn a finding is seen, escalation on a repeat.
+  const core = fs.readFileSync(path.join(ROOT, 'repo', 'CONTROLLER.md'), 'utf8');
+  assert.match(core, /\*\*Findings are the controller's work:\*\*[^\n]*gets an action and a deadline from the controller the turn it is seen; an acknowledgement, log line, count or relay is not an action\. A missed deadline or a repeat goes to the owner/);
+  const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'evidence-and-finish.md'), 'utf8');
+  for (const required of ['- **Findings:** the controller owns every finding whoever raised it', 'Dispose only with a recorded reason',
+    'the same finding on two runs in a row, goes to the owner once with the exact step', 'never a bare unknown',
+    'Re-read owed lists (promises, Lows children, pending owner OKs, review-only PRs) at session start and on every periodic run']) assert.ok(page.includes(required), required);
+  const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
+  for (const required of ["follow-up (Low or `POST_SHIP`; one record per PR, on an outcome child that joins the lane's next slice or starts within 3 days, unless the owner accepted it)",
+    "keep the UAT ask on the owner's waiting list until it is answered", 'then relaunch one successor or record the hold on the child']) assert.ok(gates.includes(required), required);
+  // A verified plugin gap stays on the owner's list every run, not only on the run that first reports it.
+  assert.match(text, /Missing account copy: say so under \*\*Plugin:\*\*\. While that verified gap remains, also list "update the Toolkit plugin on claude\.ai \(behind since <date>\)" under \*\*Waiting on owner:\*\* every run\./);
 });
