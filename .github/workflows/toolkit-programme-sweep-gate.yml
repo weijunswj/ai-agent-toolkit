@@ -2,20 +2,22 @@
 #
 # It runs every hour at minute 41 (away from the top of the hour, when GitHub delays and drops
 # scheduled runs most), when a person opens, edits, closes or reopens an issue, adds a comment, or
-# opens, updates, closes or reopens a pull request into main, and when started by hand. It reads a
+# opens, updates, closes or reopens a pull request into main, when a Validate run finishes (a CI
+# result changes no issue's update time), and when started by hand. It reads a
 # few small GitHub answers with the built-in token and either ends in seconds or starts the sweep
 # workflow (toolkit-programme-sweep.yml) on main. It starts it when no sweep has finished yet, when
 # the board says the last pass left a saved place (once GitHub's hourly App limit has reset, if that
-# is what stopped it), when an issue or pull request changed since the last sweep finished, or when
-# six hours have passed. A start from activity waits until an hour after the last sweep; the hourly
-# start then picks the change up. Nothing starts while a sweep is queued or running.
+# is what stopped it), when an issue or pull request changed or a CI run finished since the last
+# successful sweep finished, or when six hours have passed. A start from activity waits until an hour
+# after the last sweep; the hourly start then picks the change up. Activity during a running sweep
+# queues one more behind it. Nothing starts while a sweep is already queued.
 #
 # Activity from bots, the sweep's own App included, is ignored before a runner starts, so the
 # sweep's own page edits never start it again. The gate checks out only its own script from main,
 # reads the binding merged on main, never holds the App's key or tokens, and its built-in token can only read
 # issues and contents and read and start workflow runs. One gate runs at a time, with one waiting;
-# a newer one replaces the waiting one. `pull_request_target` runs main's copy of this file, and
-# nothing from the pull request is checked out or run.
+# a newer one replaces the waiting one. `pull_request_target` and `workflow_run` run main's copy of
+# this file, and nothing from the pull request or the CI run is checked out or run.
 name: Toolkit Programme Sweep Gate
 
 on:
@@ -29,6 +31,9 @@ on:
   pull_request_target:
     types: [opened, synchronize, closed, reopened]
     branches: [main]
+  workflow_run:
+    workflows: [Validate]
+    types: [completed]
 
 permissions:
   contents: read
@@ -60,4 +65,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          CI_WORKFLOW: validate.yml
         run: node repo/scripts/toolkit-programme-sweep-gate.cjs

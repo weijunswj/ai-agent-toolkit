@@ -11,11 +11,13 @@
 //   - no sweep has finished yet;
 //   - a programme board line says the last pass stopped early (a saved place to resume), unless that
 //     pass stopped at GitHub's hourly App limit and the limit has not reset yet;
-//   - an issue or pull request changed since the last sweep finished (the sweep's own edits all
-//     land before its run finishes, so they never count);
+//   - an issue or pull request changed, or a CI run finished, since the last successful sweep
+//     finished (the sweep's own edits all land before its run finishes, so they never count);
 //   - the last sweep finished six hours ago or more, so slower facts (checks, drift) still refresh.
-// A start from activity also waits until an hour after the last sweep finished; the hourly start
-// then picks the change up. Nothing starts while a sweep is queued or running.
+// A start from activity (including a finished CI run) waits until an hour after the last sweep
+// finished; the hourly start then picks the change up. Activity during a running sweep queues one
+// more run behind it, since the running pass may have read past the change. Nothing starts while a
+// sweep is already queued.
 const SWEEP_WORKFLOW = 'toolkit-programme-sweep.yml';
 const BRANCH = 'main';
 const HOUR_MS = 60 * 60 * 1000;
@@ -24,8 +26,10 @@ const HOUR_MS = 60 * 60 * 1000;
 // the limit has reset.
 const RESET_WAIT_MS = HOUR_MS + 60 * 1000;
 const REFRESH_MS = 6 * HOUR_MS;
-const ACTIVITY_EVENTS = Object.freeze(['issues', 'issue_comment', 'pull_request_target']);
-const RUNNING = new Set(['queued', 'in_progress', 'waiting', 'pending', 'requested']);
+const ACTIVITY_EVENTS = Object.freeze(['issues', 'issue_comment', 'pull_request_target', 'workflow_run']);
+const WAITING = new Set(['queued', 'waiting', 'pending', 'requested']);
+// The last sweep that finished its work: a failed or cancelled run may have saved nothing.
+const lastSweep = runs => runs.find(run => run.status === 'completed' && run.conclusion === 'success') || null;
 const COMPLETE_LINE = /^Board updated: .+ \(state revision \d+\)$/;
 const LIMIT_NOTE = /hourly App limit/;
 const SAFE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -45,8 +49,13 @@ function parentsOf(binding) {
 
 // What the facts say: { start, reason }.
 function decide({ event, now, runs, lines, changedSince }) {
-  if (runs.some(run => RUNNING.has(run.status))) return { start: false, reason: 'a sweep is queued or running' };
-  const last = runs.find(run => run.status === 'completed' && run.conclusion !== 'cancelled' && run.conclusion !== 'skipped');
+  if (runs.some(run => WAITING.has(run.status))) return { start: false, reason: 'a sweep is already queued' };
+  // A running sweep may have read past this change: activity queues one more behind it. The hourly
+  // start leaves a running sweep alone.
+  if (runs.some(run => run.status === 'in_progress')) {
+    return ACTIVITY_EVENTS.includes(event) ? { start: true, reason: 'activity during a running sweep; one more waits behind it' } : { start: false, reason: 'a sweep is running' };
+  }
+  const last = lastSweep(runs);
   if (!last) return { start: true, reason: 'no sweep has finished yet' };
   const ended = Date.parse(last.updated_at);
   if (ACTIVITY_EVENTS.includes(event)) {
@@ -59,7 +68,7 @@ function decide({ event, now, runs, lines, changedSince }) {
     if (pending.every(line => line && LIMIT_NOTE.test(line)) && now - started < RESET_WAIT_MS) return { start: false, reason: 'the last pass paused at GitHub\'s hourly App limit, which has not reset yet' };
     return { start: true, reason: 'the last pass left a saved place to resume' };
   }
-  if (changedSince) return { start: true, reason: 'issues or pull requests changed since the last sweep' };
+  if (changedSince) return { start: true, reason: 'issues, pull requests or CI results changed since the last sweep' };
   if (now - ended >= REFRESH_MS) return { start: true, reason: 'six hours since the last sweep' };
   return { start: false, reason: 'nothing changed since the last sweep' };
 }
@@ -80,7 +89,7 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
   const parents = parentsOf(binding);
   if (!parents) { log('Programme Sweep gate: governance is not enabled here; nothing to start.'); return { start: false, reason: 'governance off' }; }
   const runs = (await call('GET', `actions/workflows/${SWEEP_WORKFLOW}/runs?per_page=20`)).workflow_runs || [];
-  const last = runs.find(run => run.status === 'completed' && run.conclusion !== 'cancelled' && run.conclusion !== 'skipped');
+  const last = lastSweep(runs);
   const lines = [];
   for (const number of parents) lines.push(boardLine((await call('GET', `issues/${number}`)).body));
   let changedSince = false;
@@ -88,6 +97,11 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     const since = new Date(Date.parse(last.updated_at)).toISOString();
     const changed = await call('GET', `issues?state=all&sort=updated&direction=desc&per_page=1&since=${encodeURIComponent(since)}`);
     changedSince = Array.isArray(changed) && changed.some(item => Date.parse(item.updated_at) > Date.parse(since));
+    // A finished CI run changes no issue's update time, so CI results are checked apart.
+    if (!changedSince && env.CI_WORKFLOW && /^[A-Za-z0-9_.-]+\.ya?ml$/.test(env.CI_WORKFLOW)) {
+      const ci = (await call('GET', `actions/workflows/${env.CI_WORKFLOW}/runs?status=completed&per_page=1`)).workflow_runs || [];
+      changedSince = ci.some(run => Date.parse(run.updated_at) > Date.parse(since));
+    }
   }
   const verdict = decide({ event: env.EVENT_NAME || '', now, runs, lines, changedSince });
   if (verdict.start) await call('POST', `actions/workflows/${SWEEP_WORKFLOW}/dispatches`, { ref: BRANCH });

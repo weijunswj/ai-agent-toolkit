@@ -347,14 +347,15 @@ const gateScript = () => require(path.join(ROOT, 'repo/scripts/toolkit-programme
 
 test('gate workflow: hourly at minute 41, narrow activity triggers, bots ignored before a runner starts, main only, no secrets', () => {
   const text = gateWorkflow();
-  assert.match(text, /^on:\n  schedule:\n    - cron: '41 \* \* \* \*'\n  workflow_dispatch:\n  issues:\n    types: \[opened, edited, closed, reopened\]\n  issue_comment:\n    types: \[created\]\n  pull_request_target:\n    types: \[opened, synchronize, closed, reopened\]\n    branches: \[main\]\n\n/m);
-  assert.doesNotMatch(text, /^\s+(pull_request|push|workflow_run|repository_dispatch):/m);
+  assert.match(text, /^on:\n  schedule:\n    - cron: '41 \* \* \* \*'\n  workflow_dispatch:\n  issues:\n    types: \[opened, edited, closed, reopened\]\n  issue_comment:\n    types: \[created\]\n  pull_request_target:\n    types: \[opened, synchronize, closed, reopened\]\n    branches: \[main\]\n  workflow_run:\n    workflows: \[Validate\]\n    types: \[completed\]\n\n/m);
+  assert.doesNotMatch(text, /^\s+(pull_request|push|repository_dispatch):/m);
+  assert.match(text, /CI_WORKFLOW: validate\.yml$/m, 'the hourly start also counts finished CI runs');
   assert.match(text, /^permissions:\n  contents: read\n\n/m);
   assert.match(text, /^    permissions:\n      actions: write\n      contents: read\n      issues: read\n    steps:/m, 'the built-in token reads issues and contents and starts workflow runs, nothing more');
   assert.match(text, /^    if: \$\{\{ github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch' \|\| github\.event\.sender\.type != 'Bot'\) \}\}$/m);
   assert.match(text, /concurrency:\n  group: toolkit-programme-sweep-gate-\$\{\{ github\.repository \}\}\n  cancel-in-progress: false/);
   assert.match(text, /timeout-minutes: 3/);
-  assert.doesNotMatch(text, /secrets\.|github\.event\.(?:issue|comment|pull_request)\.|head\.sha|head_ref/, 'no secrets, no event text and nothing from the pull request');
+  assert.doesNotMatch(text, /secrets\.|github\.event\.(?:issue|comment|pull_request|workflow_run)\.|head\.sha|head_ref/, 'no secrets, no event text and nothing from the pull request');
   assert.match(text, /ref: main\n          persist-credentials: false\n          sparse-checkout: repo\/scripts\/toolkit-programme-sweep-gate\.cjs\n/);
   for (const uses of text.match(/^\s+uses: \S+/gm)) assert.match(uses, /@[0-9a-f]{40}$/);
   assert.match(text, /run: node repo\/scripts\/toolkit-programme-sweep-gate\.cjs$/m);
@@ -387,7 +388,11 @@ test('gate: the hourly start sweeps only for a saved place, a change or six quie
   assert.equal(hourly({ lines: [null] }).start, true, 'no board line yet');
   assert.equal(hourly({ runs: [] }).start, true, 'no sweep has finished yet');
   assert.equal(hourly({ runs: [{ status: 'completed', conclusion: 'cancelled' }, done(7 * HOUR)] }).start, true, 'six quiet hours, and a cancelled run is not a sweep');
-  assert.deepEqual(hourly({ runs: [{ status: 'in_progress' }, done(HOUR)], changedSince: true }), { start: false, reason: 'a sweep is queued or running' });
+  assert.deepEqual(hourly({ runs: [{ status: 'in_progress' }, done(HOUR)], changedSince: true }), { start: false, reason: 'a sweep is running' });
+  assert.deepEqual(hourly({ runs: [{ status: 'pending' }, { status: 'in_progress' }, done(HOUR)] }), { start: false, reason: 'a sweep is already queued' });
+  // M2: a failed run is not the last sweep; changes are measured from the last successful one.
+  assert.equal(hourly({ runs: [{ ...done(10 * 60 * 1000), conclusion: 'failure' }, done(7 * HOUR)] }).start, true, 'a failed run does not hide six quiet hours');
+  assert.equal(hourly({ runs: [{ ...done(10 * 60 * 1000), conclusion: 'failure' }] }).start, true, 'only failed runs: no sweep has finished yet');
   assert.equal(hourly({ event: 'workflow_dispatch', changedSince: true }).start, true);
 });
 
@@ -399,17 +404,21 @@ test('gate: a pass paused at GitHub\'s hourly App limit resumes only once the li
   assert.equal(at(RESET_WAIT_MS).start, true);
 });
 
-test('gate: activity starts a sweep only when none finished in the last hour', () => {
+test('gate: activity (a finished CI run included) starts a sweep when none finished in the last hour, or queues one behind a running sweep', () => {
   const { decide } = gateScript();
-  for (const event of ['issues', 'issue_comment', 'pull_request_target']) {
+  for (const event of ['issues', 'issue_comment', 'pull_request_target', 'workflow_run']) {
     assert.equal(decide({ event, now: T, lines: [COMPLETE], changedSince: true, runs: [done(HOUR - 1)] }).start, false);
     assert.equal(decide({ event, now: T, lines: [COMPLETE], changedSince: true, runs: [done(HOUR)] }).start, true);
+    // M2: the running pass may have read past this change, so one more waits behind it.
+    assert.deepEqual(decide({ event, now: T, lines: [COMPLETE], changedSince: false, runs: [{ status: 'in_progress' }, done(HOUR - 1)] }),
+      { start: true, reason: 'activity during a running sweep; one more waits behind it' });
+    assert.equal(decide({ event, now: T, lines: [COMPLETE], changedSince: false, runs: [{ status: 'queued' }, { status: 'in_progress' }] }).start, false, 'never more than one waiting');
   }
 });
 
 const actionsToken = ['example', 'actions', 'token'].join('-');
 const gateBinding = JSON.stringify({ governance: 'enabled', parents: [{ issue: 421 }] });
-function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], binding = gateBinding } = {}) {
+function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], binding = gateBinding, ci = [] } = {}) {
   const calls = [];
   const fetchImpl = async (url, options) => {
     const route = url.replace('https://api.github.com/repos/owner/repository/', '');
@@ -417,7 +426,8 @@ function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], bi
     assert.equal(options.headers.authorization, `Bearer ${actionsToken}`);
     const json = route.startsWith('actions/workflows/toolkit-programme-sweep.yml/runs') ? { workflow_runs: runs }
       : route === 'issues/421' ? { body: `# Programme\n\n${body}\n` } : route.startsWith('issues?') ? changed
-        : route === 'contents/.github/toolkit-programme.json?ref=main' ? { content: Buffer.from(binding).toString('base64') } : null;
+        : route === 'contents/.github/toolkit-programme.json?ref=main' ? { content: Buffer.from(binding).toString('base64') }
+          : route.startsWith('actions/workflows/validate.yml/runs') ? { workflow_runs: ci } : null;
     return { ok: true, status: options.method === 'POST' ? 204 : 200, json: async () => json };
   };
   return { calls, fetchImpl };
@@ -436,6 +446,13 @@ test('gate: a quiet hour reads four small answers and starts nothing; a change s
   const busy = fakeGitHub({ changed: [{ updated_at: '2026-11-13T02:30:00Z' }] });
   assert.equal((await gate({ env: gateEnv, fetchImpl: busy.fetchImpl, now: T, log: () => {} })).start, true);
   assert.equal(busy.calls.at(-1), 'POST actions/workflows/toolkit-programme-sweep.yml/dispatches');
+  // M3: a CI run that finished after the last sweep counts, though it changed no issue.
+  const ciEnv = { ...gateEnv, CI_WORKFLOW: 'validate.yml' };
+  const ciDone = fakeGitHub({ ci: [{ updated_at: '2026-11-13T02:10:00Z' }] });
+  assert.equal((await gate({ env: ciEnv, fetchImpl: ciDone.fetchImpl, now: T, log: () => {} })).start, true);
+  assert.match(ciDone.calls[4], /^GET actions\/workflows\/validate\.yml\/runs\?status=completed&per_page=1$/);
+  const ciOld = fakeGitHub({ ci: [{ updated_at: '2026-11-13T00:50:00Z' }] });
+  assert.equal((await gate({ env: ciEnv, fetchImpl: ciOld.fetchImpl, now: T, log: () => {} })).start, false, 'a CI run before the last sweep is already read');
   const off = fakeGitHub({ binding: JSON.stringify({ governance: 'disabled' }) });
   assert.equal((await gate({ env: gateEnv, fetchImpl: off.fetchImpl, now: T, log: () => {} })).start, false);
   assert.deepEqual(off.calls, ['GET contents/.github/toolkit-programme.json?ref=main'], 'governance off reads only the binding');
