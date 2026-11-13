@@ -184,6 +184,7 @@ class FakeGitHub {
         if (pr.updated_at && (!since || Date.parse(pr.updated_at) >= Date.parse(since))) rows.push({ number: pr.number, title: pr.title || `PR ${pr.number}`, body: pr.body || '', updated_at: pr.updated_at, pull_request: { url: '' } });
       }
       rows.sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at) || b.number-a.number);
+      if (params.get('direction') === 'asc') rows.reverse();
       return ok(200, rows.slice((page-1)*100,page*100));
     }
     if ((match = /^pulls\/(\d+)$/.exec(rest)) && method === 'GET') {

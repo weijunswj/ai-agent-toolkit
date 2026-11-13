@@ -17,18 +17,26 @@ const cli = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/pr
 const fakeToken = ['example', 'token', 'not', 'a', 'credential'].join('-');
 const storeToken = ['example', 'store', 'token'].join('-');
 const workflow = () => fs.readFileSync(workflowPath, 'utf8');
-const step = name => { const text = workflow(); const at = text.indexOf(`- name: ${name}`); return text.slice(at, text.indexOf('\n      - name:', at + 1) === -1 ? undefined : text.indexOf('\n      - name:', at + 1)); };
+// One step's text, up to the next step or the next job.
+const step = name => {
+  const text = workflow(); const at = text.indexOf(`- name: ${name}`);
+  const ends = [text.indexOf('\n      - name:', at + 1), text.slice(at).search(/\n  [a-z][a-z-]*:\r?\n/)].map((end, i) => (end === -1 ? Infinity : i ? at + end : end));
+  const end = Math.min(...ends);
+  return text.slice(at, end === Infinity ? undefined : end);
+};
 
-test('workflow: hourly off the top of the hour, after each push to main and by hand only, read-only built-in token, no saved credentials, one run at a time, stopped at 58 minutes', () => {
+test('workflow: after each push to main and by hand only (the gate and the follow-up start it by hand), read-only built-in token, no saved credentials, one run at a time, stopped at 58 minutes', () => {
   const text = workflow();
-  assert.match(text, /^on:\r?\n  schedule:\r?\n    - cron: '41 \* \* \* \*'\r?\n  push:\r?\n    branches: \[main\]\r?\n  workflow_dispatch:\s*$/m);
+  assert.match(text, /^on:\r?\n  push:\r?\n    branches: \[main\]\r?\n  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(text, /^\s+(schedule|issues|issue_comment):/m, 'the gate holds the hourly start and the activity triggers');
   assert.doesNotMatch(text, /^\s+(pull_request|pull_request_target|workflow_run|repository_dispatch):/m, 'never started by pull requests, forks or other workflows');
   assert.equal((text.match(/^\s+push:/gm) || []).length, 1, 'one push trigger');
   assert.doesNotMatch(text, /tags:|branches-ignore:|'\*\*'/, 'pushes to main only');
   assert.match(text, /^permissions:\r?\n  contents: read\s*$/m);
-  assert.match(text, /^    permissions:\r?\n      contents: read\s*$/m);
+  assert.match(text, /^    permissions:\r?\n      contents: read\r?\n    outputs:/m, 'the sweep job\'s built-in token reads contents only');
   assert.match(text, /persist-credentials: false/);
-  assert.match(text, /concurrency:\r?\n  group: toolkit-programme-sweep-\$\{\{ github\.repository \}\}\r?\n  cancel-in-progress: false/);
+  assert.match(text, /^    concurrency:\r?\n      group: toolkit-programme-sweep-\$\{\{ github\.repository \}\}\r?\n      cancel-in-progress: false/m, 'one sweep job at a time');
+  assert.equal((text.match(/concurrency:/g) || []).length, 1, 'the follow-up job waits outside the group');
   assert.match(text, /timeout-minutes: 58/);
   for (const uses of text.match(/^\s+uses: \S+/gm)) assert.match(uses, /@[0-9a-f]{40}$/, `${uses.trim()} is pinned by commit`);
   assert.equal((text.match(/actions\/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510/g) || []).length, 2);
@@ -38,6 +46,7 @@ test('contract: mint permissions match the row', () => {
   const row = cloudJobs().readCloudJobsContract({ root: ROOT }).jobs.find(job => job.id === 'programme-sweep');
   assert.equal(row.workflow, '.github/workflows/toolkit-programme-sweep.yml');
   assert.equal(row.schedule.cron, '41 * * * *');
+  assert.ok(fs.readFileSync(path.join(ROOT, '.github/workflows/toolkit-programme-sweep-gate.yml'), 'utf8').includes(`- cron: '${row.schedule.cron}'`), 'the gate holds the hourly start');
   const minted = name => Object.fromEntries([...step(name).matchAll(/permission-([a-z-]+): (read|write)/g)].map(([, permission, level]) => [permission.replace(/-/g, '_'), level]));
   const wanted = repository => cloudJobs().tokenPermissions(row.tokens.find(token => token.repository === repository));
   assert.deepEqual(minted('Mint the governed repository token'), wanted('governed_repository'));
@@ -334,6 +343,184 @@ test('cloud: the CLI in installation mode runs refresh only', () => {
   for (const argv of [['reconcile', '--apply', '--controller', '--session', 'fixture'], ['show']]) {
     assert.throws(() => cli.openContext(cli.parseArgs(argv), { environment, transport: { request() { throw new Error('no request expected'); } }, originUrl: 'https://github.com/owner/repository.git', repoRoot: '.' }), { code: 'ROLE_REFUSED' });
   }
+});
+
+
+// The gate and the follow-up: the hourly start and issue, comment and pull request activity run a
+// near-free check with the built-in token, which starts the sweep only when there is work; a pass
+// that stops early starts one more run itself.
+const gatePath = path.join(ROOT, '.github/workflows/toolkit-programme-sweep-gate.yml');
+const gateWorkflow = () => fs.readFileSync(gatePath, 'utf8').replace(/\r\n/g, '\n');
+const gateScript = () => require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-gate.cjs'));
+
+test('gate workflow: hourly at minute 41, narrow activity triggers, bots ignored before a runner starts, main only, no secrets', () => {
+  const text = gateWorkflow();
+  assert.match(text, /^on:\n  schedule:\n    - cron: '41 \* \* \* \*'\n  workflow_dispatch:\n  issues:\n    types: \[opened, edited, closed, reopened\]\n  issue_comment:\n    types: \[created\]\n  pull_request_target:\n    types: \[opened, synchronize, closed, reopened\]\n    branches: \[main\]\n  workflow_run:\n    workflows: \[Validate\]\n    types: \[completed\]\n\n/m);
+  assert.doesNotMatch(text, /^\s+(pull_request|push|repository_dispatch):/m);
+  assert.match(text, /CI_WORKFLOW: validate\.yml$/m, 'the hourly start also counts finished CI runs');
+  assert.match(text, /^permissions:\n  contents: read\n\n/m);
+  assert.match(text, /^    permissions:\n      actions: write\n      contents: read\n      issues: read\n    steps:/m, 'the built-in token reads issues and contents and starts workflow runs, nothing more');
+  assert.match(text, /^    if: \$\{\{ github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch' \|\| github\.event\.sender\.type != 'Bot'\) \}\}$/m);
+  assert.match(text, /concurrency:\n  group: toolkit-programme-sweep-gate-\$\{\{ github\.repository \}\}\n  cancel-in-progress: false/);
+  assert.match(text, /timeout-minutes: 3/);
+  assert.doesNotMatch(text, /secrets\.|github\.event\.(?:issue|comment|pull_request|workflow_run)\.|head\.sha|head_ref/, 'no secrets, no event text and nothing from the pull request');
+  assert.match(text, /ref: main\n          persist-credentials: false\n          sparse-checkout: repo\/scripts\/toolkit-programme-sweep-gate\.cjs\n/);
+  for (const uses of text.match(/^\s+uses: \S+/gm)) assert.match(uses, /@[0-9a-f]{40}$/);
+  assert.match(text, /run: node repo\/scripts\/toolkit-programme-sweep-gate\.cjs$/m);
+});
+
+test('sweep workflow: the follow-up job holds only the built-in token and waits outside the sweep group', () => {
+  const text = workflow().replace(/\r\n/g, '\n');
+  const job = text.slice(text.indexOf('  follow-up:'));
+  assert.match(job, /needs: sweep\n    if: \$\{\{ needs\.sweep\.outputs\.follow_up_at != '' \}\}/);
+  assert.match(job, new RegExp(`^    name: ${gateScript().FOLLOW_UP_JOB}$`, 'm'), 'the gate finds the follow-up job by this name');
+  assert.match(job, /permissions:\n      actions: write\n    steps:/);
+  assert.match(job, /timeout-minutes: 65/);
+  assert.doesNotMatch(job, /secrets\.|outputs\.token|concurrency:/);
+  assert.match(job, /run: node repo\/scripts\/toolkit-programme-sweep-gate\.cjs follow-up$/m);
+  assert.match(text, /follow_up_at: \$\{\{ steps\.refresh\.outputs\.follow_up_at \}\}/);
+});
+
+const HOUR = 60 * 60 * 1000;
+const T = Date.parse('2026-11-13T03:00:00Z');
+const done = (endedAgo, startedAgo = endedAgo + 10 * 60 * 1000) => ({ status: 'completed', conclusion: 'success', updated_at: new Date(T - endedAgo).toISOString(), run_started_at: new Date(T - startedAgo).toISOString() });
+const COMPLETE = 'Board updated: 13 Nov 2026, 10:41 SGT (state revision 9)';
+const PAUSED = 'Board updated: 13 Nov 2026, 10:41 SGT (state revision 9). Paused at GitHub\'s hourly App limit; the next run picks up the 340 tasks left.';
+const TIMED = 'Board updated: 13 Nov 2026, 10:41 SGT (state revision 9). Paused at this pass\'s time limit; the next run picks up the 40 tasks left.';
+
+test('gate: the hourly start sweeps only for a saved place, a change or six quiet hours', () => {
+  const { decide } = gateScript();
+  const hourly = facts => decide({ event: 'schedule', now: T, lines: [COMPLETE], changedSince: false, runs: [done(HOUR)], ...facts });
+  assert.deepEqual(hourly({}), { start: false, reason: 'nothing changed since the last sweep' });
+  assert.equal(hourly({ changedSince: true }).start, true);
+  assert.equal(hourly({ lines: [TIMED] }).start, true, 'a saved place resumes');
+  assert.equal(hourly({ lines: [null] }).start, true, 'no board line yet');
+  assert.equal(hourly({ runs: [] }).start, true, 'no sweep has finished yet');
+  assert.equal(hourly({ runs: [{ status: 'completed', conclusion: 'cancelled' }, done(7 * HOUR)] }).start, true, 'six quiet hours, and a cancelled run is not a sweep');
+  assert.deepEqual(hourly({ runs: [{ status: 'in_progress' }, done(HOUR)], changedSince: true }), { start: false, reason: 'a sweep is running' });
+  assert.deepEqual(hourly({ runs: [{ status: 'pending' }, { status: 'in_progress' }, done(HOUR)] }), { start: false, reason: 'a sweep is already queued' });
+  // M2: a failed run is not the last sweep; changes are measured from the last successful one.
+  assert.equal(hourly({ runs: [{ ...done(10 * 60 * 1000), conclusion: 'failure' }, done(7 * HOUR)] }).start, true, 'a failed run does not hide six quiet hours');
+  assert.equal(hourly({ runs: [{ ...done(10 * 60 * 1000), conclusion: 'failure' }] }).start, true, 'only failed runs: no sweep has finished yet');
+  assert.equal(hourly({ event: 'workflow_dispatch', changedSince: true }).start, true);
+});
+
+test('gate: a pass paused at GitHub\'s hourly App limit resumes only once the limit has reset', () => {
+  const { decide, RESET_WAIT_MS } = gateScript();
+  const at = startedAgo => decide({ event: 'schedule', now: T, lines: [PAUSED], changedSince: true, runs: [done(5 * 60 * 1000, startedAgo)] });
+  assert.equal(at(RESET_WAIT_MS - 1).start, false);
+  assert.match(at(RESET_WAIT_MS - 1).reason, /has not reset yet/);
+  assert.equal(at(RESET_WAIT_MS).start, true);
+});
+
+test('gate: activity (a finished CI run included) starts a sweep when none finished in the last hour, or queues one behind a running sweep', () => {
+  const { decide } = gateScript();
+  for (const event of ['issues', 'issue_comment', 'pull_request_target', 'workflow_run']) {
+    assert.equal(decide({ event, now: T, lines: [COMPLETE], changedSince: true, runs: [done(HOUR - 1)] }).start, false);
+    assert.equal(decide({ event, now: T, lines: [COMPLETE], changedSince: true, runs: [done(HOUR)] }).start, true);
+    // M2: the running pass may have read past this change, so one more waits behind it.
+    assert.deepEqual(decide({ event, now: T, lines: [COMPLETE], changedSince: false, runs: [{ status: 'in_progress' }, done(HOUR - 1)] }),
+      { start: true, reason: 'activity during a running sweep; one more waits behind it' });
+    assert.equal(decide({ event, now: T, lines: [COMPLETE], changedSince: false, runs: [{ status: 'queued' }, { status: 'in_progress' }] }).start, false, 'never more than one waiting');
+    // M4: a follow-up waiting for the App limit to reset starts the next sweep; none starts under the margin now.
+    assert.deepEqual(decide({ event, now: T, lines: [PAUSED], changedSince: true, runs: [{ status: 'in_progress' }, done(2 * HOUR)], followUpWaiting: true }),
+      { start: false, reason: 'a follow-up run is already on its way' });
+  }
+});
+
+const actionsToken = ['example', 'actions', 'token'].join('-');
+const gateBinding = JSON.stringify({ governance: 'enabled', parents: [{ issue: 421 }] });
+function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], binding = gateBinding, ci = [], jobs = [] } = {}) {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    const route = url.replace('https://api.github.com/repos/owner/repository/', '');
+    calls.push(`${options.method} ${route}`);
+    assert.equal(options.headers.authorization, `Bearer ${actionsToken}`);
+    const json = route.startsWith('actions/workflows/toolkit-programme-sweep.yml/runs') ? { workflow_runs: runs }
+      : route === 'issues/421' ? { body: `# Programme\n\n${body}\n` } : route.startsWith('issues?') ? changed
+        : route === 'contents/.github/toolkit-programme.json?ref=main' ? { content: Buffer.from(binding).toString('base64') }
+          : route.startsWith('actions/workflows/validate.yml/runs') ? { workflow_runs: ci } : /^actions\/runs\/\d+\/jobs$/.test(route) ? { jobs } : null;
+    return { ok: true, status: options.method === 'POST' ? 204 : 200, json: async () => json };
+  };
+  return { calls, fetchImpl };
+}
+const gateEnv = { GITHUB_REPOSITORY: 'owner/repository', GH_TOKEN: actionsToken, EVENT_NAME: 'schedule' };
+
+test('gate: a quiet hour reads four small answers and starts nothing; a change since the last sweep starts it on main', async () => {
+  const { gate } = gateScript();
+  const quiet = fakeGitHub();
+  const lines = [];
+  const verdict = await gate({ env: gateEnv, fetchImpl: quiet.fetchImpl, now: T, log: line => lines.push(line) });
+  assert.equal(verdict.start, false);
+  assert.deepEqual(quiet.calls.map(call => call.split('?')[0]), ['GET contents/.github/toolkit-programme.json', 'GET actions/workflows/toolkit-programme-sweep.yml/runs', 'GET issues/421', 'GET issues']);
+  assert.match(quiet.calls[3], /since=2026-11-13T01%3A00%3A00\.000Z/, 'changes since the last sweep finished');
+  assert.deepEqual(lines, ['Programme Sweep gate: nothing to start (nothing changed since the last sweep).']);
+  const busy = fakeGitHub({ changed: [{ updated_at: '2026-11-13T02:30:00Z' }] });
+  assert.equal((await gate({ env: gateEnv, fetchImpl: busy.fetchImpl, now: T, log: () => {} })).start, true);
+  assert.equal(busy.calls.at(-1), 'POST actions/workflows/toolkit-programme-sweep.yml/dispatches');
+  // M3: a CI run that finished after the last sweep counts, though it changed no issue.
+  const ciEnv = { ...gateEnv, CI_WORKFLOW: 'validate.yml' };
+  const ciDone = fakeGitHub({ ci: [{ updated_at: '2026-11-13T02:10:00Z' }] });
+  assert.equal((await gate({ env: ciEnv, fetchImpl: ciDone.fetchImpl, now: T, log: () => {} })).start, true);
+  assert.match(ciDone.calls[4], /^GET actions\/workflows\/validate\.yml\/runs\?status=completed&per_page=1$/);
+  const ciOld = fakeGitHub({ ci: [{ updated_at: '2026-11-13T00:50:00Z' }] });
+  assert.equal((await gate({ env: ciEnv, fetchImpl: ciOld.fetchImpl, now: T, log: () => {} })).start, false, 'a CI run before the last sweep is already read');
+  // M4: an issue comment while a run's follow-up waits for the App limit starts nothing; the jobs are
+  // read only for a run in progress.
+  const commentEnv = { ...gateEnv, EVENT_NAME: 'issue_comment' };
+  const waiting = fakeGitHub({ runs: [{ id: 77, status: 'in_progress' }, done(2 * HOUR)], body: PAUSED,
+    jobs: [{ name: 'Refresh the programme', status: 'completed' }, { name: gateScript().FOLLOW_UP_JOB, status: 'in_progress' }] });
+  assert.deepEqual(await gate({ env: commentEnv, fetchImpl: waiting.fetchImpl, now: T, log: () => {} }), { start: false, reason: 'a follow-up run is already on its way' });
+  assert.ok(waiting.calls.includes('GET actions/runs/77/jobs'));
+  assert.ok(!waiting.calls.some(call => call.startsWith('POST')));
+  const sweeping = fakeGitHub({ runs: [{ id: 78, status: 'in_progress' }, done(2 * HOUR)], jobs: [{ name: 'Refresh the programme', status: 'in_progress' }] });
+  assert.equal((await gate({ env: commentEnv, fetchImpl: sweeping.fetchImpl, now: T, log: () => {} })).start, true, 'a sweep still reading: one more waits behind it');
+  assert.equal(quiet.calls.filter(call => /jobs$/.test(call)).length, 0);
+  const off = fakeGitHub({ binding: JSON.stringify({ governance: 'disabled' }) });
+  assert.equal((await gate({ env: gateEnv, fetchImpl: off.fetchImpl, now: T, log: () => {} })).start, false);
+  assert.deepEqual(off.calls, ['GET contents/.github/toolkit-programme.json?ref=main'], 'governance off reads only the binding');
+});
+
+test('follow-up: waits for the given time, capped, then starts one run on main', async () => {
+  const { followUp, RESET_WAIT_MS } = gateScript();
+  const run = async at => {
+    const github = fakeGitHub(); const waits = [];
+    const started = await followUp({ env: { ...gateEnv, FOLLOW_UP_AT: String(at) }, fetchImpl: github.fetchImpl, now: () => T, sleep: async ms => { waits.push(ms); }, log: () => {} });
+    return { started, waits, calls: github.calls };
+  };
+  assert.deepEqual(await run(T + 30 * 60 * 1000), { started: true, waits: [30 * 60 * 1000], calls: ['POST actions/workflows/toolkit-programme-sweep.yml/dispatches'] });
+  assert.deepEqual((await run(T + 5 * HOUR)).waits, [RESET_WAIT_MS], 'never waits past the reset bound');
+  assert.deepEqual((await run(T - 1000)).waits, [], 'a time-limit stop starts again at once');
+  assert.deepEqual(await run(0), { started: false, waits: [], calls: [] });
+});
+
+test('follow-up time: only a pass that read something and left tasks follows up', () => {
+  const { followUpAt } = action();
+  const { RESET_WAIT_MS } = gateScript();
+  const report = sweep => ({ sweep: { read: 5, left: 10, reason: 'GitHub rate limit', ...sweep } });
+  assert.equal(followUpAt(report({}), 1000, 5000), 1000 + RESET_WAIT_MS);
+  assert.equal(followUpAt(report({ reason: 'time limit' }), 1000, 5000), 5000);
+  assert.equal(followUpAt(report({ read: 0 }), 1000, 5000), 0, 'no progress, no loop');
+  assert.equal(followUpAt(report({ left: 0 }), 1000, 5000), 0);
+  assert.equal(followUpAt(report({ reason: 'state branch busy' }), 1000, 5000), 0, 'the hourly start retries');
+  assert.equal(followUpAt({}, 1000, 5000), 0);
+  // M5: a pass that found the limit already at the margin follows up once it resets, at most hourly.
+  assert.equal(followUpAt({ outcome: 'PAUSED', reason: 'GitHub rate limit' }, 1000, 5000), 1000 + RESET_WAIT_MS);
+  assert.equal(followUpAt({ outcome: 'QUEUED' }, 1000, 5000), 0, 'a run queued behind another sweep needs no follow-up');
+});
+
+test('M5: a run whose pass found the App limit at the margin ends green with the paused note and asks for one follow-up after the reset', () => {
+  const { RESET_WAIT_MS } = gateScript();
+  const before = Date.now();
+  const paused = runAction('run', { env: minted, refresh: () => ({ status: 0, code: null, report: { outcome: 'PAUSED', reason: 'GitHub rate limit' } }) });
+  assert.equal(paused.code, 0);
+  assert.deepEqual(paused.failures, []);
+  assert.match(paused.summaries[0], /^Programme Sweep paused: GitHub's hourly App limit/);
+  const at = Number(paused.outputs.find(([name]) => name === 'follow_up_at')?.[1]);
+  assert.ok(at >= before + RESET_WAIT_MS && at <= Date.now() + RESET_WAIT_MS, 'the follow-up waits for the reset, so it runs at most once an hour');
+  // A finished pass asks for nothing.
+  const done = runAction('run', { env: minted });
+  assert.equal(done.outputs.some(([name]) => name === 'follow_up_at'), false);
 });
 
 // Footer cleaning: the third step of the sweep.

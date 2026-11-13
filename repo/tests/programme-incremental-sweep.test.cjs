@@ -149,7 +149,7 @@ test('cold-resume / I1: a capped pass saves what it read and its queue; the next
   const left = f.parent().sweep.queue;
   assert.ok(left.length > 0 && capped.report.sweep.read > 0, JSON.stringify(capped.report.sweep));
   assert.ok(capped.requests <= 100, `never more than the cap: ${capped.requests}`);
-  assert.match(f.page(421), new RegExp(`^⚠️ Board out of date since .*SGT: 1 pass stopped early \\((tasks still to check|request cap)\\)\\. ${left.length} tasks still to check\\.$`, 'm'));
+  assert.match(f.page(421), new RegExp(`^Board updated: .*SGT \\(state revision \\d+\\)\\. (Paused at this pass's request limit; the next run|The next run) picks up the ${left.length} tasks left\\.$`, 'm'));
   const read = new Set(capped.report.sweep.tasks);
   assert.ok(left.every(number => !read.has(number)), 'the tasks it read are not queued again');
   // Each capped pass also draws the pages of the changed tasks it read (about seven requests each),
