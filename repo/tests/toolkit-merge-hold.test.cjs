@@ -1140,6 +1140,15 @@ test('a push to the default branch is refused; other branches and evidence store
   for (const [cwd, command] of refused) assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, command);
   const allowed = [[feature, 'git push'], [feature, 'git push -u origin HEAD'], [feature, 'git push origin work'], [store, 'git push origin main'], [fresh, 'git push -u origin main'], [ctx.repo, `Push-Location ${store}; git push origin main`], [ctx.repo, `pushd ${feature}; pushd ${store}; popd; git push origin work`]];
   for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
+  // A pop with nothing saved in this command leaves the folder where it is, as the shell does on an
+  // empty stack, whether the command starts outside any repository or in a store.
+  const powershell = (cwd, command) => ({ cwd, tool_name: 'PowerShell', tool_input: { command } });
+  for (const [cwd, command] of [[ctx.root, `cd ${ctx.repo}; popd; git push origin main`], [store, `cd ${ctx.repo} && popd && git push origin main`]]) {
+    assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, `Bash: ${command}`);
+  }
+  for (const [cwd, command] of [[ctx.root, `Set-Location ${ctx.repo}; Pop-Location; git push origin main`], [store, `cd ${ctx.repo}; Pop-Location; git push origin main`]]) {
+    assert.match(hold.decide(powershell(cwd, command), { ...ctx.options, environment: {}, host: 'claude' })?.deny || '', /default branch `main`/, `PowerShell: ${command}`);
+  }
   // A merge after Push-Location cannot be placed in a repository, like one after cd.
   typed(ctx, 'merge 618');
   assert.match(decide(ctx, bash(ctx.root, `Push-Location ${ctx.repo}; gh pr merge 618 --merge --match-head-commit ${SHA}`))?.deny || '', /changes folder or GH_REPO first/);

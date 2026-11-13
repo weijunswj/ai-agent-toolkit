@@ -756,12 +756,13 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   // a bound store gets the pull request advice and the store-command message.
   const reasons = [];
   // pushd and Push-Location save the folder they leave; popd and Pop-Location go back to the last
-  // one saved, or to the starting folder when none is.
+  // one saved. With none saved here the shell's own stack is unknown: a real shell stays put on an
+  // empty stack, so the folder is left where it is (never reset to the starting folder).
   const saved = [];
   for (const words of parts) {
     const assigned = assignmentOf(words);
     if (assigned) { assignVariable(variables, assigned); continue; }
-    if (/^(?:popd|pop-location)$/i.test(words[0])) { root = saved.length ? saved.pop() : cwd; continue; }
+    if (/^(?:popd|pop-location)$/i.test(words[0])) { if (saved.length) root = saved.pop(); continue; }
     if (/^(?:cd|pushd|chdir|set-location|sl|push-location)$/i.test(words[0]) && words.length >= 2) {
       if (/^(?:pushd|push-location)$/i.test(words[0])) saved.push(root);
       root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell));
