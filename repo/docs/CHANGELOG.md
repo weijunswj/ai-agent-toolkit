@@ -1,5 +1,11 @@
 # Toolkit Changelog
 
+## 3.93.2
+
+### Fixed
+
+- **Evidence-store merges in cloud sessions:** a cloud session can now merge its evidence store's pull requests under the standing custody permission, as a computer session already could. A cloud session starts in the folder that holds the project's clones, so it had no cached parent binding and the merge hold refused every store merge for want of the user's approval. The hold now reads the parent's merged binding on demand in cloud sessions, with the same bounded read session start uses, and accepts an explicitly named store merge from that folder when the parent's clone sits in it. Every other check stays: a fresh merged binding that names the exact store, a private writable store, its default branch as the base, the full head SHA and a plain merge commit. Other repositories stay gated as before.
+
 ## 3.93.1 (PR edits no longer cancel CI checks; Work queue named at session start)
 
 ### Fixed
