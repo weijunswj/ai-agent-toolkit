@@ -111,6 +111,13 @@ const MAX_TOPIC_COMMENTS_PER_PASS = 5;
 const TEXT_LIMIT = 200;
 
 const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
+// Git's own blob id for a text (a SHA-1 repository): the id GitHub gives the blob it stores for it.
+const gitBlobId = text => crypto.createHash('sha1').update(`blob ${Buffer.byteLength(text, 'utf8')}\0`).update(text, 'utf8').digest('hex');
+// The blob id of a written entry in a created tree: from GitHub's answer when it lists the path.
+const createdBlobId = (tree, entry) => {
+  const listed = (tree?.tree || []).find(item => item.path === entry.path)?.sha;
+  return isSha(listed) ? listed : gitBlobId(entry.text);
+};
 const clone = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -2669,13 +2676,15 @@ class StateStore {
   }
 
   // The new commit must hold exactly what was written: every text by GraphQL, or, when GraphQL is
-  // refused, every blob id GitHub returned for the created tree (no local hash is computed).
+  // refused, every blob id. The id is the one GitHub returned for the created tree when its answer
+  // lists the path; otherwise (an answer that lists only the top-level entries of a nested path) it
+  // is Git's own blob id of the written text, computed here.
   readBack(commitSha, written, tree) {
     const { files, mode } = this.readTree(commitSha);
     for (const entry of written) {
       const name = entry.path.slice(this.store.path.length);
       const found = files.get(name);
-      const expected = mode === 'rest' ? (tree.tree || []).find(item => item.path === entry.path)?.sha : null;
+      const expected = mode === 'rest' ? createdBlobId(tree, entry) : null;
       if (!found || (mode === 'graphql' ? found.text !== entry.text : !isSha(expected) || found.sha !== expected)) {
         throw new ProgrammeError('STATE_READBACK_MISMATCH', `${entry.path} did not read back as written in the state commit.`);
       }

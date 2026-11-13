@@ -156,6 +156,40 @@ test('snapshot: REST fallback reads the same documents', () => {
   assert.equal(f.store.read('child', 500).doc.next_action, 'Checked 500');
 });
 
+// GitHub's created-tree answer may list only the top-level entries of a nested path (`state` as a
+// tree); the read-back then checks Git's own blob id of each written text.
+function topLevelTreeAnswer(f, sha = null) {
+  f.github.intercept(call => {
+    if (call.method !== 'POST' || !call.path.endsWith('/git/trees')) return undefined;
+    const answer = f.github.route(call.method, call.path, call.body);
+    answer.json.tree = [{ path: 'state', type: 'tree', sha: sha || 'e'.repeat(40) }];
+    return answer;
+  });
+}
+
+test('readback: a created tree that lists only top-level entries is checked by the local blob id', () => {
+  const f = fixture();
+  f.github.intercept(call => (call.path === 'graphql' ? { status: 403, json: { message: 'refused' } } : undefined));
+  topLevelTreeAnswer(f);
+  const result = f.store.commitBatch(f.stage());
+  assert.equal(result.written.length, 3);
+  for (const entry of result.written) assert.match(entry.blob, /^[0-9a-f]{40}$/);
+  f.github.hooks = [];
+  assert.equal(f.store.read('child', 500).doc.next_action, 'Checked 500');
+});
+
+test('readback: a listed blob id that does not match what was written is still refused', () => {
+  const f = fixture();
+  f.github.intercept(call => (call.path === 'graphql' ? { status: 403, json: { message: 'refused' } } : undefined));
+  f.github.intercept(call => {
+    if (call.method !== 'POST' || !call.path.endsWith('/git/trees')) return undefined;
+    const answer = f.github.route(call.method, call.path, call.body);
+    answer.json.tree = answer.json.tree.map(item => ({ ...item, sha: 'f'.repeat(40) }));
+    return answer;
+  });
+  assert.throws(() => f.store.commitBatch(f.stage()), { code: 'STATE_READBACK_MISMATCH' });
+});
+
 test('snapshot: fallback over budget stops before writes', () => {
   const f = fixture();
   const transport = Object.assign(Object.create(f.github), { left: () => 3, reserve: 2 });
