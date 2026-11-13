@@ -1,8 +1,9 @@
 'use strict';
 
-// Shared PR release rules and the CI guard. A PR carries its own next patch, minor
-// or major version and folded notes. A branch without a bump may retain the base's
-// version. toolkit-rebump-prs.cjs reconciles bumped PRs after main moves.
+// Shared PR release rules and the CI guard. An open PR holds the base's version and
+// keeps its notes in a fragment; the merging agent bumps it once at merge time to the
+// next patch, minor or major version with the notes folded. Both shapes pass here.
+// toolkit-rebump-prs.cjs reconciles older PRs that already carry a bump after main moves.
 
 const fs = require('node:fs');
 const path = require('node:path');

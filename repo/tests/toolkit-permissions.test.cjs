@@ -36,35 +36,37 @@ function computer(t, { managed = TK, claude = true, platform = 'linux' } = {}) {
   }
   return { home, platform, environment: {}, cwd: '/work/repo', fs: hostFs };
 }
-// A fake Git that answers for one governed repository and one store checkout.
-function fakeGit({ root = '/work/repo', origin = 'https://github.com/owner/store.git', pushUrl = null, config = {} } = {}) {
+// A fake Git that answers for one governed repository.
+function fakeGit({ root = '/work/repo' } = {}) {
   return (cmd, args) => {
     const rest = args.slice(2).join(' ');
     if (rest === 'rev-parse --path-format=absolute --git-common-dir') return { status: 0, stdout: `${root}/.git\n` };
-    if (rest === 'remote get-url origin') return { status: 0, stdout: `${origin}\n` };
-    if (rest === 'remote get-url --push --all origin') return { status: 0, stdout: `${pushUrl || origin}\n` };
-    if (rest.startsWith('config --get-all ')) return config[rest.slice(17)] ? { status: 0, stdout: `${config[rest.slice(17)]}\n` } : { status: 1, stdout: '' };
     return { status: 1, stdout: '' };
   };
 }
-const governedFs = (binding = { governance: 'enabled', store: { kind: 'github', repository: 'Owner/Store' } }) => ({
+// A whole, valid programme file: the repo block reads it as the sweep does (validateBinding, then bindingEnabled).
+const STORE = { kind: 'github', repository: 'Owner/Store', branch: 'main', path: 'state/' };
+const ENABLED = { schema: 'toolkit.programme-binding.v2', repository: 'Owner/Repo', governance: 'enabled', parents: [{ issue: 7, record_prefix: 'TEST-' }], store: STORE, required_checks: [] };
+const V1 = { schema: 'toolkit.programme-binding.v1', repository: 'Owner/Repo', parent_issue: 7, record_prefix: 'TEST-', writer_prefix: 'TEST-', store: STORE, required_checks: [] };
+const governedFs = (binding = ENABLED) => ({
   ...hostFs,
   readFileSync: (file, ...rest) => (slashed(file).endsWith('/work/repo/.github/toolkit-programme.json') ? JSON.stringify(binding) : fs.readFileSync(file, ...rest)),
 });
 
 test('both blocks print from the table, parse as JSON and print the same bytes twice', t => {
   const deps = { ...computer(t), fs: governedFs(), run: fakeGit() };
-  const print = () => { const out = []; const code = permissions.main(['--store', '/work/store'], { ...deps, stdout: text => out.push(text) }); return [code, out.join('')]; };
+  const print = () => { const out = []; const code = permissions.main([], { ...deps, stdout: text => out.push(text) }); return [code, out.join('')]; };
   const [code, text] = print();
   assert.equal(code, 0);
   assert.deepEqual(print(), [code, text]);
-  const built = new permissions.PermissionBlocks(deps).build({ storePath: '/work/store' });
+  const built = new permissions.PermissionBlocks(deps).build();
   assert.deepEqual(built.blocks.map(block => [block.host, block.scope]), [['claude', 'computer'], ['claude', 'repo']]);
   for (const block of built.blocks) assert.deepEqual(JSON.parse(block.text).permissions.allow, block.allow);
   const wanted = permissions.ROWS.filter(row => row.scope === 'computer' && !row.windowsOnly).flatMap(row => (row.forms || [' *']).map(form => `Bash(node "${TK}/${row.script}"${row.sub ? ` ${row.sub}` : ''}${form})`));
   assert.deepEqual(built.blocks[0].allow, wanted);
-  assert.deepEqual(built.blocks[1].allow, ['Bash(gh pr comment *)', 'Bash(gh issue comment *)', 'Bash(git -C "/work/store" push origin main)']);
-  assert.ok(built.blocks[1].ask.includes('Bash(git -C "/work/store" push *--force*)') && built.blocks.every(block => [...block.allow, ...block.ask].every(line => !/merge/.test(line))));
+  assert.ok(built.blocks[0].allow.includes(`Bash(node "${TK}/repo/scripts/toolkit-store.cjs" *)`), 'the store command is one computer line');
+  assert.deepEqual(built.blocks[1].allow, ['Bash(gh pr comment *)', 'Bash(gh issue comment *)']);
+  assert.ok(built.blocks.every(block => [...block.allow, ...block.ask].every(line => !/merge|git -C|push/.test(line))), 'no merge and no raw git push line');
   assert.match(built.blocks[0].target.replace(/\\/g, '/'), /\/\.claude\/settings\.json$/);
   assert.match(built.blocks[1].target.replace(/\\/g, '/'), /\/work\/repo\/\.claude\/settings\.local\.json$/);
   assert.equal(built.coverage.length, built.blocks.reduce((sum, block) => sum + block.allow.length, 0), 'every allow line has its guard text');
@@ -93,15 +95,15 @@ test('every subcommand of the two multi-command scripts is classified as allow o
 
 test('no printed line holds a never class, and the never list catches each class', t => {
   const deps = { ...computer(t, { platform: 'win32', managed: 'C:\\tk' }), fs: { ...governedFs(), existsSync: () => true }, run: fakeGit() };
-  const built = new permissions.PermissionBlocks(deps).build({ storePath: 'C:\\store' });
+  const built = new permissions.PermissionBlocks(deps).build();
   const lines = built.blocks.flatMap(block => block.allow);
   assert.ok(lines.length > 40);
-  assert.ok(lines.includes('Bash(git -C "C:/store" push origin main)') && lines.includes('PowerShell(git -C "C:/store" push origin main)'), 'the store line is printed for a Windows path');
+  assert.ok(lines.includes('Bash(node "C:/tk/repo/scripts/toolkit-store.cjs" *)') && lines.includes('PowerShell(node "C:/tk/repo/scripts/toolkit-store.cjs" *)'), 'the store line is printed for a Windows path');
   for (const line of lines) {
     assert.equal(permissions.NEVER.find(([, pattern]) => pattern.test(line)), undefined, line);
-    assert.match(line, /^(?:Bash|PowerShell)\((?:node "C:\/tk\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs"(?: [a-z-]+)? \*|node "C:\/tk\/repo\/scripts\/toolkit-(?:tasks|update-scheduled-task)\.cjs"(?: --apply)?(?: --json)?|gh pr comment \*|gh issue comment \*|git -C "C:\/store" push origin main)\)$/);
+    assert.match(line, /^(?:Bash|PowerShell)\((?:node "C:\/tk\/(?:skills\/github-program-reconciler\/scripts|repo\/scripts)\/[a-z-]+\.cjs"(?: [a-z-]+)? \*|node "C:\/tk\/repo\/scripts\/toolkit-(?:tasks|update-scheduled-task)\.cjs"(?: --apply)?(?: --json)?|gh pr comment \*|gh issue comment \*)\)$/);
   }
-  assert.ok(built.blocks[0].allow.every(line => !/owner|store|work\/repo/i.test(line)), 'the computer block names no repository');
+  assert.ok(built.blocks[0].allow.every(line => !/owner|"C:\/store"|work\/repo/i.test(line)), 'the computer block names no repository');
   const bad = ['Bash', 'Bash(*)', 'PowerShell(*)', 'Bash(node *)', 'Bash(python3 *)', 'Bash(* --version)', 'Bash(gh pr close *)', 'Bash(gh issue close *)', 'Bash(rm *)',
     'PowerShell(Remove-Item *)', 'Bash(git worktree remove *)', 'Bash(git branch -D *)', 'Bash(git reset *)', 'Bash(git rebase *)', 'Bash(cat ~/.claude/settings.json *)',
     'Bash(gh auth token *)', 'Bash(node C:/tk/repo/scripts/toolkit-env.cjs *)', 'mcp__github__merge_pull_request', 'PowerShell(Unregister-ScheduledTask *)'];
@@ -131,33 +133,22 @@ test('missing pieces stop with a plain line and leave only the safe part', t => 
   assert.equal(permissions.main([], { ...computer(t, { managed: '/opt/empty' }), stderr: text => errors.push(text) }), 1);
   assert.match(errors.pop(), /^Stopped: the recorded Toolkit folder does not hold the Toolkit scripts/);
 
-  const noHold = new permissions.PermissionBlocks({ ...computer(t, { claude: false }), fs: governedFs(), run: fakeGit() }).build({ storePath: '/work/store' });
-  assert.deepEqual(noHold.blocks[1].allow, ['Bash(gh pr comment *)', 'Bash(gh issue comment *)', 'Bash(git -C "/work/store" push origin main)']);
-  assert.ok(noHold.stops.every(stop => !/merge/.test(stop.stopped)));
+  const noHold = new permissions.PermissionBlocks({ ...computer(t, { claude: false }), fs: governedFs(), run: fakeGit() }).build();
+  assert.deepEqual(noHold.blocks[1].allow, ['Bash(gh pr comment *)', 'Bash(gh issue comment *)']);
+  assert.deepEqual(noHold.stops, []);
 
-  const wrongStore = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(), run: fakeGit({ origin: 'https://github.com/someone/else.git' }) }).build({ storePath: '/work/store' });
-  assert.ok(wrongStore.blocks[1].allow.every(line => !line.includes('push')));
-  assert.match(wrongStore.stops[0].stopped, /that folder is not a checkout of the evidence store the programme file names/);
-
-  // A plain push follows the checkout's own push settings, so a checkout that would push elsewhere,
-  // force or mirror gets no store line.
-  for (const [label, world, said] of [
-    ['a push address that is another repository', { pushUrl: 'https://github.com/someone/else.git' }, /pushes somewhere other than the evidence store/],
-    ['a second push address', { pushUrl: 'https://github.com/owner/store.git\nhttps://github.com/someone/else.git' }, /pushes somewhere other than the evidence store/],
-    ['a forcing push rule', { config: { 'remote.origin.push': '+refs/heads/main:refs/heads/main' } }, /has its own push rule \(remote\.origin\.push\)/],
-    ['a mirror remote', { config: { 'remote.origin.mirror': 'true' } }, /has its own push rule \(remote\.origin\.mirror\)/],
-  ]) {
-    const odd = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(), run: fakeGit(world) }).build({ storePath: '/work/store' });
-    assert.ok(odd.blocks[1].allow.every(line => !line.includes('push')), label);
-    assert.match(odd.stops[0].stopped, said, label);
-  }
-
-  for (const binding of [{ governance: 'disabled' }, null]) {
+  // A hand-broken version 1 file that says governance is disabled is not a valid file, so it is off,
+  // as the sweep reads it; so is a file without a schema.
+  for (const binding of [{ governance: 'disabled' }, null, { ...V1, governance: 'disabled' }, { ...V1, governance: 'enabled' }, { ...ENABLED, schema: undefined }]) {
     const off = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(binding), run: fakeGit() }).build({});
     assert.deepEqual(off.blocks.map(block => block.scope), ['computer']);
     assert.match(off.stops[0].stopped, /^no repo block: this repository has no Toolkit programme file with governance enabled/);
   }
-  const codex = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(), run: fakeGit() }).build({ host: 'codex', storePath: '/work/store' });
+  // A version 1 programme file has no governance key and reads as enabled, as everywhere else.
+  const v1 = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(V1), run: fakeGit() }).build({});
+  assert.deepEqual(v1.blocks.map(block => block.scope), ['computer', 'repo']);
+  assert.deepEqual(v1.stops, []);
+  const codex = new permissions.PermissionBlocks({ ...computer(t), fs: governedFs(), run: fakeGit() }).build({ host: 'codex' });
   assert.ok(codex.blocks[1].allow.every(line => !line.includes('merge')), 'no block carries a merge line');
   assert.match(codex.blocks[0].text, /prefix_rule\(\n {4}pattern = \["node","[^"]+programme\.cjs","refresh"\],\n {4}decision = "allow"/);
   assert.match(codex.blocks[0].text, /pattern = \["node","[^"]+programme\.cjs","claim"\],\n {4}decision = "prompt"/);
@@ -170,9 +161,10 @@ test('the command cannot write: no write call in its source, and none attempted 
   const guarded = new Proxy(governedFs(), { get: (target, key) => (/^(?:read|exists|lstat|stat|realpath)/.test(String(key)) || typeof target[key] !== 'function' ? target[key] : (...args) => { attempts.push(String(key)); throw new Error(`write attempted: ${String(key)}`); }) });
   const runs = [];
   const run = (cmd, args) => { runs.push(args.slice(2).join(' ')); return fakeGit()(cmd, args); };
-  assert.equal(permissions.main(['--store', '/work/store', '--json'], { ...computer(t), fs: guarded, run, stdout: () => {} }), 0);
+  assert.equal(permissions.main(['--json'], { ...computer(t), fs: guarded, run, stdout: () => {} }), 0);
   assert.deepEqual(attempts, []);
-  assert.deepEqual([...new Set(runs)].sort(), ['config --get-all remote.origin.mirror', 'config --get-all remote.origin.push', 'remote get-url --push --all origin', 'remote get-url origin', 'rev-parse --path-format=absolute --git-common-dir']);
+  assert.deepEqual([...new Set(runs)].sort(), ['rev-parse --path-format=absolute --git-common-dir']);
+  assert.equal(permissions.main(['--store', '/work/store'], { ...computer(t), stdout: () => {}, stderr: () => {} }), 2, 'the old store option is gone');
 });
 
 test('--check reads a settings file and reports missing and stale lines without changing it', t => {
@@ -184,7 +176,7 @@ test('--check reads a settings file and reports missing and stale lines without 
   const before = fs.readFileSync(file, 'utf8');
   const out = [];
   assert.equal(permissions.main(['--check', file, '--scope', 'computer', '--json'], { ...deps, stdout: text => out.push(text) }), 1);
-  assert.deepEqual(JSON.parse(out.join('')).check, [{ scope: 'computer', missing: [built.blocks[0].allow[0]], stale: [stale] }]);
+  assert.deepEqual(JSON.parse(out.join('')).check, [{ scope: 'computer', missing: [built.blocks[0].allow[0], ...built.blocks[0].ask], stale: [stale] }]);
   assert.equal(fs.readFileSync(file, 'utf8'), before);
   fs.writeFileSync(file, built.blocks[0].text);
   assert.equal(permissions.main(['--check', file, '--scope', 'computer'], { ...deps, stdout: () => {} }), 0);
@@ -214,29 +206,21 @@ const ruleMatches = (rule, tool, command) => {
 const verdict = (blocks, tool, command) => (blocks.some(block => block.ask.some(rule => ruleMatches(rule, tool, command))) ? 'ask'
   : blocks.some(block => block.allow.some(rule => ruleMatches(rule, tool, command))) ? 'allow' : 'prompt');
 
-test('the store push line allows one exact push and nothing that rides on it', t => {
+test('evidence store work is one store command line on both hosts, and no raw git push is allowed', t => {
   const deps = { ...computer(t, { platform: 'win32', managed: 'C:\\tk' }), fs: { ...governedFs(), existsSync: () => true }, run: fakeGit() };
-  const { blocks } = new permissions.PermissionBlocks(deps).build({ storePath: 'C:\\store' });
-  const push = 'git -C "C:/store" push';
+  const { blocks } = new permissions.PermissionBlocks(deps).build();
+  const tk = 'node "C:/tk/repo/scripts/toolkit-store.cjs"';
   for (const tool of ['Bash', 'PowerShell']) {
-    assert.equal(verdict(blocks, tool, `${push} origin main`), 'allow', tool);
-    const open = [
-      `${push} --receive-pack="echo ran > MARKER; git-receive-pack" origin main`, `${push} --exec=evil origin main`,
-      `${push} --mirr origin`, `${push} -d origin evidence-only`, `${push} --delet origin archive-2026-10`, `${push} --prun origin`,
-      `${push} https://github.com/someone/else.git main`, `${push} other main`, `${push} -uf origin main`, `${push} origin '+main:main'`,
-      `${push} origin main --force`, `${push} origin main:other`, `${push} origin main extra`, `${push} origin`, `${push}`, `${push} origin main && rm -rf x`,
-      `${push} --force origin main`, `${push} -f origin main`, `${push} origin :main`, `${push} origin +main`,
-      'git -C "C:/elsewhere" push origin main', 'git push origin main',
-    ];
-    for (const command of open) assert.notEqual(verdict(blocks, tool, command), 'allow', `${tool}: ${command}`);
+    for (const command of [`${tk} save --store C:/store --path archives/x --message x`, `${tk} delete-merged-branch --store C:/store --branch done`, `${tk} status --store C:/store`]) {
+      assert.equal(verdict(blocks, tool, command), 'allow', `${tool}: ${command}`);
+    }
+    for (const command of ['git -C "C:/store" push origin main', 'git -C "C:/store" push --force origin main', 'git push origin main', 'git -C "C:/store" commit -m x',
+      'node "C:/elsewhere/repo/scripts/toolkit-store.cjs" save', `${tk} save && git push --force`.replace(tk, 'node C:/tk/repo/scripts/toolkit-store.cjs')]) {
+      assert.notEqual(verdict(blocks, tool, command), 'allow', `${tool}: ${command}`);
+    }
   }
-  assert.ok(blocks.flatMap(block => block.allow).filter(line => line.includes(' push')).every(line => !line.includes('*')), 'no push line carries a wildcard');
-  const named = new permissions.PermissionBlocks({ ...deps, fs: { ...governedFs({ governance: 'enabled', store: { kind: 'github', repository: 'Owner/Store', branch: 'evidence' } }), existsSync: () => true } }).build({ storePath: 'C:\\store' });
-  assert.ok(named.blocks[1].allow.includes('Bash(git -C "C:/store" push origin evidence)'));
-  for (const branch of ['--mirror', 'a b', '+main', 'x..y', ':main', '*']) {
-    const odd = new permissions.PermissionBlocks({ ...deps, fs: { ...governedFs({ governance: 'enabled', store: { kind: 'github', repository: 'Owner/Store', branch } }), existsSync: () => true } }).build({ storePath: 'C:\\store' });
-    assert.ok(odd.blocks[1].allow.includes('Bash(git -C "C:/store" push origin main)'), `a strange branch name falls back to main: ${branch}`);
-  }
+  assert.ok(blocks.every(block => block.ask.every(line => !/store|push/.test(line))), 'the store needs no ask line: the command checks itself');
+  assert.equal(permissions.ROWS.filter(row => /store/.test(row.id)).length, 1);
 });
 
 test('script lines allow only what their guard text says; approval-bearing flags ask', t => {
@@ -256,6 +240,12 @@ test('script lines allow only what their guard text says; approval-bearing flags
     [`${node('toolkit-windows-tasks.cjs')} remove --repo-root C:/repo`, 'prompt'], [`${node('toolkit-windows-tasks.cjs')} adopt --folder F --task T --id t --purpose p`, 'prompt'],
     [`${node('toolkit-windows-tasks.cjs')} start --task demo-footer-sweep`, 'allow'],
     ['gh pr comment 12 --body-file note.md', 'allow'], ['gh pr comment 12 --delete-last', 'ask'], ['gh issue comment 12 --delete-last --yes', 'ask'],
+    // The scheduled sweep's flags only set how long one refresh pass may run (10 to 50 minutes).
+    [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" refresh --scheduled`, 'allow'],
+    [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" refresh --scheduled --budget-ms 2880000 --json`, 'allow'],
+    [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" claim --takeover`, 'prompt'],
+    // A holder order runs only the allowed writes it lists; the order itself refuses claims and takeovers.
+    [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" run-order --order C:/x/order.json --session s-1`, 'allow'],
   ];
   for (const tool of ['Bash', 'PowerShell']) for (const [command, expected] of rows) assert.equal(verdict(blocks, tool, command), expected, `${tool}: ${command}`);
   // Every flag of a script printed with exact lines is known here, so a new flag fails until someone decides.
@@ -275,29 +265,44 @@ test('script lines allow only what their guard text says; approval-bearing flags
   const taskSwitches = [...source('repo/scripts/toolkit-windows-tasks.cjs').matchAll(/arg === '(--[a-z-]+)'/g)].map(match => match[1]);
   assert.deepEqual([...new Set(taskSwitches)].sort(), ['--json', '--no-first-run', '--repair-owned', '--task-choice']);
   const programmeFlags = [...source('skills/github-program-reconciler/scripts/programme.cjs').matchAll(/'(--[a-z-]+)'/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(programmeFlags)].sort(), ['--apply', '--assignment', '--at-head', '--body-file', '--catalogue', '--consume', '--controller', '--deadline-ms', '--dry-run', '--effort', '--finding', '--force-another', '--include-private', '--issue', '--json', '--lane', '--message-file', '--model', '--parent', '--parent-file', '--patch', '--plan-digest', '--pr', '--prefix', '--reason', '--record', '--refresh', '--repo-root', '--role', '--route-read-back', '--session', '--show-toplevel', '--supersede', '--takeover', '--takeover-record', '--verdict']);
+  assert.deepEqual([...new Set(programmeFlags)].sort(), ['--apply', '--assignment', '--at-head', '--body-file', '--budget-ms', '--catalogue', '--consume', '--controller', '--deadline-ms', '--dry-run', '--effort', '--finding', '--force-another', '--include-private', '--issue', '--json', '--lane', '--message-file', '--model', '--order', '--parent', '--parent-file', '--patch', '--plan-digest', '--pr', '--prefix', '--reason', '--record', '--refresh', '--repo-root', '--role', '--route-read-back', '--scheduled', '--session', '--show-toplevel', '--supersede', '--takeover', '--takeover-record', '--verdict']);
+  // The refresh line's guard says what its time flags may change, and the script clamps them to that.
+  const refreshGuard = permissions.ROWS.find(row => row.id === 'programme-refresh').guard;
+  assert.match(refreshGuard, /--scheduled and --budget-ms set only how long one refresh pass may run, 10 to 50 minutes/);
+  const cli = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme.cjs'));
+  const budget = argv => cli.passBudgetMs(cli.parseArgs(argv));
+  assert.equal(budget(['refresh', '--scheduled', '--budget-ms', String(10 * 60 * 60 * 1000)]), 50 * 60 * 1000, 'a huge budget is held to 50 minutes');
+  assert.equal(budget(['refresh', '--scheduled', '--budget-ms', '1']), 10 * 60 * 1000, 'a tiny budget is held to 10 minutes');
+  assert.throws(() => cli.parseArgs(['refresh', '--scheduled', '--controller']), /refresh takes no options/, 'the time flags open no other refresh option');
+  assert.throws(() => cli.parseArgs(['run-order', '--order', 'o.json', '--session', 's', '--takeover']), /run-order takes only/, 'an order line opens no other option');
+  assert.match(permissions.ROWS.find(row => row.id === 'programme-run-order').guard, /run-order runs only the writes listed here/);
   const wild = permissions.ROWS.filter(row => row.kind === 'script' && !row.sub && !row.forms).map(row => row.id);
-  assert.deepEqual(wild, ['permissions-print'], 'only the print-only script keeps a bare wildcard');
-  assert.deepEqual([...source('repo/scripts/toolkit-permissions.cjs').matchAll(/'(--[a-z-]+)': \[/g)].map(match => match[1]).sort(), ['--check', '--format', '--host', '--repo-root', '--scope', '--store']);
+  assert.deepEqual(wild, ['permissions-print', 'store'], 'only the print-only script and the self-checking store command keep a bare wildcard; the store flag table is pinned in its own test');
+  assert.deepEqual([...source('repo/scripts/toolkit-permissions.cjs').matchAll(/'(--[a-z-]+)': \[/g)].map(match => match[1]).sort(), ['--check', '--format', '--host', '--repo-root', '--scope']);
 });
 
 test('Codex gets no allow rule for a command that needs an exact form or an ask line', t => {
   const deps = { ...computer(t, { platform: 'win32', managed: 'C:\\tk' }), fs: { ...governedFs(), existsSync: () => true }, run: fakeGit() };
-  const codex = new permissions.PermissionBlocks(deps).build({ host: 'codex', storePath: 'C:\\store' });
+  const codex = new permissions.PermissionBlocks(deps).build({ host: 'codex' });
   const rules = codex.blocks.flatMap(block => [...block.text.matchAll(/pattern = (\[[^\n]+\]),\n {4}decision = "(\w+)"/g)].map(match => [JSON.parse(match[1]), match[2]]));
   // A Codex prefix rule matches when its tokens start the command; the strictest decision wins.
   const decide = tokens => { const hits = rules.filter(([pattern]) => pattern.every((token, index) => tokens[index] === token)).map(([, decision]) => decision); return hits.includes('prompt') ? 'prompt' : hits.includes('allow') ? 'allow' : 'none'; };
   const push = ['git', '-C', 'C:/store', 'push'];
   const tk = script => ['node', `C:/tk/repo/scripts/${script}`];
   const mustNotBeAllowed = [
-    [...push, 'origin', 'main'], [...push, '--force'], [...push, '--mirror'], [...push, '--delete', 'origin', 'x'], [...push, 'origin', '+main'], [...push, '--receive-pack=evil', 'origin', 'main'],
+    [...push, 'origin', 'main'], [...push, '--force'], [...push, '--mirror'], [...push, '--delete', 'origin', 'x'], [...push, 'origin', '+main'], [...push, '--receive-pack=evil', 'origin', 'main'], ['git', 'push', 'origin', 'main'],
     ['gh', 'pr', 'comment', '12', '--delete-last'], ['gh', 'pr', 'comment', '12', '--body', 'x'], ['gh', 'issue', 'comment', '12', '--delete-last'],
     [...tk('toolkit-windows-tasks.cjs'), 'apply', '--repair-owned'], [...tk('toolkit-windows-tasks.cjs'), 'apply', '--folder', 'X'], [...tk('toolkit-windows-tasks.cjs'), 'apply'],
     [...tk('toolkit-tasks.cjs'), '--forget', 'x'], [...tk('toolkit-tasks.cjs')], [...tk('toolkit-update-scheduled-task.cjs'), '--apply', '--answers', 'f'],
     [...tk('toolkit-windows-tasks.cjs'), 'remove'], [...tk('toolkit-windows-tasks.cjs'), 'adopt'],
   ];
   for (const tokens of mustNotBeAllowed) assert.notEqual(decide(tokens), 'allow', tokens.join(' '));
-  for (const tokens of [[...push, '--force'], ['gh', 'pr', 'comment', '1'], [...tk('toolkit-windows-tasks.cjs'), 'apply', '--repair-owned']]) assert.equal(decide(tokens), 'prompt', tokens.join(' '));
+  for (const tokens of [['gh', 'pr', 'comment', '1'], [...tk('toolkit-windows-tasks.cjs'), 'apply', '--repair-owned']]) assert.equal(decide(tokens), 'prompt', tokens.join(' '));
+  // The store command is one allow rule, and no store or push rule prompts: a prompt rule would win
+  // over the allow rule and ask on every store step.
+  assert.equal(decide([...tk('toolkit-store.cjs'), 'save', '--store', 'C:/store', '--path', 'archives/x', '--message', 'x']), 'allow');
+  assert.equal(decide([...tk('toolkit-store.cjs'), 'delete-merged-branch', '--store', 'C:/store', '--branch', 'done']), 'allow');
+  assert.ok(rules.filter(([, decision]) => decision === 'prompt').every(([pattern]) => !pattern.some(token => /store|^push$/.test(token))), 'no store prompt rule');
   assert.equal(decide([...tk('toolkit-windows-tasks.cjs'), 'start', '--task', 'x']), 'allow');
   assert.equal(decide(['node', 'C:/tk/skills/github-program-reconciler/scripts/programme.cjs', 'refresh', '--apply']), 'allow');
   assert.ok(codex.blocks.every(block => block.excluded.length > 0));

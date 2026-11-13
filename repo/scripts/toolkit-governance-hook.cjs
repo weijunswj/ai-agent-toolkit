@@ -4,7 +4,8 @@
 // Claude Code's governance hook: one script for four events, named by --event.
 //   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs);
 //                     in a github.com one the turn runs only to show the tap-to-answer card. It also
-//                     keeps each "merge N" the user types, for the merge hold.
+//                     keeps each "merge N" the user types, for the merge hold, and adds one
+//                     context line for a typed Toolkit command (toolkit-commands.cjs).
 //   PreToolUse        refuses every tool there but the card, and agent answers everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs).
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
@@ -74,7 +75,7 @@ function respond(event, input, options = {}) {
       } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
       const decision = new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: [decision.reason, approvalNote].filter(Boolean).join('\n') };
-      const text = [decision.context, approvalNote].filter(Boolean).join('\n');
+      const text = [decision.context, approvalNote, decision.context ? '' : typedCommandNote(gate, input.prompt)].filter(Boolean).join('\n');
       const context = text ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } } : {};
       return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
@@ -112,6 +113,13 @@ function respond(event, input, options = {}) {
 }
 
 const mergeHold = () => require('./toolkit-merge-hold.cjs');
+
+// One advisory context line when the user's own message is exactly a typed Toolkit command
+// (toolkit-commands.cjs). It never blocks: any failure adds nothing, and a turn that carries
+// governance context (the question, a replay) gets no line, so the hold reads as it did.
+function typedCommandNote(gate, prompt) {
+  try { return require('./toolkit-commands.cjs').phraseContext(gate.ownerReply(prompt)); } catch { return ''; }
+}
 
 function closureDecision(input, options) {
   let closure;

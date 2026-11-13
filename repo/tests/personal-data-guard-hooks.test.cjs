@@ -256,3 +256,38 @@ test('the CI template checks pull requests and every branch push without interpo
   assert.doesNotMatch(text, /\$\{\{\s*github\.event\./, 'event text is read from the event file, never interpolated');
   for (const use of text.match(/uses: \S+/g)) assert.match(use, /@[0-9a-f]{40}$/, `${use} is pinned to a commit`);
 });
+
+test('installer --uninstall: removes the guard hooks, puts the earlier hook back, and lists the committed files', (t) => {
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n' });
+  const hooks = path.join(repo.root, '.git', 'hooks');
+  fs.writeFileSync(path.join(hooks, 'pre-commit'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  assert.equal(repo.installer([]).status, 0);
+  const result = repo.installer(['--uninstall']);
+  assert.equal(result.status, 0, result.all);
+  assert.match(result.all, /Hook removed: pre-commit \(the earlier hook is back in its place\)/);
+  assert.match(result.all, /Hook removed: pre-push\./);
+  assert.match(result.all, /Still in the repository: .*personal-data-guard\.cjs/);
+  assert.equal(fs.readFileSync(path.join(hooks, 'pre-commit'), 'utf8'), '#!/bin/sh\nexit 0\n');
+  assert.equal(fs.existsSync(path.join(hooks, 'pre-commit.pre-personal-data-guard')), false);
+  assert.equal(fs.existsSync(path.join(hooks, 'pre-push')), false);
+  assert.match(repo.installer(['--uninstall']).all, /No guard hooks were installed/);
+  assert.equal(repo.installer(['--uninstall', '--check']).status, 2);
+});
+
+test('installer: refuses the Toolkit repository itself, and --check there points at --uninstall for left-over hooks', (t) => {
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n' });
+  assert.equal(repo.installer([]).status, 0, 'an earlier install, before the refusal');
+  repo.write('skills/secure-ci-cd/scripts/personal-data-guard.cjs', '// the guard source\n');
+  let result = repo.installer([]);
+  assert.equal(result.status, 2);
+  assert.match(result.all, /is the Toolkit's own repository.*run the installer with --uninstall.*Nothing was installed/);
+  result = repo.installer(['--check']);
+  assert.equal(result.status, 1);
+  assert.match(result.all, /guard hooks are still in this clone \(pre-commit, commit-msg, pre-push\); run the installer with --uninstall/);
+  assert.equal(repo.installer(['--uninstall']).status, 0);
+  result = repo.installer(['--check']);
+  assert.equal(result.status, 0, result.all);
+  assert.match(result.all, /no guard hooks are installed in it/);
+});

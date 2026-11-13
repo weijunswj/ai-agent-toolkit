@@ -301,8 +301,9 @@ function scriptName(command) {
 
 // Read only the surface delivered as context by each host, never stderr diagnostics.
 function hookContext(host, event, result) {
-  if (result.status !== 0 || event !== 'SessionStart') return '';
-  if (host === 'codex') return result.stdout;
+  if (result.status !== 0 || !['SessionStart', 'UserPromptSubmit'].includes(event)) return '';
+  // Codex takes a session start's plain stdout as context; both hosts send prompt context as JSON.
+  if (host === 'codex' && event === 'SessionStart') return result.stdout;
   try {
     const output = JSON.parse(result.stdout);
     return typeof output.hookSpecificOutput?.additionalContext === 'string' ? output.hookSpecificOutput.additionalContext : '';

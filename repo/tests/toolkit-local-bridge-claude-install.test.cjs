@@ -228,40 +228,40 @@ test('a current Claude app copy, a --plugin-dir copy and an unreadable checkout 
   assert.match(none.stdout, /could not compare this claude\.ai copy with this PC's Toolkit \(no Toolkit folder is recorded on this PC\)/);
 });
 
-test('a Claude app chat shows the Codex reminder in the hook JSON, never as a plain line', (t) => {
-  const CODEX_LINE = 'Codex runs Toolkit 9.8.0; this PC has 9.9.1. In Codex say "refresh toolkit", then open /hooks and turn the Toolkit hooks on.';
+// Owner decision: no Codex notices anywhere in Claude. Codex state on this PC never reaches a Claude app chat.
+test('a Claude app chat never mentions Codex, even when Codex runs an older Toolkit with its hooks off', (t) => {
   const root = tmpRoot(t);
   const { hub, checkout } = recordManagedCheckout(root, '9.9.1');
   writeJson(path.join(checkout, '.codex-plugin', 'plugin.json'), { name: 'ai-agent-toolkit', version: '9.9.1' });
   // Codex has the Toolkit plugin on and runs an older version than this PC's checkout.
   const codexHome = path.join(root, '.codex');
   fs.mkdirSync(codexHome, { recursive: true });
-  fs.writeFileSync(path.join(codexHome, 'config.toml'), '[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]\nenabled = true\n');
+  fs.writeFileSync(path.join(codexHome, 'config.toml'), '[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]\nenabled = true\n\n[hooks.state]\n');
   writeJson(path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '9.8.0', '.codex-plugin', 'plugin.json'), { name: 'ai-agent-toolkit', version: '9.8.0' });
   const config = fs.readFileSync(path.join(codexHome, 'config.toml'));
-  const json = (result) => {
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout.trim().split(/\r?\n/).length, 1, 'one JSON line and nothing else');
-    return JSON.parse(result.stdout);
-  };
 
-  // A current app copy: the Codex line alone.
-  const current = json(hook(root, hub, accountCopy(root, '9.9.1')));
-  assert.equal(current.systemMessage, CODEX_LINE);
-  assert.match(current.hookSpecificOutput.additionalContext, UNINSTALLED_LINE);
-  assert.ok(current.hookSpecificOutput.additionalContext.includes(`Toolkit update reminder for the owner: ${CODEX_LINE} Say this reminder to the owner once, in your first reply.`));
+  // A current app copy: plain lines only, no reminder JSON and no Codex text.
+  const current = hook(root, hub, accountCopy(root, '9.9.1'));
+  assert.equal(current.status, 0, current.stderr);
+  assert.match(current.stdout, UNINSTALLED_LINE);
+  assert.doesNotMatch(current.stdout, /systemMessage|codex/i);
+  assert.doesNotMatch(current.stderr, /codex/i);
 
-  // An older app copy: both reminders, the app's first, each once.
-  const both = json(hook(root, hub, accountCopy(root, '9.8.0')));
-  assert.equal(both.systemMessage, `${accountCopyBehind('9.8.0', '9.9.1')}\n${CODEX_LINE}`);
-  assert.equal(both.hookSpecificOutput.additionalContext.split('Toolkit update reminder for the owner: ').length - 1, 2);
+  // An older app copy: exactly the app's own reminder, once, and still no Codex text.
+  const behind = hook(root, hub, accountCopy(root, '9.8.0'));
+  assert.equal(behind.status, 0, behind.stderr);
+  assert.equal(behind.stdout.trim().split(/\r?\n/).length, 1, 'one JSON line and nothing else');
+  const both = JSON.parse(behind.stdout);
+  assert.equal(both.systemMessage, accountCopyBehind('9.8.0', '9.9.1'));
+  assert.equal(both.hookSpecificOutput.additionalContext.split('Toolkit update reminder for the owner: ').length - 1, 1);
+  assert.doesNotMatch(behind.stdout, /codex/i);
 
-  // A --plugin-dir test copy is not a Claude app chat: no Codex line.
+  // A --plugin-dir test copy is not a Claude app chat either.
   const candidate = path.join(root, 'pc', 'candidate');
   fakeToolkit(candidate, '9.9.1');
   const plain = hook(root, hub, candidate);
   assert.equal(plain.status, 0, plain.stderr);
-  assert.doesNotMatch(plain.stdout, /systemMessage|Codex runs Toolkit/);
+  assert.doesNotMatch(plain.stdout, /systemMessage|codex/i);
   assert.ok(fs.readFileSync(path.join(codexHome, 'config.toml')).equals(config), 'the Codex config is never written');
 });
 
@@ -330,8 +330,7 @@ test('the installed copy is recognised in any path spelling and keeps its sessio
   assert.equal(state.last_sync_source, 'claude-plugin');
 });
 
-test('session start prints the Codex reminder once, and nothing when the Codex plugin is off', (t) => {
-  const REMINDER = /^Toolkit reminder for the owner: Codex runs Toolkit 1\.0\.0; this PC has \S+\. In Codex say "refresh toolkit", then open \/hooks and turn the Toolkit hooks on\. Say this reminder to the owner once, in your first reply\.$/gm;
+test('installed Claude session start never prints a Codex reminder, whether the Codex plugin is on or off', (t) => {
   const run = (pluginOn) => {
     const root = tmpRoot(t);
     installToolkit(root, repoRoot);
@@ -340,7 +339,7 @@ test('session start prints the Codex reminder once, and nothing when the Codex p
     // Codex runs an older Toolkit than the copy Claude Code runs (the managed checkout here).
     const codexHome = path.join(root, '.codex');
     fs.mkdirSync(codexHome, { recursive: true });
-    fs.writeFileSync(path.join(codexHome, 'config.toml'), `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]\nenabled = ${pluginOn}\n`);
+    fs.writeFileSync(path.join(codexHome, 'config.toml'), `[plugins."ai-agent-toolkit@ai-agent-toolkit-local"]\nenabled = ${pluginOn}\n\n[hooks.state]\n`);
     const cache = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', '1.0.0');
     writeJson(path.join(cache, '.codex-plugin', 'plugin.json'), { name: 'ai-agent-toolkit', version: '1.0.0' });
     const config = fs.readFileSync(path.join(codexHome, 'config.toml'));
@@ -349,10 +348,13 @@ test('session start prints the Codex reminder once, and nothing when the Codex p
     });
     assert.equal(result.status, 0, result.stderr);
     assert.ok(fs.readFileSync(path.join(codexHome, 'config.toml')).equals(config), 'the Codex config is never written');
-    return result.stdout;
+    return `${result.stdout}\n${result.stderr}`;
   };
-  assert.equal((run(true).match(REMINDER) || []).length, 1, 'printed exactly once');
-  assert.doesNotMatch(run(false), /Toolkit reminder for the owner/);
+  for (const pluginOn of [true, false]) {
+    const output = run(pluginOn);
+    assert.doesNotMatch(output, /Toolkit reminder for the owner/, `plugin ${pluginOn}`);
+    assert.doesNotMatch(output, /Codex runs Toolkit|Open \/hooks in Codex|refresh toolkit"? in Codex|codex-toolkit/i, `plugin ${pluginOn}`);
+  }
 });
 
 test('a newer recorded version names the likely cause and the one-step recovery', (t) => {

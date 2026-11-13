@@ -53,7 +53,7 @@ for (const host of ['codex', 'claude-code']) {
       assert.equal(row.section, 'Toolkit settings');
       assert.equal(row.recommended, value === 'after-gates' && status === 'saved' ? 'keep' : 'after-gates');
       if (status !== 'blocked') assert.deepEqual(row.choices.map(choice => choice.value), value === 'after-gates' ? ['keep', 'off'] : ['keep', 'after-gates']);
-      const otherApp = host === 'codex' ? /Claude/ : /Codex|Antigravity/;
+      const otherApp = host === 'codex' ? /Claude/ : /Codex/;
       for (const text of [core.renderSetupQuestionBank(rows), core.renderSetupQuestionBankTerminal(rows),
         core.renderQuestionRows(rows, row.presentation.question_ref)]) assert.doesNotMatch(text, otherApp);
       const parsed = core.parseConciseQuestionBankAnswer(`${rows[0].presentation.bank_reference}: all recommended`, rows);
@@ -591,11 +591,12 @@ test('bank reference covers host, order, recommendations and approval-visible se
   assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Toolkit in your coding apps', 'Toolkit settings', 'Windows scheduled tasks']);
   assert.ok(payload.questions.every((question) => question.what_this_controls));
   assert.ok(payload.questions.filter((question) => !question.report_only).every((question) => question.recommendation.choice_ref && question.recommendation.label));
-  // The report-only row's state is bound too: a hooks change between plan and approval is a new bank.
+  // A report-only row's state is not bound: the owner turning hooks on in Codex while the table is
+  // open keeps the same bank, because no answer acts on that row.
   const hooksIndex = rows.findIndex((row) => row.report_only);
   const hooksChanged = core.withPresentationMetadata(rows.map((row, index) => ({ ...row, presentation: undefined,
-    ...(index === hooksIndex ? { current_short: 'All 6 off' } : {}) })), 'codex');
-  assert.notEqual(hooksChanged[0].presentation.bank_reference, reference);
+    ...(index === hooksIndex ? { current: 'Toolkit hooks in Codex: all off.', current_short: 'All 6 off', recommended_text: 'Turn them on', recommended_outcome: 'Turn them on' } : {}) })), 'codex');
+  assert.equal(hooksChanged[0].presentation.bank_reference, reference);
 
   const changedHost = core.withPresentationMetadata(rows, 'claude-code');
   const changedRecommendation = core.withPresentationMetadata(rows.map((row, index) => index === 0
@@ -1098,7 +1099,8 @@ test('both banks put Keep current first and keep the other choices in their orig
       }
       assert.equal(core.resolveDisplayedChoiceAnswer(row, ''), row.recommended, row.id);
     }
-    assert.equal(specs.some((row) => row.id === 'antigravity-skills'), specs[0].presentation.host === 'codex');
+    // Both apps offer the Antigravity copy when Antigravity is on this computer.
+    assert.ok(specs.some((row) => row.id === 'antigravity-skills'), specs[0].presentation.host);
     assert.ok(specs.filter((row) => /toolkit-plugin|claude-setting|antigravity-skills/.test(row.id)).every((row) => row.section === 'Toolkit in your coding apps'));
   }
 });

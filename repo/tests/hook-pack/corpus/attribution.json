@@ -41,6 +41,48 @@
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
       "expect": { "decision": "allow" },
       "status": "pass"
+    },
+    {
+      "id": "ATTR.store-raw-push",
+      "source": "C1 UAT 12 Nov: a raw push in the evidence store ran with no prompt",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push origin feature" } },
+      "fixture": { "repo": { "governance": "undecided", "name": "TRANSPORT-ai-agent-toolkit", "branch": "feature", "cached_binding_store": true } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "A programme binding cached on this computer names this repository as its evidence store, so a raw push to it is refused and the agent is pointed at the store command."
+    },
+    {
+      "id": "ATTR.store-raw-push-git-dir",
+      "source": "G2 review of the store push check: --git-dir",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git --git-dir={work}/.git push origin feature" } },
+      "fixture": { "repo": { "governance": "undecided", "name": "TRANSPORT-ai-agent-toolkit", "branch": "feature", "cached_binding_store": true } },
+      "expect": { "decision": "deny" },
+      "status": "pass"
+    },
+    {
+      "id": "ATTR.store-push-dry-run",
+      "source": "G2 review of the store push check: no false blocks",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git push --dry-run origin feature" } },
+      "fixture": { "repo": { "governance": "undecided", "name": "TRANSPORT-ai-agent-toolkit", "branch": "feature", "cached_binding_store": true } },
+      "expect": { "decision": "allow" },
+      "status": "pass",
+      "note": "A dry run sends nothing, so the store push check does not judge it."
+    },
+    {
+      "id": "ATTR.store-commit",
+      "source": "G2 review of the store push check: no false blocks",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": { "tool_name": "Bash", "tool_input": { "command": "git commit -m \"Fix push logic notes\"" } },
+      "fixture": { "repo": { "governance": "undecided", "name": "TRANSPORT-ai-agent-toolkit", "branch": "feature", "cached_binding_store": true } },
+      "expect": { "decision": "allow" },
+      "status": "pass"
     }
   ]
 }

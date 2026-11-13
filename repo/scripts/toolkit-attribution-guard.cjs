@@ -14,6 +14,10 @@
 // GIT_CONFIG_* environment variables, remote.*.push or remote.*.mirror settings, git aliases, scripts and programs that run git themselves,
 // a cd that is not its own command in the same line, and commands nested more than two shells deep.
 //
+// It refuses any raw `git push` to an evidence store that an enabled merged binding cached on this
+// computer names (a delete included, a dry run excepted): store work goes through toolkit-store.cjs,
+// which checks the store itself. With no cached binding the push is not judged here.
+//
 // Last, a `git push` or `gh pr create` that passed those checks is refused when what it would send
 // carries a credential (toolkit-push-check.cjs), including what a `git commit`
 // earlier in the same command could add. A push whose folder cannot be found is refused. When the step
@@ -24,7 +28,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { SHELLS, ShellCall, absoluteShellPath, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { STORE_PUSH_MESSAGE, SHELLS, ShellCall, absoluteShellPath, githubSlug, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 
 const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
@@ -91,7 +95,7 @@ function withVariables(commands, shell = null) {
 
 // The force-push check reads location commands by their last non-option folder word. -Path and
 // -LiteralPath name the following word, while flags such as -P, -L, /d and -PassThru do not.
-const LOCATION_COMMAND = /^(?:cd|pushd|chdir|set-location|sl)$/i;
+const LOCATION_COMMAND = /^(?:cd|pushd|chdir|set-location|sl|push-location)$/i;
 function locationTarget(words) {
   return words.slice(1).filter((word) => !word.startsWith('-') && !/^\/d$/i.test(word)).pop() || '';
 }
@@ -233,9 +237,16 @@ function gitCommand({ words }, root) {
   let base = root;
   let absolute = false;
   let directories = 0;
+  // GIT_DIR= set for this one command, or --git-dir: the repository it runs on (read by the store check).
+  let gitDir = null;
+  for (const word of words.slice(0, start)) if (/^GIT_DIR=/.test(word)) gitDir = word.slice(8);
   for (let index = start + 1; index < words.length; index += 1) {
     const word = words[index];
-    if (word === '-c' || word === '--config-env') index += 1;
+    if (word === '--git-dir' || word.startsWith('--git-dir=')) {
+      const value = word === '--git-dir' ? words[++index] : word.slice(10);
+      if (value === undefined) return null;
+      gitDir = value;
+    } else if (word === '-c' || word === '--config-env') index += 1;
     else if (word.startsWith('--config-env=') || (word.startsWith('-c') && word.length > 2)) continue;
     else if (word === '-C' || word.startsWith('-C')) {
       const value = word === '-C' ? words[++index] : word.slice(2);
@@ -246,7 +257,7 @@ function gitCommand({ words }, root) {
       const value = word === '--work-tree' ? words[++index] : word.slice(12);
       if (value) { base = shellPath(base, value); absolute ||= absoluteShellPath(value); }
     } else if (GIT_VALUE_OPTIONS.has(word)) index += 1;
-    else if (!word.startsWith('-')) return { base, absolute, sub: word, args: words.slice(index + 1) };
+    else if (!word.startsWith('-')) return { base, absolute, sub: word, args: words.slice(index + 1), ...(gitDir ? { gitDir: shellPath(base, gitDir) } : {}) };
   }
   return { base, absolute, sub: null, args: [] };
 }
@@ -309,22 +320,28 @@ function governanceEnabled(root, registryOptions) {
 function repositoryKind(folder, cache, registryOptions = {}) {
   if (cache.has(folder)) return cache.get(folder);
   let answer = { checked: false, store: false };
+  const current = repositoryRoot(folder);
+  if (current) {
+    answer = {
+      checked: fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
+        || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md')))
+        || governanceEnabled(current, registryOptions),
+      store: [...gitConfigText(current).matchAll(/^\s*url\s*=\s*(.+)$/gim)].some((match) => storeUrl(match[1])),
+    };
+  }
+  cache.set(folder, answer);
+  return answer;
+}
+
+// The nearest folder at or above `folder` with a .git entry, or null.
+function repositoryRoot(folder) {
   for (let current = folder, depth = 0; depth < 64; depth += 1) {
-    if (fs.existsSync(path.join(current, '.git'))) {
-      answer = {
-        checked: fs.existsSync(path.join(current, '.github', 'personal-data-guard.json'))
-          || /BEGIN TOOLKIT-GOVERNED-RULES\b/.test(readSmallFile(path.join(current, 'AGENTS.md')))
-          || governanceEnabled(current, registryOptions),
-        store: [...gitConfigText(current).matchAll(/^\s*url\s*=\s*(.+)$/gim)].some((match) => storeUrl(match[1])),
-      };
-      break;
-    }
+    if (fs.existsSync(path.join(current, '.git'))) return current;
     const parent = path.dirname(current);
     if (parent === current) break;
     current = parent;
   }
-  cache.set(folder, answer);
-  return answer;
+  return null;
 }
 
 // Returns the refusal reason, or '' when the command may run. A quoted command handed to a
@@ -332,12 +349,23 @@ function repositoryKind(folder, cache, registryOptions = {}) {
 // `registryOptions` is for tests (the governance decisions file to read).
 // `shell` is the shell the command runs in when the host says (shellOf), else null.
 function forceRefusal(command, cwd, depth = 0, registryOptions = {}, shell = null) {
+  const cache = new Map();
+  return eachGitCommand(command, cwd, depth, shell, (git) => {
+    if (!forcePush(git)) return '';
+    const kind = repositoryKind(git.base, cache, registryOptions);
+    const target = git.args.find((word) => !word.startsWith('-'));
+    return kind.checked || kind.store || storeUrl(target) ? FORCE_MESSAGE : '';
+  });
+}
+
+// Calls `judge(git)` for each git command in a shell command line, with the folder it runs in, and
+// returns the first refusal (a git -C limit refusal included), or ''. A cd earlier in the same line
+// moves the folder; a quoted command handed to a shell is read too, up to two levels deep.
+function eachGitCommand(command, cwd, depth, shell, judge) {
   const text = String(command || '');
   if (text.length > MAX_COMMAND_CHARS || !/\bgit\b/i.test(text)) return '';
   let root = cwd || process.cwd();
-  const cache = new Map();
   for (const current of withVariables(shellCommands(text), shell)) {
-    // A cd earlier in the same command line moves the folder later git commands run in.
     if (LOCATION_COMMAND.test(current.words[0])) {
       const target = locationTarget(current.words);
       if (target) root = shellPath(root, target);
@@ -345,21 +373,80 @@ function forceRefusal(command, cwd, depth = 0, registryOptions = {}, shell = nul
     }
     const git = gitCommand(current, root);
     if (git?.refusal) return git.refusal;
-    if (git && forcePush(git)) {
-      const kind = repositoryKind(git.base, cache, registryOptions);
-      const target = git.args.find((word) => !word.startsWith('-'));
-      if (kind.checked || kind.store || storeUrl(target)) return FORCE_MESSAGE;
-    }
+    const refused = git && git.sub ? judge(git) : '';
+    if (refused) return refused;
     if (depth < 2 && SHELLS.test(current.words[0])) {
       for (const word of current.words.slice(1)) {
         if (/\s/.test(word) && /\bgit\b/i.test(word)) {
-          const nested = forceRefusal(word, root, depth + 1, registryOptions, null);
+          const nested = eachGitCommand(word, root, depth + 1, null, judge);
           if (nested) return nested;
         }
       }
     }
   }
   return '';
+}
+
+// ---- raw pushes to a bound evidence store ------------------------------------------------------
+
+// STORE_PUSH_MESSAGE and githubSlug live in toolkit-shell-call.cjs, shared with the merge hold.
+
+// The url and pushurl values of each remote in the repository's own config, by remote name.
+function remoteUrls(configText) {
+  const remotes = new Map();
+  let name = null;
+  for (const line of configText.split(/\r?\n/)) {
+    const section = /^\s*\[\s*([^\s\]"]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]/.exec(line);
+    if (section) { name = section[1].toLowerCase() === 'remote' && section[2] !== undefined ? section[2] : null; continue; }
+    const value = name !== null && /^\s*(?:url|pushurl)\s*=\s*(.+?)\s*$/i.exec(line);
+    if (value) remotes.set(name, [...(remotes.get(name) || []), value[1].replace(/^"(.*)"$/, '$1')]);
+  }
+  return remotes;
+}
+
+// Where a push may go: the first word after its options (a remote name or URL) and --repo's value.
+// git takes the word when both are given; both are judged, so either one naming a store refuses.
+function pushRemoteWords(args) {
+  const found = [];
+  let positional = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const word = args[index];
+    if (word === '--') { if (!positional && args[index + 1]) found.push(args[index + 1]); break; }
+    if (word === '--repo') { if (args[index + 1]) found.push(args[index + 1]); index += 1; continue; }
+    if (word.startsWith('--repo=')) { found.push(word.slice(7)); continue; }
+    if (PUSH_VALUE_OPTIONS.has(word) || word === '-o') { index += 1; continue; }
+    if (!word.startsWith('-') && !positional) { positional = true; found.push(word); }
+  }
+  return found;
+}
+const dryRunPush = (args) => args.some((word) => word === '--dry-run' || (/^-[A-Za-z]+$/.test(word) && word.includes('n') && !word.includes('o')));
+
+// The evidence stores (lower-case owner/name) named by an enabled merged binding cached on this
+// computer, at any freshness. None when the cache cannot be read: the push then runs as before.
+function boundStores(registryOptions = {}) {
+  try { return require('./toolkit-governance-state.cjs').evidenceStoreRepositories(registryOptions).stores; } catch { return new Set(); }
+}
+
+// Refuses a git push (a delete or a push of any branch included, a dry run excepted) whose target is
+// an evidence store bound on this computer: the named remote's url and pushurl, a URL given in its
+// place (--repo included), or every remote of the repository when none is named; --git-dir and a
+// GIT_DIR= prefix name the repository read. Only bound stores count, so a
+// computer or container with no cached binding behaves as before. Reads git config files only.
+function storePushRefusal(command, cwd, depth = 0, registryOptions = {}, shell = null) {
+  let stores = null;
+  return eachGitCommand(command, cwd, depth, shell, (git) => {
+    if (git.sub !== 'push' || dryRunPush(git.args)) return '';
+    stores ||= boundStores(registryOptions);
+    if (!stores.size) return '';
+    const words = pushRemoteWords(git.args);
+    // --git-dir or GIT_DIR names the repository itself: its config, else the working folder's.
+    let config = '';
+    if (git.gitDir) config = readSmallFile(path.join(git.gitDir, 'config')) || gitConfigText(git.gitDir) || gitConfigText(path.dirname(git.gitDir));
+    else { const root = repositoryRoot(git.base); config = root ? gitConfigText(root) : ''; }
+    const remotes = remoteUrls(config);
+    const urls = words.length ? words.flatMap((word) => remotes.get(word) || [word]) : [...remotes.values()].flat();
+    return urls.some((url) => stores.has(githubSlug(url))) ? STORE_PUSH_MESSAGE : '';
+  });
 }
 
 // The value of a gh option given as `--name value`, `--name=value`, `-X value` or `-Xvalue`.
@@ -560,8 +647,8 @@ function attributionDecision(input, options = {}) {
   const folderConfirmed = !(options.sessionFolderOnly && !call.folders.length);
   // `options.host` is set by the hook entry point ('claude' or 'codex'), never read from the payload.
   const shell = shellOf(input, options.host);
-  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || shellReadings(shell).map((reading) => forceRefusal(command, call.folder, 0, {}, reading)).find(Boolean) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed, shell })));
+  const reason = call.refusal() || (command && (attributionRefusal(command, call.folder) || shellReadings(shell).map((reading) => forceRefusal(command, call.folder, 0, {}, reading) || storePushRefusal(command, call.folder, 0, {}, reading)).find(Boolean) || outgoingRefusal(command, call.folder, { ...options, folderConfirmed, shell })));
   return reason ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } } : {};
 }
 
-module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, FORCE_MESSAGE, MESSAGE, attributionDecision, attributionRefusal, forceRefusal, hasAttribution, outgoingChanges, outgoingRefusal, repositoryKind });
+module.exports = Object.freeze({ ATTRIBUTION_PATTERNS, FORCE_MESSAGE, MESSAGE, STORE_PUSH_MESSAGE, storePushRefusal, attributionDecision, attributionRefusal, forceRefusal, hasAttribution, outgoingChanges, outgoingRefusal, repositoryKind });

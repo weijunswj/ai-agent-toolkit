@@ -277,9 +277,15 @@ function quotePath(file, label) {
   return `"${file}"`;
 }
 
+// The task's own stop-after limit: one minute past the scheduled job's 55-minute work budget, for
+// its bookkeeping, and before the next hourly start. Tasks registered before carry 30 minutes.
+const TASK_TIME_LIMIT_MINUTES = 56;
+const EARLIER_TIME_LIMIT_MINUTES = 30;
+const timeLimit = definition => definition.time_limit_minutes ?? TASK_TIME_LIMIT_MINUTES;
+
 function definitionDigest(definition) {
   const { execute, arguments: args, working_directory: workingDirectory, schedule, purpose } = definition;
-  return crypto.createHash('sha256').update(JSON.stringify({ execute, args, workingDirectory, schedule, purpose, settings: 'v1 interactive start-when-available ignore-new 30m battery' })).digest('hex').slice(0, 12);
+  return crypto.createHash('sha256').update(JSON.stringify({ execute, args, workingDirectory, schedule, purpose, settings: `v1 interactive start-when-available ignore-new ${timeLimit(definition)}m battery` })).digest('hex').slice(0, 12);
 }
 
 // { folder, repository, wanted: [definitions], skipped: [{ job, reason }] } for a checkout.
@@ -373,7 +379,7 @@ if ($p.schedule.kind -eq 'hourly') {
 } else {
   $trigger = New-ScheduledTaskTrigger -Weekly -WeeksInterval 1 -DaysOfWeek $p.schedule.day -At $p.schedule.at
 }
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes $p.time_limit_minutes) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
 $task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description $p.description
 Register-ScheduledTask -TaskPath $path -TaskName $p.name -InputObject $task -Force | Out-Null
@@ -432,10 +438,16 @@ function powerShellScheduler(options = {}) {
       if (previous && !previous.definition_xml) throw new WindowsTasksError('existing task has no exact XML readback; nothing replaced', 1);
       return ps('register', {
       folder: definition.folder, name: definition.name, execute: definition.execute, arguments: definition.arguments, working_directory: definition.working_directory,
-      schedule: definition.schedule, description: definition.description, marker_prefix: `[toolkit-task v1 id=${definition.id} `, expected_xml: previous?.definition_xml || null, expect_absent: !previous,
+      schedule: definition.schedule, description: definition.description, time_limit_minutes: timeLimit(definition), marker_prefix: `[toolkit-task v1 id=${definition.id} `, expected_xml: previous?.definition_xml || null, expect_absent: !previous,
       });
     },
     unregister: (folder, name, id, previous) => ps('unregister', { folder, name, marker: `[toolkit-task v1 id=${id} `, expected_xml: previous?.definition_xml || null }),
+    // A task the launcher disabled carries its fixed description instead of the marker; it is removed
+    // only while it is still exactly the recorded snapshot.
+    unregisterDisabled: (folder, name, previous) => {
+      if (!previous?.definition_xml) throw new WindowsTasksError('disabled task has no exact XML readback; left alone', 1);
+      return ps('unregister', { folder, name, marker: require('./toolkit-task-launcher.cjs').DISABLED_DESCRIPTION, expected_xml: previous.definition_xml });
+    },
     restore: (definition, previous, written) => ps('restore', { folder: definition.folder, name: definition.name, previous_xml: previous.definition_xml, expected_xml: written.definition_xml }),
     removeFolderIfEmpty: folder => ps('remove-folder', { folder }),
     start: (folder, name) => ps('start', { folder, name }),
@@ -895,7 +907,7 @@ function recognisedEarlier(live, recorded, definition) {
   if (recorded.enrolled) return false; // A stored baseline must always match independently.
   return EARLIER_JOBS.filter(old => old.job === definition.job).some(old => {
     const legacyRunner = path.win32.join(definition.toolkit_root, 'repo', 'scripts', 'toolkit-scheduled-job.cjs');
-    const candidate = { ...definition, working_directory: definition.toolkit_root, purpose: old.purpose, schedule: old.schedule, arguments: definition.arguments.replace(`${quotePath(definition.launcher, 'launcher')} ${quotePath(definition.toolkit_root, 'root')}`, quotePath(legacyRunner, 'runner')) };
+    const candidate = { ...definition, time_limit_minutes: EARLIER_TIME_LIMIT_MINUTES, working_directory: definition.toolkit_root, purpose: old.purpose, schedule: old.schedule, arguments: definition.arguments.replace(`${quotePath(definition.launcher, 'launcher')} ${quotePath(definition.toolkit_root, 'root')}`, quotePath(legacyRunner, 'runner')) };
     const { execute, arguments: args, working_directory: workingDirectory, schedule } = candidate;
     candidate.def = old.withoutPurpose ? crypto.createHash('sha256').update(JSON.stringify({ execute, args, workingDirectory, schedule, settings: 'v1 interactive start-when-available ignore-new 30m battery' })).digest('hex').slice(0, 12) : definitionDigest(candidate);
     candidate.description = `${definition.folder}: ${JOBS[definition.job].task}. ${old.purpose} [toolkit-task v1 id=${definition.id} def=${candidate.def}]`;
@@ -914,7 +926,7 @@ function verifiedDefinition(live, definition) {
   const tr = triggers[0];
   if (live.principal && (live.principal.logon_type !== 'Interactive' || live.principal.run_level !== 'Limited')) return false;
   if (live.settings && (!live.settings.enabled || !live.settings.start_when_available || live.settings.multiple_instances !== 'IgnoreNew'
-    || live.settings.execution_time_limit !== 'PT30M' || live.settings.disallow_start_if_on_batteries || live.settings.stop_if_going_on_batteries)) return false;
+    || live.settings.execution_time_limit !== `PT${timeLimit(definition)}M` || live.settings.disallow_start_if_on_batteries || live.settings.stop_if_going_on_batteries)) return false;
   return definition.schedule.kind === 'hourly' ? /Daily/.test(tr.kind) && tr.interval === 'PT1H' && (tr.duration === `PT${definition.schedule.hours}H` || definition.schedule.hours === 24 && tr.duration === 'P1D')
     : definition.schedule.kind === 'daily' ? /Daily/.test(tr.kind) && !tr.interval && (tr.days_interval === undefined || Number(tr.days_interval) === 1)
     : /Weekly/.test(tr.kind) && Number(tr.days_of_week) === 2 && (tr.weeks_interval === undefined || Number(tr.weeks_interval) === 1);
@@ -1020,14 +1032,13 @@ function applyCommand(desired, { toolkitRoot = path.resolve(__dirname, '..', '..
 
 const ACTION_TEXT = Object.freeze({ create: 'to create', update: 'to update in place', retire: 'to retire after replacement', 'owner-choice-required': 'owner choice required', current: 'up to date', refused: 'refused' });
 
-function describePlan(plan, { command = null, applied = false, summaryOnly = false } = {}) {
+function describePlan(plan, { command = null, applied = false } = {}) {
   const lines = [`Windows scheduled tasks for ${plan.repository || 'this repository'} in \\${plan.folder}\\:`];
   if (plan.assignment?.collision) lines.push(`Minute ${String(plan.assignment.minute).padStart(2, '0')} is shared: more than nine repositories are enrolled on this computer.`);
   for (const item of plan.items) {
     const d = item.definition;
     const state = applied ? (['refused', 'owner-choice-required'].includes(item.action) ? ACTION_TEXT[item.action] : item.done === false ? `failed: ${item.error}` : item.action === 'current' ? 'up to date' : item.action === 'create' ? 'created' : item.action === 'retire' ? item.recovery ? 'reconciled by owner-authorised recovery' : 'retired by Toolkit' : 'updated') : ACTION_TEXT[item.action];
     lines.push(`- ${d.name} (${d.schedule_text}): ${state}. ${d.purpose}`);
-    if (summaryOnly) continue;
     if (item.reason) lines.push(`  ${item.reason}`);
     if (item.choice) {
       lines.push(`  Task ${item.choice.task}; operation: ${item.choice.operation}; changed: ${item.choice.changed.join(', ')}; observation: ${item.choice.fingerprint}. Use --task-choice keep|replace --task ${item.choice.task} --observed ${item.choice.fingerprint} --answer-ref <actual-owner-answer-reference>. Flags attest an actual owner answer; they cannot prove who answered.`);
@@ -1040,8 +1051,7 @@ function describePlan(plan, { command = null, applied = false, summaryOnly = fal
   }
   if (plan.coverage) lines.push(plan.coverage);
   if (plan.approval) lines.push(`Approval: ${plan.approval}.`);
-  if (summaryOnly) lines.push('Next step: Run the direct task plan for details and commands.');
-  else if (plan.next_step) lines.push(`Next step: ${plan.next_step}`);
+  if (plan.next_step) lines.push(`Next step: ${plan.next_step}`);
   for (const note of plan.history_notes || []) lines.push(note);
   for (const item of plan.skipped) lines.push(`- ${item.name}: not registered, because ${item.reason}.`);
   if (!applied && command && / --(?:folder|repair-owned)\b/.test(command)) lines.push('This folder override or repair is outside standing approval. Explicit approval must name the affected fixed tasks, paths and changes.');
@@ -1165,7 +1175,7 @@ function installLauncher(home) {
   if (fs.readFileSync(file, 'utf8') !== source) throw new WindowsTasksError('Task launcher readback failed', 1);
   return file;
 }
-module.exports = { launcherPath, installLauncher,
+module.exports = { TASK_TIME_LIMIT_MINUTES, launcherPath, installLauncher,
   WindowsTaskOwner, startTask, repositoryOf, readTaskObservation, readLocations, mainCheckout, samePath, enrolledDefinition, verifiedDefinition, JOBS, FOLDER, MARKER, STATUS_CONTROL_C_EXIT, WindowsTasksError, defaultFolder, nameProblem, taskName, taskId, parseMarker, readCheckout, folderForCheckout,
   describeTriggers, describeResult, describeSchedule, desiredTasks, definitionDigest, powerShellScheduler, runPowerShell, SCRIPTS, planTasks, applyTasks, firstRun,
   removeTasks, adoptTask, applyCommand, powerShellPath, describePlan, parseArgs, main,

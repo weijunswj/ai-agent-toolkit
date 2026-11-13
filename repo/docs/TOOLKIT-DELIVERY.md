@@ -53,7 +53,7 @@ G0 is a strong reasoning lead. It walks the real happy path and checks the actua
 
 G1 receives the whole approved scope, builds and integrates it, runs meaningful tests, demonstrates it and resolves ordinary UAT feedback and defects without another admission. The user owns the outcome, material scope and acceptance; the builder owns the plan within them and never silently changes scope, trust boundaries, paid services, destructive effects or acceptance. Design follows the gate rules' building policy, every change follows the global change-local hygiene law, and work finishes before stopping as the global Shipping section says. Before asking for review, the builder self-checks its diff against the gate rules' G2 review section in the same session, fixes what it finds and notes the result in the PR; this is not a review and replaces none.
 
-G1 reaches the actual consumer boundary: mocks never prove an installation or operation they did not exercise, and it reports what ran, failed and was not exercised. UAT depth follows the tier and the gate rules' UAT section: RISKY work gets agent UAT plus owner UAT for any final-product steps; otherwise owner UAT runs when the user's surface changes. User acceptance covers only the final product: features the user runs and sees, such as hook setup in Codex or Claude Code, a quote run or a design run. Internals (governance, programme state, gate plumbing) and everything CI (Windows runners included), automated tests, G2 review and agent UAT prove are accepted objectively and listed beside the owner steps with the passing check that covers it; when no final-product step changed, UAT is recorded as not required. Silence is not approval.
+G1 reaches the actual consumer boundary: mocks never prove an installation or operation they did not exercise, and it reports what ran, failed and was not exercised. UAT depth follows the tier and the gate rules' UAT section: RISKY work gets agent UAT plus owner UAT for any final-product steps; otherwise owner UAT runs when the user's surface changes. User acceptance covers only the final product: features the user runs and sees, such as hook setup in Codex or Claude Code, a quote run or a design run. Internals (governance, programme state, gate plumbing) and everything CI (Windows runners included), automated tests, G2 review and agent UAT prove are accepted objectively and listed beside the owner steps with the passing check that covers it; when no final-product step changed, UAT is recorded as not required. Silence is not approval. Owner UAT runs after the merge, on the installed build, and never holds it; the task stays open until the owner passes it (gate rules).
 
 ## 7. Context and fresh sessions
 
@@ -61,7 +61,7 @@ There is no handover packet: state lives in the pushed branch, the PR or brief, 
 
 ## 8. G2 Review and finding disposition
 
-G2 starts after G1's working version and any required user UAT are accepted. Review depth follows the risk tier: RISKY work gets the full G2, NORMAL one independent review and LIGHT the builder's diff read. G2 uses fresh independent reviewer contexts, the actual candidate, the complete approved scope and its evidence. G2 does not spawn subagents. Every assigned reviewer independently reviews the complete approved scope and implementation, with execution, evidence, installation, authority, security, privacy and recovery; reviewers never split scope from execution. The selected stack fixes the set (section 10), and the gate rules hold launch ownership, delta reviews and rechecks.
+G2 starts after G1's working version is accepted; user UAT follows the merge. Review depth follows the risk tier: RISKY work gets the full G2, NORMAL one independent review and LIGHT the builder's diff read. G2 uses fresh independent reviewer contexts, the actual candidate, the complete approved scope and its evidence. G2 does not spawn subagents. Every assigned reviewer independently reviews the complete approved scope and implementation, with execution, evidence, installation, authority, security, privacy and recovery; reviewers never split scope from execution. The selected stack fixes the set (section 10), and the gate rules hold launch ownership, delta reviews and rechecks.
 
 | Disposition | Required explanation and action |
 |---|---|
@@ -156,7 +156,7 @@ Test the actual supported controller/launcher continuation path when section 7 r
 1. Read the brief, this contract and the parent plan; resolve only changed evidence.
 2. Establish a single writer, run G0 against the actual environment and name the risk tier.
 3. Launch one G1 for the complete scope through a launcher that enforces the exact pinned-stack route for the role, not a prompt that merely names it.
-4. Get the UAT and review the tier requires, return genuine blockers as one correction, then complete the authorised merge, activation and installed proof.
+4. Get the agent UAT and review the tier requires, return genuine blockers as one correction, then complete the authorised merge, the release batch's real-host round, the owner's UAT on the installed build, activation and installed proof.
 
 ## 20. History
 

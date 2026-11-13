@@ -192,6 +192,9 @@ class ToolkitGovernanceCli {
     if (result.no_force_push_ruleset) lines.push(`No-force-push ruleset: ${result.no_force_push_ruleset.status}`);
     if (result.default_branch_protection) lines.push(`Default-branch protection: ${result.default_branch_protection.status}`);
     if (result.dependency_security) lines.push(`Dependency and security settings: ${result.dependency_security.status}`);
+    if (result.cloud_jobs) {
+      lines.push(...require('./toolkit-cloud-jobs.cjs').guideLines(result.cloud_jobs));
+    }
     lines.push('Prompt-hold enforcement:');
     for (const [host, status] of Object.entries(result.enforcement)) lines.push(`- ${host}: ${status.status} (${status.reason})`);
     this.#print(json, result, lines);
@@ -281,9 +284,12 @@ class ToolkitGovernanceCli {
   // The governance App steps that follow a published decision: setup for yes, removal for no.
   #appLines(proposal, binding) {
     const slug = proposal.repository;
-    const state = governanceApp.presence(slug, { reader: this.#appReader || governanceApp.ghReader,
-      offline: !this.#appReader && (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1') });
-    if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state);
+    const read = { reader: this.#appReader || governanceApp.ghReader,
+      offline: !this.#appReader && (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1') };
+    const state = governanceApp.presence(slug, read);
+    // The owner type picks the App page, so it is read only when the setup steps will show.
+    if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state,
+      state.variable === 'found' || state.secret === 'found' ? null : governanceApp.ownerType(slug, read));
     const others = governance.enabledRepositories(this.#registryOptions).filter(name => name.toLowerCase() !== slug.toLowerCase());
     return governanceApp.removalLines(slug, state, others);
   }

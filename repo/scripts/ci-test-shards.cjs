@@ -207,7 +207,15 @@ function verifyCiSummaries({ manifest, discovered, summaries, needs }) {
       errors.push(`a summary names unknown system ${summary.system}`);
       continue;
     }
-    if (legs.has(summary.shard)) errors.push(`${summary.system} shard ${summary.shard} reported twice`);
+    // A re-run of a shard adds a summary with a higher run attempt, which replaces the older one;
+    // two summaries of one shard from the same attempt (or with none recorded) are an error.
+    const earlier = legs.get(summary.shard);
+    if (earlier) {
+      const [was, now] = [earlier.run_attempt, summary.run_attempt];
+      if (!(Number.isInteger(was) && Number.isInteger(now) && was !== now)) errors.push(`${summary.system} shard ${summary.shard} reported twice`);
+      else if (now > was) legs.set(summary.shard, summary);
+      continue;
+    }
     legs.set(summary.shard, summary);
   }
   for (const system of SYSTEMS) {
@@ -303,15 +311,18 @@ function testJobText(system, ids) {
     "          python-version: '3.12'",
     '',
     '      - name: Run test shard',
-    `        run: node repo/scripts/run-tests.cjs --shard \${{ matrix.shard }} --os ${system} --temp-root "\${{ runner.temp }}/tests" --summary "\${{ runner.temp }}/summary/test-summary-\${{ matrix.shard }}.json"`,
+    `        run: node repo/scripts/run-tests.cjs --shard \${{ matrix.shard }} --os ${system} --temp-root "\${{ runner.temp }}/tests" --summary "\${{ runner.temp }}/summary/test-summary-\${{ matrix.shard }}-attempt-\${{ github.run_attempt }}.json"`,
     '',
-    // A failed shard still uploads its summary, so the validate job names the failed tests.
+    // A failed shard still uploads its summary, so the validate job names the failed tests. Each run
+    // attempt uploads its own artifact: a re-run of a failed shard adds a second one, and the
+    // validate job keeps the newest attempt of each shard (two artifacts of one name would leave it
+    // reading whichever the download picked, the failed one included).
     '      - name: Upload test summary',
     '        if: ${{ !cancelled() }}',
     '        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2',
     '        with:',
-    '          name: test-summary-${{ matrix.shard }}',
-    '          path: ${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}.json',
+    '          name: test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}',
+    '          path: ${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json',
     '          if-no-files-found: error',
     '          retention-days: 7',
   ].join('\n');
@@ -515,7 +526,9 @@ const WORKFLOW_HEADER = [
   '# validate job runs after every shard, also when one failed: its "Run validation" step runs the',
   '# repository checks, fails any test file over its time budget (check-test-durations.cjs), and then',
   '# proves from the shard summaries that each system ran every test file once with no failure. A',
-  '# failed, cancelled or skipped shard fails it. The tests-clock-ahead job runs the test files that',
+  '# failed, cancelled or skipped shard fails it. Each run attempt uploads its own summary artifact',
+  '# and the check keeps the newest attempt of each shard, so re-running a failed shard can clear',
+  '# validate. The tests-clock-ahead job runs the test files that',
   '# pin a calendar date with Node\'s clock 400 days ahead, so a test that only passes near the date',
   '# it pins fails now rather than months later; validate waits for it. The hook-pack job runs the',
   '# full pack on Linux; hook-pack-windows runs every family separately. Both are required by validate.',

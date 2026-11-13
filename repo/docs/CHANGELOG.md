@@ -1,18 +1,342 @@
 # Toolkit Changelog
 
-## 3.71.0 (Merge by card in Claude Code)
+## 3.91.10
 
-### Added
+### Fixed
 
-- In Claude Code on this computer, a tap can replace typed `merge N`. When the merge hold refuses a merge that names its full head SHA, it hands back one exact card: "Merge owner/name#N at <short SHA>?" with Merge and Not now. The owner's tap on Merge approves that pull request at that commit, once. Not now approves nothing and withdraws an unused approval for it.
-- The card counts only in a chat the owner started, shown exactly as given, as a plain tap. A changed card, a card asked with its answer filled in, words typed into Other, an answer the host marks as idle, a follow-up, typed text or noted, an answer with a field the reader does not know, and a launched, resumed or unmarked session record nothing. Nothing is refused for the card's sake, so ordinary questions are untouched.
-- A card event whose environment holds `TOOLKIT_HOST_SESSION` records nothing: the host's hook process carries none, and a session's shell commands do. Two command-line shapes are refused like a fed prompt, read from the text alone: one that names a hook script (or a file named after one, such as its tests) and a tool event (`PreToolUse`, `PostToolUse` or the card functions) and also runs node, bun or deno anywhere, unless the word straight after it is `--test` or `test`; and one that names a hook script and has a command starting `env` whose leading words (dash options or NAME=value) include `-i`, `--ignore-environment` or `-` as a word of its own. Ordinary work of either shape is refused too, such as a search or commit message about the hooks chained with any node run; run those as separate commands.
-- Known limits: this is a tripwire, not a lock. Any command or script that starts a hook script without `TOOLKIT_HOST_SESSION` can still feed a card event in the owner's own chat, because the refusals catch only those two exact shapes (a wrapper before `env`, other `env` option spellings, clearing the variable another way, a node one-liner or a saved script all get through), as it can already feed typed `merge N`. A host that answers the card itself, with no tap, is not told apart either: a permission answer from an SDK callback, a permission hook (from any plugin or from settings), a permission-prompt tool or a launcher, a reply a connected client sends to a background session, and an automatic answer the host does not mark.
+- **Programme sweep docs:** the bridge doc no longer promises a footer-skip warning that a run never shows. When the refresh skips or fails, the footer step does not run, and the refresh's own warning, notice or failure says why.
+- **Programme file reading tests:** the gate's parity table now covers a version 1 file carrying `parent_lifecycle`, and the `toolkit permissions` comment about the Codex block sits above its own code again.
+
+## 3.91.9
+
+### Fixed
+
+- **New session after an update:** `setup toolkit` and `refresh toolkit` now end with a `## Start a new session` line naming each app (Claude Code, Codex, Antigravity) whose skill files or rules the run changed, because sessions already open keep using the old files; Codex, for one, keeps the old plugin folder's skill paths. Nothing is printed when the run changed none.
+
+## 3.91.8
+
+### Fixed
+
+- **Skill descriptions in Codex:** Codex lists each skill with only about the first 200 characters of its description, so a trigger written further down was never seen there. `remove toolkit` and its full removal plan now open the setup skill's description (Codex had asked whether "remove" meant the computer, the repository or governance instead of showing the plan), and the Toolkit env and release-readiness skills put their trigger phrases first too. A check now keeps every quoted phrase or command in a skill description within the first 195 characters, and every description within 1,024 characters (the programme reconciler's was 1,051).
+
+## 3.91.7
+
+### Fixed
+
+- **Programme file reading:** the cloud sweep gate and `toolkit permissions` now read the programme file the same way the sweep does. A hand-edited version 1 file that also carries a version 2 key, such as `governance: "disabled"`, no longer counts as governance on: the gate skips with a warning that the file is not valid, and `toolkit permissions` offers no repo block.
+- **Remove Toolkit test:** the setup skill test now fails if the line allowing an app's own uninstall tool moves in front of the user's yes.
+
+## 3.91.6
+
+### Fixed
+
+- Programme Sweep: a run started by hand from a branch or tag other than the default branch now stops with one warning before any App token is minted, and footer cleaning runs only after a programme refresh that ran on the run's own commit, so a skipped or failed refresh edits no posts.
+
+## 3.91.5
+
+### Fixed
+
+- **Remove Toolkit in Codex:** `remove toolkit` always runs the full removal plan (scheduled tasks, app settings, hook records, helpers, skill copies, global rules, reinstall note and the Toolkit folder) after the user's OK. The setup skill's listing now names the plan script and says the app's own plugin uninstall tool is never the answer on its own, so a Codex session that cannot open the skill file still routes to the plan. Codex's own uninstall tool may do the Codex uninstall step once the user has said yes.
+
+## 3.91.4
+
+### Fixed
+
+- Governance App setup now links an organisation-owned repository to its organisation's "New GitHub App" page, read from the repository's owner type. A personal App cannot be installed on an organisation's repository. When the owner type cannot be read, the steps show both pages.
+- The cloud programme sweep, its gate, its merged-binding read and `toolkit permissions` now read a version 1 programme file as governance enabled, as the rest of Toolkit does. Such repositories were silently skipped.
+- Every cloud sweep skip (no programme file, governance off, invalid or oversized file, another repository named, foreign evidence store, public state branch, App not set up) and the sweep gate's skip are now one visible warning that names the repository, the reason and the fix, instead of a quiet notice.
+
+## 3.91.3
+
+### Fixed
+
+- **Setup's Antigravity question:** Once Toolkit's skills are copied into Antigravity, setup shows whether the copies match this Toolkit version ("Copied, up to date" or "Copied, N out of date"). It recommends "Keep current" when they match and "Copy and keep updated" only when some are out of date, instead of always recommending a refresh. If setup cannot read the copies, it says "Copied, could not check" and recommends a refresh, and the copies still count as there.
+
+## 3.91.2 (fewer setup re-asks, and Antigravity in Claude Code setup)
 
 ### Changed
 
-- The order for a merge that needs the owner is now: task auto-merge when it applies, then the card, then typed `merge N`. Codex keeps typed `merge N`. In cloud sessions the governance hook runs in cloud mode, which skips the merge hold, so a Projects card there still rests on the written rules and required CI.
-- Hook pack rows may use a placeholder in an object key, so a card answer can be keyed by its question.
+- **Codex hooks no longer void setup answers:** The "Toolkit hooks in Codex" status line takes no answer, and setup never changes it, so its state is no longer bound into the setup bank reference. Turning the hooks on in Codex's `/hooks` while the table is open keeps the same bank, and your answer still applies.
+- **Antigravity in Claude Code setup:** Claude Code setup now offers "Copy Toolkit's skills into Antigravity?" too, whenever Antigravity is on the computer, as Codex setup already did. It is one folder on the computer, whichever app sets it up, so a removal run from Claude Code can be undone from Claude Code.
+
+## 3.91.1
+
+### Fixed
+
+- **Merge train build:** `toolkit-merge-train.cjs build` refuses a branch that is checked out in another worktree, before it changes anything, so a train can no longer leave another checkout out of step with its branch.
+- **Merge train body:** on a train whose UAT line waits on an owner test, members' closing lines become `Refs` lines, so the issue-closure check passes; each member's own closing line still closes its issue when the train lands.
+
+## 3.91.0 (reinstall after remove toolkit without hand repair)
+
+### Fixed
+
+- **Cloud sweep follow-up:** after its wait the follow-up starts nothing when another sweep is already queued, running or newer. It also runs when the footer step fails, and its built-in token can read contents, so the checkout works on a private repository.
+- **No paid waits:** on a private repository no runner waits an hour after a pass stopped mid-way at GitHub's hourly App limit; the hourly gate resumes it from its board note. A pass that found the limit already at the margin keeps its one follow-up, and a pass stopped by its own time limit still follows up at once.
+- **Footer cleaning at the limit:** a run that stopped at GitHub's hourly App limit skips footer cleaning, so it never spends the safety margin.
+- **No red runs on a GitHub blip:** a 5xx, a 429 or a dropped connection in the gate or the follow-up ends the run green with a notice; the next start tries again. A missing token or repository, a 401, 403 or 404, and any other error still show red.
+- **Cloud jobs contract:** the programme sweep's row names the gate workflow that holds its hourly cron, and `toolkit governance check` says the gate starts the sweep.
+- **Store push refusal:** the store command the raw-push refusal prints now includes `--store`, a path in the store and `--repo-root`, so it runs as printed from the store folder.
+- **Going back a folder:** the merge hold now reads `cd -` and `Set-Location -` as a step back to the folder before (bash's previous folder, or any folder in PowerShell's location history) instead of a folder named `-`, so `cd <store>; cd -; git push origin main` is judged in the folder the push really runs in. `cd -- -` and `Set-Location -Path -` step back too, and a bare `cd` goes home first, so `cd <repo>; cd; cd -` comes back to the repository. A push after a step back to a folder the same command never showed, after a bare `pushd`, or after `pushd +N`/`-N`, is refused with advice to name the folder.
+- **Switches are not folders:** `Push-Location <folder> -PassThru`, `-StackName <name>`, `-Path`/`-LiteralPath`, `cd -L`/`-P`, `pushd -n` and cmd's `cd /d` now give the merge hold the real folder.
+- **Timing test:** the closure scanner timing test may now grow its baseline to 2 MiB, so a fast Windows runner no longer compares a sample of under 5 ms.
+- **Re-runs clear CI:** each run attempt of a test shard uploads its own summary artifact, and the `validate` check keeps the newest attempt of each shard, so re-running a failed shard can turn `validate` green.
+- The leftover-files scan now lists the cloud sweep workflow copies in repositories with governance off, and says when one was edited by hand.
+- The cloud sweep workflows' header comments now hold both in the Toolkit and in a governed repository's copy (CI trigger, where the gate script and the refresh come from).
+- `toolkit governance check` re-renders a cloud sweep copy at its own Toolkit commit, when the checkout has it and the render is unchanged since, so a hand edit with a recomputed hash shows as drift instead of an older copy. It uses the CI workflow the copy itself names, so renaming or removing that workflow only makes the copy outdated. This covers copies pinned from this release on: the render now lives in `repo/scripts/toolkit-cloud-workflows-render.cjs`, so copies pinned before it keep the hash check until their next rules refresh.
+- The governance check's note for an out-of-date copy now says it differs from what a refresh writes (an older Toolkit commit, an action pin or the CI workflow it follows), not only that its commit is older.
+
+### Changed
+
+- **Codex hook records:** `remove toolkit` now also takes out Codex's approval records for the Toolkit hooks (`[hooks.state."ai-agent-toolkit@ai-agent-toolkit-local:..."]` in `config.toml`) and the empty Toolkit plugin cache folder, once the Codex plugin is uninstalled. It backs up the file first, and the edit must read, with Python's `tomllib`, as the old file without exactly those tables; otherwise the file is left alone with a by-hand step.
+- **Codex reinstall:** Codex setup no longer treats leftover Toolkit hook records alone as an earlier install. A computer cleaned by an older `remove toolkit` now installs the plugin without being asked for the old marketplace folder.
+- **Reinstall note:** `remove toolkit` saves a note in the kept backups (`~/.ai-agent-toolkit/backups/remove-toolkit/reinstall.json`). It names the helper stack each app had and the checkouts whose scheduled tasks it removed; no keys.
+  - `setup toolkit` puts the helper agents back for that stack where none are installed.
+  - On Windows, setup lists the removed tasks with their exact `plan` and `apply` lines for the owner's OK. It never creates the tasks itself.
+- **MCP key warning:** The removal plan lists each MCP server whose key helper runs `toolkit-env.cjs` from inside the Toolkit folder. Such a server gets no key until Toolkit is reinstalled, and its key stays in the credential store.
+
+## 3.90.0
+
+### Added
+
+- **Cloud sweep in every governed repository:** `repo/scripts/toolkit-cloud-workflows.cjs --repo <repo>` copies the Programme Sweep and its gate into a governed repository. Each copy is the Toolkit's own file, pinned to the Toolkit commit it came from, and checks the public Toolkit out into `.toolkit/` to run its scripts. The gate follows the repository's CI workflow when one is named with `--ci-workflow`. It pins only a commit on main from a checkout whose origin is the Toolkit repository, and refuses a Toolkit source checkout, a default branch other than `main`, and a same-named file that is not a Toolkit copy. Shard Timings is not copied.
+- **Governance enable and refresh:** The repository rules install or refresh adds the copies while governance is on, and the governance enable pull request carries them. `toolkit governance check` reports a missing or hand-edited copy as drift and notes one pinned to an older Toolkit commit, including one whose action pins Dependabot bumped.
+
+### Changed
+
+- **Sweep action:** The cloud sweep runs the Toolkit's scripts from its own checkout and keeps the checked-out repository as the binding and working folder, so the same steps work in a governed repository's copy.
+
+## 3.89.0 (merge trains)
+
+### Added
+
+- **Merge trains:** `repo/scripts/toolkit-merge-train.cjs` lands several reviewed pull requests with one version bump and one CI run. Each member boards at the exact head its review passed, as its own merge commit, so it keeps its own commits and review. `verify` refuses anything else in the train, `land` checks live heads, main and RISKY owner OKs and names the one head to merge, and a conflict, moved head or red CI ejects a member instead of patching the train.
+
+## 3.88.1
+
+### Fixed
+
+- Governance App setup no longer lets a second person overwrite an existing App by accident. When the repository already has the App variable or secret, setup says to reuse that App instead of offering a new one, and every printed save command stops when it cannot read the names and asks for a typed `replace` before overwriting either fixed name; any other answer, or no answer, changes nothing. A half-set repository gets a command that sets only the missing name.
+
+## 3.88.0 (remove toolkit does the full uninstall)
+
+### Changed
+
+- `remove toolkit` now removes everything Toolkit put on the computer after one OK, not only scheduled tasks and global rules: Codex's helper limit block, Claude Code's subagent limit (only while it holds Toolkit's value), the helper agent files Toolkit generated, the skill folders it copied, and last the Toolkit folder `~/.ai-agent-toolkit`, keeping `env` and the backups. The Claude Code preferences chosen at setup, such as no AI attribution, are listed and kept. The folder waits until no Toolkit plugin is installed, and the result prints the exact plan line to finish with. The plan prints each app's plugin uninstall lines, which the agent runs after the OK, and the app screen to use when the command line is missing.
+- The README's Remove section is now one command plus what stays on purpose.
+- The personal-data guard installer refuses to install into the Toolkit's own repository, and `--uninstall` removes a clone's guard hooks and puts back any hook they set aside. `--check` in a Toolkit checkout points at `--uninstall` when guard hooks are left over.
+
+## 3.87.0 (cloud sweep runs to GitHub's limit and resumes)
+
+### Changed
+
+- **Cloud sweep has no request cap of its own:** the scheduled sweep on GitHub no longer stops at 1,500 requests. It reads until GitHub's remaining hourly count for the governance App reaches a safety margin, a tenth of the hourly limit GitHub reports (never under 200), then saves where it got to, and the next run resumes with changed and new tasks first. The margin keeps room for the repository's other governance jobs. The computer's caps stay as they were.
+- **No fixed limits that can stall a big board:** the changed-issues list is read oldest change first from the last update time it reached, so a list longer than one pass can read carries on next pass instead of starting over. PR discovery's budget grows with the board (sixty requests, plus one per twenty tasks and two per task read), and the open and closed PR lists are read whole within the pass's own request budget.
+- **A calm note instead of an alarm:** when a pass stops early, the board's freshness line keeps the pass's time and adds a short note, such as "Paused at GitHub's hourly App limit; the next run picks up the 340 tasks left." The warning `⚠️ Sweep stuck` appears only when no pass has finished for six hours and the passes in those hours read fewer than ten tasks. The evidence store keeps the recent unfinished passes in `sweep-history.json` beside the lease (a pass that finishes writes nothing there), so an older sweep's lease check is unaffected.
+- **One governance App per repository:** setup and the docs now guide one GitHub App per governed repository, so each repository gets its own hourly allowance. The pre-filled "New GitHub App" link is named for the repository, within GitHub's 34-character limit. `toolkit governance check` still reads only the variable and secret names, so it cannot tell whether two repositories share an App.
+- **A near-free gate in front of the sweep:** a new gate workflow holds the hourly start and also runs on issue, comment and pull request activity from people and when a Validate run finishes. With only the built-in token it starts the sweep when the board shows a saved place to resume, when anything changed or a CI run finished since the last successful sweep, or after six quiet hours; otherwise it ends in seconds. Activity during a running sweep queues one more run behind it, unless a follow-up is already waiting to start the next one. A pass that starts with the App's hourly count already at the margin ends green with a paused note instead of a stop, and follows up once the limit has reset. Bot activity, the sweep's own included, is ignored before a runner starts.
+- **The sweep follows up on itself:** a pass that stops early after reading something starts one more run, once GitHub's hourly App limit has reset or at once after its own time limit, so a backlog keeps draining when GitHub drops an hourly start.
+- **A pass that saves nothing keeps its place:** when the state branch is busy and a pass saves nothing, the changed-issues bookmark stays where it was, so the next pass reads those changes again.
+
+## 3.86.1
+
+### Fixed
+
+- **Store push refusal wording:** the default-branch merge hold now follows `Push-Location` like `cd` and `Set-Location`, so a push to an evidence store reached that way is judged in the store's own folder and refused by the store guard with the store-command message. Before, it was judged in the starting folder and got "push to another branch and open one", which is wrong for a store and made an agent hold back the store command too. A default-branch push whose remote is a bound store not named `TRANSPORT-*` also shows the store-command message. The push stays refused either way, and a command with several refused pushes names each reason once.
+- **Folder stack:** the merge hold now goes back a folder on `popd` and `Pop-Location`, so `Push-Location <folder>; Pop-Location; git push origin main` (or the `pushd`/`popd` pair) is judged in the folder the push really runs in, and a default-branch push there is refused. A `popd` or `Pop-Location` with nothing saved in the same command leaves the folder where it is, as the shell does.
+- **Merge target after `Push-Location`:** a merge that names no repository, after a `Push-Location` in the same command, is now refused like one after `cd`, because its repository cannot be told.
+
+## 3.86.0
+
+### Changed
+
+- **Shard timings catch-all:** The Toolkit Shard Timings workflow also starts on a push to `main`, in case the daily schedule stops firing. A push run first checks whether a refresh ran in the last 24 hours and skips the refresh when one did, and only one run goes at a time.
+
+## 3.85.0
+
+### Changed
+
+- The cloud Programme Sweep now cleans the "Generated by Claude Code" footer from posts the repository owner wrote in the governed repository and its evidence store, after each refresh, so footer cleaning no longer needs a computer's sweep. It reads the last 26 hours, or further back when a manual run gives `footer_since`, and writes only counts to the run summary. Refused review-body edits warn and wait for a manual clean; any other failed edit fails the step. The evidence store token gains issues and pull requests write for this.
+- `toolkit-github-footer-sweep.cjs` takes `--author <login>` to clean one named author's posts, for a sign-in, such as a GitHub App, that is not that person.
+
+## 3.84.1
+
+### Fixed
+
+- The install check's header comment no longer says it reports Codex's Toolkit state.
+
+## 3.84.0
+
+### Added
+
+- The Toolkit Shard Timings workflow refreshes the test shard timings on GitHub once a day and when started by hand, so it no longer depends on a computer being on. Its built-in token only reads. With the governance GitHub App it opens the refresh pull request with an App token limited to contents and pull requests write, so that pull request's checks start; without the App it only reports. It never runs for pull requests or forks, and the cloud jobs contract lists it.
+
+### Changed
+
+- `refresh-shard-timings.cjs --open-pr` opens no new pull request while an earlier shard timing pull request is still open. When `TOOLKIT_SHARD_PUBLISH_TOKEN` is set, the push and the pull request use that token through environment-only git settings, never a command-line argument or saved config.
+
+## 3.83.1
+
+### Fixed
+
+- Claude no longer reports Codex's Toolkit state. Claude Code session start, a Claude app chat and Claude setup's install check stop saying that Codex runs an older Toolkit or that its Toolkit hooks are off, not reviewed or changed since approval. Codex still reports its own state in its own setup and checks.
+
+## 3.83.0
+
+### Changed
+
+- The scheduled programme sweep can now read and redraw a whole board in one pass. Its request cap is 1,500 on GitHub and 600 on a computer, where it shares the signed-in account's hourly limit. Every other refresh keeps 300. A task now starts only when its reads and the pages already owed also fit within what GitHub reports as left for the hour, above the low-remaining mark, so a larger cap never draws pages past GitHub's limit.
+- The cloud Programme Sweep workflow starts at minute 41 instead of 17, because GitHub delays and drops scheduled runs at the top of the hour. It also runs after every push to main, so each merge refreshes the board even when GitHub drops an hourly start. It never runs for pull requests or forks.
+- The sweep's summary line now shows its request cap and whether the pass completed, beside the tasks read and the tasks still queued.
+
+## 3.82.0
+
+### Changed
+
+- Projects posts: owner questions now come last, below the ELI5 line, as part of the "Text first, card last" rule. **Waiting on you** keeps the other asks just above the ELI5 line.
+- Projects hourly nudge: flags a post with anything but its questions after the ELI5 line, or a question above it.
+
+## 3.81.0
+
+### Fixed
+
+- **Raw pushes to the evidence store:** the shell hook (Claude Code and the Codex helper hook) now refuses a raw `git push` to an evidence store that an enabled binding cached on this computer names, whether reached by `cd`, `pushd`, `Set-Location`, `Push-Location`, `git -C`, `--git-dir`, a `GIT_DIR=` prefix, `--repo`, a URL (https, ssh with a port, `www.github.com`) or a nested shell, deletes included and dry runs excepted, and points at `toolkit-store.cjs save`. Before this, the permission blocks only left raw pushes out, so auto mode could run one with no prompt. Pushes to other repositories, the store command itself and computers with no cached binding are unchanged.
+
+## 3.80.2
+
+### Fixed
+
+- The cloud programme sweep no longer refuses its evidence store as "not writable". A GitHub App installation token's repository read does not reliably show the token's own access, so the cloud sweep skips that one check. Its workflow mints the store token with Contents write, and the sweep lease's write proves it before any state is saved. The private-store and branch checks still apply, and a computer's pass still needs its signed-in account to have push access.
+
+## 3.80.1
+
+### Fixed
+
+- The cloud programme sweep now names its stop code, and the HTTP status of a failed GitHub request, when a pass fails, so a failed run shows its cause. GitHub's own error text, tokens and keys are still never printed.
+
+## 3.80.0 (command list as tables)
+
+### Changed
+
+- `toolkit cmd` now shows the Toolkit commands as small two-column tables (Type this, What it does), grouped Setup, Keys, Governance and Merge, instead of one long bulleted list.
+
+### Added
+
+- The toolkit-setup skill now handles a whole-message `toolkit cmd` or `toolkit command` when no prompt hook line came with it, for example when Codex hooks are off after an update: it runs the command list script and shows its output.
+
+## 3.79.0 (faster setup and refresh)
+
+### Changed
+
+- Setup and refresh skip the Windows scheduled-task update while nothing it depends on has changed (Toolkit version, approval, task registry, discovered checkouts and each checkout's cached governance read) and the last clean update is under 24 hours old, and say so: `Scheduled tasks: unchanged since <time>; not rechecked.` The direct `toolkit update scheduled task` always checks in full.
+- When the scheduled-task update is held, setup names each held row and its reason, so agents no longer run the slow direct plan again to find out why. The `toolkit-setup` skill tells agents not to run that plan during setup or refresh.
+- A checkout whose cached governance read is fresh, certain and enabled is used without a network refresh or a wait for the refresh lock.
+- The scheduled-task plan reports `timings_ms` per step and checkout, and setup prints `Scheduled tasks checked in N s.`
+
+### Fixed
+
+- Linked worktrees under the GitHub folder are no longer discovered as checkouts, so they no longer hold every scheduled-task update (and every setup) on the computer.
+
+## 3.78.0
+
+### Changed
+
+- **Typed governance commands:** `toolkit governance status`, `check`, `discover`, `catalogue` and `security`, typed as a whole message, now tell the agent to run exactly that subcommand of `toolkit-governance.cjs` and nothing in its place. Typing `toolkit governance check` used to run `status` and the programme attention list instead. `toolkit governance migrate` gives you the command to run in your own terminal, because it asks for its own typed yes. `enable` and `disable` stay answers the governance gate reads. The command list and How to use show them all.
+
+## 3.77.0 (holder orders and sweeps that finish)
+
+### Programme reconciler
+
+- **Holder orders:** a controller with no shell of its own (a web controller) writes its decisions into a holder order: the exact writes, for the parent's current holder and epoch, until an expiry at most a day ahead. The session it hands the order to runs `programme.cjs run-order --order <file> --session <id>`, which runs only those writes as the holder, stops at the first refusal and logs the order, its digest, the running session's hash and each outcome in the parent's private part. A rerun skips finished writes; `--dry-run` writes nothing. Claims, takeovers, `init-parent` and `migrate-state` never run from an order.
+- **Sweeps draw their pages:** a sweep pass now budgets each task page at its measured cost (about seven requests) for every task likely to need one, and counts the requests that opened the store. A large parent no longer reads every task, runs out of requests and draws no page at all, pass after pass; its pages now fill in over a few passes and the stopped-pass finding clears.
+- **A busy sweep says who holds it:** a refresh that meets another sweep's live lease prints the holder's host, start time and lease end, and its JSON carries them as `holder`.
+
+### Issue closure guard
+
+- **Merged owner-test PRs:** closing words for a task are refused while a merged PR in the same repository that references it still says `UAT: OWNER_TEST_NEEDED`, even if the task's page has not recorded the owed test.
+
+## 3.76.0 (owner's one-command permissions apply)
+
+### Added
+
+- **`toolkit permissions --apply`:** the owner types it in their own PowerShell or terminal. It lists what would change, waits for the typed word `apply`, backs each file up next to itself, merges the computer blocks into Claude Code's user settings (every other key and line kept, stale Toolkit lines reported, never removed) and replaces Codex's own `toolkit.rules`, then reads each file back. `--host claude` or `--host codex` does one app. The repo block is still pasted by hand.
+
+### Changed
+
+- **Permission blocks:** every computer block now makes `--apply` ask: an ask line on Claude Code and a prompt rule on Codex, with `--apply` required as the first argument so the Codex rule matches. Printing and `--check` stay allowed and still write nothing.
+- **Agents never run `--apply`:** the setup skill and safety playbooks tell agents to hand the owner the command instead. The app's ask for the exact command is the only hard block; the refusals in an agent's shell and without a terminal are speed bumps. Blocks pasted before this release allow `--apply` with no ask until `--apply` or a fresh paste adds the ask line.
+- **Merge authority:** changes to the apply command wait for a typed merge, like the permission, cleanup and store scripts.
+
+## 3.75.0 (typed commands and remove Toolkit)
+
+### Added
+
+- **Typed commands:** `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup` and `toolkit show env`, typed as the whole message on your own computer, are matched exactly by the Codex and Claude Code prompt hooks. The agent is told which action was asked for, so `toolkit show env` always opens the editor. A phrase inside a longer message, in a relayed message or in a cloud session stays plain text, and a governance hold is unchanged. `node repo/scripts/toolkit-commands.cjs` prints the command list.
+- **Remove Toolkit from this computer:** `remove toolkit` routes to `repo/scripts/toolkit-remove.cjs`. `plan` lists every scheduled task that carries Toolkit's marker in any Task Scheduler folder, Toolkit's own task files, the Toolkit block in each global rules file and Toolkit's raised `project_doc_max_bytes` line in Codex's `config.toml`, with a plan code. `apply --confirm <plan code>` removes exactly that list after the owner's OK; a list that changed removes nothing. Tasks changed by hand stay unless named, the owner's own listed tasks always stay, apply puts Codex's earlier `project_doc_max_bytes` back (a backup first, then a Codex load check), and no repository, key, other app setting or plugin is touched.
+- **Leftover file report:** `repo/scripts/toolkit-leftover-files.cjs scan` lists files that are provably Toolkit's in GitHub checkouts whose governance is off or undecided. It reports only and never deletes.
+
+### Changed
+
+- **Setup covers the computer only:** setup no longer prints a task plan for the managed checkout and the folder it was started in. The computer-wide task update under the saved approval stays, and the direct task plan still gives one repository's details.
+- **Hook pack:** context checks now also read the context a prompt hook adds.
+
+## 3.74.0 (merge before owner tests, bump once at merge, one real-host round per release)
+
+### Changed
+
+- Owner UAT no longer holds a merge. A pull request whose line is `UAT: OWNER_TEST_NEEDED` merges on its review and green CI; the owner tests the installed build afterwards, its tasks stay open on `Refs` until their OK, and a failed test gets a fix-forward or revert pull request. The task auto-merge check now exits 0 for an owner test once scope allows, and says the test follows the merge.
+- Pull requests hold `main`'s version and carry only a changelog fragment plus a `Bump: patch|minor|major` body line. The merging agent bumps once, at merge time, so a merge no longer forces a re-bump, new CI and a stale merge card on every other open pull request. Older pull requests that already carry a bump still go through the re-bump workflow.
+- Hook changes read the hook pack from CI's Linux and Windows runs. The real-host smoke and the qualification matrix run once per release batch, after its merges, on the installed build and before the owner tests.
+
+## 3.73.0 (refresh toolkit keeps your answers with no questions)
+
+### Changed
+
+- `refresh toolkit` (and `toolkit refresh` or plain `refresh`) now runs setup with `--refresh`: it updates Toolkit and, while the questions match the last bank answered on this computer, keeps every current answer (each row's `A. Keep current`) with no bank, in Codex and in Claude Code. An installed, turned-on plugin that the update left behind is refreshed.
+- A new or different question, no saved answers yet, or a missing or turned-off plugin shows the full bank as for `setup toolkit`, with a line naming each new or different row. A recommendation you already declined does not bring the bank back.
+- `setup toolkit` still shows the bank. An answered bank saves each row's question shape and the recommendation it showed under `~/.ai-agent-toolkit/user-state/setup-question-shapes.json`, one record per app, with no setting values, paths or keys.
+- A refresh never approves a Codex configuration proposal, a scheduled-task standing approval or a native trust step, and `--refresh` refuses choice flags, `--yes-recommended`, proposal approvals and `--plan`.
+
+## 3.72.1 (closing words wait for a task's recorded UAT)
+
+### Fixed
+
+- **Owed UAT on the target:** the issue closure check now also refuses a closing word for an open issue whose generated programme status records UAT as `PENDING`, `UAT_PARTIAL_REQUIRED` or `UAT_FULL_REQUIRED`, whatever the pull request's own UAT line says, and names the `Refs` link to use. Before, a pull request that needed no UAT of its own could close a task still waiting on the owner's test, even through quoted text.
+
+## 3.72.0 (self-checking evidence store command)
+
+### Added
+
+- **`toolkit store`:** `repo/scripts/toolkit-store.cjs` does every evidence store step on a computer (`status`, `sync`, `save`, `move`, `merge-branch`, `delete-merged-branch`) and checks the store itself first: the merged binding's store and branch, a checkout whose fetch and push addresses are that store and whose own config holds no push, rewrite or program setting, and a private, writable store on GitHub. `save` stages only the named paths under the binding's store path, `archives/` or `evidence/`, secret-scans exactly what it stages (refusing a binary or non-UTF-8 file it cannot read), commits, pushes the bound branch with a plain push and reads it back on GitHub. Ancestry is read from real commits only (no grafts, replace refs or commit-graph), a merged branch's whole history is scanned, and "already merged" before a branch delete is GitHub's answer, not the checkout's. It never force-pushes, rebases, deletes a file or pushes another branch, and deletes a store branch only when it is already merged.
+
+### Changed
+
+- **Permission blocks:** the exact store push line and its ask lines are replaced by one store command line in the computer block. On Codex it is an allow rule and no store prompt rule is printed, so store steps stop asking there too. `toolkit permissions` no longer takes `--store`.
+- **Merge authority:** changes to the store command wait for a typed merge, like the permission and cleanup scripts.
+
+## 3.71.0 (programme sweep on a saved queue, and on GitHub)
+
+### Changed
+
+- The programme refresh now works through a saved queue on the one reconciler. Each pass reads the whole graph, then the tasks GitHub changed since the last pass, tasks whose page shows another revision than their state, open tracked PRs whose head or checks moved, and a rotating share, so every task is read at least once in twelve passes. It saves the state in one commit, keeps every recovery step it had, and a pass that changes nothing writes no state.
+- Requests run one at a time within a cap of 300 per pass, keep a reserve for saving and redrawing, and stop reading when GitHub's rate limit runs low or asks to wait. When GitHub refuses GraphQL, the state is read one document at a time instead.
+- CURRENT on the parent page starts with when the board was last updated, or how long it has been out of date, why, and how many tasks are still to check.
+- `reconcile --apply` saves its state phase in the same single commit.
+- The hourly sweep pass (`refresh --scheduled`) now works for up to 50 minutes instead of 10, is killed at 55 minutes and, on GitHub, has its job stopped at 58, so it always ends before the next hourly start. The refresh a session starts after its own GitHub write keeps 10 minutes and still leaves a flag for the scheduled pass while that holds the lock.
+- On a computer, the hourly task's budget rises to 55 minutes and its Windows stop-after limit to 56; the refresh in it takes what is left, less the attention step, and never less than 10 minutes. A task registered with the earlier 30-minute limit is updated in place by the next apply. A long pass renews its sweep lease.
+- `toolkit permissions` keeps allowing the programme refresh line with the sweep's `--scheduled` and `--budget-ms`, and its note now says they only set how long one pass may run, 10 to 50 minutes.
+
+### Added
+
+- The hourly Toolkit Programme Sweep workflow runs the refresh on GitHub under the governance GitHub App, with one installation token for the governed repository and one for its evidence store, each with only its own permissions. Without the App it posts a notice and writes nothing; a repository whose state is on a public branch keeps the computer's sweep.
+- A shared lease in the evidence store lets one sweep write at a time across the computer and GitHub; a run stopped by its timeout is reported by the next one. The lease makes every write of its own record in turn: while the pass saves its state, the renewal rides that one commit, so a long pass never mistakes its own renewal for another sweep. A lease never outlasts its pass's kill time, a pass that defers to another sweep leaves no stop behind, and a pass that ends with an error records its stop where the next pass on either host reads it.
+- On GitHub, the sweep reads the binding merged on the default branch online, so a fresh runner with no saved copy runs its pass, and a run that started before main moved stops with a notice.
+- `repo/contracts/cloud-jobs.json` lists the jobs that run on GitHub and their tokens. Each token names only which of the governance App's permissions it takes, at the App's level unless marked read-only, so the App's permission list is kept in one place. `toolkit governance check` lists the jobs beside the App's setup, in the same words.
+
+## 3.70.1 (closing words wait for the owner's UAT)
+
+### Fixed
+
+- **Closing words wait for UAT:** the issue closure check (CI and the PreToolUse hook) now refuses `Closes`, `Fixes` or `Resolves` in a pull request's title, body or commits while its own UAT line is `OWNER_TEST_NEEDED` or invalid, and names the `Refs` link to use instead. Before, a merge could close a child issue before the owner tested it.
 
 ## 3.70.0 (Marked notes move off large programme pages)
 

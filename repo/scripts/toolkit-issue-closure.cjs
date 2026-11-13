@@ -10,6 +10,7 @@ const { ShellCall, closureCommands, connectorTarget, GRAPHQL_OPERATION, shellPat
 const { IssueClosureGuard, closingReferences } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
 const { GitHubTransport } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
 const { resolveExecutable } = require('../../skills/github-program-reconciler/scripts/resolve-executable.cjs');
+const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
 const SLUG = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i;
 const RECOVERY = 'Provide an explicit repository, PR or issue number, and literal title/body text or a readable body file; retry when GitHub is readable.';
 function readFile(file) {
@@ -43,7 +44,8 @@ function guardFor(repository, cwd, options = {}) {
     catch { throw Object.assign(new Error('gh is unavailable. Run setup toolkit, then gh auth login.'), { code: 'GH_MISSING' }); }
     return new GitHubTransport({ ghPath, timeoutMs: options.timeoutMs ?? 5000 }).request(...args);
   } };
-  return new IssueClosureGuard({ transport, repository, deadline: options.deadline, deadlineMs: options.deadlineMs ?? 120000, maxRequests: options.maxRequests ?? 500 });
+  return new IssueClosureGuard({ transport, repository, deadline: options.deadline, deadlineMs: options.deadlineMs ?? 120000, maxRequests: options.maxRequests ?? 500,
+    uatState: body => uatVerdict(body).state });
 }
 const TABLES = {
   create: { values: ['repo:R','assignee:a','base:B','body:b','body-file:F','head:H','label:l','milestone:m','project:p','recover','reviewer:r','template:T','title:t'], booleans: ['draft:d','dry-run','editor:e','fill:f','fill-first','fill-verbose','no-maintainer-edit','web:w'] },
@@ -261,6 +263,19 @@ function connectorOperations(input, options = {}) {
   return variants.filter(text => !cloudMerge || text.title !== undefined || text.body !== undefined)
     .map(text => ({ kind, repository: target.repository, number: target.pr, ...text }));
 }
+// A closing word closes its issue when the PR merges. While the PR's own UAT line still waits on
+// the owner (OWNER_TEST_NEEDED) or cannot be read (invalid), the issue must stay open, so closing
+// words are refused and Refs is named instead. An absent line is left to the review and the
+// auto-merge check, since repositories without UAT lines use closing words normally.
+function uatClosingDecision(body, references) {
+  if (!references.length) return null;
+  const uat = uatVerdict(body);
+  if (uat.state !== 'OWNER_TEST_NEEDED' && uat.state !== 'invalid') return null;
+  const ref = references[0];
+  const where = `${ref.source ? `${ref.source}, ` : ''}line ${ref.line}`;
+  const why = uat.state === 'invalid' ? `this PR's UAT line is invalid (${uat.problem})` : "this PR's UAT line is OWNER_TEST_NEEDED";
+  return `${where} closes #${ref.number}, but ${why}, so the merge would close the issue before the owner's test. Use Refs #${ref.number} until the owner's OK makes the line UAT: PASSED.`;
+}
 function issueClosureDecision(input, options = {}) {
   try {
     const shell = ShellCall.isShellTool(input?.tool_name);
@@ -270,6 +285,12 @@ function issueClosureDecision(input, options = {}) {
         for (const key of ['title','body']) {
           if (op[key] == null) op[key] = undefined;
           else if (typeof op[key] !== 'string') throw new Error('PR text must be explicit strings.');
+        }
+        if (op.body !== undefined) {
+          const sources = op.title !== undefined ? [['title', op.title], ['body', op.body]] : [['body', op.body]];
+          const references = sources.flatMap(([source, text]) => closingReferences(text, 'x/x').map(ref => ({ ...ref, source })));
+          const refused = uatClosingDecision(op.body, references);
+          if (refused) return { status: 'refused', deny: `Toolkit: ${refused}` };
         }
       }
       if (!SLUG.test(op.repository || '')) throw new Error('Missing or invalid repository identity.');
@@ -290,7 +311,9 @@ function main() {
   if (!pr?.number || !pr.head?.sha) throw new Error('A current pull request event is required.');
   const result = guardFor(process.env.GITHUB_REPOSITORY, process.cwd(), { timeoutMs: 30000 }).checkPullRequest(pr.number, { head: pr.head.sha });
   if (result.status !== 'allowed') throw new Error(result.reason);
+  const refused = uatClosingDecision(result.pr.body ?? '', result.references);
+  if (refused) throw new Error(refused);
   process.stdout.write('Issue closure safety verified on the current PR head.\n');
 }
 if (require.main === module) { try { main(); } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; } }
-module.exports = { issueClosureDecision, guardFor, readFile, shellOperations, connectorOperations, flagValues, graphqlRelevant };
+module.exports = { issueClosureDecision, uatClosingDecision, guardFor, readFile, shellOperations, connectorOperations, flagValues, graphqlRelevant };

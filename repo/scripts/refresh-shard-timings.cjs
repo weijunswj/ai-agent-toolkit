@@ -8,7 +8,7 @@
 // --repo-root selects another repository using the same shard manifest and Validate summary contract.
 //
 // Without a flag it only reports. Each shard job already uploads its run-tests.cjs summary (per-file
-// seconds) as a test-summary-<shard> artifact, so this reads those through read-only `gh` and changes
+// seconds) as a test-summary-<shard>-attempt-<n> artifact, so this reads those through read-only `gh` and changes
 // nothing. --run <id> reads that finished Validate run instead, for example a pull request's run
 // that measured a new or split test file. It reports the refresh triggers it checks:
 //   - more than 10% of test files have no measured time;
@@ -226,6 +226,29 @@ function prBody(run, plan) {
   ].join('\n');
 }
 
+// The open pull requests a previous refresh made (branch toolkit/shard-timings-<sha>): while one is
+// open, a scheduled run opens no second one.
+const REFRESH_BRANCH_PREFIX = 'toolkit/shard-timings-';
+function openRefreshPrs(root) {
+  const open = JSON.parse(command('gh', ['pr', 'list', '--state', 'open', '--base', 'main', '--limit', '100', '--json', 'number,headRefName'], { cwd: root }));
+  return open.filter(pr => typeof pr.headRefName === 'string' && pr.headRefName.startsWith(REFRESH_BRANCH_PREFIX));
+}
+
+// On GitHub the workflow reads runs with its built-in token and publishes with the governance App's
+// token, given as TOOLKIT_SHARD_PUBLISH_TOKEN. The push and the pull request then use that token, the
+// push through an environment-only git header (never a command-line argument or a saved config).
+function publishEnv(env = process.env) {
+  const token = env.TOOLKIT_SHARD_PUBLISH_TOKEN;
+  if (!token) return undefined;
+  const index = Number.parseInt(env.GIT_CONFIG_COUNT || '0', 10) || 0;
+  const basic = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+  const out = { ...env, GH_TOKEN: token, GIT_CONFIG_COUNT: String(index + 1),
+    [`GIT_CONFIG_KEY_${index}`]: 'http.https://github.com/.extraheader', [`GIT_CONFIG_VALUE_${index}`]: `AUTHORIZATION: basic ${basic}` };
+  delete out.TOOLKIT_SHARD_PUBLISH_TOKEN;
+  delete out.GITHUB_TOKEN;
+  return out;
+}
+
 function openPr(root, run, out) {
   const branch = `toolkit/shard-timings-${run.headSha.slice(0, 7)}`;
   if (command('git', ['ls-remote', '--heads', 'origin', branch], { cwd: root }).trim()) {
@@ -253,8 +276,9 @@ function openPr(root, run, out) {
     fs.writeFileSync(path.join(tree, ...shards.MANIFEST_REL.split('/')), manifestText(plan.manifest));
     command('git', ['add', shards.MANIFEST_REL], { cwd: tree });
     command('git', ['commit', '--quiet', '-m', `Refresh test shard timings from main run ${run.databaseId}`], { cwd: tree });
-    command('git', ['push', '--quiet', '-u', 'origin', branch], { cwd: tree });
-    const url = command('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', 'Refresh test shard timings', '--body', prBody(run, plan)], { cwd: tree }).trim();
+    const env = publishEnv();
+    command('git', ['push', '--quiet', '-u', 'origin', branch], { cwd: tree, ...(env ? { env } : {}) });
+    const url = command('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', 'Refresh test shard timings', '--body', prBody(run, plan)], { cwd: tree, ...(env ? { env } : {}) }).trim();
     out.write(`Opened ${url}\n`);
     command('git', ['worktree', 'remove', '--force', tree], { cwd: root });
     return 0;
@@ -269,7 +293,7 @@ function openPr(root, run, out) {
   }
 }
 
-function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, readRun = latestGreenRun, readSummaries = downloadSummaries, publish = openPr } = {}) {
+function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, readRun = latestGreenRun, readSummaries = downloadSummaries, publish = openPr, findOpen = openRefreshPrs } = {}) {
   let options;
   try {
     options = parseArgs(argv);
@@ -285,6 +309,11 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     out.write(`Validate run ${run.databaseId} on ${run.headBranch} (${run.headSha.slice(0, 7)})\n`);
     if (options.openPr) {
       if (run.headBranch !== 'main') throw new Error('--open-pr reads main runs only');
+      const open = findOpen(root);
+      if (open.length) {
+        out.write(`A shard timing pull request is already open (#${open.map(pr => pr.number).join(', #')}); no new pull request.\n`);
+        return 0;
+      }
       return publish(root, run, out);
     }
     const discovered = shards.discoverTestFiles(root);
@@ -305,4 +334,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ IMBALANCE_RATIO, UNTIMED_SHARE, main, manifestText, parseArgs, planRefresh, rebalance, timingsFromSummaries });
+module.exports = Object.freeze({ IMBALANCE_RATIO, UNTIMED_SHARE, REFRESH_BRANCH_PREFIX, main, manifestText, parseArgs, planRefresh, publishEnv, rebalance, timingsFromSummaries });

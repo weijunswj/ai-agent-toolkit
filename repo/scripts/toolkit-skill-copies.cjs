@@ -79,6 +79,12 @@ class ManagedSkillCopies {
     return sourceFiles.every((rel) => normalized(fs.readFileSync(path.join(sourceDir, rel))) === normalized(fs.readFileSync(path.join(targetDir, rel))));
   }
 
+  // The folders Toolkit recorded as its own copies, as [{ target, skill }], read-only.
+  recorded() {
+    return Object.entries(this.#readLedger()).flatMap(([target, names]) => names.map((skill) => ({ target, skill })))
+      .sort((a, b) => `${a.target}/${a.skill}`.localeCompare(`${b.target}/${b.skill}`));
+  }
+
   // Whether Toolkit has copies recorded.
   hasCopies() { return Object.values(this.#readLedger()).some((names) => names.length); }
 

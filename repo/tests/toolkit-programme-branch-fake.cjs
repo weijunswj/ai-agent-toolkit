@@ -54,6 +54,15 @@ class BranchFakeGitHub extends FakeGitHub {
   }
 
   route(method, fullPath, body) {
+    if (fullPath === 'graphql' && body.query.includes('stateSnapshot') && this.git(`${body.variables.owner}/${body.variables.name}`)) {
+      const { owner, name, directory } = body.variables;
+      const split = directory.indexOf(':');
+      const files = this.filesAt(`${owner}/${name}`, directory.slice(0, split));
+      const prefix = directory.slice(split + 1).replace(/\/$/, '') + '/';
+      const entries = [...(files || [])].filter(([file]) => file.startsWith(prefix) && !file.slice(prefix.length).includes('/'))
+        .map(([file, text]) => ({ name: file.slice(prefix.length), oid: blobSha(text), type: 'blob', object: { text, isTruncated: false } }));
+      return ok(200, { data: { repository: { snapshot: entries.length ? { entries } : null } } });
+    }
     const [path, query = ''] = fullPath.split('?');
     const params = new URLSearchParams(query);
     const match = /^repos\/([^/]+\/[^/]+)\/(.+)$/.exec(path);
@@ -64,20 +73,32 @@ class BranchFakeGitHub extends FakeGitHub {
     if ((found = /^contents\/(.+)$/.exec(rest))) return this.gitContents(git, method, decodeURIComponent(found[1]), body, params);
     if ((found = /^branches\/(.+)$/.exec(rest)) && method === 'GET') {
       const sha = git.branches.get(decodeURIComponent(found[1]));
-      return sha ? ok(200, { name: decodeURIComponent(found[1]), commit: { sha } }) : ok(404, { message: 'Branch not found' });
+      // In this fake a commit's tree has the commit's own id.
+      return sha ? ok(200, { name: decodeURIComponent(found[1]), commit: { sha, commit: { tree: { sha } } } }) : ok(404, { message: 'Branch not found' });
+    }
+    if ((found = /^git\/blobs\/([0-9a-f]{40})$/.exec(rest)) && method === 'GET') {
+      for (const commit of git.commits.values()) for (const text of commit.files.values()) {
+        if (blobSha(text) === found[1]) return ok(200, { sha: found[1], encoding: 'base64', content: Buffer.from(text, 'utf8').toString('base64') });
+      }
+      return ok(404, { message: 'Not Found' });
+    }
+    if ((found = /^compare\/([0-9a-f]{40})\.\.\.([0-9a-f]{40})$/.exec(rest)) && method === 'GET') {
+      const ancestors = sha => { const seen = new Set(); const walk = at => { if (!at || seen.has(at)) return; seen.add(at); for (const parent of git.commits.get(at)?.parents || []) walk(parent); }; walk(sha); return seen; };
+      const [base, head] = [found[1], found[2]];
+      return ok(200, { status: base === head ? 'identical' : ancestors(head).has(base) ? 'ahead' : ancestors(base).has(head) ? 'behind' : 'diverged' });
     }
     if ((found = /^git\/commits\/([0-9a-f]{40})$/.exec(rest)) && method === 'GET') {
       return git.commits.has(found[1]) ? ok(200, { sha: found[1], message: git.commits.get(found[1]).message }) : ok(404, { message: 'Not Found' });
     }
     if (rest === 'git/trees' && method === 'POST') {
-      const tree = new Map();
+      const tree = new Map(body.base_tree ? this.filesAt(match[1], body.base_tree) || git.trees.get(body.base_tree) || [] : []);
       for (const entry of body.tree) {
         if (entry.type !== 'blob' || typeof entry.content !== 'string') return ok(422, { message: 'Invalid tree entry' });
         tree.set(entry.path, entry.content);
       }
       const sha = this.newSha('tree');
       git.trees.set(sha, tree);
-      return ok(201, { sha });
+      return ok(201, { sha, tree: body.tree.map(entry => ({ path: entry.path, type: 'blob', sha: blobSha(entry.content) })) });
     }
     if (rest === 'git/commits' && method === 'POST') {
       const tree = git.trees.get(body.tree);
@@ -101,6 +122,8 @@ class BranchFakeGitHub extends FakeGitHub {
       const descends = sha => sha === current || (git.commits.get(sha)?.parents || []).some(descends);
       if (!body.force && !descends(body.sha)) return ok(422, { message: 'Update is not a fast forward' });
       git.branches.set(branch, body.sha);
+      const logged = this.commitLog.find(item => item.sha === body.sha);
+      if (logged) logged.branch = branch;
       return ok(200, { ref: `refs/heads/${branch}`, object: { sha: body.sha } });
     }
     if (rest === 'commits' && method === 'GET') {

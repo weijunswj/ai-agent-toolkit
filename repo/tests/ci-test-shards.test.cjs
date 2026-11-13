@@ -155,6 +155,8 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
     ['no leg results', (f) => { f.needs = null; }, /results \(needs\) are missing/],
     ['a missing summary', (f) => { f.summaries.splice(1, 1); }, /linux shard linux-2 has no summary/],
     ['a summary reported twice', (f) => { f.summaries.push(clone(f.summaries[0])); }, /reported twice/],
+    ['a summary reported twice in one attempt', (f) => { f.summaries[0].run_attempt = 2; f.summaries.push(clone(f.summaries[0])); }, /reported twice/],
+    ['a newer attempt that failed', (f) => { f.summaries[0].run_attempt = 1; f.summaries.push({ ...clone(f.summaries[0]), run_attempt: 2, exit_code: 1 }); }, /linux-1 exited with 1/],
     ['an unknown shard', (f) => { f.summaries.push({ ...clone(f.summaries[0]), shard: 'linux-7' }); }, /linux-7 is not in the manifest/],
     ['a dropped file', (f) => { f.summaries[1].files.pop(); }, /no result for repo\/tests\/c\.test\.cjs/],
     ['a file run by the wrong shard', (f) => { f.summaries[0].files.push(clone(f.summaries[1].files[0])); }, /which the manifest gives to another shard/],
@@ -166,6 +168,15 @@ test('the CI aggregate check passes only when every leg succeeded and covered ev
     ['a new test file nobody ran', (f) => { f.files.push('repo/tests/d.test.cjs'); }, /d\.test\.cjs/],
     ['a clock-ahead run in place of a shard', (f) => { f.summaries[1].clock_offset_days = 400; }, /moved 400 days ahead, so it does not count as a shard run[\s\S]*linux-2 has no summary/],
   ];
+  // A re-run shard: the failed first attempt is replaced by the passing second, in either order.
+  for (const order of [[0, 1], [1, 0]]) {
+    const rerun = ciFixture();
+    const failed = { ...clone(rerun.summaries[2]), run_attempt: 1, exit_code: 1 };
+    failed.files[1].failed = 1;
+    const passed = { ...clone(rerun.summaries[2]), run_attempt: 2 };
+    rerun.summaries.splice(2, 1, ...order.map(at => [failed, passed][at]));
+    assert.deepEqual(shards.verifyCiSummaries({ manifest: rerun.manifest, discovered: rerun.files, summaries: rerun.summaries, needs: rerun.needs }).errors, [], `re-run order ${order}`);
+  }
   for (const [label, mutate, pattern] of cases) {
     const fixture = ciFixture();
     mutate(fixture);
@@ -216,8 +227,8 @@ function assertDriftGuard(WORKFLOW) {
     ['a shard step that runs everything', WORKFLOW.replace(shardStep, 'node repo/scripts/run-tests.cjs --all')],
     ['a name filter', WORKFLOW.replace('--os linux', '--os linux --test-name-pattern=fast')],
     ['if: false on a step', WORKFLOW.replace('      - name: Run test shard\n', '      - name: Run test shard\n        if: false\n')],
-    ['; exit 0', WORKFLOW.replace('test-summary-${{ matrix.shard }}.json"\n', 'test-summary-${{ matrix.shard }}.json"; exit 0\n')],
-    ['|| true', WORKFLOW.replace('test-summary-${{ matrix.shard }}.json"\n', 'test-summary-${{ matrix.shard }}.json" || true\n')],
+    ['; exit 0', WORKFLOW.replace('test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json"\n', 'test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json"; exit 0\n')],
+    ['|| true', WORKFLOW.replace('test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json"\n', 'test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json" || true\n')],
     ['continue-on-error', WORKFLOW.replace('    timeout-minutes: 30\n', '    timeout-minutes: 30\n    continue-on-error: true\n')],
     ['a matrix include', WORKFLOW.replace('        shard: [linux-1, linux-2]\n', '        shard: [linux-1, linux-2]\n        include:\n          - shard: linux-1\n')],
     ['a matrix exclude', WORKFLOW.replace('        shard: [linux-1, linux-2]\n', '        shard: [linux-1, linux-2]\n        exclude:\n          - shard: linux-2\n')],

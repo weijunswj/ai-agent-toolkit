@@ -125,8 +125,9 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     (a sha field is not read); a call whose fields are missing, not readable or disagree is refused;
 //   - refused when written directly: any connector's auto-merge tool, GraphQL merges (the number cannot be read), the merge queue, branch merges,
 //     writes to the default branch's ref, `gh repo sync`, gh aliases that mention merge, a `git push`
-//     to the remote's default branch (evidence stores excepted, by name), a merge whose target is
-//     moved by cd, pushd, Set-Location or GH_REPO, and a bare number in a folder with more than one
+//     to the remote's default branch (evidence stores excepted, by name; a refused push whose remote is an
+//     evidence store bound on this computer shows the store-command message instead), a merge whose target is
+//     moved by cd, pushd, Set-Location, Push-Location or GH_REPO, a push after a `cd -` whose folder this command cannot show, and a bare number in a folder with more than one
 //     remote or a gh default repository other than its own, unless --repo or a URL names it. A push
 //     run through another shell or expression runner (bash -c, pwsh -Command, cmd /c, eval) is
 //     refused whatever branch it names; encoded PowerShell commands are refused unread;
@@ -186,7 +187,7 @@ const MAX_APPROVALS = 100;
 const MAX_PROMPT_CHARS = 8000;
 const MAX_COMMAND_CHARS = 1024 * 1024;
 
-const { SHELLS, SHELL_TOOLS, ShellCall, MOVES_TARGET, connectorTarget, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
+const { STORE_PUSH_MESSAGE, githubSlug, SHELLS, SHELL_TOOLS, ShellCall, MOVES_TARGET, connectorTarget, argvText, assignVariable, assignmentOf, absoluteShellPath, folderWord, plainGitLine, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 // A connector's merge or auto-merge tool, whatever its server is called (a claude.ai connector's
 // server name is a UUID): the tool name ends in one of these after a _ or -.
 const AUTO_MERGE_NAME = 'enable[_-]?(?:pr[_-]?|pull[_-]?request[_-]?)?auto[_-]?merge';
@@ -552,13 +553,49 @@ function pushTarget(cwd, remote, registryOptions = {}) {
     if (!defaultBranch) defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/${remoteName}/${name}`)) || null;
   } else defaultBranch = ['main', 'master'].find(name => hasRef(dirs.common, `refs/remotes/origin/${name}`)) || null;
   const named = /TRANSPORT-[^/\s]*?(?:\.git)?\/?$/i.test(String(url || ''));
-  return { default: defaultBranch, current, store: named || (remoteName === 'origin' && evidenceStoreAt(root, registryOptions)) };
+  return { default: defaultBranch, current, url, store: named || (remoteName === 'origin' && evidenceStoreAt(root, registryOptions)) };
 }
 
 // Whether the governance state names the repository at `root` an evidence store (rule S1). A state
 // that cannot be read is not one.
 function evidenceStoreAt(root, registryOptions = {}) {
   try { return governance.governanceState(root, registryOptions).rule === 'S1'; } catch { return false; }
+}
+
+// Whether a remote URL is an evidence store an enabled binding cached on this computer names, at
+// any freshness (the attribution guard's reading). A cache that cannot be read names none.
+function boundStore(url, registryOptions = {}) {
+  const slug = githubSlug(url);
+  if (!slug) return false;
+  try { return governance.evidenceStoreRepositories(registryOptions).stores.has(slug); } catch { return false; }
+}
+
+const UNKNOWN_FOLDER_PUSH = 'this command pushes after `cd -`, `Set-Location -` or `pushd +N`/`-N` returns to a folder Toolkit cannot see from this command alone, so it is refused. Name the folder with `cd <path>` or `git -C <path>` and retry.';
+
+// What a cd, chdir, pushd, Set-Location, sl or Push-Location segment moves to: { word } for a
+// folder, { back: true } for `-` (also after `--` or as -Path's value, and `+` outside bash,
+// PowerShell's step forward), { unknown: true } for pushd's stack rotation (`+N`, `-N`), or
+// { none: true } when it names no folder. Switches such as -PassThru, -L or cmd's /d are skipped
+// wherever they stand; -StackName skips its value; -Path, -LiteralPath and -PSPath (also as
+// -Path:value) take theirs, and only -Path reads `-` as a step back (-LiteralPath is literal).
+const LOCATION_PATH = /^-(?:path|literalpath|lp|pspath)$/i;
+const LOCATION_VALUE = /^-st(?:a(?:c(?:k(?:n(?:a(?:m(?:e)?)?)?)?)?)?)?$/i;
+function locationTarget(words, shell) {
+  const pushd = /^pushd$/i.test(words[0]);
+  const named = (option, value) => (value === '-' && !/^-(?:literalpath|lp)$/i.test(option) ? { back: true } : { word: value });
+  for (let at = 1; at < words.length; at += 1) {
+    const word = words[at];
+    if (word === '--') return at + 1 < words.length ? (words[at + 1] === '-' ? { back: true } : { word: words[at + 1] }) : { none: true };
+    if (word === '-' || (word === '+' && shell !== 'posix' && !pushd)) return { back: true };
+    if (pushd && /^[+-]\d+$/.test(word)) return { unknown: true };
+    const inline = /^(-(?:path|literalpath|lp|pspath)):(.+)$/is.exec(word);
+    if (inline) return named(inline[1], inline[2]);
+    if (LOCATION_PATH.test(word)) return at + 1 < words.length ? named(word, words[at + 1]) : { none: true };
+    if (LOCATION_VALUE.test(word)) { at += 1; continue; }
+    if (/^-[A-Za-z@]/.test(word) || /^\/d$/i.test(word)) continue;
+    return { word };
+  }
+  return { none: true };
 }
 
 const PUSH_VALUE_OPTIONS = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed']);
@@ -573,10 +610,14 @@ function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), 
   index += 1;
   while (index < words.length && words[index].startsWith('-')) {
     const option = words[index];
-    if (option === '-C' && index + 1 < words.length) root = shellPath(root, folderWord(words[index + 1], variables, shell));
+    if (option === '-C' && index + 1 < words.length) {
+      const folder = folderWord(words[index + 1], variables, shell);
+      root = root === null && !absoluteShellPath(folder) ? null : shellPath(root || process.cwd(), folder);
+    }
     index += GIT_VALUE_OPTIONS.has(option) ? 2 : 1;
   }
   if (words[index] !== 'push') return '';
+  if (root === null) return UNKNOWN_FOLDER_PUSH;
   const args = words.slice(index + 1);
   const positional = [];
   let mirror = false;
@@ -597,7 +638,12 @@ function pushRefusal(words, cwd, { registryOptions = {}, variables = new Map(), 
   const hitsDefault = mirror
     || (refspecs.length === 0 && target.current === target.default)
     || refspecs.some(spec => branchOf(spec.includes(':') ? spec.slice(spec.lastIndexOf(':') + 1) : spec) === target.default);
-  return hitsDefault ? `this command pushes to the default branch \`${target.default}\`. Changes must reach the default branch through a pull request the user merges; push to another branch and open one.` : '';
+  if (!hitsDefault) return '';
+  // A push to an evidence store this computer has bound stays refused, but with the store-command
+  // message: a pull request is the wrong advice for a store, whose default branch is written
+  // directly by toolkit-store.cjs under standing permission.
+  if (boundStore(target.url, registryOptions)) return STORE_PUSH_MESSAGE;
+  return `this command pushes to the default branch \`${target.default}\`. Changes must reach the default branch through a pull request the user merges; push to another branch and open one.`;
 }
 
 // ---- requested merges -------------------------------------------------------------------------
@@ -922,16 +968,64 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
       return refuse('this API call merges or moves a branch in a way an approval cannot cover (GraphQL merges, the merge queue, branch merges or a ref write to the default branch), so it is refused. Use `gh pr merge <number> --match-head-commit <sha>` after the user approves, or ask the user to do it.');
     }
   }
-  let root = cwd;
   const variables = new Map();
+  // Every refused push is named, each reason once: a command that pushes both a default branch and
+  // a bound store gets the pull request advice and the store-command message.
+  const reasons = [];
+  // The folders the command could be in at each point: usually one, more after a `cd -` whose
+  // target depends on the shell, and null for a folder Toolkit cannot see from this command alone
+  // (a push judged there is refused). pushd and Push-Location save the folders they leave; popd and
+  // Pop-Location go back to the last one saved. With none saved here the shell's own stack is
+  // unknown: a real shell stays put on an empty stack, so the folder is left where it is (never reset
+  // to the starting folder).
+  let roots = [cwd || process.cwd()];
+  // `cd -` in bash goes to OLDPWD, the folder before the last move (unknown before the first one).
+  // PowerShell's `Set-Location -` (and `+`) walks a history that steps further back on each repeat,
+  // so there it may be any folder this command has been in, and an unknown one once the steps back
+  // outnumber the moves. A reading whose shell is not known takes both.
+  let previous = null;
+  const visited = [...roots];
+  let moves = 0;
+  let backs = 0;
+  const saved = [];
+  const move = next => { previous = roots; roots = [...new Set(next)]; visited.push(...roots); moves += 1; };
   for (const words of parts) {
     const assigned = assignmentOf(words);
     if (assigned) { assignVariable(variables, assigned); continue; }
-    if (/^(?:cd|pushd|chdir|set-location|sl)$/i.test(words[0]) && words.length >= 2) { root = shellPath(root || process.cwd(), folderWord(words[words.length - 1], variables, shell)); continue; }
-    const reason = pushRefusal(words, root || process.cwd(), { registryOptions, variables, shell });
-    if (reason) return refuse(reason);
+    if (/^(?:popd|pop-location)$/i.test(words[0])) { if (saved.length) move(saved.pop()); continue; }
+    if (/^(?:cd|pushd|chdir|set-location|sl|push-location)$/i.test(words[0])) {
+      const target = locationTarget(words, shell);
+      if (/^(?:pushd|push-location)$/i.test(words[0])) saved.push(roots);
+      if (target.none) {
+        // No folder named: bash's cd goes home and its pushd swaps the top two saved folders (from a
+        // stack this command may not show, so unknown). PowerShell 7's Set-Location also goes home,
+        // Windows PowerShell's and cmd's stay put, and Push-Location saves the folder and stays; a
+        // reading whose shell is not bash takes both.
+        const home = roots.map(root => shellPath(root || process.cwd(), '~'));
+        if (/^pushd$/i.test(words[0])) move([null]);
+        else if (/^(?:cd|chdir|set-location|sl)$/i.test(words[0])) move(shell === 'posix' ? home : [...roots, ...home]);
+        continue;
+      }
+      if (target.unknown) move([null]);
+      else if (target.back) {
+        backs += 1;
+        const bash = previous || [null];
+        const history = backs <= moves ? visited : [...visited, null];
+        const back = shell === 'posix' ? bash : shell === 'powershell' ? history : [...bash, ...history];
+        moves -= 1;
+        move(back);
+      } else {
+        const word = folderWord(target.word, variables, shell);
+        move(roots.map(root => (root === null && !absoluteShellPath(word) ? null : shellPath(root || process.cwd(), word))));
+      }
+      continue;
+    }
+    for (const root of roots) {
+      const reason = pushRefusal(words, root, { registryOptions, variables, shell });
+      if (reason && !reasons.includes(reason)) reasons.push(reason);
+    }
   }
-  return '';
+  return reasons.length ? refuse(reasons.join(' Also: ')) : '';
 }
 
 // Read command position with shell quoting intact: an env launch inside a message is just text.

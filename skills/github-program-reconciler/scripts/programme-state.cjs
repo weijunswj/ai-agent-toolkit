@@ -60,6 +60,11 @@ const GATE_ROLES = ['G0', 'G1', 'G2'];
 const GATE_STATES = ['ASSIGNED', 'ACTIVE', 'WAITING_OWNER', 'INTERRUPTED', 'SUBMITTED', 'RETIRED'];
 // A live assignment: its bound session may journal and the controller reads that journal.
 const LIVE_GATE_STATES = ['ASSIGNED', 'ACTIVE', 'SUBMITTED', 'WAITING_OWNER'];
+// A queued pass reads a task whose number matches the pass count in this cycle, so every task is
+// read again at least once in this many passes even when nothing about it changed.
+const ROTATION_PASSES = 12;
+// The freshness time is redrawn when it is this old.
+const BOARD_REDRAW_MS = 60 * 60 * 1000;
 const VERDICTS = ['ACCEPT', 'REOPEN', 'WAITING_OWNER'];
 const RETURN_MODES = ['native', 'toolkit_assisted'];
 const REQUESTED_VERDICTS = ['ACCEPT', 'WAITING_OWNER'];
@@ -81,7 +86,7 @@ const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // observation timestamps, pending effects (an intent write must not make the rendered state stale),
 // the journal blobs the controller has read and the parent's attention findings. sameState still
 // compares the last two, so a real change is written without a revision bump.
-const UNHASHED = ['revision', 'volatile', 'pending_effects', 'journals_seen', 'attention', 'page_archive'];
+const UNHASHED = ['revision', 'volatile', 'pending_effects', 'journals_seen', 'attention', 'page_archive', 'sweep'];
 // Child fields `update` may change. UAT, review and a terminal lifecycle (DONE, RETIRED) are
 // acceptance records: only the parent's holder (the controller) writes them.
 const PATCHABLE_CHILD_FIELDS = ['lifecycle', 'completed_at', 'release', 'candidate', 'uat', 'review', 'blockers', 'next_action', 'private'];
@@ -140,6 +145,7 @@ function sameState(previous, next) {
     && JSON.stringify(canonical(previous.journals_seen || {})) === JSON.stringify(canonical(next.journals_seen || {}))
     && JSON.stringify(canonical(previous.attention || [])) === JSON.stringify(canonical(next.attention || []))
     && JSON.stringify(canonical(previous.page_archive || [])) === JSON.stringify(canonical(next.page_archive || []))
+    && JSON.stringify(canonical(previous.sweep || null)) === JSON.stringify(canonical(next.sweep || null))
     && previous.private?.graph_pr_watermark === next.private?.graph_pr_watermark
     && previous.private?.graph_issue_watermark === next.private?.graph_issue_watermark
     && JSON.stringify(canonical(previous.private?.closing_scan || [])) === JSON.stringify(canonical(next.private?.closing_scan || []));
@@ -150,7 +156,7 @@ function check(errors, condition, message) { if (!condition) errors.push(message
 // Fields each object may and must hold, as the schemas' additionalProperties: false and required.
 const SHAPES = {
   child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'], optional: ['volatile', 'journals_seen', 'completed_at', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'] },
-  parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'page_archive', 'private', 'volatile'], optional: ['volatile', 'attention', 'page_archive'] },
+  parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'page_archive', 'private', 'volatile', 'sweep'], optional: ['volatile', 'attention', 'page_archive', 'sweep'] },
   finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics', 'kind'], optional: ['diagnostics', 'kind'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
@@ -279,6 +285,7 @@ function validateCommon(errors, doc, schema) {
 function validateParent(doc) {
   const errors = [];
   if (validateCommon(errors, doc, SCHEMA.parent)) {
+    if (doc.sweep !== undefined) validateSweep(errors, doc.sweep);
     check(errors, isInt(doc.parent_issue, 1), 'parent_issue must be an issue number');
     check(errors, optional(doc.release_plan, value => isObject(value)
       && optional(value.record, isText) && optional(value.comment_id, v => isInt(v, 1))), 'release_plan must hold record and comment_id');
@@ -318,6 +325,14 @@ function validateParent(doc) {
     validatePageArchive(errors, doc.page_archive);
   }
   return errors;
+}
+
+// The sweep's saved queue: tasks still to read, in order, and how often each failed in a row.
+function validateSweep(errors, value) {
+  checkShape(errors, value, { all: ['queue', 'failures'] }, 'sweep');
+  if (!isObject(value)) return;
+  check(errors, Array.isArray(value.queue) && value.queue.every(number => isInt(number, 1)) && new Set(value.queue).size === value.queue.length, 'sweep.queue must contain unique issue numbers');
+  check(errors, isObject(value.failures) && Object.entries(value.failures).every(([number, count]) => /^[1-9]\d*$/.test(number) && isInt(count, 1)), 'sweep.failures must map issue numbers to failure counts');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -360,6 +375,9 @@ const FINDING_CODES = Object.freeze({
   ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the archive comments on the page this finding names; redraw can publish a fresh verified graph part; archived notes are in the saved page copies in the private store under page-copies/issue-<n>/ and are restored by putting them back on the page under `## Archive` for a fresh comment; the finding stays open until disposed' },
   ARCHIVE_SECTION_UNSAFE: { source: 'reconcile', next_action: 'Controller: fix the text under the `## Archive` line as the reason says, or remove that line; nothing was moved' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
+  SWEEP_TASK_UNREADABLE: { source: 'reconcile', next_action: 'Controller: check why the sweep could not read this task three passes in a row; it keeps trying after the other tasks' },
+  STATE_BRANCH_BUSY: { source: 'reconcile', next_action: 'Controller: something else kept moving the state branch during three sweeps in a row; find the other writer' },
+  GRAPHQL_REFUSED: { source: 'reconcile', next_action: 'Controller: GitHub refused GraphQL to three sweeps in a row; check the sign-in and GitHub status, the sweep reads one document at a time meanwhile' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
   TASK_IDLE: { source: 'reconcile', next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
@@ -386,12 +404,22 @@ const BODY_SECTION_KINDS = ['CURRENT', 'STATE', 'CONTEXT', 'TRACE', 'NAV', 'hand
 const SIZE_CODES = ['BODY_TOO_LARGE', 'BODY_NEAR_LIMIT'];
 const PAGE_CODES = SIZE_CODES;
 const BODY_SECTION_LIMIT = 5;
-const REFRESH_BUDGET_MS = 10 * 60 * 1000;
+// One pass budget per mode. A scheduled pass (the hourly sweep, on GitHub or on a computer) has
+// about an hour: it is killed KILL_SLACK_MS after its budget and its job stopped JOB_SLACK_MS later,
+// still before the next hourly start. The refresh a session starts after its own GitHub write keeps
+// ten minutes, so it never holds the programme lock for long.
+const KILL_SLACK_MS = 5 * 60 * 1000;
+const JOB_SLACK_MS = 3 * 60 * 1000;
+const PASS_BUDGETS = Object.freeze(Object.fromEntries(Object.entries({ scheduled: 50, 'after-write': 10 }).map(([mode, minutes]) => {
+  const budgetMs = minutes * 60 * 1000;
+  return [mode, Object.freeze({ budgetMs, killMs: budgetMs + KILL_SLACK_MS, jobTimeoutMs: budgetMs + KILL_SLACK_MS + JOB_SLACK_MS })];
+})));
+const REFRESH_BUDGET_MS = PASS_BUDGETS['after-write'].budgetMs;
 const PAGE_RESERVE_MS = 3 * 60 * 1000;
 const END_RESERVE_MS = 60 * 1000;
-// Stop the queue at minute 8 of the ten-minute budget: one minute to settle intents and
-// record the stop, then one for CURRENT. The scheduled twelve-minute kill still has two
-// minutes of slack for requests already in flight; checks cannot cancel such a request.
+// Stop the queue two minutes before the budget ends: one minute to settle intents and record the
+// stop, then one for CURRENT. The kill five minutes after the budget leaves slack for requests
+// already in flight; checks cannot cancel such a request.
 const QUEUE_RESERVE_MS = 2 * END_RESERVE_MS;
 const AGAIN_RESERVE_MS = 6 * 60 * 1000;
 // Task pages re-laid (hand-written text moved, with a saved copy each) in one pass.
@@ -414,13 +442,15 @@ function validatePassDiagnostics(errors, value, at) {
 }
 
 // One clock and deadline for all passes in a refresh process. Progress is supplied by the lock
-// owner; direct callers can inject the same clock without writing a local progress file.
+// owner; direct callers can inject the same clock without writing a local progress file. `endsBy`
+// is when the process is killed at the latest: the sweep lease never outlasts it.
 class RefreshBudget {
   constructor({ nowMs = Date.now, budgetMs = REFRESH_BUDGET_MS, progress = null } = {}) {
     this.nowMs = nowMs;
     this.start = nowMs();
     this.started_at = new Date(this.start).toISOString();
     this.deadline = this.start + budgetMs;
+    this.endsBy = this.deadline + KILL_SLACK_MS;
     this.progress = progress;
     this.phase = 'planning'; this.done = 0; this.total = 0;
     this.stopped = null;
@@ -1663,7 +1693,7 @@ function ownerWait(child) {
 // The generated CURRENT summary: the tasks in progress, in Programme Graph order, each with its gate,
 // PR, next step and anything waiting on the owner, then the top LATER task to start next. Queued
 // work shows in the graph below it.
-function renderCurrentBlockBody(parent, children, issues = new Map(), now = new Date().toISOString()) {
+function renderCurrentBlockBody(parent, children, issues = new Map(), now = new Date().toISOString(), board = null) {
   const rows = graphOrder(parent, children, issues).map(outcome => ({ outcome, child: children.get(outcome.issue) }));
   const working = rows.filter(row => statusText(row.outcome, row.child) === 'IN PROGRESS').map(row => {
     const parts = [row.child.gate.role, row.child.pr.number ? `PR #${row.child.pr.number}` : null].filter(Boolean).join(', ');
@@ -1675,6 +1705,7 @@ function renderCurrentBlockBody(parent, children, issues = new Map(), now = new 
   return [
     '# CURRENT',
     '<!-- programme-current -->',
+    ...(board ? [board] : []),
     `_Generated from the programme state (revision ${parent.revision}). PROGRAMME GRAPH, AGENT CONTEXT and COMMENT TRACE follow._`,
     '',
     '**In progress**',
@@ -1684,6 +1715,12 @@ function renderCurrentBlockBody(parent, children, issues = new Map(), now = new 
     '',
     ...attentionBlockLines(parent.attention, now),
   ].join('\n');
+}
+
+// The freshness line a page shows in its CURRENT block, or null.
+function boardLineOf(body) {
+  const current = findStateBlock(String(body || ''), CURRENT_BLOCK_NAME).block;
+  return current?.body.split('\n').find(line => /^(?:Board updated: |⚠️ Board out of date |⚠️ Sweep stuck)/.test(line)) || null;
 }
 
 // The parent preview shows recent/acknowledged findings and a separate short waiting list.
@@ -2218,14 +2255,27 @@ function upsertStateBlock(text, rendered, placement = {}) {
 // The only place that runs `gh api`. Returns status and parsed JSON; never retries.
 // A takeover (STALE_WRITER) or the loss of the pass lock (PASS_LOCK_LOST) stops the whole pass at
 // once; an intent it leaves IN_FLIGHT is recovered by the next pass.
-const STOPS_PASS = new Set(['STALE_WRITER', 'PASS_LOCK_LOST', 'PASS_STOPPED']);
+const STOPS_PASS = new Set(['STALE_WRITER', 'PASS_LOCK_LOST', 'PASS_STOPPED', 'SWEEP_STOP']);
+// Requests per pass for the changed-issues list; a longer list carries on next pass from its cursor.
+const CHANGED_PAGES = 10;
+// A runaway guard on one PR list (100 PRs a page), far above any real repository; the pass's own
+// request budget is what normally bounds it.
+const LIST_PAGE_GUARD = 1000;
+// PR discovery's own budget: a fixed part for the PR lists' detail reads and the parent, plus one
+// request for each batch of twenty task links and two for each task read this pass (an older PR to
+// reconfirm and a merge to confirm). It grows with the board, so a large board never fails discovery
+// on a fixed number; the list pages themselves count only against the pass's request budget.
+const DISCOVERY_BASE = 60;
+const discoveryBudget = (tasks, scoped = tasks) => DISCOVERY_BASE + Math.ceil(Math.max(0, tasks) / 20) + 2 * Math.max(0, scoped);
 
 class GitHubTransport {
-  constructor({ ghPath, run = spawnSync, timeoutMs = 120000 }) {
+  // `env`, when given, is the whole environment of every gh call (the cloud sweep's own token).
+  constructor({ ghPath, run = spawnSync, timeoutMs = 120000, env = null }) {
     if (!ghPath) throw new ProgrammeError('EXECUTABLE_NOT_FOUND', 'GitHubTransport needs the full path to gh.');
     this.ghPath = ghPath;
     this.run = run;
     this.timeoutMs = timeoutMs;
+    this.env = env;
   }
 
   request(method, apiPath, body, { timeoutMs = this.timeoutMs } = {}) {
@@ -2234,6 +2284,7 @@ class GitHubTransport {
     const result = this.run(this.ghPath, args, {
       encoding: 'utf8', input: body === undefined ? undefined : JSON.stringify(body),
       maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: Math.max(1, Math.floor(Math.min(this.timeoutMs, timeoutMs))),
+      ...(this.env ? { env: this.env } : {}),
     });
     if (result.error) throw new ProgrammeError('GH_FAILED', `gh could not run: ${result.error.message}`);
     // gh exits 4 when it is not signed in, before any request: a refusal, never "unreachable".
@@ -2256,7 +2307,11 @@ class GitHubTransport {
       try { json = JSON.parse(text); }
       catch { json = { message: text.trim().slice(0, 300) }; }
     }
-    return { status: Number(last[1]), json };
+    const headers = Object.fromEntries(rest.slice(0, split === -1 ? rest.length : split).split(/\r?\n/).slice(1)
+      .map(line => /^([^:]+):\s*(.*)$/.exec(line)).filter(Boolean).map(match => [match[1].toLowerCase(), match[2].trim()]));
+    // The rate-limit headers ride along for the sweep's request budget without changing the answer
+    // every other caller compares, prints or stores.
+    return Object.defineProperty({ status: Number(last[1]), json }, 'headers', { value: headers, enumerable: false });
   }
 
   graphql(query, variables) {
@@ -2286,15 +2341,67 @@ function assertPageCopy(doc) {
 
 // An existing document is replaced only against the exact version that was read. A read that
 // came back without a usable blob id cannot prove that version, so nothing is requested.
+const DOCUMENT_FILE = /^(parent|issue)-([1-9][0-9]*)\.json$/;
+const SWEEP_RECORD_FILE = 'sweep-lease.json';
+const SWEEP_RECORD_SCHEMA = 'toolkit.programme-sweep-lease.v1';
+// The sweep's recent passes, beside the lease: when each ended, how many tasks it read, how many it
+// left and whether it finished. Only the board's stuck note reads it.
+const SWEEP_HISTORY_FILE = 'sweep-history.json';
+const SWEEP_HISTORY_SCHEMA = 'toolkit.programme-sweep-history.v1';
+const SWEEP_STOP_REASONS = ['time limit', 'request cap', 'GitHub rate limit', 'state branch busy', 'GitHub GraphQL unavailable', 'tasks still to check', 'an incomplete read',
+  'another pass took over', 'a GitHub request failed', 'an error'];
+
+// The record both sweep routes share in the private store: who holds the sweep now (with its
+// progress, so a killed run is reported), the pass count the rotation runs on, when a pass last
+// started and last finished, and a stop the state could not hold.
+function validateSweepRecord(doc) {
+  const errors = [];
+  const time = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+  const diagnostics = (value, at) => { if (value !== null) validatePassDiagnostics(errors, value, at); };
+  check(errors, isObject(doc), 'the sweep record must be an object');
+  if (isObject(doc)) {
+    checkShape(errors, doc, { all: ['schema', 'repository', 'holder', 'pass', 'changed_since', 'last_complete_at', 'stopped_passes', 'reason', 'unreported', 'streaks'] }, 'sweep record');
+    check(errors, doc.schema === SWEEP_RECORD_SCHEMA && REPO.test(doc.repository || ''), 'the sweep record names its schema and repository');
+    check(errors, doc.holder === null || isObject(doc.holder) && /^[0-9a-f]{32}$/.test(doc.holder.nonce || '') && ['computer', 'cloud'].includes(doc.holder.host)
+      && time(doc.holder.expires_at) && Object.keys(doc.holder).sort().join(',') === 'expires_at,host,nonce,progress', 'the sweep record holder is invalid');
+    if (isObject(doc.holder)) diagnostics({ cause: 'interrupted', ...doc.holder.progress }, 'sweep record progress');
+    check(errors, isInt(doc.pass) && isInt(doc.stopped_passes), 'the sweep record counts must be whole numbers');
+    check(errors, [doc.changed_since, doc.last_complete_at].every(value => value === null || time(value)), 'the sweep record times must be dates or null');
+    check(errors, doc.reason === null || SWEEP_STOP_REASONS.includes(doc.reason), 'the sweep record reason must be a known stop reason');
+    if (doc.unreported !== null) diagnostics(doc.unreported, 'sweep record stop');
+    check(errors, isObject(doc.streaks) && Object.keys(doc.streaks).sort().join(',') === 'busy,graphql' && isInt(doc.streaks.busy) && isInt(doc.streaks.graphql), 'the sweep record streaks are invalid');
+  }
+  if (errors.length) throw new ProgrammeError('STATE_INVALID', `The sweep record is invalid: ${errors[0]}.`);
+  return doc;
+}
+
+function validateSweepHistory(doc) {
+  const errors = [];
+  const time = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+  check(errors, isObject(doc), 'the sweep history must be an object');
+  if (isObject(doc)) {
+    checkShape(errors, doc, { all: ['schema', 'repository', 'started_at', 'passes'] }, 'sweep history');
+    check(errors, doc.schema === SWEEP_HISTORY_SCHEMA && REPO.test(doc.repository || '') && time(doc.started_at), 'the sweep history names its schema, repository and start');
+    check(errors, Array.isArray(doc.passes) && doc.passes.length <= 200 && doc.passes.every(entry => isObject(entry)
+      && Object.keys(entry).sort().join(',') === 'at,complete,left,read' && time(entry.at) && isInt(entry.read)
+      && (entry.left === null || isInt(entry.left)) && typeof entry.complete === 'boolean'), 'the sweep history passes are invalid');
+  }
+  if (errors.length) throw new ProgrammeError('STATE_INVALID', `The sweep history is invalid: ${errors[0]}.`);
+  return doc;
+}
+
 function requireVersionToken(sha, docPath) {
   if (typeof sha === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) return;
   throw new ProgrammeError('STATE_TOKEN_MISSING', `${docPath} was read without its version id, so it was not replaced. Nothing was written; run refresh again.`);
 }
 
 class StateStore {
-  constructor({ transport, store, now = () => new Date().toISOString(), toolkitVersion = null }) {
+  // `installationWrite` is true only for the cloud sweep, whose store token is a GitHub App
+  // installation token the workflow minted with Contents write for this one store.
+  constructor({ transport, store, now = () => new Date().toISOString(), toolkitVersion = null, installationWrite = false }) {
     this.transport = transport;
     this.store = store;
+    this.installationWrite = installationWrite === true;
     this.now = now;
     this.toolkitVersion = toolkitVersion;
     this.writes = 0;
@@ -2321,11 +2428,16 @@ class StateStore {
   journalPath(issue, name) { return `${this.journalDir(issue)}/${name}`; }
 
   // The store must exist, be private and be writable, and the branch must exist. No fallback store.
+  // A signed-in account's read shows its push access. An App installation token's read does not
+  // reliably show the token's own access (it may omit `permissions` or report every value false), so
+  // the cloud sweep skips that one check: its workflow minted the token with Contents write for this
+  // one store, and the sweep lease's write, which comes before any state is saved, proves it.
   verify() {
     const repo = this.transport.request('GET', `repos/${this.store.repository}`);
+    const writable = this.installationWrite || repo.json?.permissions?.push === true;
     const reason = repo.status !== 200 ? `it could not be read (${repo.status})`
       : repo.json.private !== true ? 'it is not private'
-        : repo.json.permissions?.push !== true ? 'this account cannot write to it' : null;
+        : !writable ? 'this account cannot write to it' : null;
     if (reason) throw new ProgrammeError('STATE_STORE_UNVERIFIED', `The state store ${this.store.repository} was not used because ${reason}. Choose a private repository you can write to in .github/toolkit-programme.json.`);
     const branch = this.transport.request('GET', `repos/${this.store.repository}/branches/${encodeURIComponent(this.store.branch)}`);
     if (branch.status !== 200) throw new ProgrammeError('STATE_STORE_UNVERIFIED', `The state store branch ${this.store.branch} could not be read (${branch.status}).`);
@@ -2334,6 +2446,187 @@ class StateStore {
 
   read(kind, number) {
     return this.readPath(this.docPath(kind, number), kind);
+  }
+
+  // The state directory at one commit: every file's text and blob id. GraphQL reads it in one
+  // request. When GitHub refuses GraphQL, one REST listing plus one blob read per document is used
+  // instead, inside the same request budget; the caller learns which route ran (`mode`).
+  readTree(ref) {
+    const dir = this.store.path.replace(/\/$/, '');
+    const [owner, name] = this.store.repository.split('/');
+    const response = this.transport.request('POST', 'graphql', {
+      query: 'query stateSnapshot($owner:String!,$name:String!,$directory:String!){repository(owner:$owner,name:$name){snapshot:object(expression:$directory){... on Tree{entries{name oid type object{... on Blob{text isTruncated}}}}}}}',
+      variables: { owner, name, directory: `${ref}:${dir}` },
+    });
+    if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
+    const repo = response.json?.data?.repository;
+    if (response.status === 200 && !response.json?.errors?.length && repo) {
+      this.graphqlRefused = false;
+      const files = new Map();
+      for (const entry of repo.snapshot?.entries || []) {
+        if (entry.type !== 'blob') continue;
+        const truncated = entry.object?.isTruncated || typeof entry.object?.text !== 'string';
+        files.set(entry.name, { text: truncated ? null : entry.object.text, sha: entry.oid || null });
+      }
+      return { files, mode: 'graphql' };
+    }
+    this.graphqlRefused = true;
+    const listing = this.transport.request('GET', `${this.encodedContents(dir)}?ref=${encodeURIComponent(ref)}`);
+    if (listing.status === 404) return { files: new Map(), mode: 'rest' };
+    if (listing.status !== 200 || !Array.isArray(listing.json)) throw ghFailure(listing, `Listing ${dir}`);
+    const wanted = listing.json.filter(entry => entry?.type === 'file' && DOCUMENT_FILE.test(String(entry.name)));
+    const others = listing.json.filter(entry => entry?.type === 'file' && !DOCUMENT_FILE.test(String(entry.name)));
+    // Reading every blob must still leave the settlement reserve; otherwise stop before any write.
+    if (typeof this.transport.left === 'function' && this.transport.left() < wanted.length + (this.transport.reserve || 0)) {
+      throw Object.assign(new ProgrammeError('PASS_STOPPED', 'GitHub refused GraphQL and the state documents cannot be read one by one within this pass.'), { reason: 'GitHub GraphQL unavailable', noWrite: true });
+    }
+    const files = new Map(others.map(entry => [entry.name, { text: null, sha: isSha(entry.sha) ? entry.sha : null }]));
+    for (const entry of wanted) {
+      if (!isSha(entry.sha)) { files.set(entry.name, { text: null, sha: null }); continue; }
+      const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${entry.sha}`);
+      if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${dir}/${entry.name}`);
+      files.set(entry.name, { text: Buffer.from(blob.json.content, 'base64').toString('utf8'), sha: entry.sha });
+    }
+    return { files, mode: 'rest' };
+  }
+
+  // Every parent and child document at the branch head, each with its own blob id: the version its
+  // compare-and-swap checks. A document that cannot be used holds only when it is read.
+  readSnapshot() {
+    const branch = this.transport.request('GET', `repos/${this.store.repository}/branches/${encodeURIComponent(this.store.branch)}`);
+    if (branch.status !== 200) throw ghFailure(branch, `Reading the state branch ${this.store.branch}`);
+    const head = branch.json?.commit?.sha;
+    const tree = branch.json?.commit?.commit?.tree?.sha;
+    if (!isSha(head) || !isSha(tree)) throw new ProgrammeError('STATE_STORE_UNVERIFIED', `The state branch ${this.store.branch} head could not be read.`);
+    const { files, mode } = this.readTree(head);
+    const documents = new Map();
+    for (const [file, entry] of files) {
+      const match = DOCUMENT_FILE.exec(file);
+      if (!match) continue;
+      const kind = match[1] === 'parent' ? 'parent' : 'child';
+      const docPath = this.docPath(kind, Number(match[2]));
+      let value;
+      try {
+        if (entry.text === null) throw new ProgrammeError('STATE_INVALID', `${docPath} could not be read in full.`);
+        let doc;
+        try { doc = JSON.parse(entry.text); } catch { throw new ProgrammeError('STATE_INVALID', `${docPath} is not valid JSON.`); }
+        value = { doc: this.validateRead(kind, doc), sha: entry.sha, text: entry.text };
+      } catch (error) {
+        if (!error.code) throw error;
+        value = { error };
+      }
+      documents.set(`${kind}:${Number(match[2])}`, value);
+    }
+    return { head, tree, mode, documents, files };
+  }
+
+  // Where the sweep's shared record (its lease) lives.
+  sweepRecordPath() { return `${this.store.path}${SWEEP_RECORD_FILE}`; }
+  sweepHistoryPath() { return `${this.store.path}${SWEEP_HISTORY_FILE}`; }
+  // The documents as they stand now: the earlier snapshot when the branch has not moved since.
+  currentSnapshot(earlier) {
+    const branch = this.transport.request('GET', `repos/${this.store.repository}/branches/${encodeURIComponent(this.store.branch)}`);
+    if (branch.status === 200 && earlier?.head && branch.json?.commit?.sha === earlier.head) return earlier;
+    return this.readSnapshot();
+  }
+
+  // A document of a snapshot, as read() returns it: { doc, sha }, or the error that holds it.
+  snapshotDoc(snapshot, kind, number) {
+    const entry = snapshot.documents.get(`${kind}:${number}`);
+    if (!entry) return { doc: null, sha: null };
+    if (entry.error) throw entry.error;
+    return { doc: clone(entry.doc), sha: entry.sha };
+  }
+
+  // The bytes a document is stored as (a public view on a public state branch).
+  storedText(kind, doc) { return canonicalText(doc); }
+  beforeBatch() {}
+  afterBatch() {}
+
+  // The state phase of a pass in one commit: every changed document, each built on the version it
+  // was read at, published by one non-forced ref update from the snapshot head. A ref race re-runs
+  // the staged changes on a fresh snapshot once (`rerun`); a second race stops the pass. A reply
+  // lost after the ref update is settled by reading the branch head before anything else runs.
+  commitBatch(batch, { message = 'programme state: pass' } = {}) {
+    // The sweep lease's commit window: it closes when this returns or throws, with the lease entry
+    // that landed, or unsure when a write request went out and its outcome was not confirmed.
+    let committed = null;
+    let unsure = false;
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const documents = batch.prepare(this);
+        if (!documents.length) return { written: [], head: batch.snapshot.head };
+        // The sweep's progress and renewed expiry ride the commit (or are written beside it), rebuilt
+        // on every attempt from the version the lease holds.
+        const lease = batch.lease ? batch.lease.entry(batch.snapshot) : null;
+        const written = [...documents, ...(lease ? [{ ...lease, kind: 'lease' }] : [])];
+        this.beforeBatch(written);
+        const tree = this.transport.request('POST', `repos/${this.store.repository}/git/trees`, { base_tree: batch.snapshot.tree,
+          tree: written.map(entry => ({ path: entry.path, mode: '100644', type: 'blob', content: entry.text })) });
+        if (!okStatus(tree.status) || !isSha(tree.json?.sha)) throw ghFailure(tree, 'Writing the state tree');
+        const lines = documents.map(entry => `${documentName(entry.kind, entry.number)} r${entry.doc.revision}`);
+        const commit = this.transport.request('POST', `repos/${this.store.repository}/git/commits`, { message: `${message}: ${lines.join(', ')} [skip ci]`, tree: tree.json.sha, parents: [batch.snapshot.head] });
+        if (!okStatus(commit.status) || !isSha(commit.json?.sha)) throw ghFailure(commit, 'Writing the state commit');
+        // Only the ref update can land this commit: until it is confirmed, the outcome is unsure.
+        unsure = true;
+        const outcome = this.moveBranch(batch.snapshot.head, commit.json.sha);
+        if (outcome === 'MOVED') {
+          this.readBack(commit.json.sha, written, tree.json);
+          unsure = false;
+          committed = written.find(entry => entry.kind === 'lease')?.blob || null;
+          this.writes += documents.length;
+          this.lastCommit = commit.json.sha;
+          for (const entry of documents) this.ownWrites.set(entry.path, { replaced: entry.sha, doc: clone(entry.stored), sha: entry.blob });
+          this.afterBatch(documents, commit.json.sha);
+          batch.committed(documents, commit.json.sha);
+          return { written: documents, head: commit.json.sha };
+        }
+        // RACED: another writer moved the branch, so this attempt changed nothing. Re-read and
+        // re-run every staged change once.
+        unsure = false;
+        if (attempt === 0) batch.rerun(this.readSnapshot(), this);
+      }
+      throw Object.assign(new ProgrammeError('STATE_BRANCH_BUSY', 'The state branch moved twice while this pass was saving; nothing was written and the queue is unchanged.'), { reason: 'state branch busy' });
+    } finally {
+      batch.lease?.close({ committed, unsure });
+    }
+  }
+
+  // MOVED or RACED. A lost reply is decided from the branch head: ours is accepted, the old head is
+  // retried once, anything else is compared; if none of that can be read, GH_FAILED and no effect runs.
+  moveBranch(from, to) {
+    const ref = `repos/${this.store.repository}/git/refs/heads/${encodeURIComponent(this.store.branch)}`;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const moved = this.transport.request('PATCH', ref, { sha: to, force: false });
+      if (okStatus(moved.status)) return 'MOVED';
+      if ([409, 422].includes(moved.status)) return 'RACED';
+      const head = this.transport.request('GET', `repos/${this.store.repository}/branches/${encodeURIComponent(this.store.branch)}`);
+      const sha = head.status === 200 ? head.json?.commit?.sha : null;
+      if (!isSha(sha)) throw new ProgrammeError('GH_FAILED', 'The state branch update got no reply and the branch head could not be read, so nothing else ran. Run refresh again.', { status: moved.status });
+      if (sha === to) return 'MOVED';
+      if (sha === from) continue;
+      const compare = this.transport.request('GET', `repos/${this.store.repository}/compare/${to}...${sha}`);
+      if (compare.status !== 200 || !['ahead', 'identical', 'behind', 'diverged'].includes(compare.json?.status)) {
+        throw new ProgrammeError('GH_FAILED', 'The state branch update got no reply and its outcome could not be read, so nothing else ran. Run refresh again.', { status: moved.status });
+      }
+      return ['ahead', 'identical'].includes(compare.json.status) ? 'MOVED' : 'RACED';
+    }
+    throw new ProgrammeError('GH_FAILED', 'The state branch update got no reply twice, so nothing else ran. Run refresh again.');
+  }
+
+  // The new commit must hold exactly what was written: every text by GraphQL, or, when GraphQL is
+  // refused, every blob id GitHub returned for the created tree (no local hash is computed).
+  readBack(commitSha, written, tree) {
+    const { files, mode } = this.readTree(commitSha);
+    for (const entry of written) {
+      const name = entry.path.slice(this.store.path.length);
+      const found = files.get(name);
+      const expected = mode === 'rest' ? (tree.tree || []).find(item => item.path === entry.path)?.sha : null;
+      if (!found || (mode === 'graphql' ? found.text !== entry.text : !isSha(expected) || found.sha !== expected)) {
+        throw new ProgrammeError('STATE_READBACK_MISMATCH', `${entry.path} did not read back as written in the state commit.`);
+      }
+      entry.blob = found.sha;
+    }
   }
 
   // Reads the branch, or a fixed commit when `ref` is given. A branch read that still shows the
@@ -2355,6 +2648,8 @@ class StateStore {
 
   // State documents and journals, or a public state branch's sidecars and checkpoint.
   validateRead(kind, doc) {
+    if (kind === 'sweep_record') return validateSweepRecord(doc);
+    if (kind === 'sweep_history') return validateSweepHistory(doc);
     if (kind === 'sidecar') return assertSidecar(doc);
     if (kind === 'checkpoint') return assertCheckpoint(doc);
     if (kind === 'page_copy') return assertPageCopy(doc);
@@ -2521,6 +2816,132 @@ class StateStore {
     }
     if (onConflict) onConflict(clone(base), { created: false });
     throw new ProgrammeError('STATE_CONFLICT', `${this.docPath(kind, number)} kept moving; held for the controller.`);
+  }
+}
+
+// The documents of one pass at one snapshot. read() returns staged versions; mutate() stages a change
+// with the same authorisation and callbacks StateStore.mutate uses, and nothing reaches GitHub until
+// StateStore.commitBatch publishes every staged document in one commit. On a ref race the staged
+// changes are run again on the fresh documents, with the same conflict rule as the per-document
+// compare-and-swap: a document whose own fields another writer changed is dropped and held alone.
+class StateBatch {
+  constructor(store, snapshot, parentNumber) {
+    this.store = store;
+    this.snapshot = snapshot;
+    this.parentNumber = parentNumber;
+    this.entries = new Map();
+    this.dropped = new Map();
+    this.written = [];
+    this.head = null;
+    // The sweep lease's commit window, when a sweep holds one: { entry(snapshot), close(outcome) }.
+    this.lease = null;
+  }
+
+  read(kind, number) {
+    const key = `${kind}:${number}`;
+    if (this.dropped.has(key)) throw this.dropped.get(key);
+    const entry = this.entries.get(key);
+    if (entry) return { doc: entry.doc ? clone(entry.doc) : null, sha: entry.sha };
+    return this.store.snapshotDoc(this.snapshot, kind, number);
+  }
+
+  parent() { return this.read('parent', this.parentNumber).doc; }
+
+  run(entry, current, op) {
+    if (op.authorise) authoriseWrite(entry.kind, current, entry.kind === 'parent' ? null : this.parent(), op.writer);
+    const start = current || op.create();
+    const next = op.change(clone(start), { created: current === null });
+    return next ? clone(next) : null;
+  }
+
+  mutate(kind, number, { writer, change, create = null, authorise = true, onConflict = null }) {
+    const key = `${kind}:${number}`;
+    if (this.dropped.has(key)) throw this.dropped.get(key);
+    let entry = this.entries.get(key);
+    if (!entry) {
+      const { doc, sha } = this.store.snapshotDoc(this.snapshot, kind, number);
+      if (!doc && !create) throw new ProgrammeError('STATE_MISSING', `${this.store.docPath(kind, number)} does not exist yet.`);
+      // Before staging: a document read without its version id is never replaced.
+      if (doc) requireVersionToken(sha, this.store.docPath(kind, number));
+      entry = { kind, number, base: doc, sha, doc, ops: [] };
+    }
+    const op = { writer, change, create, authorise, onConflict };
+    const next = this.run(entry, entry.doc, op);
+    if (!next) return { outcome: 'NOOP', doc: entry.doc ? clone(entry.doc) : null, sha: entry.sha };
+    entry.doc = next;
+    entry.ops.push(op);
+    this.entries.set(key, entry);
+    return { outcome: 'STAGED', doc: clone(next), sha: entry.sha };
+  }
+
+  drop(entry, error) {
+    this.dropped.set(`${entry.kind}:${entry.number}`, error);
+    this.entries.delete(`${entry.kind}:${entry.number}`);
+  }
+
+  // The documents to write, each built on the version it was staged from.
+  prepare(store) {
+    const written = [];
+    for (const entry of this.entries.values()) {
+      if (!entry.doc || (entry.base && sameState(entry.base, entry.doc))) continue;
+      const doc = clone(entry.doc);
+      if (entry.kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
+      doc.revision = entry.base ? entry.base.revision + (contentDigest(entry.base) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
+      doc.volatile = { written_at: store.now(), ...(store.toolkitVersion ? { toolkit: store.toolkitVersion } : {}) };
+      assertValid(entry.kind, doc);
+      const text = store.storedText(entry.kind, doc);
+      written.push({ kind: entry.kind, number: entry.number, path: store.docPath(entry.kind, entry.number), sha: entry.sha, previous: entry.base, doc, text, stored: JSON.parse(text) });
+    }
+    return written;
+  }
+
+  // A ref race: run every staged change again on the fresh snapshot. The parent goes first, so each
+  // child is authorised against the parent as it now stands.
+  rerun(fresh, store) {
+    const before = [...this.entries.values()].sort((a, b) => (a.kind === 'parent' ? 0 : 1) - (b.kind === 'parent' ? 0 : 1));
+    this.snapshot = fresh;
+    this.entries = new Map();
+    for (const entry of before) {
+      let base, sha;
+      try { ({ doc: base, sha } = store.snapshotDoc(fresh, entry.kind, entry.number)); } catch (error) { if (!error.code) throw error; this.drop(entry, error); continue; }
+      if (entry.base && base && (base.fence.epoch !== entry.base.fence.epoch || base.fence.holder_session !== entry.base.fence.holder_session)) {
+        throw new ProgrammeError('STALE_WRITER', `${store.docPath(entry.kind, entry.number)} is now held by another session; this pass was stopped before it wrote anything.`);
+      }
+      const changed = (a, b) => Object.keys({ ...(a || {}), ...(b || {}) }).filter(key => !['revision', 'volatile'].includes(key)
+        && JSON.stringify(canonical(a?.[key])) !== JSON.stringify(canonical(b?.[key])));
+      const ours = changed(entry.base || entry.ops[0]?.create?.(), entry.doc);
+      const theirs = entry.base || base ? changed(entry.base, base) : [];
+      const overlap = ours.filter(key => theirs.includes(key));
+      // Created documents and the parent's catalogue additions only stand while their owner commits.
+      if ((!entry.base && base) || (entry.base && !base) || overlap.length || (!entry.base && this.dropped.has(`parent:${this.parentNumber}`))) {
+        let error = new ProgrammeError('STATE_CONFLICT', `${store.docPath(entry.kind, entry.number)} was changed by another writer in ${overlap.join(', ') || 'the same document'}; held for the controller.`);
+        try { for (const op of entry.ops) op.onConflict?.(base ? clone(base) : null, { created: false }); } catch (thrown) { if (!thrown.code) throw thrown; error = thrown; }
+        this.drop(entry, error);
+        continue;
+      }
+      try {
+        let doc = base;
+        for (const op of entry.ops) doc = this.run({ ...entry, base }, doc, op) || doc;
+        this.entries.set(`${entry.kind}:${entry.number}`, { ...entry, base, sha, doc });
+        if (base) requireVersionToken(sha, store.docPath(entry.kind, entry.number));
+      } catch (error) {
+        if (!error.code || STOPS_PASS.has(error.code)) throw error;
+        this.drop(entry, error);
+      }
+    }
+  }
+
+  committed(written, head) {
+    this.written = written;
+    this.head = head;
+  }
+
+  // Every document as committed: the snapshot with this batch's documents laid over it.
+  documents(kind) {
+    const docs = new Map();
+    for (const [key, entry] of this.snapshot.documents) if (key.startsWith(`${kind}:`) && entry.doc) docs.set(Number(key.slice(kind.length + 1)), clone(entry.doc));
+    for (const entry of this.written) if (entry.kind === kind) docs.set(entry.number, clone(entry.doc));
+    return docs;
   }
 }
 
@@ -2694,6 +3115,63 @@ function assertCheckpoint(doc) {
 // unchanged; reads join each public file to its sidecar, and writes put the sidecar first, then the
 // public file, then the checkpoint.
 class BranchStateStore extends StateStore {
+  // The public files at the branch head, each joined to its private sidecar as read() joins it.
+  // A branch never created has no documents.
+  readSnapshot() {
+    const branch = this.ensureBranch();
+    if (!branch.exists) return { head: null, tree: null, mode: 'graphql', documents: new Map(), files: new Map() };
+    const snapshot = super.readSnapshot();
+    for (const [key, entry] of snapshot.documents) {
+      if (entry.error) continue;
+      const kind = key.startsWith('parent:') ? 'parent' : 'child';
+      const number = Number(key.slice(kind.length + 1));
+      const recorded = this.checkpoint?.doc?.files?.[documentName(kind, number)];
+      if (recorded && entry.doc.revision < recorded.revision) {
+        this.hold('STATE_ROLLED_BACK', `${STATE_PATH}${documentName(kind, number)}.json on ${STATE_BRANCH} is at revision ${entry.doc.revision}, below the checkpoint's revision ${recorded.revision} (a force-push back, a deleted file or a hand edit). Nothing was written. Controller: report to the owner.`);
+      }
+      snapshot.documents.set(key, { doc: this.join(kind, number, entry.doc), sha: entry.sha, text: entry.text });
+    }
+    return snapshot;
+  }
+
+  storedText(kind, doc) { return canonicalText(publicView(kind, doc, [...this.sessions])); }
+
+  // The sweep record lives in the private store beside the sidecars.
+  sweepRecordPath() { return this.private.sweepRecordPath(); }
+  sweepHistoryPath() { return this.private.sweepHistoryPath(); }
+
+  // The sidecars before the branch commit, as write() puts the sidecar before the public file.
+  beforeBatch(written) {
+    if (!this.ensureBranch().exists) {
+      throw new ProgrammeError('STATE_BRANCH_MISSING', `The state branch ${STATE_BRANCH} was never created, so nothing was written. Only programme.cjs migrate-state --apply creates it.`);
+    }
+    this.requirePrivateStore();
+    for (const entry of written) {
+      entry.publicDigest = sha256(entry.text);
+      entry.sidecarSha = this.putSidecar(documentName(entry.kind, entry.number), entry.doc, entry.publicDigest);
+    }
+  }
+
+  // The checkpoint after the branch commit. A stop before it is recomputed from the branch next run.
+  afterBatch(written, head) {
+    this.branch = { exists: true, head };
+    const files = Object.fromEntries(written.map(entry => [documentName(entry.kind, entry.number), { revision: entry.doc.revision, sha256: entry.publicDigest }]));
+    try { this.recordCheckpoint(files, head); }
+    catch (error) {
+      if (!error.code || STOPS_PASS.has(error.code)) throw error;
+      this.checkpoint = null;
+      this.branch = null;
+      this.note('STATE_CHECKPOINT_STALE', `The state was written but its checkpoint was not (${error.code}); the next run sets it from the branch.`);
+      return;
+    }
+    for (const entry of written) {
+      const name = documentName(entry.kind, entry.number);
+      const replaced = this.joined.get(name);
+      this.joined.set(name, { file: this.sidecarPath(name, entry.doc.revision, entry.publicDigest), sha: entry.sidecarSha, revision: entry.doc.revision });
+      this.pruneSidecars(name, entry.doc.revision, replaced);
+    }
+  }
+
   constructor({ transport, binding, now = () => new Date().toISOString(), toolkitVersion = null, localCheckpoint = null }) {
     const block = binding?.state;
     if (!isObject(block) || block.kind !== 'branch' || block.branch !== STATE_BRANCH || block.path !== STATE_PATH) {
@@ -3064,9 +3542,9 @@ const STATE_BACKENDS = Object.freeze({ branch: BranchStateStore });
 
 // The store a merged binding names: the public state branch with the private store beside it when
 // the binding has `state`, else the private store alone. A disabled binding never reaches here.
-function openStore({ transport, binding, now, toolkitVersion = null, localCheckpoint = null }) {
+function openStore({ transport, binding, now, toolkitVersion = null, localCheckpoint = null, installationWrite = false }) {
   if (binding.state) return new STATE_BACKENDS[binding.state.kind]({ transport, binding, now, toolkitVersion, localCheckpoint });
-  return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion });
+  return new STORE_BACKENDS[binding.store.kind]({ transport, store: binding.store, now, toolkitVersion, installationWrite });
 }
 
 const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
@@ -3093,7 +3571,61 @@ function parentFromUrl(url, repository) {
 
 // Read-only view of the programme on GitHub.
 class ProgrammeGraphReader {
+  // At most twenty tracked/history PRs per serial request. Refusal alone uses the same REST
+  // facts; a pass stop, expired sign-in or a lost writer never becomes a compatibility fallback.
+  pullRequests(numbers) {
+    const result = new Map();
+    const unique = [...new Set(numbers)];
+    const [owner, name] = this.repository.split('/');
+    for (let start = 0; start < unique.length; start += 20) {
+      const batch = unique.slice(start, start + 20);
+      if (!batch.every(number => Number.isSafeInteger(number) && number > 0)) throw new ProgrammeError('USAGE', 'Pull request numbers must be positive integers.');
+      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
+      const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name} ${selection}}}`, variables: { owner, name } });
+      if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
+      const repo = response.json?.data?.repository;
+      if (response.status !== 200 || response.json?.errors?.length || !repo) {
+        for (const number of batch) result.set(number, this.restPullRequest(number));
+        continue;
+      }
+      for (const number of batch) {
+        const pr = repo[`p${number}`];
+        if (!pr || pr.number !== number) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'A batched pull request was not returned.');
+        const commit = pr.commits?.nodes?.[0]?.commit;
+        const rollup = commit?.statusCheckRollup;
+        result.set(number, { number, title: pr.title, state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
+          merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null, head: pr.headRefOid, base: pr.baseRefName,
+          default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable, rollupOid: commit?.oid || null,
+          complete: !rollup?.contexts?.pageInfo?.hasNextPage,
+          contexts: (rollup?.contexts?.nodes || []).map(node => ({ kind: node.__typename, name: node.name || node.context,
+            status: node.status || null, conclusion: node.conclusion || null, state: node.state || null, required: node.isRequired === true })) });
+      }
+    }
+    return result;
+  }
+
+  restPullRequest(number) {
+    const request = endpoint => {
+      const response = this.transport.request('GET', `repos/${this.repository}/${endpoint}`);
+      if (response.status !== 200) throw ghFailure(response, 'Reading pull request facts');
+      return response.json;
+    };
+    const pr = request(`pulls/${number}`);
+    if (!isSha(pr.head?.sha)) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The pull request head is unreadable.');
+    const checks = request(`commits/${pr.head.sha}/check-runs?per_page=100`);
+    const status = request(`commits/${pr.head.sha}/status`);
+    return { number: pr.number, title: pr.title, state: pr.merged ? 'MERGED' : pr.state === 'closed' ? 'CLOSED' : pr.draft ? 'DRAFT' : 'OPEN',
+      head: pr.head.sha, base: pr.base?.ref, default_branch: pr.base?.repo?.default_branch || null, mergeable: pr.mergeable,
+      merged_at: pr.merged_at || null, merge_sha: pr.merge_commit_sha || null, rollupOid: pr.head.sha,
+      complete: Array.isArray(checks.check_runs) && checks.total_count === checks.check_runs.length && Array.isArray(status.statuses) && status.total_count === status.statuses.length,
+      contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: check.status, conclusion: check.conclusion, required: false })),
+        ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: context.state, required: false }))] };
+  }
+
+  // The login archive comments are written under. The cloud sweep is given its App's login and
+  // never asks GitHub for the signed-in user.
   viewer() {
+    if (this.login) return this.login;
     const response = this.transport.request('GET', 'user');
     if (response.status !== 200 || !isText(response.json?.login)) throw ghFailure(response, 'Reading the authenticated login');
     return response.json.login;
@@ -3116,9 +3648,10 @@ class ProgrammeGraphReader {
     return events;
   }
 
-  constructor({ transport, repository }) {
+  constructor({ transport, repository, login = null }) {
     this.transport = transport;
     this.repository = repository;
+    this.login = login;
   }
 
   issue(number) {
@@ -3251,7 +3784,7 @@ class ProgrammeGraphReader {
   graphPullRequests(status, spend, watermark = null) {
     const all = [];
     const cutoff = status === 'closed' && watermark ? Date.parse(watermark) - 5 * 60000 : null;
-    for (let page = 1; page <= 10; page += 1) {
+    for (let page = 1; page <= LIST_PAGE_GUARD; page += 1) {
       spend();
       const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=${status}&per_page=100&sort=updated&direction=desc&page=${page}`);
       if (response.status !== 200) throw ghFailure(response, 'Reading programme PR history');
@@ -3267,7 +3800,7 @@ class ProgrammeGraphReader {
       }
       if (response.json.length < 100) return all;
     }
-    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', 'The programme PR scan reached ten full pages.');
+    throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `The programme PR scan reached ${LIST_PAGE_GUARD} full pages.`);
   }
 
   // At most twenty aliases, each with two bounded issue connections. No partial GraphQL data is used.
@@ -3301,6 +3834,38 @@ class ProgrammeGraphReader {
       return [number, { complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
         candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(Boolean), history }];
     }));
+  }
+
+  // The issues and pull requests GitHub changed at or after `since`, oldest change first. Each
+  // request asks again from the update time the last one ended on (keyset paging), so an item that
+  // changes during the read moves to the end and is read then, never skipped. The read stops after
+  // CHANGED_PAGES requests: it is then incomplete, and `cursor` is the update time read up to, so
+  // the next pass carries on from there instead of starting over. Rows that share that time are
+  // read again next pass, through the pass's own overlap.
+  changedSince(since) {
+    const issues = new Set(); const prs = []; const seen = new Set(); const order = [];
+    let from = since; let page = 1; let cursor = null;
+    for (let request = 0; request < CHANGED_PAGES; request += 1) {
+      const response = this.transport.request('GET', `repos/${this.repository}/issues?state=all&sort=updated&direction=asc&since=${encodeURIComponent(from)}&per_page=100&page=${page}`);
+      if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
+      if (response.status !== 200 || !Array.isArray(response.json)) return { issues, prs, order, complete: false, cursor };
+      let last = null;
+      for (const row of response.json) {
+        if (!isObject(row) || !isInt(row.number, 1) || !Number.isFinite(Date.parse(row.updated_at))) return { issues, prs, order, complete: false, cursor };
+        last = row.updated_at;
+        if (seen.has(row.number)) continue;
+        seen.add(row.number);
+        if (row.pull_request) prs.push({ number: row.number, title: row.title || '', body: [row.title, row.body].filter(Boolean).join('\n') });
+        else { issues.add(row.number); order.push(row.number); }
+      }
+      if (response.json.length < 100) return { issues, prs, order, complete: true, cursor: null };
+      // Everything changed before `last` has been read; rows at `last` itself may continue.
+      cursor = last;
+      // A full page of one update time cannot move the keyset forward: page through it instead.
+      if (Date.parse(last) <= Date.parse(from)) page += 1;
+      else { from = last; page = 1; }
+    }
+    return { issues, prs, order, complete: false, cursor };
   }
 
   pullRequestForBranch(branch) {
@@ -3766,8 +4331,14 @@ class Reconciler {
     return this.store.read('parent', this.binding.parent_issue);
   }
 
-  observe(parent, children, only) {
-    const outcomes = parent.outcomes.filter(outcome => !only || outcome.issue === only);
+  // What a pass reads from GitHub. A full pass reads every task and an issue-scoped pass one task.
+  // A queued pass (refresh with `queued`) first reads the whole graph: the parent's lists, every
+  // sub-issue list, the issues changed since its predecessor started, the open tracked PRs, the
+  // parent's comments, the PR lists and links, and the closing scan. Then it reads the tasks in its
+  // scope one at a time in queue order while `queued.canRead()` allows. A task outside the scope
+  // keeps its stored document, as every other task does on an issue-scoped pass.
+  observe(parent, children, only, queued = null) {
+    let outcomes = parent.outcomes.filter(outcome => !only || outcome.issue === only);
     const issues = new Map();
     // On a full pass the parent's own sub-issue list carries the issue facts of every native direct
     // child, so those children need no read of their own. Anything the list does not show
@@ -3786,13 +4357,25 @@ class Reconciler {
         if (row.facts?.complete === true && !row.facts.is_pull_request && row.facts.parent === parent.parent_issue) rows.set(row.number, row.facts);
       }
     }
+    const cache = this.refreshFacts && !only ? this.readCache : null;
+    cache?.beginPass();
+    const listedRows = rows.size;
+    const sweep = queued ? this.queuedReads(parent, children, outcomes, rows, issues, queued, cache) : null;
+    const all = outcomes;
+    // A queued pass observes only the tasks it read; the graph reads above cover the rest.
+    if (sweep) outcomes = sweep.read.map(number => all.find(outcome => outcome.issue === number));
+    if (sweep) this.sweepRead = sweep.read.length;
+    // Every task the lists showed keeps its current facts on the parent page, read or not.
+    if (sweep) for (const [number, facts] of rows) if (!issues.has(number)) issues.set(number, facts);
     for (const outcome of outcomes) read(outcome.issue);
-    const parents = new Set([parent.parent_issue, ...outcomes.map(outcome => outcome.parent).filter(Boolean), ...(this.refreshFacts && !only ? outcomes.map(outcome => outcome.issue) : [])]);
-    for (const number of parents) read(number);
+    const parents = new Set([parent.parent_issue, ...all.map(outcome => outcome.parent).filter(Boolean),
+      ...(this.refreshFacts && !only ? (sweep ? [...sweep.lists.keys()] : all.map(outcome => outcome.issue)) : [])]);
+    for (const number of parents) if (!sweep?.lists.has(number)) read(number);
     // An issue that reports no sub-issues has no list to read.
-    const subIssues = new Map([...parents].filter(number => issues.get(number)).map(number => [number,
-      number === parent.parent_issue && parentRows ? parentRows.map(row => ({ number: row.number, id: row.id }))
-        : issues.get(number).sub_issues_total === 0 ? [] : this.reader.subIssues(number)]));
+    const subIssues = new Map([...parents].filter(number => sweep?.lists.has(number) || issues.get(number)).map(number => [number,
+      sweep?.lists.has(number) ? sweep.lists.get(number)
+        : number === parent.parent_issue && parentRows ? parentRows.map(row => ({ number: row.number, id: row.id }))
+          : issues.get(number).sub_issues_total === 0 ? [] : this.reader.subIssues(number)]));
     const additions = [];
     if (this.refreshFacts && !only) {
       const known = new Set([parent.parent_issue,...parent.outcomes.map(outcome => outcome.issue)]);
@@ -3808,41 +4391,28 @@ class Reconciler {
         additions.push(outcome); outcomes.push(outcome);
       }
     }
-    const blockedBy = new Map();
+    const blockedBy = new Map(sweep ? sweep.blockedBy : []);
     const prs = new Map();
-    const prCache = new Map();
+    const prCache = sweep ? sweep.prCache : new Map();
     const readPr = number => {
       if (!prCache.has(number)) prCache.set(number, this.reader.pullRequest(number));
       return prCache.get(number);
     };
-    // Settled children whose live row still matches the copy kept from an earlier pass: their
-    // comments and merged PR are not read again.
-    const cache = this.refreshFacts && !only ? this.readCache : null;
-    const observedAt = this.now();
-    const settled = outcome => {
-      const doc = children.get(outcome.issue)?.doc;
-      const facts = rows.get(outcome.issue);
-      return Boolean(doc && facts && facts.state === 'closed' && isInt(facts.comments) && isInt(facts.sub_issues_total)
-        && isFinished(outcome, doc) && !doc.pending_effects.length);
-    };
-    cache?.beginPass();
-    if (cache) cache.counts.rows = rows.size;
-    const kept = cache ? cache.usable(outcomes.filter(settled).map(outcome => [outcome.issue, rows.get(outcome.issue)]), observedAt) : new Map();
     for (const outcome of outcomes) {
       const issue = issues.get(outcome.issue);
-      if (issue?.blocked_by_total > 0) blockedBy.set(outcome.issue, this.reader.blockedBy(outcome.issue));
+      if (issue?.blocked_by_total > 0 && !blockedBy.has(outcome.issue)) blockedBy.set(outcome.issue, this.reader.blockedBy(outcome.issue));
       const doc = children.get(outcome.issue)?.doc;
-      const keptPr = kept.get(outcome.issue)?.pr;
-      if (keptPr && keptPr.number === doc?.pr?.number && !prCache.has(keptPr.number)) prCache.set(keptPr.number, keptPr);
-      const number = doc?.pr?.number || (!isFinished(outcome, doc) && doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
+      const number = sweep?.tracked.has(outcome.issue) ? sweep.tracked.get(outcome.issue)
+        : doc?.pr?.number || (!isFinished(outcome, doc) && doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
       if (number) prs.set(outcome.issue, readPr(number));
     }
-    const prGraph = this.refreshFacts ? this.discoverGraph(parent, outcomes, children, prs, prCache, readPr) : null;
+    const scoped = sweep ? new Set(outcomes.map(outcome => outcome.issue)) : null;
+    const prGraph = this.refreshFacts ? this.discoverGraph(parent, sweep ? [...all, ...additions] : outcomes, children, prs, prCache, readPr, scoped, sweep?.graph) : null;
     const discovery = prGraph ? prGraph.discovery : this.discoverMerged(outcomes.filter(outcome => backfillEligible(outcome, children.get(outcome.issue)?.doc)), prs, prCache, readPr);
-    const journals = new Map();
+    const journals = new Map(sweep ? sweep.journals : []);
     for (const outcome of outcomes) {
       const doc = children.get(outcome.issue)?.doc;
-      if (doc && (doc.gate.assignment || Object.keys(doc.journals_seen || {}).length)) journals.set(outcome.issue, this.readJournals(doc));
+      if (!journals.has(outcome.issue) && doc && (doc.gate.assignment || Object.keys(doc.journals_seen || {}).length)) journals.set(outcome.issue, this.readJournals(doc));
     }
     // Every open PR that names a catalogued task gets the links and status blocks, so the open
     // list is read on every pass that plans page writes.
@@ -3850,35 +4420,168 @@ class Reconciler {
     const references = prGraph ? prGraph.openReferences : referencedIssues(openList);
     const prHeads = new Map(openList.map(pr => [pr.number, pr.head_sha || null]));
     const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number,
-      number === parent.parent_issue ? this.discussion(number, issues.get(number), cache)
-        : kept.has(number) ? kept.get(number).comments
-        // An issue that reports no comments has no list to read.
-        : issues.get(number).comments === 0 ? [] : this.reader.comments(number)]));
+      sweep?.comments.has(number) ? sweep.comments.get(number)
+        : number === parent.parent_issue ? this.discussion(number, issues.get(number), cache)
+          // An issue that reports no comments has no list to read.
+          : issues.get(number).comments === 0 ? [] : this.reader.comments(number)]));
     if (cache) {
-      for (const outcome of outcomes) {
-        // A child that is open again, unfinished or waiting on an intent keeps no copy.
-        if (!settled(outcome)) { cache.dropChild(outcome.issue); continue; }
-        if (kept.has(outcome.issue)) continue;
-        const facts = rows.get(outcome.issue);
-        const pr = prs.get(outcome.issue);
-        cache.setChild(outcome.issue, { updated_at: facts.updated_at, comment_count: facts.comments, sub_total: facts.sub_issues_total, read_at: observedAt,
-          comments: comments.get(outcome.issue), pr: pr?.state === 'MERGED' && pr.number === children.get(outcome.issue).doc.pr?.number ? pr : null });
-      }
-      cache.retain(parent.outcomes.map(outcome => outcome.issue));
+      cache.counts.rows = listedRows;
+      if (sweep) Object.assign(cache.counts, sweep.counts);
     }
     // Even an issue-scoped pass renders the whole parent, including every NOW task's comment time.
     for (const outcome of parent.outcomes) {
       if (!comments.has(outcome.issue) && graphClass(outcome, children.get(outcome.issue)?.doc) === 'NOW') comments.set(outcome.issue, this.reader.comments(outcome.issue));
     }
-    const prPages = new Map();
-    for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state)) prPages.set(pr.number, this.reader.issue(pr.number));
+    const prPages = new Map(sweep ? sweep.prPages : []);
+    for (const pr of prs.values()) if (pr && ['OPEN', 'DRAFT'].includes(pr.state) && !prPages.has(pr.number)) prPages.set(pr.number, this.reader.issue(pr.number));
     for (const outcome of outcomes) for (const number of references.get(outcome.issue) || []) {
       if (!prPages.has(number)) prPages.set(number, this.reader.issue(number));
     }
-    const closing = this.refreshFacts && !only ? this.closing.scan(parent,prGraph,this.now,excludedGraphPr) : null;
-    if (closing) this.pass.planning();
+    const closing = sweep ? sweep.closing : this.refreshFacts && !only ? this.closing.scan(parent,prGraph,this.now,excludedGraphPr) : null;
+    if (closing && !sweep) this.pass.planning();
     this.pass.phaseAt('planning');
-    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, prHeads, discovery, additions, prGraph, closing };
+    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, prHeads, discovery, additions, prGraph, closing,
+      ...(sweep ? { sweep: { ...sweep.result, scoped } } : {}) };
+  }
+
+  // The reads of a queued pass. Every graph read comes first and is bounded; the tasks follow one
+  // at a time, each read in full or not at all, so a stop never leaves half a task observed.
+  queuedReads(parent, children, outcomes, rows, issues, queued, cache) {
+    const stored = number => children.get(number)?.doc || null;
+    const tasks = new Set(outcomes.map(outcome => outcome.issue));
+    // Every native list under the parent, breadth first, so nested tasks get their facts free.
+    const lists = new Map();
+    const walk = [...new Set(outcomes.map(outcome => outcome.parent).filter(number => number && number !== parent.parent_issue))];
+    for (const outcome of outcomes) if (rows.get(outcome.issue)?.sub_issues_total) walk.push(outcome.issue);
+    for (let at = 0; at < walk.length; at += 1) {
+      const number = walk[at];
+      if (lists.has(number)) continue;
+      const list = this.reader.subIssueRows(number);
+      lists.set(number, list.map(row => ({ number: row.number, id: row.id })));
+      for (const row of list) {
+        if (row.facts?.complete !== true || row.facts.is_pull_request || row.facts.parent !== number) continue;
+        rows.set(row.number, row.facts);
+        if (tasks.has(row.number) && row.facts.sub_issues_total && !walk.includes(row.number)) walk.push(row.number);
+      }
+    }
+    // The issues and PRs GitHub changed since the predecessor started (none to compare on a first pass).
+    const changed = queued.since ? this.reader.changedSince(queued.since) : { issues: new Set(), prs: [], complete: true };
+    const prChanged = new Set(changed.prs.map(pr => pr.number));
+    const named = referencedIssues(changed.prs);
+    const touched = number => {
+      const doc = stored(number);
+      return changed.issues.has(number) || (named.get(number) || []).length > 0
+        || [doc?.pr?.number, ...(doc?.prs || []).map(pr => pr.number)].some(pr => pr && prChanged.has(pr));
+    };
+    // A page drawn from another revision than the stored one: a controller write leaves no trace
+    // on GitHub, so the revision drawn on the page is the evidence.
+    const drifted = number => {
+      if (!rows.has(number) || !stored(number)) return false;
+      const match = /State revision (\d+) \(issue-\d+\.json\)/.exec(rows.get(number).body || '');
+      return !match || Number(match[1]) !== stored(number).revision;
+    };
+    // Open tracked PRs, twenty to a request: a task whose PR state, head or checks moved is read.
+    const open = outcomes.filter(outcome => ['OPEN', 'DRAFT'].includes(stored(outcome.issue)?.pr?.state) && stored(outcome.issue).pr.number);
+    const prCache = open.length ? this.reader.pullRequests(open.map(outcome => stored(outcome.issue).pr.number)) : new Map();
+    const checksMoved = number => {
+      const doc = stored(number);
+      const pr = prCache.get(doc?.pr?.number);
+      if (!pr) return false;
+      const checks = evaluateChecks({ head: pr.head, rollupOid: pr.rollupOid, contexts: pr.contexts, complete: pr.complete, configured: this.binding.required_checks });
+      return pr.state !== doc.pr.state || pr.head !== doc.pr.head || checks.state !== doc.pr.checks?.state;
+    };
+    const all = outcomes.map(outcome => outcome.issue);
+    const share = new Set(all.filter(number => number % ROTATION_PASSES === queued.pass % ROTATION_PASSES));
+    const reasons = [
+      all.filter(number => stored(number)?.pending_effects?.length),
+      all.filter(number => LIVE_GATE_STATES.includes(stored(number)?.gate?.state)),
+      // No document yet, or no complete facts from a list: nothing shows whether it changed.
+      all.filter(number => !stored(number) || !rows.has(number)),
+      // Changed tasks newest change first (the list is read oldest first), then those changed through a PR.
+      [...new Set([...[...(changed.order || changed.issues)].reverse().filter(number => tasks.has(number)), ...all.filter(touched)])], all.filter(drifted), all.filter(checksMoved),
+      (queued.queue || []).filter(number => tasks.has(number)),
+    ];
+    // Without a saved queue (a first pass) every task is in scope; otherwise this pass's rotation share.
+    const order = [...new Set([...reasons.flat(), ...(queued.since ? all.filter(number => share.has(number)) : all)])];
+    const urgent = new Set(reasons.flat());
+    this.sweepOrder = order;
+    const discussion = this.discussion(parent.parent_issue, issues.get(parent.parent_issue), cache);
+    const graph = this.listGraph(parent, outcomes);
+    const closing = this.closing.scan(parent, graph, this.now, excludedGraphPr);
+    this.pass.planning();
+    this.pass.phaseAt('planning');
+    const read = [], failed = [];
+    const primed = { blockedBy: new Map(), tracked: new Map(), journals: new Map(), comments: new Map([[parent.parent_issue, discussion]]), prPages: new Map() };
+    // A task with a reason to read (a change, an intent, a gate, no facts yet, a queued one), or any
+    // task on a first pass, is likely to need its page drawn this pass, so its page is budgeted; a
+    // rotation-only read rarely is.
+    let pages = 0;
+    this.pausedBy = null;
+    for (const number of order) {
+      const needsPage = !queued.since || urgent.has(number);
+      if (!queued.canRead(pages, needsPage)) { this.pausedBy = queued.pausedBy?.() || null; break; }
+      const doc = stored(number);
+      const outcome = outcomes.find(entry => entry.issue === number);
+      try {
+        const issue = rows.get(number) || this.reader.issue(number);
+        if (this.refreshFacts && issue && issue.complete !== true) throw new ProgrammeError('GH_FAILED', `Issue ${number} was not read completely.`);
+        const blockers = issue?.blocked_by_total > 0 ? this.reader.blockedBy(number) : null;
+        const tracked = doc?.pr?.number || (!isFinished(outcome, doc) && doc?.candidate?.branch ? this.reader.pullRequestForBranch(doc.candidate.branch) : null);
+        const pr = tracked ? (prCache.has(tracked) ? prCache.get(tracked) : this.reader.pullRequest(tracked)) : null;
+        const journals = doc && (doc.gate.assignment || Object.keys(doc.journals_seen || {}).length) ? this.readJournals(doc) : null;
+        const list = !issue ? null : issue.comments === 0 ? [] : this.reader.comments(number);
+        const prPages = new Map();
+        for (const page of [pr && ['OPEN', 'DRAFT'].includes(pr.state) ? pr.number : null, ...(graph.openReferences.get(number) || [])]) {
+          if (page && !prPages.has(page)) prPages.set(page, this.reader.issue(page));
+        }
+        // The task is observed only once every read of it has succeeded.
+        if (issue) { rows.set(number, issue); issues.set(number, issue); }
+        if (blockers) primed.blockedBy.set(number, blockers);
+        primed.tracked.set(number, tracked || null);
+        if (tracked) prCache.set(tracked, pr);
+        if (journals) primed.journals.set(number, journals);
+        if (list) primed.comments.set(number, list);
+        for (const [page, facts] of prPages) primed.prPages.set(page, facts);
+        read.push(number);
+        if (needsPage) pages += 1;
+      } catch (error) {
+        if (!error.code || STOPS_PASS.has(error.code) || ['GH_AUTH', 'PASS_STOPPED'].includes(error.code)) throw error;
+        failed.push(number);
+      }
+    }
+    const left = order.filter(number => !read.includes(number) && !failed.includes(number));
+    return { lists, graph, closing, read, prCache, ...primed,
+      counts: { reused: all.length - read.length, reread: read.filter(number => !urgent.has(number)).length },
+      result: { order, read, failed, left, changedComplete: changed.complete, changedCursor: changed.complete ? null : changed.cursor || null,
+        why: Object.fromEntries(['intents', 'gates', 'unverified', 'changed', 'drifted', 'checks', 'queued'].map((name, at) => [name, reasons[at].length])) } };
+  }
+
+  // The PR lists and every task's links, for the queued pass's discovery. The per-task reads of the
+  // graph (a confirmed merge, an older PR) happen later, only for the tasks read.
+  listGraph(parent, outcomes) {
+    let requests = 0;
+    let pages = 0;
+    const budget = DISCOVERY_BASE + Math.ceil(outcomes.length / 20);
+    const spend = () => { if (requests >= budget) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `PR discovery reached its ${budget}-request budget.`); requests++; };
+    // List pages are counted apart: only the pass's own request budget stops them.
+    const page = () => { pages++; };
+    const watermark = parent.private?.graph_pr_watermark || null;
+    const scanStarted = this.now();
+    const list = status => {
+      try { return { list: this.reader.graphPullRequests(status, page, status === 'closed' ? watermark : null), complete: true }; }
+      catch (error) { if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; return { list: [], complete: false }; }
+    };
+    const open = list('open');
+    const closed = list('closed');
+    const all = outcomes.map(outcome => outcome.issue);
+    const links = new Map();
+    for (let start = 0; start < all.length; start += 20) {
+      const batch = all.slice(start, start + 20);
+      try { for (const [number, link] of this.reader.issuePullRequestLinks(batch, spend)) links.set(number, link); }
+      catch (error) { if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; }
+    }
+    return { openListed: open.list, openComplete: open.complete, closedListed: closed.list, closedComplete: closed.complete,
+      openReferences: referencedIssues(open.list), links, requests, pages, watermark, scanStarted };
   }
 
   // The parent's comments. With a copy from an earlier pass only the comments changed since its
@@ -3905,25 +4608,38 @@ class Reconciler {
     return full.comments;
   }
 
-  discoverGraph(parent, outcomes, children, prs, prCache, readPr) {
+  // A queued pass brings its lists and links already read (`pre`) and reads per task only for the
+  // tasks in `scoped`; a task outside it adds its known PRs to the linked set and nothing else.
+  discoverGraph(parent, outcomes, children, prs, prCache, readPr, scoped = null, pre = null) {
     const discovery = new Map(); const histories = new Map();
     const selectedPrs = new Map();
     // Take the boundary before any PR list read, never at planning completion: a close during
     // this scan must remain eligible on the next one.
-    const scanStarted = this.now();
-    let requests = 0; let listsComplete = true; let listed = [];
+    const scanStarted = pre ? pre.scanStarted : this.now();
+    let requests = pre ? pre.requests : 0; let listsComplete = true; let listed = [];
+    let pages = pre ? pre.pages : 0;
     const watermark = parent.private?.graph_pr_watermark || null;
-    const spend = () => { if (requests >= 60) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE','PR discovery reached its sixty-request budget.'); requests++; };
+    // The task links and the per-task reads share this budget, which grows with the board and the
+    // tasks read; the list pages are counted apart and only the pass's request budget stops them.
+    const budget = discoveryBudget(outcomes.length, scoped ? scoped.size : outcomes.length);
+    const spend = () => { if (requests >= budget) throw new ProgrammeError('PR_DISCOVERY_INCOMPLETE', `PR discovery reached its ${budget}-request budget.`); requests++; };
+    const page = () => { pages++; };
     const incomplete = (numbers, error) => {
       if (error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error;
       for (const number of numbers) discovery.set(number,{complete:false,detail:'PR discovery was incomplete; existing PR history is retained.'});
     };
     let openListed = []; let openComplete = true;
-    try { openListed = this.reader.graphPullRequests('open',spend); listed.push(...openListed); }
-    catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; openComplete=false; }
     let closedListed=[], closedComplete=true;
-    try { closedListed=this.reader.graphPullRequests('closed',spend,watermark); listed.push(...closedListed); }
-    catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; closedComplete=false; }
+    if (pre) {
+      ({ openListed, openComplete, closedListed, closedComplete } = pre);
+      listed.push(...openListed, ...closedListed);
+      if (!openComplete || !closedComplete) { incomplete(outcomes.map(outcome=>outcome.issue),{}); listsComplete=false; }
+    } else {
+      try { openListed = this.reader.graphPullRequests('open',page); listed.push(...openListed); }
+      catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; openComplete=false; }
+      try { closedListed=this.reader.graphPullRequests('closed',page,watermark); listed.push(...closedListed); }
+      catch(error) { incomplete(outcomes.map(outcome=>outcome.issue),error); listsComplete=false; closedComplete=false; }
+    }
     const references = referencedIssues(listed);
     const openReferences = referencedIssues(openListed);
     const linked = new Set();
@@ -3936,12 +4652,20 @@ class Reconciler {
     for (let start=0; start<all.length; start+=20) {
       const batch=all.slice(start,start+20);
       try {
-        const links=this.reader.issuePullRequestLinks(batch,spend);
+        // Tasks added in this pass were not in the early read: their links are read now.
+        const missing=pre ? batch.filter(number=>!pre.links.has(number)) : [];
+        if (missing.length) for (const [number,link] of this.reader.issuePullRequestLinks(missing,spend)) pre.links.set(number,link);
+        const links=pre ? pre.links : this.reader.issuePullRequestLinks(batch,spend);
         for (const number of batch) {
           const link=links.get(number);
           if (!link?.complete || !listsComplete) { incomplete([number],{}); continue; }
           const prior = children.get(number)?.doc?.prs || [];
           const history=[...link.history,...listed.filter(pr=>(references.get(number)||[]).includes(pr.number))];
+          if (scoped && !scoped.has(number)) {
+            for (const pr of [...history, ...prior, ...(children.get(number)?.doc?.pr?.number ? [children.get(number).doc.pr] : [])]) linked.add(pr.number);
+            discovery.set(number, { complete: true, candidates: mergedSelection(history.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at}))) });
+            continue;
+          }
           const current=prs.get(number);
           if(current) {
             const listedCurrent=listed.find(pr=>pr.number===current.number);
@@ -3987,7 +4711,7 @@ class Reconciler {
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
       && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
-    return {discovery,histories,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests,watermark,scanStarted,closedListed,closedComplete};
+    return {discovery,histories,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests:requests+pages,pages,watermark,scanStarted,closedListed,closedComplete};
   }
 
   // Additional discovery reads share one hard budget. Ordinary tracking is outside this budget.
@@ -4040,7 +4764,7 @@ class Reconciler {
   // outcome whose state tracks no PR and no branch. The controller confirms before recording it.
   diffUntracked(parent, docs, observed, only, findings) {
     for (const outcome of parent.outcomes) {
-      if (only && outcome.issue !== only) continue;
+      if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
       const doc = docs.get(outcome.issue);
       if (isFinished(outcome, doc) || doc?.pr?.number || doc?.candidate?.branch) continue;
       const numbers = observed.references.get(outcome.issue) || [];
@@ -4055,7 +4779,7 @@ class Reconciler {
   diffIdle(parent, docs, observed, only, findings) {
     const now = Date.parse(this.now());
     for (const outcome of parent.outcomes) {
-      if (only && outcome.issue !== only) continue;
+      if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
       const doc = docs.get(outcome.issue);
       if (!doc || statusText(outcome, doc) !== 'IN PROGRESS' || doc.lifecycle === 'WAITING_OWNER') continue;
       if (['OPEN', 'DRAFT'].includes(doc.pr?.state) || (doc.prs || []).some(pr => pr.state === 'OPEN')) continue;
@@ -4245,7 +4969,7 @@ class Reconciler {
   // The decision-trace audit on the parent and each catalogued issue whose body this pass does not
   // rewrite with a fresh comment trace. Report only.
   auditTraces(parent, observed, only, findings, effects) {
-    const numbers = only ? [only, parent.parent_issue] : [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)];
+    const numbers = (only ? [only, parent.parent_issue] : [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)]).filter(number => !this.scope || number === parent.parent_issue || this.scope.has(number));
     const traced = new Set(effects.filter(effect => effect.kind === 'replace_block').map(effect => effect.target.issue));
     for (const number of numbers) {
       const issue = observed.issues.get(number);
@@ -4513,7 +5237,7 @@ class Reconciler {
   diffBlocks(parent, children, observed, only, effects, findings, holds, targetsOverride = null, resolutions = []) {
     const blocks = this.renderAll(parent, children, observed.issues, observed.comments);
     const version = this.toolkitVersion || '0.0.0';
-    const requested = targetsOverride || (only ? [only, parent.parent_issue] : [...blocks.keys()]);
+    const requested = targetsOverride || (only ? [only, parent.parent_issue] : this.scope ? [...blocks.keys()].filter(number => number === parent.parent_issue || this.scope.has(number)) : [...blocks.keys()]);
     const targets = [...requested.filter(number => number !== parent.parent_issue), ...requested.filter(number => number === parent.parent_issue)];
     if (!targetsOverride) this.diffPrPages(parent, children, observed, only, effects);
     for (const number of targets) {
@@ -4525,7 +5249,7 @@ class Reconciler {
       const nav = findStateBlock(issue.body, NAV_BLOCK_NAME);
       if (error || traced.error || nav.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: error || traced.error || nav.error }); continue; }
       const navBody = this.navFor(parent, number, children);
-      const currentBody = number === parent.parent_issue ? renderCurrentBlockBody(parent, children, observed.issues, this.now()) : null;
+      const currentBody = number === parent.parent_issue ? renderCurrentBlockBody(parent, children, observed.issues, this.now(), this.boardLine(parent)) : null;
       const summary = currentBody ? findStateBlock(issue.body, CURRENT_BLOCK_NAME) : { block: null, error: null };
       if (summary.error) { findings.push({ code: 'MANAGED_BLOCK_BROKEN', issue: number, detail: summary.error }); continue; }
       // A page written by a newer Toolkit is left alone, so computers on different versions never
@@ -4738,9 +5462,13 @@ class Reconciler {
     const unreadOpenPrHolds = observed.prGraph?.openComplete === false ? (parent.attention || []).filter(entry=>entry.code==='PR_UNTRACKED').map(entry=>entry.id) : [];
     const adoptionHolds = (observed.additions || []).map(outcome=>findingId('reconcile','CHILD_ADDED',outcome.issue));
     const stoppedHolds = openFindings(parent.attention).filter(entry => entry.code === 'PASS_STOPPED').map(entry => entry.id);
+    const sweep = observed.sweep;
+    const tasks = new Set(parent.outcomes.map(outcome => outcome.issue));
+    const unread = !this.scope ? [] : (parent.attention || []).filter(entry => tasks.has(entry.issue) ? !this.scope.has(entry.issue)
+      : sweep && (!sweep.changedComplete || sweep.left.length || sweep.failed.length)).map(entry => entry.id);
     if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds,
-        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...(observed.prGraph?.holdWithoutTask || []),
+        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...unread, ...(observed.prGraph?.holdWithoutTask || []),
         ...(parent.attention || []).filter(entry=>entry.code==='CLOSING_COMMENT_MISSING' && !observed.closing?.checked.has(`${entry.kind}:${entry.issue}`)).map(entry=>entry.id)] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
@@ -4775,17 +5503,22 @@ class Reconciler {
     }
   }
 
-  plan({ issue: only = null, parentOverride = null, inventory = null } = {}) {
+  plan({ issue: only = null, parentOverride = null, inventory = null, queued = null } = {}) {
     this.closing?.beginPass();
     this.pass.phaseAt('planning');
     this.planning = true;
+    this.queued = only || parentOverride ? null : queued;
+    this.scope = null; this.sweepOrder = null; this.sweepChange = null; this.board = null;
     try { return this.planWithinBudget({ issue: only, parentOverride, inventory }); }
     catch (error) {
       if (error.code !== 'PASS_STOPPED') throw error;
-      const parentRead = this.loadParent(parentOverride);
+      if (!this.pass.stopped) this.pass.stopped = this.pass.snapshot('time_limit');
+      const parentRead = parentOverride ? this.loadParent(parentOverride) : this.snapshot ? this.store.snapshotDoc(this.snapshot, 'parent', this.binding.parent_issue) : { doc: null, sha: null };
       const finding = { code: 'PASS_STOPPED', issue: this.binding.parent_issue, diagnostics: this.pass.stopped };
-      return { parent: parentRead.doc, override: Boolean(parentOverride), children: new Map(), findings: [finding], effects: [], resolutions: [],
-        holds: [{ code: 'PASS_STOPPED', target: `#${this.binding.parent_issue}`, detail: findingText(finding) }], complete: false, stopped: true };
+      // A queued pass cut in planning keeps its queue: every task it put in order stays to be read.
+      if (this.queued && this.sweepOrder && parentRead.doc) this.sweepChange = this.queueChange(parentRead.doc, this.sweepOrder, []);
+      return { parent: parentRead.doc, override: Boolean(parentOverride), children: new Map(), findings: [finding], effects: [], resolutions: [], snapshot: this.snapshot,
+        holds: [{ code: 'PASS_STOPPED', target: `#${this.binding.parent_issue}`, detail: findingText(finding) }], complete: false, stopped: true, reason: error.reason || null, noWrite: Boolean(error.noWrite) };
     } finally {
       this.planning = false;
       // Kept even when planning was cut, so a slow first pass makes the next one cheaper.
@@ -4795,7 +5528,11 @@ class Reconciler {
 
   planWithinBudget({ issue: only = null, parentOverride = null, inventory = null } = {}) {
     const holds = [];
-    const parentRead = this.loadParent(parentOverride);
+    // Every document comes from one read of the state directory, each with its own version id.
+    this.snapshot = null;
+    const snapshot = this.store.readSnapshot();
+    this.snapshot = snapshot;
+    const parentRead = parentOverride ? this.loadParent(parentOverride) : this.store.snapshotDoc(snapshot, 'parent', this.binding.parent_issue);
     if (!parentRead.doc) {
       return { parent: null, findings: [], effects: [], holds: [{ code: 'PARENT_STATE_MISSING', target: `#${this.binding.parent_issue}`, detail: `No parent state document for #${this.binding.parent_issue} yet. The appointed controller creates and holds it with init-parent --apply --controller; other sessions report this to the controller.` }], resolutions: [] };
     }
@@ -4804,13 +5541,30 @@ class Reconciler {
       throw new ProgrammeError('STATE_INVALID', 'The parent state document belongs to a different repository or parent issue.');
     }
     if (only && !parent.outcomes.some(outcome => outcome.issue === only)) throw new ProgrammeError('USAGE', `#${only} is not in the outcome catalogue.`);
-    const children = new Map(parent.outcomes.map(outcome => { this.pass.planning(); return [outcome.issue, this.store.read('child', outcome.issue)]; }));
-    const observed = this.observe(parent, children, only);
+    const children = new Map(parent.outcomes.map(outcome => { this.pass.planning(); return [outcome.issue, this.store.snapshotDoc(snapshot, 'child', outcome.issue)]; }));
+    const observed = this.observe(parent, children, only, this.queued);
+    const sweep = observed.sweep || null;
+    if (sweep) this.scope = new Set([...sweep.scoped, ...observed.additions.map(outcome => outcome.issue)]);
+    const queueFindings = [];
+    if (sweep) {
+      this.sweepChange = this.queueChange(parent, sweep.left, sweep.failed);
+      for (const number of sweep.failed) if ((parent.sweep?.failures?.[number] || 0) + 1 >= 3) queueFindings.push({ code: 'SWEEP_TASK_UNREADABLE', issue: number });
+      for (const code of this.queued.findings || []) queueFindings.push({ code, issue: parent.parent_issue });
+    }
+    // CURRENT's first line, once the parent has a saved queue: this pass's time when it is set to
+    // finish, otherwise how long the board has been out of date.
+    const record = this.queued?.record ?? null;
+    // Within an hour of the last finished pass the line keeps that pass's time, so a pass that changes
+    // nothing else does not rewrite the page; the sweep runs hourly, so the time moves every pass.
+    const now = this.now();
+    const shown = record?.last_complete_at && Date.parse(now) >= Date.parse(record.last_complete_at) && Date.parse(now) - Date.parse(record.last_complete_at) < BOARD_REDRAW_MS ? record.last_complete_at : now;
+    this.board = sweep ? { record, time: shown, complete: Boolean(sweep.changedComplete && !sweep.left.length && !sweep.failed.length), left: sweep.left.length + sweep.failed.length }
+      : { keep: boardLineOf(observed.issues.get(parent.parent_issue)?.body) };
     const resolutions = this.recover([
       { kind: 'parent', number: parent.parent_issue, doc: parent },
       ...[...children.values()].filter(entry => entry.doc).map(entry => ({ kind: 'child', number: entry.doc.issue, doc: entry.doc })),
     ], observed, holds);
-    const findings = [];
+    const findings = [...queueFindings];
     if (this.pass.progress?.interrupted) findings.push({ code: 'PASS_STOPPED', issue: parent.parent_issue, diagnostics: this.pass.progress.interrupted });
     const effects = [];
     if (observed.additions.length) {
@@ -4841,7 +5595,7 @@ class Reconciler {
     const desiredDocs = new Map();
     for (const outcome of parent.outcomes) {
       const existing = children.get(outcome.issue)?.doc || null;
-      if (only && outcome.issue !== only) { if (existing) desiredDocs.set(outcome.issue, existing); continue; }
+      if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) { if (existing) desiredDocs.set(outcome.issue, existing); continue; }
       const { doc: desired, checks, journals, findings: journalFindings, holds: journalHolds } = this.desiredChild(outcome, existing, observed);
       findings.push(...journalFindings);
       holds.push(...journalHolds);
@@ -4870,10 +5624,58 @@ class Reconciler {
     this.planAttention(parent, projected, observed, only, Boolean(parentOverride), inventory, effects, findings, holds, resolutions, blockHolds);
     this.pass.planning();
     for (const effect of effects) effect.text = describeEffect(effect);
-    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), issueScoped: Boolean(only), children, observed, findings, effects, holds, resolutions,
+    return { parent, parentSha: parentRead.sha, override: Boolean(parentRead.override), issueScoped: Boolean(only), children, observed, findings, effects, holds, resolutions, snapshot,
       complete: !only && !parentOverride && (!inventory || inventory.complete) && (!observed.prGraph || observed.prGraph.complete) && [...observed.discovery.values()].every(entry => entry.complete !== false)
-        && [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)].every(number => Boolean(observed.issues.get(number)))
+        && [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)].filter(number => !this.scope || number === parent.parent_issue || this.scope.has(number)).every(number => Boolean(observed.issues.get(number)))
+        // A queued pass is complete only when its changed list was whole and its queue ends empty.
+        && (!sweep || (sweep.changedComplete && !sweep.left.length && !sweep.failed.length))
         && !findings.some(entry => entry.code === 'MANAGED_BLOCK_BROKEN') };
+  }
+
+  // The queue a queued pass leaves: the tasks it did not reach, in order, then the ones that failed
+  // (each counted, so three in a row raise a finding). Unchanged, it writes nothing.
+  queueChange(stored, left, failed) {
+    const failures = { ...(stored.sweep?.failures || {}) };
+    for (const number of this.scope || []) delete failures[number];
+    for (const number of failed) failures[number] = (stored.sweep?.failures?.[number] || 0) + 1;
+    const queue = [...new Set([...left, ...failed])];
+    return doc => {
+      const live = new Set(doc.outcomes.map(outcome => outcome.issue));
+      const next = { queue: queue.filter(number => live.has(number)),
+        failures: Object.fromEntries(Object.entries(failures).filter(([number]) => live.has(Number(number))).sort(([a], [b]) => a - b)) };
+      if (JSON.stringify(canonical(doc.sweep || null)) === JSON.stringify(canonical(next))) return null;
+      doc.sweep = next;
+      return doc;
+    };
+  }
+
+  // CURRENT's freshness line. An issue-scoped pass repeats what the last finished pass recorded.
+  // A finished pass says when the board was updated. A pass that stops early says so in a short,
+  // calm note beside its own time (it did update what it read), and the next run carries on. Only a
+  // sweep that is truly stuck gets a warning: no pass finished for six hours, and the passes in
+  // those hours read fewer than ten tasks in all.
+  boardLine(parent) {
+    const board = this.board;
+    if (!board) return null;
+    if ('keep' in board) return board.keep;
+    const record = board.record || {};
+    const sgt = time => `${new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Singapore', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(time))} SGT`;
+    if (board.complete && !this.pass.stopped) return `Board updated: ${sgt(board.time)} (state revision ${parent.revision})`;
+    const reason = this.stopReason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : board.left ? 'tasks still to check' : record.reason || 'an incomplete read');
+    const tasks = `${board.left} task${board.left === 1 ? '' : 's'}`;
+    const stuck = this.queued?.stuck?.(this.sweepRead || 0);
+    if (stuck?.stuck) {
+      const since = record.last_complete_at ? `since ${sgt(record.last_complete_at)}` : 'yet';
+      return `⚠️ Sweep stuck: no pass has finished ${since}, and the passes in the last 6 hours read ${stuck.read} task${stuck.read === 1 ? '' : 's'}. ${tasks} still to check (${reason}).`;
+    }
+    const app = this.queued?.host === 'cloud' ? ' App' : '';
+    const next = board.left ? `the next run picks up the ${tasks} left` : 'the next run reads it again';
+    const note = reason === 'GitHub rate limit' ? `Paused at GitHub's hourly${app} limit; ${next}.`
+      : reason === 'request cap' ? `Paused at this pass's request limit; ${next}.`
+        : reason === 'time limit' ? `Paused at this pass's time limit; ${next}.`
+          : reason === 'tasks still to check' ? `${next[0].toUpperCase()}${next.slice(1)}.`
+            : `Not every read finished (${reason}); ${next}.`;
+    return `Board updated: ${sgt(this.now())} (state revision ${parent.revision}). ${note}`;
   }
 
   // Only verified stored state proves the predecessor was reported. Its controller answer and
@@ -4882,6 +5684,18 @@ class Reconciler {
     const interrupted = this.pass.progress?.interrupted;
     if (interrupted && parent.attention?.some(entry => entry.code === 'PASS_STOPPED'
       && JSON.stringify(canonical(entry.diagnostics)) === JSON.stringify(canonical(interrupted)))) this.pass.progress.reported();
+  }
+
+  // A state batch on the documents as they stand now. A sweep's lease opens its commit window
+  // first, so no separate lease write lands between this snapshot and the end of the commit.
+  openBatch(earlier, parentNumber) {
+    const lease = this.queued?.lease || null;
+    lease?.open();
+    try {
+      const batch = new StateBatch(this.store, this.store.currentSnapshot(earlier), parentNumber);
+      batch.lease = lease;
+      return batch;
+    } catch (error) { lease?.close({}); throw error; }
   }
 
   // Saved states, parent page, queue, then completion. Every group shares the process deadline.
@@ -4893,6 +5707,10 @@ class Reconciler {
     const parentNumber = plan.parent.parent_issue;
     let parentDoc = null;
     let docs = null;
+    // The state phase is staged on the plan's snapshot and published in one commit before any page
+    // or GitHub effect runs. Effect bookkeeping after it keeps the per-document compare-and-swap.
+    let batch = plan.snapshot?.head ? this.openBatch(plan.snapshot, parentNumber) : null;
+    const staged = [];
     const settledChildren = new Map([...plan.children].filter(([,entry])=>entry.doc).map(([number,entry])=>[number,entry.doc]));
     const writtenChildren = new Set();
     const verifiedBodies = new Set();
@@ -4905,20 +5723,21 @@ class Reconciler {
     // so a takeover stops this pass at its next effect (STALE_WRITER). An intent it leaves IN_FLIGHT
     // is settled by readback in the successor's next pass, never replayed.
     const guard = () => {
-      const fresh = this.store.read('parent', parentNumber).doc;
+      // While the state phase is staged, the fence is the snapshot's; the commit re-checks it.
+      const fresh = batch ? batch.parent() : this.store.read('parent', parentNumber).doc;
       authoriseWrite('parent', fresh, null, writer);
       parentDoc = fresh;
-      this.reportStoredProgress(parentDoc);
+      if (!batch) this.reportStoredProgress(parentDoc);
     };
     guard();
     const mutateDoc = (kind, number, options) => {
       guard();
-      const result = this.store.mutate(kind, number, { writer, parentDoc, ...options });
+      const result = batch ? batch.mutate(kind, number, { writer, ...options }) : this.store.mutate(kind, number, { writer, parentDoc, ...options });
       if (kind === 'parent') {
         parentDoc = result.doc;
-        this.reportStoredProgress(parentDoc);
+        if (!batch) this.reportStoredProgress(parentDoc);
       } else {
-        if (result.outcome === 'WRITTEN') writtenChildren.add(number);
+        if (result.outcome === 'WRITTEN' || result.outcome === 'STAGED') writtenChildren.add(number);
         if (result.doc) settledChildren.set(number,result.doc);
         if (docs && result.doc) docs.set(number, result.doc);
       }
@@ -4932,6 +5751,7 @@ class Reconciler {
     const outcomes = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, outcome]));
     const record = (effect, outcome, detail = null) => {
       results.push({ kind: effect.kind, target: effect.target, text: effect.text, outcome, ...(detail ? { detail } : {}) });
+      if (batch) staged.push({ effect, result: results.at(-1), key: ['add_native_children', 'update_attention'].includes(effect.kind) ? `parent:${parentNumber}` : `child:${effect.target.issue}` });
       if (this.pass.phase === 'state') this.pass.tick();
     };
     let stoppedRecorded = false;
@@ -5185,6 +6005,45 @@ class Reconciler {
       }
     }
 
+    if (batch) {
+      recordStopped();
+      // The queue this pass leaves rides the same commit, and so does the sweep's lease (its progress
+      // and renewed expiry) when it lives in the same store; otherwise its progress is written once.
+      if (this.sweepChange) mutateDoc('parent', parentNumber, { change: this.sweepChange });
+      try { this.store.commitBatch(batch); }
+      catch (error) {
+        if (error.code === 'STATE_READBACK_MISMATCH') {
+          // The commit may stand but cannot be trusted: no state effect counts and nothing else runs.
+          for (const entry of staged) if (entry.result.outcome !== 'NOOP') Object.assign(entry.result, { outcome: 'HELD', detail: error.message });
+          holds.push({ code: error.code, target: `#${parentNumber}`, detail: error.message });
+          return { results, holds, attention: attentionLine(plan.parent.attention, this.now()) };
+        }
+        if (error.code !== 'STATE_BRANCH_BUSY') throw error;
+        // Nothing was written and no effect runs. The stop is kept outside the state (lease, note).
+        this.pass.stopped = { cause: 'time_limit', phase: 'state', done: this.pass.done, total: this.pass.total, started_at: this.pass.started_at };
+        this.stopReason = error.reason;
+        for (const entry of staged) if (entry.result.outcome !== 'NOOP') Object.assign(entry.result, { outcome: 'SKIPPED', detail: 'the state branch was busy; nothing was written' });
+        const finding = { code: 'PASS_STOPPED', issue: parentNumber, diagnostics: this.pass.stopped };
+        holds.push({ code: 'PASS_STOPPED', target: `#${parentNumber}`, detail: `${findingText(finding)} (the state branch was busy)` });
+        return { results, holds, attention: attentionLine(plan.parent.attention, this.now()), noWrite: true };
+      }
+      // A document another writer changed during the commit is held alone; the rest stand.
+      for (const entry of staged) {
+        const error = batch.dropped.get(entry.key);
+        if (!error || entry.result.outcome === 'NOOP') continue;
+        Object.assign(entry.result, { outcome: 'HELD', detail: error.message });
+        hold(entry.effect, error.code || 'STATE_WRITE_FAILED', error.message);
+      }
+      const committed = batch;
+      batch = null;
+      parentDoc = committed.documents('parent').get(parentNumber);
+      this.reportStoredProgress(parentDoc);
+      const childDocs = committed.documents('child');
+      docs = new Map(plan.parent.outcomes.map(outcome => [outcome.issue, childDocs.get(outcome.issue)]).filter(([, doc]) => doc));
+      for (const [number, doc] of docs) settledChildren.set(number, doc);
+      for (const number of [...writtenChildren]) if (!committed.written.some(entry => entry.kind === 'child' && entry.number === number)) writtenChildren.delete(number);
+    }
+
     let finalRedraw = false;
     let relays = 0;
     let finalAttention = null;
@@ -5223,7 +6082,7 @@ class Reconciler {
         if (!before) throw new ProgrammeError('ISSUE_MISSING', 'The parent issue could not be read.');
         const newest = newestBlockVersion(before.body);
         if (newest && versionNewer(newest, version)) throw new ProgrammeError('BLOCK_NEWER_TOOLKIT', 'Update Toolkit before redrawing this newer page.');
-        const comments = this.reader.comments(parentNumber);
+        const comments = this.discussion(parentNumber, before, this.readCache);
         const next = this.projectBody(parentNumber, before.body, body, comments, version, null, currentBody, null, postsLeft(parentNumber), { parent: parentDoc, only: plan.issueScoped, keepNotes: Boolean(this.pass.stopped) });
         if (next.refused || next.body.length >= this.threshold) {
           const error = new ProgrammeError('BODY_TOO_LARGE', 'The programme page cannot fit below the hard body limit; no archive comments were changed.');
@@ -5474,7 +6333,7 @@ class Reconciler {
           // Persist those resolutions only after this exact body also reads back.
           const displayParent = finalAttention ? { ...parentDoc, attention: finalAttention } : number === parentNumber && finalRedraw && plan.complete && !holds.length && !this.pass.stopped
             ? { ...parentDoc, attention: (parentDoc.attention || []).map(entry => canResolveSize(entry, true) ? { ...entry, state: 'resolved' } : entry) } : parentDoc;
-          const currentBody = number === parentNumber ? renderCurrentBlockBody(displayParent, docs, plan.observed.issues, this.now()) : null;
+          const currentBody = number === parentNumber ? renderCurrentBlockBody(displayParent, docs, plan.observed.issues, this.now(), this.boardLine(displayParent)) : null;
           const topic = this.topicFor(parentDoc, number, plan.observed.issues);
           if (number === parentNumber) {
             try { parentPage(effect, body, version, currentBody); }
@@ -5820,8 +6679,10 @@ class Reconciler {
     return { results, holds, attention: attentionLine(parentDoc.attention, this.now()) };
   }
 
-  run({ apply = false, issue = null, parentOverride = null, inventory = null } = {}) {
-    const plan = this.plan({ issue, parentOverride, inventory });
+  run({ apply = false, issue = null, parentOverride = null, inventory = null, queued = null } = {}) {
+    const plan = this.plan({ issue, parentOverride, inventory, queued });
+    // A queued pass stops reading here; what follows saves, settles and draws within its reserve.
+    this.queued?.settle?.();
     const report = {
       repository: this.binding.repository,
       parent_issue: this.binding.parent_issue,
@@ -5841,20 +6702,32 @@ class Reconciler {
       // What the read copy saved this pass: counts only.
       ...(this.readCache && this.refreshFacts && !issue ? { reads: { ...this.readCache.counts } } : {}),
     };
-    if (apply && plan.stopped && plan.parent) {
+    if (apply && plan.stopped && plan.parent && plan.snapshot?.head && !plan.noWrite) {
       const finding = plan.findings[0];
       const writes = this.store.writes;
-      // Planning expiry commits only the finding. No recovered intent or planned effect is applied.
-      this.store.mutate('parent', plan.parent.parent_issue, { writer: this.writer, change: doc => {
+      // Planning expiry commits only the finding and the queue. No recovered intent or planned effect is applied.
+      const batch = this.openBatch(plan.snapshot, plan.parent.parent_issue);
+      batch.mutate('parent', plan.parent.parent_issue, { writer: this.writer, change: doc => {
         doc.attention = foldAttention(doc.attention, { source: 'reconcile', complete: false, seen: [finding], now: this.now() });
-        return doc;
+        return this.sweepChange ? this.sweepChange(doc) || doc : doc;
       } });
-      report.writes.state = this.store.writes - writes;
-      this.pass.progress?.reported();
-    } else if (apply && plan.parent && (this.pass.progress?.interrupted || plan.effects.length || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
+      try {
+        this.store.commitBatch(batch);
+        report.writes.state = this.store.writes - writes;
+        // The newer stop is recorded, so a predecessor's note is reported by it.
+        this.pass.progress?.reported();
+      } catch (error) {
+        if (error.code !== 'STATE_BRANCH_BUSY') throw error;
+        this.stopReason = error.reason;
+      }
+    } else if (apply && plan.parent && (this.pass.progress?.interrupted || plan.effects.length || this.sweepChange || plan.resolutions.some(entry => entry.outcome !== 'UNKNOWN'))) {
       const storeWrites = this.store.writes;
       const githubWrites = this.mutator.mutations;
-      const { results, holds, attention } = this.apply(plan);
+      let applied;
+      // A state phase that ends before its commit still closes the lease's commit window.
+      try { applied = this.apply(plan); } finally { this.queued?.lease?.close({}); }
+      const { results, holds, attention, noWrite } = applied;
+      if (noWrite) plan.noWrite = true;
       report.results = results;
       report.holds = holds;
       report.attention = attention;
@@ -5874,6 +6747,15 @@ class Reconciler {
         : attention.length ? `Controller: decide on ${attention.length} finding(s) the reconciler does not change, starting with ${attention[0].code} on #${attention[0].issue}`
           : 'None: the state documents and GitHub agree';
     if (typeof this.store.stateBranch === 'function') report.state_branch = this.store.stateBranch();
+    // What a queued pass leaves for the next one.
+    if (this.queued) {
+      const sweep = plan.observed?.sweep;
+      report.sweep = { complete: Boolean(plan.complete && !plan.stopped && !this.pass.stopped), changedComplete: Boolean(sweep?.changedComplete),
+        board_time: this.board?.time || null,
+        read: sweep?.read.length ?? 0, tasks: sweep?.read || [], why: sweep?.why || {}, left: sweep ? sweep.left.length + sweep.failed.length : (this.sweepOrder?.length ?? plan.parent?.sweep?.queue.length ?? 0),
+        changedCursor: sweep?.changedCursor || null,
+        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : null) };
+    }
     return report;
   }
 }
@@ -5917,10 +6799,11 @@ module.exports = Object.freeze({
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
   SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
-  RefreshBudget, REFRESH_BUDGET_MS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
+  RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
   SAFE_LIMIT, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS,
-  contextCommentIds,
+  contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
+  DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });

@@ -60,21 +60,15 @@ test('ordering: a stop arriving after registration prevents the first start, inc
   assert.ok(registry.readRegistry().tasks.find(row => row.job === 'programme-sweep').stopped_by_owner);
 });
 
-test('G: setup only plans and reports the tasks, and --remove-toolkit-tasks removes only Toolkit\'s own', async (t) => {
+test('G: setup prints no per-repository task plan, and --remove-toolkit-tasks removes only Toolkit\'s own', async (t) => {
   const core = require('../scripts/setup-toolkit-core.cjs');
   const home = tempHome(t);
   const root = checkout(t);
   const scheduler = fakeScheduler();
-  const lines = [];
-  const plan = core.printWindowsTasks({ repoRoot: root }, { platform: 'win32', scheduler, checkoutDeps: { identityReader, reportCheckout: root => root, governance: governance() }, workingFolder: root, home, log: line => lines.push(line) });
-  assert.deepEqual(plan[0].items.map(item => item.action), ['create', 'create']);
-  const text = lines.join('\n');
-  assert.match(text, /## Windows scheduled tasks\nWindows scheduled tasks for weijunswj\/ai-agent-toolkit in \\TOOLKIT\\:/);
-  assert.match(text, /Approval: standing approval with verified ownership/);
-  assert.equal(text.includes(root), false, 'setup never prints checkout paths');
-  assert.deepEqual(scheduler.calls.map(call => call[0]), ['list'], 'setup never registers, starts or removes a task');
-  assert.deepEqual(tasks.readRegistry(home).tasks, [], 'setup records nothing');
-  assert.equal(core.printWindowsTasks({ repoRoot: root }, { platform: 'linux', scheduler, log: line => lines.push(line) }), null);
+  assert.equal(core.printWindowsTasks, undefined, 'setup prints no task plan for one repository');
+  const source = fs.readFileSync(require.resolve('../scripts/setup-toolkit-core.cjs'), 'utf8');
+  assert.equal(source.includes('## Windows scheduled tasks'), false, 'setup has no per-repository task section');
+  assert.ok(source.includes('const scheduledTaskUpdate = applyScheduledTasks(args);'), 'the computer-wide task update stays');
   // The remove flag runs on its own and goes to remove, never apply.
   windowsTasks.applyTasks(desired(t, { root }), { scheduler, home });
   scheduler.folders.get('TOOLKIT').push(unmarked('Mine'));

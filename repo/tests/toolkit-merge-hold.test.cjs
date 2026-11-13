@@ -1133,10 +1133,69 @@ test('a push to the default branch is refused; other branches and evidence store
     [feature, 'git push origin HEAD:main'], [feature, 'git push origin work:refs/heads/main'], [feature, 'git push origin main'],
     [feature, 'git push --all origin'], [feature, 'git merge work && git checkout main && git push origin main'],
     [ctx.root, 'cd feature && git push origin HEAD:main'], [ctx.root, `git -C ${feature} push origin +work:main`],
+    [ctx.root, `Push-Location ${feature}; git push origin HEAD:main`], [store, `Push-Location ${ctx.repo}; git push`],
+    [ctx.repo, `Push-Location ${store}; Pop-Location; git push origin main`], [ctx.repo, `pushd ${store}; popd; git push origin main`],
+    [ctx.repo, `pushd ${store} && pushd ${feature} && popd && popd && git push origin main`], [store, `popd; git -C ${ctx.repo} push`],
   ];
   for (const [cwd, command] of refused) assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, command);
-  const allowed = [[feature, 'git push'], [feature, 'git push -u origin HEAD'], [feature, 'git push origin work'], [store, 'git push origin main'], [fresh, 'git push -u origin main']];
+  const allowed = [[feature, 'git push'], [feature, 'git push -u origin HEAD'], [feature, 'git push origin work'], [store, 'git push origin main'], [fresh, 'git push -u origin main'], [ctx.repo, `Push-Location ${store}; git push origin main`], [ctx.repo, `pushd ${feature}; pushd ${store}; popd; git push origin work`]];
   for (const [cwd, command] of allowed) assert.equal(decide(ctx, bash(cwd, command)), null, command);
+  // A pop with nothing saved in this command leaves the folder where it is, as the shell does on an
+  // empty stack, whether the command starts outside any repository or in a store.
+  const powershell = (cwd, command) => ({ cwd, tool_name: 'PowerShell', tool_input: { command } });
+  for (const [cwd, command] of [[ctx.root, `cd ${ctx.repo}; popd; git push origin main`], [store, `cd ${ctx.repo} && popd && git push origin main`]]) {
+    assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, `Bash: ${command}`);
+  }
+  for (const [cwd, command] of [[ctx.root, `Set-Location ${ctx.repo}; Pop-Location; git push origin main`], [store, `cd ${ctx.repo}; Pop-Location; git push origin main`]]) {
+    assert.match(hold.decide(powershell(cwd, command), { ...ctx.options, environment: {}, host: 'claude' })?.deny || '', /default branch `main`/, `PowerShell: ${command}`);
+  }
+  // `cd -` and `Set-Location -` go back to the folder before: bash's OLDPWD, or any folder in
+  // PowerShell's history. A step back to a folder this command never showed refuses every push.
+  const unknown = /cannot see from this command alone/;
+  const ps = (cwd, command) => hold.decide(powershell(cwd, command), { ...ctx.options, environment: {}, host: 'claude' })?.deny || '';
+  for (const [cwd, command] of [[ctx.repo, `cd ${store}; cd -; git push origin main`], [ctx.repo, `cd ${store} && cd ${feature} && cd - && cd - && git push origin HEAD:main`], [store, `cd ${ctx.repo}; cd ${feature}; cd -; git push origin main`]]) {
+    assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, `Bash: ${command}`);
+  }
+  for (const [cwd, command] of [[ctx.repo, `Set-Location ${store}; Set-Location -; git push origin main`], [ctx.repo, `sl ${store}; cd -; git push origin main`], [store, `Set-Location ${feature}; Set-Location ${store}; Set-Location -; git push origin main`]]) {
+    assert.match(ps(cwd, command), /default branch `main`/, `PowerShell: ${command}`);
+  }
+  for (const command of ['cd -; git push origin work', 'cd -; git push origin main', 'pushd +1; git push origin work', `Set-Location ${feature}; Set-Location -; Set-Location -; git push origin work`]) {
+    assert.match(decide(ctx, bash(feature, command))?.deny || '', unknown, `Bash: ${command}`);
+  }
+  assert.match(ps(feature, `cd ${store}; cd -; cd -; git push origin work`), unknown, 'PowerShell steps back past this command');
+  // In bash, `cd -` after one move is exact: back to the start, where a feature push is fine; and an
+  // absolute git -C names the folder whatever cd - did.
+  assert.equal(decide(ctx, bash(feature, `cd ${store}; cd -; git push origin work`)), null);
+  assert.equal(decide(ctx, bash(feature, `cd -; git -C ${feature} push origin work`)), null);
+  assert.match(decide(ctx, bash(feature, `cd -; git -C ${ctx.repo} push`))?.deny || '', /default branch `main`/);
+  // A switch is not the folder: -PassThru or -StackName after the path, cd -L, cmd's /d.
+  for (const [cwd, command] of [[store, `Push-Location ${ctx.repo} -PassThru; git push`], [store, `Push-Location ${ctx.repo} -StackName s; git push`], [store, `Set-Location -Path ${ctx.repo} -PassThru; git push`], [store, `Set-Location -LiteralPath:${ctx.repo}; git push`], [store, `Push-Location -StackName s ${ctx.repo}; git push`], [store, `cd /d ${ctx.repo}; git push`]]) {
+    assert.match(ps(cwd, command), /default branch `main`/, `PowerShell: ${command}`);
+  }
+  for (const command of [`cd -L ${ctx.repo}; git push`, `cd -P -- ${ctx.repo} && git push`, `pushd -n ${ctx.repo}; git push`]) {
+    assert.match(decide(ctx, bash(store, command))?.deny || '', /default branch `main`/, `Bash: ${command}`);
+  }
+  assert.equal(ps(ctx.repo, `Push-Location ${store} -PassThru; git push origin main`), '');
+  // A bare cd goes home (so a later cd - comes back), a cd -- - and -Path - still step back, and a bare
+  // pushd swaps folders this command may not show.
+  const plain = path.join(ctx.root, 'plain');
+  fs.mkdirSync(plain, { recursive: true });
+  // Claude Code's Bash tool names its shell, so these run in the bash reading alone.
+  const bs = (cwd, command) => hold.decide(bash(cwd, command), { ...ctx.options, environment: {}, host: 'claude' })?.deny || '';
+  for (const [cwd, command] of [[store, `cd ${ctx.repo}; cd; cd -; git push origin main`], [plain, `cd ${ctx.repo}; cd; cd -; git push origin main`], [ctx.repo, `cd ${store}; cd -- -; git push origin main`], [ctx.repo, `cd ${store}; pushd -; git push origin main`]]) {
+    assert.match(bs(cwd, command), /default branch `main`/, `Bash: ${command}`);
+    assert.match(decide(ctx, bash(cwd, command))?.deny || '', /default branch `main`/, `Unknown shell: ${command}`);
+  }
+  assert.match(decide(ctx, bash(store, `pushd ${ctx.repo}; pushd; git push origin main`))?.deny || '', unknown, 'Bash: bare pushd');
+  for (const [cwd, command] of [[ctx.repo, `Set-Location ${store}; Set-Location -Path -; git push origin main`], [ctx.repo, `Set-Location ${store}; Set-Location -Path:-; git push origin main`], [store, `Push-Location ${ctx.repo}; Pop-Location; Set-Location -; git push origin main`], [store, `Set-Location ${ctx.repo}; Set-Location; git push origin main`]]) {
+    assert.match(ps(cwd, command), /default branch `main`/, `PowerShell: ${command}`);
+  }
+  // -LiteralPath takes `-` as a folder name, not a step back to a folder this command never showed.
+  assert.equal(ps(store, 'Set-Location -LiteralPath -; git push origin main'), '');
+  assert.match(ps(store, 'Set-Location -Path -; git push origin main'), unknown);
+  // A merge after Push-Location cannot be placed in a repository, like one after cd.
+  typed(ctx, 'merge 618');
+  assert.match(decide(ctx, bash(ctx.root, `Push-Location ${ctx.repo}; gh pr merge 618 --merge --match-head-commit ${SHA}`))?.deny || '', /changes folder or GH_REPO first/);
 });
 
 test('shell argument lists allow plain feature pushes but refuse a shell nested in the script', (t) => {

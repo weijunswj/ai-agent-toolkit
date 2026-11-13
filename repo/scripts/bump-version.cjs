@@ -4,8 +4,9 @@
 // Sets the Toolkit version in one step: writes version.json (the one version source) and the four
 // plugin manifests hosts read, then refreshes the generated surfaces that carry the version
 // (managed-block markers, the README contract block and the published-surface baseline).
-// A PR prepares its own bump from main and folds its changelog fragments. When main
-// moves, toolkit-rebump-prs.cjs preserves that bump level and reapplies it above main.
+// The merging agent runs --next on the PR branch at merge time, after merging main, to fold the
+// PR's changelog fragments (the level comes from the PR body's Bump: line). An older PR that
+// already carries its own bump is reapplied above main by toolkit-rebump-prs.cjs.
 // Usage: node repo/scripts/bump-version.cjs <x.y.z> [--workspace <repo root>]
 //        node repo/scripts/bump-version.cjs --next patch|minor|major [--base <ref>] [--workspace <repo root>]
 

@@ -349,7 +349,7 @@ function scriptContext(input, { host } = {}) {
   const tool = input?.tool_name || input?.toolName;
   return { powershell: tool === 'PowerShell', uncertainShell: tool !== 'PowerShell' && tool !== 'Bash', codexBash: host === 'codex' && tool === 'Bash' };
 }
-const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl)\s|\bGH_REPO\s*=/i;
+const MOVES_TARGET = /(?:^|[\s;&|({])(?:cd|pushd|chdir|set-location|sl|push-location)\s|\bGH_REPO\s*=/i;
 const NUMBER_FIELDS = Object.freeze(['pr_number', 'pull_number', 'pullNumber', 'pull_request_number', 'number']);
 const GRAPHQL_OPERATION = /(?:^|__)(?:graphql|graphql_query|execute_graphql)$/i;
 function connectorTarget(args, numberFields = NUMBER_FIELDS) {
@@ -703,4 +703,17 @@ function closureWriteCandidate(input, options = {}) {
   });
 }
 
-module.exports = Object.freeze({ GUARDED_SCREEN: GUARDED, SHELLS, SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, MOVES_TARGET, GRAPHQL_OPERATION, connectorTarget, closureCommands, executableCommands, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, closureWriteCandidate, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, quoteWords, shellCommands, shellOf, shellPath, shellReadings });
+// ---- evidence store pushes ----------------------------------------------------------------------
+
+// The refusal text for a raw git push to an evidence store this computer has bound. The attribution
+// guard and the merge hold both show it, so an agent is pointed at the store command, never at a pull
+// request.
+const STORE_PUSH_MESSAGE = 'This is a raw git push to an evidence store this computer has bound. Store work goes through the store command, which checks the store, scans what it commits for secrets and pushes only the bound branch: node "<Toolkit folder>/repo/scripts/toolkit-store.cjs" save --store <store folder> --path <path in the store> --message <text> --repo-root <governed repository folder> (--repo-root can go when you run it from the governed repository; run toolkit governance status first if it reports a stale binding). A push the owner wants by hand runs in their own terminal.';
+
+// owner/name, lower case, from a github.com remote URL; null for anything else.
+function githubSlug(url) {
+  const match = /^(?:(?:https?|git):\/\/(?:[^@/\s]+@)?(?:www\.)?github\.com(?::\d+)?\/|(?:[^@/\s:]+@)?(?:ssh\.)?github\.com:(?!\d+\/)|ssh:\/\/(?:[^@/\s]+@)?(?:ssh\.)?github\.com(?::\d+)?\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
+  return match ? match[1].toLowerCase() : null;
+}
+
+module.exports = Object.freeze({ GUARDED_SCREEN: GUARDED, STORE_PUSH_MESSAGE, githubSlug, SHELLS, SHELL_TOOL_NAMES, SHELL_TOOLS, UNREADABLE, ShellCall, MOVES_TARGET, GRAPHQL_OPERATION, connectorTarget, closureCommands, executableCommands, scriptCommands, scriptContext, wordText, stdinText, fileIsGenerated, ghCommand, closureWriteCandidate, absoluteShellPath, argvText, assignVariable, assignmentOf, folderWord, plainGitLine, quoteWords, shellCommands, shellOf, shellPath, shellReadings });

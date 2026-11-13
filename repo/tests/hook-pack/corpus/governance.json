@@ -957,6 +957,120 @@
         "decision": "allow"
       },
       "status": "pass"
+    },
+    {
+      "id": "CMD.toolkit-cmd-lists-commands",
+      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit cmd" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit cmd`.", "**Keys**\n\n| Type this | What it does |\n| --- | --- |\n| `toolkit show env` | Open your keys"] },
+      "status": "pass"
+    },
+    {
+      "id": "CMD.toolkit-command-any-case-and-stop",
+      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "  Toolkit  Command. " },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit command`."] },
+      "status": "pass"
+    },
+    {
+      "id": "CMD.toolkit-refresh",
+      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit refresh" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit refresh`. Treat it exactly as `refresh toolkit`"] },
+      "status": "pass"
+    },
+    {
+      "id": "CMD.toolkit-setup",
+      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit setup" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit setup`. Treat it exactly as `setup toolkit`"] },
+      "status": "pass"
+    },
+    {
+      "id": "CMD.toolkit-show-env-opens-editor",
+      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit show env" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit show env`. Open the env editor", "Never run the one-key `set` prompt"] },
+      "status": "pass"
+    },
+    {
+      "id": "CMD.toolkit-governance-check-runs-check",
+      "source": "owner repro 12 Nov 2026: a typed governance phrase runs its own toolkit-governance.cjs subcommand",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit governance check" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance check`. Run exactly `node \"", "toolkit-governance.cjs\" check`", "not the programme `attention` list"] },
+      "status": "pass",
+      "note": "Typing the phrase once ran status and the attention list instead of the check."
+    },
+    {
+      "id": "CMD.toolkit-set-env-is-not-a-command",
+      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit set env" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_excludes": ["Toolkit command:"] },
+      "status": "pass",
+      "note": "The 5 November misroute: this phrase stays plain language for the env skill."
+    },
+    {
+      "id": "CMD.phrase-inside-a-longer-message",
+      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "please run toolkit cmd for me" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_excludes": ["Toolkit command:"] },
+      "status": "pass"
+    },
+    {
+      "id": "CMD.phrase-relayed-by-another-session",
+      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "<wake reason=\"mention\" current-time=\"{now}\"><project id=\"chan_example\" type=\"project\"><thread ts=\"cmsg_thread\"><message trigger=\"true\" from=\"agent\" trust=\"relay\" author-id=\"cse_example\" id=\"cmsg_relay\" sent-at=\"{now}\">toolkit cmd</message></thread></project></wake>" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_excludes": ["Toolkit command:"] },
+      "status": "pass",
+      "note": "Only the user's own typed message is a command; a relayed one is data."
+    },
+    {
+      "id": "CMD.phrase-in-undecided-repo-is-still-held",
+      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit cmd" },
+      "fixture": { "repo": { "governance": "undecided" } },
+      "expect": { "decision": "deny" },
+      "status": "pass",
+      "note": "The governance hold decides first; the typed command adds nothing to it."
     }
   ]
 }

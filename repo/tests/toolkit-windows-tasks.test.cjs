@@ -233,6 +233,7 @@ test('A1a: recognised earlier Toolkit definition updates without accepting hand 
     d.arguments = d.arguments.replace(`"${d.launcher}" "${d.toolkit_root}"`, `"${d.toolkit_root}\\repo\\scripts\\toolkit-scheduled-job.cjs"`);
     d.working_directory = d.toolkit_root;
     d.schedule_text = windowsTasks.describeSchedule(d.schedule);
+    d.time_limit_minutes = 30;
     d.def = windowsTasks.definitionDigest(d);
     if (generation === 'daytime') d.def = require('node:crypto').createHash('sha256').update(JSON.stringify({ execute: d.execute, args: d.arguments, workingDirectory: d.working_directory, schedule: d.schedule, settings: 'v1 interactive start-when-available ignore-new 30m battery' })).digest('hex').slice(0, 12);
     d.description = `${d.folder}: ${windowsTasks.JOBS[d.job].task}. ${d.purpose} [toolkit-task v1 id=${d.id} def=${d.def}]`;
@@ -396,4 +397,26 @@ test('G: adopted fixed-job conflicts and a corrupt registry keep their refusals'
   assert.throws(() => windowsTasks.applyTasks(wanted, { scheduler, home }), /registry .* could not be read, so no task was changed/);
   assert.equal(fs.readFileSync(tasks.registryPath(home), 'utf8'), '{broken');
   assert.deepEqual(scheduler.calls.map(call => call[0]), ['list']);
+});
+
+test('A1b: a task registered with the earlier 30-minute limit updates in place to the new limit', t => {
+  const home = tempHome(t), scheduler = fakeScheduler(), wanted = desired(t);
+  for (const current of wanted.wanted) {
+    const d = { ...current, time_limit_minutes: 30 };
+    d.def = windowsTasks.definitionDigest(d);
+    assert.notEqual(d.def, current.def, 'the limit is part of the definition');
+    d.description = current.description.replace(`def=${current.def}]`, `def=${d.def}]`);
+    scheduler.register(d);
+    // Enrolled as apply records it: checkout, runner location and the exact live baseline.
+    const live = scheduler.list(d.folder).find(row => row.name === d.name);
+    tasks.updateRegistry(home, rows => [...rows, { id: d.id, host: 'windows', folder: d.folder, name: d.name, schedule: d.schedule_text, purpose: d.purpose,
+      repository: d.repository, job: d.job, definition: d.def, checkout: d.checkout, toolkit_root: d.toolkit_root, enrolled: windowsTasks.enrolledDefinition(live),
+      created: new Date().toISOString(), created_by: 'toolkit-windows-tasks apply', model: null, effort: null }]);
+  }
+  const result = windowsTasks.applyTasks(wanted, { scheduler, home });
+  assert.deepEqual(result.items.map(item => item.action), wanted.wanted.map(() => 'update'), JSON.stringify(result.items.map(item => item.reason)));
+  assert.ok(result.items.every(item => item.done));
+  for (const current of wanted.wanted) assert.ok(scheduler.list(current.folder).some(row => row.description === current.description), 'registered with the new definition');
+  scheduler.folders.get(wanted.folder)[0].arguments += ' --owner-edit';
+  assert.ok(windowsTasks.planTasks(wanted, { scheduler, home }).items.some(item => ['refused', 'owner-choice-required'].includes(item.action)), 'a hand edit is still not accepted');
 });

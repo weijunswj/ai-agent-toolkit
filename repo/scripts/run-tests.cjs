@@ -375,6 +375,9 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     const { exitCode, summary } = testRun.run(shards.runOrder(selection.files, durations), { concurrency: options.concurrency, label: selection.label });
     if (summary) {
       if (selection.shard) summary.shard = selection.shard;
+      // GitHub Actions numbers each run attempt; the CI check keeps the newest summary of a shard.
+      const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
+      if (selection.shard && Number.isInteger(attempt) && attempt > 0) summary.run_attempt = attempt;
       out.write(`${totalsLine(summary)}\n`);
       if (summary.missing.length) err.write(`No result for ${summary.missing.join(', ')}: the file did not load.\n`);
       if (options.summary) writeJson(options.summary, summary);

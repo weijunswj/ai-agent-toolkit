@@ -5,7 +5,9 @@
 // owner's steps and reads whether the variable and the secret exist; it never writes either.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const childProcess = require('node:child_process');
 const test = require('node:test');
 
 const app = require('../scripts/toolkit-governance-app.cjs');
@@ -19,12 +21,22 @@ test('the App holds one permission list, and the creation link is built from it'
   assert.deepEqual(app.APP.permissions, { contents: 'write', issues: 'write', pull_requests: 'write', checks: 'read', statuses: 'read' });
   const link = new URL(app.creationLink(SLUG));
   assert.equal(`${link.origin}${link.pathname}`, 'https://github.com/settings/apps/new');
-  assert.equal(link.searchParams.get('name'), 'example-owner-toolkit-governance');
+  // One App per governed repository, named for it, within GitHub's 34-character limit.
+  assert.equal(link.searchParams.get('name'), 'example-repo-governance', 'owner-repo-governance would pass 34 characters');
   assert.equal(link.searchParams.get('url'), `https://github.com/${SLUG}`);
   assert.equal(link.searchParams.get('public'), 'false');
   assert.equal(link.searchParams.get('webhook_active'), 'false');
   for (const [name, level] of Object.entries(app.APP.permissions)) assert.equal(link.searchParams.get(name), level, name);
   for (const never of ['workflows', 'secrets', 'administration']) assert.equal(link.searchParams.has(never), false, never);
+});
+
+test('the App name is per repository, at most 34 characters, and falls back to the repository name', () => {
+  assert.equal(app.NAME_LIMIT, 34);
+  assert.equal(app.appName('ab/cd'), 'ab-cd-governance');
+  assert.equal(app.appName('weijunswj/ai-agent-toolkit'), 'ai-agent-toolkit-governance');
+  assert.equal(app.appName('owner/a-very-long-repository-name-indeed'), 'a-very-long-repository-governance');
+  assert.notEqual(app.appName('owner/one'), app.appName('owner/two'), 'two repositories get two names');
+  for (const slug of ['ab/cd', 'weijunswj/ai-agent-toolkit', 'owner/a-very-long-repository-name-indeed', 'o/x'.padEnd(80, 'y')]) assert.ok(app.appName(slug).length <= 34, slug);
 });
 
 test('every workflow token stays within the App permission list', () => {
@@ -52,13 +64,16 @@ test('setup names the link, the page checks, both repositories and the owner com
   assert.ok(text.includes(`gh variable set TOOLKIT_GOVERNANCE_APP_CLIENT_ID --repo ${SLUG} --body "<Client ID>"`));
   assert.ok(text.includes(`Get-Content -Raw "<key file>.pem" | gh secret set TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY --repo ${SLUG}`));
   assert.ok(text.includes(`gh secret set TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY --repo ${SLUG} < "<key file>.pem"`));
-  assert.match(text, /Already set the App up for another repository/);
+  assert.match(text, /Create this repository's own App/);
+  assert.match(text, /one App per governed repository/i);
+  assert.match(text, /cannot tell whether two repositories share an App/);
+  assert.doesNotMatch(text, /Already set the App up for another repository/);
   // Without a store the install step names this repository only.
   assert.doesNotMatch(app.setupLines(SLUG, null, missing).join('\n'), /example-store/);
 });
 
 test('setup is one line once the variable and the secret exist, and says when they could not be checked', () => {
-  assert.deepEqual(app.setupLines(SLUG, STORE, found), [`Governance GitHub App: the variable and the secret are set on ${SLUG}. The first governance job run proves the App is installed.`]);
+  assert.deepEqual(app.setupLines(SLUG, STORE, found), [`Governance GitHub App: the variable and the secret are set on ${SLUG}. Reuse that App: do not set it up again. The first governance job run proves the App is installed.`]);
   const half = app.setupLines(SLUG, STORE, { variable: 'found', secret: 'missing' }).join('\n');
   assert.match(half, /variable found, secret missing/);
   const unknown = app.setupLines(SLUG, STORE, { variable: 'unverified', secret: 'unverified', reason: 'offline' }).join('\n');
@@ -120,8 +135,6 @@ test('check findings: missing App while on, leftovers while off, nothing when of
 
 // ---- wired into `toolkit governance` ----------------------------------------------------------
 
-const os = require('node:os');
-const childProcess = require('node:child_process');
 const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
 const conformance = require('../scripts/toolkit-governance-conformance.cjs');
 const governance = require('../scripts/toolkit-governance-state.cjs');
@@ -177,4 +190,116 @@ test('check reports the App while governance is on and left-overs once it is off
   assert.equal(governance.governanceState(repo, options).rule, 'M2');
   assert.deepEqual(ids({ variable: 'missing', secret: 'found' }).map(entry => entry.id), ['GOVERNANCE_APP_LEFT_OVER']);
   assert.deepEqual(ids(missing), []);
+});
+
+test('an existing setup is reused: no new App link, single-name commands for what is missing, and a guarded replace', () => {
+  for (const [state, missingName] of [[{ variable: 'found', secret: 'missing' }, 'secret'], [{ variable: 'missing', secret: 'found' }, 'variable']]) {
+    const lines = app.setupLines(SLUG, STORE, state);
+    const text = lines.join('\n');
+    assert.match(text, /already has part of an App setup/);
+    assert.match(text, /Reuse that App: set only what is missing, from the same App/);
+    assert.ok(!text.includes(app.creationLink(SLUG)), 'no new App is offered over an existing one');
+    assert.match(text, new RegExp(`To set only the missing ${missingName}`));
+    for (const line of app.saveCommands(SLUG, missingName)) assert.ok(lines.includes(line), line);
+    assert.match(text, /type replace first/);
+    assert.match(text, /remove this repository from the old App's installation/);
+  }
+  // Every printed save step is guarded, whatever the state, and the names never change.
+  for (const state of [missing, { variable: 'unverified', secret: 'unverified', reason: 'offline' }, { variable: 'found', secret: 'missing' }]) {
+    const lines = app.setupLines(SLUG, STORE, state).filter(line => /gh (variable|secret) set/.test(line));
+    assert.ok(lines.length >= 2, JSON.stringify(state));
+    for (const line of lines) {
+      assert.match(line, /Type replace to overwrite it/);
+      assert.match(line, /Could not read the names\. Nothing changed\./);
+      for (const [name, write] of [['TOOLKIT_GOVERNANCE_APP_CLIENT_ID', 'gh variable set'], ['TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY', 'gh secret set']]) {
+        if (line.includes(write)) assert.ok(line.split(name).length >= 3, `${name} is checked before it is written`);
+      }
+      assert.ok(line.indexOf(' list --repo ') < line.indexOf(' set '), 'names are listed before anything is set');
+    }
+  }
+  // The single-name commands write only their own name.
+  assert.doesNotMatch(app.saveCommands(SLUG, 'secret').join('\n'), /gh variable set/);
+  assert.doesNotMatch(app.saveCommands(SLUG, 'variable').join('\n'), /gh secret set/);
+  // The POSIX line never uses read -p, which zsh and dash do not support.
+  for (const which of ['both', 'variable', 'secret']) assert.doesNotMatch(app.saveCommands(SLUG, which)[1], /read -r -p|read -p/);
+});
+
+const shells = ['bash', 'dash', 'zsh'].filter(shell => process.platform !== 'win32' && childProcess.spawnSync(shell, ['-c', 'exit 0']).status === 0);
+
+test('the macOS or Linux save command overwrites an existing setup only after a typed replace, and stops when names cannot be read', { skip: shells.length === 0 }, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-app-guard-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, 'gh'), [
+    '#!/bin/sh',
+    'case "$1 $2" in',
+    '  "variable list") [ -n "$FAIL_VARIABLE_LIST" ] && exit 1; [ -n "$HAS_VARIABLE" ] && echo TOOLKIT_GOVERNANCE_APP_CLIENT_ID; echo OTHER_VARIABLE;;',
+    '  "secret list") [ -n "$FAIL_SECRET_LIST" ] && exit 1; [ -n "$HAS_SECRET" ] && echo TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY; echo OTHER_SECRET;;',
+    '  *) echo "$1 $2" >> "$WRITES"; cat > /dev/null;;',
+    'esac',
+    '',
+  ].join('\n'), { mode: 0o755 });
+  fs.writeFileSync(path.join(dir, '<key file>.pem'), 'not a key\n');
+  for (const shell of shells) {
+    const run = (which, answer, env) => {
+      const script = app.saveCommands(SLUG, which)[1].replace(/^\s*macOS or Linux: /, '');
+      const writes = path.join(dir, `writes-${Math.random().toString(16).slice(2)}`);
+      const result = childProcess.spawnSync(shell, ['-c', script], { cwd: dir, input: `${answer}\n`, encoding: 'utf8',
+        env: { ...process.env, ...env, WRITES: writes, PATH: `${dir}${path.delimiter}${process.env.PATH}` } });
+      assert.equal(result.status, 0, `${shell}: ${result.stderr}`);
+      return { out: result.stdout, writes: fs.existsSync(writes) ? fs.readFileSync(writes, 'utf8').trim().split('\n') : [] };
+    };
+    assert.deepEqual(run('both', '', {}).writes, ['variable set', 'secret set'], `${shell}: a fresh repository is saved without a question`);
+    for (const env of [{ HAS_VARIABLE: '1' }, { HAS_SECRET: '1' }]) {
+      const kept = run('both', 'yes', env);
+      assert.deepEqual(kept.writes, [], `${shell} ${JSON.stringify(env)}`);
+      assert.match(kept.out, /Kept the existing App\. Nothing changed\./);
+      assert.deepEqual(run('both', 'replace', env).writes, ['variable set', 'secret set'], `${shell} ${JSON.stringify(env)}`);
+    }
+    assert.deepEqual(run('both', '', { HAS_VARIABLE: '1', HAS_SECRET: '1' }).writes, [], `${shell}: no answer, as from an agent, keeps the existing App`);
+    for (const env of [{ FAIL_VARIABLE_LIST: '1' }, { FAIL_SECRET_LIST: '1' }]) {
+      const unread = run('both', 'replace', env);
+      assert.deepEqual(unread.writes, [], `${shell} ${JSON.stringify(env)}`);
+      assert.match(unread.out, /Could not read the names\. Nothing changed\./);
+    }
+    // Filling in what is missing writes only that name, without a question, next to the other one.
+    assert.deepEqual(run('secret', '', { HAS_VARIABLE: '1' }).writes, ['secret set'], shell);
+    assert.deepEqual(run('variable', '', { HAS_SECRET: '1' }).writes, ['variable set'], shell);
+    assert.deepEqual(run('secret', '', { HAS_VARIABLE: '1', HAS_SECRET: '1' }).writes, [], `${shell}: an existing secret is kept`);
+  }
+});
+
+test('an organisation-owned repository gets the organisation App page; a personal one the personal page; unknown shows both', () => {
+  const org = new URL(app.creationLink('example-org/example-repo', 'Organization'));
+  assert.equal(`${org.origin}${org.pathname}`, 'https://github.com/organizations/example-org/settings/apps/new');
+  assert.equal(org.searchParams.get('public'), 'false', 'installable only on the organisation');
+  for (const [name, level] of Object.entries(app.APP.permissions)) assert.equal(org.searchParams.get(name), level, name);
+  const user = new URL(app.creationLink(SLUG, 'User'));
+  assert.equal(`${user.origin}${user.pathname}`, 'https://github.com/settings/apps/new');
+  assert.equal(app.creationLink(SLUG), app.creationLink(SLUG, 'User'), 'no owner type keeps the personal page');
+  const orgText = app.setupLines('example-org/example-repo', STORE, missing, 'Organization').join('\n');
+  assert.ok(orgText.includes(app.creationLink('example-org/example-repo', 'Organization')));
+  const pages = text => [...text.matchAll(/https:\/\/\S+/g)].map(([found]) => new URL(found)).filter(url => url.pathname.endsWith('/settings/apps/new')).map(url => `${url.origin}${url.pathname}`);
+  assert.deepEqual(pages(orgText), ['https://github.com/organizations/example-org/settings/apps/new'], 'an organisation never gets the personal page');
+  const userText = app.setupLines(SLUG, STORE, missing, 'User').join('\n');
+  assert.deepEqual(pages(userText), ['https://github.com/settings/apps/new'], 'a personal account never gets the organisation page');
+  const unknownText = app.setupLines(SLUG, STORE, missing, null).join('\n');
+  assert.deepEqual(pages(unknownText), ['https://github.com/settings/apps/new', 'https://github.com/organizations/example-owner/settings/apps/new'], 'unknown owner: both pages');
+  assert.match(unknownText, /If example-owner is an organisation/);
+  const finding = app.appFinding('ENABLED', 'example-org/example-repo', STORE, missing, [], 'Organization');
+  assert.deepEqual(pages(finding.message), ['https://github.com/organizations/example-org/settings/apps/new']);
+});
+
+test('ownerType reads only the repository, with GET, and anything unreadable is null', () => {
+  const calls = [];
+  const answer = value => args => { calls.push(args); return value; };
+  assert.equal(app.ownerType('example-org/example-repo', { reader: answer({ ok: true, value: { owner: { type: 'Organization' } } }) }), 'Organization');
+  assert.deepEqual(calls, [['repos/example-org/example-repo']]);
+  assert.equal(app.ownerType(SLUG, { reader: answer({ ok: true, value: { owner: { type: 'User' } } }) }), 'User');
+  assert.equal(app.ownerType(SLUG, { reader: answer({ ok: true, value: { owner: { type: 'Bot' } } }) }), null);
+  assert.equal(app.ownerType(SLUG, { reader: answer({ ok: false, reason: 'gh-request-failed' }) }), null);
+  assert.equal(app.ownerType(SLUG, { reader: () => { throw new Error('boom'); } }), null);
+  assert.equal(app.ownerType(SLUG, { offline: true, reader: () => assert.fail('no read offline') }), null);
+  const seen = [];
+  app.ownerType(SLUG, { reader: args => app.ghReader(args, { spawn: (command, list) => { seen.push(list); return { status: 0, stdout: '{"owner":{"type":"User"}}' }; } }) });
+  assert.deepEqual(seen, [['api', `repos/${SLUG}`]]);
 });

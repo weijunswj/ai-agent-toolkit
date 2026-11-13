@@ -461,3 +461,111 @@ test('query variables require an executable literal assignment before the API ca
   assert.match(adapter.issueClosureDecision(shell("q='query { viewer { login } }'; gh api graphql -f query=\"$Q\""),{guard:setup().guard})?.deny,/query variable is unresolved/,'POSIX variables keep their case');
   for(const command of ["cat <<'EOF'\nQ='query { viewer { login } }'\nEOF\ngh api graphql -f query=\"$Q\"", "gh api graphql -f query=\"$Q\"; Q='query { viewer { login } }'", "if false; then Q='query { viewer { login } }'; fi; gh api graphql -f query=\"$Q\"", "function f {\nQ='query { viewer { login } }'\n}; gh api graphql -f query=\"$Q\"", "echo ready; Q='query { viewer { login } }'; gh api graphql -f query=\"$Q\""]) assert.match(adapter.issueClosureDecision(shell(command),{guard:setup().guard})?.deny,/query variable is unresolved/,command);
 });
+
+test('closing words wait for the owner while the PR UAT line is pending or invalid', () => {
+  const pending = 'UAT: OWNER_TEST_NEEDED (open the page and check it)';
+  const ref = (number, source = 'body') => [{ number, line: 3, source }];
+  assert.match(adapter.uatClosingDecision(`Change\n\n${pending}\n\nCloses #756.`, ref(756)), /body, line 3 closes #756, but this PR's UAT line is OWNER_TEST_NEEDED.*Use Refs #756/);
+  assert.match(adapter.uatClosingDecision('UAT: SKIP (x)\n\nFixes #9', ref(9)), /UAT line is invalid/);
+  for (const body of ['UAT: PASSED (owner OK 12 Nov)\n\nCloses #1', 'UAT: NOT_REQUIRED (docs only)\n\nCloses #1', 'Closes #1'])
+    assert.equal(adapter.uatClosingDecision(body, ref(1)), null, body);
+  assert.equal(adapter.uatClosingDecision(`${pending}\n\nRefs #1`, []), null);
+  const fail = { request() { assert.fail('the UAT check must not read GitHub'); } };
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'uat-closing-'));
+  const file = path.join(dir, 'body.md');
+  fs.writeFileSync(file, `${pending}\n\nresolves #5\n`);
+  for (const command of [
+    `gh pr create -R ${repo} --title Change --body-file "${file}"`,
+    `gh pr edit 7 -R ${repo} --body-file "${file}"`,
+  ]) assert.match(adapter.issueClosureDecision({ cwd: process.cwd(), tool_name: 'Bash', tool_input: { command } }, { transport: fail })?.deny ?? '', /Use Refs #5/, command);
+  const connector = (body, title = 'Change') => adapter.issueClosureDecision({ cwd: process.cwd(), tool_name: 'mcp__github__create_pull_request', tool_input: { owner: 'example.test', repo: 'app', title, body } }, { transport: fail });
+  assert.equal(connector(`${pending}\n\nCloses #5`).status, 'refused');
+  assert.match(connector(pending, 'Fix #5 now').deny, /title, line 1 closes #5/);
+  assert.equal(connector(`${pending}\n\nRefs #5`), null);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the CI check reads the live PR body and every closing reference', () => {
+  const pr = { number: 7, title: 'Change', body: 'UAT: OWNER_TEST_NEEDED (try it)\n\nRefs #2', head: { sha: SHA }, commits: 1 };
+  const responses = {
+    [`repos/${repo}/pulls/7`]: pr,
+    [`repos/${repo}/pulls/7/commits?per_page=100&page=1`]: [{ sha: SHA, commit: { message: 'Build it\n\nCloses #2' } }],
+    [`repos/${repo}/issues/2`]: { number: 2, state: 'open', sub_issues_summary: { total: 0 } },
+    [`repos/${repo}/issues/2/sub_issues?per_page=100&page=1`]: [],
+  };
+  const guard = new IssueClosureGuard({ repository: repo, transport: { request(method, apiPath) { if (!(apiPath in responses)) assert.fail(apiPath); return { status: 200, json: responses[apiPath] }; } } });
+  const result = guard.checkPullRequest(7, { head: SHA });
+  assert.equal(result.status, 'allowed');
+  assert.equal(result.pr.body, pr.body);
+  assert.match(adapter.uatClosingDecision(result.pr.body, result.references), /commit a{40}, line 3 closes #2/);
+});
+
+test('closing words wait while the target issue records an owed UAT', () => {
+  const { owedUat } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  const block = state => `<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE v2 toolkit=3.70.1 sha256=0123456789ab -->\n<!-- programme-state child=2@4 -->\n- Status: ACTIVE\n- UAT: ${state}; review: PASSED\n<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\nTask text.`;
+  assert.equal(owedUat(block('PENDING')), 'PENDING');
+  assert.equal(owedUat(block('UAT_FULL_REQUIRED')), 'UAT_FULL_REQUIRED');
+  assert.equal(owedUat(block('UAT_PARTIAL_REQUIRED (STALE_HEAD, was abc1234)')), 'UAT_PARTIAL_REQUIRED');
+  for (const state of ['PASSED', 'NOT_REQUIRED', 'UAT_RETAINED', '-']) assert.equal(owedUat(block(state)), null, state);
+  assert.equal(owedUat('- UAT: PENDING; review: -\n'), null, 'only a generated STATE block counts');
+  assert.equal(owedUat(null), null);
+  const issue = (state, body) => ({ number: 2, state, body, sub_issues_summary: { total: 0 } });
+  const guardWith = target => new IssueClosureGuard({ repository: repo, transport: { request(method, apiPath) {
+    const rows = { [`repos/${repo}/issues/2`]: target, [`repos/${repo}/issues/2/sub_issues?per_page=100&page=1`]: [] };
+    if (!(apiPath in rows)) assert.fail(apiPath);
+    return { status: 200, json: rows[apiPath] };
+  } } });
+  const refused = guardWith(issue('open', block('PENDING'))).checkTexts(['UAT: NOT_REQUIRED (docs)\n\nCloses #2'], undefined, { sources: ['body'] });
+  assert.equal(refused.status, 'refused');
+  assert.match(refused.reason, /body, line 3.*records UAT PENDING.*use Refs/);
+  assert.equal(guardWith(issue('open', block('PASSED'))).checkTexts(['Closes #2']).status, 'allowed');
+  assert.equal(guardWith(issue('closed', block('PENDING'))).checkTexts(['Closes #2']).status, 'allowed');
+  assert.equal(guardWith(issue('open', block('PENDING'))).checkTexts(['Refs #2']).status, 'allowed');
+});
+
+// A merged PR that references a task and still waits on the owner's test keeps the task open: a
+// later PR's closing words are refused even when the task's own page has not recorded the owed test.
+function ownerTestSetup(prBody, { merged = true, otherRepo = false } = {}) {
+  const github = new FakeGitHub({ repository: repo });
+  github.addIssue(1);
+  const source = { number: 77, body: prBody, repository_url: `https://api.github.com/repos/${otherRepo ? 'someone/else' : repo}`,
+    pull_request: { merged_at: merged ? '2026-11-12T10:00:00Z' : null } };
+  github.intercept(call => (call.method === 'GET' && /\/issues\/1\/timeline\?/.test(call.path)
+    ? { status: 200, json: [{ event: 'cross-referenced', source: { issue: source } }, { event: 'labeled' }] } : undefined));
+  const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
+  return new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state });
+}
+test('closing words are refused for a task a merged OWNER_TEST_NEEDED PR references', () => {
+  const guard = ownerTestSetup('Refs #1\n\nUAT: OWNER_TEST_NEEDED (open the board and check the new line)');
+  const result = guard.checkTexts(['Closes #1']);
+  assert.equal(result.status, 'refused');
+  assert.match(result.reason, /merged PR #77, whose UAT line is still OWNER_TEST_NEEDED/);
+});
+for (const [label, body, options] of [
+  ['the owner passed it', 'Refs #1\n\nUAT: PASSED (owner OK 12 Nov)', {}],
+  ['no owner test was needed', 'Refs #1\n\nUAT: NOT_REQUIRED (docs only)', {}],
+  ['the PR is not merged', 'Refs #1\n\nUAT: OWNER_TEST_NEEDED (try it)', { merged: false }],
+  ['the PR is in another repository', 'Refs #1\n\nUAT: OWNER_TEST_NEEDED (try it)', { otherRepo: true }],
+]) test(`closing words stay allowed when ${label}`, () => {
+  assert.equal(ownerTestSetup(body, options).checkTexts(['Closes #1']).status, 'allowed');
+});
+test('without a UAT reader (the skill copied alone) the merged-PR check is skipped', () => {
+  const github = new FakeGitHub({ repository: repo });
+  github.addIssue(1);
+  let timeline = 0;
+  github.intercept(call => { if (/\/timeline/.test(call.path)) timeline += 1; return undefined; });
+  assert.equal(new IssueClosureGuard({ transport: github, repository: repo }).checkTexts(['Closes #1']).status, 'allowed');
+  assert.equal(timeline, 0);
+});
+test('the hook guard passes the UAT reader', () => {
+  const adapter = require('../scripts/toolkit-issue-closure.cjs');
+  assert.equal(typeof adapter.guardFor(repo, process.cwd(), { ghPath: process.execPath }).uatState, 'function');
+});
+test('an open native child is still a proven refusal when the timeline cannot be read', () => {
+  const github = new FakeGitHub({ repository: repo });
+  github.addIssue(1); github.addIssue(2, { parent: 1 });
+  github.intercept(call => (/\/timeline/.test(call.path) ? { status: 404, json: {} } : undefined));
+  const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
+  const result = new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state }).checkTexts(['Closes #1']);
+  assert.equal(result.status, 'refused', 'a cloud hook allows unknown, so a later failed read must not hide the open child');
+});

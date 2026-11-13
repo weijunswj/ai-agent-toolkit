@@ -80,10 +80,12 @@ test('G: plan prints the exact apply command and approval guidance, with literal
   assert.doesNotMatch(text, /paste.*yourself|agents do not create scheduled tasks/i);
 });
 
-test('G: the registered task runs headless as the logged-on user, ignores a second start and stops at 30 minutes', () => {
+test('G: the registered task runs headless as the logged-on user, ignores a second start and stops at its time limit', () => {
   const script = windowsTasks.SCRIPTS.register;
   assert.match(script, /-LogonType Interactive -RunLevel Limited/);
-  assert.match(script, /-StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit \(New-TimeSpan -Minutes 30\) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries/);
+  assert.match(script, /-StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit \(New-TimeSpan -Minutes \$p\.time_limit_minutes\) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries/);
+  // One minute past the job's 55-minute work budget, before the next hourly start.
+  assert.equal(windowsTasks.TASK_TIME_LIMIT_MINUTES, 56);
   assert.match(script, /IndexOf\(\$p\.marker_prefix\) -lt 0 -and -not \(\$p\.expected_xml/);
   assert.doesNotMatch(script, /-Password|-User\s/);
   assert.match(windowsTasks.SCRIPTS.unregister, /IndexOf\(\$p\.marker\) -lt 0\) \{ throw/);

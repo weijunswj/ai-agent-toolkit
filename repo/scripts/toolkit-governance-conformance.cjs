@@ -155,8 +155,9 @@ function checkConformance(cwd, options = {}) {
   }
   if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
   if (state.state === 'ENABLED' && state.materials.binding) findings.push(...appFindings(state, options));
+  if (state.state === 'ENABLED' && state.materials.binding) findings.push(...cloudWorkflowFindings(state, toolkitRoot, options));
   const drift = findings.some(entry => entry.severity === 'drift');
-  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult);
+  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot));
 }
 
 // The governance GitHub App: set up while governance is on, nothing left behind once it is off. Read
@@ -165,10 +166,14 @@ function appFindings(state, options) {
   let slug = null;
   try { const identity = governance.readIdentity(state.root); slug = identity.valid ? governance.remoteSlug(identity.remote) : null; } catch { slug = null; }
   if (!slug) return [];
-  const appState = governanceApp.presence(slug, { reader: options.appReader || governanceApp.ghReader,
-    offline: options.offline === true || (!options.appReader && (options.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1')) });
+  const read = { reader: options.appReader || governanceApp.ghReader,
+    offline: options.offline === true || (!options.appReader && (options.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1')) };
+  const appState = governanceApp.presence(slug, read);
   const others = governance.enabledRepositories(options).filter(name => name.toLowerCase() !== slug.toLowerCase());
-  const found = governanceApp.appFinding(state.state, slug, governance.bindingStoreRepository(state.root, options), appState, others);
+  // The owner type picks the App page, so it is read only when the setup steps will show.
+  const setup = state.state === 'ENABLED' && !(appState.variable === 'found' || appState.secret === 'found');
+  const owner = setup ? governanceApp.ownerType(slug, read) : null;
+  const found = governanceApp.appFinding(state.state, slug, governance.bindingStoreRepository(state.root, options), appState, others, owner);
   return found ? [found] : [];
 }
 
@@ -295,7 +300,35 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   return out;
 }
 
-function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null) {
+// The cloud sweep copies a governed repository carries (toolkit-cloud-workflows.cjs). A missing or
+// hand-edited copy is drift; one rendered from an older Toolkit commit is only noted, since every
+// rules refresh updates it. The Toolkit's own checkout runs its own files and is skipped.
+function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
+  const workflows = require('./toolkit-cloud-workflows.cjs');
+  if (workflows.isToolkitCheckout(state.root)) return [];
+  let result;
+  try {
+    // The check compares with this checkout's own commit; only an install needs it to be on main.
+    result = workflows.plan({ repo: state.root, root: toolkitRoot, commit: options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot) });
+  } catch (error) {
+    return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The cloud sweep workflows could not be checked: ${error.name === 'InstallError' ? error.message : 'the Toolkit copy could not render them.'}`)];
+  }
+  const out = [];
+  for (const row of result.rows) {
+    if (row.state === 'current') continue;
+    if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin or the CI workflow it follows); the next rules refresh updates it.`));
+    else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so this repository's programme board gets no cloud sweep. Refresh the repository rules to fix it.`));
+  }
+  return out;
+}
+
+// The cloud jobs guide from the contract: each job and the tokens it mints from the governance App.
+function cloudJobsGuide(state, toolkitRoot) {
+  if (state?.state !== 'ENABLED' || !fs.existsSync(path.join(toolkitRoot, 'repo/contracts/cloud-jobs.json'))) return null;
+  return require('./toolkit-cloud-jobs.cjs').buildCloudJobsGuide({ root: toolkitRoot });
+}
+
+function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null, cloudJobs = null) {
   let catalogueProblems = [];
   try { catalogueProblems = catalogue.catalogueProblems(toolkitRoot); } catch { catalogueProblems = ['the skill catalogue could not be checked']; }
   const all = [...findings, ...catalogueProblems.map(message => finding('CATALOGUE_DRIFT', 'drift', message))];
@@ -309,8 +342,9 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
     no_force_push_ruleset: rulesetResult,
     default_branch_protection: protectionResult,
     dependency_security: securityResult,
+    cloud_jobs: cloudJobs,
     enforcement: enforcementStatus(toolkitRoot),
   });
 }
 
-module.exports = Object.freeze({ checkConformance, enforcementStatus, expectedGovernedBlock, PROMPT_HOLD_HOOK });
+module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, enforcementStatus, expectedGovernedBlock, PROMPT_HOLD_HOOK });

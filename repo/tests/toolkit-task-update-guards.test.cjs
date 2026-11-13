@@ -78,7 +78,7 @@ test('loud failure is present in tasks, the single session task line and the hea
 });
 test('setup uses the same saved approval and stops on pending host questions', t => {
   const w = world(t); let runs = 0;
-  const updater = { run: options => { runs++; assert.equal(options.apply, true); return { plans: [], questions: [update.approvalQuestion()] }; } };
+  const updater = { recentCheck: () => null, saveCheck: () => assert.fail('a held update saves no stamp'), run: options => { runs++; assert.equal(options.apply, true); return { plans: [], questions: [update.approvalQuestion()] }; } };
   assert.equal(core.applyScheduledTasks({ repoRoot: w.root }, { home: w.home, platform: 'win32', updater, log() {} }), null);
   update.saveApproval(w.home, { decision: 'standing', answer_ref: 'host/setup-answer' }, '3.52.0');
   assert.deepEqual(core.applyScheduledTasks({ repoRoot: w.root }, { home: w.home, platform: 'win32', updater, log() {} }), { held: true }); assert.equal(runs, 1);

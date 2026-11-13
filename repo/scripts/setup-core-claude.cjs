@@ -17,7 +17,6 @@ const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs'
 const { ToolkitInstallHealthCheck } = require('./toolkit-install-health.cjs');
 const { claudeAccountPluginFolders } = require('./toolkit-claude-account-copy.cjs');
 const { ToolkitEnv } = require('./toolkit-env.cjs');
-const { CodexToolkitInstall } = require('./toolkit-codex-install-state.cjs');
 
 // The setup-choice key of one managed Claude Code setting row, for example claudeSettingAgentsMd.
 const claudeSettingKey = (id) => `claudeSetting${id.replace(/(^|-)([a-z])/g, (match, dash, letter) => letter.toUpperCase())}`;
@@ -360,17 +359,20 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
   // The last setup step on Claude Code: checks what this run installed, refreshing stale Toolkit
   // helper definitions, and returns the result the summary and exit code report.
   function runClaudeInstallCheck(args, nativeCache, delegation) {
+    const helperDefinitions = new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays });
+    // After `remove toolkit`, its reinstall note names the helper stack to put back.
+    const restored = require('./toolkit-reinstall-note.cjs').restoreHelpersLine('claude-code', helperDefinitions);
+    if (restored) console.log(restored);
     const check = new ToolkitInstallHealthCheck({
       toolkitRoot: args.repoRoot,
       expectedVersion: expectedToolkitVersion(args.repoRoot, 'claude-code'),
       hubPath: path.resolve(args.hub || path.join(os.homedir(), '.ai-agent-toolkit', 'current')),
-      helperDefinitions: new ClaudeHelperDefinitions({ repositoryRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays }),
+      helperDefinitions,
       globalRules: setupGlobalRules(args),
       depthSetting: new ClaudeSubagentDepthSetting(),
       envHealth: ToolkitEnv.forUser(),
       syncedSkillsDir: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills', 'synced'),
       accountPluginFolders: claudeAccountPluginFolders(),
-      codexInstall: new CodexToolkitInstall({ managedRoot: args.repoRoot }),
     });
     const installed = ['already fresh', 'installed this run'].includes(nativeCache.status);
     return check.run({

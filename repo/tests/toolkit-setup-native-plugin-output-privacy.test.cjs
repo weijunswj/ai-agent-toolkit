@@ -69,6 +69,8 @@ test('Codex managed stale refresh captures write JSON and emits only the sanitiz
   assert.match(result.stdout, /Codex plugin cache path: <Codex Toolkit cache>/);
   assert.match(result.stdout, /Codex plugin status: refreshed/);
   assert.match(result.stdout, /Codex plugin updated this run: yes/);
+  // An open Codex session keeps the old plugin folder's skill paths, so setup ends by saying so.
+  assert.match(result.stdout, /\n## Start a new session\nStart a new session in Codex, and close sessions opened before this run: this run changed Toolkit skill files or rules, and open sessions keep using the old ones\.\n$/);
   assert.equal(fs.existsSync(path.join(fixture.setupRepo, 'CODEX_PLUGIN_REFRESHED')), true);
   assertPrivateHelperOutputAbsent(result, fixture);
 });

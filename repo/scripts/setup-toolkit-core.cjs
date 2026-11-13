@@ -27,6 +27,7 @@ const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferen
 const { taskAutoMerge } = require('./toolkit-governance-state.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
 const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
+const { userStateDirectory } = require('./toolkit-user-state.cjs');
 
 const DEFAULT_REPO_BRANCH = 'main';
 const DEFAULT_REPO_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit';
@@ -165,6 +166,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     antigravityGlobalRules: false,
     explain: '',
     yesRecommended: false,
+    refresh: false,
     codexHelperCount: null,
     approveHighHelperCapacity: false,
     approveCodexConfigProposal: false,
@@ -234,6 +236,7 @@ function parseArgs(argv = process.argv.slice(2)) {
       args.setupChoices.taskAutoMerge = choice;
     }
     else if (arg === '--yes-recommended') args.yesRecommended = true;
+    else if (arg === '--refresh') args.refresh = true;
     else if (arg === '--codex-helper-capacity') {
       const choice = next().toLowerCase();
       // Legacy Skip answers write nothing, exactly like Keep current.
@@ -349,6 +352,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     if (choice) args.setupChoices[claudeSettingKey(spec.id)] = choice;
   }
   if (args.plan && args.execute) throw new Error('--plan and --execute cannot be used together');
+  if (args.refresh) assertRefreshArgs(args);
   if (argv.some((arg) => arg === '--explain' || arg.startsWith('--explain=')) && !args.explain) throw new Error('--explain needs a question number, for example --explain 1.2');
   if (!args.plan && !args.execute && !args.help && !args.verifyClaudePlugin) args.plan = true;
   args.repoRoot = path.resolve(args.repoRoot);
@@ -571,6 +575,23 @@ function setupPlan(options = {}) {
   };
 }
 
+// refresh toolkit keeps every current answer, so it takes no answer of its own: a choice flag,
+// --yes-recommended, a proposal approval or a plan would give the run a second meaning.
+function assertRefreshArgs(args) {
+  const chosen = Object.entries(args.setupChoices).filter(([, value]) => value).map(([key]) => key);
+  const conflicts = [
+    ...(args.plan || args.explain ? ['--plan or --explain'] : []),
+    ...(args.yesRecommended ? ['--yes-recommended'] : []),
+    ...(args.approveCodexConfigProposal ? ['--approve-codex-config-proposal'] : []),
+    ...(args.approveHighHelperCapacity ? ['--approve-high-helper-capacity'] : []),
+    ...(args.codexHelperCount !== null ? ['--codex-helper-count'] : []),
+    ...(args.updateReportRetentionDaysExplicit ? ['--update-report-retention-days'] : []),
+    ...(chosen.length ? [`a setup choice flag (${chosen.join(', ')})`] : []),
+  ];
+  if (conflicts.length) throw new Error(`--refresh keeps every current answer and cannot be combined with ${conflicts.join(', ')}. Use setup toolkit to change an answer.`);
+  if (!args.execute) throw new Error('--refresh runs with --execute.');
+}
+
 function printHelp() {
   console.log([
     'AI Agent Toolkit setup orchestrator',
@@ -597,6 +618,8 @@ function printHelp() {
     '  --claude-cli <path>          explicit Claude Code CLI for native plugin setup',
     '  --hub <path>                 test override for Toolkit bridge hub',
     '  --yes-recommended           print and apply recommended choices for unanswered setup questions',
+    '  --refresh                   refresh toolkit: keep every current answer with no bank when the questions match',
+    '                               the last bank answered on this computer; any new or different question shows the bank',
     '  --scheduled-task-update keep|standing|no',
     '                               resolve the Windows task update approval without reading stdin',
     '  --codex-helper-capacity one-helper|root-only|keep|custom',
@@ -906,6 +929,8 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
     let timedOut = false;
     let earlyClassification = '';
     let settled = false;
+    let refreshKept = false;
+    const refreshRun = argv.includes('--refresh');
     let stdinBytes = 0;
     let stdinPausedForBackpressure = false;
     const stopStdinTransport = () => {
@@ -960,8 +985,28 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
       if (!forwarded) failEarly('child-failure');
     });
 
+    // A silent refresh shows no bank: the child reports the kept answers instead, and waits for this
+    // acknowledgement before any write, as it waits after a bank.
+    const acknowledgeRefreshIfKept = () => {
+      let receipt = null;
+      try { receipt = JSON.parse(control.toString('utf8').split('\n')[0]); } catch { return false; }
+      if (receipt?.event !== REFRESH_KEPT_EVENT) return false;
+      const markers = [QUESTION_BANK_BEGIN, QUESTION_BANK_COMPLETE].some((marker) => stdout.includes(marker) || stderr.includes(marker));
+      if (!refreshRun || markers || receipt.protocol !== MANAGED_QUESTION_BANK_PROTOCOL || receipt.stream !== 'stdout'
+          || !Number.isSafeInteger(receipt.question_count) || receipt.question_count < 1) {
+        failEarly('invalid-control-receipt');
+        return true;
+      }
+      if (stdout.length) fs.writeSync(1, stdout);
+      forwarded = true;
+      refreshKept = true;
+      forwardOffset = stdout.length;
+      child.stdio[4].end(`${REFRESH_KEPT_ACKNOWLEDGEMENT}\n`);
+      return true;
+    };
     const acknowledgeIfComplete = () => {
       if (forwarded || !control.includes(0x0a)) return;
+      if (acknowledgeRefreshIfKept()) return;
       const inspected = inspectManagedBankOutput(stdout, stderr, control);
       if (!inspected.ok) {
         if (!inspected.pending) failEarly(inspected.classification);
@@ -1010,6 +1055,14 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
       stopStdinTransport();
       if (settled) return;
       settled = true;
+      if (refreshKept) {
+        if (timedOut) return reject(new Error(managedFailureMessage('timeout')));
+        if (earlyClassification) return reject(new Error(managedFailureMessage(earlyClassification)));
+        if (signal) return reject(new Error(managedFailureMessage('signal')));
+        if (stdout.includes(QUESTION_BANK_BEGIN) || stdout.includes(QUESTION_BANK_COMPLETE)) return reject(new Error(managedFailureMessage('invalid-control-receipt')));
+        if (status !== 0 && status !== SETUP_ACTION_REQUIRED) return reject(new Error(managedFailureMessage('child-failure')));
+        return resolve(status);
+      }
       const inspected = inspectManagedBankOutput(stdout, stderr, control);
       if (!forwarded && inspected.ok) {
         fs.writeSync(1, inspected.bank);
@@ -1431,6 +1484,14 @@ function questionBankApprovalPayload(specs) {
     total_visible_question_count: specs[0]?.presentation?.total_visible_question_count || specs.length,
     sections: [...sectionMap.values()],
     questions: specs.map((spec) => {
+      // A report-only row takes no answer and setup never changes what it shows (the Codex hook
+      // states, which the owner changes in Codex's /hooks), so only its place in the table is bound:
+      // turning a hook on while the table is open does not void the answers.
+      if (spec.report_only) {
+        return { id: spec.id, key: spec.key, section_id: spec.presentation.section_id, section_index: spec.presentation.section_index,
+          question_index: spec.presentation.question_index, question_ref: spec.presentation.question_ref, section_title: spec.section,
+          title: spec.title, report_only: true, what_this_controls: spec.whatThisControls };
+      }
       const recommendedChoice = selectedChoice(spec, spec.recommended);
       const displayedSelection = spec.selected || spec.empty_input || '';
       const displayedChoice = selectedChoice(spec, displayedSelection);
@@ -1630,10 +1691,13 @@ const copyFailure = (error) => (error?.code ? `file error ${error.code}` : error
 // The n8n Skills plugin would load the same skills twice: after a good copy, Claude Code's user-scope
 // plugin is turned off; Codex has no supported switch, so the summary says how.
 function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: antigravityState(args).copies }),
-  disablePlugin = (id) => disableUserPlugin(id, { claudeCli: args.claudeCli })) {
+  disablePlugin = (id) => disableUserPlugin(id, { claudeCli: args.claudeCli }), notice = null) {
   let summary;
-  try { summary = n8nSkillsSummary(owner.install()); }
-  catch (error) { return `not copied (${copyFailure(error)}).`; }
+  try {
+    const result = owner.install();
+    notice?.addCopies(result);
+    summary = n8nSkillsSummary(result);
+  } catch (error) { return `not copied (${copyFailure(error)}).`; }
   if (args.host !== 'claude-code') return `${summary}. If the n8n Skills plugin is installed, turn it off in the Codex app's plugin settings so the skills do not load twice.`;
   try { return disablePlugin(N8N_SKILLS_PLUGIN) ? `${summary}. Turned off the n8n Skills plugin so the skills do not load twice.` : `${summary}.`; }
   catch (error) { return `${summary}. Could not turn off the n8n Skills plugin (${error.message}); run \`claude plugin disable ${N8N_SKILLS_PLUGIN}\` so the skills do not load twice.`; }
@@ -1641,12 +1705,26 @@ function installOfficialN8nSkills(args, owner = new OfficialN8nSkills({ toolkitR
 
 // Whether Antigravity is installed and whether Toolkit's copies of its skills are already there.
 function antigravityState(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot })) {
-  try { return { installed: owner.installed(), copies: owner.hasCopies() }; }
-  catch { return { installed: false, copies: false }; }
+  let installed; let copies;
+  try { installed = owner.installed(); copies = owner.hasCopies(); }
+  catch { return { installed: false, copies: false, outOfDate: 0 }; }
+  if (!copies) return { installed, copies, outOfDate: 0 };
+  // Toolkit's copies that a copy run would change: out of date, missing since a newer Toolkit added a
+  // skill, or retired from the source (a copy run removes those). Hand copies never count. Reading the
+  // copies can fail (a link or an unreadable file); that never hides the copies: it shows as null,
+  // "could not check".
+  try {
+    const names = new Set(owner.skillNames());
+    const retired = owner.recorded().filter((row) => !names.has(row.skill)).length;
+    const behind = owner.inspect().filter((row) => row.state === 'stale' || row.state === 'missing').length;
+    return { installed, copies, outOfDate: behind + retired };
+  } catch { return { installed, copies, outOfDate: null }; }
 }
 
 function antigravitySkillsOutcome(state) {
-  if (state?.copies) return "Toolkit's skills are in Antigravity's global skills folder.";
+  if (state?.copies && state.outOfDate === null) return "Toolkit's skills are in Antigravity's global skills folder; setup could not check whether they match this Toolkit version.";
+  if (state?.copies && state.outOfDate) return `Toolkit's skills are in Antigravity's global skills folder; ${state.outOfDate} of Toolkit's copies there are out of date or missing.`;
+  if (state?.copies) return "Toolkit's skills are in Antigravity's global skills folder and match this Toolkit version.";
   return "Toolkit's skills are not in Antigravity's global skills folder.";
 }
 
@@ -1664,12 +1742,18 @@ function antigravitySkillsQuestion(args, current) {
       ...(current.antigravity?.copies ? [wizardChoice('remove', "Remove Toolkit's copies", 'Delete only the skill folders Toolkit recorded there.')] : []),
       wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${outcome}`),
     ],
-    recommendation: current.antigravity?.copies
-      ? { value: 'copy', outcome: "Keep Toolkit's skills in Antigravity current.", reason: 'You chose to copy them before, so setup keeps those copies up to date.' }
-      : { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' },
+    recommendation: current.antigravity?.copies && current.antigravity.outOfDate === null
+      ? { value: 'copy', outcome: "Refresh Toolkit's skills in Antigravity.", reason: 'You chose to copy them before, and setup could not check whether they match this Toolkit version.' }
+      : current.antigravity?.copies && current.antigravity.outOfDate
+      ? { value: 'copy', outcome: "Bring Toolkit's skills in Antigravity up to date.", reason: 'You chose to copy them before, and some of the copies are older than this Toolkit version.' }
+      : current.antigravity?.copies
+        ? { value: 'keep', outcome: "Leave Toolkit's skills in Antigravity as they are.", reason: 'Your copies already match this Toolkit version; setup offers to refresh them when they fall behind.' }
+        : { value: 'keep', outcome: 'Leave Antigravity unchanged.', reason: 'The copy is opt-in: choose it if you use Toolkit skills in Antigravity.' },
     selected: args.setupChoices.antigravitySkills,
     current: outcome,
-    currentShort: current.antigravity?.copies ? 'Copied' : 'Not copied',
+    currentShort: !current.antigravity?.copies ? 'Not copied'
+      : current.antigravity.outOfDate === null ? 'Copied, could not check'
+        : current.antigravity.outOfDate ? `Copied, ${current.antigravity.outOfDate} out of date` : 'Copied, up to date',
     currentVerification: 'state-derived',
     afterApplying: 'Start a new Antigravity session to load changed skills.',
   });
@@ -1677,13 +1761,19 @@ function antigravitySkillsQuestion(args, current) {
 
 // Applies the owner's answer for Toolkit's skills in Antigravity; keep changes nothing.
 function applyAntigravitySkills(args, owner = new AntigravityGlobalSkills({ toolkitRoot: args.repoRoot }),
-  n8n = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: true })) {
+  n8n = new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host, antigravity: true }), notice = null) {
   const choice = args.setupChoices.antigravitySkills || 'keep';
   try {
-    if (choice === 'copy') return `${globalCopySummary(owner.install())}.`;
+    if (choice === 'copy') {
+      const result = owner.install();
+      notice?.addAntigravity(result.copied.length + (result.pruned?.length || 0));
+      return `${globalCopySummary(result)}.`;
+    }
     if (choice === 'remove') {
       // Toolkit's n8n skill copies in Antigravity go with them.
-      return `removed ${owner.remove().length + n8n.remove(n8n.antigravityTarget()).length} Toolkit skill folders.`;
+      const removed = owner.remove().length + n8n.remove(n8n.antigravityTarget()).length;
+      notice?.addAntigravity(removed);
+      return `removed ${removed} Toolkit skill folders.`;
     }
   } catch (error) { return `not changed (${copyFailure(error)}).`; }
   return '';
@@ -1949,7 +2039,8 @@ function codexDocLimitCells(current) {
 }
 
 // A report-only row: it shows Codex state the owner changes in Codex itself, takes no answer, has
-// no number or letters and shows as a status line; its Current text is still bound into the bank identity.
+// no number or letters and shows as a status line. Only its place, title and what it controls are
+// bound into the bank identity, so a change in its Current text keeps the owner's answers.
 function reportOnlyRow({ id, key, section, title, whatThisControls, current, currentShort, recommendedText }) {
   return {
     id, key, section, title, whatThisControls, report_only: true,
@@ -2288,7 +2379,8 @@ function setupQuestionSpecs(args, current) {
     }));
     specs.push(...claudeSettingQuestions(args, current));
   }
-  if (args.host === 'codex' && (current.antigravity?.installed || current.antigravity?.copies)) specs.push(antigravitySkillsQuestion(args, current));
+  // Both apps offer the Antigravity copy: it is one folder on this computer, whichever app sets it up.
+  if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
   specs.push(taskAutoMergeQuestion(args, current));
   if (current.scheduledTasksSupported) specs.push(resolvedQuestion({
     id: 'scheduled-task-update', key: 'scheduledTaskUpdate', section: 'Windows scheduled tasks',
@@ -3149,10 +3241,185 @@ function effectiveChoiceSummary(args, current, spec, value) {
   return value;
 }
 
+// refresh toolkit answers every row with its displayed A. Keep current, with no bank, when the questions
+// match the last bank answered on this computer. The saved record holds each row's question shape (a
+// hash of its id, title and choice names) and the recommendation it showed: no setting values, paths
+// or keys. A row is new or different when it has no saved shape, its shape changed, it has no Keep
+// current choice, or it now recommends a change it did not recommend when last answered. A changed
+// Current text alone (a version number) never counts, and a removed question never brings the bank back.
+const REFRESH_SHAPE_FILE = 'setup-question-shapes.json';
+const REFRESH_SHAPE_VERSION = 1;
+const KEEP_CURRENT_LABEL = 'Keep current';
+const REFRESH_KEPT_EVENT = 'refresh-kept-current';
+const REFRESH_KEPT_ACKNOWLEDGEMENT = 'refresh-kept-current-visible';
+
+function refreshShapePath(options = {}) {
+  return options.refreshShapePath || path.join(userStateDirectory(), REFRESH_SHAPE_FILE);
+}
+
+function keepCurrentChoice(spec) {
+  const first = spec.choices?.[0];
+  return first && first.label === KEEP_CURRENT_LABEL ? first : null;
+}
+
+// Keeping an installed, turned-on plugin current means keeping it installed at the update copy's
+// version, so after a Toolkit update its row is answered Install or refresh, as Keep current does
+// once the plugin matches the copy. A plugin that is missing or turned off is a real change: the bank asks.
+function pluginKeptInstalled(spec, current) {
+  if (spec.key === 'codexPluginBehavior') return current.codexInstall?.config === 'read' && current.codexInstall?.plugin === 'on';
+  if (spec.key === 'claudePluginBehavior') return current.claudePluginInstall?.installed === true && current.claudePluginInstall?.enabled === true;
+  return false;
+}
+
+function refreshRowAnswer(spec, current) {
+  const keep = keepCurrentChoice(spec);
+  if (!keep) return { value: '', recommendation: spec.recommended };
+  if (spec.recommended === keep.value) return { value: keep.value, recommendation: KEEP_CURRENT_LABEL };
+  if (spec.recommended === 'install' && pluginKeptInstalled(spec, current)) return { value: 'install', recommendation: KEEP_CURRENT_LABEL };
+  return { value: keep.value, recommendation: spec.recommended };
+}
+
+// Keep current's own presence and a folded twin change with the current state, so the shape leaves them out.
+function refreshRowShape(spec) {
+  const names = new Set(spec.choices.map((choice) => choice.value));
+  if (spec.folded_value) names.add(spec.folded_value);
+  names.delete('keep');
+  return crypto.createHash('sha256').update(JSON.stringify({ id: spec.id, title: spec.title, choices: [...names].sort() })).digest('hex');
+}
+
+function readRefreshShapes(host, options = {}) {
+  let text;
+  try { text = fs.readFileSync(refreshShapePath(options), 'utf8'); } catch (error) { return { status: error.code === 'ENOENT' ? 'missing' : 'unreadable', hosts: {} }; }
+  try {
+    const record = JSON.parse(text);
+    const hosts = record?.hosts;
+    if (record?.version !== REFRESH_SHAPE_VERSION || !hosts || typeof hosts !== 'object' || Array.isArray(hosts)) throw new Error('shape');
+    const rows = hosts[host]?.rows;
+    if (rows === undefined) return { status: 'missing', hosts };
+    if (!rows || typeof rows !== 'object' || Array.isArray(rows)) throw new Error('shape');
+    for (const row of Object.values(rows)) {
+      if (!/^[a-f0-9]{64}$/.test(String(row?.shape || '')) || typeof row.recommendation !== 'string') throw new Error('shape');
+    }
+    return { status: 'read', hosts, rows };
+  } catch { return { status: 'unreadable', hosts: {} }; }
+}
+
+function refreshDecision(specs, current, host, options = {}) {
+  const saved = readRefreshShapes(host, options);
+  const answers = [];
+  const differences = [];
+  for (const spec of answerable(specs)) {
+    const answer = refreshRowAnswer(spec, current);
+    const savedRow = saved.rows?.[spec.id];
+    answers.push({ spec, value: answer.value });
+    let reason = '';
+    if (!answer.value) reason = 'it has no Keep current choice';
+    else if (!savedRow) reason = 'it is new';
+    else if (savedRow.shape !== refreshRowShape(spec)) reason = 'its question or choices changed';
+    else if (answer.recommendation !== KEEP_CURRENT_LABEL && answer.recommendation !== savedRow.recommendation) reason = 'setup now recommends a change';
+    if (reason && saved.status === 'read') differences.push({ spec, reason });
+  }
+  return { silent: saved.status === 'read' && differences.length === 0, saved: saved.status, answers, differences };
+}
+
+function refreshShapeRows(specs, current) {
+  return Object.fromEntries(answerable(specs).map((spec) => [spec.id, {
+    shape: refreshRowShape(spec),
+    recommendation: refreshRowAnswer(spec, current).recommendation,
+  }]));
+}
+
+// Saved after an answered bank (setup or refresh), so the next refresh compares with what was answered.
+function saveRefreshShapes(rows, host, options = {}) {
+  const file = refreshShapePath(options);
+  const existing = readRefreshShapes(host, options);
+  if (existing.status === 'read' && JSON.stringify(existing.rows) === JSON.stringify(rows)) return false;
+  const record = { version: REFRESH_SHAPE_VERSION, hosts: { ...existing.hosts, [host]: { rows } } };
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`);
+  fs.renameSync(temporary, file);
+  return true;
+}
+
+function refreshDifferenceNote(decision) {
+  if (decision.saved !== 'read') {
+    return [
+      '',
+      `Refresh: no saved answers to compare with on this computer (${decision.saved === 'unreadable' ? 'the saved record could not be read' : 'none saved yet'}), so the bank appears this once.`,
+      'Answer it as for setup toolkit. Later refreshes keep your current answers with no bank while the questions stay the same.',
+    ].join('\n');
+  }
+  return [
+    '',
+    'Refresh: the bank appears because these questions are new or different since you last answered:',
+    ...decision.differences.map(({ spec, reason }) => `- ${spec.presentation?.question_ref || ''} ${spec.title}: ${reason}.`.replace('-  ', '- ')),
+    'Answer it as for setup toolkit.',
+  ].join('\n');
+}
+
+function emitRefreshKeptNotice(text, questionCount, options = {}) {
+  const managed = process.env[MANAGED_PROTOCOL_ENV] === MANAGED_QUESTION_BANK_PROTOCOL;
+  if (options.write) options.write(text);
+  else if (managed) fs.writeSync(1, text);
+  else process.stdout.write(text);
+  if (!managed) return;
+  fs.writeSync(3, `${JSON.stringify({ protocol: MANAGED_QUESTION_BANK_PROTOCOL, event: REFRESH_KEPT_EVENT, stream: 'stdout', question_count: questionCount })}\n`);
+  if (fs.readFileSync(4, 'utf8').trim() !== REFRESH_KEPT_ACKNOWLEDGEMENT) {
+    throw new Error('Managed refresh acknowledgement was not received.');
+  }
+}
+
+// The silent refresh: every row takes the answer refreshDecision chose, the same choices a reply of
+// A on every row would make, and setup goes on exactly as after that reply.
+function keepCurrentAnswers(args, current, specs, decision, options = {}) {
+  for (const { spec, value } of decision.answers) assignChoice(args, spec.key, value);
+  const kept = decision.answers.length;
+  emitRefreshKeptNotice([
+    '',
+    '## Refresh',
+    `No questions changed since you last answered, so refresh kept your current answers on all ${kept} questions, with no bank.`,
+    'To change an answer, say setup toolkit.',
+    '',
+  ].join('\n'), kept, options);
+  if (args.host === 'claude-code') resolveClaudeTopology(args, current);
+  const confirmedSpecs = setupQuestionSpecs(args, current);
+  assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
+  const before = answerable(specs).map((spec) => `${spec.id}:${refreshRowShape(spec)}`).join('|');
+  const after = answerable(confirmedSpecs).map((spec) => `${spec.id}:${refreshRowShape(spec)}`).join('|');
+  if (before !== after) throw new Error('Setup questions changed during refresh; run refresh toolkit again.');
+  applySetupChoices(args, current);
+  console.log('Answers kept by refresh before writes:');
+  for (const spec of answerable(confirmedSpecs)) {
+    const value = choiceForKey(args, spec.key);
+    const choice = selectedChoice(spec, value);
+    if (!choice) throw new Error(`Refresh answer is unavailable for ${spec.id}.`);
+    console.log(`- ${spec.presentation.question_ref} ${spec.title}: ${choice.label} (canonical: ${choice.value}; effective: ${effectiveChoiceSummary(args, current, spec, value)})`);
+  }
+  return {
+    appeared: false,
+    answers_initially_required: false,
+    answers_supplied_by_complete_stdin: false,
+    answers_prompted_interactively: false,
+    stopped_for_answers: false,
+    answer_source: 'refresh kept current answers',
+    remaining_input: [],
+    render_attempts: 0,
+    refresh: 'kept-current',
+    refresh_shapes: refreshShapeRows(specs, current),
+  };
+}
+
 async function answerSetupQuestionBank(args, current, options = {}) {
   const isTTY = options.isTTY === undefined ? process.stdin.isTTY === true : options.isTTY === true;
   const initialSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, initialSpecs);
+  let refreshHeld = null;
+  if (args.refresh) {
+    const decision = refreshDecision(initialSpecs, current, args.host, options);
+    if (decision.silent) return keepCurrentAnswers(args, current, initialSpecs, decision, options);
+    refreshHeld = decision;
+  }
   const initialMissingCount = unanswered(initialSpecs, args).length;
   let answerSource = initialMissingCount ? (isTTY ? 'interactive' : 'stdin') : 'explicit flags';
   let completeStdinConsumed = false;
@@ -3195,6 +3462,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       }),
     ...(options.write ? { write: options.write } : {}),
   });
+  if (refreshHeld) console.log(refreshDifferenceNote(refreshHeld));
 
   const rawStdin = (needsPromptedAnswers || needsCodexProposalInput) && !isTTY
     ? await readNonInteractiveStdin()
@@ -3361,6 +3629,8 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     answer_source: answerSource || 'none',
     remaining_input: lines ? lines.filter((line) => String(line).trim()) : [],
     render_attempts: rendered.attempts,
+    ...(refreshHeld ? { refresh: 'bank-shown' } : {}),
+    refresh_shapes: refreshShapeRows(displayedSpecs, current),
   };
 }
 
@@ -3953,6 +4223,10 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log(`Question bank render attempts: ${unknown(questionBank?.render_attempts)}`);
+  if (questionBank?.refresh === 'kept-current') {
+    const versionAt = (commit) => (commit && commit !== 'unknown' ? toolkitVersionAt(args.repoRoot, commit) : '') || 'unknown';
+    console.log(`Refresh: kept every current answer with no bank; Toolkit ${versionAt(managed.commit_before || current?.managed?.commit)} to ${versionAt(managed.commit_after || managed.commit)}.`);
+  }
   console.log(`Helper-agent capacity questions shown: ${yesNo(args.host === 'codex')}`);
   console.log('Preference writes before answers: no');
   console.log('');
@@ -4067,6 +4341,46 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
   if (installCheck) printInstallCheck(installCheck);
 }
 
+// Apps whose open sessions keep using the old Toolkit skill files or rules after this run changed
+// them (Codex, for one, keeps the old plugin folder's skill paths). Setup ends with one line that
+// names each such app, and prints nothing when this run changed none.
+function newSessionAntigravityTarget(args) {
+  try { return new OfficialN8nSkills({ toolkitRoot: args.repoRoot, host: args.host }).antigravityTarget(); } catch { return null; }
+}
+
+const NEW_SESSION_APP_ORDER = Object.freeze(['Claude Code', 'Codex', 'Antigravity']);
+class NewSessionNotice {
+  #host; #antigravityTarget; #apps = new Set();
+  constructor(host, { antigravityTarget = null } = {}) { this.#host = host; this.#antigravityTarget = antigravityTarget; }
+  #add(app) { if (app) this.#apps.add(app); return this; }
+  // Codex reports a refresh as updated_this_run; Claude Code reports an install as restart_required.
+  addNativePlugin(cache) {
+    const changed = this.#host === 'codex' ? cache?.updated_this_run === true : cache?.restart_required === true;
+    return changed ? this.#add(HOST_LABELS[this.#host]) : this;
+  }
+  addGlobalRules(result) { return result?.status === 'updated' ? this.#add(HOST_LABELS[this.#host]) : this; }
+  // Claude Code's install check refreshes its global rules and helper definitions and marks a write updated.
+  addInstallCheck(result) {
+    return (result?.checks || []).some((check) => check.updated === true) ? this.#add(HOST_LABELS[this.#host]) : this;
+  }
+  addAntigravity(changedCount) { return changedCount > 0 ? this.#add('Antigravity') : this; }
+  // A skill-copy result: only copied, pruned or removed folders count; current and hand copies do not.
+  addCopies(result) {
+    for (const row of [...(result?.copied || []), ...(result?.pruned || []), ...(result?.antigravityRemoved || [])]) {
+      this.#add(this.#antigravityTarget && row?.target === this.#antigravityTarget ? 'Antigravity' : HOST_LABELS[this.#host]);
+    }
+    return this;
+  }
+  apps() { return NEW_SESSION_APP_ORDER.filter((app) => this.#apps.has(app)); }
+  lines() {
+    const apps = this.apps();
+    if (!apps.length) return [];
+    const named = apps.length === 1 ? apps[0] : `${apps.slice(0, -1).join(', ')} and ${apps.at(-1)}`;
+    return ['## Start a new session',
+      `Start a new session in ${named}, and close sessions opened before this run: this run changed Toolkit skill files or rules, and open sessions keep using the old ones.`];
+  }
+}
+
 const INSTALL_CHECK_WORDS = Object.freeze({ 'passed': 'passed', 'restart-required': 'new session needed', 'action-required': 'action required' });
 
 function printInstallCheck(result) {
@@ -4091,10 +4405,14 @@ function setupGlobalRules(args) {
 // Codex setup refreshes installed Toolkit helper agents to the stack each names and reports them.
 function runCodexHelperAgents(args) {
   let result;
-  try { result = new CodexHelperDefinitions({ repositoryRoot: args.repoRoot }).refresh(); }
+  const definitions = new CodexHelperDefinitions({ repositoryRoot: args.repoRoot });
+  // After `remove toolkit`, its reinstall note names the helper stack to put back.
+  const restored = require('./toolkit-reinstall-note.cjs').restoreHelpersLine('codex', definitions);
+  try { result = definitions.refresh(); }
   catch (error) { result = { status: 'held', detail: error.message }; }
   console.log('');
   console.log('## Toolkit helpers');
+  if (restored) console.log(restored);
   for (const line of describeCodexHelpers(result, '<managed-toolkit-checkout>')) console.log(line);
   return result;
 }
@@ -4113,6 +4431,7 @@ class ToolkitSetupExecution {
     this.#questionBank = await answerSetupQuestionBank(args, this.#current);
     if (args.host === 'codex') this.#current = await detectCodexRuntimeAfterApproval(args, this.#current);
     await confirmSelectedDelegationProposal(args, this.#current, this.#questionBank);
+    saveRefreshShapes(this.#questionBank.refresh_shapes, args.host);
     new TaskAutoMergePreferences({ host: args.host }).verify(this.#current.taskAutoMerge);
     if (this.#current.scheduledTasksSupported && JSON.stringify(require('./toolkit-update-scheduled-task.cjs').readApproval(os.homedir())) !== JSON.stringify(this.#current.scheduledTaskApproval)) throw new Error('Scheduled-task approval changed; show a fresh question bank.');
   }
@@ -4180,15 +4499,19 @@ class ToolkitSetupExecution {
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
     const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
     // The Antigravity answer first: the n8n skills reach Antigravity only when Toolkit's skills are there.
-    const antigravitySkills = applyAntigravitySkills(args);
-    const n8nSkills = installOfficialN8nSkills(args);
+    const notice = new NewSessionNotice(args.host, { antigravityTarget: newSessionAntigravityTarget(args) }).addNativePlugin(nativeCache);
+    const antigravitySkills = applyAntigravitySkills(args, undefined, undefined, notice);
+    const n8nSkills = installOfficialN8nSkills(args, undefined, undefined, notice);
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     const scheduledTaskUpdate = applyScheduledTasks(args);
-    printWindowsTasks(args);
+    offerRemovedTasks(args);
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
+    notice.addGlobalRules(globalRules).addInstallCheck(installCheck);
+    const closing = notice.lines();
+    if (closing.length) console.log(['', ...closing].join('\n'));
     return scheduledTaskUpdate?.held || installCheck?.status === INSTALL_CHECK_STATUS.ACTION || globalRules?.status === 'held' || codexHelpers?.status === 'held' ? SETUP_ACTION_REQUIRED : 0;
   }
 }
@@ -4198,86 +4521,53 @@ async function execute(args){return new ToolkitSetupExecution(args).execute();}
 // Setup uses the same standing approval and updater as the direct command. It
 // does not answer pending hand-edit or computer-ownership questions on behalf of
 // the owner; those return to the host question UI before any dependent effect.
+// While nothing the last clean update depended on has changed (Toolkit version, approval, task
+// registry, checkouts) and it is under 24 hours old, setup skips the update and says so. Held rows
+// are named here, so nobody needs to run the slow direct plan again to find them.
 function applyScheduledTasks(args, { home = os.homedir(), updater, platform = process.platform, log = console.log } = {}) {
   if (platform !== 'win32') return null;
   const api = require('./toolkit-update-scheduled-task.cjs');
   const approval = api.readApproval(home);
   if (approval?.decision !== 'standing') return null;
   try {
-    const result = (updater || new api.TaskUpdater({ home, toolkitRoot: args.repoRoot })).run({ apply: true });
+    const owner = updater || new api.TaskUpdater({ home, toolkitRoot: args.repoRoot });
+    const recent = owner.recentCheck();
+    if (recent) { log(`Scheduled tasks: unchanged since ${recent.checked_at}; not rechecked.`); return { held: false, skipped: true }; }
+    const result = owner.run({ apply: true });
     if (result.questions) log(JSON.stringify({ question_ui: 'host', questions: result.questions }));
-    const held = Boolean(result.questions || result.plans.some(row => row.held) || result.results?.some(row => row.refused || row.items?.some(item => item.done === false)));
-    log(held ? 'Scheduled task update needs an owner answer or a local repair; inspect the direct update plan.' : 'Scheduled tasks updated and read back.');
+    const reasons = scheduledTaskHeldReasons(result);
+    const held = Boolean(result.questions || reasons.length);
+    if (held) {
+      log('Scheduled task update needs an owner answer or a local repair:');
+      for (const line of reasons) log(`- ${line}`);
+      if (result.questions) log('- Questions for the owner are listed above.');
+    } else {
+      log('Scheduled tasks updated and read back.');
+      // The update itself succeeded; a stamp that cannot be saved only means the next setup checks again.
+      try { owner.saveCheck(); } catch { log('The unchanged-check stamp could not be saved, so the next setup checks scheduled tasks again.'); }
+    }
+    if (Number.isFinite(result.timings_ms?.total)) log(`Scheduled tasks checked in ${Math.round(result.timings_ms.total / 1000)} s.`);
     return { held };
   } catch { log('Scheduled task update held; inspect the direct update plan. Native permission blocks remain stops.'); return { held: true }; }
 }
 
-// Read-only task reporting for the managed repository and the original project. Cache only
-// this report's reads (including failures); plan/apply elsewhere always gets fresh dependencies.
-function printWindowsTasks(args, { platform = process.platform, scheduler = null, checkoutDeps = {}, home = os.homedir(), workingFolder = process.env[SETUP_START_FOLDER_ENV] || process.cwd(), log = console.log } = {}) {
-  if (platform !== 'win32') return null;
-  log('');
-  log('## Windows scheduled tasks');
-  const windowsTasks = require('./toolkit-windows-tasks.cjs');
-  const toolkitRoot = path.resolve(args.repoRoot);
-  const memoise = read => {
-    const results = new Map();
-    return (...args) => {
-      const key = JSON.stringify(args);
-      if (!results.has(key)) {
-        try { results.set(key, { value: read(...args) }); } catch (error) { results.set(key, { error }); }
-      }
-      const result = results.get(key);
-      if (result.error) throw result.error;
-      return result.value;
-    };
-  };
-  const plans = [], seen = new Set();
-  try {
-    const live = scheduler || windowsTasks.powerShellScheduler();
-    const reportScheduler = { list: memoise(folder => live.list(folder)), markedFolders: memoise(() => live.markedFolders()) };
-    const source = checkoutDeps.governance || require('./toolkit-governance-state.cjs');
-    const governance = { ...source, readIdentity: memoise(root => source.readIdentity(root)), governanceState: memoise(root => source.governanceState(root)) };
-    const observation = memoise(identity => (checkoutDeps.readObservation || source.readObservation || windowsTasks.readTaskObservation)(identity, home));
-    const primaryRead = memoise(root => windowsTasks.mainCheckout(root));
-    const gitRead = memoise((file, args, options) => spawnSync(file, args, options));
-    const locations = memoise(request => checkoutDeps.identityReader ? checkoutDeps.identityReader(request) : windowsTasks.readLocations(request, { mainCheckout: primaryRead, run: gitRead }));
-    const registry = { readRegistry: memoise(() => require('./toolkit-tasks.cjs').readRegistry(home)) };
-    const deps = { ...checkoutDeps, home, governance, readObservation: identity => observation(identity), identityReader: locations };
-    for (const checkout of [toolkitRoot, workingFolder]) {
-      const managed = windowsTasks.samePath(path.resolve(checkout), toolkitRoot);
-      const label = managed ? 'the managed Toolkit checkout' : 'this project';
-      const refusal = reason => log(`Windows scheduled tasks refused for ${label}: ${reason}.`);
-      try {
-        let read = windowsTasks.readCheckout(checkout, deps);
-        if (!read.root) {
-          if (!(managed && read.refusalCode === 'no-github-origin')) refusal(read.refusal || 'no usable github.com origin repository');
-          continue;
-        }
-        if (seen.has(read.repository.toLowerCase())) continue;
-        // Reporting may discover a worktree or subdirectory. Direct apply still refuses both.
-        const primary = checkoutDeps.reportCheckout || (root => {
-          const result = spawnSync('git', ['-C', root, 'worktree', 'list', '--porcelain', '-z'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
-          const first = /^worktree ([^\0]+)\0/.exec(String(result.stdout || ''));
-          if (result.error || result.status !== 0 || !first) throw new Error('primary checkout unreadable');
-          return primaryRead(first[1]);
-        });
-        const root = primary(read.root);
-        const resolved = windowsTasks.readCheckout(root, deps);
-        if (!resolved.repository || resolved.repository.toLowerCase() !== read.repository.toLowerCase()) throw new Error('primary origin mismatch');
-        read = resolved;
-        const desired = windowsTasks.desiredTasks({ checkout: root, checkoutRead: read, toolkitRoot, home, deps });
-        const plan = windowsTasks.planTasks(desired, { scheduler: reportScheduler, home, registry });
-        for (const line of windowsTasks.describePlan(plan, { summaryOnly: true })) log(line);
-        plans.push(plan);
-        seen.add(read.repository.toLowerCase());
-      } catch { refusal('checkout or task ownership could not be verified; run the direct task plan for details'); }
-    }
-    return plans;
-  } catch {
-    log('Windows scheduled tasks could not be checked; run the direct task plan for details.');
-    return null;
-  }
+// After `remove toolkit`, the scheduled tasks it removed are offered, never created: creating tasks
+// stays the owner's call whatever the standing approval says (that approval covers updates only).
+function offerRemovedTasks(args, { home = os.homedir(), platform = process.platform, log = console.log } = {}) {
+  if (platform !== 'win32') return [];
+  let offers = [];
+  try { offers = require('./toolkit-reinstall-note.cjs').taskOffers({ home, toolkitRoot: args.repoRoot }); } catch { offers = []; }
+  for (const line of require('./toolkit-reinstall-note.cjs').describeTaskOffers(offers)) log(line);
+  return offers;
+}
+
+function scheduledTaskHeldReasons(result) {
+  const name = row => row.repository || row.task || row.root || 'Toolkit task';
+  return [
+    ...result.plans.filter(row => row.held).map(row => `${name(row)}: ${row.reason || 'held'}`),
+    ...(result.results || []).filter(row => row.refused).map(row => `${name(row)}: ${row.reason || row.action || 'refused'}`),
+    ...(result.results || []).filter(row => !row.refused && row.items?.some(item => item.done === false)).map(row => `${name(row)}: a task write did not complete`),
+  ];
 }
 
 // Toolkit supports Windows computers only. Linux stays a build machine: CI runners set CI=true, and the
@@ -4383,7 +4673,9 @@ const {
 
 module.exports = {
   assertSupportedComputer,
-  applyScheduledTasks, printWindowsTasks,
+  NewSessionNotice,
+  applyScheduledTasks,
+  offerRemovedTasks,
   gitFailureHint,
   nativePluginRebindFailure,
   installOfficialN8nSkills,
@@ -4418,10 +4710,14 @@ module.exports = {
   withPresentationMetadata,
   buildNonTtyAnswerPlan,
   questionBankApprovalPayload,
+  questionBankSemanticIdentity,
   spreadsheetChoiceReference,
   parseConciseQuestionBankAnswer,
   assertQuestionBankAnswerBinding,
   answerSetupQuestionBank,
+  refreshDecision,
+  refreshShapeRows,
+  saveRefreshShapes,
   resolveDisplayedChoiceAnswer,
   renderSetupQuestionBank,
   renderQuestionRows,

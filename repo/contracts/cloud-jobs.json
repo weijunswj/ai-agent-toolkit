@@ -1,0 +1,65 @@
+{
+  "schema": "toolkit.cloud-jobs.v1",
+  "never_granted": [
+    "administration",
+    "secrets",
+    "workflows",
+    "account"
+  ],
+  "jobs": [
+    {
+      "id": "programme-sweep",
+      "workflow": ".github/workflows/toolkit-programme-sweep.yml",
+      "schedule": {
+        "cadence": "hourly",
+        "cron": "41 * * * *",
+        "workflow": ".github/workflows/toolkit-programme-sweep-gate.yml"
+      },
+      "replaces_computer_job": "toolkit-programme-sweep",
+      "tokens": [
+        {
+          "name": "governed",
+          "repository": "governed_repository",
+          "takes": [
+            "contents",
+            "issues",
+            "pull_requests",
+            "checks",
+            "statuses"
+          ],
+          "read_only": [
+            "contents"
+          ]
+        },
+        {
+          "name": "store",
+          "repository": "evidence_store",
+          "takes": [
+            "contents",
+            "issues",
+            "pull_requests"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shard-timings",
+      "workflow": ".github/workflows/toolkit-shard-timings.yml",
+      "schedule": {
+        "cadence": "daily",
+        "cron": "37 2 * * *"
+      },
+      "replaces_computer_job": "toolkit-shard-timings",
+      "tokens": [
+        {
+          "name": "publish",
+          "repository": "governed_repository",
+          "takes": [
+            "contents",
+            "pull_requests"
+          ]
+        }
+      ]
+    }
+  ]
+}

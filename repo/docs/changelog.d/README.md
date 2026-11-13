@@ -1,14 +1,14 @@
 # Changelog Fragments
 
-A branch writes its notes here before preparing its own Toolkit version bump. Use one file named after the branch with `/` replaced by `-`, for example `claude-fix-setup.md`.
+A branch writes its notes here and keeps `main`'s version; the Toolkit version bump happens once, at merge time. Use one file named after the branch with `/` replaced by `-`, for example `claude-fix-setup.md`. The pull request body names the level in one line, `Bump: patch`, `Bump: minor` or `Bump: major`. Nothing reads that line by machine: the merging agent checks it against the rule below, and a missing or wrong line is corrected at merge, not a blocker.
 
 A fragment holds what a version entry in [CHANGELOG.md](../CHANGELOG.md) holds: `###` section headings and bullets, starting with the first `###` heading. An optional first line `Title: <words>` adds words to the version heading. Leave the `##` version heading out; the bump command adds it.
 
 A branch with one `## Unreleased` section on top of the CHANGELOG may fold it like a fragment. Use `###` sections and bullets, with optional title words in `## Unreleased (<words>)`. Keep any notes main already holds there. New work uses fragments.
 
-## Prepare the branch bump
+## Bump at merge time
 
-After merging main, one command sets the next version, folds every fragment and any `## Unreleased` section under its heading, deletes the fragments, refreshes every copy of the version and bumps the Projects skill Version line if the branch changed that skill:
+The merging agent bumps just before the merge, never the builder. On the pull request branch, after merging main, one command sets the next version, folds every fragment and any `## Unreleased` section under its heading, deletes the fragments, refreshes every copy of the version and bumps the Projects skill Version line if the branch changed that skill:
 
 ```text
 node repo/scripts/bump-version.cjs --next patch
@@ -17,12 +17,34 @@ node repo/scripts/bump-version.cjs --next major
 ```
 
 - **Patch or minor:** `minor` when the branch adds a feature, a skill, a command or a new rule; `patch` for fixes and wording.
-- **Then:** commit that as the branch's last commit, push it and wait for green CI before the merge.
+- **Then:** commit that as the branch's last commit, push it, wait for green CI and merge that head. A clean main merge and the version-only commit need no new review; a source conflict gets a delta review. An owner merge card goes up at the bumped head.
+- **Batches:** several merge-ready pull requests land as one merge train that bumps once, for all of them (below).
+- **Why at merge:** a version taken by an earlier merge would otherwise force a re-bump, new CI and a stale merge card on every other open pull request.
 - **Major releases:** use `--next major` for an owner-chosen major release.
 - **Projects skill Version date:** the date is today's date in UTC, so a merge in the early morning east of UTC may carry the previous day's date.
+## Merge trains
+
+A merge train lands several reviewed pull requests with one bump and one CI run. Each member keeps its own commits and review: it boards at the exact head its review passed, as its own merge commit, and GitHub shows it as merged once the train merges. The train never carries a hand-made fix.
+
+```text
+node repo/scripts/toolkit-merge-train.cjs build --manifest train.json --branch toolkit-train/<name> --out boarded.json
+node repo/scripts/toolkit-merge-train.cjs verify --manifest boarded.json --head toolkit-train/<name>
+node repo/scripts/toolkit-merge-train.cjs body --manifest boarded.json
+node repo/scripts/toolkit-merge-train.cjs land --manifest boarded.json --pr <train PR> --head <train head SHA>
+```
+
+- **Manifest:** each member's pull request number, reviewed head (full SHA), review link, tier, `Bump:` level, `UAT:` line, closing lines and, for RISKY members, the owner's typed merge OK. Members hold main's version, like any open pull request.
+- **Build:** run it in a worktree of its own; it refuses a branch checked out in another worktree. It merges each member head in order, ejects one that conflicts or is already on main, then runs the bump once at the highest member level. A bump that fails (a member already carrying its own bump) stops the build with a clean tree.
+- **Verify:** proves the train holds only member merges and main catch-up merges identical to Git's own clean merge, plus one last commit identical to a fresh bump. Run it before pushing and again before the merge.
+- **The train pull request:** its body is the `body` output under the usual header, so it lists every member, one `Bump:` line, the strictest `UAT:` line and every member's closing lines. When any member needs an owner test, closing lines become `Refs`: each member's own `Closes` line still closes its issue when the train lands. Its tier is the highest member tier.
+- **Land:** re-runs verify and checks main has not moved, every member is open at its boarded head, the train pull request is at the given head and every RISKY member has the owner's OK. It then names the train pull request and the exact head to merge; it never merges. The merging agent merges that head by the usual route (`--match-head-commit`, a merge commit, the merge hold and any owner card).
+- **Red CI:** never patch the train. `split --out-prefix half` writes two halves; rebuild and test each until the culprit is out, then land the rest.
+- **While CI runs:** `build --onto <running train head>` combines the next members early to find conflicts. A stacked train takes no bump and cannot land; rebuild it on main once the earlier train merges.
+- **Native merge queue:** GitHub offers it only to some organisation-owned repositories, and it cannot run this bump, so trains do not use it.
+
 ## When main moves
 
-After each merge in this repository, the merging agent runs the apply command below, or asks a computer lane to run it if it has no computer:
+A pull request that holds main's version needs nothing when main moves. Only an older pull request that already carries its own bump falls behind; for those, the re-bump workflow below runs after each merge, and the hand command is its fallback:
 
 ```text
 node repo/scripts/toolkit-rebump-prs.cjs
