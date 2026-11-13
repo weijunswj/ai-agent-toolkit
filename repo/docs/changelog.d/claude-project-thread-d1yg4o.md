@@ -11,3 +11,4 @@ Title: governance question without the freeze
 
 - **Held messages:** nothing is stored or replayed. The file of messages an earlier version held is deleted at session start.
 - **Tool holds for the question:** the refusal of every tool in an undecided repository, of commands that reach into one from another folder, and the scheduled-task exception that existed only to pass that hold.
+- **Task-command exception code:** the unused helper behind that exception is deleted, and `toolkit governance check` now names its last section "Governance question hook" instead of "Prompt-hold enforcement".
