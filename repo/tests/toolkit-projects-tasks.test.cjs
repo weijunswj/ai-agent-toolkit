@@ -940,5 +940,8 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
     'the same finding on two runs in a row, goes to the owner once with the exact step', 'never a bare unknown',
     'Re-read owed lists (promises, Lows children, pending owner OKs, review-only PRs) at session start and on every periodic run']) assert.ok(page.includes(required), required);
   const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
-  assert.ok(gates.includes("follow-up (Low; one record per PR, on an outcome child that joins the lane's next slice or starts within 3 days)"));
+  for (const required of ["follow-up (Low or `POST_SHIP`; one record per PR, on an outcome child that joins the lane's next slice or starts within 3 days, unless the owner accepted it)",
+    "keep the UAT ask on the owner's waiting list until it is answered", 'then relaunch one successor or record the hold on the child']) assert.ok(gates.includes(required), required);
+  // A verified plugin gap stays on the owner's list every run, not only on the run that first reports it.
+  assert.match(text, /Missing account copy: say so under \*\*Plugin:\*\*\. While that verified gap remains, also list "update the Toolkit plugin on claude\.ai \(behind since <date>\)" under \*\*Waiting on owner:\*\* every run\./);
 });

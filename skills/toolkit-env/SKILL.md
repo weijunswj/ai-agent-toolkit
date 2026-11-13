@@ -44,7 +44,7 @@ Comments over 200 characters are refused before screening. The screen checks `NA
 - Never print, echo, read back or summarise a value. `status` shows names only; do not try to show more.
 - Never run `show`, and never ask the user to paste what it printed. It refuses in agent shells and the app's built-in terminal, and needs a real terminal: this stops a value reaching you by accident or on a casual request, not a determined program running as the user.
 - Do not run `header`; the apps run it. Do not use `run` to start a shell or anything that prints the environment.
-- If the user pastes a secret into the chat anyway, do not repeat it. Tell them it is now exposed, recommend rotating it at the provider, and offer `edit` to save the new one.
+- If the user pastes a secret into the chat anyway, do not repeat it. Tell them it is now exposed, recommend rotating it at the provider, and offer `edit` to save the new one. Until the user says it is rotated, keep it as an owed step and remind them once per session.
 - Removing a key with `remove` or at "done", connecting or undoing entries, and retiring `~/.codex/.env` change things on the user's computer: do them only after the user's own yes for that exact key or entry. A line the user deletes in the edit file only marks the key; ask before `apply` removes it.
 - Key names look like `PROVIDER_SOLUTION_PURPOSE` (for example `COOLIFY_SWOOSHZ_MCP_TOKEN`): upper case letters, digits and underscores, at least three parts, never starting with `CODEX_`.
 - On a computer other than Windows it stops with a message; pass it on. There is no plain-file fallback.
