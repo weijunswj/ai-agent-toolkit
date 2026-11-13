@@ -937,7 +937,7 @@ function formatBodyDiagnostics(d) {
   if (!d) return [];
   if (d.cause) return [`  ${d.cause}: stopped at ${d.phase.replace(/_/g, ' ')} (${d.done} of ${d.total} done); started ${d.started_at}. Run refresh again.`];
   if (d.reason) return [`  Archive comment: ${d.reason.replace(/_/g, ' ')}.`];
-  const labels = { CURRENT: 'Generated CURRENT', STATE: 'Generated status or graph', CONTEXT: 'Generated agent context', TRACE: 'Generated comment trace', NAV: 'Generated navigation' };
+  const labels = { CURRENT: 'Generated CURRENT', STATE: 'Generated status or graph', CONTEXT: 'Generated agent context', TRACE: 'Generated DECISIONS block', NAV: 'Generated navigation' };
   return [`  UTF-16 units: projected ${d.projected_total}; threshold ${d.threshold}; reduce by ${d.required_reduction}.`,
     ...d.largest_sections.map(part => `  ${part.kind === 'hand_written' ? `Hand-written section ${part.section}` : labels[part.kind]}: ${part.size}`),
     `  Other sections and formatting remainder: ${d.remainder}`];
@@ -997,7 +997,7 @@ function traceCommand(rest, deps, out) {
   const origin = state.originSlug(originUrl);
   if (!origin) throw new ProgrammeError('REPO_IDENTITY_MISMATCH', 'The origin remote must name a github.com repository.');
   const history = deps.decisionHistory || require('./decision-history.cjs');
-  return history.main(['--repo', origin, '--child', String(issue), ...passed], out);
+  return history.main(['--repo', origin, '--child', String(issue), ...passed], out, { gh: deps.gh });
 }
 
 function main(argv = process.argv.slice(2), deps = {}) {
