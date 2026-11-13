@@ -115,6 +115,25 @@ for (const [label, file] of [['absent', null], ['disabled', binding({ governance
   });
 }
 
+test('action: a version 1 binding reads as enabled, as bindingEnabled says, and names its store', () => {
+  const v1 = { schema: state.SCHEMA.binding, repository: 'owner/repository', parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
+    store: { kind: 'github', repository: 'owner/evidence', branch: 'main', path: 'state/' }, required_checks: [] };
+  assert.equal(state.bindingEnabled(state.validateBinding(v1)), true);
+  const result = runAction('store', { file: v1 });
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.outputs, [['store', 'evidence'], ['store_repository', 'owner/evidence']]);
+  assert.deepEqual(result.notices, []);
+});
+
+test('gate: a version 1 binding names its parent issue, as bindingEnabled says; off and unreadable stay null', () => {
+  const { parentsOf } = gateScript();
+  assert.deepEqual(parentsOf({ schema: state.SCHEMA.binding, repository: 'owner/repository', parent_issue: 143 }), [143]);
+  assert.deepEqual(parentsOf({ schema: state.SCHEMA.bindingV2, governance: 'enabled', parents: [{ issue: 421 }, { issue: 7 }] }), [421, 7]);
+  assert.equal(parentsOf({ schema: state.SCHEMA.bindingV2, governance: 'disabled' }), null);
+  assert.equal(parentsOf({ schema: 'toolkit.programme-binding.v9', parent_issue: 1 }), null);
+  assert.equal(parentsOf(null), null);
+});
+
 test('action: no App configured gives a notice naming the variable, the secret and the check', () => {
   const result = runAction('run', { env: { STORE_REPOSITORY: 'owner/evidence', APP_CLIENT_ID_SET: 'false', MINT_OUTCOME: 'skipped/skipped' } });
   assert.equal(result.code, 0);

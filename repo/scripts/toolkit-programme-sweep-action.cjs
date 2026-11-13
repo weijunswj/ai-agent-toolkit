@@ -38,7 +38,10 @@ const BINDING_PATH = Object.freeze(['.github', 'toolkit-programme.json']);
 const BINDING_LIMIT = 64 * 1024;
 // The scheduled pass's own kill; the workflow stops the job three minutes after it.
 const { RESET_WAIT_MS } = require('./toolkit-programme-sweep-gate.cjs');
-const RUN_TIMEOUT_MS = require('../../skills/github-program-reconciler/scripts/programme-state.cjs').PASS_BUDGETS.scheduled.killMs;
+const programmeState = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+const RUN_TIMEOUT_MS = programmeState.PASS_BUDGETS.scheduled.killMs;
+// A version 1 binding has no governance key and reads as enabled, as everywhere else.
+const { bindingEnabled } = programmeState;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const SAFE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BOT_LOGIN = /^[A-Za-z0-9-]{1,100}\[bot\]$/;
@@ -74,7 +77,7 @@ function readCheckedOutBinding({ root, env, readFile = fs.readFileSync, validate
   if (buffer.length > BINDING_LIMIT) return { status: 'ungoverned' };
   let binding;
   try { binding = validateBinding(JSON.parse(buffer.toString('utf8'))); } catch { return { status: 'ungoverned' }; }
-  if (binding.governance !== 'enabled' || String(binding.repository).toLowerCase() !== repository.toLowerCase()) return { status: 'ungoverned' };
+  if (!bindingEnabled(binding) || String(binding.repository).toLowerCase() !== repository.toLowerCase()) return { status: 'ungoverned' };
   if (binding.state) return { status: 'public_state' };
   const store = String(binding.store?.repository || '');
   if (!SAFE_REPOSITORY.test(store) || store.split('/')[0].toLowerCase() !== repository.split('/')[0].toLowerCase()) return { status: 'foreign_store' };

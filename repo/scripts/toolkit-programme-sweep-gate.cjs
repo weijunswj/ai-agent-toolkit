@@ -41,9 +41,13 @@ function boardLine(body) {
   return String(body || '').split(/\r?\n/).find(line => /^(?:Board updated: |⚠️ Board out of date |⚠️ Sweep stuck)/.test(line)) || null;
 }
 
+// A version 1 binding has no governance key and reads as enabled (programme-state's bindingEnabled;
+// a test keeps the two in step). This file reads the raw JSON and loads nothing else.
+const BINDING_V1 = 'toolkit.programme-binding.v1';
+
 // The parent issues the binding names, or null when governance is off or the binding is unreadable.
 function parentsOf(binding) {
-  if (!binding || binding.governance !== 'enabled') return null;
+  if (!binding || !(binding.schema === BINDING_V1 || binding.governance === 'enabled')) return null;
   const numbers = Array.isArray(binding.parents) ? binding.parents.map(parent => parent?.issue) : [binding.parent_issue];
   const valid = numbers.filter(number => Number.isSafeInteger(number) && number > 0);
   return valid.length ? valid : null;
