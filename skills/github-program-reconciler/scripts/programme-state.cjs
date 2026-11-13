@@ -1426,8 +1426,15 @@ function contextResult(context) {
   return FAILED_CONCLUSIONS.has(context.conclusion) ? 'failed' : 'unknown';
 }
 
+// A check run that was cancelled, for example by a newer run of the same workflow.
+function isCancelled(context) {
+  return context.kind !== 'StatusContext' && context.__typename !== 'StatusContext' && context.status === 'COMPLETED' && context.conclusion === 'CANCELLED';
+}
+
 // Required checks at the exact head. Required = GitHub's isRequired flags plus the binding's list.
-// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN.
+// Missing, pending, skipped, neutral, paginated or off-head results are never GREEN. A cancelled
+// result is set aside when the same check has any other result at the head (a newer run replaced
+// it), so that other result decides; a check whose only results were cancelled stays failed.
 function evaluateChecks({ head, rollupOid, contexts = [], complete = true, configured = [] }) {
   const empty = { state: 'UNKNOWN', required_total: 0, required_passed: 0, at_head: isSha(head) ? head : null, missing: [], failing: [], reason: null };
   if (!isSha(head)) return { ...empty, reason: 'NO_HEAD' };
@@ -1436,7 +1443,9 @@ function evaluateChecks({ head, rollupOid, contexts = [], complete = true, confi
   const required = [...new Set([...contexts.filter(context => context.required).map(contextName), ...configured])].sort();
   if (!required.length) return { ...empty, reason: 'NO_REQUIRED_CHECKS' };
   const results = required.map(name => {
-    const found = contexts.filter(context => contextName(context) === name).map(contextResult);
+    const named = contexts.filter(context => contextName(context) === name);
+    const replaced = named.some(context => !isCancelled(context));
+    const found = named.filter(context => !replaced || !isCancelled(context)).map(contextResult);
     if (!found.length) return { name, result: 'missing' };
     if (found.includes('failed')) return { name, result: 'failed' };
     if (found.includes('pending')) return { name, result: 'pending' };
