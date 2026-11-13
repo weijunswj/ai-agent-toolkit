@@ -708,7 +708,7 @@ function closureWriteCandidate(input, options = {}) {
 // The refusal text for a raw git push to an evidence store this computer has bound. The attribution
 // guard and the merge hold both show it, so an agent is pointed at the store command, never at a pull
 // request.
-const STORE_PUSH_MESSAGE = 'This is a raw git push to an evidence store this computer has bound. Store work goes through the store command, which checks the store, scans what it commits for secrets and pushes only the bound branch: node "<Toolkit folder>/repo/scripts/toolkit-store.cjs" save --path <file> --message <text> (run toolkit governance status first if it reports a stale binding). A push the owner wants by hand runs in their own terminal.';
+const STORE_PUSH_MESSAGE = 'This is a raw git push to an evidence store this computer has bound. Store work goes through the store command, which checks the store, scans what it commits for secrets and pushes only the bound branch: node "<Toolkit folder>/repo/scripts/toolkit-store.cjs" save --store <store folder> --path <file> --message <text> --repo-root <governed repository folder> (--repo-root can go when you run it from the governed repository; run toolkit governance status first if it reports a stale binding). A push the owner wants by hand runs in their own terminal.';
 
 // owner/name, lower case, from a github.com remote URL; null for anything else.
 function githubSlug(url) {

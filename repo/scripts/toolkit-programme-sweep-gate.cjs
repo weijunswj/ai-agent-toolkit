@@ -78,9 +78,13 @@ function decide({ event, now, runs, lines, changedSince, followUpWaiting = false
   return { start: false, reason: 'nothing changed since the last sweep' };
 }
 
+// A fault in the run's own set-up (no repository or token): the run shows red. GitHub answers that
+// fail (a 5xx, a dropped connection) are only a notice, since the next start tries again.
+class SetupError extends Error {}
+
 async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Date.now(), log = line => process.stdout.write(`${line}\n`) } = {}) {
   const repository = env.GITHUB_REPOSITORY || '';
-  if (!SAFE_REPOSITORY.test(repository) || !env.GH_TOKEN) throw new Error('The gate needs GITHUB_REPOSITORY and GH_TOKEN.');
+  if (!SAFE_REPOSITORY.test(repository) || !env.GH_TOKEN) throw new SetupError('The gate needs GITHUB_REPOSITORY and GH_TOKEN.');
   const api = (env.GITHUB_API_URL || 'https://api.github.com').replace(/\/$/, '');
   const call = async (method, route, body) => {
     const response = await fetchImpl(`${api}/repos/${repository}/${route}`, { method, body: body ? JSON.stringify(body) : undefined,
@@ -122,7 +126,8 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
 
 // The sweep's follow-up: after a pass stops early, start one more run on main. A pass paused at
 // GitHub's hourly App limit waits until the limit has reset; one stopped by its time limit starts
-// again at once. `at` is a time in milliseconds; waiting is capped at RESET_WAIT_MS.
+// again at once. `at` is a time in milliseconds; waiting is capped at RESET_WAIT_MS. After the wait
+// it starts nothing when another sweep is queued, running or started after its own run.
 async function followUp({ env = process.env, fetchImpl = globalThis.fetch, now = () => Date.now(), sleep = ms => new Promise(done => setTimeout(done, ms)),
   log = line => process.stdout.write(`${line}\n`) } = {}) {
   const at = Number(env.FOLLOW_UP_AT);
@@ -130,18 +135,34 @@ async function followUp({ env = process.env, fetchImpl = globalThis.fetch, now =
   const wait = Math.min(Math.max(0, at - now()), RESET_WAIT_MS);
   if (wait) { log(`Programme Sweep follow-up: waiting ${Math.ceil(wait / 60000)} minute(s) for GitHub's hourly limit to reset.`); await sleep(wait); }
   const repository = env.GITHUB_REPOSITORY || '';
-  if (!SAFE_REPOSITORY.test(repository) || !env.GH_TOKEN) throw new Error('The follow-up needs GITHUB_REPOSITORY and GH_TOKEN.');
+  if (!SAFE_REPOSITORY.test(repository) || !env.GH_TOKEN) throw new SetupError('The follow-up needs GITHUB_REPOSITORY and GH_TOKEN.');
   const api = (env.GITHUB_API_URL || 'https://api.github.com').replace(/\/$/, '');
-  const response = await fetchImpl(`${api}/repos/${repository}/actions/workflows/${SWEEP_WORKFLOW}/dispatches`, { method: 'POST', body: JSON.stringify({ ref: BRANCH }),
-    headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${env.GH_TOKEN}`, 'x-github-api-version': '2022-11-28', 'content-type': 'application/json' } });
-  if (!response.ok) throw new Error(`GitHub answered ${response.status} when starting the follow-up sweep.`);
+  const call = async (method, route, body) => {
+    const response = await fetchImpl(`${api}/repos/${repository}/${route}`, { method, body: body ? JSON.stringify(body) : undefined,
+      headers: { accept: 'application/vnd.github+json', authorization: `Bearer ${env.GH_TOKEN}`, 'x-github-api-version': '2022-11-28', ...(body ? { 'content-type': 'application/json' } : {}) } });
+    if (!response.ok) throw new Error(`GitHub answered ${response.status} for ${method} ${route.split('?')[0]}.`);
+    return response.status === 204 ? null : response.json();
+  };
+  // Re-check after the wait: another sweep queued or running, or one started after this run, already
+  // covers the saved place (a merge or the hourly gate during the wait), so none more is needed.
+  const own = Number(env.GITHUB_RUN_ID);
+  const runs = (await call('GET', `actions/workflows/${SWEEP_WORKFLOW}/runs?per_page=20`)).workflow_runs || [];
+  const mine = runs.find(run => run.id === own);
+  const ownStart = mine ? Date.parse(mine.created_at) : NaN;
+  const newer = runs.find(run => run.id !== own && (WAITING.has(run.status) || run.status === 'in_progress' || (Number.isFinite(ownStart) && Date.parse(run.created_at) > ownStart)));
+  if (newer) { log('Programme Sweep follow-up: another sweep already started; none more needed.'); return false; }
+  await call('POST', `actions/workflows/${SWEEP_WORKFLOW}/dispatches`, { ref: BRANCH });
   log('Programme Sweep follow-up: started the next sweep on main.');
   return true;
 }
 
 if (require.main === module) {
-  const run = process.argv[2] === 'follow-up' ? followUp() : gate();
-  run.catch(error => { process.stderr.write(`Programme Sweep ${process.argv[2] === 'follow-up' ? 'follow-up' : 'gate'} failed: ${error.message}\n`); process.exitCode = 1; });
+  const which = process.argv[2] === 'follow-up' ? 'follow-up' : 'gate';
+  const run = which === 'follow-up' ? followUp() : gate();
+  run.catch(error => {
+    if (error instanceof SetupError) { process.stderr.write(`Programme Sweep ${which} failed: ${error.message}\n`); process.exitCode = 1; return; }
+    process.stdout.write(`::notice::Programme Sweep ${which} could not finish: ${String(error?.message || 'GitHub did not answer').replace(/[\r\n]+/g, ' ')} The next start tries again.\n`);
+  });
 }
 
-module.exports = Object.freeze({ SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, parentsOf, decide, gate, followUp });
+module.exports = Object.freeze({ SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, parentsOf, decide, gate, followUp, SetupError });

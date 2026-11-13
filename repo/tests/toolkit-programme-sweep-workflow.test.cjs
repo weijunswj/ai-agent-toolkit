@@ -372,9 +372,11 @@ test('gate workflow: hourly at minute 41, narrow activity triggers, bots ignored
 test('sweep workflow: the follow-up job holds only the built-in token and waits outside the sweep group', () => {
   const text = workflow().replace(/\r\n/g, '\n');
   const job = text.slice(text.indexOf('  follow-up:'));
-  assert.match(job, /needs: sweep\n    if: \$\{\{ needs\.sweep\.outputs\.follow_up_at != '' \}\}/);
+  // L8: a failed footer step after the refresh still lets the follow-up run.
+  assert.match(job, /needs: sweep\n    if: \$\{\{ !cancelled\(\) && needs\.sweep\.outputs\.follow_up_at != '' \}\}/);
   assert.match(job, new RegExp(`^    name: ${gateScript().FOLLOW_UP_JOB}$`, 'm'), 'the gate finds the follow-up job by this name');
-  assert.match(job, /permissions:\n      actions: write\n    steps:/);
+  // L4: contents read, so the sparse checkout works on a private repository too.
+  assert.match(job, /permissions:\n      actions: write\n      contents: read\n    steps:/);
   assert.match(job, /timeout-minutes: 65/);
   assert.doesNotMatch(job, /secrets\.|outputs\.token|concurrency:/);
   assert.match(job, /run: node repo\/scripts\/toolkit-programme-sweep-gate\.cjs follow-up$/m);
@@ -488,10 +490,72 @@ test('follow-up: waits for the given time, capped, then starts one run on main',
     const started = await followUp({ env: { ...gateEnv, FOLLOW_UP_AT: String(at) }, fetchImpl: github.fetchImpl, now: () => T, sleep: async ms => { waits.push(ms); }, log: () => {} });
     return { started, waits, calls: github.calls };
   };
-  assert.deepEqual(await run(T + 30 * 60 * 1000), { started: true, waits: [30 * 60 * 1000], calls: ['POST actions/workflows/toolkit-programme-sweep.yml/dispatches'] });
+  assert.deepEqual(await run(T + 30 * 60 * 1000), { started: true, waits: [30 * 60 * 1000], calls: ['GET actions/workflows/toolkit-programme-sweep.yml/runs?per_page=20', 'POST actions/workflows/toolkit-programme-sweep.yml/dispatches'] });
   assert.deepEqual((await run(T + 5 * HOUR)).waits, [RESET_WAIT_MS], 'never waits past the reset bound');
   assert.deepEqual((await run(T - 1000)).waits, [], 'a time-limit stop starts again at once');
   assert.deepEqual(await run(0), { started: false, waits: [], calls: [] });
+});
+
+test('L2: after its wait the follow-up starts nothing when another sweep is queued, running or newer', async () => {
+  const { followUp } = gateScript();
+  const own = { id: 500, status: 'in_progress', created_at: '2026-11-13T01:50:00Z' };
+  const run = async runs => {
+    const github = fakeGitHub({ runs }); const lines = [];
+    const started = await followUp({ env: { ...gateEnv, GITHUB_RUN_ID: '500', FOLLOW_UP_AT: String(T) }, fetchImpl: github.fetchImpl, now: () => T, sleep: async () => {}, log: line => lines.push(line) });
+    return { started, posted: github.calls.some(call => call.startsWith('POST')), lines };
+  };
+  assert.deepEqual((await run([own, done(2 * HOUR)])).started, true, 'only its own run and older finished ones');
+  for (const other of [{ id: 501, status: 'queued', created_at: '2026-11-13T02:40:00Z' }, { id: 499, status: 'in_progress', created_at: '2026-11-13T01:40:00Z' },
+    { id: 502, status: 'completed', conclusion: 'success', created_at: '2026-11-13T02:10:00Z' }]) {
+    const result = await run([other, own]);
+    assert.deepEqual([result.started, result.posted], [false, false], JSON.stringify(other));
+    assert.deepEqual(result.lines, ['Programme Sweep follow-up: another sweep already started; none more needed.']);
+  }
+  assert.equal((await run([{ id: 400, status: 'completed', conclusion: 'success', created_at: '2026-11-13T01:00:00Z' }, own])).started, true, 'an older finished run is not newer');
+});
+
+test('L6: GitHub failures in the gate and follow-up end green with a notice; a set-up fault stays red', t => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const script = path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-gate.cjs');
+  // A stand-in fetch: the binding reads, then GitHub answers 502 (a 5xx blip).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-gate-l6-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const preload = path.join(dir, 'fetch-502.cjs');
+  fs.writeFileSync(preload, `globalThis.fetch = async url => /contents\\/\\.github\\/toolkit-programme\\.json/.test(url)
+    ? { ok: true, status: 200, json: async () => ({ content: Buffer.from(${JSON.stringify(gateBinding)}).toString('base64') }) }
+    : { ok: false, status: 502, json: async () => ({}) };\n`);
+  const env = { PATH: process.env.PATH, GITHUB_REPOSITORY: 'owner/repository', GH_TOKEN: actionsToken, EVENT_NAME: 'schedule' };
+  for (const args of [[], ['follow-up']]) {
+    const blip = spawnSync(process.execPath, ['--require', preload, script, ...args], { env: { ...env, FOLLOW_UP_AT: '1' }, encoding: 'utf8', timeout: 30000 });
+    assert.equal(blip.status, 0, `${args[0] || 'gate'}: ${blip.stderr}`);
+    assert.match(blip.stdout, /^::notice::Programme Sweep (gate|follow-up) could not finish: GitHub answered 502 for GET actions\/workflows\/toolkit-programme-sweep\.yml\/runs\. The next start tries again\.$/m);
+    const unset = spawnSync(process.execPath, [script, ...args], { env: { PATH: process.env.PATH, FOLLOW_UP_AT: '1' }, encoding: 'utf8', timeout: 30000 });
+    assert.equal(unset.status, 1, `${args[0] || 'gate'} without a token is a set-up fault`);
+    assert.match(unset.stderr, /needs GITHUB_REPOSITORY and GH_TOKEN/);
+  }
+});
+
+test('L3 and L7: at the App limit the footer step skips; a private repository leaves the wait to the hourly gate', () => {
+  const { RESET_WAIT_MS } = gateScript();
+  const limited = { status: 0, code: null, report: { outcome: 'PAUSED', reason: 'GitHub rate limit' } };
+  const rate = { status: 0, code: null, report: { metrics: 'Sweep: requests=4500', sweep: { read: 5, left: 10, reason: 'GitHub rate limit' }, holds: [] } };
+  const timed = { status: 0, code: null, report: { metrics: 'Sweep: requests=40', sweep: { read: 5, left: 10, reason: 'time limit' }, holds: [] } };
+  for (const refresh of [limited, rate]) {
+    const result = runAction('run', { env: minted, refresh: () => refresh });
+    assert.ok(result.outputs.some(([name, value]) => name === 'at_limit' && value === 'true'));
+    assert.ok(Number(result.outputs.find(([name]) => name === 'follow_up_at')?.[1]) >= Date.now() - 5000 + RESET_WAIT_MS - 60000, 'public: waits for the reset');
+    const hidden = runAction('run', { env: { ...minted, REPOSITORY_PRIVATE: 'true' }, refresh: () => refresh });
+    assert.equal(hidden.code, 0);
+    assert.equal(hidden.outputs.some(([name]) => name === 'follow_up_at'), false, 'no runner waits an hour on a private repository');
+    assert.deepEqual(hidden.notices, [action().NOTICES.private_wait]);
+  }
+  const quick = runAction('run', { env: { ...minted, REPOSITORY_PRIVATE: 'true' }, refresh: () => timed });
+  assert.ok(quick.outputs.some(([name]) => name === 'follow_up_at'), 'a time-limit stop still follows up at once');
+  assert.equal(quick.outputs.some(([name]) => name === 'at_limit'), false, 'footer cleaning runs after a time-limit stop');
+  assert.equal(runAction('run', { env: minted }).outputs.some(([name]) => name === 'at_limit'), false);
+  assert.match(step('Clean the cloud footer from the owner\'s posts'), /steps\.refresh\.outputs\.at_limit != 'true'/);
+  assert.match(step('Refresh the programme'), /REPOSITORY_PRIVATE: \$\{\{ github\.event\.repository\.private \}\}/);
 });
 
 test('follow-up time: only a pass that read something and left tasks follows up', () => {
@@ -604,7 +668,7 @@ test('workflow: footer cleaning runs after the refresh, on minted tokens, and a 
   assert.match(text, /  workflow_dispatch:\r?\n    inputs:\r?\n      footer_since:\r?\n        description: .+\r?\n        required: false\r?\n        default: ''/);
   const footers = step("Clean the cloud footer from the owner's posts");
   assert.ok(text.indexOf("- name: Clean the cloud footer") > text.indexOf('- name: Refresh the programme'), 'after the refresh');
-  assert.match(footers, /if: \$\{\{ !cancelled\(\) && steps\.governed\.outcome == 'success' && steps\.store\.outcome == 'success' \}\}/);
+  assert.match(footers, /if: \$\{\{ !cancelled\(\) && steps\.governed\.outcome == 'success' && steps\.store\.outcome == 'success' && steps\.refresh\.outputs\.at_limit != 'true' \}\}/);
   assert.match(footers, /FOOTER_SINCE: \$\{\{ inputs\.footer_since \}\}/);
   assert.match(footers, /run: node repo\/scripts\/toolkit-programme-sweep-action\.cjs footers\s*$/);
   assert.doesNotMatch(footers, /secrets\./);
