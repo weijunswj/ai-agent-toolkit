@@ -1140,7 +1140,8 @@ test('local Toolkit is the Projects base: every hook has a cloud row and every o
   for (const row of rows) assert.equal(row.split(' | ').length, 4, row.slice(0, 80));
   // Each override names the base clause it changes, why, the owner's decision and when it ends.
   const overrides = read(`${dir}/reference/base-overrides.md`).split('\n').filter(line => line.startsWith('| ') && !/^\| (?:Override|---)/.test(line));
-  assert.ok(overrides.length >= 6);
+  // The cloud-holds-skipped override ended when the cloud merge hold shipped.
+  assert.ok(overrides.length >= 5);
   for (const row of overrides) {
     const cells = row.split(' | ');
     assert.equal(cells.length, 5, row.slice(0, 80));
