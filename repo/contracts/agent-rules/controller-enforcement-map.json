@@ -60,6 +60,18 @@
     },
     {
       "file": "repo/CONTROLLER.md",
+      "rule": "**Work queue:**",
+      "covers": "The reconciler raises TASK_IDLE and TASK_MERGED_OPEN for NOW tasks nothing is moving, refuses to acknowledge them and lists them first; picking the lane or next step is the controller's judgement.",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/programme-task-layout.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
       "rule": "**Batch small fixes:**",
       "instruction_only": "Whether a fix is small and which slice it joins is a judgement made before any branch exists."
     },

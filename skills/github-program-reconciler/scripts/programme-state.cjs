@@ -380,7 +380,8 @@ const FINDING_CODES = Object.freeze({
   GRAPHQL_REFUSED: { source: 'reconcile', next_action: 'Controller: GitHub refused GraphQL to three sweeps in a row; check the sign-in and GitHub status, the sweep reads one document at a time meanwhile' },
   TRACE_UNLINKED: { source: 'reconcile', next_action: 'Controller: link the decision comments with decision-trace-audit --repair' },
   TRACE_SUPERSEDED_UNMARKED: { source: 'reconcile', next_action: 'Controller: mark the superseded decision record' },
-  TASK_IDLE: { source: 'reconcile', next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
+  TASK_IDLE: { source: 'reconcile', queue: true, next_action: 'Controller: hand the task to a lane, or set it back to planned (queued), put its decision on record or retire it' },
+  TASK_MERGED_OPEN: { source: 'reconcile', queue: true, next_action: 'Controller: judge its done-when, then close it as completed, or plan and hand out its next slice, or set it back to planned (queued)' },
   PR_UNTRACKED: { source: 'reconcile', next_action: 'Controller: confirm the PR and record it with update --patch' },
   COMPLETED_PR_MISSING: { source: 'reconcile', next_action: 'Controller: check the completed task references; no matching merged PR was found' },
   PR_DISCOVERY_INCOMPLETE: { source: 'reconcile', next_action: 'Controller: retry reconciliation; merged PR discovery could not finish within its read limits' },
@@ -397,6 +398,11 @@ const FINDING_CODES = Object.freeze({
   INVENTORY_INCOMPLETE: { source: 'inventory', next_action: 'Controller: run programme.cjs attention --refresh again; this run could not read every open issue' },
   ATTENTION_FULL: { source: 'inventory', next_action: 'Controller: answer or dispose open findings; no new finding is recorded until there are fewer than 500' },
 });
+// Work-queue findings: a task on the programme graph that needs the controller's next step. They are
+// answered by acting (a lane, a state change, a close) or disposed with a reason, never acknowledged;
+// they list first, and a disposed one resolves when its condition clears so a later stall is new.
+// A code joins it with `queue: true` in its FINDING_CODES row.
+const WORK_QUEUE_CODES = new Set(Object.keys(FINDING_CODES).filter(code => FINDING_CODES[code].queue === true));
 // Findings with no issue of their own.
 const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
@@ -427,6 +433,10 @@ const MAX_RELAYS_PER_PASS = 10;
 // A task shown IN PROGRESS with no open PR, no live gate and no holder counts as idle once its
 // state document and its comments have been still for this long.
 const TASK_IDLE_HOURS = 6;
+// A task whose PRs have all merged or closed needs its next step sooner: this long after the last change.
+const TASK_MERGED_OPEN_HOURS = 1;
+// An open PR with no update (push, comment, review or edit) for this long no longer counts as moving its task.
+const PR_STALE_HOURS = 24;
 const PASS_PHASES = ['planning', 'state', 'page', 'links', 'order', 'pr_links', 'task_pages', 'lifecycle', 'closing', 'unknown'];
 
 function validatePassDiagnostics(errors, value, at) {
@@ -628,7 +638,8 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     if (PAGE_CODES.includes(entry.code) || entry.code === 'ARCHIVE_COMMENT_UNTRUSTED') continue;
     // ATTENTION_FULL resolves on any complete run back under the bound.
     const own = entry.source === source || entry.code === 'ATTENTION_FULL';
-    if (!own || seenIds.has(entry.id) || hold.includes(entry.id) || !OPEN_FINDING_STATES.includes(entry.state)) continue;
+    const settles = OPEN_FINDING_STATES.includes(entry.state) || (entry.state === 'disposed' && WORK_QUEUE_CODES.has(entry.code));
+    if (!own || seenIds.has(entry.id) || hold.includes(entry.id) || !settles) continue;
     if (entry.code === 'ATTENTION_FULL' && open() - 1 >= ATTENTION_LIMIT) continue;
     entry.state = 'resolved';
     entry.changed_at = now;
@@ -652,6 +663,9 @@ function answerFinding(doc, { id, state, reason = null, now }) {
   if (!['acknowledged', 'disposed'].includes(state)) throw new ProgrammeError('USAGE', 'A finding is acknowledged or disposed.');
   const entry = (doc.attention || []).find(item => item.id === id);
   if (!entry) throw new ProgrammeError('FINDING_UNKNOWN', `No finding ${id} on the parent document. Run programme.cjs attention to list them.`);
+  if (state === 'acknowledged' && WORK_QUEUE_CODES.has(entry.code)) {
+    throw new ProgrammeError('QUEUE_FINDING_NEEDS_ACTION', `Finding ${id} (${entry.code}) is on the work queue: act on it (${FINDING_CODES[entry.code].next_action}), or dispose --finding ${id} --reason <text>. It clears by itself once the task moves.`);
+  }
   if (state === 'disposed' && (!isText(reason) || reason.length > ATTENTION_NOTE_LIMIT)) {
     throw new ProgrammeError('USAGE', `dispose needs --reason <text> of at most ${ATTENTION_NOTE_LIMIT} characters.`);
   }
@@ -680,8 +694,14 @@ function waitingFindings(attention, now) {
 
 function attentionLine(attention, now = new Date().toISOString()) {
   const counts = attentionCounts(attention);
-  const waiting = waitingFindings(attention, now).length;
-  return counts.new || counts.acknowledged ? `Attention: ${counts.new} new, ${counts.acknowledged} acknowledged${waiting ? `, ${waiting} waiting on you` : ''}` : 'Attention: clear';
+  const waiting = waitingFindings(attention, now).filter(entry => !WORK_QUEUE_CODES.has(entry.code)).length;
+  const queue = workQueue(attention).length;
+  return counts.new || counts.acknowledged ? `Attention: ${counts.new} new, ${counts.acknowledged} acknowledged${queue ? `, ${queue} in the work queue` : ''}${waiting ? `, ${waiting} waiting on you` : ''}` : 'Attention: clear';
+}
+
+// Open work-queue findings, oldest first: the longest-stalled task leads.
+function workQueue(attention) {
+  return openFindings(attention).filter(entry => WORK_QUEUE_CODES.has(entry.code)).reverse();
 }
 
 // Open findings, newest first.
@@ -1475,6 +1495,13 @@ function reviewText(child) {
   return stale ? `${state} (STALE_HEAD)` : state;
 }
 
+// On a task still open, a shown PR that already merged or closed says so, so it never reads as in progress.
+function prCellState(outcome, child, number) {
+  if (isFinished(outcome, child)) return '';
+  const state = [child?.pr, ...(child?.prs || [])].find(pr => pr?.number === number)?.state;
+  return state === 'MERGED' ? ' merged' : state === 'CLOSED' ? ' closed' : '';
+}
+
 // The task's most recently opened PR, whatever its state, or null. GitHub numbers PRs in the order
 // they are opened, so the highest number among the tracked PR and the discovered history is it.
 function latestPr(child) {
@@ -1604,7 +1631,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     // One PR per row; the full history is on the task page.
     // A retired task shows none: its PRs are no longer the way to the work.
     const latest = isRetired(outcome, child) ? null : latestPr(child);
-    const pr = latest ? `#${latest}` : '-';
+    const pr = latest ? `#${latest}${prCellState(outcome, child, latest)}` : '-';
     const issue = issues.get(outcome.issue);
     // Optional cell padding would cost fourteen characters per row, more than the PR count.
     return `|${taskName(outcome, issue)}|${descriptionText(outcome)}|#${outcome.issue}|${pr}|${cls}|${statusText(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
@@ -1613,7 +1640,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: the latest opened, whatever its state (none for a retired task); history on the task page.`,
+    `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: the latest opened, whatever its state (merged or closed said on an open task; none for a retired task); history on the task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -1727,13 +1754,18 @@ function boardLineOf(body) {
 // Waiting findings appear only once; the command keeps every finding and its full next action.
 const ATTENTION_SHOWN = 10;
 const WAITING_SHOWN = 5;
+const WORK_QUEUE_SHOWN = 10;
 function attentionBlockLines(attention, now) {
-  const waiting = waitingFindings(attention, now);
+  const queue = workQueue(attention);
+  const waiting = waitingFindings(attention, now).filter(entry => !WORK_QUEUE_CODES.has(entry.code));
   const waitingIds = new Set(waiting.map(entry => entry.id));
-  const open = openFindings(attention).filter(entry => !waitingIds.has(entry.id))
+  const open = openFindings(attention).filter(entry => !waitingIds.has(entry.id) && !WORK_QUEUE_CODES.has(entry.code))
     .sort((a, b) => Number(b.code === 'PASS_STOPPED') - Number(a.code === 'PASS_STOPPED'));
   return [
     `**${attentionLine(attention, now)}**`,
+    // Work-queue tasks come ahead of the newest-first window, longest stalled first, so stalled work is never pushed out by bookkeeping.
+    ...(queue.length ? ['', '**Work queue** (the controller acts on each now)', ...queue.slice(0, WORK_QUEUE_SHOWN).map(entry => `- ${findingText(entry)}`),
+      ...(queue.length > WORK_QUEUE_SHOWN ? [`- and ${queue.length - WORK_QUEUE_SHOWN} more: run programme.cjs attention`] : []), ''] : []),
     ...open.slice(0, ATTENTION_SHOWN).map(entry => `- ${entry.state === 'acknowledged' ? '(acknowledged) ' : ''}${findingText(entry)}`),
     ...(open.length > ATTENTION_SHOWN ? [`- and ${open.length - ATTENTION_SHOWN} more: run programme.cjs attention`] : []),
     ...(waiting.length ? ['', '**Waiting on you**', ...waiting.slice(0, WAITING_SHOWN).map(entry => `- ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${shortSha(entry.head)}` : ''}`),
@@ -3754,7 +3786,7 @@ class ProgrammeGraphReader {
     for (let page = 1; page < 50; page += 1) {
       const response = this.transport.request('GET', `repos/${this.repository}/pulls?state=open&per_page=100&page=${page}`);
       if (response.status !== 200) throw ghFailure(response, 'Listing open pull requests');
-      all.push(...response.json.map(pr => ({ number: pr.number, body: pr.body || '', head_sha: pr.head?.sha || null })));
+      all.push(...response.json.map(pr => ({ number: pr.number, body: pr.body || '', head_sha: pr.head?.sha || null, updated_at: pr.updated_at || null })));
       if (response.json.length < 100) return all;
     }
     throw new ProgrammeError('GH_FAILED', 'The repository has more open pull requests than this reader pages through.');
@@ -3796,7 +3828,7 @@ class ProgrammeGraphReader {
         // Keep a five-minute overlap for boundary updates and timestamp precision. The REST list
         // is descending by updated_at, so nothing after this row can be newer than the cutoff.
         if (cutoff !== null && Date.parse(pr.updated_at) < cutoff) return all;
-        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', head_sha:pr.head?.sha || null, closed_at:pr.closed_at || pr.merged_at || null});
+        all.push({...item, body:[pr.title,pr.body].filter(Boolean).join('\n'), author:pr.user?.login || '', branch:pr.head?.ref || '', head_sha:pr.head?.sha || null, updated_at:pr.updated_at || null, closed_at:pr.closed_at || pr.merged_at || null});
       }
       if (response.json.length < 100) return all;
     }
@@ -4419,6 +4451,8 @@ class Reconciler {
     const openList = prGraph ? prGraph.openListed : this.reader.openPullRequests();
     const references = prGraph ? prGraph.openReferences : referencedIssues(openList);
     const prHeads = new Map(openList.map(pr => [pr.number, pr.head_sha || null]));
+    // When each open PR last changed; a row from an older cache has none and counts as moving.
+    const prUpdated = new Map(openList.map(pr => [pr.number, pr.updated_at || null]));
     const comments = new Map([parent.parent_issue, ...outcomes.map(outcome => outcome.issue)].filter(number => issues.get(number)).map(number => [number,
       sweep?.comments.has(number) ? sweep.comments.get(number)
         : number === parent.parent_issue ? this.discussion(number, issues.get(number), cache)
@@ -4440,7 +4474,7 @@ class Reconciler {
     const closing = sweep ? sweep.closing : this.refreshFacts && !only ? this.closing.scan(parent,prGraph,this.now,excludedGraphPr) : null;
     if (closing && !sweep) this.pass.planning();
     this.pass.phaseAt('planning');
-    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, prHeads, discovery, additions, prGraph, closing,
+    return { issues, subIssues, blockedBy, prs, outcomes, journals, references, comments, prPages, prHeads, prUpdated, discovery, additions, prGraph, closing,
       ...(sweep ? { sweep: { ...sweep.result, scoped } } : {}) };
   }
 
@@ -4772,27 +4806,43 @@ class Reconciler {
     }
   }
 
-  // Report-only: a task the graph shows IN PROGRESS that nothing is moving. No open or draft PR
-  // (tracked, in its history, or naming it), no live gate assignment, no holder on its state
-  // document, and neither the document nor a comment has changed for TASK_IDLE_HOURS. A task
+  // Work queue: a task the graph shows IN PROGRESS that nothing is moving. Nothing moves it when it has
+  // no live gate assignment, no holder on its state document, and no open or draft PR (tracked, in its
+  // history, or naming it) updated in the last PR_STALE_HOURS. A stale open PR does not hide it, so work
+  // parked behind a stalled PR surfaces. A task whose PRs have all merged or closed is TASK_MERGED_OPEN
+  // after TASK_MERGED_OPEN_HOURS of quiet; any other idle task is TASK_IDLE after TASK_IDLE_HOURS. A task
   // waiting on the owner is left out: the owner already has it.
   diffIdle(parent, docs, observed, only, findings) {
     const now = Date.parse(this.now());
+    const hour = 60 * 60 * 1000;
     for (const outcome of parent.outcomes) {
       if ((only && outcome.issue !== only) || (this.scope && !this.scope.has(outcome.issue))) continue;
       const doc = docs.get(outcome.issue);
       if (!doc || statusText(outcome, doc) !== 'IN PROGRESS' || doc.lifecycle === 'WAITING_OWNER') continue;
-      if (['OPEN', 'DRAFT'].includes(doc.pr?.state) || (doc.prs || []).some(pr => pr.state === 'OPEN')) continue;
-      if ((observed.references.get(outcome.issue) || []).length) continue;
       if (LIVE_GATE_STATES.includes(doc.gate?.state) || doc.fence?.holder_prefix) continue;
+      const open = [...new Set([
+        ...(['OPEN', 'DRAFT'].includes(doc.pr?.state) ? [doc.pr.number] : []),
+        ...(doc.prs || []).filter(pr => pr.state === 'OPEN').map(pr => pr.number),
+        ...(observed.references.get(outcome.issue) || []),
+      ])].filter(number => isInt(number, 1));
+      // An open PR whose last update cannot be read counts as moving.
+      const updated = number => Date.parse(observed.prUpdated?.get(number) || '');
+      if (open.some(number => !Number.isFinite(updated(number)) || now - updated(number) < PR_STALE_HOURS * hour)) continue;
       const written = Date.parse(doc.volatile?.written_at || '');
       // A document with no write time is new in this pass or cannot be dated; neither is idle.
       if (!Number.isFinite(written)) continue;
       const comments = (observed.comments.get(outcome.issue) || []).filter(comment => !String(comment.body || '').includes('programme-trace intent='))
         .map(comment => Date.parse(comment.created_at)).filter(Number.isFinite);
       const latest = Math.max(written, ...comments);
-      if (now - latest < TASK_IDLE_HOURS * 60 * 60 * 1000) continue;
-      findings.push({ code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no open PR, no live gate assignment and no holder, and nothing on it has changed since ${new Date(latest).toISOString().slice(0, 16)}Z (over ${TASK_IDLE_HOURS} hours)` });
+      const closedPrs = [doc.pr, ...(doc.prs || [])].filter(pr => isInt(pr?.number, 1));
+      const merged = !open.length && closedPrs.length > 0 && closedPrs.every(pr => ['MERGED', 'CLOSED'].includes(pr.state));
+      const hours = merged ? TASK_MERGED_OPEN_HOURS : TASK_IDLE_HOURS;
+      if (now - latest < hours * hour) continue;
+      const since = new Date(latest).toISOString().slice(0, 16);
+      const stale = open.length ? `; open PR ${open.map(number => `#${number}`).join(', ')} has not changed for over ${PR_STALE_HOURS} hours` : '';
+      findings.push(merged
+        ? { code: 'TASK_MERGED_OPEN', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with every PR merged or closed and nothing working it since ${since}Z (over ${hours} hour${hours === 1 ? '' : 's'})` }
+        : { code: 'TASK_IDLE', issue: outcome.issue, detail: `shown IN PROGRESS (${doc.lifecycle}) with no moving PR, no live gate assignment and no holder, and nothing on it has changed since ${since}Z (over ${hours} hours)${stale}` });
     }
   }
 
@@ -6803,7 +6853,7 @@ module.exports = Object.freeze({
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,
   refreshWriter, isDecisionHolder, sha256, sessionsOf,
-  SAFE_LIMIT, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS,
+  SAFE_LIMIT, renderContextBlockBody, renderNavBlockBody, renderPrNavBlockBody, renderPrStatusBlockBody, upsertPrBlocks, upsertNavBlock, assertBlocksReadBack, NAV_BLOCK_NAME, latestPr, MAX_RELAYS_PER_PASS, TASK_IDLE_HOURS, TASK_MERGED_OPEN_HOURS, PR_STALE_HOURS, WORK_QUEUE_CODES, workQueue,
   contextCommentIds, excludedGraphPr, StateBatch, validateSweepRecord, validateSweepHistory, SWEEP_HISTORY_SCHEMA, ROTATION_PASSES, PASS_PHASES, STOPS_PASS,
   DISCOVERY_BASE, discoveryBudget, CHANGED_PAGES, LIST_PAGE_GUARD,
 });
