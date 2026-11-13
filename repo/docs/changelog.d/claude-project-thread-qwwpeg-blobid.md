@@ -1,3 +1,3 @@
 ### Fixed
 
-- **State commit read-back:** when GitHub's answer for a created state tree does not list a nested file, the check after a state commit now compares Git's own blob id of the written text. It no longer depends on how that answer is shaped. A blob id that does not match is still refused.
+- **State commit read-back:** the check after a state commit now compares every written file with Git's own blob id of the written text, computed locally. It no longer depends on how GitHub shapes its answer for a created tree, which may list only the top-level folder of a nested file. An id GitHub does list must agree, and any mismatch is refused.

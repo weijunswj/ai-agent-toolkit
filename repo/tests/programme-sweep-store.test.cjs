@@ -8,7 +8,7 @@ const test = require('node:test');
 const path = require('node:path');
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const state = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-state.cjs'));
-const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
+const { FakeGitHub, blobSha } = require('./toolkit-programme-fake-github.cjs');
 
 const NOW = '2026-11-12T01:00:00.000Z';
 const controller = { session: 'fixture-controller', prefix: 'TEST-' };
@@ -157,34 +157,49 @@ test('snapshot: REST fallback reads the same documents', () => {
 });
 
 // GitHub's created-tree answer may list only the top-level entries of a nested path (`state` as a
-// tree); the read-back then checks Git's own blob id of each written text.
-function topLevelTreeAnswer(f, sha = null) {
+// tree), as the fakes answer by default; the read-back then checks Git's own blob id of each written text.
+function refuseGraphql(f) {
+  f.github.intercept(call => (call.path === 'graphql' ? { status: 403, json: { message: 'refused' } } : undefined));
+}
+function rewriteTreeCall(f, change) {
   f.github.intercept(call => {
     if (call.method !== 'POST' || !call.path.endsWith('/git/trees')) return undefined;
-    const answer = f.github.route(call.method, call.path, call.body);
-    answer.json.tree = [{ path: 'state', type: 'tree', sha: sha || 'e'.repeat(40) }];
-    return answer;
+    return change(call);
   });
 }
 
 test('readback: a created tree that lists only top-level entries is checked by the local blob id', () => {
   const f = fixture();
-  f.github.intercept(call => (call.path === 'graphql' ? { status: 403, json: { message: 'refused' } } : undefined));
-  topLevelTreeAnswer(f);
+  refuseGraphql(f);
+  let answer = null;
+  rewriteTreeCall(f, call => { answer = f.github.route(call.method, call.path, call.body); return answer; });
   const result = f.store.commitBatch(f.stage());
+  assert.deepEqual(answer.json.tree.map(item => [item.path, item.type]), [['state', 'tree']], 'the fake answers top-level entries only');
   assert.equal(result.written.length, 3);
   for (const entry of result.written) assert.match(entry.blob, /^[0-9a-f]{40}$/);
   f.github.hooks = [];
   assert.equal(f.store.read('child', 500).doc.next_action, 'Checked 500');
 });
 
-test('readback: a listed blob id that does not match what was written is still refused', () => {
+test('readback: a listed blob id that does not agree with the written text is refused', () => {
   const f = fixture();
-  f.github.intercept(call => (call.path === 'graphql' ? { status: 403, json: { message: 'refused' } } : undefined));
-  f.github.intercept(call => {
-    if (call.method !== 'POST' || !call.path.endsWith('/git/trees')) return undefined;
+  refuseGraphql(f);
+  rewriteTreeCall(f, call => {
     const answer = f.github.route(call.method, call.path, call.body);
-    answer.json.tree = answer.json.tree.map(item => ({ ...item, sha: 'f'.repeat(40) }));
+    answer.json.tree = call.body.tree.map(item => ({ path: item.path, type: 'blob', sha: 'f'.repeat(40) }));
+    return answer;
+  });
+  assert.throws(() => f.store.commitBatch(f.stage()), { code: 'STATE_READBACK_MISMATCH' });
+});
+
+test('readback: a stored blob that is not the written text is refused, even when GitHub lists it', () => {
+  const f = fixture();
+  refuseGraphql(f);
+  rewriteTreeCall(f, call => {
+    // GitHub stored other bytes than were sent, and its answer lists the stored blob's own id.
+    const body = { ...call.body, tree: call.body.tree.map(item => ({ ...item, content: `${item.content} ` })) };
+    const answer = f.github.route(call.method, call.path, body);
+    answer.json.tree = body.tree.map(item => ({ path: item.path, type: 'blob', sha: blobSha(item.content) }));
     return answer;
   });
   assert.throws(() => f.store.commitBatch(f.stage()), { code: 'STATE_READBACK_MISMATCH' });

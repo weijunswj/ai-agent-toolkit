@@ -113,10 +113,12 @@ const TEXT_LIMIT = 200;
 const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
 // Git's own blob id for a text (a SHA-1 repository): the id GitHub gives the blob it stores for it.
 const gitBlobId = text => crypto.createHash('sha1').update(`blob ${Buffer.byteLength(text, 'utf8')}\0`).update(text, 'utf8').digest('hex');
-// The blob id of a written entry in a created tree: from GitHub's answer when it lists the path.
+// The blob id a written entry must have in a created tree: Git's own id of the written text. When
+// GitHub's answer lists the path itself, that id must agree, or nothing is expected (a mismatch).
 const createdBlobId = (tree, entry) => {
+  const local = gitBlobId(entry.text);
   const listed = (tree?.tree || []).find(item => item.path === entry.path)?.sha;
-  return isSha(listed) ? listed : gitBlobId(entry.text);
+  return listed === undefined || listed === local ? local : null;
 };
 const clone = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -2676,9 +2678,9 @@ class StateStore {
   }
 
   // The new commit must hold exactly what was written: every text by GraphQL, or, when GraphQL is
-  // refused, every blob id. The id is the one GitHub returned for the created tree when its answer
-  // lists the path; otherwise (an answer that lists only the top-level entries of a nested path) it
-  // is Git's own blob id of the written text, computed here.
+  // refused, every blob id, checked against Git's own blob id of the written text, computed here.
+  // GitHub's create-tree answer may list only the top-level entries of a nested path, so it is not
+  // the source; an id it does list must agree.
   readBack(commitSha, written, tree) {
     const { files, mode } = this.readTree(commitSha);
     for (const entry of written) {
