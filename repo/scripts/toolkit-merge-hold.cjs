@@ -130,6 +130,7 @@ const path = require('node:path');
 const governance = require('./toolkit-governance-state.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
 const mergeScope = require('./toolkit-auto-merge-eligible.cjs');
+const projectsCloud = require('./toolkit-projects-cloud.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
 const { validateRemoteIdentity, repositoryIdForCanonicalRemote } = require('./toolkit-repository-identity.cjs');
 const { GitHubTransport, IssueClosureGuard } = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
@@ -414,6 +415,14 @@ function startedByUser(checks, standing = false) {
 
 // Keeps the approvals a typed message carries; returns how many were kept.
 function recordPrompt(input, { environment = process.env, registryOptions = {}, now } = {}) {
+  // A Projects merge card tap (toolkit-projects-cloud.cjs) counts like a typed `merge N at <sha>`
+  // from the same thread, once, under the same session-mark rule as a wrapped typed message.
+  const tap = projectsCloud.mergeCardTap(input && input.prompt);
+  if (tap) {
+    const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
+    if (!new gate.SessionEpochs({ registryOptions, now }).get(sessionId)) return 0;
+    return new MergeApprovals({ registryOptions, now }).add([{ repository: tap.repository, pr: tap.pr, sha: tap.sha, session: sessionId }], { id: tap.id, sentAt: tap.sentAt });
+  }
   const message = gate.ownerMessage(input && input.prompt);
   if (message.wrapped ? !message.approvalEligible : message.markup || gate.hasFrameMarkup(message.text)) return 0;
   const found = approvalsIn(message.text);
@@ -1004,10 +1013,16 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   try { root = repository ? governance.findGitRoot(cwd) : null; } catch { root = null; }
   const answer = root ? governance.taskAutoMerge(root, { ...registryOptions, host, ...(now ? { now } : {}) }) : null;
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
+  // A Claude Projects cloud thread reads the same repository switch. Its project line can only force
+  // Off (toolkit-projects-cloud.cjs), and the one named merge thread stands in for a session the
+  // owner started (gate rules, Task auto-merge), so no origin check applies.
+  const cloud = Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true';
+  let forcedOff = false;
+  if (cloud) { try { forcedOff = new projectsCloud.ProjectsSwitch({ directory: governance.userStateDirectory(registryOptions), now }).forcedOff(sessionId); } catch { forcedOff = true; } }
   const checks = {
     repositoryValid: Boolean(repository && root),
     knownHost: governance.normaliseHost(host) !== null,
-    autoMergeOn: answer?.auto_merge === 'after-gates',
+    autoMergeOn: answer?.auto_merge === 'after-gates' && !forcedOff,
     bindingFresh: answer?.fresh === true,
     ...sessionChecks(sessionId, environment || {}, registryOptions, now, host),
   };
@@ -1022,6 +1037,7 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
     : checks.resumedFromSessionShell ? 'resume-from-session-shell'
     : checks.forked ? 'fork'
     : checks.resumeNeedsTypedMerge ? 'resume-needs-typed-merge'
+    : cloud ? null
     : !startedByUser(checks, true) ? (checks.resumed ? 'resumed-without-user-started-origin' : 'user-started-origin-required') : null;
   if (reason) return { eligible: false, reason, checks };
   const scope = head => {
@@ -1037,7 +1053,7 @@ function standingReason(reason) {
     'no-native-session-context': "this terminal has no native session context; run the check in the session with Toolkit's hook",
     'no-repository': 'this folder has no usable GitHub repository',
     'unknown-host': 'this app is not one Toolkit knows, so it never merges on a standing answer',
-    'auto-merge-off': "this repository's merged governance binding does not set task_prs.auto_merge to after-gates (refresh governance shows or changes it)",
+    'auto-merge-off': "this repository's merged governance binding does not set task_prs.auto_merge to after-gates (refresh governance shows or changes it), or, in a Claude Projects thread, the project line `- Task auto-merge: Off` (or unclear or unread project instructions) forces it Off",
     'binding-not-fresh': 'the enabled merged governance binding is missing, invalid or not fresh',
     'no-session-mark': 'this session has no readable session-start mark',
     'launcher-marker': 'a Toolkit launcher marker is present',
@@ -1204,7 +1220,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   for (const merge of merges) {
     // Preserve specific authority refusals; closure safety still precedes approval consumption.
     const { refusal, approval } = judge(merge, approvals, standing, evidence);
-    if (refusal) return refusal;
+    if (refusal) return cloudCard(refusal, merge, environment);
     if (!consume) continue;
     const call = ShellCall.from(input);
     let mergeTexts = [];
@@ -1271,6 +1287,15 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   }
   if (consume) for (const approval of used) approvals.use(approval);
   return null;
+}
+
+// In a cloud session, a refusal for want of an approval also names the exact Projects merge card
+// that would count (toolkit-projects-cloud.cjs), so the merge thread asks with the right wording.
+function cloudCard(refusal, merge, environment) {
+  if (!environment || environment.CLAUDE_CODE_REMOTE !== 'true' || !refusal || typeof refusal.deny !== 'string') return refusal;
+  if (typeof merge.repository !== 'string' || !Number.isInteger(merge.pr) || !(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return refusal;
+  if (!/no unused approval|waits for the user's typed merge|needs the user's typed approval|approved .* but this merge names/.test(refusal.deny)) return refusal;
+  return { ...refusal, deny: `${refusal.deny} In a Claude Projects thread, post the merge card yourself with exactly the question "${projectsCloud.mergeCardQuestion(merge.repository, merge.pr, merge.sha)}", first option Merge and second Not now; the owner's tap on Merge counts for that head, once.` };
 }
 
 // Whether a tool call may be a merge or a push, for the hooks' failure path.

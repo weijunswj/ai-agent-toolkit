@@ -136,10 +136,10 @@ test("only the user's own message is read: a relayed or attachment-bearing Proje
 });
 
 // The Claude Code hook with a stub gate: the line is added only on a pass with no governance context.
-function prompt(decision, text, extra = {}) {
+function prompt(decision, text, extra = {}, environment = {}) {
   const stubGate = { PromptHold: class { decide() { return decision; } }, sessionIdOf: () => 'session', ownerReply: gate.ownerReply, ...extra };
   const mergeHold = { recordPrompt: () => 0 };
-  return claudeHook.respond('UserPromptSubmit', { cwd: process.cwd(), prompt: text }, { gate: stubGate, mergeHold, environment: {} });
+  return claudeHook.respond('UserPromptSubmit', { cwd: process.cwd(), prompt: text }, { gate: stubGate, mergeHold, environment });
 }
 
 test('Claude Code prompt hook: a typed command adds its line on an ordinary pass', () => {
@@ -159,6 +159,6 @@ test('Claude Code prompt hook: a broken command reader adds nothing and blocks n
   assert.deepEqual(prompt({ action: 'pass' }, 'toolkit cmd', { ownerReply: () => { throw new Error('reader broke'); } }), {});
 });
 
-test('cloud sessions are unchanged: no typed command line there', () => {
-  assert.deepEqual(claudeHook.respond('UserPromptSubmit', { cwd: process.cwd(), prompt: 'toolkit cmd' }, { environment: { CLAUDE_CODE_REMOTE: 'true' } }), {});
+test('cloud sessions get the same typed command line as a computer', () => {
+  assert.deepEqual(prompt({ action: 'pass' }, 'toolkit cmd', {}, { CLAUDE_CODE_REMOTE: 'true' }), prompt({ action: 'pass' }, 'toolkit cmd'));
 });

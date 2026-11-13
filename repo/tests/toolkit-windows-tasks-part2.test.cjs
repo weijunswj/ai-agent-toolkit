@@ -89,6 +89,11 @@ test('G: the registered task runs headless as the logged-on user, ignores a seco
   assert.match(script, /IndexOf\(\$p\.marker_prefix\) -lt 0 -and -not \(\$p\.expected_xml/);
   assert.doesNotMatch(script, /-Password|-User\s/);
   assert.match(windowsTasks.SCRIPTS.unregister, /IndexOf\(\$p\.marker\) -lt 0\) \{ throw/);
+  // A name like `Backup [1]` is a wildcard pattern to -TaskName, so the exact task object found by
+  // name is exported and removed, never the name.
+  assert.match(windowsTasks.SCRIPTS.unregister, /Unregister-ScheduledTask -InputObject \$t\[0\] -Confirm:\$false/);
+  assert.match(windowsTasks.SCRIPTS.unregister, /Export-ScheduledTask -InputObject \$t\[0\]/);
+  assert.doesNotMatch(windowsTasks.SCRIPTS.unregister, /-TaskName \$p\.name/);
   assert.match(windowsTasks.SCRIPTS['remove-folder'], /GetTasks\(1\)\.Count -eq 0 -and \$f\.GetFolders\(0\)\.Count -eq 0/);
 });
 

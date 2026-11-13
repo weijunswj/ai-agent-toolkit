@@ -161,6 +161,25 @@ test('a symbolic link is never followed', { skip: process.platform === 'win32' }
   assert.ok(widget.unproven.every(item => item.reason === 'it is a symbolic link'));
 });
 
+// Directory links are made as junctions, which Windows allows without extra rights, so this runs on
+// every system. A linked playbook folder is one line, and a linked .github folder is never shown as
+// the kept programme file.
+test('a linked folder is never followed: one line for the playbooks, and no programme file kept', t => {
+  const w = world(t, { widget: { state: 'DISABLED', files: {} } });
+  const root = path.join(w.folder, 'widget');
+  for (const name of ['elsewhere', 'other-github']) fs.mkdirSync(path.join(w.folder, name));
+  fs.writeFileSync(path.join(w.folder, 'elsewhere', 'INDEX.md'), template('docs/agent-playbooks/INDEX.md'));
+  fs.writeFileSync(path.join(w.folder, 'other-github', 'toolkit-programme.json'), '{"governance":"disabled"}');
+  fs.mkdirSync(path.join(root, 'docs'));
+  fs.symlinkSync(path.join(w.folder, 'elsewhere'), path.join(root, 'docs', 'agent-playbooks'), 'junction');
+  fs.symlinkSync(path.join(w.folder, 'other-github'), path.join(root, '.github'), 'junction');
+  const widget = w.of(w.scan(), 'widget');
+  assert.deepEqual(widget.files, []);
+  assert.deepEqual(widget.kept, []);
+  assert.deepEqual(widget.unproven.filter(item => item.file.startsWith('docs/')), [{ file: 'docs/agent-playbooks', reason: 'it is a symbolic link' }]);
+  assert.ok(widget.unproven.some(item => item.file === '.github/toolkit-programme.json' && item.reason === 'it is a symbolic link'));
+});
+
 test('a missing folder, an unreadable folder and a folder that is not a checkout', t => {
   const missing = new leftovers.LeftoverScan({ githubFolder: path.join(os.tmpdir(), 'tk-leftovers-none', 'GitHub'), governance: {} }).scan();
   assert.deepEqual([missing.readable, missing.repositories], [true, []]);

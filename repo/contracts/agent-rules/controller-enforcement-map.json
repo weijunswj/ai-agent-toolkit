@@ -60,6 +60,18 @@
     },
     {
       "file": "repo/CONTROLLER.md",
+      "rule": "**Work queue:**",
+      "covers": "The reconciler raises TASK_IDLE and TASK_MERGED_OPEN for NOW tasks nothing is moving, refuses to acknowledge them and lists them first; picking the lane or next step is the controller's judgement.",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/programme-task-layout.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/CONTROLLER.md",
       "rule": "**Batch small fixes:**",
       "instruction_only": "Whether a fix is small and which slice it joins is a judgement made before any branch exists."
     },
@@ -99,6 +111,23 @@
       "file": "repo/CONTROLLER.md",
       "rule": "Routines/executors ask the owner only when the owner must act",
       "instruction_only": "Whether the owner must act is a judgement per message."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
+      "rule": "**Findings are the controller's work:**",
+      "covers": "The reconciler keeps each programme finding with its controller next action until it is answered, and the Projects daily check-in turns failing tasks, PRs that need a step and long-missing project tasks into first-line prefixes the coordinator must act on. Judging the action and deadline for any other finding is the controller's.",
+      "enforced_by": [
+        {
+          "kind": "reconciler",
+          "path": "skills/github-program-reconciler/scripts/programme-state.cjs",
+          "test": "repo/tests/toolkit-programme-attention.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-projects-tasks.cjs",
+          "test": "repo/tests/toolkit-projects-tasks.test.cjs"
+        }
+      ]
     },
     {
       "file": "repo/CONTROLLER.md",
@@ -347,6 +376,11 @@
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Promises:**",
       "instruction_only": "Promises live in free text (PR, issue comments or project memory); the hourly nudge reads them, but no code parses them."
+    },
+    {
+      "file": "repo/controller/evidence-and-finish.md",
+      "rule": "**Findings:**",
+      "instruction_only": "Which action fits a finding, and when a repeat or missed deadline needs the owner, is a judgement per finding; the check-in prefixes and programme attention that feed it are mapped on the core rule."
     },
     {
       "file": "repo/controller/evidence-and-finish.md",

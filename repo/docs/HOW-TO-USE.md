@@ -65,7 +65,7 @@ Detailed plugin verification and bridge command mechanics live in [Toolkit Local
 
 ### Commands You Can Type
 
-Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup`, `toolkit show env` and the `toolkit governance` status, check, discover, catalogue, security and migrate commands are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing; each of those `toolkit governance` commands runs that same subcommand of `toolkit-governance.cjs` and nothing else, except `migrate`, which the agent hands to you to run in your own terminal. A phrase inside a longer message is ordinary text. Everything else is plain language: ask in your own words.
+Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup`, `toolkit show env` and the `toolkit governance` status, check, discover, catalogue, security and migrate commands are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing; each of those `toolkit governance` commands runs that same subcommand of `toolkit-governance.cjs` and nothing else, except `migrate`, which the agent hands to you to run in your own terminal. A phrase inside a longer message is ordinary text. The one message that carries Toolkit's governance question gets no command line; send the phrase again after answering. Everything else is plain language: ask in your own words.
 
 - `toolkit cmd` or `toolkit command`: show this list.
 - `setup toolkit` or `toolkit setup`: set up Toolkit on this computer, or change your setup answers.
@@ -81,7 +81,7 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 - `toolkit governance catalogue`: list the skills offered in this repository under its governance state. It changes nothing.
 - `toolkit governance security`: turn on GitHub's free dependency and security settings for a governed repository.
 - `toolkit governance migrate`: get the command that offers protection and security fixes; you run it in your own terminal and answer its question there.
-- `remove toolkit`: list everything Toolkit put on this computer, then remove it after your OK, plugin included. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
+- `remove toolkit`: choose this app only or every app, see what Toolkit put there, then remove it after your OK, plugin included. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
 - `merge N`: approve the merge of pull request N.
 
 `node repo/scripts/toolkit-commands.cjs` prints the same list.

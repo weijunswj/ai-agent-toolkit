@@ -1410,7 +1410,7 @@ test('a broken merge hold refuses state-changing tools that mention merge or pus
   }
 });
 
-test('the Claude Code hook records the typed approval and enforces it; cloud sessions are not covered', (t) => {
+test('the Claude Code hook records the typed approval and enforces it; cloud sessions are held too', (t) => {
   const ctx = context(t);
   const merge = { ...connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA }), cwd: ctx.repo };
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
@@ -1423,7 +1423,8 @@ test('the Claude Code hook records the typed approval and enforces it; cloud ses
   // Once the repository is decided, no repetition is needed.
   require('./support/governance-observations.cjs').seedMerged(ctx.repo, 'disable', ctx.options);
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput?.permissionDecision, undefined);
-  assert.deepEqual(claudeHook.respond('PreToolUse', merge, { environment: { CLAUDE_CODE_REMOTE: 'true' }, ...ctx.options }), {});
+  // The approval was used by that merge, so the same merge from a cloud session is refused.
+  assert.equal(claudeHook.respond('PreToolUse', merge, { environment: { CLAUDE_CODE_REMOTE: 'true' }, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('the Codex hook refuses, records the user\'s approval, allows one merge and refuses again', (t) => {

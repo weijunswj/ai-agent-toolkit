@@ -402,6 +402,11 @@ test('Toolkit source wrapper exempts its checkout from the vendored plain-text c
   assert.deepEqual(await checkIds(), []);
   fs.rmSync(path.join(repo, 'repo', 'scripts', 'check-plain-references.cjs'));
   assert.deepEqual(await checkIds(), ['PLAIN_TEXT_CHECK_DRIFT']);
+  // The other half of the exemption: the wrapper is back but the skill's source check is gone.
+  fs.writeFileSync(path.join(repo, 'repo', 'scripts', 'check-plain-references.cjs'), "'use strict';\n");
+  assert.deepEqual(await checkIds(), []);
+  fs.rmSync(path.join(repo, 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'));
+  assert.deepEqual(await checkIds(), ['PLAIN_TEXT_CHECK_DRIFT']);
 });
 
 test('SC-01: security turns on the free settings of a governed repository without a question, and only there', async (t) => {

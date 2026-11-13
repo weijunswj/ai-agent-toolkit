@@ -36,7 +36,7 @@
 //   interrupt --issue <n> --reason <text>
 //   update --issue <n> --patch <file>
 //   return --issue <n> (--record <return-id> --assignment <id> [--at-head <sha>] | --consume <return-id> --verdict ACCEPT|REOPEN|WAITING_OWNER)
-//   ack --finding <id>                                 acknowledge an attention finding (it stays listed)
+//   ack --finding <id>                                 acknowledge an attention finding (it stays listed; never a work-queue one)
 //   dispose --finding <id> --reason <text>             dispose of one; the reason stays in the private part
 //
 // A controller that cannot run commands itself hands a session a holder order: the exact writes
@@ -660,7 +660,9 @@ const commands = {
   attention(args, context, deps = {}) {
     const parentDoc = readParent(context);
     cacheAttention(context, parentDoc, true, deps);
-    const open = state.openFindings(parentDoc.attention).map(entry => ({ id: entry.id, state: entry.state, source: entry.source, code: entry.code, issue: entry.issue, head: entry.head,
+    // Work-queue findings lead, longest-stalled first; the rest stay newest first.
+    const listed = [...state.workQueue(parentDoc.attention), ...state.openFindings(parentDoc.attention).filter(entry => !state.WORK_QUEUE_CODES.has(entry.code))];
+    const open = listed.map(entry => ({ id: entry.id, state: entry.state, source: entry.source, code: entry.code, issue: entry.issue, head: entry.head,
       first_seen: entry.first_seen, changed_at: entry.changed_at, next_action: state.FINDING_CODES[entry.code].next_action,
       ...(entry.diagnostics ? { diagnostics: entry.diagnostics } : {}) }));
     return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open };
@@ -1027,7 +1029,10 @@ function formatAttention(result) {
   if (result.refreshed?.outcome === 'QUEUED') lines.push(`Refresh queued: ${result.refreshed.reason}.`);
   if (result.refreshed?.inventory_complete === false) lines.push('The inventory could not read every open issue this time (INVENTORY_INCOMPLETE).');
   if (result.refreshed?.holds?.length) lines.push('', 'The refresh pass held', ...result.refreshed.holds.map(hold => `- ${hold.code} ${hold.target}: ${hold.detail}`), '');
-  for (const entry of result.findings) {
+  // Work-queue findings first: each is a task on the graph that needs the controller's next step now.
+  const queue = result.findings.filter(entry => state.WORK_QUEUE_CODES.has(entry.code));
+  if (queue.length) lines.push('', 'Work queue (act on each now: a lane, a state change or a close; never ack)', ...queue.map(entry => `- ${entry.id} ${entry.code} #${entry.issue}: ${entry.next_action}`), '');
+  for (const entry of result.findings.filter(item => !state.WORK_QUEUE_CODES.has(item.code))) {
     lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
     lines.push(...formatBodyDiagnostics(entry.diagnostics));
   }

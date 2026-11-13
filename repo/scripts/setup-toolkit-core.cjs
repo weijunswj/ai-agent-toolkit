@@ -1082,20 +1082,25 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
   });
 }
 
-async function delegateToManagedSetupIfAvailable(args) {
-  if (!args.execute || args.repoRootExplicit) return null;
+// The one hand-off check for a run and a preview alike: the managed checkout's setup script, when it
+// exists, is not this script, is not already a hand-off and speaks the question-bank protocol. null
+// means this script does the work itself (no managed checkout yet, or this is the managed checkout).
+function managedSetupHandOff(args) {
+  if (args.repoRootExplicit) return null;
   const managedScript = defaultManagedSetupScriptPath();
-  const currentScript = path.resolve(__dirname, 'setup-toolkit.cjs');
-  if (!fs.existsSync(managedScript) || samePath(managedScript, currentScript)) return null;
-  if (Number(process.env[MANAGED_DELEGATION_DEPTH_ENV] || 0) > 0) {
-    throw new Error(managedFailureMessage('recursive-delegation'));
-  }
-
-  const activeRoot = repoRootFromScript();
+  if (!fs.existsSync(managedScript) || samePath(managedScript, path.resolve(__dirname, 'setup-toolkit.cjs'))) return null;
+  if (Number(process.env[MANAGED_DELEGATION_DEPTH_ENV] || 0) > 0) throw new Error(managedFailureMessage('recursive-delegation'));
   const managedRoot = defaultManagedSourcePath();
-  if (!verifyManagedProtocolIdentity(managedScript, managedRoot)) {
-    throw new Error(managedFailureMessage('invalid-managed-script-identity'));
-  }
+  if (!verifyManagedProtocolIdentity(managedScript, managedRoot)) throw new Error(managedFailureMessage('invalid-managed-script-identity'));
+  return { managedScript, managedRoot };
+}
+
+async function delegateToManagedSetupIfAvailable(args) {
+  if (!args.execute) return null;
+  const handOff = managedSetupHandOff(args);
+  if (!handOff) return null;
+  const { managedScript, managedRoot } = handOff;
+  const activeRoot = repoRootFromScript();
   console.log('# setup toolkit managed route');
   console.log(`Active worktree branch: ${branchForSummary(activeRoot)}`);
   console.log(`Active worktree commit: ${commitForSummary(activeRoot)}`);
@@ -1108,6 +1113,23 @@ async function delegateToManagedSetupIfAvailable(args) {
 
   return runManagedQuestionBankChild(managedScript, managedRoot, args.argv,
     process.stdin.isTTY ? {} : { stdinSource: process.stdin });
+}
+
+// A preview (`--plan`, `--explain`) runs in the managed checkout too when there is one, so the bank it
+// shows comes from the same script, with the same reference, as the run that later accepts the answer.
+function delegatePlanToManagedSetupIfAvailable(args) {
+  if (!args.plan) return null;
+  const handOff = managedSetupHandOff(args);
+  if (!handOff) return null;
+  const { managedScript, managedRoot } = handOff;
+  const result = spawnSync(process.execPath, [managedScript, ...args.argv], {
+    cwd: managedRoot,
+    env: { ...process.env, [MANAGED_DELEGATION_DEPTH_ENV]: '1', [SETUP_START_FOLDER_ENV]: process.env[SETUP_START_FOLDER_ENV] || process.cwd() },
+    stdio: 'inherit',
+    windowsHide: true,
+  });
+  if (result.error) throw new Error(`Managed setup preview could not start: ${result.error.message}`);
+  return result.status === null ? 1 : result.status;
 }
 
 function scriptRootForReadOnlyProbe(args) {
@@ -2380,6 +2402,9 @@ function clonedSetupArgs(args) {
   };
 }
 
+// The plan's view of setup: `bank` is the question bank exactly as a real run shows it (same rows,
+// same reference), so a preview's reference is the one the run accepts; `specs` and `args` are that
+// bank with every open answer taken as recommended, for the step list and the generated docs.
 function plannedQuestionBank(args, current) {
   const planned = clonedSetupArgs(args);
   const initialSpecs = setupQuestionSpecs(planned, current);
@@ -2390,6 +2415,7 @@ function plannedQuestionBank(args, current) {
   assertManagedCheckoutChoiceAvailable(planned, resolvedSpecs);
   return {
     args: planned,
+    bank: initialSpecs,
     specs: resolvedSpecs.map((spec) => ({ ...spec, empty_input: spec.recommended })),
   };
 }
@@ -4575,17 +4601,19 @@ async function main(argv = process.argv.slice(2), options = {}) {
   }
   const delegatedCode = await delegateToManagedSetupIfAvailable(args);
   if (delegatedCode !== null) return delegatedCode;
+  const delegatedPlan = delegatePlanToManagedSetupIfAvailable(args);
+  if (delegatedPlan !== null) return delegatedPlan;
   if (args.plan) {
     const current = await collectCurrentState(args);
     args.codexRuntime = current.runtime.runtime;
     const planned = plannedQuestionBank(args, current);
     if (args.explain) {
-      const text = renderQuestionRows(planned.specs, args.explain);
+      const text = renderQuestionRows(planned.bank, args.explain);
       if (!text) throw new Error(`No setup question ${args.explain} in this bank.`);
-      console.log(`Bank reference: ${ensurePresentationMetadata(planned.specs)[0]?.presentation.bank_reference || ''} (${args.host})\n\n${text}`);
+      console.log(`Bank reference: ${ensurePresentationMetadata(planned.bank)[0]?.presentation.bank_reference || ''} (${args.host})\n\n${text}`);
       return 0;
     }
-    printPlan(setupPlan({ ...planned.args, questionBank: planned.specs }), args.json);
+    printPlan(setupPlan({ ...planned.args, questionBank: planned.bank }), args.json);
     return 0;
   }
   return execute(args);
