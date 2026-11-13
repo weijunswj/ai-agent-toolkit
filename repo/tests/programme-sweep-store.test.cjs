@@ -156,6 +156,45 @@ test('snapshot: REST fallback reads the same documents', () => {
   assert.equal(f.store.read('child', 500).doc.next_action, 'Checked 500');
 });
 
+// GraphQL leaves out the text of a blob over about 1 MB; such a document is read whole by its blob id.
+function truncateLarge(f, names) {
+  f.github.intercept(call => {
+    if (call.path !== 'graphql' || !call.body.query.includes('stateSnapshot')) return undefined;
+    const answer = f.github.route(call.method, call.path, call.body);
+    for (const entry of answer.json.data.repository.snapshot.entries) {
+      if (names.includes(entry.name)) entry.object = { text: null, isTruncated: true };
+    }
+    return answer;
+  });
+}
+
+test('snapshot: a document too large for GraphQL is read whole by its blob id', () => {
+  const f = fixture();
+  const graph = f.store.readSnapshot();
+  truncateLarge(f, ['issue-500.json']);
+  const calls = f.github.calls.length;
+  const large = f.store.readSnapshot();
+  assert.equal(large.mode, 'graphql');
+  assert.equal(f.store.graphqlRefused, false);
+  const view = snapshot => [...snapshot.documents].map(([key, entry]) => [key, entry.sha, entry.error ? entry.error.code : state.canonicalText(entry.doc)]).sort();
+  assert.deepEqual(view(large), view(graph));
+  const blobs = f.github.calls.slice(calls).filter(call => /\/git\/blobs\//.test(call.path));
+  assert.equal(blobs.length, 1, 'only the large document is read as a blob');
+  // A state commit still reads back when a written document comes back truncated.
+  const result = f.store.commitBatch(f.stage());
+  assert.equal(result.written.length, 3);
+  f.github.hooks = [];
+  assert.equal(f.store.read('child', 500).doc.next_action, 'Checked 500');
+});
+
+test('snapshot: large documents over budget stop before writes', () => {
+  const f = fixture();
+  truncateLarge(f, ['issue-500.json', 'issue-501.json']);
+  const transport = Object.assign(Object.create(f.github), { left: () => 3, reserve: 2 });
+  const store = new state.StateStore({ transport, store: f.store.store, now: () => NOW });
+  assert.throws(() => store.readSnapshot(), error => error.code === 'PASS_STOPPED' && error.noWrite === true);
+});
+
 test('snapshot: fallback over budget stops before writes', () => {
   const f = fixture();
   const transport = Object.assign(Object.create(f.github), { left: () => 3, reserve: 2 });

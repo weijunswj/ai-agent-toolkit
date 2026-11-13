@@ -2512,8 +2512,10 @@ class StateStore {
   }
 
   // The state directory at one commit: every file's text and blob id. GraphQL reads it in one
-  // request. When GitHub refuses GraphQL, one REST listing plus one blob read per document is used
-  // instead, inside the same request budget; the caller learns which route ran (`mode`).
+  // request. GraphQL leaves out the text of a blob over about 1 MB (`isTruncated`), so each such
+  // document is then read whole by its blob id. When GitHub refuses GraphQL, one REST listing plus
+  // one blob read per document is used instead. Both routes stay inside the same request budget and
+  // the caller learns which route ran (`mode`).
   readTree(ref) {
     const dir = this.store.path.replace(/\/$/, '');
     const [owner, name] = this.store.repository.split('/');
@@ -2526,11 +2528,18 @@ class StateStore {
     if (response.status === 200 && !response.json?.errors?.length && repo) {
       this.graphqlRefused = false;
       const files = new Map();
+      const large = [];
       for (const entry of repo.snapshot?.entries || []) {
         if (entry.type !== 'blob') continue;
         const truncated = entry.object?.isTruncated || typeof entry.object?.text !== 'string';
         files.set(entry.name, { text: truncated ? null : entry.object.text, sha: entry.oid || null });
+        if (truncated && DOCUMENT_FILE.test(String(entry.name)) && isSha(entry.oid)) large.push(entry);
       }
+      // Reading every large document must still leave the settlement reserve; otherwise stop before any write.
+      if (large.length && typeof this.transport.left === 'function' && this.transport.left() < large.length + (this.transport.reserve || 0)) {
+        throw Object.assign(new ProgrammeError('PASS_STOPPED', 'Some state documents are too large for one GraphQL read and cannot be read one by one within this pass.'), { reason: 'State documents too large for GraphQL', noWrite: true });
+      }
+      for (const entry of large) files.set(entry.name, { text: this.readBlob(dir, entry.name, entry.oid), sha: entry.oid });
       return { files, mode: 'graphql' };
     }
     this.graphqlRefused = true;
@@ -2546,11 +2555,16 @@ class StateStore {
     const files = new Map(others.map(entry => [entry.name, { text: null, sha: isSha(entry.sha) ? entry.sha : null }]));
     for (const entry of wanted) {
       if (!isSha(entry.sha)) { files.set(entry.name, { text: null, sha: null }); continue; }
-      const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${entry.sha}`);
-      if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${dir}/${entry.name}`);
-      files.set(entry.name, { text: Buffer.from(blob.json.content, 'base64').toString('utf8'), sha: entry.sha });
+      files.set(entry.name, { text: this.readBlob(dir, entry.name, entry.sha), sha: entry.sha });
     }
     return { files, mode: 'rest' };
+  }
+
+  // One state file's whole text by its blob id (the Git Data API serves blobs up to 100 MB).
+  readBlob(dir, name, sha) {
+    const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${sha}`);
+    if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${dir}/${name}`);
+    return Buffer.from(blob.json.content, 'base64').toString('utf8');
   }
 
   // Every parent and child document at the branch head, each with its own blob id: the version its
