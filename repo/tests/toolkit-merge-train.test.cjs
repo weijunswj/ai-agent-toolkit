@@ -186,11 +186,11 @@ test('a train stacked on a running train combines early, takes no bump and canno
   fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: next.head }, 2: { state: 'OPEN', head: two } }));
   const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', next.head, '--main', 'main', '--live', live], f.repo);
   assert.equal(landing.ok, false);
-  assert.equal(landing.command, '');
+  assert.equal(landing.merge, null);
   assert.ok(landing.problems.some(problem => /neither a member's reviewed head nor main/.test(problem)), landing.problems.join('\n'));
 });
 
-test('land checks live heads, main and RISKY owner OKs before it prints the one merge command', t => {
+test('land checks live heads, main and RISKY owner OKs before it names the one merge', t => {
   const f = fixture(t);
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
@@ -200,7 +200,7 @@ test('land checks live heads, main and RISKY owner OKs before it prints the one 
   fs.writeFileSync(live, JSON.stringify(facts));
   const ready = f.cli('land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live);
   assert.equal(ready.status, 0, ready.stdout);
-  assert.equal(JSON.parse(ready.stdout).command, `gh pr merge 50 --repo example/repo --merge --match-head-commit ${result.head}`);
+  assert.deepEqual(JSON.parse(ready.stdout).merge, { repository: 'example/repo', pr: 50, head: result.head, method: 'merge commit' });
 
   fs.writeFileSync(live, JSON.stringify({ ...facts, 1: { state: 'OPEN', head: two } }));
   let refused = train.run(['land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], f.repo);

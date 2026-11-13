@@ -6,7 +6,8 @@
 // commits and review stay its own. The train adds nothing else except one bump commit at the end,
 // made by the repository's bump command, and `verify` proves that before CI and again before the
 // merge. A member that does not merge cleanly is ejected, never hand-fixed. The script never
-// merges, pushes or writes to GitHub: `land` only checks and prints the one merge command.
+// merges, pushes or writes to GitHub: `land` only checks, then names the train pull request and the
+// exact head the merging agent may merge, by the repository's normal merge route.
 //
 //   node repo/scripts/toolkit-merge-train.cjs build  --manifest <file> --branch <name> [--main <ref>] [--onto <ref>] [--out <file>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs verify --manifest <file> --head <ref> [--main <ref>] [--json]
@@ -37,7 +38,7 @@
 // commit whose tree equals a fresh run of the bump command. Every member must board exactly once.
 // land re-runs verify, requires main to be inside the train (else main moved: rebuild), every
 // member's pull request open at its boarded head, the train pull request at --head and an owner OK
-// for every RISKY member, then prints the merge command. --live reads those pull request facts from
+// for every RISKY member, then names the pull request and head to merge. --live reads those pull request facts from
 // a JSON file ({"<number>": {"state": "OPEN", "head": "<sha>"}}) instead of `gh api` (REST).
 //
 // Exit 0: done or ready. Exit 1: refused, with every reason. Exit 2: bad arguments or unreadable input.
@@ -346,14 +347,13 @@ function land(cwd, manifest, options) {
     if (facts.head !== member.head) problems.push(`#${member.pr} moved to ${String(facts.head).slice(0, 12)} after boarding: eject it until its review passes the new head`);
     if (member.tier === 'RISKY' && !member.owner_ok) problems.push(`#${member.pr} is RISKY and has no owner merge OK recorded`);
   }
-  const repo = manifest.repository ? ` --repo ${manifest.repository}` : '';
   return {
     ok: problems.length === 0,
     pr: options.pr,
     head: options.head,
     members: checked.members,
     problems,
-    command: problems.length ? '' : `gh pr merge ${options.pr}${repo} --merge --match-head-commit ${options.head}`,
+    merge: problems.length ? null : { repository: manifest.repository || '', pr: options.pr, head: options.head, method: 'merge commit' },
   };
 }
 
