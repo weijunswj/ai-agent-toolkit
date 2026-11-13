@@ -33,7 +33,7 @@ fi
 if [ ! -e "$ENV_FILE" ]; then
   install -m 0600 /dev/null "$ENV_FILE"
   echo "Created empty private env file at $ENV_FILE"
-  echo "Edit it outside chat to enable Telegram/email notifications, healthchecks, certificates, and backup freshness checks."
+  echo "Edit it outside chat to set the required Telegram/email notification, plus healthchecks, certificates, and backup freshness checks."
 fi
 
 backup_existing() {
@@ -77,7 +77,8 @@ systemctl daemon-reload
 systemctl enable --now "$TIMER_NAME"
 
 echo 'Daily security check systemd timer installed. No auto-remediation is enabled.'
-echo "Optional notification config: $ENV_FILE"
+echo "Required notification config (the owner reads it): $ENV_FILE"
+echo "Until a notifier is set, every run ends FAIL and the unit shows in systemctl --failed."
 echo "Placeholder config copied to: $ENV_EXAMPLE_TARGET"
 systemctl list-timers --all "$TIMER_NAME" --no-pager || true
 systemctl status "$TIMER_NAME" --no-pager || true

@@ -381,7 +381,7 @@ test('only the project that runs the Toolkit repo watches other projects, and on
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['CONTEXT RESET DUE', 'GUIDEBOOK MISSING or SKILL COPY STALE', 'SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND'];
+  const order = ['CONTEXT RESET DUE', 'GUIDEBOOK MISSING or SKILL COPY STALE', 'SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND', 'TASK FAILING', 'PR ATTENTION'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
@@ -430,8 +430,10 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
   assert.ok(rendered('daily-check-in').includes('is missing (no such trigger in list_triggers'), 'check-in sees a deleted nudge');
   assert.match(nudge, /Each run posts one line in its home thread \(DELIVERY\), and the coordinator relays it to the project chat\./);
-  assert.doesNotMatch(nudge, /It runs silently|read_project_chat \(limit 1\)/);
-  for (const required of ['all three hold', 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
+  assert.doesNotMatch(nudge, /It runs silently|read_project_chat \(limit 1\)|its only thread-resolve pass|with the three conditions or QUIET-6H/);
+  for (const required of ['list a thread when (1) and (3) hold', 'the state file says the last thread scan was complete', '`scan: complete` or `scan: <read> of <total>`', 'and its backstop thread-resolve pass.',
+    'with conditions (1) and (3), the relay state, or QUIET-6H', 'relay unverified', 'RESOLVE DUE: <n> | ', 'THREAD SCAN INCOMPLETE: <read> of <total> | ',
+    'never report "none" for **Resolve:** from a partial scan', "the state file's resolve candidates that list_threads still shows unresolved", 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
   }
@@ -965,10 +967,39 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
     assert.doesNotMatch(text, /fires it once|Fire it once|Test one run now|caught up by firing it/, name);
   }
   assert.ok(device.includes('- **Rotate long Remote Control lanes too.**') && device.includes('you end its session with `stop_remote_control` once the handoff is read back'), 'Remote Control lanes rotate too');
-  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
+  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
   const freshAge = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
   assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
   const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
   assert.match(skill, /\*\*Every task run reaches the project chat\.\*\*[^\n]*a prefixed line is work, never `no_reply_needed`\./);
   assert.match(skill, /each new task gets a fresh thread, linking the old one\. Rotate every standing non-gate thread \(integrator, review runner, record keeper, any long-lived lane\) per `agent-cost-control`, and at the latest at 15 PRs, records or review rounds, a day old or summarised context:/);
+});
+
+test('the check-in turns stuck work into prefixes the coordinator must act on, and the controller owns every finding', () => {
+  const text = rendered('daily-check-in');
+  // A failing or missed task is no longer advice only.
+  assert.match(text, /never in the prefix, except an enabled task not stopped by the owner whose last run is read as failed, or as missing its last scheduled run: start the first line with "TASK FAILING: <names> \| "\. A task whose status cannot be read is "<name>: unverified" under \*\*Tasks:\*\*, and a disabled one stays advice\./);
+  // An open PR that needs a step gets a prefix, review-notification PRs included.
+  assert.match(text, /An open PR with a failing check, a ready PR missing its UAT verdict, or an open PR with no update for 3 days \(review-notification PRs included\), unless the PR or its task records a wait with its blocker and the date it is due: start the first line with "PR ATTENTION: <n> \| "/);
+  // A missing set reported before is not silenced forever: after 3 days it returns for the owner.
+  const own = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'weijunswj/ai-agent-toolkit' }));
+  assert.match(own, /with the date it was first reported; once that date is 3 or more days old, start the first line with it again, marked "3 days"/);
+  assert.match(own, /PROJECT TASKS MISSING set reported with the date it was first reported/);
+  const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
+  const periodic = fs.readFileSync(path.join(dir, 'reference', 'periodic-runs.md'), 'utf8');
+  const acting = periodic.slice(periodic.indexOf('## Acting on the check-in report'), periodic.indexOf('## Hourly nudge home thread'));
+  for (const required of ['  - `TASK FAILING`:', '  - `PR ATTENTION`:', 'Marked "3 days"', 'Every prefix is a finding the controller owns',
+    'the same prefix on two check-ins in a row goes to the owner once with the exact step']) assert.ok(acting.includes(required), required);
+  // The controller rule and its page: an action and a deadline the turn a finding is seen, escalation on a repeat.
+  const core = fs.readFileSync(path.join(ROOT, 'repo', 'CONTROLLER.md'), 'utf8');
+  assert.match(core, /\*\*Findings are the controller's work:\*\*[^\n]*gets an action and a deadline from the controller the turn it is seen; an acknowledgement, log line, count or relay is not an action\. A missed deadline or a repeat goes to the owner/);
+  const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'evidence-and-finish.md'), 'utf8');
+  for (const required of ['- **Findings:** the controller owns every finding whoever raised it', 'Dispose only with a recorded reason',
+    'the same finding on two runs in a row, goes to the owner once with the exact step', 'never a bare unknown',
+    'Re-read owed lists (promises, Lows children, pending owner OKs, review-only PRs) at session start and on every periodic run']) assert.ok(page.includes(required), required);
+  const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
+  for (const required of ["follow-up (Low or `POST_SHIP`; one record per PR, on an outcome child that joins the lane's next slice or starts within 3 days, unless the owner accepted it)",
+    "keep the UAT ask on the owner's waiting list until it is answered", 'then relaunch one successor or record the hold on the child']) assert.ok(gates.includes(required), required);
+  // A verified plugin gap stays on the owner's list every run, not only on the run that first reports it.
+  assert.match(text, /Missing account copy: say so under \*\*Plugin:\*\*\. While that verified gap remains, also list "update the Toolkit plugin on claude\.ai \(behind since <date>\)" under \*\*Waiting on owner:\*\* every run\./);
 });

@@ -259,7 +259,7 @@ const GATE_STEP = 'Run validation';
 const AGGREGATE_HEADER = [
   '  validate:',
   `    needs: [${REQUIRED_JOBS.join(', ')}]`,
-  '    if: ${{ always() }}',
+  '    if: ${{ !cancelled() }}',
   '    runs-on: ubuntu-latest',
   '    timeout-minutes: 15',
   '    steps:',
@@ -517,16 +517,21 @@ const WORKFLOW_HEADER = [
   'permissions:',
   '  contents: read',
   '',
-  '# A newer run for the same pull request cancels the older one; every push keeps its own run.',
+  '# One run at a time for each pull request; every push keeps its own run. A new commit, an open or a',
+  '# reopen cancels the run in progress, because the code changed. A title or body edit never cancels',
+  '# it: the edit run waits and then runs in full, so the newest event always finishes last and a',
+  '# fixed body still clears the required check. GitHub keeps one waiting run per group, so a burst',
+  '# of edits runs once.',
   'concurrency:',
   "  group: validate-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}",
-  '  cancel-in-progress: true',
+  "  cancel-in-progress: ${{ github.event.action != 'edited' }}",
   '',
   '# The test files run in shards on Linux and Windows (repo/contracts/ci/test-shards.json). The',
   '# validate job runs after every shard, also when one failed: its "Run validation" step runs the',
   '# repository checks, fails any test file over its time budget (check-test-durations.cjs), and then',
   '# proves from the shard summaries that each system ran every test file once with no failure. A',
-  '# failed, cancelled or skipped shard fails it. Each run attempt uploads its own summary artifact',
+  '# failed, cancelled or skipped shard fails it (a shard over its timeout counts as cancelled); a',
+  '# cancelled run reports validate as cancelled, not failed. Each run attempt uploads its own summary artifact',
   '# and the check keeps the newest attempt of each shard, so re-running a failed shard can clear',
   '# validate. The tests-clock-ahead job runs the test files that',
   '# pin a calendar date with Node\'s clock 400 days ahead, so a test that only passes near the date',
@@ -637,7 +642,7 @@ function workflowErrors(source, manifest) {
   const aggregate = jobs.get('validate');
   if (aggregate !== undefined) {
     const lines = aggregate.split('\n');
-    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push(`the validate job must start with needs: [${REQUIRED_JOBS.join(', ')}], if: \${{ always() }}, runs-on: ubuntu-latest and timeout-minutes: 15`);
+    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push(`the validate job must start with needs: [${REQUIRED_JOBS.join(', ')}], if: \${{ !cancelled() }}, runs-on: ubuntu-latest and timeout-minutes: 15`);
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
     if (names.join('|') !== 'Checkout|Set up Node|Download test summaries|Set up Python|Run validation') errors.push('the validate job steps must be Checkout, Set up Node, Download test summaries, Set up Python, Run validation (Run validation is step 6)');
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the validate job may have a condition');
