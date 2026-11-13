@@ -86,9 +86,24 @@ function renderAt(id, file, at, root, ci) {
   try { return render(id, sourceText(file, at, root), at, ci); } catch (error) { if (error instanceof InstallError) return null; throw error; }
 }
 
+// The CI workflow a gate copy follows, read from the copy itself: { file, name }, null when it follows
+// none, or undefined when its CI lines are broken (a hand edit).
+function copyCi(text) {
+  const file = /^ {10}CI_WORKFLOW: (\S+)$/m.exec(text), names = /^ {4}workflows: (\[[^\n]*\])$/m.exec(text);
+  if (!file && !names) return null;
+  if (!file || !names || !CI_FILE.test(file[1])) return undefined;
+  try {
+    const list = JSON.parse(names[1]);
+    if (Array.isArray(list) && list.length === 1 && typeof list[0] === 'string') return { file: file[1], name: list[0] };
+  } catch { /* broken below */ }
+  return undefined;
+}
+
 // { state: 'current' | 'outdated' | 'edited' | 'unmanaged' | 'missing' } for an installed copy.
-// `reference(commit)` gives what the installer wrote at the copy's own Toolkit commit, or null when
-// that cannot be known; with it, a copy that differs from its own render (pins aside) is a hand edit.
+// `reference(commit, ci)` gives what the installer wrote at the copy's own Toolkit commit for the CI
+// workflow the copy names, or null when that cannot be known; with it, a copy that differs from its
+// own render (pins aside) is a hand edit. A CI workflow renamed or removed since only makes the copy
+// outdated, because the reference uses the copy's own CI lines, not the repository's current ones.
 function copyState(text, expected, reference = () => null) {
   if (text === null) return { state: 'missing' };
   const normalised = normalise(text);
@@ -104,7 +119,9 @@ function copyState(text, expected, reference = () => null) {
   const named = [...body.matchAll(/^ {10}repository: (\S+)\n {10}ref: (\S+)$/gm)];
   if (!named.length || named.some(([, repository, ref]) => repository !== TOOLKIT_REPOSITORY || ref !== marker[2])) return { state: 'edited', toolkit: marker[2] };
   if (normalised === expected) return { state: 'current', toolkit: marker[2] };
-  const own = reference(marker[2]);
+  const ci = copyCi(body);
+  if (ci === undefined) return { state: 'edited', toolkit: marker[2] };
+  const own = reference(marker[2], ci);
   if (own !== null && withoutPins(normalised) !== withoutPins(normalise(own))) return { state: 'edited', toolkit: marker[2] };
   return { state: 'outdated', toolkit: marker[2] };
 }
@@ -159,8 +176,11 @@ function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(roo
   const rows = WORKFLOWS.map(({ id, file }) => {
     const expected = render(id, sourceText(file, commit, root), commit, ciWorkflow);
     const absolute = path.join(target, ...file.split('/'));
-    // The copy's own commit is re-rendered with this plan's CI workflow, the one the copy follows.
-    const reference = at => (at === commit ? expected : renderAt(id, file, at, root, ciWorkflow));
+    // The copy's own commit, re-rendered with the CI workflow the copy itself names.
+    const reference = (at, ci) => {
+      if (at !== commit) return renderAt(id, file, at, root, ci);
+      try { return render(id, sourceText(file, commit, root), commit, ci); } catch (error) { if (error instanceof InstallError) return null; throw error; }
+    };
     return { id, file, absolute, expected, ...copyState(readOrNull(absolute), expected, reference) };
   });
   return { target, commit, ci: ciWorkflow, rows, not_copied: NOT_COPIED.map(({ id, reason }) => ({ id, reason })) };

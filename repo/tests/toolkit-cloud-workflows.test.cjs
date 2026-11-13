@@ -93,6 +93,32 @@ test('cloud workflows: the copies carry no header line that only holds in the To
   assert.match(copies[0], /a governed\n# repository's copy checks the Toolkit out at a pinned commit/);
 });
 
+test('cloud workflows: a renamed or removed CI workflow leaves a faithful gate copy outdated, never edited', t => {
+  const toolkit = toolkitHistory(t);
+  for (const at of ['one', 'two']) {
+    const repo = tempRepo(t);
+    const ciFile = path.join(repo, '.github/workflows/ci.yml');
+    const gateFile = path.join(repo, GATE.file);
+    fs.mkdirSync(path.dirname(ciFile), { recursive: true });
+    fs.writeFileSync(ciFile, 'name: CI\non: push\n');
+    fs.writeFileSync(gateFile, workflows.render('programme-sweep-gate', source(GATE.file), toolkit[at], { file: 'ci.yml', name: 'CI' }));
+    const state = () => workflows.plan({ repo, root: toolkit.dir, commit: toolkit.two }).rows.find(row => row.id === 'programme-sweep-gate').state;
+    assert.equal(state(), at === 'two' ? 'current' : 'outdated', `${at}: faithful`);
+    fs.writeFileSync(ciFile, 'name: Build\non: push\n');
+    assert.equal(state(), 'outdated', `${at}: CI workflow renamed`);
+    fs.rmSync(ciFile);
+    assert.equal(state(), 'outdated', `${at}: CI workflow removed`);
+    assert.deepEqual(conformance.cloudWorkflowFindings({ root: repo }, toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).filter(entry => entry.severity === 'drift').map(entry => entry.message).filter(message => message.includes('gate')), [], `${at}: no drift`);
+    // Broken CI lines are a hand edit, even with the hash recomputed.
+    const text = fs.readFileSync(gateFile, 'utf8');
+    const lines = text.split('\n');
+    const body = lines.slice(1).join('\n').replace('    workflows: ["CI"]\n', '    workflows: [CI, Other]\n');
+    const hash = require('node:crypto').createHash('sha256').update(body.replace(/^(\s+(?:- )?uses: [^@\s]+)@[^\n]*$/gm, '$1'), 'utf8').digest('hex').slice(0, 12);
+    fs.writeFileSync(gateFile, `${lines[0].replace(/sha256=[0-9a-f]{12}/, `sha256=${hash}`)}\n${body}`);
+    assert.equal(state(), 'edited', `${at}: broken CI lines`);
+  }
+});
+
 // A throwaway Toolkit history: the real render file and workflow files at commit one, a workflow
 // comment changed at commit two, and optionally the render file changed at commit three.
 function toolkitHistory(t) {
