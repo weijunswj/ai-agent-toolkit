@@ -151,7 +151,7 @@ test('graph archive parts stay below the hard limit and preserve graph row order
   assert.deepEqual(parts.flatMap(part => part.body.split('\n').filter(line => /^\|Task /.test(line))), rows.map(row => row.text));
 });
 
-test('the shared post budget spends graph archives before trace pages', () => {
+test('the shared post budget goes to graph archives; no trace pages are posted', () => {
   const f = pageFixture(state, { count: 180, hand: '# Programme\n\n' + 'Notes. '.repeat(6600) });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.equal(f.posts().length, 5);
@@ -159,7 +159,7 @@ test('the shared post budget spends graph archives before trace pages', () => {
   const before = f.posts().length;
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   assert.ok(f.posts().length - before <= 5);
-  assert.ok(f.posts().slice(before).some(post => post.body.body.includes('decision-trace-index')));
+  assert.equal(f.posts().some(post => post.body.body.includes('decision-trace-index')), false);
 });
 
 test('a repair notice waits with its intent when archives spend all five comment slots', () => {
@@ -174,7 +174,7 @@ test('a repair notice waits with its intent when archives spend all five comment
   assert.ok(first.holds.length);
   assert.ok(f.parent().pending_effects.some(effect => effect.kind === 'post_parent_repair'));
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
-  assert.equal(f.posts().length, 7, 'five graph parts, then one trace page and the owed repair notice');
+  assert.equal(f.posts().length, 6, 'five graph parts, then the owed repair notice');
   assert.match(f.posts().at(-1).body.body, /toolkit-parent-repair:12:9/);
   assert.deepEqual(f.parent().pending_effects, []);
 });
@@ -226,12 +226,14 @@ test('archive registry, effect targets and new diagnostics are closed in runtime
 
 test('B-T12: archive comments remain untagged and every decision stays reachable', () => {
   const f = pageFixture(state, { count: 84, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
-  f.github.addComment(12, { body: 'Delivery\n---\nTEST-1\nA decision.' });
+  const decisionId = f.github.addComment(12, { body: 'Delivery\n---\nTEST-1\nA decision.' });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
-  assert.equal(f.parent().page_archive.length, 1, 'the graph part is reachable through the trace');
-  const audit = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/decision-trace-audit.cjs')).auditDecisionTraces({ body: f.page(), comments: f.github.commentsOf(12), recordPrefix: 'TEST-', repository: f.github.repository, issue: 12 });
-  assert.deepEqual(audit.unlinked_decisions, []);
-  assert.match(state.findStateBlock(f.page(), 'TRACE').block.body, /Other comments/);
+  assert.equal(f.parent().page_archive.length, 1, 'the graph part is archived');
+  const block = state.findStateBlock(f.page(), 'TRACE').block.body;
+  const archived = f.github.commentsOf(12).find(entry => entry.body.startsWith('<!-- programme-page-archive'));
+  assert.ok(archived, 'the archive comment exists');
+  assert.ok(block.includes(`#issuecomment-${decisionId})`), 'the newer archive comment never takes the decision link');
+  assert.equal(block.includes(String(archived.id)), false);
 });
 
 test('archived quotations cannot introduce decision records, supersession or trace indexes', () => {

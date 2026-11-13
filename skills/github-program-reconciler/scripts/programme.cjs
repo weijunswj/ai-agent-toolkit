@@ -87,7 +87,7 @@ const usage = message => new ProgrammeError('USAGE', message);
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (!COMMANDS.includes(command)) throw usage(`Usage: programme.cjs <${COMMANDS.join('|')}> [options]`);
+  if (!COMMANDS.includes(command)) throw usage(`Usage: programme.cjs <${[...COMMANDS, 'trace'].join('|')}> [options]`);
   const args = { command };
   for (let index = 0; index < rest.length; index += 1) {
     const flag = rest[index];
@@ -969,8 +969,40 @@ function formatReport(report) {
 // passes: it never writes programme state.
 const EXECUTOR_MARKERS = Object.freeze(['TOOLKIT_GATE_ROLE', 'TOOLKIT_NATIVE_HELPER_BINDING']);
 
+// `trace <n>`: the decision records on issue n (and, separately, on the parent), listed by topic with
+// the latest per topic live. Read-only; it runs the decision history against the checkout's origin.
+// The page bodies carry only one link to the newest record, so this is how agents read decisions.
+const TRACE_USAGE = 'Usage: programme.cjs trace <issue> [--full] [--edits] [--json] [--max <n>] [--repo-root <dir>]';
+function traceArgs(rest) {
+  const [issue, ...options] = rest;
+  if (!/^\d+$/.test(String(issue || '')) || Number(issue) < 1) throw usage(TRACE_USAGE);
+  const passed = [];
+  let repoRoot = null;
+  for (let index = 0; index < options.length; index += 1) {
+    const flag = options[index];
+    if (['--full', '--edits', '--json'].includes(flag)) passed.push(flag);
+    else if (flag === '--max' || flag === '--repo-root') {
+      const value = options[index + 1];
+      if (value === undefined || value.startsWith('--') || !value.trim()) throw usage(`${flag} needs a value. ${TRACE_USAGE}`);
+      if (flag === '--max') passed.push('--max', value); else repoRoot = value;
+      index += 1;
+    } else throw usage(`Unknown option: ${flag}. ${TRACE_USAGE}`);
+  }
+  return { issue: Number(issue), passed, repoRoot };
+}
+
+function traceCommand(rest, deps, out) {
+  const { issue, passed, repoRoot } = traceArgs(rest);
+  const originUrl = deps.originUrl || runGit(state.resolveExecutable('git'), repoRoot || deps.repoRoot || process.cwd(), ['remote', 'get-url', 'origin']);
+  const origin = state.originSlug(originUrl);
+  if (!origin) throw new ProgrammeError('REPO_IDENTITY_MISMATCH', 'The origin remote must name a github.com repository.');
+  const history = deps.decisionHistory || require('./decision-history.cjs');
+  return history.main(['--repo', origin, '--child', String(issue), ...passed], out);
+}
+
 function main(argv = process.argv.slice(2), deps = {}) {
   const out = deps.stdout || process.stdout;
+  if (argv[0] === 'trace') return traceCommand(argv.slice(1), deps, out);
   const args = parseArgs(argv);
   if (args.command === 'closing-comment') {
     const repoRoot=args['repo-root'] || deps.repoRoot || process.cwd();
@@ -1281,4 +1313,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ parseArgs, passBudgetMs, sweepRequestCap, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord, MergedSweepBindingReader });
+module.exports = Object.freeze({ parseArgs, traceArgs, passBudgetMs, sweepRequestCap, toolkitVersion, takeLock, lockState, defaultLockFile, againFile, LOCK_STALE_MS, LOCK_ABANDONED_MS, MAX_PASSES, openContext, commands, localCommands, formatReport, main, verifyTakeoverRecord, MergedSweepBindingReader });

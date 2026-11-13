@@ -226,3 +226,31 @@ test('the G0 history step is routed from the rules, both playbook indexes, the P
   assert.ok(text.includes(`--child <n>`) && text.includes('SCOPE-CONFIRMED') && text.includes('never every child'));
   assert.doesNotMatch(text, /github\.com|#\d/);
 });
+
+test('programme.cjs trace <n> runs the decision history for that issue against the checkout origin', () => {
+  const cli = require(path.join(SCRIPTS, 'programme.cjs'));
+  assert.deepEqual(cli.traceArgs(['865']), { issue: 865, passed: [], repoRoot: null });
+  assert.deepEqual(cli.traceArgs(['12', '--full', '--json', '--edits', '--max', '4', '--repo-root', '/repo']), { issue: 12, passed: ['--full', '--json', '--edits', '--max', '4'], repoRoot: '/repo' });
+  for (const bad of [[], ['x'], ['0'], ['12', '--bogus'], ['12', '--max'], ['12', '--max', '--full']]) assert.throws(() => cli.traceArgs(bad), { code: 'USAGE' }, JSON.stringify(bad));
+  let called = null;
+  let printed = '';
+  const code = cli.main(['trace', '865', '--json'], { originUrl: 'https://github.com/acme/app.git', stdout: { write: text => { printed += text; } },
+    decisionHistory: { main: (argv, out) => { called = argv; out.write('history\n'); return 0; } } });
+  assert.equal(code, 0);
+  assert.deepEqual(called, ['--repo', 'acme/app', '--child', '865', '--json']);
+  assert.equal(printed, 'history\n');
+  assert.throws(() => cli.main(['trace', '865'], { originUrl: 'https://example.test/acme/app.git', decisionHistory: { main: () => 0 } }), { code: 'REPO_IDENTITY_MISMATCH' });
+});
+
+test('the decision-trace playbook and governed rules send agents to programme.cjs trace, not a body trace', () => {
+  const root = path.resolve(__dirname, '../..');
+  const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+  const playbook = read('skills/repository-agent-rules/repo-local/docs/agent-playbooks/decision-trace.md');
+  assert.ok(playbook.includes('programme.cjs trace <n>'));
+  assert.doesNotMatch(playbook, /comment trace on each issue body is the ledger/);
+  const rules = read('repo/contracts/agent-rules/toolkit-governed-rules.md');
+  assert.match(rules, /Decision traces:[^\n]*page bodies keep one link, never a trace[^\n]*`programme\.cjs trace <n>`/);
+  assert.doesNotMatch(rules, /issue body is the canonical record/);
+  assert.ok(read('repo/docs/agent-playbooks/controller-takeover.md').includes('`programme.cjs trace <parent>`'));
+  assert.ok(read('skills/controller-bootstrap/SKILL.md').includes('`programme.cjs trace <parent>`'));
+});

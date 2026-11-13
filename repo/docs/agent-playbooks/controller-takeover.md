@@ -111,7 +111,7 @@ EXAMPLE-001 TAKEOVER: controller example-controller on example harness; Toolkit 
 
 ### 8. Orientation
 
-Read the repository map and its recorded commit, open pull requests and checks, and the latest evidence, including the store's `records/takeover` branch when present. With governance enabled, also read the programme index and CURRENT. If the map is absent or materially stale, queue a bounded G0 as the first work after takeover; do not start a gate before done and extras. List pending work, every hold and what waits on the owner.
+Read the repository map and its recorded commit, open pull requests and checks, and the latest evidence, including the store's `records/takeover` branch when present. With governance enabled, also read the programme index and CURRENT, and list the parent's live decisions with `programme.cjs trace <parent>`; page bodies carry no comment trace. If the map is absent or materially stale, queue a bounded G0 as the first work after takeover; do not start a gate before done and extras. List pending work, every hold and what waits on the owner.
 
 ### 9. Governance checks
 

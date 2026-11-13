@@ -9,8 +9,8 @@ const { pageFixture } = require('./support/programme-page-fixture.cjs');
 test('B-T1: the parent owns four capital H1 headings in order and settles', () => {
   const f = pageFixture(state, { count: 2 });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
-  assert.deepEqual(f.page().match(/^# (CURRENT|PROGRAMME GRAPH|AGENT CONTEXT|COMMENT TRACE)$/gm), ['# CURRENT', '# PROGRAMME GRAPH', '# AGENT CONTEXT', '# COMMENT TRACE']);
-  for (const [name, heading] of [['CURRENT', 'CURRENT'], ['STATE', 'PROGRAMME GRAPH'], ['CONTEXT', 'AGENT CONTEXT'], ['TRACE', 'COMMENT TRACE']]) assert.ok(state.findStateBlock(f.page(), name).block.body.includes(`# ${heading}`));
+  assert.deepEqual(f.page().match(/^# (CURRENT|PROGRAMME GRAPH|AGENT CONTEXT|DECISIONS)$/gm), ['# CURRENT', '# PROGRAMME GRAPH', '# AGENT CONTEXT', '# DECISIONS']);
+  for (const [name, heading] of [['CURRENT', 'CURRENT'], ['STATE', 'PROGRAMME GRAPH'], ['CONTEXT', 'AGENT CONTEXT'], ['TRACE', 'DECISIONS']]) assert.ok(state.findStateBlock(f.page(), name).block.body.includes(`# ${heading}`));
   const writes = f.github.mutations();
   assert.equal(f.make().run({ apply: true }).summary, 'No changes');
   assert.equal(f.github.mutations(), writes);
@@ -329,11 +329,11 @@ test('M1: a refused parent size does not block another page redraw', () => {
   assert.equal(f.store.read('child', 100).doc.lifecycle, 'ACTIVE');
 });
 
-// AGENT CONTEXT lists the one comment whose topic is "Agent context"; COMMENT TRACE leaves it out.
+// AGENT CONTEXT lists the one comment whose topic is "Agent context"; DECISIONS never links it on the parent.
 const contextBlocks = f => ({ context: state.findStateBlock(f.page(), 'CONTEXT').block.body, trace: state.findStateBlock(f.page(), 'TRACE').block.body });
 const contextLink = id => `https://github.com/example.test/app/issues/12#issuecomment-${id}`;
 
-test('one Agent context comment shows under AGENT CONTEXT and leaves COMMENT TRACE', () => {
+test('one Agent context comment shows under AGENT CONTEXT and is never the DECISIONS link', () => {
   const hand = '# Programme\n\n**Agent context:** hand-written pointer, kept as written.\n';
   const f = pageFixture(state, { count: 1, hand });
   // The note links a record it explains: that mention must not rule it out.
@@ -346,8 +346,8 @@ test('one Agent context comment shows under AGENT CONTEXT and leaves COMMENT TRA
   assert.equal(context, `${state.renderContextBlockBody()}\n\n- [Agent context](${contextLink(id)})`);
   assert.doesNotMatch(trace, new RegExp(String(id)));
   assert.doesNotMatch(trace, /Agent context/);
-  assert.match(trace, new RegExp(`\\*\\*Release plan:\\*\\* \\[${decision}\\]`));
-  assert.match(trace, new RegExp(`\\[${loose}\\]`));
+  assert.match(trace, new RegExp(`Newest: \\[${decision}\\]`), 'the newest tagged decision is the one link');
+  assert.doesNotMatch(trace, new RegExp(String(loose)), 'an untagged note is not a decision record');
   assert.ok(f.page().startsWith('# Programme\n') && f.page().includes('\n**Agent context:** hand-written pointer, kept as written.\n'), 'hand-written text keeps its bytes');
   assert.ok(!f.parent().attention?.some(entry => entry.code === 'TRACE_UNLINKED' && entry.state !== 'resolved'), 'the listed comment still counts as linked');
   const writes = f.github.mutations();
@@ -355,7 +355,7 @@ test('one Agent context comment shows under AGENT CONTEXT and leaves COMMENT TRA
   assert.equal(f.github.mutations(), writes);
 });
 
-test('two Agent context comments hold: the block names both and COMMENT TRACE keeps them', () => {
+test('two Agent context comments hold: the block names both, and neither becomes the DECISIONS link', () => {
   const f = pageFixture(state);
   const first = f.github.addComment(12, { body: 'Agent context\n---\nFirst.' });
   const second = f.github.addComment(12, { body: 'agent  context\r\n---\r\nSecond, other spelling.' });
@@ -364,7 +364,7 @@ test('two Agent context comments hold: the block names both and COMMENT TRACE ke
   assert.match(context, /^- Held: 2 comments have "Agent context" as their topic, so none is listed here: /m);
   for (const id of [first, second]) {
     assert.ok(context.includes(`[${id}](${contextLink(id)})`));
-    assert.ok(trace.includes(`[${id}](${contextLink(id)})`));
+    assert.doesNotMatch(trace, new RegExp(String(id)));
   }
   assert.doesNotMatch(context, /^- \[Agent context\]/m);
   assert.equal(f.make().run({ apply: true }).summary, 'No changes');
@@ -382,7 +382,7 @@ test('a long Agent context hold names five comments and counts the rest', () => 
   const body = state.renderContextBlockBody(12, comments, 'example.test/app');
   assert.match(body, /Held: 7 comments/);
   assert.equal(body.match(/#issuecomment-/g).length, 5);
-  assert.match(body, / and 2 more\. They stay in COMMENT TRACE\./);
+  assert.match(body, / and 2 more\. They stay in the comments\./);
 });
 
 test('no Agent context comment keeps the fixed lines; bot, index, archive and untagged comments never count', () => {
@@ -403,16 +403,16 @@ test('no Agent context comment keeps the fixed lines; bot, index, archive and un
   ]), ['4']);
 });
 
-test('task pages keep an Agent context comment in their own comment trace', () => {
+test('a task page links an Agent context comment as its newest decision record', () => {
   const f = pageFixture(state, { count: 1 });
   const id = f.github.addComment(100, { body: 'Agent context\n---\nTask note.' });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const body = f.github.issues.get(100).body;
   assert.equal(state.findStateBlock(body, 'CONTEXT').block, null);
-  assert.match(state.findStateBlock(body, 'TRACE').block.body, new RegExp(`\\*\\*Agent context:\\*\\* \\[${id}\\]`));
+  assert.match(state.findStateBlock(body, 'TRACE').block.body, new RegExp(`Newest: \\[${id}\\]`));
 });
 
-test('an Agent context comment stays out of the trace when the trace pages into index comments', () => {
+test('a long comment history on a large page posts no index comments and keeps the Agent context comment out of DECISIONS', () => {
   const f = pageFixture(state, { hand: '# Programme\n' + 'n'.repeat(52000) });
   const id = f.github.addComment(12, { body: 'Agent context\n---\nBackground.' });
   for (let i = 0; i < 120; i += 1) f.github.addComment(12, { body: `Topic ${i % 3}\n---\nNote ${i}.` });
@@ -421,7 +421,6 @@ test('an Agent context comment stays out of the trace when the trace pages into 
   assert.ok(context.endsWith(`- [Agent context](${contextLink(id)})`));
   assert.doesNotMatch(trace, new RegExp(String(id)));
   const pages = f.github.commentsOf(12).filter(comment => comment.body.includes('<!-- decision-trace-index -->'));
-  assert.ok(pages.length > 0, 'the trace paged');
-  for (const comment of pages) assert.ok(!comment.body.includes(String(id)), 'no index page lists it');
+  assert.equal(pages.length, 0, 'nothing pages into index comments');
   assert.equal(f.make().run({ apply: true }).summary, 'No changes');
 });

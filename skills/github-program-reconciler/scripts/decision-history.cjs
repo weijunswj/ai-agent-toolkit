@@ -323,7 +323,7 @@ function parseArgs(argv) {
   return args;
 }
 
-function main(argv = process.argv.slice(2)) {
+function main(argv = process.argv.slice(2), out = process.stdout) {
   const args = parseArgs(argv);
   const ledger = args.ledger ? JSON.parse(fs.readFileSync(args.ledger, 'utf8')) : null;
   if ((args.parent === null || args.recordPrefix === null) && args.repo) {
@@ -337,12 +337,12 @@ function main(argv = process.argv.slice(2)) {
     const reads = numbers.map(number => ({ number, ...read(number) }));
     const explicit = explicitSet(...reads.map(item => item.entries));
     const traces = reads.map(({ number, entries, counts }) => ({ number, trace: { ...analyseTrace(entries, explicit), counts } }));
-    process.stdout.write(`${args.json ? toJson({ parent: args.parent, traces }) : renderProgramme(args.parent, traces, args)}\n`);
+    out.write(`${args.json ? toJson({ parent: args.parent, traces }) : renderProgramme(args.parent, traces, args)}\n`);
     return 0;
   }
   const history = childHistory({ child: args.child, parent: args.parent, childEntries: read(args.child), parentEntries: args.parent !== args.child ? read(args.parent) : null });
   if (args.edits) history.body_edits = readBodyEdits(args.repo, args.child);
-  process.stdout.write(`${args.json ? toJson(history) : renderSummary(history, args)}\n`);
+  out.write(`${args.json ? toJson(history) : renderSummary(history, args)}\n`);
   return 0;
 }
 
@@ -352,5 +352,5 @@ if (require.main === module) {
 }
 
 module.exports = Object.freeze({
-  CONFIRMATION_TAG, entriesFromComments, entriesFromLedger, analyseTrace, childHistory, renderSummary, renderProgramme, summaryOf, parseArgs
+  CONFIRMATION_TAG, entriesFromComments, entriesFromLedger, analyseTrace, childHistory, renderSummary, renderProgramme, summaryOf, parseArgs, main
 });

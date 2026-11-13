@@ -720,6 +720,6 @@ test('a refresh that changes only the CURRENT summary names it in the effect', (
   fx.github.addIssue(450, { parent: 421 });
   const plan = fx.run(['reconcile']).result;
   assert.ok(plan.effects.some(effect => effect.kind === 'update_attention'));
-  assert.ok(plan.effects.some(effect => effect.text === "Update the comment trace and CURRENT summary in #421's body" || effect.text === "Update the CURRENT summary in #421's body"), JSON.stringify(plan.effects.map(effect => effect.text)));
-  assert.equal(plan.effects.some(effect => /comment trace in #421/.test(effect.text) && !/CURRENT/.test(effect.text)), false, 'never labelled as the comment trace alone');
+  assert.ok(plan.effects.some(effect => effect.text === "Update the DECISIONS block and CURRENT summary in #421's body" || effect.text === "Update the CURRENT summary in #421's body"), JSON.stringify(plan.effects.map(effect => effect.text)));
+  assert.equal(plan.effects.some(effect => /DECISIONS block in #421/.test(effect.text) && !/CURRENT/.test(effect.text)), false, 'never labelled as the DECISIONS block alone');
 });

@@ -145,31 +145,6 @@ test('apply-time overflow persists before any refused page write, including a re
   assert.equal(fx.github.calls.some(call => call.method === 'PATCH' && /issues\/12$/.test(call.path)), false);
 });
 
-test('apply-time topic preview and final directory read both persist newly oversized pages', t => {
-  for (const mode of ['topic', 'directory']) {
-    const fx = fixture(t);
-    if (mode === 'topic') fx.reconciler.threshold = 6000;
-    else fx.github.issues.get(12).body += 'Retained prose '.repeat(3500);
-    for (let i = 0; i < 150; i += 1) fx.github.addComment(12, { body: `${mode === 'topic' ? 'Scope' : `Topic ${i}`}\n---\nDecision ${i}` });
-    const plan = fx.reconciler.plan();
-    assert.equal(plan.holds.length, 0, mode);
-    assert.ok(plan.effects.some(effect => effect.kind === 'post_index_comment' && Boolean(effect.target.directory) === (mode === 'directory')), mode);
-    if (mode === 'topic') fx.github.issues.get(12).body += LARGE;
-    else fx.github.intercept(call => {
-      if (call.method === 'POST' && call.path === 'repos/acme/app/issues/12/comments') fx.github.issues.get(12).body += LARGE;
-      return undefined;
-    });
-    const report = fx.reconciler.apply(plan);
-    const hold = report.holds.find(entry => entry.code === 'BODY_TOO_LARGE' && entry.target === '#12');
-    assert.ok(hold, mode);
-    assert.ok(fx.entry(), mode);
-    assert.deepEqual(fx.entry().diagnostics, hold.diagnostics);
-    assert.equal(fx.entry().state, 'new');
-    assert.equal(fx.github.calls.some(call => call.method === 'PATCH' && /issues\/12$/.test(call.path)), false);
-    if (mode === 'topic') assert.equal(fx.github.calls.some(call => call.method === 'POST' && /issues\/12\/comments$/.test(call.path)), false);
-  }
-});
-
 test('closure matrix: partial, incomplete, newer-version and failed readback passes retain the finding; a full verified pass resolves', t => {
   for (const mode of ['partial', 'incomplete', 'newer', 'readback', 'broken-other', 'missing-other', 'discovery', 'success']) {
     const fx = fixture(t);

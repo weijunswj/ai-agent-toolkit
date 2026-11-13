@@ -228,7 +228,7 @@ test('a long burst stops at the pass limit and leaves the flag for the next refr
   fx.github.hooks.push((call, github) => {
     if (call.method === 'GET' || !/issues\/423/.test(call.path) || comments >= 50) return null;
     comments += 1;
-    github.addComment(423, { body: `burst ${comments}` });
+    github.addComment(423, { body: `Burst\n---\nburst ${comments}` });
     fs.writeFileSync(cli.againFile(fx.lockFile), 'x');
     return null;
   });
