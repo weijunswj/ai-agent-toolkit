@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// Remove Toolkit from this computer: its scheduled tasks, its task records and its global rules.
+// Remove Toolkit from this computer: its scheduled tasks and task records, its global rules, the app
+// settings it set, its helper agent files and skill copies, and its own folder.
 //
 // `setup toolkit` puts scheduled tasks into Windows Task Scheduler for every repository it serves.
 // Removing the plugin does not remove them. This command finds every task that carries Toolkit's
@@ -12,10 +13,12 @@
 //   apply   needs --confirm <plan code> from the plan the owner was shown. A list that changed since
 //           then gives a different code, and nothing is removed.
 //
-// It never touches a repository, the env store or any key, the managed checkout or the plugin. The
-// one app settings file it may change is Codex's config.toml: when setup raised its
-// project_doc_max_bytes, the plan lists that line and apply puts the earlier value back (a backup
-// first, then Codex is asked to load the file). Every other app settings file is left alone. A task the owner changed by hand is kept unless it is named with
+// It never touches a repository, the env store or any key, or anything the owner made. App settings
+// change only where Toolkit recorded its own value: Codex's project_doc_max_bytes line and helper
+// limit block in config.toml, and Claude Code's subagent limit in settings.json (backups first). The
+// other parts are in toolkit-remove-parts.cjs. The managed checkout and the rest of Toolkit's folder go
+// last, and only once no Toolkit plugin is installed; the plan lists the plugin uninstall lines, which
+// the agent runs after the owner's OK. A task the owner changed by hand is kept unless it is named with
 // --include; a task of the owner's own that Toolkit only lists (adopted) is always kept.
 //
 // Usage: node repo/scripts/toolkit-remove.cjs plan [--include <task id>[,<task id>...]] [--json]
@@ -28,6 +31,7 @@ const path = require('node:path');
 const tasks = require('./toolkit-tasks.cjs');
 const windows = require('./toolkit-windows-tasks.cjs');
 const { DISABLED_DESCRIPTION } = require('./toolkit-task-launcher.cjs');
+const parts = require('./toolkit-remove-parts.cjs');
 
 const SCHEMA = 'toolkit.remove-plan.v1';
 const USAGE = 'Usage: node repo/scripts/toolkit-remove.cjs plan [--include <task id>,...] [--json]\n'
@@ -60,12 +64,15 @@ const sameName = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 // Owns the read of what Toolkit left on this computer and the removal of exactly that. Every
 // effect goes through an injected boundary: the scheduler, the task registry and the global rules.
 class ToolkitRemoval {
-  #home; #scheduler; #registry; #rules; #include;
+  #home; #scheduler; #registry; #rules; #include; #parts; #plugins;
   // scheduler: the Windows scheduler interface, or null where there is no Task Scheduler.
   // rules: () => a GlobalRules-shaped object with check() and remove(), or null to leave rules out.
-  constructor({ home = os.homedir(), scheduler = null, registry = tasks, rules = null, include = [] } = {}) {
+  // parts: the other removal parts (toolkit-remove-parts.cjs), in the order apply runs them.
+  // plugins: () => { 'claude-code': bool, codex: bool }, whether the Toolkit plugin is installed.
+  constructor({ home = os.homedir(), scheduler = null, registry = tasks, rules = null, include = [], parts: extra = [], plugins = () => ({}) } = {}) {
     for (const id of include) if (!tasks.ID.test(String(id))) throw new RemovalError(`--include takes task ids from the plan; ${JSON.stringify(id)} is not one`);
     this.#home = home; this.#scheduler = scheduler; this.#registry = registry; this.#rules = rules; this.#include = [...new Set(include)].sort();
+    this.#parts = extra; this.#plugins = plugins;
   }
 
   // Read-only. The list of what would go and what stays, with the code that stands for it.
@@ -111,8 +118,20 @@ class ToolkitRemoval {
     const codexSettings = limit && limit.action !== 'none' ? { file: limit.file, action: limit.action,
       ...(limit.previous !== undefined ? { previous: limit.previous } : {}), ...(limit.detail ? { detail: limit.detail } : {}) } : null;
     const tasksOut = listed.map(({ tasks_in_folder: ignored, ...item }) => item);
-    const body = { tasks: tasksOut, stale_records: stale, folders, state: state.map(item => item.display), rules, codex_settings: codexSettings, include: this.#include };
-    return { shared, plan: { schema: SCHEMA, ...body, scheduler: this.#scheduler ? 'read' : 'not available on this system', nothing: !going.length && !stale.length && !state.length && !rules.some(file => file.action === 'remove') && !CODEX_WRITES.includes(codexSettings?.action), code: sha(body) } };
+    // A part that cannot be read is held, so the rest of the plan still shows.
+    const others = this.#parts.map(part => {
+      let items;
+      try { items = part.plan(); } catch (error) { items = [{ what: part.title, action: 'held', detail: `could not be read (${tasks.safeText(error.message)})` }]; }
+      return { key: part.key, title: part.title, items };
+    });
+    const body = { tasks: tasksOut, stale_records: stale, folders, state: state.map(item => item.display), rules, codex_settings: codexSettings, parts: others, include: this.#include };
+    // Not in the plan code: the agent uninstalls the plugins between the plan and apply.
+    let installed = {};
+    try { installed = this.#plugins() || {}; } catch { installed = {}; }
+    const plugins = Object.keys(parts.PLUGIN_STEPS).filter(host => installed[host] === true);
+    const nothing = !going.length && !stale.length && !state.length && !rules.some(file => file.action === 'remove') && !CODEX_WRITES.includes(codexSettings?.action)
+      && !others.some(part => part.items.some(item => item.action === 'remove'));
+    return { shared, plan: { schema: SCHEMA, ...body, plugins, scheduler: this.#scheduler ? 'read' : 'not available on this system', nothing, code: sha(body) } };
   }
 
   // One live task as the list shows it, or null for a task that is not Toolkit's and not listed by it.
@@ -195,16 +214,39 @@ class ToolkitRemoval {
         }
       } catch (error) { rules = [{ result: 'failed', reason: tasks.safeText(error.message) }]; }
     }
-    const ok = !results.some(item => item.result === 'failed') && !steps.some(item => item.result === 'failed') && !folders.some(item => item.result === 'failed') && !rules.some(item => item.result === 'failed') && codex?.result !== 'failed';
+    // The other parts, in order; the Toolkit folder is last and checks the plugins itself.
+    const others = this.#parts.map(part => {
+      const planned = plan.parts.find(item => item.key === part.key)?.items || [];
+      let done;
+      try { done = part.apply(planned); } catch (error) { done = [{ what: part.title, result: 'failed', reason: tasks.safeText(error.message) }]; }
+      return { key: part.key, title: part.title, results: done, held: planned.filter(item => item.action !== 'remove') };
+    });
+    let installed = {};
+    try { installed = this.#plugins() || {}; } catch { installed = {}; }
+    const plugins = Object.keys(parts.PLUGIN_STEPS).filter(host => installed[host] === true);
+    const ok = !results.some(item => item.result === 'failed') && !steps.some(item => item.result === 'failed') && !folders.some(item => item.result === 'failed') && !rules.some(item => item.result === 'failed') && codex?.result !== 'failed'
+      && !others.some(part => part.results.some(item => item.result === 'failed'));
     return { schema: 'toolkit.remove-result.v1', ok, tasks: results, kept: plan.tasks.filter(task => task.action === 'keep'), folders, steps, rules, codex_settings: codex,
-      held_rules: plan.rules.filter(file => file.action === 'held'), held_codex_settings: plan.codex_settings?.action === 'held' ? plan.codex_settings : null };
+      held_rules: plan.rules.filter(file => file.action === 'held'), held_codex_settings: plan.codex_settings?.action === 'held' ? plan.codex_settings : null, parts: others, plugins,
+      folder_kept: others.some(part => part.key === 'toolkit_folder' && part.results.some(item => item.result === 'kept')) };
   }
 }
 
-const NEXT_STEPS = Object.freeze([
-  'Not touched: your repositories, your keys, the Toolkit checkout and the plugin itself. App settings files are left alone, apart from the Codex settings line listed above, if any.',
-  'To finish removing Toolkit, uninstall the plugin in each app: `claude plugin uninstall ai-agent-toolkit@ai-agent-toolkit-local` for Claude Code and `codex plugin remove ai-agent-toolkit@ai-agent-toolkit-local` for Codex.',
-]);
+const NOT_TOUCHED = 'Not touched: your repositories, your keys (the env store and the credential store), and every setting, agent, skill and file you made yourself.';
+
+// The plugin uninstall lines for each app that still has the Toolkit plugin, and the app screen to use
+// when its command line is not available.
+function pluginLines(hosts, { after = false } = {}) {
+  if (!hosts.length) return [after ? 'Plugins: none installed.' : 'Plugins: none installed, so nothing to uninstall.'];
+  return [after ? 'Last step, uninstall the plugin (then start a new session):' : 'Plugins to uninstall (the agent runs these lines after your OK, before apply):',
+    ...hosts.flatMap(host => { const step = parts.PLUGIN_STEPS[host]; return step.lines.map(line => `- ${step.app}: \`${line}\``).concat(`- ${step.app} without its command line: ${step.ui}.`); })];
+}
+
+function partPlanLine(item) {
+  if (item.action === 'remove') return `- ${item.what}: removed${item.detail ? ` (${item.detail})` : ''}`;
+  if (item.action === 'held') return `- ${item.what}: left alone, ${item.detail || 'it could not be read'}`;
+  return `- ${item.what}: kept${item.detail ? `, ${item.detail}` : ''}`;
+}
 
 function taskLine(item) {
   const where = `\\${item.folder}\\${item.name}`;
@@ -226,7 +268,11 @@ function describePlan(plan) {
   const codex = plan.codex_settings;
   if (codex) lines.push('Codex settings:', `- ${codex.file}: ${codexPlanLine(codex)}`);
   if (rules.length) lines.push('Toolkit global rules:', ...rules.map(file => `- ${file.file}: ${file.action === 'remove' ? 'the Toolkit block is removed (a backup is saved first; the rest of the file stays)' : `left alone, ${file.detail || file.state}; fix or remove the Toolkit lines by hand`}`));
-  lines.push('', ...NEXT_STEPS);
+  for (const part of plan.parts || []) {
+    if (!part.items.length) continue;
+    lines.push(part.key === 'toolkit_folder' ? `${part.title} (goes last, once no Toolkit plugin is installed):` : `${part.title}:`, ...part.items.map(partPlanLine));
+  }
+  lines.push('', ...pluginLines(plan.plugins || []), '', NOT_TOUCHED);
   if (!plan.nothing) lines.push('', `Plan code: ${plan.code}`, 'Show the owner this list. After their OK, run apply with --confirm and this code. A list that changed gets a new code and removes nothing.');
   return lines;
 }
@@ -251,8 +297,17 @@ function describeResult(result) {
   for (const item of result.held_rules) lines.push(`- Global rules ${item.file}: left alone, ${item.detail || item.state}`);
   if (result.codex_settings) lines.push(`- Codex settings ${result.codex_settings.file || ''}: ${result.codex_settings.result}${result.codex_settings.reason ? ` (${result.codex_settings.reason})` : ''}${result.codex_settings.load_check ? `; Codex load check: ${result.codex_settings.load_check}` : ''}`);
   if (result.held_codex_settings) lines.push(`- Codex settings ${result.held_codex_settings.file}: left alone, ${result.held_codex_settings.detail || 'its Toolkit lines are damaged'}`);
-  if (!result.tasks.length && !result.steps.length && !result.rules.length && !result.codex_settings) lines.push("Nothing of Toolkit's was left to remove.");
-  lines.push('', result.ok ? 'Done.' : 'Some steps failed. Nothing else was changed; run plan again to see what is left.', ...NEXT_STEPS);
+  for (const part of result.parts || []) {
+    for (const item of part.results) lines.push(`- ${item.what}: ${item.result}${item.reason ? ` (${item.reason})` : ''}`);
+    for (const item of part.held) lines.push(`- ${item.what}: ${item.action === 'held' ? `left alone, ${item.detail || 'it could not be read'}` : 'kept'}`);
+  }
+  const partsDone = (result.parts || []).some(part => part.results.length);
+  if (!result.tasks.length && !result.steps.length && !result.rules.length && !result.codex_settings && !partsDone) lines.push("Nothing of Toolkit's was left to remove.");
+  lines.push('', result.ok ? 'Done.' : 'Some steps failed. Nothing else was changed; run plan again to see what is left.');
+  if (result.plugins?.length) lines.push('', ...pluginLines(result.plugins, { after: true }));
+  if (result.folder_kept) lines.push('', 'The Toolkit folder stays until the plugin is uninstalled. Then say `remove toolkit` again to remove it.');
+  if (!result.plugins?.length && !result.folder_kept) lines.push('', 'Start a new session in each app so nothing of Toolkit stays loaded.');
+  lines.push(NOT_TOUCHED);
   return lines;
 }
 
@@ -280,9 +335,13 @@ function main(argv = process.argv.slice(2), deps = {}) {
   try {
     const args = parseArgs(argv);
     const platform = deps.platform || process.platform;
-    const removal = new ToolkitRemoval({ home: deps.home || os.homedir(), include: args.include,
+    const home = deps.home || os.homedir();
+    const environment = deps.environment || process.env;
+    const removal = new ToolkitRemoval({ home, include: args.include,
       scheduler: deps.scheduler !== undefined ? deps.scheduler : platform === 'win32' ? windows.powerShellScheduler() : null,
-      rules: deps.rules !== undefined ? deps.rules : defaultRules() });
+      rules: deps.rules !== undefined ? deps.rules : defaultRules(environment),
+      parts: deps.parts !== undefined ? deps.parts : parts.defaultParts({ environment, home }),
+      plugins: deps.plugins !== undefined ? deps.plugins : () => parts.pluginState({ environment, home }) });
     const output = args.command === 'plan' ? removal.plan() : removal.apply(args.confirm);
     for (const line of args.json ? [JSON.stringify(output, null, 2)] : args.command === 'plan' ? describePlan(output) : describeResult(output)) log(line);
     return args.command === 'apply' && !output.ok ? 1 : 0;
