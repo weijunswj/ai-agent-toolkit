@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 11 questions across 5 sections
 
-Bank reference: KBS5-X0AB-0YF8-225D
+Bank reference: D5AD-XT9V-VR7H-WHC1
 
 Quick index
 
@@ -341,9 +341,9 @@ Anything you do not list takes its recommendation.
 
 Setup run with `--host claude-code` shows this bank instead, for the same representative state with a supported root-only Claude profile and no subagent depth setting yet. Answers use the same format as above.
 
-Toolkit setup choices - 12 questions across 5 sections
+Toolkit setup choices - 13 questions across 5 sections
 
-Bank reference: SMF9-D88F-6FAK-HGT4
+Bank reference: E3FC-K3C5-DNFX-KYTB
 
 Quick index
 
@@ -357,6 +357,7 @@ Quick index
 3.3 Claude Code setting: Let other sessions wake this one? - Recommended: B - Turn on
 3.4 Claude Code setting: Switch models without asking on a flag? - Recommended: A - Keep current
 3.5 Claude Code setting: Read AGENTS.md too? - Recommended: B - Turn on
+3.6 Copy Toolkit's skills into Antigravity? - Recommended: A - Keep current
 4.1 May Claude Code merge finished task pull requests without you typing merge? - Recommended: B - On
 5.1 May Toolkit update scheduled tasks on this computer? - Recommended: A - No standing approval
 
@@ -619,6 +620,31 @@ Quick index
 **After applying:** Start a new Claude Code session so it reads the changed settings.
 
 **Selected:** B - Turn on
+
+---
+
+### 3.6 Copy Toolkit's skills into Antigravity?
+
+**What this controls:** Whether setup copies Toolkit's portable skills, and the official n8n skills Toolkit ships, into Antigravity's global skills folder (~/.gemini/config/skills) and keeps them current on each setup. Toolkit-only skills (setup, env, controller and programme tools) stay out. Folders you copied yourself are never changed.
+
+**Current:** Toolkit's skills are not in Antigravity's global skills folder.
+
+**Verification:** state-derived
+
+**Recommended:** A - Keep current
+
+**Recommended outcome:** Leave Antigravity unchanged.
+
+**Why:** The copy is opt-in: choose it if you use Toolkit skills in Antigravity.
+
+**Choices:**
+
+- **A. Keep current** - Preserve this effective behavior: Toolkit's skills are not in Antigravity's global skills folder.
+- **B. Copy and keep updated** - Copy Toolkit's portable skills and the official n8n skills into ~/.gemini/config/skills, update Toolkit's copies when they are out of date, and record them.
+
+**After applying:** Start a new Antigravity session to load changed skills.
+
+**Selected:** A - Keep current
 
 ---
 
