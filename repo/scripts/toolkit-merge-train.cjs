@@ -44,7 +44,9 @@
 // builds on the ejected one) is refused and the checkout left as it was. The ejected pull request
 // stays open: its commits are in the train, so GitHub would mark it merged if the train landed with
 // it still at that head; land refuses that until its branch moves on or it closes. It rejoins only a
-// later train, after its branch merges main and reverts the eject revert, with a fresh review.
+// later train, after its branch merges main and reverts the eject revert, with a fresh review: each
+// boarding revert carries a Train-Eject-Head trailer, and build ejects (verify refuses) a member
+// that holds an ejected head from main's history without a commit reverting that eject revert.
 //
 // verify walks the train's first-parent commits after main and refuses anything that is not a
 // member merge or a main catch-up merge whose tree equals Git's own clean merge, or a last bump
@@ -71,6 +73,9 @@ const TIERS = Object.freeze(['LIGHT', 'NORMAL', 'RISKY']);
 const TOOLKIT_BUMP = 'node repo/scripts/bump-version.cjs --next {level} --base {base}';
 const UAT_LINE = /^UAT: (NOT_REQUIRED|OWNER_TEST_NEEDED|PASSED)\b/;
 const LINK_LINE = /^(Closes|Fixes|Resolves|Refs) #\d+$/;
+// Trailer on each boarding revert eject makes: the head it ejected, so later trains can tell a
+// rejoining member that has not restored its ejected change.
+const EJECT_TRAILER = 'Train-Eject-Head';
 const COMMANDS = Object.freeze(['build', 'verify', 'body', 'split', 'land', 'eject']);
 
 class TrainError extends Error {
@@ -182,6 +187,23 @@ function checkEjected(value, memberPrs) {
   }
 }
 
+// A member that left an earlier train after boarding has its old commits on `base`, reverted. Its
+// branch must restore them (merge main, then revert the eject revert) before it boards again, or
+// merging it brings only its new commits and silently leaves the ejected change reverted. Returns
+// one reason per eject revert on `base` that `head` contains the ejected commits of but not undoes.
+function unrestoredEjects(cwd, base, head) {
+  const listed = git(cwd, ['log', '--format=%H%x1f%(trailers:key=' + EJECT_TRAILER + ',valueonly,separator=%x1f)', '--grep', `^${EJECT_TRAILER}: `, base]).stdout;
+  const reasons = [];
+  for (const line of listed.split('\n').filter(Boolean)) {
+    const [revert, ejected] = line.split('\x1f').map(part => part.trim());
+    if (!SHA.test(revert || '') || !SHA.test(ejected || '')) continue;
+    if (!isAncestor(cwd, ejected, head)) continue;
+    const restored = git(cwd, ['log', '-1', '--format=%H', '--fixed-strings', '--grep', `This reverts commit ${revert}`, head]).stdout;
+    if (!restored) reasons.push(`it holds ${ejected.slice(0, 12)}, ejected from an earlier train by ${revert.slice(0, 12)}, without restoring it: on its branch merge main, then git revert --no-edit ${revert}, and pass a fresh review`);
+  }
+  return reasons;
+}
+
 // Members that left the train after boarding, keyed by their ejected head.
 function boardedThenEjected(manifest) {
   return (manifest.ejected || []).filter(entry => entry.merge);
@@ -240,6 +262,8 @@ function build(cwd, manifest, options) {
     const head = git(cwd, ['rev-parse', '--verify', '--quiet', `${member.head}^{commit}`], { allowFail: true });
     if (head.status !== 0) { ejected.push({ ...member, reason: 'head not fetched here' }); continue; }
     if (isAncestor(cwd, member.head, 'HEAD')) { ejected.push({ ...member, reason: 'already on the train base' }); continue; }
+    const unrestored = unrestoredEjects(cwd, onto, member.head);
+    if (unrestored.length) { ejected.push({ ...member, reason: unrestored.join('; ') }); continue; }
     const merged = git(cwd, ['-c', 'rerere.enabled=false', 'merge', '--no-ff', '--no-edit', '-m', memberMessage(member), member.head], { allowFail: true });
     if (merged.status !== 0) {
       git(cwd, ['merge', '--abort'], { allowFail: true });
@@ -315,7 +339,7 @@ function eject(cwd, manifest, options) {
   if (bump && !revert(bump, false, `Merge train: eject #${member.pr}, revert the bump to re-bump without it`)) {
     return undo('the bump does not revert cleanly; rebuild the train instead');
   }
-  if (!revert(board, true, `Merge train: eject #${member.pr} (${reason})`)) {
+  if (!revert(board, true, `Merge train: eject #${member.pr} (${reason})\n\n${EJECT_TRAILER}: ${member.head}`)) {
     return undo(`#${member.pr}'s boarding does not revert cleanly: a later member builds on it, so eject that member first`);
   }
   let rebump = null;
@@ -447,6 +471,7 @@ function verify(cwd, manifest, options) {
   }
   for (const member of manifest.members) {
     if (!seen.has(member.pr)) problems.push(`#${member.pr} at ${member.head.slice(0, 12)} is not on the train`);
+    for (const reason of unrestoredEjects(cwd, main, member.head)) problems.push(`#${member.pr}: ${reason}`);
   }
   for (const entry of left) {
     if (!reverted.has(entry.merge)) problems.push(`ejected #${entry.pr}: its boarding merge ${entry.merge.slice(0, 12)} is not reverted on the train`);

@@ -449,3 +449,46 @@ test('a stacked train ejects with one revert, and land waits until the ejected p
   fs.writeFileSync(live, JSON.stringify({ ...facts, 2: { state: 'CLOSED', head: two } }));
   assert.equal(train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo).ok, true);
 });
+
+test('an ejected member rejoins a later train only once its branch restores the ejected change', t => {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const two = f.branch('pr-2', { 'c.txt': 'c\n' });
+  const { out } = built(f, [f.member(1, one), f.member(2, two)]);
+  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo);
+  assert.match(f.git('log', '-1', '--format=%B', ejected.reverts[1].commit), new RegExp(`^Train-Eject-Head: ${two}$`, 'm'));
+  f.git('switch', '--quiet', 'main');
+  f.git('merge', '--quiet', '--no-ff', '--no-edit', 'toolkit-train/one');
+
+  f.git('switch', '--quiet', 'pr-2');
+  f.write('c2.txt', 'the review fix\n');
+  f.git('add', '--all');
+  f.git('commit', '--quiet', '-m', 'fix only');
+  const fixOnly = f.git('rev-parse', 'HEAD');
+  f.git('switch', '--quiet', 'main');
+  const later = (name, head) => {
+    const file = path.join(f.root, `${name}.json`);
+    const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, head)] }, `${name}-in.json`), '--branch', `toolkit-train/${name}`, '--main', 'main', '--out', file], f.repo);
+    return { result, file };
+  };
+  const refused = later('fix-only', fixOnly);
+  assert.deepEqual(refused.result.boarded, []);
+  assert.match(refused.result.ejected[0].reason, new RegExp(`without restoring it: on its branch merge main, then git revert --no-edit ${ejected.reverts[1].commit}`));
+  f.git('switch', '--quiet', '-C', 'by-hand', 'main');
+  f.git('merge', '--quiet', '--no-ff', '--no-edit', fixOnly);
+  const byHand = train.run(['verify', '--manifest', f.manifestFile({ members: [f.member(2, fixOnly, { bump: 'none' })], bump_command: 'none' }, 'by-hand.json'), '--head', 'by-hand', '--main', 'main'], f.repo);
+  assert.ok(byHand.problems.some(problem => /#2: it holds .* without restoring it/.test(problem)), byHand.problems.join('\n'));
+  assert.equal(f.git('ls-tree', '--name-only', 'by-hand', 'c.txt'), '', 'the ejected change would silently stay reverted');
+
+  f.git('switch', '--quiet', 'pr-2');
+  f.git('merge', '--quiet', '--no-edit', 'main');
+  f.git('revert', '--no-edit', ejected.reverts[1].commit);
+  const restored = f.git('rev-parse', 'HEAD');
+  f.git('switch', '--quiet', 'main');
+  const rejoined = later('rejoined', restored);
+  assert.deepEqual(rejoined.result.boarded, [2], JSON.stringify(rejoined.result.ejected));
+  assert.equal(f.git('show', `${rejoined.result.head}:c.txt`), 'c', 'the ejected change is back');
+  assert.equal(f.git('show', `${rejoined.result.head}:c2.txt`), 'the review fix');
+  const checked = train.run(['verify', '--manifest', rejoined.file, '--head', rejoined.result.head, '--main', 'main'], f.repo);
+  assert.equal(checked.ok, true, checked.problems.join('\n'));
+});
