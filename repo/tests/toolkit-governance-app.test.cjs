@@ -267,3 +267,29 @@ test('the macOS or Linux save command overwrites an existing setup only after a 
     assert.deepEqual(run('secret', '', { HAS_VARIABLE: '1', HAS_SECRET: '1' }).writes, [], `${shell}: an existing secret is kept`);
   }
 });
+
+test('by-hand website steps lead every save and removal; the commands follow as the other way', () => {
+  const variables = `https://github.com/${SLUG}/settings/variables/actions`;
+  const secrets = `https://github.com/${SLUG}/settings/secrets/actions`;
+  const fresh = app.setupLines(SLUG, STORE, missing);
+  const text = fresh.join('\n');
+  assert.match(text, /By hand on GitHub: open .*Settings, Secrets and variables, Actions/);
+  assert.ok(text.includes(variables) && text.includes(secrets));
+  assert.match(text, /New repository variable, Name TOOLKIT_GOVERNANCE_APP_CLIENT_ID, Value the Client ID, then Add variable/);
+  assert.match(text, /New repository secret, Name TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY\. For Secret, open the \.pem file .*paste all of it, the BEGIN and END lines included, then Add secret/);
+  assert.match(text, /Delete the \.pem file/);
+  // Each by-hand step stops on a name that is already there, so it never overwrites another App.
+  for (const name of [app.APP.variable, app.APP.secret]) assert.ok(text.includes(`if ${name} is already listed, stop and reuse that App`), name);
+  const byHand = fresh.findIndex(line => line.includes('By hand on GitHub'));
+  const commands = fresh.findIndex(line => /Or from the command line/.test(line));
+  const firstSet = fresh.findIndex(line => /gh (variable|secret) set/.test(line));
+  assert.ok(byHand >= 0 && byHand < commands && commands < firstSet, 'by hand first, commands after');
+  // A part setup gets by-hand steps for the missing name only.
+  const half = app.setupLines(SLUG, STORE, { variable: 'found', secret: 'missing' }).join('\n');
+  assert.ok(half.includes(secrets) && !half.includes('New repository variable'));
+  assert.deepEqual(app.manualSteps(SLUG, 'variable').filter(line => /New repository secret/.test(line)), []);
+  // Removal leads with the website too, and keeps the commands.
+  const removal = app.removalLines(SLUG, found, []).join('\n');
+  assert.ok(removal.indexOf('By hand on GitHub') < removal.indexOf('gh variable delete'));
+  assert.ok(removal.includes(variables) && removal.includes(secrets));
+});
