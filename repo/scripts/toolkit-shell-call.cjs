@@ -439,8 +439,11 @@ function readScript(text, { powershell = false, interpolation = false, cmd = fal
   let noBlockComment = cmd; let bodyReadTo = -1; let noBody = false; const blanks = new Set();
   // A data command's block stays data, unless the block sits in a parenthesised group or is a
   // hash literal (@{...}), whose values PowerShell runs before the data command sees them.
-  // A block followed by member access ({...}.Invoke()) runs too.
-  const runsGh = (prefix, body, at, end) => (!DATA_COMMAND.test(programName(prefix.split(/\s/)[0])) || /\(/.test(prefix) || source[at - 1] === '@' || source[end + 1] === '.') && /\bgh\b/i.test(body);
+  // Where PowerShell may run it, a script block followed by member access ({...}.Invoke(),
+  // {...}?.Invoke()) or piped on to an invoker (| % Invoke, | ForEach-Object { & $_ }) runs too.
+  const scriptBlocks = powershell || uncertainShell || codexBash;
+  const invoked = end => scriptBlocks && (/^\??\./.test(source.slice(end + 1, end + 3)) || /^[^;\n]*\|[^;\n]*?(?:^|[\s|{])(?:%|foreach-object|invoke-command|icm|&)(?=[\s{]|$)/i.test(source.slice(end + 1)));
+  const runsGh = (prefix, body, at, end) => (!DATA_COMMAND.test(programName(prefix.split(/\s/)[0])) || /\(/.test(prefix) || source[at - 1] === '@' || invoked(end)) && /\bgh\b/i.test(body);
   const escapes = c => !cmd && (c === '\\' && !powershell || c === '`');
   const emit = value => { chunks.push(value); if (prefixText.length < 64) prefixText += value.slice(0, 64 - prefixText.length); };
   const boundary = () => { prefixText = ''; };
@@ -684,10 +687,11 @@ function executableCommands(text, depth = 0, context = {}) {
         const extra = words.slice(scriptAt + 1); const at = extra.findIndex((_, n) => guardedGh(ghCommand(extra.slice(n))));
         if (at >= 0) { result.push({ words: extra.slice(at), expanding: expanding.slice(scriptAt + 1 + at), allWords: words, sourceWords: command.words, powershell: context.powershell, docs, movesTarget, hidden: true, offsets: command.offsets }); continue; }
         // A single word ('$1' x 'gh issue close 1', eval "$1") can hold the whole command.
-        for (const word of extra) if (/\bgh\b/i.test(word)) result.push(...executableCommands(word, depth + 1, { ...nextContext, powershell: false, uncertainShell: false, codexBash: false, cmd: false, hidden: true, movesTarget }));
+        // ... or several words ($@, $*, $1 $2) can together: read them joined as well.
+        if (extra.some(word => /\bgh\b/i.test(word))) for (const part of [...extra, extra.join(' ')]) result.push(...executableCommands(part, depth + 1, { ...nextContext, powershell: false, uncertainShell: false, codexBash: false, cmd: false, hidden: true, movesTarget }));
       }
-      // iex with a string built by + or -f: the command text is not literal.
-      if (/^(?:iex|invoke-expression)$/.test(program) && words.slice(1).some(word => word === '+' || /^-f(?:ormat)?$/i.test(word)) && /\bgh\b/i.test(words.slice(1).join(' '))) {
+      // iex with a string built by +, -f, -join, a method call or a cast: the command text is not literal.
+      if (powershellLike(context) && /^(?:iex|invoke-expression)$/.test(program) && (command.opensGroup || words.slice(1).some(word => word === '+' || /^-(?:f|format|join)$/i.test(word) || /::|^\[/.test(word))) && /\bgh\b/i.test(command.opensGroup ? text : words.slice(1).join(' '))) {
         result.push({ words: ['gh'], expanding: [false], allWords: words, docs, movesTarget, unreadableGh: true, unreadableReason: 'This command builds the text it runs with iex from joined or formatted strings, so Toolkit cannot tell what it runs and it was refused. Write the gh command out in full.', hidden });
         continue;
       }
