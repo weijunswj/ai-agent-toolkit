@@ -72,14 +72,16 @@ const TASKS_ASK = Object.freeze({
   adopt: 'Recording a hand-made task as known is the owner\'s choice.',
 });
 
-// Why a row is left out of the Codex block. A Codex prefix rule allows any arguments after its
-// prefix, so it cannot hold an exact line or ask for a flag that appears later in the command.
+// Whether the repository's programme file turns governance on, read as the sweep reads it.
 const PROGRAMME_STATE = path.join(__dirname, '..', '..', 'skills', 'github-program-reconciler', 'scripts', 'programme-state.cjs');
 function governanceEnabled(binding) {
   if (!binding) return false;
   const { validateBinding, bindingEnabled } = require(PROGRAMME_STATE);
   try { return bindingEnabled(validateBinding(binding)); } catch { return false; }
 }
+
+// Why a row is left out of the Codex block. A Codex prefix rule allows any arguments after its
+// prefix, so it cannot hold an exact line or ask for a flag that appears later in the command.
 const CODEX_OPEN = 'Codex would allow any flag after this command, including the ones that must ask.';
 
 // forms: what follows the command in an allow line. ' *' is any arguments; '' and ' --json' are

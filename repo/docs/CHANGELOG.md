@@ -1,5 +1,24 @@
 # Toolkit Changelog
 
+## 3.91.10
+
+### Fixed
+
+- **Programme sweep docs:** the bridge doc no longer promises a footer-skip warning that a run never shows. When the refresh skips or fails, the footer step does not run, and the refresh's own warning, notice or failure says why.
+- **Programme file reading tests:** the gate's parity table now covers a version 1 file carrying `parent_lifecycle`, and the `toolkit permissions` comment about the Codex block sits above its own code again.
+
+## 3.91.9
+
+### Fixed
+
+- **New session after an update:** `setup toolkit` and `refresh toolkit` now end with a `## Start a new session` line naming each app (Claude Code, Codex, Antigravity) whose skill files or rules the run changed, because sessions already open keep using the old files; Codex, for one, keeps the old plugin folder's skill paths. Nothing is printed when the run changed none.
+
+## 3.91.8
+
+### Fixed
+
+- **Skill descriptions in Codex:** Codex lists each skill with only about the first 200 characters of its description, so a trigger written further down was never seen there. `remove toolkit` and its full removal plan now open the setup skill's description (Codex had asked whether "remove" meant the computer, the repository or governance instead of showing the plan), and the Toolkit env and release-readiness skills put their trigger phrases first too. A check now keeps every quoted phrase or command in a skill description within the first 195 characters, and every description within 1,024 characters (the programme reconciler's was 1,051).
+
 ## 3.91.7
 
 ### Fixed

@@ -150,6 +150,15 @@ test('gate: a version 1 binding names its parent issue, as bindingEnabled says; 
   assert.equal(parentsOf(null), null);
 });
 
+test('bridge doc: a skipped or failed refresh skips footer cleaning, and the refresh\'s own line says why', () => {
+  // The footer step runs only when the refresh says it ran, so the script's own FOOTER_SKIPPED
+  // warning is a second guard a normal run never shows; the doc must not promise it.
+  const doc = fs.readFileSync(path.join(ROOT, 'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');
+  assert.match(step('Clean the cloud footer from the owner\'s posts'), /steps\.refresh\.outputs\.refreshed == 'true'/);
+  assert.doesNotMatch(doc, /when the refresh skips or fails, it edits nothing and says so in a warning/);
+  assert.match(doc, /when the refresh skips or fails, the footer step does not run and edits nothing; the refresh's own warning, notice or failure says why/);
+});
+
 test('gate: it turns governance on for exactly the files the sweep reads as enabled (validateBinding, then bindingEnabled)', () => {
   // The gate reads the raw file (it checks out only itself), so this table keeps its reading in step
   // with the sweep's. A hand-broken version 1 file carrying version 2 keys is not a valid file.
@@ -159,7 +168,7 @@ test('gate: it turns governance on for exactly the files the sweep reads as enab
   for (const [label, file] of [
     ['v1', bindingV1()], ['v2 enabled', binding()], ['v2 disabled', binding({ governance: 'disabled' })],
     ['v1 with governance disabled', { ...bindingV1(), governance: 'disabled' }], ['v1 with governance enabled', { ...bindingV1(), governance: 'enabled' }],
-    ['v1 with v2 parents', { ...bindingV1(), parents }], ['no schema, enabled', { ...v2NoParents, schema: undefined, parents }],
+    ['v1 with v2 parents', { ...bindingV1(), parents }], ['v1 with parent_lifecycle', { ...bindingV1(), parent_lifecycle: { reopen_incomplete: true, complete_when_children_closed: true } }], ['no schema, enabled', { ...v2NoParents, schema: undefined, parents }],
     ['v2 without a governance key', { ...v2NoParents, governance: undefined, parents }], ['unknown schema', { ...bindingV1(), schema: 'toolkit.programme-binding.v9' }],
   ]) {
     const file2 = JSON.parse(JSON.stringify(file));
