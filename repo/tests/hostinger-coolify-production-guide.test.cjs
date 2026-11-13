@@ -38,7 +38,7 @@ function toBashPath(filePath) {
   return `/${drive}${rest}`;
 }
 
-// Windows status 0x80000004, reported when Git Bash itself is killed (see runDailyCheckScenario).
+// Windows status 0x80000004, seen when Git Bash dies on a busy runner before any output (see runDailyCheckScenario).
 const WINDOWS_BASH_CRASH = 0x80000004;
 
 // Async so the scenarios can run side by side: each one works in its own mktemp folder.
@@ -273,12 +273,16 @@ cat "$tmp/stderr.txt" >&2
     child.on('close', (status) => resolve({ status, stdout, stderr }));
     child.stdin.end(command);
   });
-  // Git Bash on a busy Windows runner can die with the Windows status 0x80000004 before it says
-  // anything. No script exit can produce that status (a bash exit is 0 to 255), so it is the
-  // runner, not the check under test: run the scenario once more from a fresh temp folder. Any
-  // other status, or a second crash, still fails below.
+  // On a busy Windows runner Git Bash has been seen to die with the Windows status 0x80000004
+  // before any output. That meaning is inferred from CI, not documented, but no script exit can
+  // produce the status (a bash exit is 0 to 255), so the check under test did not return it: run
+  // the scenario once more from a fresh temp folder, and say so in the log so a retry that passes
+  // still shows. Any other status, or a second crash, still fails below.
   let result = await run();
-  if (process.platform === 'win32' && result.status === WINDOWS_BASH_CRASH) result = await run();
+  if (process.platform === 'win32' && result.status === WINDOWS_BASH_CRASH) {
+    console.error(`retrying ${scriptRelPath} ${scenario} after Windows status 0x80000004`);
+    result = await run();
+  }
 
   assert.equal(result.status, 0, `${scriptRelPath} ${scenario}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
   return result;
