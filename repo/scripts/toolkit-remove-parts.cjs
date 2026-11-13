@@ -188,6 +188,174 @@ class SkillCopiesPart {
   }
 }
 
+// The reinstall note (toolkit-reinstall-note.cjs): the helper stack each app's Toolkit helper files
+// name and the checkouts whose Toolkit tasks go, so `setup toolkit` can put them back later. Saved
+// first, into the kept backups folder. Its content is in the plan, so the owner sees it.
+class ReinstallNotePart {
+  key = 'reinstall_note'; title = 'Kept for a later reinstall';
+  #home; #helpers; #registry;
+  constructor({ environment = process.env, home = os.homedir(), helpers, registry } = {}) {
+    this.#home = home;
+    this.#registry = registry || require('./toolkit-tasks.cjs');
+    this.#helpers = helpers || (() => {
+      const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
+      const { CodexHelperDefinitions } = require('./toolkit-codex-helper-agents.cjs');
+      const env = { ...environment, CLAUDE_CONFIG_DIR: claudeConfigDir(environment, home), CODEX_HOME: codexHomeDir(environment, home) };
+      const stackOf = (make) => { try { return make().check().files.map(file => file.stack).find(Boolean) || null; } catch { return null; } };
+      return { 'claude-code': stackOf(() => new ClaudeHelperDefinitions({ environment: env })), codex: stackOf(() => new CodexHelperDefinitions({ environment: env })) };
+    });
+  }
+  plan() {
+    const stacks = this.#helpers();
+    const helpers = Object.fromEntries(Object.entries(stacks).filter(([, stack]) => stack));
+    const read = this.#registry.readRegistry(this.#home);
+    const tasks = read.status === 'ok' ? read.tasks.filter(entry => entry.host === 'windows' && !entry.adopted && entry.checkout && entry.folder)
+      .map(entry => ({ checkout: entry.checkout, folder: entry.folder, ...(entry.repository ? { repository: entry.repository } : {}) })) : [];
+    const note = require('./toolkit-reinstall-note.cjs');
+    const checkouts = [...new Set(tasks.map(task => task.checkout))];
+    if (!Object.keys(helpers).length && !checkouts.length) return [];
+    const said = [...Object.entries(helpers).map(([host, stack]) => `the ${host === 'codex' ? 'Codex' : 'Claude Code'} helpers (stack ${stack})`),
+      ...(checkouts.length ? [`the scheduled tasks of ${checkouts.length} ${checkouts.length === 1 ? 'repository' : 'repositories'} (offered, not created)`] : [])];
+    return [{ what: display(this.#home, note.notePath(this.#home)), action: 'save', detail: `so setup toolkit can put back ${said.join(' and ')}; no keys`, note: { helpers, tasks } }];
+  }
+  apply(items) {
+    const note = require('./toolkit-reinstall-note.cjs');
+    return items.filter(item => item.action === 'save').map(item => attempt(item, () => { note.saveNote(this.#home, item.note); return { result: 'saved' }; }));
+  }
+}
+
+// Codex's approval records for the Toolkit plugin's hooks ([hooks.state."ai-agent-toolkit@..."] tables
+// in config.toml) and the empty Toolkit plugin cache folder. `codex plugin remove` leaves both behind.
+// Removed only once the Codex plugin is uninstalled, so an installed plugin keeps its hook approvals.
+// The edit is checked with Python's tomllib: the new file must parse and equal the old one without
+// exactly those tables. Without Python, or on any difference, the file is left alone.
+class CodexHookStatePart {
+  key = 'codex_hook_state'; title = 'Codex hook records for Toolkit';
+  #home; #codexHome; #plugins; #parse; #now;
+  constructor({ environment = process.env, home = os.homedir(), plugins, parse, now = () => new Date() } = {}) {
+    this.#home = home;
+    this.#codexHome = codexHomeDir(environment, home);
+    this.#plugins = plugins || (() => pluginState({ environment, home }));
+    this.#parse = parse || require('./codex-delegation-common.cjs').parseTomlDocument;
+    this.#now = now;
+  }
+  get #config() { return path.join(this.#codexHome, 'config.toml'); }
+  get #cache() { return path.join(this.#codexHome, 'plugins', 'cache', MARKETPLACE); }
+  plan() {
+    const items = [];
+    let text = null;
+    try { text = fs.readFileSync(this.#config, 'utf8'); } catch { text = null; }
+    const keys = text === null ? [] : require('./setup-codex-toolkit-plugin.cjs').toolkitHookStateTables(text).keys;
+    if (keys.length) items.push({ what: `${display(this.#home, this.#config)}: Codex's approval records for ${keys.length} Toolkit ${keys.length === 1 ? 'hook' : 'hooks'}`, action: 'remove',
+      detail: 'once the Codex plugin is uninstalled; a backup is saved first and the rest of the file stays', keys: [...keys].sort() });
+    if (fs.existsSync(this.#cache)) items.push({ what: display(this.#home, this.#cache), action: 'remove', detail: 'once the Codex plugin is uninstalled and the folder holds no files' });
+    return items;
+  }
+  apply(items) {
+    const codexOn = () => { try { return this.#plugins().codex === true; } catch { return true; } };
+    return items.filter(item => item.action === 'remove').map(item => attempt(item, () => {
+      if (codexOn()) return { result: 'kept', reason: 'the Codex plugin is still installed' };
+      return item.keys ? this.#removeTables(item.keys) : this.#removeCache();
+    }));
+  }
+  #removeCache() {
+    if (!fs.existsSync(this.#cache)) return { result: 'already gone' };
+    const holdsFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true }).some(entry => !entry.isDirectory() || holdsFiles(path.join(dir, entry.name)));
+    if (fs.lstatSync(this.#cache).isSymbolicLink() || holdsFiles(this.#cache)) return { result: 'kept', reason: 'it still holds files' };
+    fs.rmSync(this.#cache, { recursive: true, force: true });
+    return { result: 'removed' };
+  }
+  #removeTables(planned) {
+    const { toolkitHookStateTables } = require('./setup-codex-toolkit-plugin.cjs');
+    const before = fs.readFileSync(this.#config);
+    const text = before.toString('utf8');
+    const found = toolkitHookStateTables(text);
+    if (!found.keys.length) return { result: 'already gone' };
+    if ([...found.keys].sort().join('\n') !== planned.join('\n')) return { result: 'kept', reason: 'the hook records changed after the plan; run plan again' };
+    const after = Buffer.from(found.text, 'utf8');
+    const old = this.#parse(before), next = this.#parse(after);
+    const byHand = `remove the [hooks.state."${PLUGIN_ID}:..."] tables by hand`;
+    if (!old.ok || !next.ok) return { result: 'kept', reason: old.kind === 'parser-unavailable' || next.kind === 'parser-unavailable' ? `Python 3.11 or later is needed to check the edit; ${byHand}` : `the file did not parse as expected; ${byHand}` };
+    if (JSON.stringify(withoutHookStates(old.doc, planned)) !== JSON.stringify(withoutHookStates(next.doc, []))) return { result: 'kept', reason: `taking the tables out would change other settings; ${byHand}` };
+    const backupDir = path.join(this.#home, '.ai-agent-toolkit', 'backups', 'remove-toolkit', this.#now().toISOString().replace(/[:.]/g, '-'));
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.writeFileSync(path.join(backupDir, 'codex-config.toml'), before, { mode: 0o600 });
+    if (!fs.readFileSync(this.#config).equals(before)) return { result: 'kept', reason: 'the file changed while it was being edited; run plan again' };
+    const temp = `${this.#config}.toolkit-${process.pid}.tmp`;
+    try { fs.writeFileSync(temp, after, { mode: fs.statSync(this.#config).mode & 0o777 }); fs.renameSync(temp, this.#config); }
+    finally { fs.rmSync(temp, { force: true }); }
+    if (!fs.readFileSync(this.#config).equals(after)) throw new Error('config.toml did not read back as written; the backup is in ' + display(this.#home, backupDir));
+    return { result: 'removed', reason: `backup in ${display(this.#home, backupDir)}` };
+  }
+}
+
+// A parsed TOML document (codex-delegation-common's typed form) without the given hook records, and
+// with a hooks.state or hooks table that is left empty dropped, so both sides compare alike.
+function withoutHookStates(doc, keys) {
+  const copy = JSON.parse(JSON.stringify(doc || { t: 'table', v: {} }));
+  const hooks = copy.v?.hooks;
+  const state = hooks?.t === 'table' ? hooks.v.state : null;
+  if (state?.t === 'table') {
+    for (const key of keys) delete state.v[key];
+    if (!Object.keys(state.v).length) delete hooks.v.state;
+  }
+  if (hooks?.t === 'table' && !Object.keys(hooks.v).length) delete copy.v.hooks;
+  return copy;
+}
+
+// MCP servers whose key helper runs toolkit-env.cjs from inside the Toolkit folder. Listed, never
+// changed: their settings stay, but they get no key until Toolkit is reinstalled. The keys themselves
+// stay in the computer's credential store.
+class McpKeyHelpersPart {
+  key = 'mcp_key_helpers'; title = 'MCP servers that get their key through Toolkit';
+  #home; #claudeJson; #codexConfig; #folder;
+  constructor({ environment = process.env, home = os.homedir() } = {}) {
+    this.#home = home;
+    this.#claudeJson = path.join(home, '.claude.json');
+    this.#codexConfig = path.join(codexHomeDir(environment, home), 'config.toml');
+    this.#folder = path.join(home, '.ai-agent-toolkit');
+  }
+  // A command that runs toolkit-env.cjs from inside the Toolkit folder, compared with forward slashes
+  // and, as on Windows, without regard to case.
+  #inFolder(value) {
+    const text = String(value || '').replace(/\\\\/g, '/').replace(/\\/g, '/').toLowerCase();
+    return text.includes('toolkit-env.cjs') && text.includes(this.#folder.replace(/\\/g, '/').toLowerCase());
+  }
+  #claude() {
+    let parsed;
+    try { parsed = JSON.parse(fs.readFileSync(this.#claudeJson, 'utf8').replace(/^﻿/, '')); } catch { return []; }
+    const found = [];
+    const scan = (servers, scope) => {
+      if (!servers || typeof servers !== 'object') return;
+      for (const [name, entry] of Object.entries(servers)) {
+        const parts = [entry?.headersHelper, entry?.command, ...(Array.isArray(entry?.args) ? entry.args : [])];
+        if (parts.some(part => this.#inFolder(part))) found.push(`Claude Code ${scope}: ${name}`);
+      }
+    };
+    scan(parsed?.mcpServers, 'user server');
+    for (const [project, settings] of Object.entries(parsed?.projects || {})) scan(settings?.mcpServers, `server in ${project}`);
+    return found;
+  }
+  #codex() {
+    let text;
+    try { text = fs.readFileSync(this.#codexConfig, 'utf8'); } catch { return []; }
+    const found = new Set();
+    let server = null;
+    for (const line of text.split(/\r?\n/)) {
+      const header = line.match(/^\s*\[\s*mcp_servers\.("([^"]+)"|'([^']+)'|[A-Za-z0-9_-]+)[\].]/);
+      if (header) { server = header[2] || header[3] || header[1]; continue; }
+      if (/^\s*\[/.test(line)) { server = null; continue; }
+      if (server && this.#inFolder(line)) found.add(`Codex server: ${server}`);
+    }
+    return [...found];
+  }
+  plan() {
+    return [...this.#claude(), ...this.#codex()].sort().map(what => ({ what, action: 'keep',
+      detail: 'its settings stay, but it gets no key until Toolkit is reinstalled; the key stays in the credential store' }));
+  }
+  apply() { return []; }
+}
+
 // Whether the Toolkit plugin is installed in each app. Read from the apps' own files, never by
 // starting an app.
 function pluginState({ environment = process.env, home = os.homedir() } = {}) {
@@ -268,10 +436,12 @@ function removeExcept(target, keep) {
   if (fs.readdirSync(target).length === 0) fs.rmdirSync(target);
 }
 
-// The parts in the order apply runs them: settings, then files, then the folder last.
+// The parts in the order apply runs them: the reinstall note first, then settings, then files, then
+// the folder last.
 function defaultParts({ environment = process.env, home = os.homedir() } = {}) {
-  return [new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }), new CodexHelperLimitPart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
+  return [new ReinstallNotePart({ environment, home }), new McpKeyHelpersPart({ environment, home }), new ClaudeDepthPart({ environment, home }), new ClaudeUserSettingsPart({ environment, home }),
+    new CodexHelperLimitPart({ environment, home }), new CodexHookStatePart({ environment, home }), new HelperAgentFilesPart({ environment, home }),
     new SkillCopiesPart({ home }), new ToolkitFolderPart({ home, environment })];
 }
 
-module.exports = { ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };
+module.exports = { ReinstallNotePart, CodexHookStatePart, McpKeyHelpersPart, withoutHookStates, ClaudeDepthPart, ClaudeUserSettingsPart, CodexHelperLimitPart, HelperAgentFilesPart, SkillCopiesPart, ToolkitFolderPart, FOLDER_ENTRIES, KEPT_ENTRIES, PLUGIN_ID, MARKETPLACE, PLUGIN_STEPS, defaultParts, pluginState, removeExcept };

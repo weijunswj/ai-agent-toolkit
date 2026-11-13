@@ -29,6 +29,7 @@ Say `remove toolkit` in Claude Code or Codex. It lists everything Toolkit put on
 
 - **Left for you:** If an app's command line is not available, uninstall the plugin in that app (Claude Code: `/plugin`; Codex: Plugins), then say `remove toolkit` again to finish.
 - **Kept on purpose:** Your keys, the list of them in `~/.ai-agent-toolkit/env`, and the backups in `~/.ai-agent-toolkit/backups`. Delete those two folders yourself once you no longer need them.
+- **Coming back:** `setup toolkit` puts your helper agents back and offers the scheduled tasks again. MCP servers that get their key through Toolkit are listed, because they get no key until you reinstall.
 
 ## Skills
 

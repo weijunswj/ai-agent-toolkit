@@ -210,6 +210,17 @@ class ClaudeHelperDefinitions {
     return result;
   }
 
+  // Installs the helpers for `stack` only when none are installed (for example after `remove toolkit`,
+  // whose reinstall note names the stack the owner chose before). Otherwise writes nothing.
+  install({ stack } = {}) {
+    const dir = claudeUserAgentsDirectory(this.#environment);
+    const assessed = this.#assess(dir, []);
+    if (assessed.status !== 'not-installed' || typeof stack !== 'string' || !stack) return { status: assessed.status, backup_dir: null, files: assessed.entries.map(publicEntry), detail: assessed.detail };
+    const renderer = ClaudeHelperAgentRenderer.fromRepository(stack, this.#repositoryRoot);
+    const { backup_dir } = new AgentDirectoryInstaller(dir, ['G0', 'G1'].map(role => renderer.render(role))).apply(this.#backupRoot);
+    return { status: 'installed', backup_dir, files: this.#assess(dir, []).entries.map(publicEntry), detail: '' };
+  }
+
   #assess(dir, projectDirectories) {
     const entries = this.#userEntries(dir);
     const projects = this.#projectOverrides(projectDirectories);
