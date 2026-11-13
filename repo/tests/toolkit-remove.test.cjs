@@ -240,16 +240,24 @@ test('without a Task Scheduler the plan says so and leaves task records alone', 
 
 test('command line: plan prints the list and the code, apply needs the code, bad arguments print usage', t => {
   const w = world(t); enrol(t, w, 'widget');
-  const run = argv => { const out = [], err = []; const code = removal.main(argv, { home: w.home, scheduler: w.scheduler, rules: null, platform: 'win32', log: line => out.push(line), error: line => err.push(line) }); return { code, out: out.join('\n'), err: err.join('\n') }; };
-  const plan = run(['plan']);
+  const run = argv => { const out = [], err = []; const code = removal.main(argv, { home: w.home, scheduler: w.scheduler, rules: null, plugins: () => ({}), platform: 'win32', log: line => out.push(line), error: line => err.push(line) }); return { code, out: out.join('\n'), err: err.join('\n') }; };
+  // The agent asks the owner first whether to remove from this app only or every app; without the answer nothing runs.
+  const unasked = run(['plan']);
+  assert.equal(unasked.code, 1);
+  assert.match(unasked.err, /remove needs --app: ask the owner first whether to remove Toolkit from only this app .* or from every app \(--app all\)/);
+  assert.equal(run(['plan', '--app', 'everywhere']).code, 1);
+  assert.match(run(['plan', '--app', 'codex']).out, /From: Codex only\. Your other apps keep their Toolkit; run plan with --app all/);
+  const plan = run(['plan', '--app', 'all']);
   assert.equal(plan.code, 0);
   const code = /Plan code: ([a-f0-9]{64})/.exec(plan.out)[1];
-  assert.equal(JSON.parse(run(['plan', '--json']).out).code, code);
-  assert.deepEqual([run(['apply']).code, run(['apply', '--confirm', 'nope']).code, run(['sweep']).code, run(['plan', '--confirm', code]).code], [1, 1, 1, 1]);
-  assert.match(run(['apply']).err, /apply needs --confirm/);
-  const wrong = run(['apply', '--confirm', '0'.repeat(64)]);
+  assert.match(plan.out, /From: every app on this computer\./);
+  assert.equal(JSON.parse(run(['plan', '--app', 'all', '--json']).out).code, code);
+  assert.notEqual(JSON.parse(run(['plan', '--app', 'codex', '--json']).out).code, code, 'the app is in the plan code');
+  assert.deepEqual([run(['apply', '--app', 'all']).code, run(['apply', '--app', 'all', '--confirm', 'nope']).code, run(['sweep']).code, run(['plan', '--app', 'all', '--confirm', code]).code, run(['apply', '--confirm', code]).code], [1, 1, 1, 1, 1]);
+  assert.match(run(['apply', '--app', 'all']).err, /apply needs --confirm/);
+  const wrong = run(['apply', '--app', 'all', '--confirm', '0'.repeat(64)]);
   assert.equal(wrong.code, 1); assert.match(wrong.err, /nothing was removed/);
-  const done = run(['apply', '--confirm', code]);
+  const done = run(['apply', '--app', 'all', '--confirm', code]);
   assert.equal(done.code, 0); assert.match(done.out, /: removed/); assert.match(done.out, /Done\./);
 });
 
@@ -371,8 +379,8 @@ function fullHome(t) {
   const list = [new parts.ClaudeDepthPart({ environment: { ...environment, AI_AGENT_TOOLKIT_CONTROL_ROOT: control }, home }),
     new parts.ClaudeUserSettingsPart({ environment: { ...environment, AI_AGENT_TOOLKIT_CONTROL_ROOT: control }, home }),
     new parts.CodexHelperLimitPart({ environment, home, delegation }), new parts.HelperAgentFilesPart({ environment, home }),
-    new parts.SkillCopiesPart({ home, toolkitRoot: REPO_ROOT }), new parts.ToolkitFolderPart({ home, environment, plugins: () => installed })];
-  const make = () => new removal.ToolkitRemoval({ home, parts: list, plugins: () => installed });
+    new parts.SkillCopiesPart({ environment, home, toolkitRoot: REPO_ROOT }), new parts.ToolkitFolderPart({ home, environment, plugins: () => installed })];
+  const make = (options = {}) => new removal.ToolkitRemoval({ home, parts: list, plugins: () => installed, ...options });
   return { home, environment, depth, agents, folder, installed, delegation, make };
 }
 
@@ -428,6 +436,65 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.equal(h.make().plan().nothing, true);
 });
 
+// Rules for the harnesses the removal asks for, so a one-app removal is seen to leave the other app's file.
+function scopedRules() {
+  const asked = [];
+  const states = { 'claude-code': 'current', codex: 'current', antigravity: 'current' };
+  const factory = (only = null) => {
+    asked.push(only);
+    const harnesses = only || Object.keys(states);
+    const files = () => harnesses.map(harness => ({ harness, file: `~/${harness}/rules.md`, display: `~/${harness}/rules.md`, state: states[harness] }));
+    return { check: () => ({ files: files() }),
+      remove() { const out = files().map(file => ({ ...file, action: file.state === 'current' ? 'removed' : 'absent' })); for (const harness of harnesses) states[harness] = 'absent'; return { files: out }; } };
+  };
+  return { factory, asked, states };
+}
+
+test('removal from Codex only, while Claude Code keeps Toolkit: nothing of Claude Code or shared is touched', t => {
+  const h = fullHome(t);
+  h.installed.codex = true;
+  const w = { home: h.home, managed: path.join(h.home, 'managed'), scheduler: withDisabledRemoval(s.fakeScheduler()) };
+  const task = enrol(t, w, 'widget');
+  const rules = scopedRules();
+  const make = () => h.make({ app: 'codex', scheduler: w.scheduler, rules: rules.factory });
+  const plan = make().plan();
+  const text = removal.describePlan(plan).join('\n');
+  assert.equal(plan.app, 'codex');
+  assert.deepEqual(plan.kept_for, ['claude-code']);
+  assert.deepEqual(plan.plugins, ['codex'], 'only the Codex plugin lines');
+  assert.deepEqual(plan.tasks, [], 'scheduled tasks serve every app, so they stay');
+  assert.equal(plan.scheduler, 'kept for another app');
+  assert.deepEqual(plan.rules.map(file => file.harness), ['codex'], "only Codex's global rules file");
+  assert.deepEqual(rules.asked, [['codex']]);
+  assert.match(text, /From: Codex only\./);
+  assert.match(text, /Kept, because Claude Code still has the Toolkit plugin: the scheduled tasks and their files, Antigravity's rules and skill copies, and the Toolkit folder\./);
+  assert.match(text, /- ~\/\.codex\/agents\/toolkit-g1\.toml: removed/);
+  assert.match(text, /Codex helper limit:/);
+  assert.doesNotMatch(text, /\.claude\/|claude plugin|Claude Code subagent limit|Toolkit folder \(goes last/);
+  const result = make().apply(plan.code);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(h.depth.inspect().state, 'toolkit-one-layer', "Claude Code's subagent limit stays");
+  assert.ok(fs.existsSync(path.join(h.agents.claude, 'toolkit-g0.md')), "Claude Code's helper file stays");
+  assert.deepEqual(fs.readdirSync(h.agents.codex), []);
+  assert.ok(fs.readdirSync(path.join(h.home, '.claude', 'skills')).length > 1, "Claude Code's skill copies stay");
+  assert.ok(fs.existsSync(path.join(h.folder, 'source', 'repo', 'README.md')), 'the Toolkit folder stays');
+  assert.ok(task.live(), 'the scheduled task stays');
+  assert.deepEqual(rules.states, { 'claude-code': 'current', codex: 'absent', antigravity: 'current' });
+  assert.equal(h.delegation.calls.length, 1);
+});
+
+test('removal from Codex only, with no other app keeping Toolkit: the shared parts go too, never Claude Code\'s own', t => {
+  const h = fullHome(t);
+  h.installed['claude-code'] = false;
+  const rules = scopedRules();
+  const plan = h.make({ app: 'codex', rules: rules.factory }).plan();
+  assert.deepEqual(plan.kept_for, []);
+  assert.deepEqual(rules.asked, [['codex', 'antigravity']]);
+  const text = removal.describePlan(plan).join('\n');
+  assert.match(text, /Toolkit folder \(goes last/);
+  assert.doesNotMatch(text, /\.claude\/agents|Claude Code subagent limit|\.claude\/skills/);
+});
+
 test('full removal: a Claude Code subagent limit you set yourself is listed as kept and left alone', t => {
   const h = fullHome(t);
   const file = path.join(h.environment.CLAUDE_CONFIG_DIR, 'settings.json');
@@ -481,6 +548,10 @@ test('the setup skill routes remove toolkit to the full plan, never the app unin
   assert.match(section, /Do this even when the app offers its own plugin uninstall tool \(such as Codex's `uninstall_plugin`\) or the plugin is already gone/);
   assert.match(section, /an app's own uninstall tool may do this step for that app/);
   assert.ok(section.indexOf('toolkit-remove.cjs plan') < section.indexOf('Only after a yes'), 'the plan comes before any uninstall');
+  // The owner picks the scope: Codex's remove once reached into Claude Code without asking.
+  assert.match(section, /first ask the user with the host's question UI whether to remove Toolkit from only this app \(the one you run in\) or from every app on this computer; never pick for them/);
+  assert.ok(section.indexOf('every app on this computer') < section.indexOf('toolkit-remove.cjs plan --app'), 'the scope question comes before the plan');
+  assert.match(section, /`apply --confirm <plan code> --app <the same app>`/);
   // The app's own uninstall tool is allowed only as a step after the user's yes, never before the plan is shown.
   const afterYes = section.slice(section.indexOf('Only after a yes'));
   assert.equal(section.split("an app's own uninstall tool may do this step").length, 2, 'the allowance appears once');

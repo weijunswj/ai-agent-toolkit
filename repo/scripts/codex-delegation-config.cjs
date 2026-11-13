@@ -329,6 +329,46 @@ function previewCodexDelegation(configPath = codexConfigPath(), options = {}) {
   };
 }
 
+// config.toml without the tables Codex writes for the Toolkit plugin itself: its marketplace, its
+// plugin entry and its hook records (headers naming ai-agent-toolkit), with blank lines folded, so two
+// files that differ only by those tables compare equal.
+const TOOLKIT_PLUGIN_TABLE = /^\s*\[{1,2}[^\]]*ai-agent-toolkit[^\]]*\]{1,2}\s*(#.*)?$/;
+function withoutToolkitPluginTables(bytes) {
+  const kept = [];
+  let skipping = false;
+  for (const line of Buffer.from(bytes || '').toString('utf8').split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) skipping = TOOLKIT_PLUGIN_TABLE.test(line);
+    if (!skipping && line.trim()) kept.push(line.trimEnd());
+  }
+  return kept.join('\n');
+}
+
+// Whether a fresh proposal, read after config.toml changed, is the same edit the owner approved, on a
+// file that changed only by the Toolkit plugin's own tables. Setup's own plugin install writes those
+// after the owner answered; that changes the file, not the edit, so the approval carries over to the
+// fresh proposal. The edit must match too: the same helper outcome, the same keys, the same proposed
+// Toolkit block (or, for a removal, the same Toolkit block taken out) and the same need for a typed
+// confirmation. Any other change, by the owner or another program, is a new proposal.
+function sameApprovedProposal(approved, fresh) {
+  if (!approved || !fresh || approved.status !== fresh.status || !fresh.approval_binding) return false;
+  const before = approved.approval_binding?.snapshot, after = fresh.approval_binding.snapshot;
+  // A file the plugin install created counts as empty before it.
+  if (!before || !after) return false;
+  if (withoutToolkitPluginTables(before.bytes) !== withoutToolkitPluginTables(after.bytes)) return false;
+  if (Boolean(approved.requires_user_confirmation) !== Boolean(fresh.requires_user_confirmation)) return false;
+  const edit = (proposal) => JSON.stringify({
+    runtime: proposal.approval_binding?.runtime,
+    helper_count: proposal.approval_binding?.helper_count,
+    affected_keys: proposal.affected_keys || [],
+    ownership: proposal.ownership || null,
+    repair: proposal.approval_binding?.repair_identity || null,
+    // A removal's proposed bytes are the whole file, so the Toolkit block it takes out is compared by
+    // its ownership, keys and helper count instead.
+    block: proposal.status === 'removal-preview' ? proposal.helper_count ?? null : proposal.approval_binding?.proposal_sha256,
+  });
+  return edit(approved) === edit(fresh);
+}
+
 function previewCodexDelegationRemoval(configPath = codexConfigPath(), options = {}) {
   const runtime = options.runtime || RUNTIMES.UNKNOWN;
   let snapshot;
@@ -1056,6 +1096,7 @@ module.exports = {
   inspectCodexMultiAgentRuntime,
   previewCodexDelegation,
   previewCodexDelegationRemoval,
+  sameApprovedProposal,
   cleanupTemporaryEditorDirectory,
   editWithCodexAppServer,
   appServerCandidates,
