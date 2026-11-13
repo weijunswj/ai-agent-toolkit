@@ -13,4 +13,4 @@ Title: one task auto-merge switch per repository
 
 ### Removed
 
-- The per-app task auto-merge answers older versions saved under `~/.ai-agent-toolkit/user-state/` are deleted by the first governance read that reads a repository's new switch back fresh, and never before.
+- The per-app task auto-merge answers older versions saved under `~/.ai-agent-toolkit/user-state/` are machine-wide: the first governance read on this computer that reads any repository's new switch back fresh deletes them, and never before.

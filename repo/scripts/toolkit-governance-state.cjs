@@ -299,6 +299,16 @@ function taskAutoMerge(root, options = {}) {
 // Shown once a governed repository's merged binding sets no switch yet (the upgrade): a line, not a hold.
 const TASK_SWITCH_UPGRADE_LINE = 'Task auto-merge is off here until you set it; say refresh governance.';
 
+// Older Toolkit copies reject a binding key they do not know, so a binding carrying task_prs reads as
+// invalid (governance ERROR) on them. Every switch proposal says so, with this copy's version.
+const TOOLKIT_VERSION_FILE = Object.freeze(['repo', 'contracts', 'toolkit-local-bridge', 'version.json']);
+function taskSwitchVersionLine(toolkitRoot = path.resolve(__dirname, '..', '..')) {
+  let version = null;
+  try { version = JSON.parse(fs.readFileSync(path.join(toolkitRoot, ...TOOLKIT_VERSION_FILE), 'utf8')).version; } catch { version = null; }
+  const release = typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version) ? `Toolkit ${version}` : 'this Toolkit release';
+  return `Merge only after every computer and cloud copy working on this repository runs ${release} or later; older copies show governance ERROR until they update.`;
+}
+
 // The app-local answers older Toolkit versions saved. They grant nothing; this removes them, but
 // only once the repository's own switch is merged and read back fresh, so a computer never has no
 // switch at all. Returns the names removed (none when the switch is not yet read back).
@@ -663,6 +673,7 @@ module.exports = Object.freeze({
   legacyTaskAnswersPresent,
   LEGACY_TASK_ANSWERS,
   TASK_SWITCH_UPGRADE_LINE,
+  taskSwitchVersionLine,
   HOSTS,
   normaliseHost,
   committedBindingPolicy,

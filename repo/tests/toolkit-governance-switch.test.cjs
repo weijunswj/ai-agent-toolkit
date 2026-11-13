@@ -9,14 +9,16 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { makeGoverned, recordMerged } = require('./toolkit-governed-fixture-support.cjs');
+const { makeGoverned, recordMerged, recordAbsent } = require('./toolkit-governed-fixture-support.cjs');
 
 const scripts = path.join(__dirname, '..', 'scripts');
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
-const { GitHubProposalTransport, MARKER } = require(path.join(scripts, 'toolkit-governance-proposal.cjs'));
+const { GitHubProposalTransport, MARKER, switchNote } = require(path.join(scripts, 'toolkit-governance-proposal.cjs'));
 
 const SLUG = 'toolkit-test-fixture/switch';
+const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'toolkit-local-bridge', 'version.json'), 'utf8')).version;
+const VERSION_LINE = `Merge only after every computer and cloud copy working on this repository runs Toolkit ${VERSION} or later; older copies show governance ERROR until they update.`;
 
 function bindingText(extra = {}) {
   return `${JSON.stringify({
@@ -49,7 +51,7 @@ function legacyAnswers(ctx) {
   return () => governance.LEGACY_TASK_ANSWERS.filter(name => fs.existsSync(path.join(folder, name)));
 }
 
-async function run(ctx, argv, { interactive = false, answers = [], switchTransport = null } = {}) {
+async function run(ctx, argv, { interactive = false, answers = [], switchTransport = null, proposalTransport = null } = {}) {
   let out = ''; let err = '';
   const asked = [];
   const cli = new ToolkitGovernanceCli({
@@ -59,6 +61,7 @@ async function run(ctx, argv, { interactive = false, answers = [], switchTranspo
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsPrinter: () => '== Repo block for Claude Code ==\nPaste into: fixture',
     ...(switchTransport ? { switchTransport } : {}),
+    ...(proposalTransport ? { proposalTransport, cloudWorkflows: () => ({ files: {}, warning: null }) } : {}),
   });
   const code = await cli.main(argv);
   return { code, out, err, asked };
@@ -120,6 +123,8 @@ test('refresh governance --set prepares one binding pull request that changes on
   assert.deepEqual(proposal.task_prs, { auto_merge: 'after-gates' });
   delete proposal.task_prs;
   assert.deepEqual(proposal, JSON.parse(ctx.mergedText), 'nothing else changes, and no reader-only field leaks in');
+  assert.equal(text, ctx.mergedText.replace(/\n\}\n$/, ',\n  "task_prs": { "auto_merge": "after-gates" }\n}\n'), 'the diff is the one added member');
+  assert.ok(result.out.includes(VERSION_LINE), 'the older-copies warning is shown with this release');
   assert.match(result.out, /Prepared https:\/\/github\.com\/toolkit-test-fixture\/switch\/pull\/12: it sets task auto-merge on and changes nothing else\. It applies only after you merge it/);
   assert.equal(governance.taskAutoMerge(ctx.repo, ctx.registryOptions).auto_merge, 'off', 'preparing grants nothing');
 
@@ -136,6 +141,51 @@ test('refresh governance --set prepares one binding pull request that changes on
   assert.equal(moved.code, 2);
   assert.match(moved.err, /changed since this computer read it/);
   for (const bad of [['refresh', '--set', 'maybe'], ['refresh', '--set'], ['status', '--set', 'on']]) assert.equal((await run(ctx, bad)).code, 2, bad.join(' '));
+});
+
+test('the switch pull request keeps the merged formatting: a compact binding gains one member, a set value is replaced in place', async t => {
+  const ctx = fixture(t);
+  const texts = [];
+  const switchTransport = { publishSwitch: (repository, mergedText, text) => { texts.push(text); return { number: 3, url: `https://github.com/${SLUG}/pull/3`, head: 'a'.repeat(40) }; } };
+  const compact = JSON.stringify(JSON.parse(bindingText()));
+  ctx.merge(compact);
+  assert.equal((await run(ctx, ['refresh', '--set', 'on'], { switchTransport })).code, 0);
+  assert.equal(texts.at(-1), `${compact.slice(0, -1)},"task_prs":{"auto_merge":"after-gates"}}`);
+  const set = bindingText({ task_prs: { auto_merge: 'after-gates' } });
+  ctx.merge(set);
+  assert.equal((await run(ctx, ['refresh', '--set', 'off'], { switchTransport })).code, 0);
+  assert.equal(texts.at(-1), set.replace('"auto_merge": "after-gates"', '"auto_merge": "off"'));
+  const crlf = bindingText().replace(/\n/g, '\r\n');
+  ctx.merge(crlf);
+  assert.equal((await run(ctx, ['refresh', '--set', 'on'], { switchTransport })).code, 0);
+  assert.equal(texts.at(-1), crlf.replace(/\r\n\}\r\n$/, ',\r\n  "task_prs": { "auto_merge": "after-gates" }\r\n}\r\n'));
+});
+
+test('setup governance with yes carries the switch in the same enable proposal, for a version 1 or 2 working binding', async t => {
+  for (const version of [1, 2]) {
+    const ctx = fixture(t);
+    const binding = JSON.parse(bindingText());
+    const working = version === 2 ? binding : { schema: 'toolkit.programme-binding.v1', repository: SLUG, parent_issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX', store: binding.store, required_checks: binding.required_checks };
+    fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), `${JSON.stringify(working, null, 2)}\n`);
+    recordAbsent(ctx.repo, { registryPath: ctx.registryPath });
+    const published = [];
+    let open = [];
+    const proposal = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/4`, state: 'open', answer: 'yes' };
+    const proposalTransport = { list: () => open, publish: (repository, prepared, files) => { published.push({ prepared, files }); open = [proposal]; return proposal; }, read: () => proposal };
+    const result = await run(ctx, ['setup'], { interactive: true, answers: ['on', 'yes'], proposalTransport });
+    assert.equal(result.code, 0, result.err);
+    assert.equal(result.asked.length, 2);
+    assert.equal(published.length, 1, `version ${version}`);
+    const text = published[0].files['.github/toolkit-programme.json'];
+    assert.equal(JSON.parse(text).task_prs.auto_merge, 'after-gates', `version ${version}`);
+    assert.equal(JSON.parse(text).schema, 'toolkit.programme-binding.v2');
+    assert.ok(result.out.includes(VERSION_LINE), 'the older-copies warning is shown with the proposal');
+    assert.equal(governance.taskAutoMerge(ctx.repo, ctx.registryOptions).answered, false, 'a pending proposal grants nothing');
+  }
+  assert.equal(switchNote({ governance: 'enabled' }), '', 'an enable proposal without the switch says nothing about it');
+  const note = switchNote({ governance: 'enabled', task_prs: { auto_merge: 'after-gates' } });
+  assert.match(note, /sets this repository's task auto-merge switch \(`task_prs\.auto_merge`\) to `after-gates`/);
+  assert.ok(note.includes(VERSION_LINE), 'the enable pull request warns about older copies');
 });
 
 test('setup governance: refresh in a governed repository; elsewhere the owner answers in a terminal, the switch with yes', async t => {
@@ -200,4 +250,5 @@ test('the switch transport refuses a moved default branch and opens a pull reque
   assert.equal(pr.input.base, 'main');
   assert.ok(!pr.input.body.includes(MARKER), 'never read as a governance decision');
   assert.match(pr.input.body, /changes only `task_prs\.auto_merge`.*It applies only after the owner merges it/s);
+  assert.ok(pr.input.body.includes(VERSION_LINE), 'the switch pull request warns about older copies');
 });

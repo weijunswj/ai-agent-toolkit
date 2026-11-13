@@ -10,6 +10,7 @@ const readline = require('node:readline');
 
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const util = require('node:util');
 const { GovernanceProposals, GitHubProposalTransport } = require('./toolkit-governance-proposal.cjs');
 const governance = require('./toolkit-governance-state.cjs');
 const conformance = require('./toolkit-governance-conformance.cjs');
@@ -293,7 +294,7 @@ class ToolkitGovernanceCli {
     // setup governance asks the switch with yes; it joins the same proposal, never a local file.
     if (switchTo && binding && typeof binding === 'object') binding = { ...binding, task_prs: { auto_merge: switchTo } };
     const result = this.#proposals.publish(this.#cwd, run, binding);
-    this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...this.#appLines(result.proposal, binding)]);
+    this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...(switchTo ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding)]);
     return 0;
   }
 
@@ -357,6 +358,7 @@ class ToolkitGovernanceCli {
     }
     const prepared = this.#prepareSwitch(state.root, switchTo);
     lines.push(`Prepared ${prepared.url}: it sets task auto-merge ${switchTo === 'after-gates' ? 'on' : 'off'} and changes nothing else. It applies only after you merge it; refresh governance then reads it back and removes the old per-app answers.`);
+    lines.push(governance.taskSwitchVersionLine());
     this.#print(json, { ...value, pull_request: prepared }, lines);
     return 0;
   }
@@ -372,7 +374,7 @@ class ToolkitGovernanceCli {
     const proposal = { ...parsed, task_prs: { auto_merge: switchTo } };
     if (governance.bindingProblems(proposal, identity).length) throw new GovernanceCliError('The changed binding would not be valid, so no pull request was prepared. Nothing was written.');
     try {
-      return this.#switchTransport.publishSwitch(proposal.repository, entry.text, `${JSON.stringify(proposal, null, 2)}\n`, switchTo);
+      return this.#switchTransport.publishSwitch(proposal.repository, entry.text, switchText(entry.text, parsed, switchTo), switchTo);
     } catch (error) {
       throw new GovernanceCliError(error.code === 'SWITCH_BASE_CHANGED'
         ? `The binding on the default branch changed since this computer read it. Run ${CMD('status')}, then ask again. Nothing was written.`
@@ -425,6 +427,28 @@ class ToolkitGovernanceCli {
       return 2;
     }
   }
+}
+
+// The merged binding text with only the switch changed, so the owner's diff shows only that: an
+// existing auto_merge value is replaced, or a task_prs member goes before the top-level closing
+// brace. The result must parse to the merged binding plus the switch; anything else is rendered whole.
+function switchText(mergedText, parsed, switchTo) {
+  const text = String(mergedText).replace(/^\uFEFF/, '');
+  const expected = { ...parsed, task_prs: { auto_merge: switchTo } };
+  const matches = (candidate) => { try { return util.isDeepStrictEqual(JSON.parse(candidate), expected); } catch { return false; } };
+  const values = text.match(/"auto_merge"\s*:\s*"[^"]*"/g) || [];
+  let edited = null;
+  if (parsed.task_prs !== undefined && values.length === 1) edited = text.replace(/("auto_merge"\s*:\s*)"[^"]*"/, `$1"${switchTo}"`);
+  else if (parsed.task_prs === undefined) {
+    const close = text.lastIndexOf('}');
+    const body = text.slice(0, close).replace(/\s+$/, '');
+    const newline = text.includes('\r\n') ? '\r\n' : '\n';
+    const indent = /\n([ \t]+)"/.exec(body)?.[1];
+    if (close > 0 && body.length && !body.endsWith('{')) edited = indent === undefined
+      ? `${body},"task_prs":{"auto_merge":"${switchTo}"}${text.slice(body.length)}`
+      : `${body},${newline}${indent}"task_prs": { "auto_merge": "${switchTo}" }${text.slice(body.length)}`;
+  }
+  return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
 }
 
 // The repository's permission block for this app, as toolkit permissions prints it.

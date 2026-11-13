@@ -252,6 +252,13 @@ class GovernanceProposals {
   }
 }
 
+// A proposal that also sets the repository's task auto-merge switch says so, and warns that older
+// Toolkit copies read a binding with that key as invalid until they update.
+function switchNote(binding) {
+  if (!binding?.task_prs) return '';
+  return ` It sets this repository's task auto-merge switch (\`task_prs.auto_merge\`) to \`${binding.task_prs.auto_merge}\`.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}`;
+}
+
 function validProposal(value, repository) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value) && typeof value.repository === 'string' && value.repository.toLowerCase() === repository.toLowerCase() && Number.isSafeInteger(value.number) && value.number > 0
     && SHA.test(value.head) && ['yes', 'no'].includes(value.answer) && value.state === 'open'
@@ -373,7 +380,7 @@ class GitHubProposalTransport {
     const label = value === 'after-gates' ? 'on' : 'off';
     const result = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}`, { message: `Set task auto-merge ${label} for this repository`, content: Buffer.from(text).toString('base64'), branch: head, sha: current.sha }, 'PUT');
     if (!SHA.test(result.commit?.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
-    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set task auto-merge ${label} for this repository`, head, base: branch, body: `This changes only \`task_prs.auto_merge\` in \`${cache.BINDING_PATH}\` to \`${value}\`. It is this repository's one task auto-merge switch, read the same way by every app and the Projects controller.\n\n${label === 'on' ? 'On: a finished task pull request may merge once its review, required checks and testing pass. Governance, hooks, setup and merge-rule changes still wait for a typed merge.' : 'Off: every pull request waits for a typed merge.'}\n\nIt applies only after the owner merges it. After the merge, \`refresh governance\` reads it back and removes the old per-app answers on each computer.` });
+    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set task auto-merge ${label} for this repository`, head, base: branch, body: `This changes only \`task_prs.auto_merge\` in \`${cache.BINDING_PATH}\` to \`${value}\`. It is this repository's one task auto-merge switch, read the same way by every app and the Projects controller.\n\n${label === 'on' ? 'On: a finished task pull request may merge once its review, required checks and testing pass. Governance, hooks, setup and merge-rule changes still wait for a typed merge.' : 'Off: every pull request waits for a typed merge.'}\n\nIt applies only after the owner merges it. After the merge, \`refresh governance\` reads it back and removes the old per-app answers on each computer.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
   publish(repository, binding, files = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
@@ -421,8 +428,8 @@ class GitHubProposalTransport {
       }
       if (!SHA.test(headSha)) fail('PROPOSAL_COMMIT_INVALID');
     }
-    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials, deployment or app task merge preferences.\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud sweep copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
+    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud sweep copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
     return { number: pr.number, head: headSha };
   }
 }
-module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, proposalText, bindingV2, cloudWorkflowFiles, SCHEMA, MARKER, PROMPT_BUDGET_MS });
+module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, switchNote, proposalText, bindingV2, cloudWorkflowFiles, SCHEMA, MARKER, PROMPT_BUDGET_MS });
