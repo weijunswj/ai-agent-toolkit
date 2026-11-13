@@ -19,7 +19,7 @@ const controller = { session: 'fixture-controller', prefix: 'TEST-' };
 
 // `count` tasks natively under #421, their pages drawn once by a full pass, `prs` merged PRs
 // linked from the tasks' timelines and a parent discussion of `discussion` comments.
-function fixture(t, { count = 6, prs = 0, discussion = 0, cached = true } = {}) {
+function fixture(t, { count = 6, prs = 0, discussion = 0, cached = true, closed = 0 } = {}) {
   const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
   github.commentsMoveIssue = true;
   const binding = { schema: state.SCHEMA.binding, repository: github.repository, parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
@@ -27,6 +27,11 @@ function fixture(t, { count = 6, prs = 0, discussion = 0, cached = true } = {}) 
   github.addIssue(421, { body: '# Programme\n' });
   const outcomes = Array.from({ length: count }, (_, i) => ({ issue: 500 + i, class: 'COMMITTED', parent: 421, order: i + 1 }));
   for (const outcome of outcomes) github.addIssue(outcome.issue, { parent: 421 });
+  // Closed tasks taken out from under the parent (GitHub caps a parent at 100 sub-issues).
+  for (let i = 0; i < closed; i += 1) {
+    outcomes.push({ issue: 700 + i, class: 'COMPLETED', parent: 421, order: count + i + 1 });
+    github.addIssue(700 + i, { state: 'closed' });
+  }
   for (let i = 0; i < prs; i += 1) {
     const task = outcomes[i % count].issue;
     github.addPr(2000 + i, { head: 'a'.repeat(40), merged: true, body: `Refs #${task}` });
@@ -132,6 +137,22 @@ test('complete-pass / I1 I5: a warm pass empties the queue and says when the boa
   assert.deepEqual(f.parent().sweep.queue, []);
   assert.match(f.page(421), new RegExp(`^Board updated: \\d+ \\w+ 2026, \\d\\d:\\d\\d SGT \\(state revision ${f.parent().revision}\\)$`, 'm'));
   assert.ok(warm.report.sweep.read < 6, 'only the rotation share and changed tasks are read');
+});
+
+test('detached closed tasks wait for their rotation turn, are never re-attached and keep their rows', t => {
+  const f = fixture(t, { count: 4, closed: 24 });
+  assert.equal(f.run().code, 0);
+  const warm = f.run();
+  assert.equal(warm.code, 0, JSON.stringify(warm.report.holds));
+  assert.equal(warm.report.sweep.why.unverified, 0, 'a closed task off the native list is not re-read every pass');
+  assert.ok(warm.report.sweep.read < 28, JSON.stringify(warm.report.sweep));
+  assert.equal(f.github.calls.filter(call => call.method === 'POST' && /\/sub_issues$/.test(call.path)).length, 0, 'nothing is attached');
+  for (let i = 0; i < 24; i += 1) assert.equal(f.github.issues.get(700 + i).parent, null);
+  assert.ok(!f.parent().attention.some(entry => entry.code.startsWith('NATIVE_')), JSON.stringify(f.parent().attention));
+  assert.ok(f.page(421).includes('#700'), 'the closed task keeps its graph row');
+  // A reopened detached task is a change, so it is read on the next pass.
+  Object.assign(f.github.issues.get(705), { state: 'open', updated_at: f.tick() });
+  assert.ok(f.run().report.sweep.tasks.includes(705));
 });
 
 test('cold-resume / I1: a capped pass saves what it read and its queue; the next pass continues', t => {
