@@ -1,5 +1,23 @@
 # Toolkit Changelog
 
+## 3.92.0 (the programme graph is the work queue)
+
+### Changed
+
+- The programme graph is now the controller's work queue. `CONTROLLER.md` says every NOW task always has a working lane, an owner wait or its next step done, and a freed lane takes NOW work first, then LATER by priority.
+- The sweep's `TASK_IDLE` finding no longer treats an open PR with no update for 24 hours as moving its task, so work parked behind a stalled PR surfaces.
+- The new `TASK_MERGED_OPEN` finding flags a task still shown in progress one quiet hour after every PR merged or closed.
+- `TASK_IDLE` and `TASK_MERGED_OPEN` are work-queue findings. They are listed first in `programme.cjs attention` and in the parent's CURRENT block, and counted in the `Attention:` line. They cannot be acknowledged (`QUEUE_FINDING_NEEDS_ACTION`) and never count as waiting on the owner. A disposed one comes back when the task stalls again.
+- The Programme Graph's PR cell says `merged` or `closed` when an open task's latest PR is no longer open.
+- The Projects hourly nudge reads its lane queue from the programme graph first and raises `WORK QUEUE: <n>` for tasks that need the coordinator's step this turn.
+
+## 3.91.11
+
+### Changed
+
+- **Governance App setup:** The steps to save the App's Client ID and private key now lead with GitHub's website (Settings, Secrets and variables, Actions: the variable on the Variables tab, the whole `.pem` text on the Secrets tab), each step stopping if the name is already there, then say to delete the `.pem` file. The guarded `gh` commands stay as the other way. Removal leads with the same page.
+- **Governance on and off cover both halves:** The pull request that turns governance on always carries fresh cloud sweep copies (the sweep and its gate) pinned to the Toolkit checkout's own commit, which must be on main, and moves a version 1 binding to version 2; when the copies cannot be rendered it says why and how to fix it. The pull request that turns governance off also removes those copies. Both guides end with `toolkit governance check`, which now also reports cloud sweep copies left once governance is off.
+
 ## 3.91.10
 
 ### Fixed

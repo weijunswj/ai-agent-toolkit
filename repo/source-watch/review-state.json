@@ -13,8 +13,8 @@
       "repository": "google-labs-code/design.md",
       "ref": "main",
       "source_lock_path": "repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json",
-      "reviewed_through_sha": "6e5da5382f41edbba9d73b2c62f33f32e9971f15",
-      "reviewed_at": "2026-10-25",
+      "reviewed_through_sha": "1ed38aa9dd4451b9039f9aeb9ed1d2579edafddf",
+      "reviewed_at": "2026-11-13",
       "disposition": "SEPARATE_IMPLEMENTATION_PR_RECOMMENDED",
       "owning_tracker": "#473"
     },
@@ -24,8 +24,8 @@
       "repository": "n8n-io/skills",
       "ref": "main",
       "source_lock_path": "repo/source-watch/provenance/n8n-io-skills/SOURCE-LOCK.json",
-      "reviewed_through_sha": "27b6b9f429ac0be90cae764512dbc579d7107e95",
-      "reviewed_at": "2026-10-23",
+      "reviewed_through_sha": "626f50fdf2934116eea2c5469339e03d2d524e83",
+      "reviewed_at": "2026-11-13",
       "disposition": "NO_ACTION",
       "owning_tracker": "#473"
     },
