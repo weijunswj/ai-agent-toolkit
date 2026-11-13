@@ -69,8 +69,30 @@ const set = state => state.variable === 'found' && state.secret === 'found';
 const none = state => state.variable === 'missing' && state.secret === 'missing';
 const unknown = state => state.variable === 'unverified' || state.secret === 'unverified';
 
+// The owner's save commands. Each first lists the repository's variable and secret names and, when
+// either fixed name is already there, asks for a typed "replace" before overwriting; any other answer
+// keeps the existing App and changes nothing. The names never change, so every repository is found
+// and cleaned the same way.
+function saveCommands(slug) {
+  const ask = `${slug} already has a governance App set up. Type replace to overwrite it`;
+  const kept = 'Kept the existing App. Nothing changed.';
+  const names = `gh variable list --repo ${slug} --json name --jq '.[].name'; gh secret list --repo ${slug} --json name --jq '.[].name'`;
+  return [
+    `   PowerShell: $names = @(${names}); if (($names -contains '${APP.variable}' -or $names -contains '${APP.secret}') -and (Read-Host '${ask}') -ne 'replace') { '${kept}' } else { gh variable set ${APP.variable} --repo ${slug} --body "<Client ID>"; Get-Content -Raw "<key file>.pem" | gh secret set ${APP.secret} --repo ${slug} }`,
+    `   macOS or Linux: names=$(${names}); if printf '%s\\n' "$names" | grep -qxE '${APP.variable}|${APP.secret}' && { read -r -p '${ask}: ' answer; [ "$answer" != replace ]; }; then echo '${kept}'; else gh variable set ${APP.variable} --repo ${slug} --body "<Client ID>" && gh secret set ${APP.secret} --repo ${slug} < "<key file>.pem"; fi`,
+  ];
+}
+
+const found = state => state.variable === 'found' || state.secret === 'found';
+
 function setupLines(slug, store, state) {
-  if (set(state)) return [`Governance GitHub App: the variable and the secret are set on ${slug}. The first governance job run proves the App is installed.`];
+  if (set(state)) return [`Governance GitHub App: the variable and the secret are set on ${slug}. Reuse that App: do not set it up again. The first governance job run proves the App is installed.`];
+  if (found(state)) return [
+    `Governance GitHub App: ${slug} already has part of an App setup (variable ${state.variable}, secret ${state.secret}). Reuse that App: set only what is missing, from the same App (the same Client ID and a private key generated for it). Toolkit never overwrites it for you.`,
+    `To replace it with a different App instead, save the new Client ID and key with these commands; they ask you to type replace first:`,
+    ...saveCommands(slug),
+    'Then remove this repository from the old App\'s installation (Installed GitHub Apps, Configure, Repository access).',
+  ];
   const repositories = store ? `${slug} and ${store}` : slug;
   return [
     `Governance GitHub App: the governance jobs on GitHub do nothing until the App is set up (${unknown(state) ? `could not be checked (${state.reason})` : `variable ${state.variable}, secret ${state.secret}`}). Toolkit never creates it for you. After you merge the governance pull request:`,
@@ -78,10 +100,8 @@ function setupLines(slug, store, state) {
     `   Check the page: webhook "Active" unticked, installable only on this account, repository permissions ${permissionText()}, and everything else, Workflows included, no access.`,
     '2. On the App\'s page, copy the Client ID and generate a private key (a .pem file downloads).',
     `3. Install App, Only select repositories: ${repositories}.`,
-    `4. Save both on ${slug}, then delete the .pem file:`,
-    `   gh variable set ${APP.variable} --repo ${slug} --body "<Client ID>"`,
-    `   PowerShell: Get-Content -Raw "<key file>.pem" | gh secret set ${APP.secret} --repo ${slug}`,
-    `   macOS or Linux: gh secret set ${APP.secret} --repo ${slug} < "<key file>.pem"`,
+    `4. Save both on ${slug}, then delete the .pem file. If someone else has set up an App here meanwhile, these ask you to type replace before overwriting it:`,
+    ...saveCommands(slug),
     'Already set the App up for another repository? Skip steps 1 and 2: add this repository to its installation and set the variable and the secret here, generating a new private key if you no longer hold one.',
   ];
 }
@@ -112,4 +132,4 @@ function appFinding(stateName, slug, store, state, others) {
   return null;
 }
 
-module.exports = Object.freeze({ APP, permissionLabel, creationLink, ghReader, presence, setupLines, removalLines, appFinding });
+module.exports = Object.freeze({ APP, permissionLabel, creationLink, saveCommands, ghReader, presence, setupLines, removalLines, appFinding });

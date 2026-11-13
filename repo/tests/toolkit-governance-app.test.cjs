@@ -5,7 +5,9 @@
 // owner's steps and reads whether the variable and the secret exist; it never writes either.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const childProcess = require('node:child_process');
 const test = require('node:test');
 
 const app = require('../scripts/toolkit-governance-app.cjs');
@@ -58,7 +60,7 @@ test('setup names the link, the page checks, both repositories and the owner com
 });
 
 test('setup is one line once the variable and the secret exist, and says when they could not be checked', () => {
-  assert.deepEqual(app.setupLines(SLUG, STORE, found), [`Governance GitHub App: the variable and the secret are set on ${SLUG}. The first governance job run proves the App is installed.`]);
+  assert.deepEqual(app.setupLines(SLUG, STORE, found), [`Governance GitHub App: the variable and the secret are set on ${SLUG}. Reuse that App: do not set it up again. The first governance job run proves the App is installed.`]);
   const half = app.setupLines(SLUG, STORE, { variable: 'found', secret: 'missing' }).join('\n');
   assert.match(half, /variable found, secret missing/);
   const unknown = app.setupLines(SLUG, STORE, { variable: 'unverified', secret: 'unverified', reason: 'offline' }).join('\n');
@@ -120,8 +122,6 @@ test('check findings: missing App while on, leftovers while off, nothing when of
 
 // ---- wired into `toolkit governance` ----------------------------------------------------------
 
-const os = require('node:os');
-const childProcess = require('node:child_process');
 const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
 const conformance = require('../scripts/toolkit-governance-conformance.cjs');
 const governance = require('../scripts/toolkit-governance-state.cjs');
@@ -177,4 +177,56 @@ test('check reports the App while governance is on and left-overs once it is off
   assert.equal(governance.governanceState(repo, options).rule, 'M2');
   assert.deepEqual(ids({ variable: 'missing', secret: 'found' }).map(entry => entry.id), ['GOVERNANCE_APP_LEFT_OVER']);
   assert.deepEqual(ids(missing), []);
+});
+
+test('an existing setup is reused: no new App link, and every save command asks for a typed replace first', () => {
+  for (const state of [{ variable: 'found', secret: 'missing' }, { variable: 'missing', secret: 'found' }]) {
+    const text = app.setupLines(SLUG, STORE, state).join('\n');
+    assert.match(text, /already has part of an App setup/);
+    assert.match(text, /Reuse that App: set only what is missing, from the same App/);
+    assert.ok(!text.includes(app.creationLink(SLUG)), 'no new App is offered over an existing one');
+    assert.match(text, /type replace first/);
+    assert.match(text, /remove this repository from the old App's installation/);
+  }
+  // Every printed save step is guarded, whatever the state, and the names never change.
+  for (const state of [missing, { variable: 'unverified', secret: 'unverified', reason: 'offline' }, { variable: 'found', secret: 'missing' }]) {
+    const lines = app.setupLines(SLUG, STORE, state).filter(line => /gh (variable|secret) set/.test(line));
+    assert.equal(lines.length, 2, JSON.stringify(state));
+    for (const line of lines) {
+      assert.match(line, /Type replace to overwrite it/);
+      assert.ok(line.includes('TOOLKIT_GOVERNANCE_APP_CLIENT_ID') && line.includes('TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY'));
+      assert.ok(line.indexOf(' list --repo ') < line.indexOf(' set '), 'names are listed before anything is set');
+    }
+  }
+});
+
+test('the macOS or Linux save command overwrites an existing setup only after a typed replace', { skip: process.platform === 'win32' }, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-app-guard-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, 'gh'), [
+    '#!/bin/bash',
+    'case "$1 $2" in',
+    '  "variable list") [ -n "$HAS_VARIABLE" ] && echo TOOLKIT_GOVERNANCE_APP_CLIENT_ID; echo OTHER_VARIABLE;;',
+    '  "secret list") [ -n "$HAS_SECRET" ] && echo TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY; echo OTHER_SECRET;;',
+    '  *) echo "$1 $2" >> "$WRITES"; cat > /dev/null;;',
+    'esac',
+    '',
+  ].join('\n'), { mode: 0o755 });
+  fs.writeFileSync(path.join(dir, '<key file>.pem'), 'not a key\n');
+  const script = app.saveCommands(SLUG)[1].replace(/^\s*macOS or Linux: /, '');
+  const run = (answer, env) => {
+    const writes = path.join(dir, `writes-${Math.random().toString(16).slice(2)}`);
+    const result = childProcess.spawnSync('bash', ['-c', script], { cwd: dir, input: `${answer}\n`, encoding: 'utf8',
+      env: { ...process.env, ...env, WRITES: writes, PATH: `${dir}${path.delimiter}${process.env.PATH}` } });
+    assert.equal(result.status, 0, result.stderr);
+    return { out: result.stdout, writes: fs.existsSync(writes) ? fs.readFileSync(writes, 'utf8').trim().split('\n') : [] };
+  };
+  assert.deepEqual(run('', {}).writes, ['variable set', 'secret set'], 'a fresh repository is saved without a question');
+  for (const env of [{ HAS_VARIABLE: '1' }, { HAS_SECRET: '1' }]) {
+    const kept = run('yes', env);
+    assert.deepEqual(kept.writes, [], JSON.stringify(env));
+    assert.match(kept.out, /Kept the existing App\. Nothing changed\./);
+    assert.deepEqual(run('replace', env).writes, ['variable set', 'secret set'], JSON.stringify(env));
+  }
+  assert.deepEqual(run('', { HAS_VARIABLE: '1', HAS_SECRET: '1' }).writes, [], 'no answer, as from an agent, keeps the existing App');
 });
