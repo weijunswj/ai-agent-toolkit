@@ -87,6 +87,39 @@ test('a clean train boards each member at its reviewed head, bumps once at the h
   assert.equal(f.git('worktree', 'list').split('\n').length, 1, 'verify leaves no worktree behind');
 });
 
+test('verify lists files two or more members change and says which review the train needs', t => {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n', 'shared.txt': 'from 1\n' });
+  const two = f.branch('pr-2', { 'c.txt': 'c\n' });
+  const apart = built(f, [f.member(1, one), f.member(2, two)]);
+  const clear = train.run(['verify', '--manifest', apart.out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo);
+  assert.equal(clear.ok, true, JSON.stringify(clear));
+  assert.deepEqual(clear.overlap, []);
+  assert.equal(clear.review, 'none: verify and green CI suffice');
+  // Both members change the same file in places Git merges cleanly: the train still verifies, and
+  // the shared file is named for a delta review.
+  f.git('switch', '--quiet', 'main');
+  f.write('a.txt', 'one\ntwo\nthree\nfour\nfive\nsix\n');
+  f.git('commit', '--quiet', '-am', 'longer a.txt');
+  const base = f.git('rev-parse', 'HEAD');
+  const edit = (name, text) => {
+    f.git('switch', '--quiet', '-c', name, base);
+    f.write('a.txt', text);
+    f.git('commit', '--quiet', '-am', `work on ${name}`);
+    const head = f.git('rev-parse', 'HEAD');
+    f.git('switch', '--quiet', 'main');
+    return head;
+  };
+  const three = edit('pr-3', 'ONE\ntwo\nthree\nfour\nfive\nsix\n');
+  const four = edit('pr-4', 'one\ntwo\nthree\nfour\nfive\nSIX\n');
+  const shared = built(f, [f.member(3, three), f.member(4, four)]);
+  assert.deepEqual(shared.result.boarded, [3, 4], JSON.stringify(shared.result));
+  const flagged = train.run(['verify', '--manifest', shared.out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo);
+  assert.equal(flagged.ok, true, JSON.stringify(flagged));
+  assert.deepEqual(flagged.overlap, [{ file: 'a.txt', members: [3, 4] }]);
+  assert.equal(flagged.review, 'delta review of the shared files');
+});
+
 test('a member that conflicts is ejected, never hand-fixed, and the rest still land', t => {
   const f = fixture(t);
   const one = f.branch('pr-1', { 'a.txt': 'one\nTWO from 1\nthree\n' });

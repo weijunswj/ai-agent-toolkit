@@ -37,6 +37,8 @@
 // verify walks the train's first-parent commits after main and refuses anything that is not a
 // member merge or a main catch-up merge whose tree equals Git's own clean merge, or a last bump
 // commit whose tree equals a fresh run of the bump command. Every member must board exactly once.
+// It also lists every file two or more members change ("overlap") and the review the train needs:
+// none when there is no overlap, else a delta review of the shared files.
 // land re-runs verify, requires main to be inside the train (else main moved: rebuild), every
 // member's pull request open at its boarded head, the train pull request at --head and an owner OK
 // for every RISKY member, then names the pull request and head to merge. --live reads those pull request facts from
@@ -283,7 +285,22 @@ function verify(cwd, manifest, options) {
   for (const member of manifest.members) {
     if (!seen.has(member.pr)) problems.push(`#${member.pr} at ${member.head.slice(0, 12)} is not on the train`);
   }
-  return { ok: problems.length === 0, head, main, members: manifest.members.map(member => member.pr), level, problems };
+  const overlap = memberOverlap(cwd, manifest.members, main);
+  const review = overlap.length ? 'delta review of the shared files' : 'none: verify and green CI suffice';
+  return { ok: problems.length === 0, head, main, members: manifest.members.map(member => member.pr), level, overlap, review, problems };
+}
+
+// Files that two or more members change, each counted from where that member left main. A train
+// with none needs no review of its own once verify passes and CI is green; shared files get a
+// short delta review, because each member's review saw only its own change to them.
+function memberOverlap(cwd, members, main) {
+  const owners = new Map();
+  for (const member of members) {
+    const base = git(cwd, ['merge-base', main, member.head]).stdout;
+    const listed = git(cwd, ['diff', '--name-only', '-z', '--no-renames', base, member.head]).stdout;
+    for (const file of listed.split('\0').filter(Boolean)) owners.set(file, [...(owners.get(file) || []), member.pr]);
+  }
+  return [...owners].filter(([, prs]) => prs.length > 1).map(([file, prs]) => ({ file, members: prs })).sort((a, b) => a.file.localeCompare(b.file));
 }
 
 function body(manifest) {
