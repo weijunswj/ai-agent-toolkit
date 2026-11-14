@@ -77,6 +77,16 @@
         "auto_merge": { "enum": ["off", "after-gates"] }
       }
     },
+    "ci_shards": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["answer"],
+      "description": "The owner's answer to the sharded CI offer that governance enable and refresh make: yes copies the sharded test workflow and Shard Timings into this repository, not-now asks again at the next refresh, never stops asking. This release only reads the key; nothing acts on it yet.",
+      "properties": {
+        "answer": { "enum": ["yes", "not-now", "never"] },
+        "offered_at": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T" }
+      }
+    },
     "projection": {
       "type": "object",
       "additionalProperties": false,
