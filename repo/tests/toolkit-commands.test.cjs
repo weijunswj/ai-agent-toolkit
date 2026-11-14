@@ -12,8 +12,8 @@ const SCRIPT = require.resolve('../scripts/toolkit-commands.cjs');
 const wake = (attributes, text) => `<wake reason="mention" current-time="2026-11-11T05:00:00Z"><project id="chan_example" type="project"><thread ts="cmsg_thread"><message trigger="true" ${attributes} id="cmsg_one" sent-at="2026-11-11T05:00:00Z">${text}</message></thread></project></wake>`;
 
 test('exactly these typed commands are recognised', () => {
-  assert.deepEqual([...commands.PHRASES].sort(), ['refresh governance', 'setup governance', 'toolkit cmd', 'toolkit command', 'toolkit governance catalogue', 'toolkit governance check', 'toolkit governance discover',
-    'toolkit governance migrate', 'toolkit governance security', 'toolkit governance status', 'toolkit refresh', 'toolkit refresh governance', 'toolkit setup', 'toolkit setup governance', 'toolkit show env']);
+  assert.deepEqual([...commands.PHRASES].sort(), ['governance setup', 'refresh governance', 'setup governance', 'toolkit cmd', 'toolkit command', 'toolkit env', 'toolkit governance', 'toolkit governance catalogue', 'toolkit governance check',
+    'toolkit governance discover', 'toolkit governance migrate', 'toolkit governance security', 'toolkit governance status', 'toolkit refresh', 'toolkit refresh governance', 'toolkit setup', 'toolkit setup governance', 'toolkit show env']);
 });
 
 test('setup governance and refresh governance run their own subcommand, and a switch change only prepares a pull request', () => {
@@ -57,8 +57,24 @@ test('each typed governance phrase names its own subcommand of toolkit-governanc
   assert.ok(migrate.endsWith(`\`node "${script}" migrate\``), migrate);
 });
 
+test('the governance guide runs setup, then offers the next step without answering for the user', () => {
+  const script = path.join(__dirname, '..', 'scripts', 'toolkit-governance.cjs');
+  for (const phrase of ['toolkit governance', 'governance setup']) {
+    assert.deepEqual(commands.typedCommand(` ${phrase.toUpperCase()}. `), { phrase, action: 'guide' });
+    const context = commands.phraseContext(phrase);
+    assert.ok(context.includes(`Run exactly \`node "${script}" setup\``), phrase);
+    assert.ok(context.includes(`\`node "${script}" refresh --set on\``) && context.includes(`refresh --set off`), phrase);
+    assert.match(context, /sending `toolkit governance enable` as their own message/);
+    assert.ok(context.includes(`turn governance off, which the user does by running \`node "${script}" disable\` in their own terminal`), phrase);
+    assert.match(context, /Never answer the governance question for the user\.$/);
+    for (const other of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate', 'enable']) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${phrase} runs ${other}`);
+  }
+  // The gate's answer phrases stay the gate's.
+  assert.equal(commands.typedCommand('toolkit governance enable'), null);
+});
+
 test('governance answers and other governance wording stay with the gate or plain text', () => {
-  const plain = ['toolkit governance enable', 'toolkit governance disable', 'toolkit governance decline', 'toolkit governance', 'toolkit governance check --offline',
+  const plain = ['toolkit governance enable', 'toolkit governance disable', 'toolkit governance decline', 'toolkit governance check --offline',
     'toolkit governance check --json', 'toolkit governance check please', 'run toolkit governance check', 'toolkit governance reopen', 'toolkit governance publish', 'governance check'];
   for (const text of plain) assert.equal(commands.phraseContext(text), '', text);
 });
@@ -66,13 +82,13 @@ test('governance answers and other governance wording stay with the gate or plai
 test('each typed command maps to its own action, whatever the letter case, spacing or closing full stop', () => {
   const cases = [
     ['toolkit cmd', 'list'], ['toolkit command', 'list'], ['toolkit refresh', 'refresh'], ['toolkit setup', 'setup'], ['toolkit show env', 'env'],
-    ['  TOOLKIT   Show\tEnv.  ', 'env'], ['Toolkit Cmd', 'list'],
+    ['  TOOLKIT   Show\tEnv.  ', 'env'], ['Toolkit Cmd', 'list'], ['toolkit env', 'env'], ['Toolkit Env.', 'env'], ['toolkit governance', 'guide'], ['Governance Setup', 'guide'],
   ];
   for (const [text, action] of cases) assert.equal(commands.typedCommand(text)?.action, action, text);
 });
 
 test('anything that is not the whole message is plain text', () => {
-  const plain = ['toolkit set env', 'toolkit env', 'toolkit', 'toolkit cmd please', 'please toolkit cmd', 'toolkit cmd\ntoolkit setup', 'toolkit cmd..', 'toolkit cmd!',
+  const plain = ['toolkit set env', 'toolkit', 'toolkit cmd please', 'please toolkit cmd', 'toolkit cmd\ntoolkit setup', 'toolkit cmd..', 'toolkit cmd!',
     'toolkit-cmd', '`toolkit cmd`', '"toolkit cmd"', 'toolkit show env OPENAI_API_KEY', '<b>toolkit cmd</b>', '', ' ', `toolkit cmd${' '.repeat(80)}`, null, undefined, 7, {}, ['toolkit cmd']];
   for (const text of plain) {
     assert.equal(commands.typedCommand(text), null, String(text));
@@ -91,14 +107,16 @@ test('the context line names the phrase and the one action to take', () => {
 
 test('the list shows only the commands a user types, and is what the script prints', () => {
   const list = commands.listText();
-  for (const phrase of ['toolkit cmd', 'toolkit command', 'toolkit refresh', 'toolkit setup', 'toolkit show env', 'setup governance', 'toolkit setup governance', 'refresh governance', 'toolkit refresh governance']) {
-    assert.ok(commands.PHRASES.includes(phrase), phrase);
-    assert.ok(list.includes(`\`${phrase}\``), phrase);
+  const rows = commands.COMMANDS.flatMap(command => command.type);
+  assert.deepEqual(rows, ['toolkit cmd', 'toolkit command', 'setup toolkit', 'toolkit setup', 'refresh toolkit', 'toolkit refresh', 'remove toolkit', 'toolkit env', 'toolkit show env',
+    'toolkit permissions', 'toolkit governance', 'governance setup', 'merge N']);
+  for (const phrase of rows) assert.ok(list.includes(`\`${phrase}\``), phrase);
+  // Other governance phrases and older commands still work when typed, but the list leaves them out.
+  for (const hidden of ['toolkit update scheduled task', 'setup governance', 'refresh governance', 'toolkit governance enable', 'toolkit governance disable']) assert.ok(!list.includes(`\`${hidden}\``), hidden);
+  for (const subcommand of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate']) {
+    assert.ok(!list.includes(`toolkit governance ${subcommand}`), subcommand);
+    assert.equal(commands.typedCommand(`toolkit governance ${subcommand}`)?.subcommand, subcommand);
   }
-  for (const phrase of ['toolkit permissions', 'toolkit governance disable', 'toolkit update scheduled task', 'remove toolkit', 'merge N']) assert.ok(list.includes(`\`${phrase}\``), phrase);
-  // Internal or rarely typed governance tools still work when typed, but the list leaves them out.
-  for (const subcommand of ['enable', 'status', 'check', 'discover', 'catalogue', 'security', 'migrate']) assert.ok(!list.includes(`toolkit governance ${subcommand}`), subcommand);
-  for (const subcommand of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate']) assert.equal(commands.typedCommand(`toolkit governance ${subcommand}`)?.subcommand, subcommand);
   const run = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' });
   assert.equal(run.status, 0);
   assert.equal(run.stdout, `${list}\n`);

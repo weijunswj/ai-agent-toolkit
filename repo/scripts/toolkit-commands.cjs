@@ -3,13 +3,12 @@
 
 // The Toolkit command list, and the typed commands the prompt hooks recognise.
 //
-// A typed command is the user's whole message and nothing else: `toolkit cmd`, `toolkit command`,
-// `toolkit refresh`, `toolkit setup`, `toolkit show env`, `setup governance`, `refresh governance`, or
-// `toolkit governance` followed by one of the subcommands in GOVERNANCE below. The printed list shows
-// only the commands a user would type; the governance subcommands stay recognised without being listed. For one of those the prompt hook adds a
-// short context line that tells the agent what the user asked for, so the agent never has to guess
-// from loose words (an owner once typed "toolkit set env" and got the one-key prompt instead of the
-// editor). Every other request stays plain language, read by the skills.
+// A typed command is the user's whole message and nothing else: one of the phrases in ACTIONS below.
+// For a typed command the prompt hook adds a short context line that tells the agent what the user
+// asked for, so the agent never has to guess from loose words (an owner once typed "toolkit set env"
+// and got the one-key prompt instead of the editor). Every other request stays plain language, read
+// by the skills. The printed list shows only the commands a user would type; the other governance
+// phrases stay recognised without being listed.
 //
 // Advisory only: this module never blocks a prompt, reads no file and starts no process. A phrase
 // inside a longer message, or with other words around it, is ordinary text and gets no line.
@@ -26,21 +25,19 @@ const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Setup', type: ['toolkit cmd', 'toolkit command'], does: 'Show this list.' }),
   Object.freeze({ group: 'Setup', type: ['setup toolkit', 'toolkit setup'], does: 'Set up Toolkit on this computer, or change your setup answers.' }),
   Object.freeze({ group: 'Setup', type: ['refresh toolkit', 'toolkit refresh'], does: 'Update Toolkit on this computer to the newest version.' }),
-  Object.freeze({ group: 'Setup', type: ['toolkit update scheduled task'], does: "Review and update Toolkit's scheduled tasks on this computer." }),
   Object.freeze({ group: 'Setup', type: ['remove toolkit'], does: "Choose this app or every app, list what Toolkit put there, then remove it after your OK." }),
-  Object.freeze({ group: 'Keys', type: ['toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
+  Object.freeze({ group: 'Keys', type: ['toolkit env', 'toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
   Object.freeze({ group: 'Permissions', type: ['toolkit permissions'], does: 'Print the paste-once permission blocks for this computer and this repository; `toolkit permissions --apply`, typed by you in your own terminal, adds them.' }),
-  Object.freeze({ group: 'Governance', type: ['setup governance', 'toolkit setup governance'], does: "Turn Toolkit's GitHub governance on for this repository and set its task auto-merge switch in the same pull request; in a governed repository it is refresh governance." }),
-  Object.freeze({ group: 'Governance', type: ['refresh governance', 'toolkit refresh governance'], does: "Show this repository's merged governance answers (task auto-merge switch, evidence store, checks) and its permission block; a change to the switch is one pull request for you to merge." }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance disable'], does: "Turn Toolkit's GitHub governance off for this repository. It prepares a pull request for you to merge." }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance', 'governance setup'], does: "Guide Toolkit's GitHub governance for this repository: see whether it is on, turn it on, change task auto-merge or turn it off. Each change is one pull request for you to merge." }),
   Object.freeze({ group: 'Merge', type: ['merge N'], does: 'Approve the merge of pull request N.' }),
-]);
+])
 
 const ACTIONS = {
   'toolkit cmd': 'list',
   'toolkit command': 'list',
   'toolkit refresh': 'refresh',
   'toolkit setup': 'setup',
+  'toolkit env': 'env',
   'toolkit show env': 'env',
 };
 // `toolkit governance <subcommand>`: each runs that subcommand of toolkit-governance.cjs, never a
@@ -51,6 +48,9 @@ const SWITCH_COMMANDS = Object.freeze(['setup', 'refresh']);
 for (const subcommand of Object.keys(GOVERNANCE)) ACTIONS[`toolkit governance ${subcommand}`] = `governance:${subcommand}`;
 // The repository switch commands run governance setup and refresh, never another subcommand.
 for (const verb of ['setup', 'refresh']) ACTIONS[`${verb} governance`] = ACTIONS[`toolkit ${verb} governance`] = `governance:${verb}`;
+// The governance guide: the one listed governance entry. It runs setup, which in a governed
+// repository is refresh, and then offers the next step. `setup governance` stays its own command.
+for (const phrase of ['toolkit governance', 'governance setup']) ACTIONS[phrase] = 'guide';
 Object.freeze(ACTIONS);
 const PHRASES = Object.freeze(Object.keys(ACTIONS));
 
@@ -84,6 +84,12 @@ const CONTEXT = Object.freeze({
   setup: () => 'Treat it exactly as `setup toolkit`: follow the toolkit-setup skill.',
   refresh: () => 'Treat it exactly as `refresh toolkit`: follow the toolkit-setup skill.',
   env: () => 'Open the env editor: follow the toolkit-env skill and run its `edit` route. Never run the one-key `set` prompt for this phrase, and never print a key value in chat.',
+  guide: () => {
+    const command = subcommand => `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
+    return `Guide the user through Toolkit's GitHub governance for this repository. Run exactly \`${command('setup')}\` in this repository and show the user its output; run no other governance subcommand first. `
+      + `If governance is on, it shows the merged answers: offer to change task auto-merge with \`${command('refresh')} --set on\` or \`${command('refresh')} --set off\` (it only prepares a pull request for the user to merge), or to turn governance off, which the user does by running \`${command('disable')}\` in their own terminal. `
+      + `If governance is off or not decided, tell the user they turn it on by running \`${command('setup')}\` in their own terminal, which also asks for task auto-merge, or, while Toolkit's governance question is open here, by sending \`toolkit governance enable\` as their own message. Every change is a pull request for the user to merge. Never answer the governance question for the user.`;
+  },
   governance: subcommand => {
     const command = `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
     if (SWITCH_COMMANDS.includes(subcommand)) return `Run exactly \`${command}\` in this repository and show the user its output. If the user then asks to turn task auto-merge on or off, run \`${command} --set on\` or \`${command} --set off\`: it only prepares a pull request for the user to merge. If it says a terminal is needed, give the user the command to run in their own terminal.`;
