@@ -171,7 +171,8 @@ function ensurePlainText(root, installer = null) {
   let said = '';
   const run = installer || (() => new PlainTextInstaller({ repo: root, out: { write: text => { said += text; return true; } } }).install({ workflow: true }));
   try { run(); } catch (error) { throw new AdoptError(`The plain-text check could not be added (${error.message}).`); }
-  return said.split('\n').filter(Boolean);
+  // Its own "commit these through a pull request" line is left out: the files join this one.
+  return [...said.split('\n').filter(line => line && !line.startsWith('Next:')), 'The plain-text check files were added to the working tree and travel in the turn-on pull request.'];
 }
 
 // The whole turn-on: { binding, files, made, lines }. The binding still goes through the one

@@ -26,7 +26,7 @@ const adopt = require('./toolkit-governance-adopt.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
-const ADOPTION_NOT_READY = 'The adoption proposal is not ready. Run toolkit governance discover, resolve missing parent, separate private evidence store or checks, then use repository-agent-rules to prepare the binding and governed rules. Publish them together in one setup pull request.';
+const ADOPTION_NOT_READY = 'The adoption proposal is not ready. Run toolkit governance where GitHub can be read: its bank makes a missing parent issue and private evidence store and renders the governed rules into one setup pull request. Or prepare the binding and governed rules with repository-agent-rules and publish them together.';
 const PROPOSAL_ERRORS = Object.freeze({
   PROPOSAL_WRITE_REQUIRED: 'This GitHub account cannot write to this repository. Continue with global rules, without governance effects or standing task auto-merge. An owner with write access can publish the proposal.',
   PROPOSAL_CONFLICT: 'Conflicting governance proposals are open. Show their links and ask the owner which to keep before publishing again. None decides governance.',
