@@ -7,8 +7,7 @@
 // For a typed command the prompt hook adds a short context line that tells the agent what the user
 // asked for, so the agent never has to guess from loose words (an owner once typed "toolkit set env"
 // and got the one-key prompt instead of the editor). Every other request stays plain language, read
-// by the skills. The printed list shows only the commands a user would type; the other governance
-// phrases stay recognised without being listed.
+// by the skills. Every typed command is on the printed list, or opens the same action as one that is.
 //
 // Advisory only: this module never blocks a prompt, reads no file and starts no process. A phrase
 // inside a longer message, or with other words around it, is ordinary text and gets no line.
@@ -39,17 +38,12 @@ const ACTIONS = {
   'toolkit env': 'env',
   'toolkit show env': 'env',
 };
-// `toolkit governance <subcommand>`: each runs that subcommand of toolkit-governance.cjs, never a
-// different one, and `migrate` (which asks its own typed yes) goes to the user's own terminal.
-// `enable` and `disable` are answers the governance gate reads, so they are not listed here.
-const GOVERNANCE = Object.freeze({ status: 'run', check: 'run', discover: 'run', catalogue: 'run', security: 'run', migrate: 'terminal' });
-const SWITCH_COMMANDS = Object.freeze(['setup', 'refresh']);
-for (const subcommand of Object.keys(GOVERNANCE)) ACTIONS[`toolkit governance ${subcommand}`] = `governance:${subcommand}`;
-// The repository switch commands run governance setup and refresh, never another subcommand.
-for (const verb of ['setup', 'refresh']) ACTIONS[`${verb} governance`] = ACTIONS[`toolkit ${verb} governance`] = `governance:${verb}`;
-// The governance guide: the one listed governance entry. It runs setup, which in a governed
-// repository is refresh, and then offers the next step. `setup governance` stays its own command.
-for (const phrase of ['toolkit governance', 'governance setup']) ACTIONS[phrase] = 'guide';
+// The governance guide: the one governance entry. It runs setup, which in a governed repository is
+// refresh, and then offers the next step. `setup governance` and `refresh governance`, which Toolkit's
+// own messages tell the user to say, open the same guide. `toolkit governance enable` and `disable`
+// are answers the governance gate reads, so they are not here; the governance tools (status, check
+// and the rest) are run by agents, setup and CI, not typed.
+for (const phrase of ['toolkit governance', 'governance setup', 'setup governance', 'toolkit setup governance', 'refresh governance', 'toolkit refresh governance']) ACTIONS[phrase] = 'guide';
 Object.freeze(ACTIONS);
 const PHRASES = Object.freeze(Object.keys(ACTIONS));
 
@@ -74,8 +68,7 @@ function typedCommand(text) {
   if (typeof text !== 'string' || text.length > 64) return null;
   const phrase = text.trim().replace(/\.$/, '').replace(/[ \t]+/g, ' ').toLowerCase();
   if (!Object.hasOwn(ACTIONS, phrase)) return null;
-  const [action, subcommand] = ACTIONS[phrase].split(':');
-  return subcommand ? { phrase, action, subcommand } : { phrase, action };
+  return { phrase, action: ACTIONS[phrase] };
 }
 
 const CONTEXT = Object.freeze({
@@ -89,19 +82,12 @@ const CONTEXT = Object.freeze({
       + `If governance is on, it shows the merged answers: offer to change task auto-merge with \`${command('refresh')} --set on\` or \`${command('refresh')} --set off\` (it only prepares a pull request for the user to merge), or to turn governance off, which the user does by running \`${command('disable')}\` in their own terminal. `
       + `If governance is off or not decided, tell the user they turn it on by running \`${command('setup')}\` in their own terminal: it asks two questions there, governance on and then task auto-merge on or off, and prepares one pull request with both. Every change is a pull request for the user to merge. Never answer the governance question for the user.`;
   },
-  governance: subcommand => {
-    const command = `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
-    if (SWITCH_COMMANDS.includes(subcommand)) return `Run exactly \`${command}\` in this repository and show the user its output. If the user then asks to turn task auto-merge on or off, run \`${command} --set on\` or \`${command} --set off\`: it only prepares a pull request for the user to merge. If it says a terminal is needed, give the user the command to run in their own terminal.`;
-    return GOVERNANCE[subcommand] === 'terminal'
-      ? `It asks for its own typed yes, so do not run it: give the user this exact command to run in their own terminal in this repository, and run nothing else. \`${command}\``
-      : `Run exactly \`${command}\` in this repository and show the user its output. Run no other command in its place: no other governance subcommand, and not the programme \`attention\` list.`;
-  },
 });
 
 // The context line for the user's own typed message, or '' when it is not a typed command.
 function phraseContext(text) {
   const command = typedCommand(text);
-  return command ? `Toolkit command: the user typed \`${command.phrase}\`. ${CONTEXT[command.action](command.subcommand)}` : '';
+  return command ? `Toolkit command: the user typed \`${command.phrase}\`. ${CONTEXT[command.action]()}` : '';
 }
 
 module.exports = Object.freeze({ COMMANDS, GROUPS, PHRASES, listText, typedCommand, phraseContext });

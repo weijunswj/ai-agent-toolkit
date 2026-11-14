@@ -65,7 +65,7 @@ Detailed plugin verification and bridge command mechanics live in [Toolkit Local
 
 ### Commands You Can Type
 
-Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup`, `toolkit env`, `toolkit show env` and `toolkit governance` (or `governance setup`) are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing. A phrase inside a longer message is ordinary text. The one message that carries Toolkit's governance question gets no command line; send the phrase again after answering. Everything else is plain language: ask in your own words.
+Type one of these as your whole message in Codex or Claude Code. Apart from `remove toolkit` and `merge N`, which Toolkit's skills read, each is matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing. A phrase inside a longer message is ordinary text. The one message that carries Toolkit's governance question gets no command line; send the phrase again after answering. Everything else is plain language: ask in your own words.
 
 - `toolkit cmd` or `toolkit command`: show this list.
 - `setup toolkit` or `toolkit setup`: set up Toolkit on this computer, or change your setup answers.
@@ -77,14 +77,12 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 
 `node repo/scripts/toolkit-commands.cjs` prints the same list.
 
-These still work when typed as a whole message, but the list leaves them out because the guide or the agent covers them:
+`setup governance` and `refresh governance` (also with `toolkit` in front), which Toolkit's own messages ask you to say, open the same governance guide:
 
 - `setup governance` or `toolkit setup governance`: turn Toolkit's GitHub governance on for this repository and set its task auto-merge switch in the same pull request. In a governed repository it is `refresh governance`.
 - `refresh governance` or `toolkit refresh governance`: show this repository's merged governance answers (task auto-merge switch, evidence store, checks) and its permission block. Ask to turn task auto-merge on or off and Toolkit prepares one pull request for you to merge; it applies only after your merge.
-- `toolkit governance enable` or `toolkit governance disable`: your answer to Toolkit's governance question. It prepares a pull request for you to merge, and counts only while that question is open for this repository.
-- `toolkit governance status`, `check`, `discover`, `catalogue`, `security` and `migrate`: governance tools that agents and setup run. Each runs that same subcommand of `toolkit-governance.cjs` and nothing else, except `migrate`, which the agent hands to you to run in your own terminal.
-- `toolkit permissions`: print the paste-once permission blocks for this computer and, in a governed repository, for this repository. `toolkit permissions --apply`, typed by you in your own terminal, adds them.
-- `toolkit update scheduled task`: review and update Toolkit's scheduled tasks on this computer.
+
+`toolkit governance enable` and `toolkit governance disable` are your answers to Toolkit's governance question. Each prepares a pull request for you to merge, and counts only while that question is open for this repository.
 
 ### Manual Skill-Folder Copying
 
