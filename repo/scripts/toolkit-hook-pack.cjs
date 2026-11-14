@@ -673,7 +673,7 @@ cp.spawnSync = function(file, args, options) {
         .replaceAll('{head7}', (this.head || '').slice(0,7)).replaceAll('{headUpper}', (this.head || '').toUpperCase()).replaceAll('{head}', this.head || '').replaceAll('{now}', this.#now().toISOString());
     }
     if (Array.isArray(value)) return value.map(item => this.expand(item, pluginRoot));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.expand(item, pluginRoot)]));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key.includes('{') ? this.expand(key, pluginRoot) : key, this.expand(item, pluginRoot)]));
     return value;
   }
 
