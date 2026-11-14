@@ -22,5 +22,6 @@
   "projection": {
     "after_section": "CURRENT",
     "replace_section": "Programme index"
-  }
+  },
+  "task_prs": { "auto_merge": "after-gates" }
 }
