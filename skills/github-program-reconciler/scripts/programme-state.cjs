@@ -1018,9 +1018,10 @@ function validateBinding(binding) {
       check(errors, isObject(updates) && Object.keys(updates).every(key => ['auto_merge', 'github_actions'].includes(key)), 'dependency_updates may hold only auto_merge and github_actions');
       check(errors, isObject(updates) && optional(updates.auto_merge, value => ['off', 'patch-minor'].includes(value)) && optional(updates.github_actions, value => ['auto-merge', 'owner'].includes(value)), 'dependency_updates.auto_merge must be off or patch-minor, and github_actions auto-merge or owner');
     }
-    // The repository's one task auto-merge switch; a missing key is off.
+    // The repository's task auto-merge switch (a missing key is off) and merge train switch (a
+    // missing key is on, but only while governance is enabled).
     const taskPrs = binding.task_prs;
-    if (taskPrs !== undefined) check(errors, v2 && isObject(taskPrs) && Object.keys(taskPrs).every(key => key === 'auto_merge') && optional(taskPrs.auto_merge, value => ['off', 'after-gates'].includes(value)), 'task_prs may hold only auto_merge, off or after-gates, in a version 2 binding');
+    if (taskPrs !== undefined) check(errors, v2 && isObject(taskPrs) && Object.keys(taskPrs).every(key => ['auto_merge', 'merge_train'].includes(key)) && optional(taskPrs.auto_merge, value => ['off', 'after-gates'].includes(value)) && optional(taskPrs.merge_train, value => ['off', 'on'].includes(value)), 'task_prs may hold only auto_merge (off or after-gates) and merge_train (off or on), in a version 2 binding');
     // The Windows Task Scheduler folder for this repository's no-AI tasks (toolkit-windows-tasks.cjs).
     check(errors, optional(binding.schedule_folder, value => typeof value === 'string' && /^[A-Z0-9][A-Z0-9-]{0,31}$/.test(value)), 'schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
     const projection = binding.projection;
