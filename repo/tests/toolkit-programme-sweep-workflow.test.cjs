@@ -1060,3 +1060,19 @@ test('footers: without a refresh that ran this commit, nothing is edited and one
     assert.deepEqual(result.summaries, []);
   }
 });
+
+// #886 slice A2: the holder orders a cloud pass ran are counted in the summary, never printed.
+test('action: holder orders the pass ran add a counts line; a refused one also warns', () => {
+  const report = orders => ({ status: 0, code: null, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [], orders } });
+  const quiet = runAction('refresh', { env: minted, refresh: () => report({ done: 0, refused: 0, pending: 0, results: [] }) });
+  assert.equal(quiet.code, 0);
+  assert.equal(quiet.summaries.length, 1, 'an empty queue adds no line');
+  const ran = runAction('refresh', { env: minted, refresh: () => report({ done: 2, refused: 1, pending: 1, results: [{ order_id: 'secret-looking-id', outcome: 'DONE' }] }) });
+  assert.equal(ran.code, 0);
+  assert.deepEqual(ran.summaries.slice(1), ['Holder orders: done=2, refused=1, left pending=1']);
+  assert.ok(!ran.summaries.join('\n').includes('secret-looking-id'), 'order ids stay in the store');
+  assert.deepEqual(ran.warnings, [action().ORDERS_REFUSED]);
+  const done = runAction('refresh', { env: minted, refresh: () => report({ done: 1, refused: 0, pending: 0, results: [] }) });
+  assert.deepEqual(done.warnings, []);
+  assert.deepEqual(action().ordersLine({ done: -1, refused: 'x', pending: 3 }), { line: 'Holder orders: done=0, refused=0, left pending=3', refused: 0 });
+});

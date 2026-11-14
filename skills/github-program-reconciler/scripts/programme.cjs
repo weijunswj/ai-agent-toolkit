@@ -73,6 +73,7 @@ const { SweepLease } = require('./programme-sweep-lease.cjs');
 const SWEEP_OVERLAP_MS = 5 * 60 * 1000;
 const { ReadCache } = require('./programme-read-cache.cjs');
 const holderOrder = require('./programme-holder-order.cjs');
+const { OrderQueue } = require('./programme-order-queue.cjs');
 const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = require('./programme-lock.cjs');
 
 const { ProgrammeError } = state;
@@ -672,8 +673,11 @@ const commands = {
     if (!session || prefix !== context.binding.writer_prefix) {
       throw new ProgrammeError('PARENT_UNHELD', `The parent document of #${context.binding.parent_issue} has no controller holding it, so there is no one to refresh for. Nothing changed; report this to the controller.`);
     }
+    // The cloud sweep first runs the holder orders queued in the evidence store, inside its lease, so
+    // this same pass draws their writes. Once per run; the queue keeps what it could not finish.
+    const orders = context.lease?.host === 'cloud' && !context.ordersRan ? runQueuedOrders(context, deps) : null;
     // Only the hash of the holder's session: enough to write as it, never to decide for it.
-    context.writer = state.refreshWriter(parentDoc);
+    context.writer = state.refreshWriter(orders ? readParent(context) : parentDoc);
     context.sweepNotes?.phaseAt('inventory');
     let inventory;
     // A request budget spent before the inventory finished leaves it incomplete; the pass then stops
@@ -707,6 +711,7 @@ const commands = {
       complete: report.sweep.complete && !report.holds.length, noWrite: report.sweep.noWrite, reason: report.sweep.reason, read: report.sweep.read ?? 0, left: report.sweep.left ?? 0 };
     if (context.requests) report.metrics = `Sweep: requests=${context.requests.count}, cap=${capText(context.requests.cap)}, tasks read=${report.sweep?.read ?? 0}, queue left=${report.sweep?.left ?? 0}, complete=${context.sweepOutcome?.complete ? 'yes' : 'no'}`;
     cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
+    if (orders) report.orders = orders;
     return report;
   },
 
@@ -776,7 +781,8 @@ const commands = {
   // A holder order: the controller's own writes, named one by one, run as the parent's holder by the
   // session the controller handed it to. The dry run checks it against the parent and writes nothing.
   'run-order'(args, context, deps = {}) {
-    const order = holderOrder.validateOrder(readJsonFile(args.order, 'order'), { nowMs: deps.orderClock || Date.now });
+    // The cloud sweep passes an order it read from the evidence store's queue as a value.
+    const order = holderOrder.validateOrder(args.orderValue !== undefined ? args.orderValue : readJsonFile(args.order, 'order'), { nowMs: deps.orderClock || Date.now });
     const digest = holderOrder.orderDigest(order);
     const prefix = context.binding.writer_prefix;
     const parentDoc = readParent(context);
@@ -1146,6 +1152,21 @@ function formatInventory(result) {
   }
   if (result.findings.length) lines.push('', 'Findings (recorded by the next refresh)', ...result.findings.map(finding => `- ${finding.code}${finding.issue ? ` #${finding.issue}` : ''}`));
   return `${lines.join('\n')}\n`;
+}
+
+// The holder orders queued in the private store, each run by run-order's own rules as the holder the
+// order names. The writer is left unset afterwards: the refresh sets its own.
+function runQueuedOrders(context, deps) {
+  context.ordersRan = true;
+  const environment = deps.environment || process.env;
+  const runId = /^[0-9]{1,20}$/.test(environment.GITHUB_RUN_ID || '') ? environment.GITHUB_RUN_ID : null;
+  const store = typeof context.store.private === 'object' ? context.store.private : context.store;
+  const queue = new OrderQueue({ store, session: `cloud-sweep-${runId || 'run'}`, runId, now: () => nowText(deps),
+    runOrder: ({ orderValue, session, dryRun }) => {
+      try { return commands['run-order']({ command: 'run-order', orderValue, session, ...(dryRun ? { 'dry-run': true } : {}) }, context, deps); }
+      finally { context.writer = null; }
+    } });
+  return queue.run();
 }
 
 // reconcile --apply and refresh hold the repository's pass lock. The owner runs one more refresh pass
