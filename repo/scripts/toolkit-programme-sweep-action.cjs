@@ -19,6 +19,9 @@
 // (REPOSITORY_PRIVATE) a pass stopped mid-way at the App limit gets no waiting runner, since that
 // costs paid minutes and the hourly gate resumes it from its board note; a PAUSED pass keeps its one. `at_limit` tells the footer step to skip a run at the App limit.
 //
+// The pass first runs the holder orders the controller queued in the evidence store (the reconciler's
+// programme-order-queue.cjs); the summary gets one counts line, and a refused order also warns.
+//
 // `refreshed` tells the footer step the pass ran on this commit and saved its work, read back as
 // written; any skip, failure, run queued behind another sweep, pass that wrote nothing
 // (`sweep.noWrite`), pass whose state commit did not read back as written (a STATE_READBACK_MISMATCH
@@ -101,6 +104,8 @@ const NOTICES = Object.freeze({
 const SIGN_IN_FAILURE = `Programme Sweep failed: the governance GitHub App could not sign in. Check ${CLIENT_ID_VARIABLE} and ${PRIVATE_KEY_SECRET}: the App may not be installed on this repository or its evidence store, or the key was revoked.`;
 const GENERAL_FAILURE = 'Programme Sweep failed. Open this workflow run and toolkit governance check for the cause.';
 const SUMMARY_FAILURE = 'Programme Sweep could not write its metrics summary.';
+const ORDERS_REFUSED = 'Holder orders refused: the evidence store\'s orders/refused folder holds each refused order with its code. Send the controller a corrected order under a new order_id.';
+const ORDERS_RETRYING = 'Holder orders waiting: a GitHub failure kept queued orders from running this time; they retry each run until their own expiry. If this repeats, check the governance App\'s access to the evidence store.';
 const FOOTER_WINDOW_HOURS = 26;
 const OWNER_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const FOOTER_FAILURE = 'Footer cleaning failed: an edit or its read-back did not hold. Open this workflow run for the counts.';
@@ -170,6 +175,17 @@ function summaryLine(report) {
   if (!report || typeof report.metrics !== 'string' || !METRICS.test(report.metrics)) return null;
   const held = Array.isArray(report.holds) && report.holds.length ? '; this pass held, the next run retries' : '';
   return `Programme Sweep: ${report.metrics}${held}`;
+}
+
+// The counts line for the holder orders the pass ran, or null when it ran none.
+const COUNT = value => (Number.isSafeInteger(value) && value >= 0 ? value : 0);
+function ordersLine(orders) {
+  if (!orders || typeof orders !== 'object') return null;
+  const [done, refused, pending, retrying] = [COUNT(orders.done), COUNT(orders.refused), COUNT(orders.pending), COUNT(orders.retrying)];
+  const unreadable = /^[A-Z][A-Z0-9_]{0,63}$/.test(orders.unreadable || '') ? orders.unreadable : null;
+  if (unreadable) return { line: `Holder orders: the queue could not be read (${unreadable}); queued orders wait for the next run`, refused: 0, retrying: 0, unreadable };
+  if (!done && !refused && !pending) return null;
+  return { line: `Holder orders: done=${done}, refused=${refused}, left pending=${pending}`, refused, retrying, unreadable: null };
 }
 
 // Whether the pass stopped at GitHub's hourly App limit (or found it already at the margin). The stop's
@@ -312,6 +328,14 @@ class ProgrammeSweepAction {
     // A line that could carry a token is never written.
     if (!line || [env.GOVERNED_TOKEN, env.STORE_TOKEN].some(token => line.includes(token))) { this.failure(SUMMARY_FAILURE); return 1; }
     try { this.summary(line); } catch { this.failure(SUMMARY_FAILURE); return 1; }
+    // The holder orders this pass ran from the evidence store: counts only. Their results are files in
+    // the store (orders/done, orders/refused), never printed here.
+    const orders = ordersLine(result.report?.orders);
+    if (orders) {
+      try { this.summary(orders.line); } catch { this.failure(SUMMARY_FAILURE); return 1; }
+      if (orders.refused) this.warning(ORDERS_REFUSED);
+      if (orders.retrying || orders.unreadable) this.warning(ORDERS_RETRYING);
+    }
     const outcome = result.report?.outcome;
     if (outcome === 'QUEUED' || outcome === 'PAUSED') this.notice(outcome === 'QUEUED' ? NOTICES.queued : NOTICES.paused, { title: NO_PASS_TITLE, code: outcome.toLowerCase() });
     // A held pass is green (the next run retries) but titled, so the hourly gate can count a streak.
@@ -347,4 +371,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ HELD_TITLE, SKIP_TITLE, NO_PASS_TITLE, holdCodes, TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, atAppLimit, wroteNothing, saveUnverified, followUpAt, ProgrammeSweepAction });
+module.exports = Object.freeze({ HELD_TITLE, SKIP_TITLE, NO_PASS_TITLE, holdCodes, TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, ordersLine, ORDERS_REFUSED, ORDERS_RETRYING, atAppLimit, wroteNothing, saveUnverified, followUpAt, ProgrammeSweepAction });

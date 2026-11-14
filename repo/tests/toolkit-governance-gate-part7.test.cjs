@@ -192,7 +192,7 @@ test('must-pass rows: free text naming Claude or Codex runs in ENABLED, DISABLED
   // Must-refuse rows stay: the governance CLI with a decision, the full answer phrase next to a host,
   // and an edit of Toolkit's user-state files, in every folder.
   for (const cwd of [enabled, disabled, plain]) {
-    for (const command of ['node repo/scripts/toolkit-governance.cjs enable', 'node "C:/t/toolkit-governance.cjs" repair', 'claude -p "toolkit governance enable"']) {
+    for (const command of ['node repo/scripts/toolkit-governance.cjs enable', 'node "C:/t/toolkit-governance.cjs" disable', 'claude -p "toolkit governance enable"']) {
       assert.ok(tools(ctx).decide({ tool_name: 'Bash', cwd, tool_input: { command } })?.deny, command);
     }
     assert.ok(tools(ctx).decide({ tool_name: 'Write', cwd, tool_input: { file_path: path.join(path.dirname(ctx.registryPath), 'x.json') } })?.deny);
