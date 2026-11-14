@@ -44,6 +44,7 @@ class PermissionsError extends Error {
 // ---- the table ---------------------------------------------------------------------------------
 
 const PROGRAMME = 'skills/github-program-reconciler/scripts/programme.cjs';
+const WINDOWS_TASKS = 'repo/scripts/toolkit-windows-tasks.cjs';
 const CLEANUP = 'repo/scripts/toolkit-cleanup.cjs';
 const STORE = 'repo/scripts/toolkit-store.cjs';
 
@@ -63,6 +64,15 @@ const PROGRAMME_ASK = Object.freeze({
   claim: 'Taking or taking over the controller role is an authority change.',
   'init-parent': 'Creating a programme parent is a one-time owner decision.',
   'migrate-state': 'Moving the state documents asks for the owner in that run.',
+});
+// Toolkit no longer creates, updates or starts scheduled tasks on a computer (the cloud runs those
+// jobs), so no task form is allowed. The old Windows-task script still runs until it is deleted, so
+// its changing forms keep an explicit ask (Claude Code) or prompt (Codex) line that beats a broad allow.
+const TASKS_ASK = Object.freeze({
+  apply: 'Toolkit no longer creates or updates scheduled tasks on a computer; creating one is the owner\'s own choice.',
+  start: 'Toolkit no longer runs scheduled tasks on a computer; starting an old one is the owner\'s own choice.',
+  remove: 'Removing registered tasks is a delete.',
+  adopt: 'Recording a hand-made task as known is the owner\'s choice.',
 });
 
 // Whether the repository's programme file turns governance on, read as the sweep reads it.
@@ -108,7 +118,7 @@ const ASK_NETS = Object.freeze({
 // belongs to one group here; a test holds that, so a new row needs its explanation.
 const TABLE_GROUPS = Object.freeze([
   { key: 'programme', ids: PROGRAMME_ALLOW.map(sub => `programme-${sub}`), name: 'Programme pages (`programme.cjs`)', does: 'Keep the programme issue pages, records and attention list in step on GitHub.', asks: Object.keys(PROGRAMME_ASK), checked: 'Controller check, programme lock and the merged binding.' },
-  { key: 'permissions', ids: ['permissions-print'], name: 'Permissions (`toolkit-permissions.cjs`)', does: 'Print these blocks and check a settings file.', asks: ['--apply'], checked: 'Read-only.' },
+  { key: 'permissions', ids: ['permissions-print'], name: 'Permissions (`toolkit-permissions.cjs`)', does: 'Print these blocks and check a settings file.', asks: [...OWNER_FLAGS], checked: 'Read-only.' },
   { key: 'cleanup', ids: ['cleanup-plan', 'cleanup-apply'], name: 'Cleanup (`toolkit-cleanup.cjs`)', does: "List and remove Toolkit's rebuildable scratch.", asks: [], checked: 'Checks every path; never removes unpushed or unsaved work.' },
   { key: 'store', ids: ['store'], name: 'Evidence store (`toolkit-store.cjs`)', does: 'Save evidence to the bound evidence store.', asks: [], checked: 'Bound store only, secret scan, plain push, no file deletes.' },
   { key: 'pr-comment', ids: ['gh-pr-comment'], name: '`gh pr comment`', does: "Comment on this repository's pull requests.", asks: ['--delete-last'], checked: 'Footer checks only; the repository rules on what to post.' },
@@ -234,6 +244,7 @@ class PermissionBlocks {
         ...Object.keys(PROGRAMME_ASK).map(sub => ({ command: `node ${quoted(`${managed.safe}/${PROGRAMME}`)} ${sub}`, tokens: ['node', `${managed.safe}/${PROGRAMME}`, sub], why: PROGRAMME_ASK[sub] })),
         // Codex rules match from the start of the command, so --apply and --remove must be the first argument.
         ...OWNER_FLAGS.map(flag => ({ command: `node ${quoted(`${managed.safe}/repo/scripts/toolkit-permissions.cjs`)} ${flag}`, tokens: ['node', `${managed.safe}/repo/scripts/toolkit-permissions.cjs`, flag], why: APPLY_WHY })),
+        ...(windows ? Object.keys(TASKS_ASK).map(sub => ({ command: `node ${quoted(`${managed.safe}/${WINDOWS_TASKS}`)} ${sub}`, tokens: ['node', `${managed.safe}/${WINDOWS_TASKS}`, sub], why: TASKS_ASK[sub] })) : []),
       ];
       blocks.push(this.#block({ host, scope: 'computer', made, excluded: [...excluded, ...made.prompts],
         target: host === 'claude' ? path.join(this.#environment.CLAUDE_CONFIG_DIR || path.join(this.#home, '.claude'), 'settings.json') : path.join(this.#environment.CODEX_HOME || path.join(this.#home, '.codex'), 'rules', 'toolkit.rules') }));
@@ -284,6 +295,8 @@ class PermissionBlocks {
         scope: block.scope,
         missing: [...block.allow.filter(line => !list('allow').includes(line)), ...block.ask.filter(line => !list('ask').includes(line))],
         stale: stalePrefix ? list('allow').filter(line => stalePrefix.test(line) && !block.allow.includes(line)) : [],
+        // Old Toolkit ask lines the block no longer carries (an earlier block's asks).
+        stale_ask: stalePrefix ? list('ask').filter(line => stalePrefix.test(line) && !block.ask.includes(line)) : [],
       };
     });
   }
@@ -376,8 +389,11 @@ function main(argv = process.argv.slice(2), deps = {}) {
       const report = owner.check(options.check, built);
       const wanted = report.filter(item => options.scope === 'all' || item.scope === options.scope);
       if (options.json) out(`${JSON.stringify({ check: wanted }, null, 2)}\n`);
-      else for (const item of wanted) out(`${item.scope} block: ${item.missing.length} missing, ${item.stale.length} stale.\n${[...item.missing.map(line => `- missing: ${line}`), ...item.stale.map(line => `- stale (points at another Toolkit folder or a retired line): ${line}`)].join('\n')}${item.missing.length + item.stale.length ? '\n' : ''}`);
-      return wanted.some(item => item.missing.length || item.stale.length) ? 1 : 0;
+      else for (const item of wanted) {
+        const stale = [...item.stale, ...item.stale_ask];
+        out(`${item.scope} block: ${item.missing.length} missing, ${stale.length} stale.\n${[...item.missing.map(line => `- missing: ${line}`), ...stale.map(line => `- stale (points at another Toolkit folder or a retired line): ${line}`)].join('\n')}${item.missing.length + stale.length ? '\n' : ''}`);
+      }
+      return wanted.some(item => item.missing.length || item.stale.length || item.stale_ask.length) ? 1 : 0;
     }
     if (options.json) out(`${JSON.stringify(built, null, 2)}\n`);
     else if (options.format === 'allowed-tools') out(`${built.blocks.flatMap(block => block.allow).join('\n')}\n`);
@@ -391,6 +407,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
 }
 
 // Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.
-module.exports = Object.freeze({ PermissionBlocks, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, safePath, parseArgs, main });
+module.exports = Object.freeze({ PermissionBlocks, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, TASKS_ASK, safePath, parseArgs, main });
 
 if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });

@@ -381,6 +381,7 @@ test('--remove takes every Toolkit line out, keeps the owner\'s own, and deletes
   const settings = JSON.parse(fs.readFileSync(pc.settings, 'utf8'));
   settings.permissions.allow.unshift(own);
   settings.permissions.allow.push('Bash(node "/old/place/repo/scripts/toolkit-tasks.cjs" *)');
+  settings.permissions.ask.push('Bash(node "/old/place/repo/scripts/toolkit-windows-tasks.cjs" apply *)', 'Bash(rm *)');
   fs.writeFileSync(pc.settings, JSON.stringify(settings, null, 2));
   pc.out.length = 0;
   assert.equal(await permissions.main(['--remove'], pc.deps), 0, pc.err.join(''));
@@ -388,7 +389,7 @@ test('--remove takes every Toolkit line out, keeps the owner\'s own, and deletes
   assert.match(pc.out.join(''), /Codex: .*toolkit\.rules \(Toolkit's own rules file, deleted\)/);
   const after = JSON.parse(fs.readFileSync(pc.settings, 'utf8')).permissions;
   assert.deepEqual(after.allow, [own], 'only the owner\'s own line is left, the stale Toolkit line went too');
-  assert.deepEqual(after.ask, []);
+  assert.deepEqual(after.ask, ['Bash(rm *)'], 'an old Toolkit ask line goes too; the owner\'s own ask stays');
   assert.equal(fs.existsSync(pc.rules), false);
   assert.ok(fs.readdirSync(path.dirname(pc.rules)).some(name => name.startsWith('toolkit.rules.toolkit-backup-')), 'the deleted rules file keeps a backup');
   pc.out.length = 0;

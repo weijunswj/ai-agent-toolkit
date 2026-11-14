@@ -111,12 +111,15 @@ class PermissionsApply {
       }
     }
     const permissions = settings.permissions || {};
-    const stale = before !== null ? check(block.target) : [];
+    // check(file) is the block's --check report: stale allow lines and stale ask lines.
+    const report = before !== null ? check(block.target) : { stale: [], stale_ask: [] };
+    const stale = report.stale;
+    const staleAsk = report.stale_ask || [];
     const has = (key, line) => (permissions[key] || []).includes(line);
     const missing = mode === 'remove' ? { allow: [], ask: [] } : { allow: block.allow.filter(line => !has('allow', line)), ask: block.ask.filter(line => !has('ask', line)) };
     const removed = mode === 'remove'
-      ? { allow: [...block.allow, ...stale].filter(line => has('allow', line)), ask: block.ask.filter(line => has('ask', line)) }
-      : { allow: stale.filter(line => has('allow', line)), ask: [] };
+      ? { allow: [...block.allow, ...stale].filter(line => has('allow', line)), ask: [...block.ask, ...staleAsk].filter(line => has('ask', line)) }
+      : { allow: stale.filter(line => has('allow', line)), ask: staleAsk.filter(line => has('ask', line)) };
     const merged = { ...settings, permissions: { ...permissions } };
     for (const key of ['allow', 'ask']) {
       if (!missing[key].length && !removed[key].length) continue;
@@ -217,7 +220,7 @@ async function main(argv, deps = {}) {
         if (options.repoRoot) throw new ApplyStop(`${stop.stopped}`, `${stop.next} Nothing was written.`);
         notes.push(`Repo block: none here (${stop.stopped.replace(/^no repo block: /, '').replace(/\.$/, '')}). Run it from a governed repository, or add --repo-root <checkout>, to add that repository's block too.`);
       }
-      return built.blocks.map(block => ({ ...applier.plan(block, file => blocks.check(file, { blocks: [block] })[0].stale, options.mode), scope: block.scope, block }));
+      return built.blocks.map(block => ({ ...applier.plan(block, file => blocks.check(file, { blocks: [block] })[0], options.mode), scope: block.scope, block }));
     });
 
     const title = options.mode === 'remove'
@@ -240,7 +243,8 @@ async function main(argv, deps = {}) {
     // Read back each Claude Code file written, against the block it was given.
     for (const plan of pending.filter(item => item.host === 'claude')) {
       const report = blocks.check(plan.target, { blocks: [plan.block] })[0];
-      const left = options.mode === 'remove' ? plan.block.allow.length + plan.block.ask.length - report.missing.length : report.missing.length + report.stale.length;
+      const stale = report.stale.length + report.stale_ask.length;
+      const left = options.mode === 'remove' ? plan.block.allow.length + plan.block.ask.length - report.missing.length + stale : report.missing.length + stale;
       if (left) throw new ApplyStop(`${plan.target} still ${options.mode === 'remove' ? 'holds' : 'misses or holds stale'} ${left} Toolkit lines after the write.`, 'restore the backup, then run it again.');
     }
     out('Done. Restart Claude Code and Codex so they read the new lines. To undo, copy the backup file back over the settings file.\n');

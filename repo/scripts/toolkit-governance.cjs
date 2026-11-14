@@ -570,7 +570,7 @@ function defaultPermissionsChecker(root) {
     else {
       const report = owner.check(block.target, { blocks: [block] })[0];
       missing += report.missing.length;
-      stale += report.stale.length;
+      stale += report.stale.length + report.stale_ask.length;
     }
   }
   return { checked: true, host, missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
