@@ -940,7 +940,7 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
   const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
   const periodic = fs.readFileSync(path.join(dir, 'reference', 'periodic-runs.md'), 'utf8');
   const acting = periodic.slice(periodic.indexOf('## Acting on the nudge report'));
-  for (const required of ['- **Task lines are work.**', 'never ends your turn with `no_reply_needed`', 'The same prefix on two runs in a row that you already handled also goes to the owner once',
+  for (const required of ['- **Task lines are work.**', 'never ends your turn with `no_reply_needed`', 'The same prefix on two runs in a row goes to the owner once, with the exact step and what blocks it',
     '- `COORDINATOR BEHIND`:', "then write each run's own `.relayed` and `.done`", '- `NEEDS SETUP`:', "briefing the new home with the run's `handoff.md`"]) assert.ok(acting.includes(required), required);
   assert.ok(periodic.includes('- **Task lines are work** (as in **Acting on the nudge report**).'), 'the check-in follows the same rule');
   assert.ok(acting.includes("that confirmed ping completes the prefix's action, so write `.done`"), 'a blocked prefix still closes its run');
@@ -992,8 +992,12 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
   const periodic = fs.readFileSync(path.join(dir, 'reference', 'periodic-runs.md'), 'utf8');
   const acting = periodic.slice(periodic.indexOf('## Acting on the check-in report'), periodic.indexOf('## Hourly nudge home thread'));
-  for (const required of ['  - `TASK FAILING`:', '  - `PR ATTENTION`:', 'Marked "3 days"', 'Every prefix is a finding the controller owns',
-    'the same prefix on two check-ins in a row goes to the owner once with the exact step']) assert.ok(acting.includes(required), required);
+  for (const required of ['  - `TASK FAILING`:', '  - `PR ATTENTION`:', 'Marked "3 days"', '- **Task lines are work** (as in **Acting on the nudge report**).']) assert.ok(acting.includes(required), required);
+  // One merged line owns the rule for every task's prefixes, the check-in's included.
+  const workLine = periodic.split('\n').find(line => line.startsWith('- **Task lines are work.**'));
+  for (const required of ["the check-in's included, is a finding the controller owns (**Findings** in the Toolkit controller's evidence page)", 'give each an action and a deadline that turn',
+    'The same prefix on two runs in a row goes to the owner once, with the exact step']) assert.ok(workLine.includes(required), required);
+  assert.ok(!periodic.includes('- Every prefix is a finding'), 'the overlapping check-in line is merged away');
   // The controller rule and its page: an action and a deadline the turn a finding is seen, escalation on a repeat.
   const core = fs.readFileSync(path.join(ROOT, 'repo', 'CONTROLLER.md'), 'utf8');
   assert.match(core, /\*\*Findings are the controller's work:\*\*[^\n]*gets an action and a deadline from the controller the turn it is seen; an acknowledgement, log line, count or relay is not an action\. A missed deadline or a repeat goes to the owner/);
