@@ -374,8 +374,13 @@ test('config-dir overrides and Antigravity opt-in pick the files', () => {
   assert.equal(harnessFile('codex', env), path.join(h.root, 'codex-home', 'AGENTS.md'));
   assert.deepEqual(GlobalRules.setupHarnesses({ environment: env }), ['claude-code', 'codex']);
   assert.deepEqual(GlobalRules.setupHarnesses({ environment: env, antigravity: true }), ['claude-code', 'codex', 'antigravity']);
+  assert.deepEqual(GlobalRules.setupHarnesses({ environment: env, host: 'claude-code' }), ['claude-code'], 'setup in Claude Code manages only Claude Code');
+  assert.deepEqual(GlobalRules.setupHarnesses({ environment: env, host: 'codex' }), ['codex'], 'setup in Codex manages only Codex');
+  assert.deepEqual(GlobalRules.setupHarnesses({ environment: env, host: 'codex', antigravity: true }), ['codex', 'antigravity']);
+  assert.throws(() => GlobalRules.setupHarnesses({ environment: env, host: 'cursor' }), /Unknown host/);
   new GlobalRules({ environment: env, toolkitRoot: ROOT, harnesses: ['antigravity'] }).refresh();
   assert.deepEqual(GlobalRules.setupHarnesses({ environment: env }), ['claude-code', 'codex', 'antigravity'], 'a file carrying the block stays managed');
+  assert.deepEqual(GlobalRules.setupHarnesses({ environment: env, host: 'claude-code' }), ['claude-code', 'antigravity'], 'Antigravity stays managed alongside the active app');
   assert.throws(() => harnessFile('cursor', env), /Unknown harness/);
 });
 

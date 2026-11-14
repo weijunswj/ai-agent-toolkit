@@ -16,7 +16,7 @@ Exit code `23` is an intentional pause only after the managed child emits exactl
 
 Managed delegation launches the child before waiting for non-TTY stdin EOF. It streams exact input bytes under a fixed limit; the child emits the bank before reading unresolved input and binds it to exact byte length, SHA-256, marker counts, and question count. The parent waits for and validates the exact bounded stdout payload regardless of control/stdout delivery order, forwards it once, and only then acknowledges visibility. Length/digest mismatch or oversized input, output, or metadata fails closed.
 
-**Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**
+**Toolkit will use a dedicated clean `main` checkout as the single update source. Active coding sessions may remain on PR branches, but plugin updates will not depend on those branches.**
 
 Codex and Claude Code native plugin handling is host-local; the Antigravity portable skills copy is an explicit opt-in.
 

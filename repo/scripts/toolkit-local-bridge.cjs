@@ -1717,6 +1717,13 @@ function triggeredFromTldr(syncSource) {
   return `manual or repo run (${inlineCode(syncSource || 'repo')})`;
 }
 
+const PLUGIN_VERSION_LABELS = Object.freeze({ 'codex-plugin': 'Recorded Codex plugin version', 'claude-plugin': 'Recorded Claude plugin version' });
+
+function pluginVersionRow(syncSource, state) {
+  const label = PLUGIN_VERSION_LABELS[syncSource];
+  return label ? [`- ${label}: ${inlineCode(state.bridge_versions_by_source[syncSource] || 'not recorded')}`] : [];
+}
+
 function buildUpdateReport({ args, state, checksum, context }) {
   const repo = context.repo || {};
   const nativePluginCache = context.nativePluginCache || {};
@@ -1742,8 +1749,8 @@ function buildUpdateReport({ args, state, checksum, context }) {
     `- Running bridge source: ${inlineCode(args.syncSource)}`,
     `- Running bridge version: ${inlineCode(BRIDGE_VERSION)}`,
     `- Recorded repo version: ${inlineCode(state.bridge_versions_by_source.repo || 'not recorded')}`,
-    `- Recorded Codex plugin version: ${inlineCode(state.bridge_versions_by_source['codex-plugin'] || 'not recorded')}`,
-    `- Recorded Claude plugin version: ${inlineCode(state.bridge_versions_by_source['claude-plugin'] || 'not recorded')}`,
+    // Only the triggering app's plugin version; a report from one app never describes the other.
+    ...pluginVersionRow(args.syncSource, state),
     `- Hub reporting version: ${inlineCode(state.hub_version || 'not recorded')}`,
     `- Downgrade enforcement scope: ${inlineCode(`${args.syncSource} only`)}`,
     `- Toolkit updated to commit: ${inlineCode(commit)}`,
@@ -3650,5 +3657,6 @@ module.exports = {
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
   maybeRefreshCodexGlobalRules,
-  codexGlobalRulesReportEntry
+  codexGlobalRulesReportEntry,
+  pluginVersionRow
 };

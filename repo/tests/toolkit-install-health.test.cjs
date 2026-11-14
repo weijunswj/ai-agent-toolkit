@@ -43,13 +43,13 @@ function unit(t, { helpers = { status: 'current' }, depth = { state: 'toolkit-on
 }
 
 test('the global rules check passes when current or updated, reports covered sections, and holds on broken markers', (t) => {
-  const file = path.join(os.tmpdir(), 'AGENTS.md');
+  const file = path.join(os.tmpdir(), 'CLAUDE.md');
   const updated = unit(t, { globalRules: { status: 'updated', backup_dir: os.tmpdir(), detail: '',
-    files: [{ harness: 'codex', file, state: 'current', action: 'refreshed' }], covered: [{ file, title: 'Toolkit Controller Bootstrap' }] } })
+    files: [{ harness: 'claude-code', file, state: 'current', action: 'refreshed' }], covered: [{ file, title: 'Toolkit Controller Bootstrap' }] } })
     .run({ topology: 'root-only' });
   assert.equal(updated.status, STATUS.PASSED);
   assert.equal(byId(updated, 'global-rules').updated, true, 'a write this run goes into the update report');
-  assert.match(byId(updated, 'global-rules').summary, /Codex \(.*AGENTS\.md\): refreshed/);
+  assert.match(byId(updated, 'global-rules').summary, /Claude Code \(.*CLAUDE\.md\): refreshed/);
   assert.match(byId(updated, 'global-rules').summary, /hand-written "Toolkit Controller Bootstrap" section .* Toolkit does not edit it/);
   const held = unit(t, { globalRules: { status: 'held', backup_dir: null, covered: [], detail: 'broken',
     files: [{ harness: 'claude-code', file, state: 'broken', detail: 'BEGIN GLOBAL-RULES without END', action: 'held' }] } }).run({ topology: 'root-only' });
@@ -189,14 +189,16 @@ test('setup reports root-only with a deeper owner depth value as action required
 test('a clean Claude setup passes the install check and exits 0', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  // Even with the Codex limit answer given, setup in Claude Code manages and reports only Claude Code;
+  // Codex refreshes its own file and limit at its own session start.
   const result = claudeSetup(root, setupRepo, origin, ['--enable-codex-doc-limit']);
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed\nGlobal rules: Claude Code \(~\/\.claude\/CLAUDE\.md\): created Codex \(~\/\.codex\/AGENTS\.md\): created (?:Codex config check: [^\n]+? )?Codex project_doc_max_bytes \(~\/\.codex\/config\.toml\): raised to 65536 \(was the default 32768\); --remove puts it back Codex instructions: ~\/\.codex\/AGENTS\.md \d+ B \+ \S+ \d+ B = \d+ B of 65536 B\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
-  for (const file of [path.join(root, '.claude', 'CLAUDE.md'), path.join(root, '.codex', 'AGENTS.md')]) {
-    assert.match(fs.readFileSync(file, 'utf8'), /^<!-- AI-AGENT-TOOLKIT:repo\/contracts\/agent-rules\/global-rules\.md:BEGIN GLOBAL-RULES v2 /, file);
-  }
-  // A yes to the setup question raises Codex's instruction limit, inside Toolkit markers.
-  assert.match(fs.readFileSync(path.join(root, '.codex', 'config.toml'), 'utf8'), /^# AI-AGENT-TOOLKIT:global-rules:BEGIN PROJECT-DOC-MAX-BYTES previous=none created=yes\nproject_doc_max_bytes = 65536\n/);
+  assert.match(result.stdout, /## Install check\nInstall check: passed\nClaude Code plugin: Claude Code runs Toolkit .+ from the managed checkout\.\nUpdate record: .+\nToolkit helpers: not installed\nGlobal rules: Claude Code \(~\/\.claude\/CLAUDE\.md\): created\nClaude Code depth setting: CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1 is set/);
+  assert.match(fs.readFileSync(path.join(root, '.claude', 'CLAUDE.md'), 'utf8'), /^<!-- AI-AGENT-TOOLKIT:repo\/contracts\/agent-rules\/global-rules\.md:BEGIN GLOBAL-RULES v2 /);
+  assert.equal(fs.existsSync(path.join(root, '.codex', 'AGENTS.md')), false, 'Claude setup leaves the Codex rules file alone');
+  assert.equal(fs.existsSync(path.join(root, '.codex', 'config.toml')), false, 'Claude setup leaves Codex config alone');
+  const installCheck = result.stdout.slice(result.stdout.indexOf('## Install check'));
+  assert.doesNotMatch(installCheck, /Codex|\.codex/, 'the Claude install check never describes Codex');
 });
 
 test('a same-run plugin install reports its facts and new session needed, never a bare refreshed', () => {

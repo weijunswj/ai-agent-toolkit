@@ -35,6 +35,12 @@ test('a standing task answer an older setup saved is never acted on, and setup w
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.doesNotMatch(result.stdout, /Scheduled task update|toolkit-windows-tasks/);
   assert.match(result.stdout, /## Global rules/);
+  assert.match(result.stdout, /## Toolkit helpers/);
+  // Setup in Codex manages and reports only Codex's rules file; Claude Code refreshes its own.
+  const globalRules = result.stdout.slice(result.stdout.indexOf('## Global rules'), result.stdout.indexOf('## Toolkit helpers'));
+  assert.match(globalRules, /Codex \(~\/\.codex\/AGENTS\.md\)/);
+  assert.doesNotMatch(globalRules, /Claude|CLAUDE\.md/);
+  assert.equal(fs.existsSync(path.join(root, '.claude', 'CLAUDE.md')), false, 'Codex setup leaves the Claude Code rules file alone');
   assert.deepEqual(taskFiles(), ['scheduled-task-approval.json'], 'no task registry, stamp or run file written');
   assert.equal(JSON.parse(fs.readFileSync(approval, 'utf8')).decision, 'standing', 'left as it was');
 });
