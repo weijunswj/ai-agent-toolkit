@@ -34,16 +34,16 @@ test('eject takes a boarded member off a bumped train with reverts on top, re-bu
   const record = JSON.parse(fs.readFileSync(out, 'utf8'));
   assert.deepEqual(record.members.map(member => member.pr), [1, 3]);
   assert.deepEqual(record.ejected, [{ pr: 2, head: two, bump: 'minor', reason: 'failed its review after boarding', merge: f.git('rev-parse', `${result.head}~2`), reverts: ejected.reverts }]);
-  const verified = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo);
+  const verified = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo, f.opts);
   assert.equal(verified.ok, true, verified.problems.join('\n'));
   assert.match(train.body(train.checkManifest(record)), /^Ejected: #2 at `[0-9a-f]{12}` \(failed its review after boarding\); its boarding is reverted by `[0-9a-f]{12}`, so it does not land with this train\.$/m);
 
-  const again = train.run(['eject', '--manifest', out, '--pr', '3', '--reason', 'second thoughts', '--main', 'main'], f.repo);
+  const again = train.run(['eject', '--manifest', out, '--pr', '3', '--reason', 'second thoughts', '--main', 'main'], f.repo, f.opts);
   assert.equal(again.ok, true, JSON.stringify(again));
   assert.equal(again.reverts[0].of, ejected.bump, 'a second eject replaces the re-bump');
-  const twice = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo);
+  const twice = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo, f.opts);
   assert.equal(twice.ok, true, twice.problems.join('\n'));
-  assert.throws(() => train.run(['eject', '--manifest', out, '--pr', '1', '--reason', 'last', '--main', 'main'], f.repo), /last member: close the train pull request instead/);
+  assert.throws(() => train.run(['eject', '--manifest', out, '--pr', '1', '--reason', 'last', '--main', 'main'], f.repo, f.opts), /last member: close the train pull request instead/);
 });
 
 test('verify accepts only the recorded reverts, each identical to Git\'s own revert', t => {
@@ -52,13 +52,13 @@ test('verify accepts only the recorded reverts, each identical to Git\'s own rev
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const { out } = built(f, [f.member(1, one), f.member(2, two)]);
   const before = JSON.parse(fs.readFileSync(out, 'utf8'));
-  const result = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo);
+  const result = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.equal(result.ok, true, JSON.stringify(result));
   const record = JSON.parse(fs.readFileSync(out, 'utf8'));
   const check = (value, head = 'toolkit-train/one') => {
     const file = path.join(f.root, 'check.json');
     fs.writeFileSync(file, JSON.stringify(value));
-    return train.run(['verify', '--manifest', file, '--head', head, '--main', 'main'], f.repo);
+    return train.run(['verify', '--manifest', file, '--head', head, '--main', 'main'], f.repo, f.opts);
   };
   let refused = check(before);
   assert.ok(refused.problems.some(problem => /a commit of its own inside the train/.test(problem)), 'an unrecorded revert is refused: ' + refused.problems.join('\n'));
@@ -99,7 +99,7 @@ test('eject refuses a member a later member builds on and leaves the train as it
   f.git('switch', '--quiet', 'main');
   const { result, out } = built(f, [f.member(1, one), f.member(2, two)]);
   const before = fs.readFileSync(out, 'utf8');
-  const refused = train.run(['eject', '--manifest', out, '--pr', '1', '--reason', 'failed review', '--main', 'main'], f.repo);
+  const refused = train.run(['eject', '--manifest', out, '--pr', '1', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.equal(refused.ok, false);
   assert.match(refused.problems[0], /^#2 is built on #1: a later member builds on it, so eject that member first$/);
   assert.equal(f.git('rev-parse', 'HEAD'), result.head);
@@ -114,36 +114,36 @@ test('a stacked train ejects with one revert, and land waits until the ejected p
   const three = f.branch('pr-3', { 'd.txt': 'd\n' });
   const first = built(f, [f.member(1, one)]);
   const out = path.join(f.root, 'stacked.json');
-  const stacked = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two), f.member(3, three)] }, 'stacked-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo);
-  const result = train.run(['eject', '--manifest', out, '--pr', '3', '--reason', 'failed review', '--main', first.result.head], f.repo);
+  const stacked = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two), f.member(3, three)] }, 'stacked-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo, f.opts);
+  const result = train.run(['eject', '--manifest', out, '--pr', '3', '--reason', 'failed review', '--main', first.result.head], f.repo, f.opts);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.reverts.length, 1, 'no bump to replace on a stacked train');
   assert.equal(result.bump, null);
   assert.ok(stacked.head);
 
   const solo = built(f, [f.member(1, one), f.member(2, two)]);
-  const ejected = train.run(['eject', '--manifest', solo.out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo);
+  const ejected = train.run(['eject', '--manifest', solo.out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   const live = path.join(f.root, 'live.json');
   const facts = { 60: { state: 'OPEN', head: ejected.head }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: two } };
   fs.writeFileSync(live, JSON.stringify(facts));
-  const waiting = train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo);
+  const waiting = train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(waiting.ok, false);
   assert.ok(waiting.problems.some(problem => /ejected #2 is still open at .* GitHub would mark it merged/.test(problem)), waiting.problems.join('\n'));
   fs.writeFileSync(live, JSON.stringify({ ...facts, 2: { state: 'OPEN', head: 'f'.repeat(40) } }));
-  const ready = train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo);
+  const ready = train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(ready.ok, true, ready.problems.join('\n'));
   fs.writeFileSync(live, JSON.stringify({ ...facts, 2: { state: 'CLOSED', head: two } }));
-  assert.equal(train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo).ok, true);
+  assert.equal(train.run(['land', '--manifest', solo.out, '--pr', '60', '--head', ejected.head, '--main', 'main', '--live', live], f.repo, f.opts).ok, true);
 
   // Once the running train lands, the stacked train catches up even though its head is an eject revert.
   f.git('switch', '--quiet', 'main');
   f.git('merge', '--quiet', '--no-ff', '--no-edit', first.result.head);
   f.git('switch', '--quiet', 'toolkit-train/two');
-  const caught = train.run(['catchup', '--manifest', out, '--main', 'main'], f.repo);
+  const caught = train.run(['catchup', '--manifest', out, '--main', 'main'], f.repo, f.opts);
   assert.equal(caught.ok, true, JSON.stringify(caught));
   assert.ok(caught.bump, 'the bump comes after the catch-up merge');
   assert.equal(JSON.parse(fs.readFileSync(out, 'utf8')).stacked, undefined, 'catchup drops the stacked mark');
-  const checked = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', 'main'], f.repo);
+  const checked = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', 'main'], f.repo, f.opts);
   assert.equal(checked.ok, true, checked.problems.join('\n'));
   assert.equal(f.git('show', `${caught.head}:c.txt`), 'c');
   assert.equal(spawnSync('git', ['cat-file', '-e', `${caught.head}:d.txt`], { cwd: f.repo }).status !== 0, true, 'the ejected member stays out');
@@ -154,7 +154,7 @@ test('an ejected member rejoins a later train only once its branch restores the 
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const { out } = built(f, [f.member(1, one), f.member(2, two)]);
-  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo);
+  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.match(f.git('log', '-1', '--format=%B', ejected.reverts[1].commit), new RegExp(`^Train-Eject-Head: ${two}$`, 'm'));
   f.git('switch', '--quiet', 'main');
   f.git('merge', '--quiet', '--no-ff', '--no-edit', 'toolkit-train/one');
@@ -167,7 +167,7 @@ test('an ejected member rejoins a later train only once its branch restores the 
   f.git('switch', '--quiet', 'main');
   const later = (name, head) => {
     const file = path.join(f.root, `${name}.json`);
-    const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, head)] }, `${name}-in.json`), '--branch', `toolkit-train/${name}`, '--main', 'main', '--out', file], f.repo);
+    const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, head)] }, `${name}-in.json`), '--branch', `toolkit-train/${name}`, '--main', 'main', '--out', file], f.repo, f.opts);
     return { result, file };
   };
   const refused = later('fix-only', fixOnly);
@@ -175,7 +175,7 @@ test('an ejected member rejoins a later train only once its branch restores the 
   assert.match(refused.result.ejected[0].reason, new RegExp(`without restoring it: on its branch merge main, then git revert --no-edit ${ejected.reverts[1].commit}`));
   f.git('switch', '--quiet', '-C', 'by-hand', 'main');
   f.git('merge', '--quiet', '--no-ff', '--no-edit', fixOnly);
-  const byHand = train.run(['verify', '--manifest', f.manifestFile({ members: [f.member(2, fixOnly, { bump: 'none' })], bump_command: 'none' }, 'by-hand.json'), '--head', 'by-hand', '--main', 'main'], f.repo);
+  const byHand = train.run(['verify', '--manifest', f.manifestFile({ members: [f.member(2, fixOnly, { bump: 'none' })], bump_command: 'none' }, 'by-hand.json'), '--head', 'by-hand', '--main', 'main'], f.repo, f.opts);
   assert.ok(byHand.problems.some(problem => /#2: it holds .* without restoring it/.test(problem)), byHand.problems.join('\n'));
   assert.equal(f.git('ls-tree', '--name-only', 'by-hand', 'c.txt'), '', 'the ejected change would silently stay reverted');
 
@@ -188,7 +188,7 @@ test('an ejected member rejoins a later train only once its branch restores the 
   assert.deepEqual(rejoined.result.boarded, [2], JSON.stringify(rejoined.result.ejected));
   assert.equal(f.git('show', `${rejoined.result.head}:c.txt`), 'c', 'the ejected change is back');
   assert.equal(f.git('show', `${rejoined.result.head}:c2.txt`), 'the review fix');
-  const checked = train.run(['verify', '--manifest', rejoined.file, '--head', rejoined.result.head, '--main', 'main'], f.repo);
+  const checked = train.run(['verify', '--manifest', rejoined.file, '--head', rejoined.result.head, '--main', 'main'], f.repo, f.opts);
   assert.equal(checked.ok, true, checked.problems.join('\n'));
 });
 
@@ -203,7 +203,7 @@ test('eject refuses a member that a later member is built on even when they touc
   f.git('switch', '--quiet', 'main');
   const three = f.branch('pr-3', { 'd.txt': 'd\n' });
   const { result, out } = built(f, [f.member(1, one), f.member(2, two), f.member(3, three)]);
-  const refused = train.run(['eject', '--manifest', out, '--pr', '1', '--reason', 'failed review', '--main', 'main'], f.repo);
+  const refused = train.run(['eject', '--manifest', out, '--pr', '1', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.equal(refused.ok, false);
   assert.match(refused.problems[0], /^#2 is built on #1: a later member builds on it, so eject that member first$/);
   assert.equal(f.git('rev-parse', 'HEAD'), result.head);
@@ -215,7 +215,7 @@ test('eject refuses a member that a later member is built on even when they touc
   f.git('merge', '--quiet', '--no-ff', '--no-edit', two);
   f.git('revert', '--no-edit', '-m', '1', board);
   const manifest = f.manifestFile({ bump_command: 'none', members: [f.member(2, two, { bump: 'none' })], ejected: [{ pr: 1, head: one, bump: 'patch', reason: 'by hand', merge: board, reverts: [{ commit: f.git('rev-parse', 'HEAD'), of: board }] }] }, 'by-hand.json');
-  const checked = train.run(['verify', '--manifest', manifest, '--head', 'by-hand', '--main', 'main'], f.repo);
+  const checked = train.run(['verify', '--manifest', manifest, '--head', 'by-hand', '--main', 'main'], f.repo, f.opts);
   assert.ok(checked.problems.some(problem => /#2 is built on ejected #1: it cannot land without the change it was reviewed on/.test(problem)), checked.problems.join('\n'));
 });
 
@@ -224,7 +224,7 @@ test('after an eject train lands, other pull requests made from main board and v
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const { out } = built(f, [f.member(1, one), f.member(2, two)]);
-  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo);
+  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.match(f.git('log', '-1', '--format=%B', ejected.reverts[1].commit), /^Train-Eject-PR: #2$/m);
   f.git('switch', '--quiet', 'main');
   f.git('merge', '--quiet', '--no-ff', '--no-edit', 'toolkit-train/one');
@@ -237,9 +237,9 @@ test('after an eject train lands, other pull requests made from main board and v
   const mergedMain = f.git('rev-parse', 'HEAD');
   f.git('switch', '--quiet', 'main');
   const file = path.join(f.root, 'after.json');
-  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(5, fresh), f.member(1, mergedMain)] }, 'after-in.json'), '--branch', 'toolkit-train/after', '--main', 'main', '--out', file], f.repo);
+  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(5, fresh), f.member(1, mergedMain)] }, 'after-in.json'), '--branch', 'toolkit-train/after', '--main', 'main', '--out', file], f.repo, f.opts);
   assert.deepEqual(result.boarded, [5, 1], JSON.stringify(result.ejected));
-  const checked = train.run(['verify', '--manifest', file, '--head', result.head, '--main', 'main'], f.repo);
+  const checked = train.run(['verify', '--manifest', file, '--head', result.head, '--main', 'main'], f.repo, f.opts);
   assert.equal(checked.ok, true, checked.problems.join('\n'));
 });
 
@@ -257,10 +257,10 @@ test('land refuses while the ejected pull request points at any commit the train
   const two = f.git('rev-parse', 'HEAD');
   f.git('switch', '--quiet', 'main');
   const { out } = built(f, [f.member(1, one), f.member(2, two)]);
-  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo);
+  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   const live = path.join(f.root, 'live.json');
   fs.writeFileSync(live, JSON.stringify({ 70: { state: 'OPEN', head: ejected.head }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: early } }));
-  const refused = train.run(['land', '--manifest', out, '--pr', '70', '--head', ejected.head, '--main', 'main', '--live', live], f.repo);
+  const refused = train.run(['land', '--manifest', out, '--pr', '70', '--head', ejected.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.ok(refused.problems.some(problem => new RegExp(`ejected #2 is still open at ${early.slice(0, 12)}, which the train carries`).test(problem)), refused.problems.join('\n'));
 });
 
@@ -270,29 +270,29 @@ test('verify refuses a train that drops its bump, stacked or not, and land refus
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const { result, out } = built(f, [f.member(1, one), f.member(2, two, { bump: 'minor' })]);
   const noBump = f.git('rev-parse', `${result.head}~1`);
-  const dropped = train.run(['verify', '--manifest', out, '--head', noBump, '--main', 'main'], f.repo);
+  const dropped = train.run(['verify', '--manifest', out, '--head', noBump, '--main', 'main'], f.repo, f.opts);
   assert.equal(dropped.ok, false);
   assert.ok(dropped.problems.some(problem => /the train has no bump commit/.test(problem)), dropped.problems.join('\n'));
   const quiet = path.join(f.root, 'quiet.json');
   fs.writeFileSync(quiet, JSON.stringify({ ...JSON.parse(fs.readFileSync(out, 'utf8')), members: [f.member(1, one, { bump: 'none' }), f.member(2, two, { bump: 'none' })] }));
-  assert.equal(train.run(['verify', '--manifest', quiet, '--head', noBump, '--main', 'main'], f.repo).ok, true, 'members that need no bump need no bump commit');
+  assert.equal(train.run(['verify', '--manifest', quiet, '--head', noBump, '--main', 'main'], f.repo, f.opts).ok, true, 'members that need no bump need no bump commit');
   const three = f.branch('pr-3', { 'd.txt': 'd\n' });
   const stackedOut = path.join(f.root, 'stacked.json');
-  const stacked = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(3, three)] }, 'stacked-in.json'), '--branch', 'toolkit-train/next', '--main', 'main', '--onto', result.head, '--out', stackedOut], f.repo);
+  const stacked = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(3, three)] }, 'stacked-in.json'), '--branch', 'toolkit-train/next', '--main', 'main', '--onto', result.head, '--out', stackedOut], f.repo, f.opts);
   assert.equal(JSON.parse(fs.readFileSync(stackedOut, 'utf8')).stacked, true);
-  const stackedCheck = train.run(['verify', '--manifest', stackedOut, '--head', stacked.head, '--main', result.head], f.repo);
+  const stackedCheck = train.run(['verify', '--manifest', stackedOut, '--head', stacked.head, '--main', result.head], f.repo, f.opts);
   assert.equal(stackedCheck.ok, false, 'a stacked train has no bump until catchup');
   assert.ok(stackedCheck.problems.some(problem => /the train has no bump commit: build it on main, or run catchup on a stacked train/.test(problem)), stackedCheck.problems.join('\n'));
   assert.throws(() => train.checkManifest({ members: [f.member(4, '4'.repeat(40))], stacked: 'yes' }), /"stacked" must be true or false/);
   const live = path.join(f.root, 'live.json');
   fs.writeFileSync(live, JSON.stringify({ 80: { state: 'OPEN', head: stacked.head }, 3: { state: 'OPEN', head: three } }));
-  const landing = train.run(['land', '--manifest', stackedOut, '--pr', '80', '--head', stacked.head, '--main', result.head, '--live', live], f.repo);
+  const landing = train.run(['land', '--manifest', stackedOut, '--pr', '80', '--head', stacked.head, '--main', result.head, '--live', live], f.repo, f.opts);
   assert.equal(landing.ok, false, 'a stacked train never lands, even against the train it stacks on');
   assert.ok(landing.problems.some(problem => /the train is stacked .* catch it up on main first/.test(problem)), landing.problems.join('\n'));
   const flagged = path.join(f.root, 'flagged.json');
   fs.writeFileSync(flagged, JSON.stringify({ ...JSON.parse(fs.readFileSync(out, 'utf8')), stacked: true }));
   fs.writeFileSync(live, JSON.stringify({ 81: { state: 'OPEN', head: noBump }, 1: { state: 'OPEN', head: one }, 2: { state: 'OPEN', head: two } }));
-  const dodged = train.run(['land', '--manifest', flagged, '--pr', '81', '--head', noBump, '--main', 'main', '--live', live], f.repo);
+  const dodged = train.run(['land', '--manifest', flagged, '--pr', '81', '--head', noBump, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(dodged.ok, false, 'marking a train on main stacked does not dodge its bump at land');
   assert.ok(dodged.problems.some(problem => /the train is stacked .* catch it up on main first/.test(problem)), dodged.problems.join('\n'));
   assert.ok(dodged.problems.some(problem => /the train has no bump commit/.test(problem)), dodged.problems.join('\n'));

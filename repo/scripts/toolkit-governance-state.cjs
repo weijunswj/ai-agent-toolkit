@@ -296,6 +296,28 @@ function taskAutoMerge(root, options = {}) {
   } catch { return { ...off, reason: 'binding-unreadable' }; }
 }
 
+// The merge train switch a parsed binding sets: 'on', 'off', or null when it has none.
+function trainSwitchOf(binding) {
+  const value = binding && typeof binding.task_prs === 'object' && binding.task_prs ? binding.task_prs.merge_train : undefined;
+  return value === 'on' || value === 'off' ? value : null;
+}
+
+// Whether merge trains run here. Only a fresh, enabled, version 2 binding turns them on, and there
+// no key means on; every other state (disabled, undecided, stale, unreadable) means off.
+function mergeTrain(root, options = {}) {
+  const off = { on: false, fresh: false, source: 'binding' };
+  if (!root) return { ...off, reason: 'repository-required' };
+  try {
+    const identity = readIdentity(root);
+    if (!identity.valid) return { ...off, reason: 'repository-invalid' };
+    const now = typeof options.now === 'function' ? options.now() : new Date();
+    const judged = judgeMerged(bindingCache.readBindingCache(identity, userStateDirectory(options)), identity, now);
+    if (judged.status !== 'enabled' || judged.binding.schema !== 'toolkit.programme-binding.v2' || judged.fresh !== true) return { ...off, reason: 'fresh-enabled-binding-required' };
+    const value = trainSwitchOf(judged.binding);
+    return value === 'off' ? { ...off, fresh: true, reason: 'repository-off' } : { on: true, fresh: true, source: 'binding', reason: value ? 'repository-on' : 'default-on' };
+  } catch { return { ...off, reason: 'binding-unreadable' }; }
+}
+
 // Shown once a governed repository's merged binding sets no switch yet (the upgrade): a line, not a hold.
 const TASK_SWITCH_UPGRADE_LINE = 'Task auto-merge is off here until you set it; say refresh governance.';
 
@@ -674,6 +696,8 @@ module.exports = Object.freeze({
   bindingRequiredChecks,
   workingBindingRequiredChecks,
   taskAutoMerge,
+  mergeTrain,
+  trainSwitchOf,
   taskSwitchOf,
   retireLegacyTaskAnswers,
   legacyTaskAnswersPresent,

@@ -41,6 +41,7 @@
 // rules for whether and how merges happen would otherwise merge itself on those looser rules.
 //   - the programme binding, its schema and its reader: they bound governance scope;
 //   - the merge hold, its helpers and this check: they enforce it on this computer;
+//   - the merge train: its land step names the route that merges without the owner's card;
 //   - the controller, global and gate rules, and the Approvals section of the Projects controller
 //     skill: they say when a controller may merge;
 //   - CI workflows: they decide what "every required check is green" means;
@@ -89,6 +90,7 @@ const TOOLKIT = Object.freeze([
   [/^repo\/scripts\/toolkit-merge-hold\.cjs$/, 'the merge hold'],
   [/^repo\/scripts\/toolkit-shell-call\.cjs$/, 'the merge hold'],
   [/^repo\/scripts\/toolkit-auto-merge-eligible\.cjs$/, 'this merge-scope check'],
+  [/^repo\/scripts\/toolkit-merge-train\.cjs$/, 'the merge train, which names the auto-merge route'],
   [/^repo\/scripts\/toolkit-rebump-(?:prs|report)\.cjs$/, 'the re-bump scripts that run with the push key'],
   [/^repo\/scripts\/toolkit-rebump-action\.sh$/, 'the re-bump scripts that run with the push key'],
 ]);
