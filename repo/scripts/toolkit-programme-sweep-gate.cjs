@@ -12,7 +12,8 @@
 //   - a programme board line says the last pass stopped early (a saved place to resume), unless that
 //     pass stopped at GitHub's hourly App limit and the limit has not reset yet;
 //   - an issue or pull request changed, or a CI run finished, since the last successful sweep
-//     finished (the sweep's own edits all land before its run finishes, so they never count);
+//     finished (the sweep's own edits all land before its run finishes, so they never count; a
+//     green run that made no pass, such as one queued behind another sweep's lease, is not a sweep);
 //   - the last sweep finished six hours ago or more, so slower facts (checks, drift) still refresh.
 // A start from activity (including a finished CI run) waits until an hour after the last sweep
 // finished; the hourly start then picks the change up. Activity during a running sweep queues one
@@ -30,8 +31,15 @@ const RESET_WAIT_MS = HOUR_MS + 60 * 1000;
 const REFRESH_MS = 6 * HOUR_MS;
 const ACTIVITY_EVENTS = Object.freeze(['issues', 'issue_comment', 'pull_request_target', 'workflow_run']);
 const WAITING = new Set(['queued', 'waiting', 'pending', 'requested']);
-// The last sweep that finished its work: a failed or cancelled run may have saved nothing.
-const lastSweep = runs => runs.find(run => run.status === 'completed' && run.conclusion === 'success') || null;
+// The last sweep that finished its work: a failed or cancelled run may have saved nothing, and a green
+// run that made no pass (`noPass`, by id: queued behind another sweep's lease, main moved, off the
+// default branch, no sweep job) did no work.
+const finishedGreen = run => run.status === 'completed' && run.conclusion === 'success';
+const lastSweep = (runs, noPass = new Set()) => runs.find(run => finishedGreen(run) && !noPass.has(run.id)) || null;
+// A run paused at GitHub's hourly App limit made no pass either, but it still counts as the last
+// sweep: its start time drives the wait for the limit to reset, its own follow-up resumes after the
+// reset, and activity must not start a pass under the margin.
+const COUNTS_AS_SWEEP = new Set(['paused']);
 const COMPLETE_LINE = /^Board updated: .+ \(state revision \d+\)$/;
 const LIMIT_NOTE = /hourly App limit/;
 const SAFE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -80,7 +88,7 @@ function parentsOf(binding) {
 }
 
 // What the facts say: { start, reason }.
-function decide({ event, now, runs, lines, changedSince, followUpWaiting = false }) {
+function decide({ event, now, runs, lines, changedSince, followUpWaiting = false, noPass = new Set() }) {
   if (runs.some(run => WAITING.has(run.status))) return { start: false, reason: 'a sweep is already queued' };
   // A running sweep may have read past this change: activity queues one more behind it. The hourly
   // start leaves a running sweep alone.
@@ -90,7 +98,7 @@ function decide({ event, now, runs, lines, changedSince, followUpWaiting = false
     if (followUpWaiting) return { start: false, reason: 'a follow-up run is already on its way' };
     return ACTIVITY_EVENTS.includes(event) ? { start: true, reason: 'activity during a running sweep; one more waits behind it' } : { start: false, reason: 'a sweep is running' };
   }
-  const last = lastSweep(runs);
+  const last = lastSweep(runs, noPass);
   if (!last) return { start: true, reason: 'no sweep has finished yet' };
   const ended = Date.parse(last.updated_at);
   if (ACTIVITY_EVENTS.includes(event)) {
@@ -163,7 +171,20 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     return verdict;
   }
   const runs = (await call('GET', `actions/workflows/${SWEEP_WORKFLOW}/runs?per_page=20`)).workflow_runs || [];
-  const last = lastSweep(runs);
+  // Each run's sweep job finding is read once per gate run: the last-sweep pick and the streak share it.
+  const findings = new Map();
+  const findingOf = run => {
+    if (!findings.has(run.id)) findings.set(run.id, runFinding(call, run, SWEEP_JOB, [TITLES.held, TITLES.skipped], { neutral: true }));
+    return findings.get(run.id);
+  };
+  // Newest first, pass over green runs that made no pass until one that did work.
+  const noPass = new Set();
+  for (const run of runs.filter(finishedGreen)) {
+    const found = await findingOf(run);
+    if (!found?.neutral || COUNTS_AS_SWEEP.has(found.code)) break;
+    noPass.add(run.id);
+  }
+  const last = lastSweep(runs, noPass);
   const lines = [];
   for (const number of parents) lines.push(boardLine((await call('GET', `issues/${number}`)).body));
   let changedSince = false;
@@ -183,7 +204,7 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     const jobs = (await call('GET', `actions/runs/${run.id}/jobs`)).jobs || [];
     if (jobs.some(job => job.name === FOLLOW_UP_JOB && job.status !== 'completed')) followUpWaiting = true;
   }
-  const verdict = decide({ event: env.EVENT_NAME || '', now, runs, lines, changedSince, followUpWaiting });
+  const verdict = decide({ event: env.EVENT_NAME || '', now, runs, lines, changedSince, followUpWaiting, noPass });
   if (verdict.start) await call('POST', `actions/workflows/${SWEEP_WORKFLOW}/dispatches`, { ref: BRANCH });
   log(`Programme Sweep gate: ${verdict.start ? 'started the sweep' : 'nothing to start'} (${verdict.reason}).`);
   if (STREAK_EVENTS.includes(env.EVENT_NAME || '')) {
@@ -191,7 +212,7 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     // tries again" as if nothing had happened. The verdict rules (blip a notice, set-up fault red)
     // stay the same.
     let streak;
-    try { streak = await sweepStreak(call, runs); } catch (error) {
+    try { streak = await sweepStreak(call, runs, findingOf); } catch (error) {
       if (error && typeof error === 'object') error.after = verdict.start ? 'started the sweep' : 'started nothing';
       throw error;
     }
@@ -202,35 +223,35 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
 
 // The titled finding (held or skipped) on one run's job, or null. A run of the wrong shape, a job
 // that is missing or an annotation without a code counts as no finding, which ends a streak. With
-// `neutral`, a run that made no pass answers { neutral: true }: its job is missing or skipped, or it
-// carries the titled no-pass notice.
+// `neutral`, a run that made no pass answers { neutral: true, code }: its job is missing or skipped
+// (code null), or it carries the titled no-pass notice (its code, such as queued or paused).
 async function runFinding(call, run, jobName, titles, { neutral = false } = {}) {
   if (!Number.isSafeInteger(run?.id)) return null;
   const job = ((await call('GET', `actions/runs/${run.id}/jobs`)).jobs || []).find(item => item.name === jobName && Number.isSafeInteger(item.id));
-  if (!job) return neutral ? { neutral: true } : null;
-  if (neutral && job.conclusion === 'skipped') return { neutral: true };
+  if (!job) return neutral ? { neutral: true, code: null } : null;
+  if (neutral && job.conclusion === 'skipped') return { neutral: true, code: null };
   // A job's id is its check run's id.
   const notes = await call('GET', `check-runs/${job.id}/annotations?per_page=50`);
-  let noPass = false;
+  let noPass = null;
   for (const note of Array.isArray(notes) ? notes : []) {
-    if (neutral && note?.title === TITLES.noPass && note.annotation_level === 'notice') noPass = true;
+    if (neutral && noPass === null && note?.title === TITLES.noPass && note.annotation_level === 'notice') noPass = CODE.exec(String(note.message || ''))?.[1] || '';
     if (!titles.includes(note?.title) || note.annotation_level !== 'warning') continue;
     const code = CODE.exec(String(note.message || ''))?.[1];
     if (code) return { title: note.title, code, at: run.run_started_at || run.created_at || null };
   }
-  return noPass ? { neutral: true } : null;
+  return noPass === null ? null : { neutral: true, code: noPass || null };
 }
 
 // Did the finished sweeps end in STREAK or more held runs in a row (any hold codes), or skipped runs
 // in a row with the same code? Runs that made no pass are passed over. Stops reading at the first run
 // that breaks the streak, so a quiet hour costs two small reads; a streak is read back to its start,
 // within the runs the gate already listed, so "since" names when it began.
-async function sweepStreak(call, runs) {
-  const finished = runs.filter(run => run.status === 'completed' && run.conclusion === 'success');
+async function sweepStreak(call, runs, findingOf = run => runFinding(call, run, SWEEP_JOB, [TITLES.held, TITLES.skipped], { neutral: true })) {
+  const finished = runs.filter(finishedGreen);
   let first = null, since = null, count = 0, broken = false;
   const codes = new Set();
   for (const run of finished) {
-    const found = await runFinding(call, run, SWEEP_JOB, [TITLES.held, TITLES.skipped], { neutral: true });
+    const found = await findingOf(run);
     if (found?.neutral) continue;
     if (!found || (first && (found.title !== first.title || (found.title === TITLES.skipped && found.code !== first.code)))) { broken = true; break; }
     first = first || found;

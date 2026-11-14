@@ -9,7 +9,9 @@
 # starts it when no sweep has finished yet, when the board says the last pass left a saved place
 # (once GitHub's hourly App limit has reset, if that is what stopped it), when an issue or pull
 # request changed since the last successful sweep finished (or a CI run finished, where the gate
-# follows a CI workflow), or when six hours have passed. A start from activity waits until an hour
+# follows a CI workflow), or when six hours have passed. A green run that made no pass (queued behind
+# another sweep's lease, main moved, off the default branch) is not a sweep here; one paused at
+# GitHub's hourly App limit still is, so its reset wait holds. A start from activity waits until an hour
 # after the last sweep; the hourly start then picks the change up. Activity during a running sweep
 # queues one more behind it. Nothing starts while a sweep is already queued.
 #
