@@ -37,7 +37,7 @@ test('permissions are read-only except pull request comments, and the key reache
   assert.match(code, /\n    permissions:\n      contents: read\n      pull-requests: write\n    steps:/);
   assert.equal([...code.matchAll(/^\s*[a-z-]+: write$/gm)].length, 1);
   assert.equal([...code.matchAll(/secrets\./g)].length, 1);
-  assert.match(code, /        env:\n          TOOLKIT_REBUMP_TOKEN: \$\{\{ secrets\.TOOLKIT_REBUMP_TOKEN \}\}\n          AUTHORS: \$\{\{ github\.repository_owner \}\}\n        run: bash repo\/scripts\/toolkit-rebump-action\.sh\n/);
+  assert.match(code, /        env:\n          TOOLKIT_REBUMP_TOKEN: \$\{\{ secrets\.TOOLKIT_REBUMP_TOKEN \}\}\n          AUTHORS: \$\{\{ github\.repository_owner \}\}\n          READ_TOKEN: \$\{\{ github\.token \}\}\n          REPOSITORY: \$\{\{ github\.repository \}\}\n        run: bash repo\/scripts\/toolkit-rebump-action\.sh\n/);
   // The comment step uses the built-in token and runs only after a real run.
   assert.match(code, /        if: \$\{\{ steps\.rebump\.outputs\.ran == 'true' \}\}\n        env:\n          GH_TOKEN: \$\{\{ github\.token \}\}\n        run: node repo\/scripts\/toolkit-rebump-report\.cjs /);
 });
@@ -65,15 +65,41 @@ function runStep(t, env) {
   return { result, temp, calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [], output: fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : '' };
 }
 
-test('with no push key the step prints a note, calls nothing and ends green', linuxOnly, t => {
-  for (const env of [{}, { TOOLKIT_REBUMP_TOKEN: '' }]) {
-    const { result, calls, output, temp } = runStep(t, env);
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /^::notice title=Toolkit re-bump::No push key is set/);
-    assert.deepEqual(calls, []);
-    assert.equal(output, 'ran=false\n');
-    assert.equal(fs.existsSync(path.join(temp, 'rebump-report.json')), false);
-  }
+// With no key: a stand-in gh that answers the open pull request list and each one's files.
+function runNoKey(t, { open = '', files = {}, failList = false } = {}) {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'rebump-nokey-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const bin = path.join(temp, 'bin'); fs.mkdirSync(bin);
+  const log = path.join(temp, 'calls.log');
+  fs.writeFileSync(path.join(temp, 'open'), open);
+  for (const [number, list] of Object.entries(files)) fs.writeFileSync(path.join(temp, `files-${number}`), list.join('\n'));
+  fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\necho "gh $2 key=\${GH_TOKEN:-none}" >> "${log}"\n` +
+    `case "$2" in *pulls\\?state=open*) ${failList ? 'exit 1' : `cat "${temp}/open"; exit 0`} ;; esac\n` +
+    `n=$(echo "$2" | sed -n 's|.*/pulls/\\([0-9]*\\)/files.*|\\1|p'); [ -f "${temp}/files-$n" ] && cat "${temp}/files-$n"; exit 0\n`, { mode: 0o755 });
+  for (const name of ['git', 'node']) fs.writeFileSync(path.join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${log}"\nexit 0\n`, { mode: 0o755 });
+  const output = path.join(temp, 'output');
+  const result = spawnSync('bash', [step], { cwd: ROOT, encoding: 'utf8',
+    env: { PATH: `${bin}:/usr/bin:/bin`, HOME: temp, RUNNER_TEMP: temp, GITHUB_OUTPUT: output, GITHUB_SERVER_URL: 'https://github.com', AUTHORS: 'owner-1', READ_TOKEN: 'read-token', REPOSITORY: 'owner-1/repo' } });
+  return { result, temp, calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : [], output: fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : '' };
+}
+
+test('with no push key and no stale bump the step reads with the built-in token only and ends green and silent', linuxOnly, t => {
+  const { result, calls, output, temp } = runNoKey(t, { open: '5 owner-1\n6 someone-else\n', files: { 5: ['README.md'], 6: ['repo/contracts/toolkit-local-bridge/version.json'] } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '', 'no note on every merge');
+  assert.equal(output, 'ran=false\n');
+  assert.deepEqual(calls, ['gh repos/owner-1/repo/pulls?state=open&per_page=100 key=read-token', 'gh repos/owner-1/repo/pulls/5/files?per_page=100 key=read-token'], 'other authors are not read; nothing else runs');
+  assert.equal(fs.existsSync(path.join(temp, 'rebump-report.json')), false);
+});
+
+test('with no push key a listed author\'s pull request carrying a stale bump fails the run naming it and the by-hand step', linuxOnly, t => {
+  const { result, output } = runNoKey(t, { open: '5 owner-1\n7 owner-1\n', files: { 5: ['repo/contracts/toolkit-local-bridge/version.json', 'README.md'], 7: ['repo/scripts/x.cjs'] } });
+  assert.equal(result.status, 1);
+  assert.equal(output, 'ran=false\n');
+  assert.match(result.stdout, /^::error title=Toolkit re-bump::Main moved and these pull requests carry a version bump that is now stale: #5\. .+toolkit-rebump-prs\.cjs --apply/m);
+  const unread = runNoKey(t, { failList: true });
+  assert.equal(unread.result.status, 1, 'a list that cannot be read is red, not green');
+  assert.match(unread.result.stdout, /could not be read/);
 });
 
 test('with a push key it signs in, runs the command for the listed authors and keeps the report even when a pull request is held', linuxOnly, t => {

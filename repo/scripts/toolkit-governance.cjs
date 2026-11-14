@@ -189,6 +189,7 @@ class ToolkitGovernanceCli {
     const lines = [`Conformance: ${result.status}${unverified ? ` (${unverified} item${unverified === 1 ? '' : 's'} unverified)` : ''}`];
     if (result.state) lines.push(`State: ${label(result.state)}`);
     for (const entry of result.findings) lines.push(`- ${entry.severity}: ${entry.message}`);
+    if (result.next_step) lines.push(`Next step: ${result.next_step}`);
     if (result.no_force_push_ruleset) lines.push(`No-force-push ruleset: ${result.no_force_push_ruleset.status}`);
     if (result.default_branch_protection) lines.push(`Default-branch protection: ${result.default_branch_protection.status}`);
     if (result.dependency_security) lines.push(`Dependency and security settings: ${result.dependency_security.status}`);

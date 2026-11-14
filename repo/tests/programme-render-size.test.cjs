@@ -74,7 +74,7 @@ test('waiting preview lists at most five short items and keeps the full count', 
   assert.match(waiting, /and 101 more: run programme.cjs attention/);
   assert.doesNotMatch(waiting, /Controller:/);
   assert.equal(body.split('\n').filter(line => /^- CHILD_REOPENED #\d+/.test(line)).length, 5, 'waiting entries do not repeat in the ordinary preview');
-  for (const entry of f.parent.attention) entry.state = 'acknowledged';
+  for (const entry of f.parent.attention) Object.assign(entry, { state: 'acknowledged', due: new Date(Date.parse(f.now) + 3600000).toISOString() });
   assert.doesNotMatch(state.renderCurrentBlockBody(f.parent, f.children, f.issues, f.now), /Waiting on you|waiting on you/);
 });
 

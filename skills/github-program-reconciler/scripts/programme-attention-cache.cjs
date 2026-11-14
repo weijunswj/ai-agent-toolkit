@@ -95,7 +95,8 @@ function ageText(ms) {
 }
 
 // The session-start line for a repository, or null when there is nothing to say, and whether a
-// background refresh is due: { line, refresh, age }. `age` is set when the cache is over an hour old.
+// background refresh is due: { line, refresh, age }, plus queueOnly when every open finding is on the
+// work queue. `age` is set when the cache is over an hour old.
 // While a finding is new or acknowledged the line shows at every start; "clear" shows once after each
 // change (every line shown records its set); with no cache it never says clear. The caller says
 // whether a refresh started.
@@ -110,7 +111,10 @@ function sessionAttention(repository, deps = {}) {
   if (open === 0 && cache.shown_digest === cache.digest) return result(null);
   if (cache.shown_digest !== cache.digest) markShown(repository, cache.digest, deps);
   const queue = open > 0 ? queueText(cache.queue) : null;
-  return result(open > 0 ? `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}.${queue ? ` ${queue}.` : ''} Run programme.cjs attention for the list` : `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}`);
+  // Every open finding is on the work queue: the caller offers no ack, since those cannot be acked.
+  const queueOnly = Boolean(queue) && queueOf(cache.queue).count >= open;
+  const shown = result(open > 0 ? `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}.${queue ? ` ${queue}.` : ''} Run programme.cjs attention for the list` : `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}`);
+  return queueOnly ? { ...shown, queueOnly: true } : shown;
 }
 
 // Background refreshes from session start are at most one per START_GAP_MS per repository on this

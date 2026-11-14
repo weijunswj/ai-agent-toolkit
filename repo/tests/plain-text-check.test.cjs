@@ -188,14 +188,14 @@ test('stale matched links reach neither output stream while counts, failures and
   fs.writeFileSync(path.join(root, 'docs', 'a.md'), `${link}\n`);
   fs.unlinkSync(path.join(root, 'docs', 'removed.md'));
   const stale = run([SCRIPT, '--repo', root], root);
-  assert.equal(stale.status, 0, stale.stderr);
-  assert.match(stale.stdout, /docs\/a\.md: github-link is in the baseline 2 time\(s\) but occurs 1; run with --prune-baseline/);
-  assert.match(stale.stdout, /docs\/removed\.md: github-link is in the baseline 1 time\(s\) but occurs 0/);
+  assert.equal(stale.status, 1, 'the baseline only shrinks: a stale allowance fails until it is pruned');
+  assert.match(stale.stderr, /FAIL: docs\/a\.md: github-link is in the baseline 2 time\(s\) but occurs 1; run with --prune-baseline and commit the smaller baseline/);
+  assert.match(stale.stderr, /FAIL: docs\/removed\.md: github-link is in the baseline 1 time\(s\) but occurs 0/);
   assert.deepEqual(fs.readFileSync(baselinePath), before, 'reporting does not migrate or rewrite existing baselines');
   fs.writeFileSync(path.join(root, 'docs', 'new.md'), `${link}\n`);
   const mixed = run([SCRIPT, '--repo', root], root);
   assert.equal(mixed.status, 1);
-  assert.match(mixed.stdout, /occurs 1; run with --prune-baseline/);
+  assert.match(mixed.stderr, /occurs 1; run with --prune-baseline/);
   assert.match(mixed.stderr, /FAIL: docs\/new\.md:1: github-link:/);
   assert.match(mixed.stderr, /1 item\(s\) to rewrite/);
   const scoped = run([SCRIPT, '--repo', root, '--files', 'docs/a.md'], root);
@@ -242,7 +242,9 @@ const closureRows = ['absent', 'v1', 'v2', 'malformed', 'unreadable'].flatMap(ba
       const excess = finding === 'excess' || (baseline === 'absent' && finding !== 'none');
       const exit = mode === 'init' ? (baseline === 'absent' ? 0 : 2)
         : mode === 'migrate' ? (['v1', 'v2'].includes(baseline) ? 0 : 2)
-          : invalid ? 2 : mode === 'prune' ? 0 : excess ? 1 : 0;
+          : invalid ? 2 : mode === 'prune' ? 0 : excess ? 1
+            // A stale allowance fails a full run (the baseline only shrinks); a scoped run never judges it.
+            : finding === 'stale' && ['report', 'check'].includes(mode) ? 1 : 0;
       const writes = (mode === 'init' && baseline === 'absent') || (mode === 'migrate' && baseline === 'v1')
         || (mode === 'prune' && ['v1', 'v2'].includes(baseline));
       return { baseline, mode, finding, exit, writes };
@@ -458,12 +460,13 @@ for (const state of ['v1 references', 'v1 empty', 'v1 banned term', 'v2', 'malfo
         spawn: () => ({ status: 0, stdout: root }),
       });
     } finally { fs.writeFileSync = originalWrite; fs.mkdirSync = originalMkdir; }
-    assert.equal(status, copyMissing ? 1 : 0, 'baseline advice does not change drift exit codes');
+    const unreadable = ['malformed', 'invalid entry', 'unreadable'].includes(state);
+    assert.equal(status, copyMissing || unreadable ? 1 : 0, 'an unreadable baseline is drift; advice alone does not change the exit code');
     assert.equal(stderr, '');
     assert.equal(writes, 0);
     assert.deepEqual(snapshot(), before);
     assert.equal(stdout.includes(`NOTE: baseline ${config.baseline}: stores matched text (v1); run the check with --migrate-baseline\n`), state === 'v1 references');
-    assert.equal(stdout.includes('NOTE: Baseline could not be read or is invalid.\n'), ['malformed', 'invalid entry', 'unreadable'].includes(state));
+    assert.equal(stdout.includes(`Drift: baseline ${config.baseline}: could not be read or is invalid; fix it, or rewrite it with plain-text-check.cjs --init-baseline\n`), unreadable);
     for (const stream of [stdout, stderr]) {
       assert.equal(stream.includes(link), false);
       assert.equal(stream.includes(marker), false);
@@ -537,4 +540,16 @@ test('kept-term guidance describes exemptions that suppress no finding', () => {
   const playbook = fs.readFileSync(path.join(ROOT, 'repo/docs/agent-playbooks/docs-governance.md'), 'utf8');
   assert.match(script, /A kept term that exempts nothing fails a full run/);
   assert.match(playbook, /an entry that exempts nothing fails the full check/);
+});
+
+test('installer --check reports unreadable settings as drift, never as "No drift"', t => {
+  const root = tempRepo(t, {}, { git: false });
+  fs.mkdirSync(path.dirname(path.join(root, installer.VENDORED_PATH)), { recursive: true });
+  fs.writeFileSync(path.join(root, installer.VENDORED_PATH), installer.vendoredText());
+  fs.writeFileSync(path.join(root, installer.CONFIG_PATH), '{"schema":');
+  let stdout = '';
+  const status = installer.main(['--repo', root, '--check'], { out: { write: text => { stdout += text; } }, err: { write: () => {} }, spawn: () => ({ status: 0, stdout: root }) });
+  assert.equal(status, 1);
+  assert.match(stdout, /^Drift: settings \.github\/plain-text\.json: could not be read or are invalid; fix them or reinstall$/m);
+  assert.doesNotMatch(stdout, /No drift/);
 });

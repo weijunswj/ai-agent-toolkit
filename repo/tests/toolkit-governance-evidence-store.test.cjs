@@ -139,6 +139,137 @@ test('never-governed store classification alone grants no merge; fresh exact bin
   assert.equal(reads, 2);
 });
 
+// A cloud container clones each project repository into its own subfolder and starts the session in
+// their shared parent folder, so session start caches no parent binding. The merge hold reads the
+// clones' merged bindings on demand, in cloud sessions only, and the usual checks then decide.
+function cloudStoreMerge(t, { cloud = true, refreshed = true, parentStore = 'example-owner/evidence', withParent = true } = {}) {
+  const ctx = scratch(t);
+  const parent = withParent ? repo(path.join(ctx.root, 'app'), 'example-owner/app') : null;
+  repo(path.join(ctx.root, 'evidence'), 'example-owner/evidence');
+  const hold = require(path.join(scripts, 'toolkit-merge-hold.cjs'));
+  const sha = 'b'.repeat(40);
+  const refreshes = [];
+  const options = { registryOptions: { ...ctx.options, home: path.join(ctx.root, 'home') },
+    environment: cloud ? { CLAUDE_CODE_REMOTE: 'true' } : {},
+    transport: { request(method, apiPath) {
+      if (apiPath === 'repos/example-owner/evidence/pulls/251') return { status: 200, json: { number: 251, title: 'Evidence', body: 'Refs only', head: { sha }, commits: 0 } };
+      if (apiPath.startsWith('repos/example-owner/evidence/pulls/251/commits')) return { status: 200, json: [] };
+      throw new Error(`Unexpected closure read: ${apiPath}`);
+    } },
+    readEvidenceGitHub(apiPath) {
+      return { status: 200, json: apiPath.endsWith('/pulls/251')
+        ? { number: 251, base: { repo: { full_name: 'example-owner/evidence' }, ref: 'main' }, head: { sha } }
+        : { full_name: 'example-owner/evidence', private: true, permissions: { push: true }, default_branch: 'main' } };
+    },
+    refreshEvidenceBinding(folder, budget) {
+      refreshes.push(folder);
+      assert.ok(Number.isFinite(budget.deadline));
+      if (!refreshed || folder !== parent) return { refreshed: false, error: 'remote-unreachable' };
+      recordMerged(parent, { registryPath: ctx.registryPath, text: binding('example-owner/app', parentStore) });
+      return { refreshed: true, error: null };
+    } };
+  const input = { cwd: ctx.root, tool_name: 'mcp__github__merge_pull_request', tool_input: {
+    owner: 'example-owner', repo: 'evidence', pullNumber: 251, expectedHeadSha: sha, merge_method: 'merge' } };
+  return { ctx, hold, input, options, refreshes, parent, sha };
+}
+
+test('cloud: a store merge from the clones folder reads the parent binding on demand and passes', t => {
+  const { hold, input, options, refreshes, parent } = cloudStoreMerge(t);
+  assert.equal(hold.decide(input, options), null);
+  assert.deepEqual(refreshes, [parent]);
+  // The fresh read is cached, so a second merge does not read again.
+  assert.equal(hold.decide(input, options), null);
+  assert.deepEqual(refreshes, [parent]);
+});
+
+test('cloud: a store merge from the parent clone itself reads that binding on demand', t => {
+  const { hold, input, options, refreshes, parent } = cloudStoreMerge(t);
+  assert.equal(hold.decide({ ...input, cwd: parent }, options), null);
+  assert.deepEqual(refreshes, [parent]);
+});
+
+test('cloud: the exemption still needs a fresh binding that names this store, and a plain merge commit', t => {
+  {
+    const { hold, input, options } = cloudStoreMerge(t, { refreshed: false });
+    assert.match(hold.decide(input, options).deny, /no unused approval/);
+  }
+  {
+    const { hold, input, options } = cloudStoreMerge(t, { parentStore: 'example-owner/other-store' });
+    assert.match(hold.decide(input, options).deny, /no unused approval/);
+  }
+  {
+    const { hold, input, options } = cloudStoreMerge(t);
+    assert.match(hold.decide({ ...input, tool_input: { ...input.tool_input, merge_method: 'squash' } }, options).deny, /Evidence-store verification failed/);
+  }
+  {
+    // Only the store is cloned here: no parent clone, so nothing to read and no folder match.
+    const { hold, input, options, refreshes } = cloudStoreMerge(t, { withParent: false });
+    assert.match(hold.decide(input, options).deny, /no unused approval/);
+    assert.deepEqual(refreshes, []);
+  }
+});
+
+test('outside the cloud nothing is read on demand: a missing cached binding still refuses', t => {
+  const { hold, input, options, refreshes } = cloudStoreMerge(t, { cloud: false });
+  assert.match(hold.decide(input, options).deny, /no unused approval/);
+  assert.deepEqual(refreshes, []);
+  // Only the exact value "true" marks a cloud session.
+  assert.match(hold.decide(input, { ...options, environment: { CLAUDE_CODE_REMOTE: '1' } }).deny, /no unused approval/);
+  assert.deepEqual(refreshes, []);
+});
+
+test('cloud: lookalike targets, an unrelated folder, a symlinked clone and an unnamed target stay gated', t => {
+  {
+    // A name that only starts like the store, and the parent repository itself.
+    const { hold, input, options } = cloudStoreMerge(t);
+    assert.ok(hold.decide({ ...input, tool_input: { ...input.tool_input, repo: 'evidence-x' } }, options).deny);
+    assert.match(hold.decide({ ...input, tool_input: { ...input.tool_input, repo: 'app' } }, options).deny, /no unused approval/);
+  }
+  {
+    // A session folder inside an unrelated repository reads only that repository's binding.
+    const { ctx, hold, input, options, refreshes } = cloudStoreMerge(t);
+    const other = repo(path.join(ctx.root, 'zz-other'), 'example-owner/other');
+    assert.ok(hold.decide({ ...input, cwd: other }, options).deny);
+    assert.deepEqual(refreshes, [other]);
+  }
+  {
+    // A symlink to the parent clone is not a clone in that folder.
+    const { ctx, hold, input, options, refreshes } = cloudStoreMerge(t);
+    const box = path.join(ctx.root, 'box');
+    fs.mkdirSync(box);
+    fs.symlinkSync(path.join(ctx.root, 'app'), path.join(box, 'app'), 'junction');
+    assert.ok(hold.decide({ ...input, cwd: box }, options).deny);
+    assert.deepEqual(refreshes, []);
+  }
+  {
+    // A shell merge from the clones folder must name the store; a named one passes.
+    const { ctx, hold, options, sha } = cloudStoreMerge(t);
+    const shell = rest => ({ cwd: ctx.root, tool_name: 'Bash', tool_input: { command: `${['g', 'h'].join('')} pr merge 251 ${rest}` } });
+    assert.ok(hold.decide(shell(`--merge --match-head-commit ${sha}`), options).deny);
+    assert.ok(hold.decide(shell(`--repo example-owner/evidence --squash --match-head-commit ${sha}`), options).deny);
+    assert.equal(hold.decide(shell(`--repo example-owner/evidence --merge --match-head-commit ${sha}`), options), null);
+  }
+});
+
+test('cloud: a failing or unaffordable on-demand read fails closed', t => {
+  {
+    const { hold, input, options } = cloudStoreMerge(t);
+    assert.match(hold.decide(input, { ...options, refreshEvidenceBinding() { throw new Error('read failed'); } }).deny, /no unused approval/);
+  }
+  {
+    // Too little of the hook's time left: no read is started.
+    const { hold, input, options, refreshes } = cloudStoreMerge(t);
+    assert.ok(hold.decide(input, { ...options, deadline: globalThis.performance.now() + 2000 }).deny);
+    assert.deepEqual(refreshes, []);
+  }
+  {
+    // The parent clone beyond the eight-folder cap is never read.
+    const { ctx, hold, input, options } = cloudStoreMerge(t);
+    for (let index = 0; index < 9; index += 1) repo(path.join(ctx.root, `a${index}`), `example-owner/x${index}`);
+    assert.ok(hold.decide(input, options).deny);
+  }
+});
+
 test('R1s: a clone of another repository in a decided repository\'s ignored .tmp folder; never a worktree of the parent, an unignored .tmp or an undecided parent', (t) => {
   const ctx = scratch(t);
   const parent = governed(ctx);

@@ -35,6 +35,19 @@ const lastSweep = runs => runs.find(run => run.status === 'completed' && run.con
 const COMPLETE_LINE = /^Board updated: .+ \(state revision \d+\)$/;
 const LIMIT_NOTE = /hourly App limit/;
 const SAFE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+// Findings are for action: a sweep that holds or skips, or a gate that skips, says so in a titled
+// warning each run (an annotation on that run). Three in a row with the same code turn the hourly
+// gate red with the step that clears it. Only the hourly start and a start by hand go red, so the
+// gate's check on pull requests stays about pull requests. The gate keeps no state: it reads the
+// annotations of the last runs (the built-in token's checks: read).
+const STREAK = 3;
+const SWEEP_JOB = 'Refresh the programme';
+const GATE_JOB = 'Start the sweep if there is work';
+const GATE_WORKFLOW = 'toolkit-programme-sweep-gate.yml';
+const TITLES = Object.freeze({ held: 'Programme Sweep held', skipped: 'Programme Sweep skipped', gate: 'Programme Sweep gate skipped' });
+const STREAK_EVENTS = Object.freeze(['schedule', 'workflow_dispatch']);
+// The code a titled warning carries: `<title> (<code>)` at the start of its message.
+const CODE = /^\(([A-Za-z0-9_,; -]{1,200})\)/;
 
 // The CURRENT section's freshness line, as the sweep draws it.
 function boardLine(body) {
@@ -117,8 +130,15 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     return response.status === 204 ? null : response.json();
   };
   // The binding merged on main decides governance, as everywhere else.
+  // Only a 404 means there is no file: any other answer (401, 403, a 5xx) is not "governance off" and
+  // goes to the blip rule (a 5xx or 429 is a notice, the rest red). Content that does not parse is
+  // an unreadable file.
   let binding = null;
-  try { binding = JSON.parse(Buffer.from((await call('GET', `contents/.github/toolkit-programme.json?ref=${BRANCH}`)).content || '', 'base64').toString('utf8')); } catch { binding = null; }
+  let content = null;
+  try { content = (await call('GET', `contents/.github/toolkit-programme.json?ref=${BRANCH}`)).content || ''; } catch (error) {
+    if (!(error instanceof GitHubAnswerError && error.status === 404)) throw error;
+  }
+  if (content !== null) try { binding = JSON.parse(Buffer.from(content, 'base64').toString('utf8')); } catch { binding = null; }
   const parents = parentsOf(binding);
   if (!parents) {
     // Record 808: a skip is one visible warning that names the repository, the reason and the fix.
@@ -126,8 +146,18 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     const why = !binding || typeof binding !== 'object' ? 'the programme file on main is missing or unreadable'
       : governance === 'disabled' ? 'the programme file on main turns governance off'
         : governance === 'invalid' ? 'the programme file on main is not a valid programme file' : 'the programme file on main names no parent issue';
-    log(`::warning::Programme Sweep gate skipped ${repository}: ${why}. Fix: run toolkit governance check in a clone of ${repository}; turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows if it should not be governed.`);
-    return { start: false, reason: 'governance off' };
+    const code = !binding || typeof binding !== 'object' ? 'unreadable' : governance === 'disabled' ? 'disabled' : governance === 'invalid' ? 'invalid' : 'no_parent';
+    log(`::warning title=${TITLES.gate}::(${code}) Programme Sweep gate skipped ${repository}: ${why}. Fix: run toolkit governance check in a clone of ${repository}; turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows if it should not be governed.`);
+    const verdict = { start: false, reason: 'governance off' };
+    if (!STREAK_EVENTS.includes(env.EVENT_NAME || '')) return verdict;
+    // This run counts as one; the earlier finished hourly runs make up the rest.
+    const earlier = ((await call('GET', `actions/workflows/${GATE_WORKFLOW}/runs?event=schedule&status=completed&per_page=${STREAK - 1}`)).workflow_runs || []).slice(0, STREAK - 1);
+    const codes = [];
+    for (const run of earlier) codes.push((await runFinding(call, run, GATE_JOB, TITLES.gate))?.code || null);
+    if (codes.length === STREAK - 1 && codes.every(item => item === code)) {
+      verdict.alert = `Programme Sweep gate skipped ${repository} ${STREAK} hourly runs in a row (${code}): ${why}. Owner: turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows (both workflow files) if ${repository} should not be governed.`;
+    }
+    return verdict;
   }
   const runs = (await call('GET', `actions/workflows/${SWEEP_WORKFLOW}/runs?per_page=20`)).workflow_runs || [];
   const last = lastSweep(runs);
@@ -153,7 +183,45 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
   const verdict = decide({ event: env.EVENT_NAME || '', now, runs, lines, changedSince, followUpWaiting });
   if (verdict.start) await call('POST', `actions/workflows/${SWEEP_WORKFLOW}/dispatches`, { ref: BRANCH });
   log(`Programme Sweep gate: ${verdict.start ? 'started the sweep' : 'nothing to start'} (${verdict.reason}).`);
+  if (STREAK_EVENTS.includes(env.EVENT_NAME || '')) {
+    const streak = await sweepStreak(call, runs);
+    if (streak) verdict.alert = streak;
+  }
   return verdict;
+}
+
+// The titled finding (held or skipped) on one run's job, or null. A run of the wrong shape, a job
+// that is missing or an annotation without a code counts as no finding, which ends a streak.
+async function runFinding(call, run, jobName, ...titles) {
+  if (!Number.isSafeInteger(run?.id)) return null;
+  const job = ((await call('GET', `actions/runs/${run.id}/jobs`)).jobs || []).find(item => item.name === jobName && Number.isSafeInteger(item.id));
+  if (!job) return null;
+  // A job's id is its check run's id.
+  const notes = await call('GET', `check-runs/${job.id}/annotations?per_page=50`);
+  for (const note of Array.isArray(notes) ? notes : []) {
+    if (!titles.includes(note?.title) || note.annotation_level !== 'warning') continue;
+    const code = CODE.exec(String(note.message || ''))?.[1];
+    if (code) return { title: note.title, code, at: run.run_started_at || run.created_at || null };
+  }
+  return null;
+}
+
+// The last STREAK finished sweeps: all held, or all skipped, with the same code? Stops reading at
+// the first run that breaks the streak, so a quiet hour costs two small reads.
+async function sweepStreak(call, runs) {
+  const finished = runs.filter(run => run.status === 'completed' && run.conclusion === 'success').slice(0, STREAK);
+  if (finished.length < STREAK) return null;
+  let first = null, since = null;
+  for (const run of finished) {
+    const found = await runFinding(call, run, SWEEP_JOB, TITLES.held, TITLES.skipped);
+    if (!found || (first && (found.title !== first.title || found.code !== first.code))) return null;
+    first = first || found;
+    since = found.at;
+  }
+  const when = since ? ` since ${since}` : '';
+  return first.title === TITLES.held
+    ? `Programme Sweep held ${STREAK} runs in a row (${first.code})${when}. Controller: read the held items on the programme page and clear their cause, or ask the owner; the first clean sweep clears this.`
+    : `Programme Sweep skipped ${STREAK} runs in a row (${first.code})${when}. Owner: follow the fix in the sweep run's warning (toolkit governance check names it), or remove the Toolkit Programme Sweep workflows if this repository should not be governed.`;
 }
 
 // The sweep's follow-up: after a pass stops early, start one more run on main. A pass paused at
@@ -191,11 +259,15 @@ async function followUp({ env = process.env, fetchImpl = globalThis.fetch, now =
 if (require.main === module) {
   const which = process.argv[2] === 'follow-up' ? 'follow-up' : 'gate';
   const run = which === 'follow-up' ? followUp() : gate();
-  run.catch(error => {
+  run.then(verdict => {
+    if (!verdict?.alert) return;
+    process.stdout.write(`::error title=Programme Sweep needs action::${verdict.alert}\n`);
+    process.exitCode = 1;
+  }, error => {
     if (!isBlip(error)) { process.stderr.write(`Programme Sweep ${which} failed: ${error?.message}\n`); process.exitCode = 1; return; }
     const what = error instanceof GitHubAnswerError ? error.message : 'GitHub did not answer.';
     process.stdout.write(`::notice::Programme Sweep ${which} could not finish: ${what} The next start tries again.\n`);
   });
 }
 
-module.exports = Object.freeze({ SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, governanceOf, parentsOf, decide, gate, followUp, SetupError, GitHubAnswerError, isBlip });
+module.exports = Object.freeze({ STREAK, TITLES, sweepStreak, runFinding, SWEEP_WORKFLOW, FOLLOW_UP_JOB, BRANCH, HOUR_MS, RESET_WAIT_MS, REFRESH_MS, ACTIVITY_EVENTS, boardLine, governanceOf, parentsOf, decide, gate, followUp, SetupError, GitHubAnswerError, isBlip });
