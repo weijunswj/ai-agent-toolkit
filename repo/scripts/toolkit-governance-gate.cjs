@@ -183,10 +183,26 @@ function ownerMessage(prompt) {
 // passes: what stops a nested session answering is the same-run rule above (it was never asked, so
 // nothing it sends answers) together with the refusal of sessions another session started.
 function answerCommand(text) {
-  return /toolkit-governance\.cjs["']?\s+(?:enable|disable|decline|reopen|migrate|repair)\b/i.test(text)
+  return decisionAfterScript(text)
     || (/\b(?:claude|codex)\b/i.test(text) && /toolkit governance (?:enable|disable|decline)\b/i.test(text));
 }
-const TICKET_ARGUMENTS = /\b(?:confirm-)?(?:yes|no|later)\s+[0-9a-f]{32}\b/i;
+// The governance CLI given a decision word anywhere after it in the same command, so options before
+// the decision (`--json enable`, `--repo . disable`) count too. Read word by word, in linear time.
+const DECISION_WORDS = new Set(['enable', 'disable', 'decline', 'reopen', 'migrate', 'repair']);
+function decisionAfterScript(text) {
+  const pattern = /toolkit-governance\.cjs/gi;
+  for (let found = pattern.exec(text); found; found = pattern.exec(text)) {
+    const rest = text.slice(found.index + found[0].length).split(/[;&|\r\n]/, 1)[0];
+    if (rest.split(/\s+/).some(word => DECISION_WORDS.has(word.replace(/^["']+|["']+$/g, '').toLowerCase()))) return true;
+  }
+  return false;
+}
+
+// The proposal code run from the shell: a runtime with the module named (its tests excepted).
+function proposalRun(text) {
+  return /\b(?:node|bun|deno)(?:\.exe)?\b/i.test(text) && /toolkit-governance-proposal(?!\.test)\b/i.test(text);
+}
+const TICKET_ARGUMENTS =/\b(?:confirm-)?(?:yes|no|later)\s+[0-9a-f]{32}\b/i;
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
 const PICKER_TOOL = 'AskUserQuestion';
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
@@ -1363,6 +1379,9 @@ class ToolGate {
       }
       if (answerCommand(text)) {
         return { deny: `Toolkit: only the user answers the governance question, on Toolkit's card or by sending \`toolkit governance enable\` or \`toolkit governance disable\` as their own message. If they asked you to decide it, tell them that in plain words. ${NEVER_OWNER}` };
+      }
+      if (proposalRun(text)) {
+        return { deny: `Toolkit: its governance proposals are made only by Toolkit itself, from the user's own answer. ${NEVER_OWNER}` };
       }
     }
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => USER_STATE_PATH.test(resolveTarget(input, target)))) {
