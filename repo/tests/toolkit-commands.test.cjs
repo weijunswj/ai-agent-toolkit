@@ -39,12 +39,11 @@ test('the governance guide runs setup, then offers the next step without answeri
     const context = commands.phraseContext(phrase);
     assert.ok(/'setup'/.test(fs.readFileSync(script, 'utf8').match(/const COMMANDS = Object\.freeze\(\[[^\]]*\]\)/)[0]));
     assert.ok(context.includes(`Run exactly \`node "${script}" setup\``), phrase);
-    assert.ok(context.includes(`\`node "${script}" refresh --set on\``) && context.includes(`refresh --set off`), phrase);
-    assert.match(context, /it asks two questions there, governance on and then task auto-merge on or off, and prepares one pull request with both/);
-    assert.doesNotMatch(context, /toolkit governance enable/, 'the guide always asks the task auto-merge question');
-    assert.ok(context.includes(`turn governance off, which the user does by running \`node "${script}" disable\` in their own terminal`), phrase);
-    assert.match(context, /Never answer the governance question for the user\.$/);
-    assert.match(context, /Show the user its output once, in full and as printed, the permission table and every permission block included; never summarise it, shorten it or repeat it\. After it, add the next step once\./);
+    assert.match(context, /works like setup toolkit's: the user replies `all recommended` or only their changes, such as `1\.2=B`/);
+    assert.match(context, /one-use ticket/);
+    assert.match(context, /once, in full and as printed, every table, any permission table and every permission block included, and the reply line; never summarise it, shorten it or repeat it, then stop\./);
+    assert.doesNotMatch(context, /--set|own terminal|toolkit governance enable/, 'no terminal hop and no switch flag');
+    assert.match(context, /Never answer the bank for the user\.$/);
     for (const other of ['status', 'check', 'discover', 'security', 'migrate', 'enable']) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${phrase} runs ${other}`);
   }
   // The gate's answer phrases stay the gate's.
@@ -147,7 +146,7 @@ function prompt(decision, text, extra = {}, environment = {}) {
 
 test('Claude Code prompt hook: a typed command adds its line on an ordinary pass', () => {
   assert.match(prompt({ action: 'pass' }, 'toolkit show env').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit show env`\./);
-  assert.match(prompt({ action: 'pass' }, 'toolkit governance').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit governance`\. Guide the user through Toolkit's GitHub governance for this repository\. Run exactly `node "[^"]*toolkit-governance\.cjs" setup`/);
+  assert.match(prompt({ action: 'pass' }, 'toolkit governance').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit governance`\. Show the user Toolkit's governance question bank for this repository\. Run exactly `node "[^"]*toolkit-governance\.cjs" setup`/);
   assert.deepEqual(prompt({ action: 'pass' }, 'toolkit governance check'), {});
   assert.deepEqual(prompt({ action: 'pass' }, 'toolkit set env'), {});
 });
