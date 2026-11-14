@@ -21,7 +21,6 @@ const expectedCodexRows = [
   ['antigravity-skills', "Copy Toolkit's skills into Antigravity?"],
   // A report-only row closes its section as an unnumbered status line.
   ['codex-toolkit-hooks', 'Toolkit hooks in Codex'],
-  ['scheduled-task-update', 'May Toolkit update scheduled tasks on this computer?'],
 ];
 // The rows that take an answer; the Codex hooks row only reports.
 const answerable = (rows) => rows.filter((row) => !row.report_only);
@@ -390,7 +389,7 @@ test('conditional questions renumber without gaps and change the bound bank iden
   const all = allRows();
   const withoutConditional = all.filter((row) => row.id !== 'report-retention');
   const renumbered = core.withPresentationMetadata(withoutConditional.map((row) => ({ ...row, presentation: undefined })));
-  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1', '3.2', '', '4.1']);
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '2.2', '3.1', '3.2', '']);
   assert.notEqual(renumbered[0].presentation.bank_identity, all[0].presentation.bank_identity);
 });
 
@@ -410,9 +409,9 @@ test('all recommended and changed-only answers resolve to canonical values', () 
   assert.equal(all.mode, 'all-recommended');
   assert.deepEqual(all.selections.map((selection) => selection.canonical_value), answerable(rows).map((row) => row.recommended));
   core.assertQuestionBankAnswerBinding(all, rows);
-  // The report-only hooks status line has no number; scheduled task authority is its own final section.
+  // The report-only hooks status line has no number.
   assert.equal(all.selections.some((selection) => selection.question_id === 'codex-toolkit-hooks'), false);
-  assert.equal(all.selections.at(-1).question_ref, '4.1');
+  assert.equal(all.selections.at(-1).question_ref, '3.2');
   assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 3.3=A`, rows), /unavailable question 3\.3/);
 
   const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=c, 2.2 = b`, rows);
@@ -559,7 +558,7 @@ test('bank reference covers host, order, recommendations and approval-visible se
   const payload = core.questionBankApprovalPayload(rows);
   assert.equal(payload.schema, 'ai-agent-toolkit.setup-question-bank-approval.v2');
   assert.equal(payload.host, 'codex');
-  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Toolkit in your coding apps', 'Windows scheduled tasks']);
+  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Toolkit in your coding apps']);
   assert.ok(payload.questions.every((question) => question.what_this_controls));
   assert.ok(payload.questions.filter((question) => !question.report_only).every((question) => question.recommendation.choice_ref && question.recommendation.label));
   // A report-only row's state is not bound: the owner turning hooks on in Codex while the table is

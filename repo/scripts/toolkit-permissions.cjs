@@ -48,11 +48,8 @@ const STORE = 'repo/scripts/toolkit-store.cjs';
 
 const GUARDS = Object.freeze({
   programme: "The script's own controller-holder check, programme lock and merged binding read. A parent lifecycle write needs the merged binding's permission and the closure guard. refresh --scheduled and --budget-ms set only how long one refresh pass may run, 10 to 50 minutes, under the same checks and request cap. run-order runs only the writes listed here, from an unexpired order for the parent's current holder and epoch, never a claim, takeover, init-parent or migrate-state.",
-  tasks: "The script's marker and ownership checks: only Toolkit's own recorded tasks are created, changed or started, and a hand-edited task needs the owner's answer.",
-  taskUpdate: 'Its saved approval and question flow: a new task kind or a hand-edited task returns a question for the owner.',
   readOnly: 'Read-only: it lists or prints and changes nothing.',
   listOnly: 'Exact lines for the listing forms only. Recording or forgetting a task is not in a line, so it asks.',
-  updateOnly: 'Exact lines for the plan and apply forms only; a run that carries an answers file is not in a line, so it asks. Its saved approval and question flow return a new task kind or a hand-edited task to the owner.',
   cleanup: 'The script checks every path itself: inside a scratch root after links are resolved, a clean and fully pushed worktree, and the evidence store read back first. Anything else is reported, never deleted.',
   comment: 'The owner approved comment lines. Nothing checks the target or the words: the footer hook and the footer sweep check only the footer, so the repository rules on what to post still bind the agent.',
   store: 'The store command checks every step itself: the merged binding\'s store, a checkout whose fetch and push addresses are that store and whose own config holds no push, rewrite or program setting, a private writable store on its default branch, a secret scan of exactly what it commits, a plain push of the bound branch only, no file deletions, and a branch delete only when the branch is already merged.',
@@ -67,8 +64,12 @@ const PROGRAMME_ASK = Object.freeze({
   'init-parent': 'Creating a programme parent is a one-time owner decision.',
   'migrate-state': 'Moving the state documents asks for the owner in that run.',
 });
-const TASKS_ALLOW = Object.freeze(['plan', 'apply', 'list', 'start']);
+// Toolkit no longer creates, updates or starts scheduled tasks on a computer (the cloud runs those
+// jobs), so only the read-only forms are allowed; removal stays an ask under remove toolkit.
+const TASKS_ALLOW = Object.freeze(['plan', 'list']);
 const TASKS_ASK = Object.freeze({
+  apply: 'Toolkit no longer creates or updates scheduled tasks on a computer; creating one is the owner\'s own choice.',
+  start: 'Toolkit no longer runs scheduled tasks on a computer; starting an old one is the owner\'s own choice.',
   remove: 'Removing registered tasks is a delete.',
   adopt: 'Recording a hand-made task as known is the owner\'s choice.',
 });
@@ -91,9 +92,8 @@ const scriptRow = (id, script, sub, guard, extra = {}) => Object.freeze({ id, sc
 
 const ROWS = Object.freeze([
   ...PROGRAMME_ALLOW.map(sub => scriptRow(`programme-${sub}`, PROGRAMME, sub, GUARDS.programme)),
-  ...TASKS_ALLOW.map(sub => scriptRow(`tasks-${sub}`, WINDOWS_TASKS, sub, sub === 'list' ? GUARDS.readOnly : GUARDS.tasks, { windowsOnly: true, ...(sub === 'apply' ? { codex: false } : {}) })),
+  ...TASKS_ALLOW.map(sub => scriptRow(`tasks-${sub}`, WINDOWS_TASKS, sub, GUARDS.readOnly, { windowsOnly: true })),
   scriptRow('tasks-list-all', 'repo/scripts/toolkit-tasks.cjs', null, GUARDS.listOnly, { forms: ['', ' --json'], codex: false }),
-  scriptRow('task-update', 'repo/scripts/toolkit-update-scheduled-task.cjs', null, GUARDS.updateOnly, { windowsOnly: true, forms: ['', ' --json', ' --apply', ' --apply --json'], codex: false }),
   scriptRow('permissions-print', 'repo/scripts/toolkit-permissions.cjs', null, GUARDS.readOnly),
   scriptRow('cleanup-plan', CLEANUP, 'plan', GUARDS.readOnly),
   scriptRow('cleanup-apply', CLEANUP, 'apply', GUARDS.cleanup),
@@ -108,12 +108,6 @@ const APPLY_WHY = 'Writing the app\'s permission settings is the owner\'s own st
 // Ask lines: the host asks even when an allow line above matches, because ask beats allow.
 // `after` is appended to the row's command; each entry names why it still asks.
 const ASK_NETS = Object.freeze({
-  'tasks-apply': [
-    { after: '*--repair-owned*', why: 'A same-job repair needs approval naming the affected tasks.' },
-    { after: '*--folder*', why: 'A folder override needs the owner\'s approval.' },
-    { after: '*--no-first-run*', why: 'Skipping the first run needs the owner\'s approval.' },
-    { after: '*--task-choice*', why: 'A keep-or-replace answer is the owner\'s; a flag cannot prove who answered.' },
-  ],
   'permissions-print': [{ after: '*--apply*', why: APPLY_WHY }],
   'gh-pr-comment': [{ after: '*--delete-last*', why: 'Deleting a comment is a delete.' }],
   'gh-issue-comment': [{ after: '*--delete-last*', why: 'Deleting a comment is a delete.' }],
@@ -124,9 +118,8 @@ const ASK_NETS = Object.freeze({
 // belongs to one group here; a test holds that, so a new row needs its explanation.
 const TABLE_GROUPS = Object.freeze([
   { key: 'programme', ids: PROGRAMME_ALLOW.map(sub => `programme-${sub}`), name: 'Programme pages (`programme.cjs`)', does: 'Keep the programme issue pages, records and attention list in step on GitHub.', asks: Object.keys(PROGRAMME_ASK), checked: 'Controller check, programme lock and the merged binding.' },
-  { key: 'windows-tasks', ids: TASKS_ALLOW.map(sub => `tasks-${sub}`), name: 'Windows tasks (`toolkit-windows-tasks.cjs`)', does: "Plan, set up, list and start Toolkit's own Windows scheduled tasks.", asks: [...Object.keys(TASKS_ASK), ...ASK_NETS['tasks-apply'].map(net => net.after.replace(/\*/g, ''))], checked: "Only Toolkit's own recorded tasks; a hand-edited task goes back to you." },
+  { key: 'windows-tasks', ids: TASKS_ALLOW.map(sub => `tasks-${sub}`), name: 'Windows tasks (`toolkit-windows-tasks.cjs`)', does: "Plan and list Toolkit's old Windows scheduled tasks; Toolkit no longer creates or starts them.", asks: Object.keys(TASKS_ASK), checked: "Only Toolkit's own recorded tasks; a hand-edited task goes back to you." },
   { key: 'tasks-list', ids: ['tasks-list-all'], name: 'Task list (`toolkit-tasks.cjs`)', does: 'List the scheduled tasks Toolkit knows about.', asks: ['recording or forgetting a task'], checked: 'Read-only.' },
-  { key: 'task-update', ids: ['task-update'], name: 'Update task (`toolkit-update-scheduled-task.cjs`)', does: 'Plan and set up the Toolkit update scheduled task.', asks: ['a run with an answers file'], checked: 'Its saved approval; a new or hand-edited task goes back to you.' },
   { key: 'permissions', ids: ['permissions-print'], name: 'Permissions (`toolkit-permissions.cjs`)', does: 'Print these blocks and check a settings file.', asks: ['--apply'], checked: 'Read-only.' },
   { key: 'cleanup', ids: ['cleanup-plan', 'cleanup-apply'], name: 'Cleanup (`toolkit-cleanup.cjs`)', does: "List and remove Toolkit's rebuildable scratch.", asks: [], checked: 'Checks every path; never removes unpushed or unsaved work.' },
   { key: 'store', ids: ['store'], name: 'Evidence store (`toolkit-store.cjs`)', does: 'Save evidence to the bound evidence store.', asks: [], checked: 'Bound store only, secret scan, plain push, no file deletes.' },

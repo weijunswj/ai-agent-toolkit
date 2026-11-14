@@ -203,14 +203,13 @@ class SkillCopiesPart {
 }
 
 // The reinstall note (toolkit-reinstall-note.cjs): the helper stack each app's Toolkit helper files
-// name and the checkouts whose Toolkit tasks go, so `setup toolkit` can put them back later. Saved
+// name, so `setup toolkit` can put them back later. Scheduled tasks are never noted. Saved
 // first, into the kept backups folder. Its content is in the plan, so the owner sees it.
 class ReinstallNotePart {
   key = 'reinstall_note'; title = 'Kept for a later reinstall'; app = 'any';
-  #home; #helpers; #registry;
-  constructor({ environment = process.env, home = os.homedir(), helpers, registry } = {}) {
+  #home; #helpers;
+  constructor({ environment = process.env, home = os.homedir(), helpers } = {}) {
     this.#home = home;
-    this.#registry = registry || require('./toolkit-tasks.cjs');
     this.#helpers = helpers || (() => {
       const { ClaudeHelperDefinitions } = require('./toolkit-claude-helper-agents.cjs');
       const { CodexHelperDefinitions } = require('./toolkit-codex-helper-agents.cjs');
@@ -222,15 +221,10 @@ class ReinstallNotePart {
   plan() {
     const stacks = this.#helpers();
     const helpers = Object.fromEntries(Object.entries(stacks).filter(([, stack]) => stack));
-    const read = this.#registry.readRegistry(this.#home);
-    const tasks = read.status === 'ok' ? read.tasks.filter(entry => entry.host === 'windows' && !entry.adopted && entry.checkout && entry.folder)
-      .map(entry => ({ checkout: entry.checkout, folder: entry.folder, ...(entry.repository ? { repository: entry.repository } : {}) })) : [];
     const note = require('./toolkit-reinstall-note.cjs');
-    const checkouts = [...new Set(tasks.map(task => task.checkout))];
-    if (!Object.keys(helpers).length && !checkouts.length) return [];
-    const said = [...Object.entries(helpers).map(([host, stack]) => `the ${host === 'codex' ? 'Codex' : 'Claude Code'} helpers (stack ${stack})`),
-      ...(checkouts.length ? [`the scheduled tasks of ${checkouts.length} ${checkouts.length === 1 ? 'repository' : 'repositories'} (offered, not created)`] : [])];
-    return [{ what: display(this.#home, note.notePath(this.#home)), action: 'save', detail: `so setup toolkit can put back ${said.join(' and ')}; no keys`, note: { helpers, tasks } }];
+    if (!Object.keys(helpers).length) return [];
+    const said = Object.entries(helpers).map(([host, stack]) => `the ${host === 'codex' ? 'Codex' : 'Claude Code'} helpers (stack ${stack})`);
+    return [{ what: display(this.#home, note.notePath(this.#home)), action: 'save', detail: `so setup toolkit can put back ${said.join(' and ')}; no keys`, note: { helpers } }];
   }
   apply(items) {
     const note = require('./toolkit-reinstall-note.cjs');

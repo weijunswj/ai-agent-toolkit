@@ -232,7 +232,7 @@ test('approval metadata: --no-first-run is outside the exact standing command', 
   assert.equal(scheduler.calls.some(row => row[0] === 'start'), false);
 });
 
-test('task advisory clears immediately after real owner ON/OFF/absent switches and removal with leftover records', async t => {
+test('session start prints no task advisory through real owner ON/OFF/absent switches and removal with leftover records', async t => {
   const w = switchWorld(t);
   const gate = require('../scripts/toolkit-governance-gate.cjs');
   const registryOptions = { registryPath: path.join(tasks.userStateDir(w.home), 'repository-governance.v1.json'), testOnly: true };
@@ -245,7 +245,7 @@ test('task advisory clears immediately after real owner ON/OFF/absent switches a
   assert.equal(w.cli('apply').code, 0);
   for (const state of ['off','on','absent','on']) {
     await w.gov(state);
-    for (const source of ['startup','resume','clear','compact']) assert.match(start(source), /Toolkit tasks: recorded Windows tasks/);
+    for (const source of ['startup','resume','clear','compact']) assert.doesNotMatch(start(source), /Toolkit tasks:/, 'the retired task line never returns');
     const wanted = require('../scripts/toolkit-task-shape.cjs').confirmedTaskShape({ certain: true, governanceState: state === 'on' ? 'ENABLED' : state === 'off' ? 'DISABLED' : 'UNDECIDED' });
     assert.deepEqual(w.offer().wanted.map(d => d.job).sort(), [...wanted].sort());
     assert.deepEqual(w.cli('plan').json.items.filter(item => !item.retiring).filter(item => ['create','current','update'].includes(item.action)).map(item => item.definition.job).sort(), [...wanted].sort());
