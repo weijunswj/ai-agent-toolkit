@@ -1119,8 +1119,7 @@
       "hosts": ["claude","codex"],
       "steps": [
         {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"merge weijunswj/tk-uat-missing-pr-20261101#9\nmerge weijunswj/tk-uat-missing-pr-20261101#10\nmerge weijunswj/tk-uat-missing-pr-20261101#11\nmerge weijunswj/tk-uat-missing-pr-20261101#13\nmerge weijunswj/tk-uat-missing-pr-20261101#14\nmerge weijunswj/tk-uat-missing-pr-20261101#12"},"expect":{"decision":"allow"},"expect_by_host":{"codex":{"decision":"deny"}},"note":"Claude allows only the governance card; Codex blocks the held prompt."},
-        {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"weijunswj/tk-uat-missing-pr-20261101","pr_number":9,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"deny"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"merge weijunswj/tk-uat-missing-pr-20261101#9\nmerge weijunswj/tk-uat-missing-pr-20261101#10\nmerge weijunswj/tk-uat-missing-pr-20261101#11\nmerge weijunswj/tk-uat-missing-pr-20261101#13\nmerge weijunswj/tk-uat-missing-pr-20261101#14\nmerge weijunswj/tk-uat-missing-pr-20261101#12"},"expect":{"decision":"allow"}},
         {"event":"UserPromptSubmit","payload":{"prompt":"no"},"expect":{"decision":"allow"}},
         {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"weijunswj/tk-uat-missing-pr-20261101","pr_number":9,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"allow"}},
         {"payload":{"tool_name":"mcp__github__merge_pull_request","tool_input":{"repository_full_name":"weijunswj/tk-uat-missing-pr-20261101","pr_number":10,"expected_head_sha":"{head}","merge_method":"merge"}},"expect":{"decision":"allow"}},

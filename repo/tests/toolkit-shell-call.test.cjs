@@ -358,37 +358,38 @@ test('hostile shell texts inside an unreadable shape are refused with the push i
   hostile.expectDefaultDeny(assert, text => read('shell', { command: ['git', null, `${text}\ngit commit -m x`] }).refusal() === '', list);
 });
 
-test('C7: the governance gate refuses a Codex call whose run folder waits for its answer, under every shell shape', (t) => {
+test('C7: the governance gate lets a Codex call into an undecided run folder through under every shell shape, and still refuses the governance decision under each', (t) => {
   const fs = require('node:fs');
   const gate = require('../scripts/toolkit-governance-gate.cjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-shell-call-gate-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const held = path.join(dir, 'held');
+  const undecided = path.join(dir, 'undecided');
   const session = path.join(dir, 'session');
-  for (const folder of [held, session]) fs.mkdirSync(folder);
+  for (const folder of [undecided, session]) fs.mkdirSync(folder);
   const registryOptions = { registryPath: path.join(dir, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
-  const stateReader = folder => (path.resolve(folder) === held ? { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-held' } : { state: 'DISABLED', rule: 'R1' });
+  const stateReader = folder => (path.resolve(folder) === undecided ? { state: 'UNDECIDED', rule: 'R4', repository_id: 'synthetic-undecided' } : { state: 'DISABLED', rule: 'R1' });
   const decide = input => new gate.ToolGate({ registryOptions, stateReader }).decide(input);
   const rows = [
-    ['R4', command => ({ tool_name: 'Bash', cwd: session, tool_input: { cmd: command, workdir: held } })],
-    ['R5', command => ({ tool_name: 'exec_command', cwd: session, tool_input: { cmd: command, workdir: held } })],
-    ['R6', command => ({ tool_name: 'shell', cwd: session, tool_input: { command: ['bash', '-lc', command], workdir: held } })],
-    ['R7', command => ({ tool_name: 'shell', cwd: session, tool_input: { command: command.split(' '), workdir: held } })],
-    ['R8', command => ({ tool_name: 'local_shell', cwd: dir, tool_input: { cmd: command, workdir: 'held' } })],
+    ['R4', command => ({ tool_name: 'Bash', cwd: session, tool_input: { cmd: command, workdir: undecided } })],
+    ['R5', command => ({ tool_name: 'exec_command', cwd: session, tool_input: { cmd: command, workdir: undecided } })],
+    ['R6', command => ({ tool_name: 'shell', cwd: session, tool_input: { command: ['bash', '-lc', command], workdir: undecided } })],
+    ['R7', command => ({ tool_name: 'shell', cwd: session, tool_input: { command: command.split(' '), workdir: undecided } })],
+    ['R8', command => ({ tool_name: 'local_shell', cwd: dir, tool_input: { cmd: command, workdir: 'undecided' } })],
   ];
   if (process.platform === 'win32') {
-    // A Git Bash drive path to the held folder, in cd, git -C, an absolute word and a Codex workdir.
-    const drive = `/${held[0].toLowerCase()}${held.slice(2).replace(/\\/g, '/')}`;
+    // A Git Bash drive path to the undecided folder, in cd, git -C, an absolute word and a Codex workdir.
+    const drive = `/${undecided[0].toLowerCase()}${undecided.slice(2).replace(/\\/g, '/')}`;
     for (const input of [
       { tool_name: 'Bash', cwd: session, tool_input: { command: `cd ${drive} && git status` } },
       { tool_name: 'Bash', cwd: session, tool_input: { command: `git -C ${drive} status` } },
       { tool_name: 'Bash', cwd: session, tool_input: { command: `ls ${drive}` } },
       { tool_name: 'exec_command', cwd: session, tool_input: { cmd: 'git status', workdir: drive } },
-    ]) assert.match(decide(input)?.deny || '', /works in a repository that is waiting for the user's governance answer/, JSON.stringify(input.tool_input));
+    ]) assert.equal(decide(input), null, JSON.stringify(input.tool_input));
   }
   for (const [row, shape] of rows) {
-    assert.match(decide(shape('git status'))?.deny || '', /works in a repository that is waiting for the user's governance answer/, row);
-    assert.equal(decide({ ...shape('git status'), tool_input: { ...shape('git status').tool_input, workdir: session } }), null, `${row}: a run folder that is not held`);
+    assert.equal(decide(shape('git status')), null, row);
+    assert.equal(decide({ ...shape('git status'), tool_input: { ...shape('git status').tool_input, workdir: session } }), null, `${row}: another run folder`);
+    assert.match(decide(shape('node repo/scripts/toolkit-governance.cjs enable'))?.deny || '', /only the user answers the governance question/, `${row}: the decision command`);
   }
 });
 

@@ -34,7 +34,7 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // auto-merge. Relays, citations, notes, notifications, attachments and malformed frames grant nothing.
 // Delivery ids are hashed and remembered for a day; expired deliveries cannot rearm approval after
 // their marker expires. No raw prompt text is stored. A valid explicit approval is kept at arrival
-// even during a governance hold; tools remain held and governance is not answered by it.
+// even on the message that carries the governance question; governance is not answered by it.
 // It is for the repository the session is in, or the one the message names; a bare number typed
 // outside a GitHub repository records nothing.
 //

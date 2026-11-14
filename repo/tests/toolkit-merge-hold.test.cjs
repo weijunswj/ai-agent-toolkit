@@ -688,7 +688,8 @@ for (const mode of ['enabled', 'disabled', 'undecided', 'plain']) test(`adapter 
       assert.ok([0, 2].includes(result.status), result.stderr);
     }
     assert.equal(Boolean(new hold.MergeApprovals(ctx.options).find('owner/matrix', pr)), row.record, `${host} ${row.name}`);
-    assert.equal(new gate.GovernanceGate(ctx.options).evaluate(cwd).hold, mode === 'undecided', 'merge text never answers governance');
+    assert.equal(new gate.GovernanceGate(ctx.options).evaluate(cwd).open, mode === 'undecided', 'merge text never answers governance');
+    assert.doesNotMatch(gate.sessionLine(cwd, { ...ctx.options, sessionId: session_id }), /is pending/, 'merge text never answers governance');
   }
 });
 
@@ -1414,16 +1415,18 @@ test('the Claude Code hook records the typed approval and enforces it; cloud ses
   const ctx = context(t);
   const merge = { ...connector('merge_pull_request', { pullNumber: 618, expectedHeadSha: SHA }), cwd: ctx.repo };
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
-  // Governance holds tools independently of recording the explicit approval.
-  const held = claudeHook.respond('UserPromptSubmit', { cwd: ctx.repo, prompt: 'merge 618', session_id: userSession(ctx) }, { environment: {}, ...ctx.options });
-  assert.ok(held.systemMessage || held.decision === 'block', JSON.stringify(held));
+  // The approval is recorded from the first message of the run, which also carries the governance
+  // question; the undecided repository does not stand in the way of the approved merge.
+  const first = claudeHook.respond('UserPromptSubmit', { cwd: ctx.repo, prompt: 'merge 618', session_id: userSession(ctx) }, { environment: {}, ...ctx.options });
+  assert.equal(first.decision, undefined, JSON.stringify(first));
+  assert.match(first.hookSpecificOutput.additionalContext, /Turn on GitHub governance[\s\S]*Toolkit recorded 1 explicit merge approval\(s\)\./);
   assert.equal(fs.existsSync(ctx.file), true);
-  assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
-  assert.ok(new hold.MergeApprovals(ctx.options).find('owner/a', 618), 'the held merge did not consume approval');
-  // Once the repository is decided, no repetition is needed.
-  require('./support/governance-observations.cjs').seedMerged(ctx.repo, 'disable', ctx.options);
+  assert.ok(new hold.MergeApprovals(ctx.options).find('owner/a', 618));
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput?.permissionDecision, undefined);
-  // The approval was used by that merge, so the same merge from a cloud session is refused.
+  // One approval, one merge: the governance question changes nothing about that.
+  assert.equal(new hold.MergeApprovals(ctx.options).find('owner/a', 618), null, 'the merge used the approval');
+  assert.equal(claudeHook.respond('PreToolUse', merge, { environment: {}, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
+  // A cloud session runs the same hold, so it is refused too.
   assert.equal(claudeHook.respond('PreToolUse', merge, { environment: { CLAUDE_CODE_REMOTE: 'true' }, ...ctx.options }).hookSpecificOutput.permissionDecision, 'deny');
 });
 
@@ -1437,11 +1440,12 @@ test('the Codex hook refuses, records the user\'s approval, allows one merge and
   const refusedFirst = run(merge);
   assert.equal(refusedFirst.status, 2, refusedFirst.stdout + refusedFirst.stderr);
   gate.startSession({ session_id: 'codex-user', source: 'startup', cwd: ctx.root }, { registryOptions: { registryPath: path.join(home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true } });
-  // Approval is kept at arrival even though governance still holds this repository.
-  run({ hook_event_name: 'UserPromptSubmit', cwd: ctx.repo, session_id: 'codex-user', prompt: 'merge owner/a#618' });
+  // Approval is kept at arrival, in a repository with no governance decision yet; the prompt is let through.
+  const approved = run({ hook_event_name: 'UserPromptSubmit', cwd: ctx.repo, session_id: 'codex-user', prompt: 'merge owner/a#618' });
+  assert.equal(approved.status, 0, approved.stdout + approved.stderr);
   assert.equal(fs.existsSync(path.join(home, '.ai-agent-toolkit', 'user-state', hold.APPROVALS_BASENAME)), true);
-  assert.equal(run({ ...merge, cwd: ctx.repo }).status, 2, 'governance tools remain held');
-  run({ hook_event_name: 'UserPromptSubmit', cwd: ctx.repo, session_id: 'codex-user', prompt: 'no' });
+  // Another pull request is still refused from that repository: the hold is the merge hold's own.
+  assert.equal(run({ ...merge, cwd: ctx.repo, tool_input: { ...merge.tool_input, pullNumber: 619 } }).status, 2, 'only the approved pull request merges');
   const allowed = run(merge);
   assert.equal(allowed.status, 0, allowed.stdout + allowed.stderr);
   assert.equal(run(merge).status, 2, 'used up');

@@ -19,7 +19,7 @@
 // One older than 30 days without an `issue` number fails the run (agedKnownBad).
 //
 // Usage:
-//   node repo/scripts/toolkit-hook-pack.cjs run [--suite <kind>] [--family <name>] [--rows <id,...>]
+//   node repo/scripts/toolkit-hook-pack.cjs run [--suite <kind>] [--family <name>[,<name>...]] (or <name>+<name>) [--rows <id,...>]
 //        [--host claude|codex] [--against <commit>] [--budget-seconds <n>] [--concurrency <n>]
 //   node repo/scripts/toolkit-hook-pack.cjs check-expectations [--base <ref>] [--body-file <file>]
 //   node repo/scripts/toolkit-hook-pack.cjs validate
@@ -846,7 +846,13 @@ function selectRows(rows, options) {
     selected = selected.filter(row => wanted.has(row.id));
   }
   if (options.suite) selected = selected.filter(row => row.kind === options.suite);
-  if (options.family) selected = selected.filter(row => row.family === options.family);
+  if (options.family) {
+    // A list joined by commas or + runs several families in one process, so CI can group the
+    // Windows families (the workflow uses +, which needs no quoting in YAML or PowerShell).
+    const families = new Set(options.family.split(/[,+]/));
+    for (const family of families) if (!rows.some(row => row.family === family)) throw new UsageError(`No family ${family} in the pack.`);
+    selected = selected.filter(row => families.has(row.family));
+  }
   return selected;
 }
 
@@ -1035,5 +1041,5 @@ if (require.main === module) main().then(code => { process.exitCode = code; });
 
 module.exports = Object.freeze({
   CORPUS_REL, FAULTS, HOSTS, KINDS, KNOWN_BAD_DAYS, SCHEMA,
-  agedKnownBad, expectationChanges, explainedRows, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
+  agedKnownBad, expectationChanges, selectRows, explainedRows, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
 });

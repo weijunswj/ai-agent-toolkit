@@ -2,11 +2,11 @@
 'use strict';
 
 // Claude Code's governance hook: one script for four events, named by --event.
-//   UserPromptSubmit  holds every prompt in an undecided repository (toolkit-governance-gate.cjs);
-//                     in a github.com one the turn runs only to show the tap-to-answer card. It also
+//   UserPromptSubmit  in an undecided repository, attaches the governance question once per session
+//                     (toolkit-governance-gate.cjs) and lets the message through. It also
 //                     keeps each "merge N" the user types, for the merge hold, and adds one
 //                     context line for a typed Toolkit command (toolkit-commands.cjs).
-//   PreToolUse        refuses every tool there but the card, and agent answers everywhere; and in every
+//   PreToolUse        refuses an agent's own answer to that question, everywhere; and in every
 //                     folder refuses a merge the user has not typed "merge N" for (toolkit-merge-hold.cjs).
 //   PostToolUse       records the answer tapped on the governance card or on the merge card
 //                     (AskUserQuestion).
@@ -34,7 +34,7 @@ function readInput(text) {
   } catch { return {}; }
 }
 
-const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the undecided-repository hold does not (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. Task auto-merge is the repository's merged switch (task_prs.auto_merge); in a Claude Projects thread, a project line `- Task auto-merge: Off` in its session context forces it Off; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
+const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the governance question is not asked (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. Task auto-merge is the repository's merged switch (task_prs.auto_merge); in a Claude Projects thread, a project line `- Task auto-merge: Off` in its session context forces it Off; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
 
 // Records this cloud session's Projects task auto-merge project line (off, none or on) when the
 // prompt starts with the host's session context. Never throws; with no readable record the line
@@ -86,17 +86,17 @@ function respond(event, input, options = {}) {
     gate = options.gate || require('./toolkit-governance-gate.cjs');
     if (event === 'UserPromptSubmit') {
       // Recording explicit merge authority is independent of answering governance. Only this live
-      // prompt is ingested, never the held context later attached to an answer.
+      // prompt is ingested, never context Toolkit attaches to it.
       let approvalNote = '';
       try {
         const count = (options.mergeHold || mergeHold()).recordPrompt(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now });
-        if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s). Any governance hold still applies.`;
+        if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s).`;
       } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
-      // Cloud override (Projects base-overrides list): the undecided-repository hold stays off in
-      // cloud sessions, which cannot keep the owner's answer, until the no-freeze question ships.
+      // Cloud override (Projects base-overrides list): the governance question is not asked in
+      // cloud sessions, which cannot keep the owner's answer; nothing is held either way.
       const decision = cloud ? { action: 'pass' } : new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: [decision.reason, approvalNote].filter(Boolean).join('\n') };
-      const text = [decision.context, approvalNote, decision.context ? '' : typedCommandNote(gate, input.prompt)].filter(Boolean).join('\n');
+      const text = [decision.context, approvalNote, decision.question ? '' : typedCommandNote(gate, input.prompt)].filter(Boolean).join('\n');
       const context = text ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } } : {};
       return decision.notice ? { systemMessage: decision.notice, ...context } : context;
     }
@@ -142,8 +142,9 @@ function respond(event, input, options = {}) {
 const mergeHold = () => require('./toolkit-merge-hold.cjs');
 
 // One advisory context line when the user's own message is exactly a typed Toolkit command
-// (toolkit-commands.cjs). It never blocks: any failure adds nothing, and a turn that carries
-// governance context (the question, a replay) gets no line, so the hold reads as it did.
+// (toolkit-commands.cjs). It never blocks: any failure adds nothing, and the turn that carries
+// the governance question gets no line (the question comes first; the command works from the
+// next message).
 function typedCommandNote(gate, prompt) {
   try { return require('./toolkit-commands.cjs').phraseContext(gate.ownerReply(prompt)); } catch { return ''; }
 }

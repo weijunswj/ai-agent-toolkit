@@ -359,8 +359,12 @@ const CLOCK_AHEAD_JOB = [
   '        run: node repo/scripts/run-tests.cjs --clock-ahead --clock-offset-days 400 --temp-root "${{ runner.temp }}/tests"',
 ].join('\n');
 
-// Linux runs the full hook pack; Windows runs each family separately to keep the same budget
-// with room for slower hosts. Both jobs are required, and fail-fast stays off for every family.
+// Linux runs the full hook pack. Windows starts its hooks far more slowly, so it splits the pack
+// into four groups of families with about the same measured time, each in its own job: four jobs
+// instead of one per family, since every job waits for one of the account's 20 concurrent runner
+// slots. A group joins its families with + (a comma would split the YAML flow list, and PowerShell
+// would split an unquoted comma list into an array); the value is quoted so the shell passes one word.
+// Both jobs are required, and fail-fast stays off for every group.
 const HOOK_PACK_JOB = [
   '  hook-pack:',
   '    runs-on: ${{ matrix.os }}',
@@ -391,8 +395,8 @@ const HOOK_PACK_JOB = [
 const HOOK_PACK_WINDOWS_JOB = HOOK_PACK_JOB
   .replace('  hook-pack:', '  hook-pack-windows:')
   .replace('    runs-on: ${{ matrix.os }}', '    runs-on: windows-latest')
-  .replace('        os: [ubuntu-latest]', '        family: [attribution, closure-matrix, closure-shell, fault, governance, issue-closure, merge, push, task-governance]')
-  .replace(' run --budget-seconds 360', ' run --family ${{ matrix.family }} --budget-seconds 360');
+  .replace('        os: [ubuntu-latest]', '        families: [attribution+closure-matrix, closure-shell+push, governance+issue-closure, fault+merge+task-governance]')
+  .replace(' run --budget-seconds 360', ' run --family "${{ matrix.families }}" --budget-seconds 420');
 
 // The exact text of the personal-data job: every commit of the pull request or push, its messages,
 // branch name and pull request text, checked by the personal-data guard. The validate job waits
@@ -536,7 +540,7 @@ const WORKFLOW_HEADER = [
   '# validate. The tests-clock-ahead job runs the test files that',
   '# pin a calendar date with Node\'s clock 400 days ahead, so a test that only passes near the date',
   '# it pins fails now rather than months later; validate waits for it. The hook-pack job runs the',
-  '# full pack on Linux; hook-pack-windows runs every family separately. Both are required by validate.',
+  '# full pack on Linux; hook-pack-windows runs it in four groups of families. Both are required by validate.',
   '# The personal-data job checks',
   '# every commit of the pull request or push, the commit messages, the branch name and the pull',
   '# request title and body for email addresses, phone numbers and WhatsApp links, and the title and',

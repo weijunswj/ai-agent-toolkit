@@ -1,7 +1,7 @@
 'use strict';
 const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot, scripts, gate, governance, claudeHook, codexHook, codexSessionStartScript, codexSetup, managedBlock, REMOTE, QUESTION_LINE, AGENT_LINE, noticeOf, git, scratch, gitRepo, hold, tools, stateOf, OLD_FOLDER, oldCopy, writesNothingIn, registryBytes, projects, hostile, replyTicket, answerFixture, baseReplyStore, boundOf, askOf, REAL_THREAD_WAKE, REAL_CHAT_WAKE, ATTACHMENT_MESSAGE, FILE_ATTACHMENT, IMAGE_ATTACHMENT, MUST_PASS, MUST_PASS_POWERSHELL, ROOT_GITIGNORE_ROWS, snapshot, UAT_REPORT, REPORT_WRITE, card, clone } = require('./toolkit-governance-gate-support.cjs');
 
-// Complete original test declarations, split to keep the per-file time budget.
+// Split to keep the per-file time budget.
 require('node:test')('cloud connector merges are held: closing text and a missing approval both refuse',()=>{
   const assert=require('node:assert/strict');
   const hook=require('../scripts/toolkit-governance-hook.cjs');
@@ -27,27 +27,6 @@ require('node:test')('cloud connector merges are held: closing text and a missin
   assert.equal(hook.respond('PreToolUse',both,{environment:{CLAUDE_CODE_REMOTE:'true'},guard}).hookSpecificOutput.permissionDecision,'deny','a clean alias cannot mask closing text in another supplied alias');
 });
 
-test('task command exception is a literal managed command with independent scope', t => {
-  const policy = require('../scripts/toolkit-task-policy.cjs');
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-policy-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  const managed = path.join(home, 'managed');
-  const current = path.join(home, '.ai-agent-toolkit', 'current');
-  fs.mkdirSync(current, { recursive: true });
-  fs.mkdirSync(path.join(managed, 'repo', 'scripts'), { recursive: true });
-  for (const name of ['toolkit-windows-tasks.cjs', 'toolkit-tasks.cjs']) fs.writeFileSync(path.join(managed, 'repo', 'scripts', name), '// fixture');
-  fs.writeFileSync(path.join(current, 'state.json'), JSON.stringify({ repo_path: managed }));
-  const script = path.join(managed, 'repo', 'scripts', 'toolkit-windows-tasks.cjs');
-  const base = `node "${script}" apply --repo-root "${managed}"`;
-  const read = text => policy.independentTaskCommand(text, { home, certainIndependent: () => true });
-  const listScript = path.join(managed, 'repo', 'scripts', 'toolkit-tasks.cjs');
-  for (const args of ['', ' --json', ' list', ' list --json']) assert.equal(read(`node "${listScript}"${args}`), true);
-  for (const command of policy.COMMANDS) assert.equal(read(base.replace(' apply ', ` ${command} `)), true, command);
-  assert.equal(policy.independentTaskCommand(base, { home, certainIndependent: () => false }), false);
-  for (const text of [base + ' --task programme-sweep', base + ' --folder CUSTOM', base + ' --repair-owned', base + ' --no-first-run', base + '; echo extra', base + ' && echo extra', base + ' > output', `echo ${base}`, base.replace('node ', 'node --eval '), base.replace(script, path.join(home, 'other', 'toolkit-windows-tasks.cjs')), base.replace('apply', 'adopt')]) assert.equal(read(text), false, text);
-  for (const row of require('./support/hostile-inputs.cjs').shapes.filter(row => row.syntax === 'shell')) assert.equal(read(row.text), false, row.id);
-});
-
 test('task advisory preserves every verdictLine branch, evaluates once and shares one registry read', t => {
   const ctx = scratch(t);
   const tasks = require('../scripts/toolkit-tasks.cjs');
@@ -58,14 +37,14 @@ test('task advisory preserves every verdictLine branch, evaluates once and share
   const state = { state: 'UNDECIDED', repository: 'example/widget', repository_id: 'fixture', merged: { fresh: true, status: 'none' }, root: ctx.root };
   const options = { registryOptions: ctx.options, programmeDeps: { home: ctx.options.home, environment: {}, platform: 'win32' } };
   try {
-    for (const branch of ['pending','unavailable','not-now','hold','disabled','enabled','error','stale','refresh-failed']) {
+    for (const branch of ['pending','unavailable','asked','undecided','disabled','enabled','error','stale','refresh-failed']) {
       let count = 0, reads = 0;
       const s = { ...state, ...(branch === 'disabled' ? { state: 'DISABLED', merged: { fresh: true, status: 'disabled' } } : {}),
         ...(branch === 'enabled' ? { state: 'ENABLED', programme_records_bind: true, merged: { fresh: true, status: 'enabled' } } : {}),
         ...(branch === 'error' ? { state: 'ERROR', merged: { fresh: true, status: 'invalid' } } : {}),
         ...(branch === 'stale' ? { state: 'DISABLED', rule: 'M2', notes: ['merged-binding-stale'], merged: { fresh: false, status: 'disabled' } } : {}),
         ...(branch === 'refresh-failed' ? { state: 'DISABLED', notes: ['could-not-check-governance'], merged: { fresh: true, status: 'disabled' } } : {}) };
-      const verdict = { state: s, reason: branch, hold: branch === 'hold', ...(branch === 'pending' ? { pending: { text: 'Original pending line.' } } : {}) };
+      const verdict = { state: s, reason: branch, open: ['asked', 'undecided'].includes(branch), ...(branch === 'pending' ? { pending: { text: 'Original pending line.' } } : {}) };
       gate.GovernanceGate.prototype.evaluate = () => { count++; return verdict; };
       tasks.readRegistry = () => { reads++; return registry; };
       tasks.taskGovernanceLine = () => null;
@@ -155,7 +134,7 @@ for (const mutation of ['receipt recorded', 'ticket spent']) {
           else assert.ok(writer.take(baseReplyStore.ticket));
           written = fs.readFileSync(file, 'utf8');
         }
-        return { hold: root === repositories[0].root };
+        return { open: root === repositories[0].root };
       } } });
       if (lookup === 'peek' || lookup === 'pending') {
         const entry = lookup === 'peek' ? reader.peek(baseReplyStore.ticket, 'owner') : reader.pending('waiting', epoch);
@@ -196,7 +175,7 @@ for (const mutation of ['receipt recorded', 'ticket spent']) {
       return targets.evaluate(root, context);
     } } });
     const entry = tickets.take(baseReplyStore.ticket);
-    assert.deepEqual(entry.repositories, [repositories[0]], 'taking returns only held targets');
+    assert.deepEqual(entry.repositories, [repositories[0]], 'taking returns only undecided targets');
     assert.notEqual(written, null, 'the concurrent mutation ran during target evaluation');
     assert.equal(writer.peek(baseReplyStore.ticket, 'owner'), null, 'the taken ticket stays spent');
     if (mutation === 'receipt recorded') assert.equal(writer.acceptDelivery(delivery, null), false, 'spent delivery stays spent');
@@ -208,7 +187,7 @@ for (const mutation of ['receipt recorded', 'ticket spent']) {
 }
 
 for (const kind of ['ticket', 'pending', 'bound']) {
-  test(`upgrade reply state: ${kind} stops holding decided targets and cannot ask another confirmation`, t => {
+  test(`upgrade reply state: ${kind} no longer counts for decided targets and cannot ask another confirmation`, t => {
     for (const identity of ['missing', 'several', 'other', 'enabled', 'disabled']) {
       const ctx = scratch(t);
       const target = gitRepo(ctx, 'target', { remote: identity === 'other' ? 'https://gitlab.com/example-owner/repo.git' : ['enabled', 'disabled'].includes(identity) ? REMOTE : null });
@@ -247,8 +226,10 @@ for (const kind of ['ticket', 'pending', 'bound']) {
       }
       // A pending old confirmation must not hijack a reply to a different GitHub question either.
       seed();
-      const held = gitRepo(ctx, 'held', { remote: 'https://github.com/example-owner/held.git' });
-      assert.equal(prompts.decide({ cwd: held, prompt: 'Start here.', sessionId: 'owner' }).action, 'block');
+      const held = gitRepo(ctx, 'undecided', { remote: 'https://github.com/example-owner/undecided.git' });
+      const started = prompts.decide({ cwd: held, prompt: 'Start here.', sessionId: 'owner' });
+      assert.equal(started.action, 'pass');
+      assert.ok(started.context.includes(QUESTION_LINE));
       const reply = prompts.decide({ cwd: held, prompt: 'Probably your recommendation.', sessionId: 'owner' });
       const ticket = replyTicket(reply);
       assert.ok(ticket);
@@ -260,7 +241,7 @@ for (const kind of ['ticket', 'pending', 'bound']) {
   });
 }
 
-test('upgrade reply state: undecided and unreadable targets keep scheduling held, including mixed targets', t => {
+test('upgrade reply state: undecided and unreadable targets keep scheduling refused while a reply is awaited, including mixed targets', t => {
   const ctx = scratch(t);
   const held = gitRepo(ctx, 'held');
   const off = gitRepo(ctx, 'off', { remote: null });
@@ -289,7 +270,7 @@ test('upgrade reply state: undecided and unreadable targets keep scheduling held
     }
     assert.deepEqual(tickets.peek(ticket, 'owner').repositories.map(item => item.root), [held]);
     const taken = tickets.take(ticket);
-    assert.deepEqual(taken.repositories.map(item => item.root), [held], 'spending returns only held targets');
+    assert.deepEqual(taken.repositories.map(item => item.root), [held], 'spending returns only undecided targets');
     assert.equal(tickets.peek(ticket, 'owner'), null);
     tickets.confirm('owner', epoch, 'disable', taken.repositories);
     assert.deepEqual(tickets.pending('owner', epoch).repositories.map(item => item.root), [held]);

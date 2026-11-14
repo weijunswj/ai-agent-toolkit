@@ -56,7 +56,7 @@
         "required": ["intent_id", "kind", "target", "state"],
         "properties": {
           "intent_id": { "type": "string", "minLength": 1 },
-          "kind": { "enum": ["attach", "reparent", "reorder", "replace_block", "post_index_comment", "post_archive_comment", "edit_archive_comment", "replace_pr_nav", "set_parent_state", "post_parent_repair", "post_closing_backstop"] },
+          "kind": { "enum": ["attach", "reparent", "detach", "reorder", "replace_block", "post_index_comment", "post_archive_comment", "edit_archive_comment", "replace_pr_nav", "set_parent_state", "post_parent_repair", "post_closing_backstop"] },
           "target": { "type": "object", "description": "Index comment intents name issue, tag, after and parts (SHA-256 page digests with the intent ID removed); directory: true identifies topic directory pages. Both kinds carry decision-trace-index, directories also decision-trace-directory. Pages stay below 60000 characters including headers. Directory lines link decisions directly or older topic indexes on the same issue; directories never link directories. Generated pages are strict, with at most two index hops and 1024 generated indexes. Hand-made indexes without an intent retain one-hop reading: foreign and missing references are ignored and index-to-index references are not followed. Foreign links never cover local comments. At most five topic comments are planned across the pass; larger traces use directory pages directly without speculative topic posts. Partial verified sets settle as NOT_DONE and are adopted before paging the remaining links; mismatched or duplicate pages stay UNKNOWN. Older intents without parts use their part/total metadata." },
           "state": { "enum": ["IN_FLIGHT", "DONE", "UNKNOWN"] }
         },
@@ -143,7 +143,7 @@
         }
       }
     },
-    "private": { "type": "object" },
+    "private": { "type": "object", "description": "Private sidecar facts. detached_children lists every finished task the reconciler detached from its native parent: { issue, parent, at }, newest last." },
     "volatile": { "type": "object" },
     "sweep": {
       "type": "object", "additionalProperties": false, "required": ["queue", "failures"],

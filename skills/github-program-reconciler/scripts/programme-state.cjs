@@ -80,7 +80,7 @@ const CHECK_STATES = ['GREEN', 'PENDING', 'RED', 'UNKNOWN'];
 const UAT_STATES = ['NOT_REQUIRED', 'PENDING', 'PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'];
 const REVIEW_STATES = ['NOT_STARTED', 'IN_REVIEW', 'PASSED', 'NOT_PASSED'];
 const REVIEW_VERDICTS = ['PASSED', 'NOT_PASSED'];
-const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment', 'replace_pr_nav', 'set_parent_state', 'post_parent_repair', 'post_closing_backstop'];
+const EFFECT_KINDS = ['attach', 'reparent', 'detach', 'reorder', 'replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment', 'replace_pr_nav', 'set_parent_state', 'post_parent_repair', 'post_closing_backstop'];
 const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
 // observation timestamps, pending effects (an intent write must not make the rendered state stale),
@@ -975,6 +975,7 @@ function validateBinding(binding) {
         const policy = binding.parent_lifecycle;
         check(errors, isObject(policy) && Object.keys(policy).length === 2 && ['reopen_incomplete', 'complete_when_children_closed'].every(key => typeof policy[key] === 'boolean'), 'parent_lifecycle must explicitly name reopen_incomplete and complete_when_children_closed booleans');
       }
+      check(errors, binding.detach_finished_children === undefined || typeof binding.detach_finished_children === 'boolean', 'detach_finished_children must be true or false');
       const unknown = Object.keys(binding).filter(key => !BINDING_V2_KEYS.includes(key));
       check(errors, unknown.length === 0, `${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a version 2 binding key`);
       if (binding.state !== undefined) validateStateBlock(errors, binding);
@@ -995,6 +996,7 @@ function validateBinding(binding) {
     } else {
       check(errors, binding.governance === undefined && binding.parents === undefined, 'governance and parents belong to v2');
       check(errors, binding.parent_lifecycle === undefined, 'parent_lifecycle belongs to v2');
+      check(errors, binding.detach_finished_children === undefined, 'detach_finished_children belongs to v2');
       check(errors, isInt(binding.parent_issue, 1), 'parent_issue must be an issue number');
       check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
       check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
@@ -1036,7 +1038,7 @@ function validateBinding(binding) {
 }
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
-const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'projection', 'schedule_folder', 'state', 'parent_lifecycle']);
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
@@ -3716,7 +3718,7 @@ const PR_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
     pullRequest(number: $number) {
-      number state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
+      number body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable
       commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) {
         pageInfo { hasNextPage }
         nodes {
@@ -3745,7 +3747,7 @@ class ProgrammeGraphReader {
     for (let start = 0; start < unique.length; start += 20) {
       const batch = unique.slice(start, start + 20);
       if (!batch.every(number => Number.isSafeInteger(number) && number > 0)) throw new ProgrammeError('USAGE', 'Pull request numbers must be positive integers.');
-      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
+      const selection = batch.map(number => `p${number}: pullRequest(number:${number}) { number title body state isDraft merged mergedAt mergeCommit { oid } headRefOid baseRefName mergeable commits(last:1) { nodes { commit { oid statusCheckRollup { contexts(first:100) { pageInfo { hasNextPage } nodes { __typename ... on CheckRun { name status conclusion isRequired(pullRequestNumber:${number}) } ... on StatusContext { context state isRequired(pullRequestNumber:${number}) } } } } } } } }`).join('\n');
       const response = this.transport.request('POST', 'graphql', { query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name} ${selection}}}`, variables: { owner, name } });
       if (response.status === 401) throw new ProgrammeError('GH_AUTH', 'GitHub rejected the sign-in.');
       const repo = response.json?.data?.repository;
@@ -3759,7 +3761,7 @@ class ProgrammeGraphReader {
         const commit = pr.commits?.nodes?.[0]?.commit;
         const rollup = commit?.statusCheckRollup;
         result.set(number, { number, title: pr.title, state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
-          merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null, head: pr.headRefOid, base: pr.baseRefName,
+          train: trainRows(pr.body), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null, head: pr.headRefOid, base: pr.baseRefName,
           default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable, rollupOid: commit?.oid || null,
           complete: !rollup?.contexts?.pageInfo?.hasNextPage,
           contexts: (rollup?.contexts?.nodes || []).map(node => ({ kind: node.__typename, name: node.name || node.context,
@@ -3781,7 +3783,7 @@ class ProgrammeGraphReader {
     const status = request(`commits/${pr.head.sha}/status`);
     return { number: pr.number, title: pr.title, state: pr.merged ? 'MERGED' : pr.state === 'closed' ? 'CLOSED' : pr.draft ? 'DRAFT' : 'OPEN',
       head: pr.head.sha, base: pr.base?.ref, default_branch: pr.base?.repo?.default_branch || null, mergeable: pr.mergeable,
-      merged_at: pr.merged_at || null, merge_sha: pr.merge_commit_sha || null, rollupOid: pr.head.sha,
+      train: trainRows(pr.body), merged_at: pr.merged_at || null, merge_sha: pr.merge_commit_sha || null, rollupOid: pr.head.sha,
       complete: Array.isArray(checks.check_runs) && checks.total_count === checks.check_runs.length && Array.isArray(status.statuses) && status.total_count === status.statuses.length,
       contexts: [...(checks.check_runs || []).map(check => ({ kind: 'CheckRun', name: check.name, status: check.status, conclusion: check.conclusion, required: false })),
         ...(status.statuses || []).map(context => ({ kind: 'StatusContext', name: context.context, state: context.state, required: false }))] };
@@ -3902,7 +3904,7 @@ class ProgrammeGraphReader {
     return {
       number: pr.number,
       state: pr.merged ? 'MERGED' : pr.state === 'CLOSED' ? 'CLOSED' : pr.isDraft ? 'DRAFT' : 'OPEN',
-      merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
+      train: trainRows(pr.body), merged_at: pr.mergedAt || null, merge_sha: pr.mergeCommit?.oid || null,
       head: pr.headRefOid, base: pr.baseRefName, default_branch: repo.defaultBranchRef?.name || null, mergeable: pr.mergeable,
       rollupOid: commit?.oid || null,
       complete: !rollup?.contexts?.pageInfo?.hasNextPage,
@@ -3937,7 +3939,7 @@ class ProgrammeGraphReader {
         if (!pr.merged_at) continue;
         const match = mergedCandidate({ number: pr.number, merged: true, mergedAt: pr.merged_at,
           repository: pr.base?.repo ? { nameWithOwner: pr.base.repo.full_name } : { nameWithOwner: this.repository } }, this.repository);
-        if (match) all.push({ ...match, body: pr.body || '' });
+        if (match) all.push({ ...match, state: 'MERGED', body: pr.body || '' });
       }
       if (response.json.length < 100) return all;
     }
@@ -3973,11 +3975,11 @@ class ProgrammeGraphReader {
     const [owner, name] = this.repository.split('/');
     const fields = numbers.map(number => `i${number}: issue(number: ${number}) {
       closedByPullRequestsReferences(first: 100, includeClosedPrs: true) {
-        pageInfo { hasNextPage } nodes { number state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
+        pageInfo { hasNextPage } nodes { number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } }
       }
       timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
         pageInfo { hasNextPage } nodes { ... on CrossReferencedEvent {
-          source { __typename ... on PullRequest { number state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
+          source { __typename ... on PullRequest { number body headRefOid state merged mergedAt mergeCommit { oid } repository { nameWithOwner } } }
         } }
       }
     }`).join('\n');
@@ -3995,9 +3997,11 @@ class ProgrammeGraphReader {
       const timeline = issue?.timelineItems;
       const complete = [closing, timeline].every(connection => connection?.pageInfo?.hasNextPage === false && Array.isArray(connection.nodes));
       const nodes = complete ? [...closing.nodes, ...timeline.nodes.map(node => node?.source).filter(node => node?.__typename === 'PullRequest')] : [];
-      const history = nodes.map(node => graphPr(node, this.repository)).filter(Boolean);
+      // A merge train carries its members' work; the member PR, never the train, is the task's PR.
+      const history = withoutCarriers(nodes.map(node => graphPr(node, this.repository)).filter(Boolean));
+      const kept = new Set(history.map(pr => pr.number));
       return [number, { complete: complete && nodes.every(node => node.repository?.nameWithOwner?.toLowerCase() !== this.repository.toLowerCase() || graphPr(node, this.repository)),
-        candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(Boolean), history }];
+        candidates: nodes.map(node => mergedCandidate(node, this.repository)).filter(candidate => candidate && kept.has(candidate.number)), history }];
     }));
   }
 
@@ -4183,7 +4187,10 @@ class ProgrammeInventory {
 // lists such as "Refs #421, #423": issue -> sorted PR numbers.
 function referencedIssues(prs) {
   const references = new Map();
+  const carriers = carrierNumbers(prs.map(pr => ({ ...pr, state: pr.state || (pr.merged_at ? 'MERGED' : 'OPEN'), head: pr.head || pr.head_sha || null })));
   for (const pr of prs) {
+    // A merge train Refs every member's task; the members it carries answer for them, so it names none.
+    if (carriers.has(pr.number)) continue;
     for (const match of String(pr.body || '').matchAll(/\b(?:refs|completes|closes|fixes|resolves)\b:?\s+((?:#\d+(?:\s*(?:,|and)\s*)?)+)/gi)) {
       for (const [, number] of match[1].matchAll(/#(\d+)/g)) {
         const list = references.get(Number(number)) || [];
@@ -4221,6 +4228,22 @@ function lifecycleSnapshot(tree) {
   return JSON.stringify([tree.issue.state, tree.descendants.map(child => [child.repository, child.number, child.state]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]);
 }
 
+// The binding's standing permission to unlink finished tasks from their native parent. Removing a
+// sub-issue is `DELETE /issues/{parent}/sub_issue` with the same `sub_issue_id`; the issue itself is
+// untouched, both timelines show the removal, and attaching it again undoes it.
+function detachPermitted(binding) {
+  return binding?.schema === SCHEMA.bindingV2 && binding.governance === 'enabled' && binding.detach_finished_children === true;
+}
+// Every task the reconciler detached stays on record in the parent's private sidecar (newest last),
+// beside the catalogue entry that keeps it on the graph and in the decision history.
+function recordDetached(doc, targets, at) {
+  if (!targets.length) return;
+  const list = Array.isArray(doc.private.detached_children) ? doc.private.detached_children : [];
+  doc.private = { ...doc.private, detached_children: [...list, ...targets.map(target => ({ issue: target.issue, parent: target.parent, at }))] };
+}
+// Detaches per pass, so a first run over a long backlog spreads its writes over several passes.
+const DETACH_PER_PASS = 25;
+
 class GitHubMutator {
   setIssueState(number, state, { binding, expected, fence }) {
     const policy = binding.parent_lifecycle;
@@ -4245,6 +4268,14 @@ class GitHubMutator {
   attach(parent, childId, replaceParent) {
     this.mutations += 1;
     return this.transport.request('POST', `repos/${this.repository}/issues/${parent}/sub_issues`, { sub_issue_id: childId, ...(replaceParent ? { replace_parent: true } : {}) });
+  }
+
+  // Unlink a finished task from its native parent. Only an enabled v2 binding that sets
+  // detach_finished_children permits it; the issue itself is never closed, edited or deleted.
+  detach(parent, childId, { binding }) {
+    if (!detachPermitted(binding) || binding.repository.toLowerCase() !== this.repository.toLowerCase()) throw new ProgrammeError('DETACH_REFUSED', 'No bound permission to detach finished tasks.');
+    this.mutations += 1;
+    return this.transport.request('DELETE', `repos/${this.repository}/issues/${parent}/sub_issue`, { sub_issue_id: childId });
   }
 
   // Exactly one anchor: { before_id } or { after_id } (GitHub answers 422 otherwise).
@@ -4333,6 +4364,28 @@ const CLOSE_FIELDS = ['lifecycle', 'completed_at', 'before_close', 'closed_by_sw
 const GRAPH_BOTS = new Set(['dependabot[bot]', 'github-actions[bot]', 'app/github-actions']);
 // The weekly timing refresh may use the owner's gh sign-in rather than an Actions token.
 const GRAPH_GENERATED_BRANCH_PREFIX = 'toolkit/shard-timings-';
+// A merge train pull request carries its members' work: it joins no task's PR history, PATH or
+// STATUS blocks or backfill, and is never a PR without a task; each member it carried stays its own
+// task's PR. Its body's member table alone proves nothing: a PR is a carrier only where a member it
+// names is in the same set and was really carried by it (issue-closure.cjs trainCarried).
+function trainRows(body) {
+  return require('./issue-closure.cjs').mergeTrainRows(body);
+}
+function carrierNumbers(items) {
+  const { trainCarried } = require('./issue-closure.cjs');
+  const byNumber = new Map();
+  for (const item of items) if (item && !byNumber.has(item.number) || item?.train) byNumber.set(item.number, item);
+  const carriers = new Set();
+  for (const item of byNumber.values()) {
+    const rows = item.train === undefined ? trainRows(item.body) : item.train;
+    if (rows?.some(row => row.pr !== item.number && trainCarried(item, byNumber.get(row.pr), row.head))) carriers.add(item.number);
+  }
+  return carriers;
+}
+function withoutCarriers(items) {
+  const carriers = carrierNumbers(items);
+  return items.filter(item => !carriers.has(item.number));
+}
 const excludedGraphPr = pr => Boolean(pr && (GRAPH_BOTS.has(pr.author) || pr.branch?.startsWith(GRAPH_GENERATED_BRANCH_PREFIX)));
 
 function graphPr(pr, repository) {
@@ -4344,8 +4397,9 @@ function graphPr(pr, repository) {
   const mergeSha = pr.mergeCommit?.oid || pr.merge_commit_sha || null;
   if (mergeSha !== null && !isSha(mergeSha)) return null;
   if (merged && !Number.isFinite(Date.parse(pr.mergedAt || pr.merged_at))) return null;
+  const head = typeof pr.head === 'string' ? pr.head : pr.head?.sha || pr.headRefOid || pr.head_sha || null;
   return {number:pr.number, state:state === 'DRAFT' ? 'OPEN' : state, merge_sha:merged ? mergeSha : null,
-    merged_at:pr.mergedAt || pr.merged_at || null};
+    merged_at:pr.mergedAt || pr.merged_at || null, head, train:pr.train === undefined ? trainRows(pr.body) : pr.train};
 }
 
 function prHistory(entries) {
@@ -4393,6 +4447,7 @@ const EFFECT_TEXT = {
   advance_closing_scan: effect => `Record closing scan progress on #${effect.target.issue}`,
   post_closing_backstop: effect => `Append closing facts to ${effect.target.kind} #${effect.target.issue}`,
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
+  detach: effect => `Detach finished #${effect.target.issue} from under #${effect.target.parent} (the task stays in the catalogue)`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
   replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, STATUS, COMMENT TRACE, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first`
@@ -4422,7 +4477,7 @@ function holdScope(kind) {
   if (kind === 'set_parent_state' || kind === 'post_parent_repair') return 'lifecycle';
   if (['replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment'].includes(kind)) return 'body';
   if (kind === 'replace_pr_nav') return 'pr';
-  if (kind === 'attach' || kind === 'reparent' || kind === 'reorder') return 'links';
+  if (kind === 'attach' || kind === 'reparent' || kind === 'detach' || kind === 'reorder') return 'links';
   return 'all';
 }
 
@@ -4861,8 +4916,10 @@ class Reconciler {
             }
           } catch(error) { incomplete([number],error); continue; }
           history.forEach(pr=>linked.add(pr.number));
-          histories.set(number,prHistory(history));
-          const candidates=mergedSelection(history.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at})));
+          // The members a train carried stay this task's PRs; the train (saved earlier too) leaves.
+          const own=withoutCarriers(history);
+          histories.set(number,prHistory(own));
+          const candidates=mergedSelection(own.filter(pr=>pr.state==='MERGED').map(pr=>({number:pr.number,merged_at:pr.merged_at})));
           const result={complete:true,candidates}; discovery.set(number,result);
           const outcome=outcomes.find(outcome=>outcome.issue===number);
           if(backfillEligible(outcome,children.get(number)?.doc) && !children.get(number)?.doc?.closed_by_sweep && candidates.length) {
@@ -4880,10 +4937,11 @@ class Reconciler {
     }
     const complete = listsComplete && [...discovery.values()].every(entry=>entry.complete);
     for(const [number,pr] of selectedPrs) if(discovery.get(number)?.complete) prs.set(number,pr);
-    const withoutTask = complete ? listed.filter(pr=> !excludedGraphPr(pr) && !linked.has(pr.number)
+    const listedCarriers = carrierNumbers(listed);
+    const withoutTask = complete ? listed.filter(pr=> !excludedGraphPr(pr) && !listedCarriers.has(pr.number) && !linked.has(pr.number)
       && (pr.state==='OPEN' || watermark && Date.parse(pr.closed_at) > Date.parse(watermark))) : [];
     const holdWithoutTask = (parent.attention || []).filter(entry=>entry.code==='PR_WITHOUT_TASK' && !linked.has(entry.issue)
-      && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)))).map(entry=>entry.id);
+      && (!complete || !excludedGraphPr(listed.find(pr=>pr.number===entry.issue)) && !listedCarriers.has(entry.issue))).map(entry=>entry.id);
     const advance = complete && (!watermark || listed.some(pr=>pr.closed_at && Date.parse(pr.closed_at)>Date.parse(watermark)));
     return {discovery,histories,openReferences,openListed,withoutTask,holdWithoutTask,complete,openComplete,advance,requests:requests+pages,pages,watermark,scanStarted,closedListed,closedComplete};
   }
@@ -5083,6 +5141,15 @@ class Reconciler {
       } else if (issue.parent !== outcome.parent) {
         findings.push({ code: 'NATIVE_PARENT_WRONG', issue: issueNumber, detail: `under ${typeof issue.parent === 'number' ? `#${issue.parent}` : issue.parent}, expected #${outcome.parent}` });
         effects.push({ kind: 'reparent', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id, from: issue.parent });
+      }
+    } else if (outcome.parent && issue.parent === outcome.parent && detachPermitted(this.binding)) {
+      // A finished task still under its parent leaves it once nothing can still need it there: no
+      // open or draft PR tracks or names it, and the open PR list was read in full.
+      const pr = observed.prs.get(issueNumber);
+      const openPr = (pr && ['OPEN', 'DRAFT'].includes(pr.state)) || (observed.references.get(issueNumber) || []).length > 0;
+      if (!openPr && observed.prGraph?.openComplete !== false) {
+        findings.push({ code: 'NATIVE_DETACH_FINISHED', issue: issueNumber, detail: `closed and finished with no open work or PR; detached from #${outcome.parent} to keep room under GitHub's sub-issue cap` });
+        effects.push({ kind: 'detach', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id });
       }
     } else if (!outcome.parent && issue.parent !== null) {
       findings.push({ code: 'NATIVE_PARENT_UNEXPECTED', issue: issueNumber, detail: `natively under #${issue.parent} but the catalogue names no parent; not changed` });
@@ -5584,6 +5651,11 @@ class Reconciler {
         } else if (effect.kind === 'attach' || effect.kind === 'reparent') {
           const issue = observed.issues.has(target.issue) ? observed.issues.get(target.issue) : this.reader.issue(target.issue);
           done = issue ? issue.parent === target.parent : null;
+        } else if (effect.kind === 'detach') {
+          const issue = observed.issues.has(target.issue) ? observed.issues.get(target.issue) : this.reader.issue(target.issue);
+          // Off every parent is done; still under the same one is not; moved elsewhere by someone else
+          // is neither, so it stays UNKNOWN and holds rather than being recorded as a detach.
+          done = issue ? (issue.parent === null ? true : issue.parent === target.parent ? false : null) : null;
         } else if (effect.kind === 'reorder') {
           const list = observed.subIssues.get(target.parent) || null;
           if (list) done = moveDone(list, target);
@@ -5633,6 +5705,7 @@ class Reconciler {
         resolutions.push({ kind, number, intent_id: effect.intent_id, outcome: done === null ? 'UNKNOWN' : done ? 'DONE' : 'NOT_DONE',
           ...(untrusted ? { untrusted: { key: target.key, reason: untrusted } } : {}),
           ...(rejectedArchive ? { rejectedArchive } : {}),
+          ...(effect.kind === 'detach' && done ? { detached: target } : {}),
           ...(['post_archive_comment', 'edit_archive_comment'].includes(effect.kind) && done ? { archive: { key: target.key, comment_id: recoveredId || target.comment_id, login: target.login, digest: target.digest } } : {}) });
       }
     }
@@ -5826,7 +5899,7 @@ class Reconciler {
       this.diffChild(outcome, existing, desired, checks, observed, findings, effects, journals);
       desiredDocs.set(outcome.issue, desired);
     }
-    const plannedParents = new Map(effects.filter(effect => effect.kind === 'attach' || effect.kind === 'reparent').map(effect => [effect.target.issue, effect.target.parent]));
+    const plannedParents = new Map(effects.filter(effect => ['attach', 'reparent', 'detach'].includes(effect.kind)).map(effect => [effect.target.issue, effect.kind === 'detach' ? null : effect.target.parent]));
     if (!only) this.diffOrder(parent, observed, effects, findings, plannedParents, desiredDocs);
     // Blocks are rendered from the revisions the documents will have after this pass.
     const projected = new Map([...desiredDocs].map(([number, doc]) => {
@@ -6042,6 +6115,7 @@ class Reconciler {
           const kept = doc.pending_effects.filter(effect => !resolutions.some(entry => entry.intent_id === effect.intent_id));
           if (kept.length === doc.pending_effects.length) return null;
           doc.pending_effects = kept;
+          recordDetached(doc, resolutions.filter(entry => entry.detached).map(entry => entry.detached), this.now());
           return doc;
         },
       });
@@ -6073,6 +6147,7 @@ class Reconciler {
         if (outcome !== 'UNKNOWN') this.pass.tick();
       }
       mutateDoc('parent', parentNumber, { change: doc => {
+        recordDetached(doc, doc.pending_effects.filter(entry => entry.kind === 'detach' && settled.get(entry.intent_id) === 'DONE').map(entry => entry.target), this.now());
         doc.pending_effects = doc.pending_effects.filter(entry => {
           const outcome = settled.get(entry.intent_id);
           if (outcome === 'UNKNOWN') entry.state = 'UNKNOWN';
@@ -6699,7 +6774,7 @@ class Reconciler {
     renderPages(true);
     redrawing = false;
 
-    phase('links', plan.effects.filter(entry => ['attach', 'reparent'].includes(entry.kind)).length);
+    phase('links', plan.effects.filter(entry => ['attach', 'reparent'].includes(entry.kind)).length + Math.min(DETACH_PER_PASS, plan.effects.filter(entry => entry.kind === 'detach').length));
     // 2. Native parent links, read back on both sides.
     for (const effect of plan.effects.filter(entry => entry.kind === 'attach' || entry.kind === 'reparent')) {
       if (this.pass.stop()) break;
@@ -6711,6 +6786,44 @@ class Reconciler {
         const listed = this.reader.subIssues(effect.target.parent).some(sub => sub.number === effect.target.issue);
         if (issue?.parent === effect.target.parent && listed) return { outcome: 'DONE' };
         if (issue && issue.parent !== effect.target.parent && !listed) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}: ${response.json?.message || ''}`.trim() };
+        return { outcome: 'UNKNOWN', detail: 'the child and parent disagree after the change' };
+      });
+    }
+    // Finished tasks leave their native parent, a few per pass. Each is read again just before the
+    // write: a reopened task, a moved link, open sub-issues or an open PR that now tracks or names it
+    // cancel it. The open PR list is read once, just before the first detach write.
+    let openNow = null;
+    const openPrsNow = () => {
+      if (!openNow) {
+        const list = this.reader.openPullRequests();
+        openNow = { references: referencedIssues(list), numbers: new Set(list.map(pr => pr.number)) };
+      }
+      return openNow;
+    };
+    for (const effect of plan.effects.filter(entry => entry.kind === 'detach').slice(0, DETACH_PER_PASS)) {
+      if (this.pass.stop()) break;
+      if (isHeld(`#${effect.target.issue}`, 'links')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
+      withIntent(effect, () => {
+        const latest = this.reader.issue(effect.target.issue);
+        if (!latest || latest.state !== 'closed' || latest.parent !== effect.target.parent || latest.open_sub_issues > 0) {
+          return { outcome: 'NOT_DONE', code: 'DETACH_MOVED', detail: 'the task changed since planning; the next pass re-plans it' };
+        }
+        let open;
+        try { open = openPrsNow(); }
+        catch (error) {
+          if (STOPS_PASS.has(error.code)) throw error;
+          return { outcome: 'NOT_DONE', code: 'DETACH_PRS_UNREAD', detail: `the open PR list could not be read again before the write: ${error.message}` };
+        }
+        const tracked = plan.observed.prs.get(effect.target.issue);
+        if ((open.references.get(effect.target.issue) || []).length || (tracked && open.numbers.has(tracked.number))) {
+          return { outcome: 'NOT_DONE', code: 'DETACH_MOVED', detail: 'an open PR now tracks or names the task; the next pass re-plans it' };
+        }
+        guard();
+        const response = this.mutator.detach(effect.target.parent, effect.childId, { binding: this.binding });
+        const issue = this.reader.issue(effect.target.issue);
+        const listed = this.reader.subIssues(effect.target.parent).some(sub => sub.number === effect.target.issue);
+        if (issue && issue.parent !== effect.target.parent && !listed) return { outcome: 'DONE' };
+        if (issue?.parent === effect.target.parent && listed) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}: ${response.json?.message || ''}`.trim() };
         return { outcome: 'UNKNOWN', detail: 'the child and parent disagree after the change' };
       });
     }

@@ -148,11 +148,16 @@ test('Claude Code prompt hook: a typed command adds its line on an ordinary pass
   assert.deepEqual(prompt({ action: 'pass' }, 'toolkit set env'), {});
 });
 
-test('Claude Code prompt hook: a hold or governance context is returned unchanged', () => {
-  assert.deepEqual(prompt({ action: 'block', reason: 'held' }, 'toolkit cmd'), { decision: 'block', reason: 'held' });
-  const shown = prompt({ action: 'pass', context: 'governance question', notice: 'pick one' }, 'toolkit cmd');
+test('Claude Code prompt hook: a refusal or the governance question is returned unchanged', () => {
+  assert.deepEqual(prompt({ action: 'block', reason: 'refused' }, 'toolkit cmd'), { decision: 'block', reason: 'refused' });
+  const shown = prompt({ action: 'pass', context: 'governance question', notice: 'pick one', question: true }, 'toolkit cmd');
   assert.equal(shown.hookSpecificOutput.additionalContext, 'governance question');
   assert.equal(shown.systemMessage, 'pick one');
+});
+
+test('Claude Code prompt hook: other governance context keeps the typed command line', () => {
+  const shown = prompt({ action: 'pass', context: 'a reply ticket' }, 'toolkit cmd');
+  assert.match(shown.hookSpecificOutput.additionalContext, /^a reply ticket\nToolkit command: the user typed `toolkit cmd`\./);
 });
 
 test('Claude Code prompt hook: a broken command reader adds nothing and blocks nothing', () => {
