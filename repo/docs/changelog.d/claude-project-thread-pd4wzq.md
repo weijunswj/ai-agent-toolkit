@@ -2,5 +2,6 @@ Title: shorter command list
 
 ### Changed
 
-- **`toolkit cmd` lists only what you would type:** the list drops `toolkit governance enable`, `status`, `check`, `discover`, `catalogue`, `security` and `migrate`. Setup, agents and checks run those; they still work when typed as a whole message. Governance is now three rows: `setup governance` to turn it on, `refresh governance` to see and change its answers, and `toolkit governance disable` to turn it off.
-- **`toolkit permissions` is on the list:** a new Permissions group shows it, with `toolkit permissions --apply` as the step you type in your own terminal.
+- **`toolkit cmd` lists only what you would type:** setup, refresh and remove Toolkit; `toolkit env` (or `toolkit show env`); `toolkit governance` (or `governance setup`); and `merge N`. Every other command, `toolkit permissions` included, still works when typed as a whole message, but the list leaves it out.
+- **`toolkit governance` is now a guide:** typed as a whole message (or `governance setup`), it runs governance setup, which in a governed repository shows the merged answers, and then offers the next step: turn governance on, change task auto-merge or turn it off. Each change is one pull request for you to merge.
+- **`toolkit env` is a typed command:** it opens the keys editor, the same as `toolkit show env`.
