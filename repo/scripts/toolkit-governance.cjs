@@ -323,8 +323,8 @@ class ToolkitGovernanceCli {
     return { value: answer.answered ? answer.auto_merge : 'unset', answer, removed, lines };
   }
 
-  // `refresh governance`: the merged answers (governance, switch, store, checks), the repository's
-  // permission block, and, with --set, one binding pull request that changes only the switch.
+  // `refresh governance`: the merged answers (governance, switch, store, checks), the permission
+  // table and blocks (this computer's and the repository's), and, with --set, one binding pull request that changes only the switch.
   // It never writes the binding itself; only the owner's merge changes it.
   #refreshGovernance(json, switchTo) {
     const refresh = this.#refresh(this.#cwd) || {};
@@ -345,7 +345,7 @@ class ToolkitGovernanceCli {
     if (merged) lines.push(`Evidence store: ${merged.store.repository}`, `Required checks: ${merged.required_checks.length ? merged.required_checks.join(', ') : 'none listed'}`);
     let permissions = null;
     try { permissions = this.#permissionsPrinter(state.root); } catch { permissions = null; }
-    lines.push('', ...(permissions ? permissions.split('\n') : ['Repo permission block: could not be printed here; run toolkit permissions.']), '');
+    lines.push('', ...(permissions ? permissions.split('\n') : ['Permission blocks: could not be printed here; run toolkit permissions.']), '');
     if (permissions) lines.push(PERMISSIONS_RELAY, '');
     const value = { state: state.state, task_auto_merge: task.value, removed_legacy_answers: task.removed, store: merged?.store.repository || null, required_checks: merged ? [...merged.required_checks] : null };
     if (!switchTo) {
@@ -454,13 +454,14 @@ function switchText(mergedText, parsed, switchTo) {
 }
 
 // Command output can sit folded away in the app, so the agent repeats the block in its reply.
-const PERMISSIONS_RELAY = 'Agents: in your reply, show the owner the permission table and block above in full (the table, the block itself, the file it goes in and the one-paste owner command), not a summary of it. Offer two ways to add it: the owner pastes that command into their own PowerShell or terminal, or you add the block for them if they ask. Write it only on the owner\'s own ask (safety-gates playbook), and never run the command yourself.';
+const PERMISSIONS_RELAY = 'Agents: in your reply, show the owner the permission table and blocks above in full (the table, each block, the file it goes in and the one-paste owner command), not a summary of it. Offer two ways to add them: the owner pastes that command into their own PowerShell or terminal, or you add the blocks for them if they ask. Write it only on the owner\'s own ask (safety-gates playbook), and never run the command yourself.';
 
-// The repository's permission block for this app, as toolkit permissions prints it.
+// The permission table and blocks for this app (this computer's and this repository's), as toolkit
+// permissions prints them, so governance setup covers permission setup too.
 function defaultPermissionsPrinter(root) {
   let text = '';
   const host = detectAgentHost() === 'codex' ? 'codex' : 'claude';
-  const code = require('./toolkit-permissions.cjs').main(['--scope', 'repo', '--host', host, '--repo-root', root], { stdout: chunk => { text += chunk; }, stderr: () => {} });
+  const code = require('./toolkit-permissions.cjs').main(['--scope', 'all', '--host', host, '--repo-root', root], { stdout: chunk => { text += chunk; }, stderr: () => {} });
   return code === 0 && text.trim() ? text.trimEnd() : null;
 }
 
