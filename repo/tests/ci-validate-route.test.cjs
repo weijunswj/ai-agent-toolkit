@@ -181,8 +181,10 @@ test('the route job always exits 0 and chooses full on any error', async () => {
       assert.match(out.text(), reason, label);
     }
     const output = path.join(dir, 'light.txt');
-    const code = await route.main(['route'], { env: { ...env(), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: output }, fetchImpl: github([fullRun(102)]).fetchImpl, out: sink(), err: sink() });
+    const lightOut = sink();
+    const code = await route.main(['route'], { env: { ...env(), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: output }, fetchImpl: github([fullRun(102)]).fetchImpl, out: lightOut, err: sink() });
     assert.equal(code, 0);
+    assert.equal(lightOut.text(), 'Validate runs light: the test and hook-pack jobs are reused because run 102 already tested this exact code.\n');
     assert.deepEqual(outputs(output), { mode: 'light', run_id: '102' });
     assert.equal(await route.main(['other'], { env: env(), out: sink(), err: sink() }), 2);
     assert.equal(await route.main([], { env: env(), out: sink(), err: sink() }), 2);

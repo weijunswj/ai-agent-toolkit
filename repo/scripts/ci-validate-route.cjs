@@ -167,7 +167,7 @@ async function main(argv = process.argv.slice(2), { env = process.env, fetchImpl
     try { decision = await route({ env, fetchImpl }); }
     catch (error) { decision = { mode: 'full', runId: '', reason: `could not read earlier runs (${error.message})` }; }
     writeOutputs(env, { mode: decision.mode, run_id: decision.runId });
-    out.write(`Validate runs ${decision.mode === 'light' ? 'light: the test and hook-pack jobs are reused from' : 'in full:'} ${decision.reason}.\n`);
+    out.write(`Validate runs ${decision.mode === 'light' ? 'light: the test and hook-pack jobs are reused because' : 'in full:'} ${decision.reason}.\n`);
     return 0;
   }
   try {
