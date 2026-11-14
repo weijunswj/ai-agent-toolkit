@@ -971,7 +971,7 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
     assert.doesNotMatch(text, /fires it once|Fire it once|Test one run now|caught up by firing it/, name);
   }
   assert.ok(device.includes('- **Rotate long Remote Control lanes too.**') && device.includes('you end its session with `stop_remote_control` once the handoff is read back'), 'Remote Control lanes rotate too');
-  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
+  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, TRACE GAPS, WORKFLOW FAILING, CI GAPS, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
   const freshAge = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
   assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
   const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
@@ -1076,4 +1076,15 @@ test('rendered hourly nudges list PROGRAMME FINDINGS and CLOUD SWEEP only in the
       assert.ok(lanes && !lanes.includes('PROGRAMME FINDINGS'), `${repo}/${session}: step 11 has no findings prefix`);
     }
   }
+});
+
+// The owner's catch-what-was-missed checks run in the daily check-in, each with its own first-line prefix.
+test('rendered daily check-ins run the decision trace, workflow health and CI check-up checkers', () => {
+  const text = rendered('daily-check-in');
+  const step = text.slice(text.indexOf('11b. CHECKERS'), text.indexOf('12. Promises'));
+  for (const phrase of ['decision-trace-audit.cjs --repo', 'unlinked_decisions', '"TRACE GAPS: <unlinked> unlinked, <unmarked> unmarked | "',
+    'that have a `schedule` trigger', '"WORKFLOW FAILING: <names> | "', 'ci-checkup.cjs --repo <clone>', '"CI GAPS: <n> | "']) {
+    assert.ok(step.includes(phrase), phrase);
+  }
+  assert.ok(text.indexOf('**Checkers:**', text.indexOf('REPORT')) > 0, 'the report has a Checkers bullet');
 });

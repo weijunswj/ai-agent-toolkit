@@ -128,7 +128,7 @@ test('the CLI resolves gh to a full path and hides its window for both read-only
       if (name === './decision-tags.cjs') return require('../../skills/github-program-reconciler/scripts/decision-tags.cjs');
       if (name === 'node:child_process') return { spawnSync(executable, args, options) {
         calls.push({ executable, args, options });
-        return { status: 0, stdout: args.includes('--paginate') ? '[[]]' : '{"body":""}' };
+        return { status: 0, stdout: args.some(arg => arg.includes('/comments?')) ? '[]' : '{"body":""}' };
       } };
       return require(name);
     },

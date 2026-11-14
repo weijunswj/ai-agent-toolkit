@@ -333,8 +333,14 @@ function gh(args) {
 
 function fetchIssue(repo, issue) {
   const body = JSON.parse(gh(['api', `repos/${repo}/issues/${issue}`])).body || '';
-  const pages = gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`]);
-  return { body, comments: JSON.parse(pages).flat() };
+  // Numbered pages instead of --paginate, which some proxies refuse (it follows numeric-id links).
+  const comments = [];
+  for (let page = 1; ; page += 1) {
+    const rows = JSON.parse(gh(['api', `repos/${repo}/issues/${issue}/comments?per_page=100&page=${page}`]));
+    comments.push(...rows);
+    if (rows.length < 100) break;
+  }
+  return { body, comments };
 }
 
 function parseArgs(argv) {
