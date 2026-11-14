@@ -5,6 +5,8 @@
 // re-bump why, in one marked comment that later runs edit in place, and print a summary table.
 // Success writes no new comment; a held comment left by an earlier run is edited to say it cleared.
 // It only reads the report file and the pull requests' comments, and writes that one comment.
+// The held comment keeps the day the hold began. A pull request held over STALE_DAYS fails the run,
+// naming it and the by-hand step, so a hold never sits unchanged in a green run forever.
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 
@@ -13,17 +15,20 @@ const BOT = 'github-actions[bot]';
 const SHA = /^[0-9a-f]{40}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const STATUSES = new Set(['held', 'verified', 'unchanged', 'eligible', 'skipped']);
+const STALE_DAYS = 7;
+const SINCE = /^- \*\*Held since:\*\* (\d{4}-\d{2}-\d{2})\b/m;
 
 // Reasons come from error text: keep one plain line that cannot open markup, mention anyone or
 // link an issue.
 function plain(text, limit = 400) {
   return String(text ?? '').replace(/[\r\n\t]+/g, ' ').replace(/[<>`@#|*[\]]/g, ' ').replace(/ {2,}/g, ' ').trim().slice(0, limit) || 'no reason given';
 }
-function commentBody(result, main) {
+function commentBody(result, main, since = null) {
   if (result.status === 'held') {
     return [MARKER, `**Re-bump held.** After \`main\` moved to ${main.slice(0, 7)}, this pull request could not be re-bumped automatically.`, '',
       `- **Why:** ${plain(result.reason)}`,
-      '- **What to do:** merge `main` into this branch, fix what the reason names, then prepare the version bump again as the branch\'s last commit.', ''].join('\n');
+      '- **What to do:** merge `main` into this branch, fix what the reason names, then prepare the version bump again as the branch\'s last commit.',
+      ...(since ? [`- **Held since:** ${since} (a hold over ${STALE_DAYS} days fails the re-bump run until it clears)`] : []), ''].join('\n');
   }
   return [MARKER, `**Re-bump cleared.** Re-bumped to ${plain(result.version, 20)} at ${String(result.head).slice(0, 7)} after \`main\` moved to ${main.slice(0, 7)}.`, ''].join('\n');
 }
@@ -44,6 +49,9 @@ function runGitHub(args, input) {
 
 function report({ report: raw, main }, deps = {}) {
   const github = deps.github || runGitHub;
+  const now = deps.now ?? Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
+  const stale = [];
   const { repository, results } = checkedReport(raw);
   if (!SHA.test(main || '')) throw new Error('--main needs the full commit SHA of main');
   const ownComment = number => {
@@ -61,8 +69,11 @@ function report({ report: raw, main }, deps = {}) {
     if (!['held', 'verified'].includes(result.status)) continue;
     const existing = ownComment(result.number);
     if (result.status === 'verified' && !existing) continue;
-    const body = commentBody(result, main);
-    const same = existing && (existing.body === body || (result.status === 'held' && existing.body.split('\n')[3] === body.split('\n')[3] && existing.body.includes('Re-bump held')));
+    // A hold keeps the day it began while the comment still says held; a fresh hold starts today.
+    const since = result.status === 'held' ? (existing?.body.includes('Re-bump held') && SINCE.exec(existing.body)?.[1]) || today : null;
+    if (since && Date.parse(`${today}T00:00:00Z`) - Date.parse(`${since}T00:00:00Z`) > STALE_DAYS * 86400000) stale.push({ number: result.number, since });
+    const body = commentBody(result, main, since);
+    const same = existing && (existing.body === body || (result.status === 'held' && existing.body.split('\n')[3] === body.split('\n')[3] && existing.body.includes('Re-bump held') && SINCE.test(existing.body)));
     if (same) { actions.push({ number: result.number, action: 'unchanged' }); continue; }
     if (existing && result.status === 'verified' && existing.body.includes('Re-bump cleared')) continue;
     const input = JSON.stringify({ body });
@@ -74,7 +85,12 @@ function report({ report: raw, main }, deps = {}) {
     : result.status === 'held' || result.status === 'skipped' ? plain(result.reason, 200) : result.target ? `would be ${plain(result.target, 20)}` : '';
   const summary = ['## Toolkit re-bump', '', `\`main\` at ${main.slice(0, 7)}.`, '', '| Pull request | Result | Detail |', '|---|---|---|',
     ...results.map(result => `| ${result.number} | ${result.status} | ${detail(result)} |`), ''].join('\n');
-  return { actions, summary };
+  return { actions, summary, stale };
+}
+
+// The step a stale hold names: the merging agent re-bumps by hand, or the builder fixes the reason.
+function staleLine(stale) {
+  return `Re-bump held over ${STALE_DAYS} days: ${stale.map(item => `pull request ${item.number} (since ${item.since})`).join(', ')}. Merging agent: fix what each comment names, or re-bump by hand with node repo/scripts/toolkit-rebump-prs.cjs --apply after agreeing branch custody with its builder.`;
 }
 
 function parseArgs(argv) {
@@ -92,9 +108,10 @@ if (require.main === module) {
     const args = parseArgs(process.argv.slice(2));
     let parsed;
     try { parsed = JSON.parse(fs.readFileSync(args.report, 'utf8')); } catch { throw new Error('not a re-bump report'); }
-    const { summary } = report({ report: parsed, main: args.main });
+    const { summary, stale } = report({ report: parsed, main: args.main });
     process.stdout.write(summary);
+    if (stale.length) { console.error(`::error title=Toolkit re-bump::${staleLine(stale)}`); process.exitCode = 1; }
   } catch (error) { console.error(`toolkit-rebump-report: ${error.message}`); process.exitCode = 1; }
 }
 
-module.exports = { MARKER, commentBody, report, parseArgs, plain };
+module.exports = { MARKER, STALE_DAYS, commentBody, report, parseArgs, plain, staleLine };

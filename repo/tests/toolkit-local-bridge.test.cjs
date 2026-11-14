@@ -21,7 +21,11 @@ const {
   toolkitSkillPayload,
   payloadChecksum,
   classifyUpdateReport,
-  maybeWriteUpdateReport
+  maybeWriteUpdateReport,
+  printUpdateReportLine,
+  hookSkipLine,
+  recordHookSkip,
+  clearHookSkips
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
@@ -336,8 +340,9 @@ function pushRepoToolkitUpdate(fixture, label) {
   return commit;
 }
 
+// A written report prints "sync complete", or the action-needed line when the run needs action.
 function reportPathFromOutput(stdout, hub) {
-  assert.match(String(stdout || ''), /^Toolkit local bridge sync complete\.$/m);
+  assert.match(String(stdout || ''), /^(?:Toolkit local bridge sync complete\.|Toolkit: action needed \(.+\. Tell the owner before other work\.)$/m);
   const reportPath = readJson(path.join(hub, 'state.json')).last_update_report_path;
   assert.ok(reportPath, stdout);
   return reportPath;
@@ -2532,7 +2537,7 @@ test('SessionStart notice names a vendored Toolkit check that is older or missin
   assert.equal(result.status, 'needs-attention');
   assert.deepEqual(result.findings.map((finding) => [finding.file, finding.kind]), [['.github/scripts/plain-text-check.cjs', 'repo-check']]);
   const message = formatAgentRulesPreflight(result);
-  assert.match(message, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*refresh them with repository-agent-rules when convenient\. No files were changed\.$/);
+  assert.match(message, /^Toolkit note: this repository's Toolkit checks \(\.github\/scripts\/plain-text-check\.cjs\) differ from the running Toolkit .*next step: refresh them with repository-agent-rules before this task ends\. No files were changed\.$/);
   assert.doesNotMatch(message, NEVER_HALTING);
   assert.deepEqual(snapshotTree(root), before);
   const notGoverned = runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, { ...options, governanceEnabled: () => false });
@@ -2546,7 +2551,7 @@ test('SessionStart notice names a vendored Toolkit check that is older or missin
   assert.equal(runAgentRulesPreflight({ hook: true, syncSource: 'codex-plugin' }, options).status, 'ok', 'a check switched off with a recorded reason is not noted as missing');
 });
 
-test('SessionStart notice says repository rules from a newer Toolkit are authoritative, once, without writing', () => {
+test('SessionStart notice says repository rules from a newer Toolkit are authoritative, at every session start, without writing', () => {
   // Hub state records a newer Toolkit than the running copy, and the repository block differs.
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
@@ -2560,7 +2565,7 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
   assert.doesNotMatch(message, NEVER_HALTING);
   assert.match(message, /newer Toolkit \(99\.0\.0\) than the running copy/);
   assert.match(message, /repository rules are authoritative/);
-  assert.match(message, /Refresh Toolkit when convenient/);
+  assert.match(message, /Next step: refresh Toolkit \(setup toolkit\) before this task ends/);
 
   // A Toolkit source checkout newer than the running copy is the same direction, even when current.
   const checkout = tmpRoot();
@@ -2578,7 +2583,7 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
   assert.equal(source.direction, 'newer');
   assert.doesNotMatch(formatAgentRulesPreflight(source), NEVER_HALTING);
 
-  // Through the hook: one line on the first session, nothing on the next, no repository writes.
+  // Through the hook: one line on the first session and again on the next with its count, no repository writes.
   const home = tmpRoot();
   const hub = path.join(home, 'hub', 'current');
   writeJson(path.join(hub, 'state.json'), { schema_version: 1, architecture_version: 2, hub_version: expectedBridgeVersion,
@@ -2594,11 +2599,11 @@ test('SessionStart notice says repository rules from a newer Toolkit are authori
   assert.doesNotMatch(first.stdout, NEVER_HALTING);
   const second = runSessionStartHook(root, home);
   assert.equal(second.status, 0, second.stderr);
-  assert.doesNotMatch(second.stdout, /Toolkit note/);
+  assert.match(second.stdout, /^Toolkit note: .+ \(Seen at 2 session starts since \d{4}-\d{2}-\d{2}\.\)$/m);
   assert.deepEqual(snapshotTree(root), before);
 });
 
-test('SessionStart notice offers a refresh for differing or broken repository blocks, once per finding, without writing', async (t) => {
+test('SessionStart notice offers a refresh for differing or broken repository blocks at every session start, counted per finding, without writing', async (t) => {
   const cases = [
     { name: 'stale managed block', agents: managedAgentsTemplate().replace('Repository-wide CI', 'Keep tests in edited wording') },
     { name: 'malformed managed block', agents: '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.4.0 sha256=000000000000 -->\n# broken\n' }
@@ -2617,7 +2622,7 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
       assert.doesNotMatch(message, NEVER_HALTING);
       assert.match(message, /\(AGENTS\.md\) differ from the running Toolkit [0-9.]+ templates/);
       assert.doesNotMatch(message, /are older/);
-      assert.match(message, /refresh them with repository-agent-rules when convenient/);
+      assert.match(message, /next step: refresh them with repository-agent-rules before this task ends/);
       assert.match(message, /No files were changed/);
 
       const home = tmpRoot();
@@ -2625,13 +2630,14 @@ test('SessionStart notice offers a refresh for differing or broken repository bl
       const first = runSessionStartHook(root, home);
       assert.equal(first.status, 0, first.stderr);
       assert.equal(first.stdout, `${message}\n${DISABLED_LINE}`);
-      // Resume, compact or a new session with the same finding stays quiet.
+      // Resume, compact or a new session with the same finding shows it again, with its count.
       const again = runSessionStartHook(root, home);
-      assert.equal(again.stdout, DISABLED_LINE);
-      // A changed finding is new and is shown once.
+      assert.match(again.stdout, /^Toolkit note: .+ \(Seen at 2 session starts since \d{4}-\d{2}-\d{2}\.\)\n/);
+      // A changed finding starts its own count.
       fs.appendFileSync(path.join(root, 'AGENTS.md'), '\n<!-- AI-AGENT-TOOLKIT:x:BEGIN EXTRA v1 -->\n');
       const changed = runSessionStartHook(root, home);
       assert.match(changed.stdout, /^Toolkit note:/);
+      assert.doesNotMatch(changed.stdout, /Seen at/);
       const after = snapshotTree(root);
       assert.deepEqual(after.filter((entry) => !entry.startsWith('file:AGENTS.md:')), before.filter((entry) => !entry.startsWith('file:AGENTS.md:')));
       assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
@@ -2659,7 +2665,7 @@ test('SessionStart notice ledger survives hub snapshot swaps when auto-sync is o
   for (let session = 2; session <= 3; session += 1) {
     const again = hook();
     assert.equal(again.status, 0, again.stderr);
-    assert.doesNotMatch(again.stdout, /Toolkit note:/, `session ${session}`);
+    assert.match(again.stdout, new RegExp(`^Toolkit note: .+ \\(Seen at ${session} session starts since`, 'm'), `session ${session}: the count survives the swap`);
   }
   assert.equal(readJson(path.join(hub, 'state.json')).auto_sync_enabled, true);
 });
@@ -3107,7 +3113,7 @@ test('hook mode refuses a dirty repo before update and does not sync targets', (
   assert.equal(state.last_repo_update_status, 'skipped');
   assert.match(state.last_repo_update_error, /dirty/i);
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
+  assert.match(result.stdout, /^Toolkit: action needed \(this session start\): .+ Update report: toolkit-update-[\d-]+\.md in the Toolkit update-report folder\. Tell the owner before other work\.$/m);
   assert.match(report.text, /Repo: skipped \(configured Toolkit source checkout is dirty\)\./);
   const repoPattern = fixture.repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   assert.match(report.text, new RegExp(`Action needed: the configured Toolkit source checkout \\(\`${repoPattern}\`\\) has uncommitted changes, so startup updates stay skipped until it is clean: commit or stash them there, or run \`setup toolkit\` to use a dedicated clean \`main\` checkout\\.`));
@@ -3301,7 +3307,7 @@ test('validation failure after update does not sync targets', () => {
   assert.equal(state.last_repo_update_to_commit, updatedCommit);
   assert.match(state.last_repo_update_error, /validate-toolkit/i);
   const report = readLatestReport(hub);
-  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
+  assert.match(result.stdout, /^Toolkit: action needed \(this session start\): .+ Update report: toolkit-update-[\d-]+\.md in the Toolkit update-report folder\. Tell the owner before other work\.$/m);
   assert.match(report.text, /repo update status: `validation-failed`/);
   assert.match(report.text, /hook-light validation: `failed/);
   assert.match(report.text, /- `VERSION\.txt`/);
@@ -3520,6 +3526,47 @@ test('each restored hand edit gets its own report, even on the same Toolkit cont
     { id: 'global-rules', status: 'passed', updated: true, run, summary: 'Claude Code (~/.claude/CLAUDE.md): created' }] } });
   assert.equal(invoke(created('2026-10-22T11-00-00-000Z')).reportPath, 'restore-3.md');
   assert.equal(invoke(created('2026-10-22T12-00-00-000Z')).reportPath, 'restore-4.md');
+});
+
+test('an action-required report stays open and is named at every session start until a run clears it', () => {
+  const root = tmpRoot();
+  const base = { repo: { status: 'up-to-date' }, nativePluginCache: {}, installCheck: null };
+  const failing = { ...base, repo: { status: 'validation-failed' } };
+  let state = { update_report_enabled: true, last_update_report_signature: '', last_update_report_cleanup: {}, bridge_versions_by_source: {}, hub_version: '', update_report_retention_days: 7 };
+  const writes = [];
+  const invoke = (context, at) => {
+    const result = maybeWriteUpdateReport({
+      args: { hook: true, repoUpdateNow: false, openUpdateReport: false, suppressUpdateReport: false, syncSource: 'repo' },
+      hubPath: 'unused', state, checksum: 'fixture', context: { ...context, timestamp: at },
+      writeReport(markdown) { const file = path.join(root, `toolkit-update-2026111${writes.length}-010101.md`); writes.push(markdown); fs.writeFileSync(file, markdown); return file; },
+      openReport() { return { ok: true }; },
+    });
+    state = result.state;
+    return result;
+  };
+  const first = invoke(failing, '2026-11-14T01:00:00.000Z');
+  assert.equal(writes.length, 1);
+  assert.deepEqual({ cause: first.actionRequired.cause, sessions: first.actionRequired.sessions, since: first.actionRequired.since },
+    { cause: 'check hook-light validation', sessions: 1, since: '2026-11-14T01:00:00.000Z' });
+  const second = invoke(failing, '2026-11-14T02:00:00.000Z');
+  assert.equal(writes.length, 1, 'the same result writes no second report');
+  assert.equal(second.reportPath, '');
+  assert.equal(second.stateChanged, true, 'the count is saved');
+  assert.equal(second.actionRequired.sessions, 2);
+  const lines = [];
+  const log = console.log;
+  console.log = (line) => lines.push(line);
+  try { printUpdateReportLine({ hook: true }, second); } finally { console.log = log; }
+  assert.deepEqual(lines, ['Toolkit: action needed (2 session starts in a row since 2026-11-14): check hook-light validation. Update report: toolkit-update-20261110-010101.md in the Toolkit update-report folder. Tell the owner before other work.']);
+
+  const cleanup = cleanupUpdateReports({ reportDir: root, expectedDir: root, retentionDays: 1, nowMs: Date.now() + 30 * 24 * 60 * 60 * 1000, keepPaths: [state.open_action_report.path] });
+  assert.equal(cleanup.deleted_count, 0, 'cleanup keeps the open action-required report');
+  assert.ok(fs.existsSync(state.open_action_report.path));
+
+  const cleared = invoke(base, '2026-11-14T03:00:00.000Z');
+  assert.equal(cleared.stateChanged, true);
+  assert.equal(cleared.actionRequired, undefined);
+  assert.equal(state.open_action_report, null, 'a run that needs no action clears it');
 });
 
 test('update report cleanup deletes only old Toolkit-managed reports inside the report root', () => {
@@ -3915,4 +3962,17 @@ test('the removed rule-refresh PR merge choice is gone: its flags are rejected a
   assert.equal('refresh_pr_auto_merge_enabled' in JSON.parse(audit.stdout), false);
   assert.equal(run(['--hub', hub, '--write', '--enable-update-reports'], { env }).status, 0);
   assert.equal('refresh_pr_auto_merge_enabled' in readJson(statePath), false);
+});
+
+test('a bridge hook that keeps stopping on an error counts the session starts and says to tell the owner', () => {
+  const root = tmpRoot();
+  const argv = ['--hook', '--hub', path.join(root, 'hub', 'current')];
+  assert.equal(hookSkipLine('boom', recordHookSkip(argv, '2026-11-14T01:00:00.000Z')), 'Toolkit local bridge hook skipped: boom');
+  const second = recordHookSkip(argv, '2026-11-15T01:00:00.000Z');
+  assert.deepEqual(second, { count: 2, since: '2026-11-14T01:00:00.000Z' });
+  assert.equal(hookSkipLine('boom', second), 'Toolkit local bridge hook skipped: boom (2 session starts in a row since 2026-11-14; tell the owner before other work)');
+  assert.ok(fs.existsSync(path.join(root, 'hub', 'hook-skips.json')), 'the count sits beside the hub snapshot directory');
+  clearHookSkips(argv);
+  assert.equal(fs.existsSync(path.join(root, 'hub', 'hook-skips.json')), false, 'a completed hook run clears it');
+  assert.deepEqual(recordHookSkip(argv, '2026-11-16T01:00:00.000Z'), { count: 1, since: '2026-11-16T01:00:00.000Z' });
 });

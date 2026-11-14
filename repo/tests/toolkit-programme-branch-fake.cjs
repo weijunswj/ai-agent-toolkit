@@ -8,7 +8,7 @@
 // commit while it exists. Issues, comments, pull requests and GraphQL behave as in the base fake.
 
 const crypto = require('node:crypto');
-const { FakeGitHub, blobSha } = require('./toolkit-programme-fake-github.cjs');
+const { FakeGitHub, blobSha, topLevelEntries } = require('./toolkit-programme-fake-github.cjs');
 
 const ok = (status, json) => ({ status, json });
 
@@ -98,7 +98,7 @@ class BranchFakeGitHub extends FakeGitHub {
       }
       const sha = this.newSha('tree');
       git.trees.set(sha, tree);
-      return ok(201, { sha, tree: body.tree.map(entry => ({ path: entry.path, type: 'blob', sha: blobSha(entry.content) })) });
+      return ok(201, { sha, tree: topLevelEntries(body.tree, sha) });
     }
     if (rest === 'git/commits' && method === 'POST') {
       const tree = git.trees.get(body.tree);
