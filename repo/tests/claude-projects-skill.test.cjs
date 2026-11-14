@@ -1065,7 +1065,7 @@ const ctaRecoveryCases = [
   ['finished superseded resolved cloud or working lane', 'device', ['Skip finished, superseded, resolved, cloud and already-working lanes']],
   ['device or prerequisite unavailable', 'device', ['Separate sessions still waiting for a device or another prerequisite from resumable sessions needing owner input']],
   ['missing session or failed incomplete inventory', 'device', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success', 'reads one thread per call by `thread_id`', 'an active session that is not connected or served is the usual parked case']],
-  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 2b, 4 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
+  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 2b, 4, 5 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
   ['quiet run finds a missed ask', 'nudge', ['2a. Owner asks (runs every time, including the no-change path)', 'UNRELAYED ASK: <n> | ']],
   ['reaction without required native action', 'nudge', ['An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']],
   ['resume while approval is held', 'skill', ['type anything, such as `.`', 'Typing text resumes conversation; it grants no approval for held work']],

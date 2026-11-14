@@ -426,7 +426,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects',
     'run it again with `--out` in place of `--check`', '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "']) assert.ok(guidebook.includes(required), required);
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
-  assert.match(nudge, /plus steps 2a, 2b, 4 and 7 to 11 \(and 5b when it applies\)/);
+  assert.match(nudge, /plus steps 2a, 2b, 4, 5 and 7 to 11 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(age\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
@@ -890,7 +890,7 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
       const text = tasks().render('hourly-nudge', validateParams('hourly-nudge', {
         ...PARAMS['hourly-nudge'], repo, session
       }));
-      for (const phrase of ['plus steps 2a, 2b, 4 and 7 to 11 (and 5b when it applies)',
+      for (const phrase of ['plus steps 2a, 2b, 4, 5 and 7 to 11 (and 5b when it applies)',
         'skip the other checks in steps 2 to 6', '2a. Owner asks (runs every time, including the no-change path)',
         'Page the inventories and read enough source history to identify each ask and any later answer or completed action',
         'also check older asks absent from later relays',
@@ -1013,6 +1013,30 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   assert.match(text, /Missing account copy: say so under \*\*Plugin:\*\*\. While that verified gap remains, also list "update the Toolkit plugin on claude\.ai \(behind since <date>\)" under \*\*Waiting on owner:\*\* every run\./);
 });
 
+// A bot or workflow PR wakes no thread, so the PR step runs every hour, covers the evidence store,
+// and flags any open PR with no owner or live next step; the coordinator routes it the same turn.
+test('periodic tasks give every open PR an owner and a next step, bot and workflow PRs included', () => {
+  for (const session of ['bound', 'fresh']) {
+    const text = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
+    const step = text.split('\n').find(line => line.startsWith('5. PRs'));
+    assert.ok(step, `${session}: step 5`);
+    for (const phrase of ['runs every time, even when step 1 found no change', 'a bot or workflow PR wakes no thread',
+      'every open PR on example-owner/example-repo and on the project\'s evidence store', '"store unread"',
+      'its owner (the thread that owns or watches it', 'or the merge train holding it', 'its live next step',
+      'bot and workflow PRs included', '`PR UNOWNED`', '"PR UNOWNED: <n> | "']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
+    assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11'), `${session}: quiet runs keep step 5`);
+    const none = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
+    assert.ok(none.includes('5. PRs: none (no repo).') && !none.includes('every open PR on'), `${session}: no-repo nudge has no PR sweep`);
+  }
+  const checkIn = rendered('daily-check-in').split('\n').find(line => line.startsWith('11. GitHub'));
+  for (const phrase of ["and the project's evidence store", 'no thread owns or watches', 'no merge train holds',
+    'bot and workflow PRs included', 'the reason `unowned`']) assert.ok(checkIn.includes(phrase), phrase);
+  const acting = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
+  for (const phrase of ['- `PR UNOWNED`: every open PR needs an owner and a live next step', 'to the merge train',
+    "after the owner's OK", 'the same PR listed again on the next run goes to the owner',
+    'an `unowned` PR is routed as for `PR UNOWNED`']) assert.ok(acting.includes(phrase), phrase);
+});
+
 // A thread silently waiting on CI makes no activity, so the CI-wait check runs on the no-change path too,
 // and its prefix sits between LANES UNDER CAP and WORK QUEUE.
 test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pending, on every run', () => {
@@ -1028,8 +1052,8 @@ test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pendi
         '"CI WAIT QUIET: <n> | "', 'this task never messages threads itself']) {
         assert.ok(step.includes(phrase), `${repo}/${session}: ${phrase}`);
       }
-      assert.ok(text.includes('plus steps 2a, 2b, 4 and 7 to 11 (and 5b when it applies)'));
-      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "WORK QUEUE: <n> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
+      assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11 (and 5b when it applies)'));
+      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "PR UNOWNED: <n> | ", "WORK QUEUE: <n> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
     }
   }
 });

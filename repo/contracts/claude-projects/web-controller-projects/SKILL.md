@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-11-14.6
+Version: 2026-11-14.7
 
 Run Toolkit repos through Claude Projects. Global rules and coding gates apply everywhere; GitHub governance (issues, records, decision traces, evidence custody) only to ENABLED github.com repos. Keep project facts in project memory; durable work state in the branch, PR and programme comments or evidence store, mirrored in memory, never only there.
 
@@ -101,7 +101,7 @@ When the skill or Toolkit updates, a guidebook refresh reports BLOCK CHANGED, or
 - **Resolve on relay; the nudge is the backstop.** Threads never resolve themselves; you resolve a work thread the turn you relay its final result or in the hourly pass, only when all hold: (a) it has its own Claude session (never your own project-chat post or the reply thread under it, as resolving it hides that message) and is no task's home thread; (b) its output is durably recorded (pushed, merged, filed or handed off) and every PR it lists is merged or closed; (c) its latest result was relayed to the owner in project chat, or the owner replied after it; (d) no owner test, card, question, decision or promised work is still owed; (e) its last report is final, not "waiting on CI". A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done. Idleness alone never closes a work thread. Fresh-session scheduled runs resolve their own run thread after delivery; a task's home thread is never resolved.
 
 ## Pull requests and CI
-- **The coordinator tracks CI itself.** Never ask the owner to watch/paste checks. For every lane PR, whoever opened it, attach repo API access to the coordinator session and subscribe to CI, reviews, merges and closes.
+- **The coordinator tracks CI itself.** Never ask the owner to watch/paste checks. For every open PR, bots' too, attach repo access here and subscribe to CI, reviews, merges and closes; each needs an owner and next step (`PR UNOWNED`).
 - Relay CI in one line with the owning thread's link (a PR link only on a merge-ready merge ask). On red, get failing check names/key errors through a thread if needed, distinguish PR failures and route fixes to its builder. Never push code from the coordinator.
 - If the builder runs in a chat the user drives by hand (another account or machine), give the user its next prompt only once that chat is idle, trimmed of parts already handled.
 - **Threads waiting on CI arm a check-in.** Every brief tells its thread to arm one (about 15 minutes, repeated and spaced out until handled) before ending a turn that waits on CI or another outside event. The nudge's `CI WAIT QUIET` is the backstop: ping each listed thread that turn.
