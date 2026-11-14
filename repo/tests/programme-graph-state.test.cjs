@@ -17,11 +17,11 @@ const temps = [];
 const temporary = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'graph-state-')); temps.push(dir); return dir; };
 test.after(() => { for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true }); });
 
-function fixture(numbers = [2]) {
+function fixture(numbers = [2], pinned = []) {
   const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
   const binding = { schema: state.SCHEMA.binding, repository: github.repository, parent_issue: 1, record_prefix: 'TEST-', writer_prefix: 'TEST-',
     store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: ['validate'] };
-  const outcomes = numbers.map((issue, i) => ({ issue, label: `Task ${issue}`, class: 'COMMITTED', parent: 1, order: i + 1 }));
+  const outcomes = numbers.map((issue, i) => ({ issue, label: `Task ${issue}`, class: 'COMMITTED', parent: 1, order: i + 1, ...(pinned.includes(issue) ? { last: true } : {}) }));
   github.addIssue(1);
   numbers.forEach(number => github.addIssue(number, {parent: 1}));
   let now = epoch;
@@ -169,6 +169,17 @@ test('fix1 L2: skip children of a catalogued registered parent and still adopt u
   assert.deepEqual(pass.apply(plan).holds,[]);
   assert.ok(!f.parent().outcomes.some(o=>o.issue===11)); assert.ok(f.parent().outcomes.some(o=>o.issue===12));
   assert.deepEqual(f.parent().attention.filter(e=>e.code==='CHILD_ADDED').map(e=>e.issue),[12]);
+});
+
+test('a task the sweep adds later lands before the task pinned last, in the catalogue order and natively',()=>{
+  const f=fixture([2,3],[3]); f.run();
+  assert.deepEqual(f.github.issues.get(1).subs,[2,3]);
+  f.github.addIssue(4,{parent:1}); f.github.addIssue(5,{parent:1});
+  f.run(); f.run();
+  const added=f.parent().outcomes.filter(o=>[4,5].includes(o.issue));
+  assert.deepEqual(added.map(o=>[o.issue,o.order,o.last]),[[4,3,undefined],[5,4,undefined]],'additions take the next order and are never pinned');
+  assert.equal(f.parent().outcomes.find(o=>o.issue===3).last,true,'the pin survives the sweep');
+  assert.deepEqual(f.github.issues.get(1).subs,[2,4,5,3],'native sub-issues follow, with the pinned task last');
 });
 
 test('fix1 L2: failed adoption never records CHILD_ADDED',()=>{
