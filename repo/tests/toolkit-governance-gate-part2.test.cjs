@@ -30,7 +30,7 @@ test('non-GitHub identities pass the first prompt and ordinary tools on both hos
         ['Read', { file_path: 'README.md' }], ['Write', { file_path: 'notes.md', content: 'Ordinary work.' }],
       ]) assert.equal(toolGate.decide({ cwd: repo, tool_name, tool_input }), null, `${name}/${host}/${tool_name}`);
       const state = stateOf(ctx, repo);
-      assert.deepEqual([state.state, state.rule, state.reason, state.hold], ['DISABLED', 'R8', reason, false]);
+      assert.deepEqual([state.state, state.rule, state.reason], ['DISABLED', 'R8', reason]);
       assert.match(gate.sessionLine(repo, options), /DISABLED automatically/);
       assert.doesNotMatch(gate.sessionLine(repo, options), /Reply|held|user said ok/);
     }

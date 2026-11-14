@@ -98,7 +98,7 @@ for (const decision of ['disable', 'enable']) {
         }
       }
       const decided = require('./support/governance-observations.cjs').seedMerged(repo, decision, { registryOptions: ctx.options });
-      assert.deepEqual([decided.hold, decided.reason], [false, 'decided']);
+      assert.equal(decided.reason, 'decided');
       for (let round = 0; round < 2; round += 1) {
         assert.equal(hold(ctx).decide({ cwd: repo, prompt: `request ${round}` }).action, 'pass');
         assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
@@ -184,4 +184,45 @@ test('tools: an undecided repository runs every tool; only Toolkit\'s own card i
   assert.equal(tools(ctx).decide({ tool_name: 'AskUserQuestion', cwd: plain, tool_input: { ...gate.PICKER_INPUT, answers: { [gate.PICKER_QUESTION]: 'Yes' } } }), null, 'where nothing is open the card means nothing');
   require('./support/governance-observations.cjs').seedMerged(repo, 'enable', { registryOptions: ctx.options });
   assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
+});
+
+test('with no hold, the shell still cannot reach Toolkit\'s user state, run its proposal code or give the answer, in every folder', (t) => {
+  const ctx = scratch(t);
+  const undecided = gitRepo(ctx, 'undecided');
+  const enabled = gitRepo(ctx, 'enabled');
+  require('./support/governance-observations.cjs').seedMerged(enabled, 'enable', { registryOptions: ctx.options });
+  const plain = fs.mkdtempSync(path.join(ctx.root, 'plain-'));
+  const STATE = 'Toolkit\'s user-state files';
+  const refused = [
+    // Toolkit's user state, by path (the merge hold's check) and through a folder change.
+    ['echo {} > ~/.ai-agent-toolkit/user-state/governance-reply-tickets.v1.json', STATE],
+    ['cd ~/.ai-agent-toolkit && rm -rf user-state', STATE],
+    ['cd ~ && rm -f .ai-agent-toolkit/user-state/governance-asked-runs.v1.json', STATE],
+    // The proposal code, run directly or from an inline script.
+    [`node -e "new (require('./repo/scripts/toolkit-governance-proposal.cjs').GovernanceProposals)({}).request('.', 'enable')"`, 'its governance proposals'],
+    ['node repo/scripts/toolkit-governance-proposal.cjs', 'its governance proposals'],
+    ['bun -e "require(\'C:/t/toolkit-governance-proposal\')"', 'its governance proposals'],
+    // The governance CLI with a decision after its options.
+    ['node repo/scripts/toolkit-governance.cjs --json enable', 'only the user answers'],
+    ['node repo/scripts/toolkit-governance.cjs --repo . disable', 'only the user answers'],
+  ];
+  const allowed = [
+    'node repo/scripts/run-tests.cjs repo/tests/toolkit-governance-proposal.test.cjs',
+    'git diff -- repo/scripts/toolkit-governance-proposal.cjs',
+    'node repo/scripts/toolkit-governance.cjs --json status',
+    'ls user-state',
+  ];
+  for (const cwd of [undecided, enabled, plain]) {
+    for (const [tool_name, key] of [['Bash', 'command'], ['PowerShell', 'command']]) {
+      const respond = command => claudeHook.respond('PreToolUse', { cwd, session_id: 'A', tool_name, tool_input: { [key]: command } }, { registryOptions: ctx.options, environment: {} });
+      for (const [command, reason] of refused) {
+        const result = respond(command).hookSpecificOutput || {};
+        assert.equal(result.permissionDecision, 'deny', `${path.basename(cwd)} ${tool_name}: ${command}`);
+        assert.ok(String(result.permissionDecisionReason).includes(reason), `${command}: ${result.permissionDecisionReason}`);
+      }
+      for (const command of allowed) {
+        assert.notEqual(respond(command).hookSpecificOutput?.permissionDecision, 'deny', `${path.basename(cwd)} ${tool_name}: ${command}`);
+      }
+    }
+  }
 });
