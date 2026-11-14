@@ -30,7 +30,34 @@ const PARAMS = {
 const OWN_TEXT = 'Task: check the example folder and list what changed.\n1. List the folder.\n2. Compare with the last report.';
 const params = kind => validateParams(kind, PARAMS[kind]);
 const nudge0 = () => fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
-const rendered = kind => tasks().render(kind, params(kind), kind === 'custom' ? OWN_TEXT : undefined);
+const rendered = kind => full(kind, params(kind), kind === 'custom' ? OWN_TEXT : undefined);
+const pointer = kind => tasks().render(kind, params(kind), kind === 'custom' ? OWN_TEXT : undefined);
+
+// The stored prompt shape from before pointers: the full instructions as managed blocks, as live
+// tasks still carry it until their first refresh. Content tests read the instructions through it;
+// its blocks are exactly what --expand prints (checked below).
+function full(kind, promptParams, projectText, source = tasks()) {
+  const [setup, ...rest] = source.instructionBlocks(kind, promptParams).map(renderBlock);
+  const delivery = rest.pop();
+  const own = projectText === undefined ? '' : projectText.replace(/^\n+|\n+$/g, '');
+  if (!own && kind === 'custom') throw new Error('custom needs its own steps');
+  const fence = ['```toolkit-task-params', JSON.stringify(promptParams, null, 2), '```'].join('\n');
+  return [setup, '', fence, '', ...rest.flatMap(block => [block, '']), own || `${PROJECT_HEADING}\n- none`, '', delivery, ''].join('\n');
+}
+
+// What a run of this stored prompt loads: --expand with the params block it carries.
+const loadedFrom = (kind, stored) => tasks().expand(kind, validateParams(kind, JSON.parse(stored.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1])));
+
+// For these params, the stored pointer checks current and a refresh keeps it byte for byte, and
+// the full prompt from before pointers checks outdated and refreshes into exactly that pointer.
+function assertStable(kind, promptParams, projectText, label) {
+  const stored = tasks().render(kind, promptParams, projectText);
+  assert.equal(tasks().check(kind, stored).state, 'current', label);
+  assert.equal(tasks().refresh(kind, stored), stored, label);
+  const before = full(kind, promptParams, projectText);
+  assert.equal(tasks().check(kind, before).state, 'outdated', label);
+  assert.equal(tasks().refresh(kind, before), stored, label);
+}
 
 function tempDir(t) {
   const tempRoot = path.join(ROOT, '.tmp');
@@ -56,11 +83,13 @@ function cli(t, kind, text) {
 }
 
 // A ProjectsTasks whose template files or version differ from the repo: what a later main renders.
-function laterMain({ version, template } = {}) {
+// template changes the instruction templates; pointer changes the stored pointer's own text.
+function laterMain({ version, template, pointer: pointerText } = {}) {
   return new ProjectsTasks({ root: ROOT, readFile(target, encoding) {
     const text = fs.readFileSync(target, encoding);
     if (version && target.endsWith('version.json')) return JSON.stringify({ version });
-    if (template && target.startsWith(TASKS)) return `${text}\n- A step added on main.`;
+    const isPointer = target === path.join(TASKS, 'pointer.md');
+    if ((template && target.startsWith(TASKS) && !isPointer) || (pointerText && isPointer)) return `${text}\n- A step added on main.`;
     return text;
   } });
 }
@@ -73,77 +102,121 @@ const replaceBlockBody = (text, name, from, to) => {
 
 test('render is deterministic and every kind round-trips as current through the CLI', t => {
   for (const kind of ['daily-check-in', 'hourly-nudge', 'custom']) {
-    assert.equal(rendered(kind), rendered(kind));
-    assert.deepEqual(cli(t, kind, rendered(kind)), { state: 'current', status: 0 });
+    assert.equal(pointer(kind), pointer(kind));
+    assert.deepEqual(cli(t, kind, pointer(kind)), { state: 'current', status: 0 });
     const paramsFile = file(t, 'params.json', JSON.stringify(PARAMS[kind]));
     const args = ['--render', kind, '--params', paramsFile];
     if (kind === 'custom') args.push('--project-text', file(t, 'own.md', OWN_TEXT));
     const result = run(args);
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout, rendered(kind));
+    assert.equal(result.stdout, pointer(kind));
+    const expanded = run(['--expand', kind, '--params', paramsFile]);
+    assert.equal(expanded.status, 0, expanded.stderr);
+    assert.equal(expanded.stdout, tasks().expand(kind, params(kind)));
   }
   assert.equal(run(['--name', 'daily-check-in', '--params', file(t, 'p.json', JSON.stringify(PARAMS['daily-check-in']))]).stdout, 'EXAMPLE: Daily check-in\n');
   assert.equal(run(['--name', 'hourly-nudge', '--params', file(t, 'p.json', JSON.stringify(PARAMS['hourly-nudge']))]).stdout, 'EXAMPLE: Hourly nudge\n');
   assert.equal(run(['--name', 'custom', '--params', file(t, 'p.json', JSON.stringify(PARAMS.custom))]).status, 2);
+  assert.equal(run(['--expand', 'daily-check-in', '--params', file(t, 'p.json', '{"project":"EXAMPLE"}')]).status, 2, 'bad params never print instructions');
+});
+
+// The stored prompt is a short pointer; each run prints the instructions from main with --expand.
+test('the stored prompt is a pointer and every run loads the current instructions from main', t => {
+  for (const kind of ['daily-check-in', 'hourly-nudge', 'custom']) {
+    for (const session of ['bound', 'fresh']) {
+      const promptParams = validateParams(kind, { ...PARAMS[kind], session });
+      const stored = tasks().render(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined);
+      const { blocks } = findBlocks(stored);
+      assert.deepEqual(blocks.map(block => block.name), ['TASK-POINTER'], `${kind} ${session}: one Toolkit block`);
+      assert.ok(stored.length < 4000, `${kind} ${session}: short (${stored.length})`);
+      assert.match(stored, /^- First check, before anything else: if this turn has no mcp__hearthbot__ tools/m);
+      assert.ok(stored.includes(`git clone --depth 1 https://github.com/weijunswj/ai-agent-toolkit TK-LOAD`));
+      assert.ok(stored.includes(`node TK-LOAD/repo/scripts/toolkit-projects-tasks.cjs --expand ${kind} --params TK-LOAD-params.json`));
+      assert.match(stored, /never run the task from memory or an older copy/);
+      assert.match(stored, /"TASK LOAD FAILED: <clone or expand>: <one-line reason>"/);
+      assert.equal(stored.includes('set_thread_resolved'), session === 'fresh', `${kind} ${session}: only a fresh run resolves`);
+      // What a run loads: every instruction block, in order, as plain text with no markers.
+      const loaded = tasks().expand(kind, promptParams);
+      assert.equal(findBlocks(loaded).blocks.length, 0);
+      assert.match(loaded, /^TOOLKIT TASK INSTRUCTIONS \(.+, toolkit \d+\.\d+\.\d+\)\n/);
+      let at = 0;
+      for (const block of tasks().instructionBlocks(kind, promptParams)) {
+        const found = loaded.indexOf(block.body.replace(/\n+$/, ''), at);
+        assert.ok(found > at, `${kind} ${session}: ${block.name} loaded in order`);
+        at = found;
+      }
+      if (kind === 'custom') assert.match(loaded, /own steps are the project additions in its stored prompt/);
+    }
+  }
+  // A Toolkit release reaches the task with no change to its stored prompt.
+  const stored = pointer('hourly-nudge');
+  const later = laterMain({ version: '99.0.0', template: true });
+  assert.equal(later.check('hourly-nudge', stored).state, 'current', 'a later main leaves the pointer current');
+  assert.match(later.expand('hourly-nudge', params('hourly-nudge')), /A step added on main\./);
+  assert.match(later.expand('hourly-nudge', params('hourly-nudge')), /toolkit 99\.0\.0/);
+  // A pointer stored before tiers still loads: --expand migrates its params as a refresh would.
+  const old = { ...PARAMS['hourly-nudge'], effort: 'low' };
+  const result = run(['--expand', 'hourly-nudge', '--params', file(t, 'old.json', JSON.stringify(old))]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /set_effort_level with medium/);
 });
 
 // Closure matrix: input state -> check result.
 test('closure matrix: each prompt state gets its check result', t => {
-  const checkIn = rendered('daily-check-in');
+  const stored = pointer('daily-check-in');
+  const before = rendered('daily-check-in');
   const fence = /```toolkit-task-params\n[\s\S]*?\n```/;
+  const oldDelivery = before.slice(findBlocks(before).blocks[2].start, findBlocks(before).blocks[2].end);
   const rows = [
-    ['rendered from current main, untouched', 'daily-check-in', checkIn, 'current', 0],
-    ['template changed on main, params same', 'daily-check-in', laterMain({ template: true }).check('daily-check-in', checkIn).state, null],
-    ['params block changed by the project', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "high", "raise_reason": "misses checks at medium"'), 'outdated', 1],
-    ['a raise without its reason', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "high"'), 'malformed', 2],
-    ['effort below the medium floor', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "low"'), 'malformed', 2],
-    ['text inside markers hand-edited', 'daily-check-in', replaceBlockBody(checkIn, 'DAILY-CHECK-IN-CHECKS', '\nCHECKS\n', '\nCHECKS (edited)\n'), 'edited', 1],
-    ['a Toolkit block deleted', 'daily-check-in', checkIn.replace(/<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN DAILY-CHECK-IN-CHECKS[\s\S]*?END DAILY-CHECK-IN-CHECKS -->\n/, ''), 'edited', 1],
-    ['owner lines in the additions section changed', 'daily-check-in', checkIn.replace('- none', '- Also list the example sweep.'), 'current', 0],
+    ['pointer rendered from current main, untouched', 'daily-check-in', stored, 'current', 0],
+    ['pointer stamped by an older release, same text', 'daily-check-in', laterMain({ version: '1.0.0' }).render('daily-check-in', params('daily-check-in')), 'current', 0],
+    ['pointer text changed on main', 'daily-check-in', laterMain({ pointer: true }).render('daily-check-in', params('daily-check-in')), 'outdated', 1],
+    ['full prompt from before pointers', 'daily-check-in', before, 'outdated', 1],
+    ['full prompt from an older release', 'daily-check-in', full('daily-check-in', params('daily-check-in'), undefined, laterMain({ version: '1.0.0' })), 'outdated', 1],
+    ['full prompt hand-edited inside a block', 'daily-check-in', replaceBlockBody(before, 'DAILY-CHECK-IN-CHECKS', '\nCHECKS\n', '\nCHECKS (edited)\n'), 'edited', 1],
+    ['full prompt with a block deleted', 'daily-check-in', before.replace(/<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN DAILY-CHECK-IN-CHECKS[\s\S]*?END DAILY-CHECK-IN-CHECKS -->\n/, ''), 'outdated', 1],
+    ['params block changed by the project', 'daily-check-in', stored.replace('"effort": "medium"', '"effort": "high",\n  "raise_reason": "misses checks at medium"'), 'current', 0],
+    ['a session change rewrites the pointer', 'daily-check-in', stored.replace('"effort": "medium"', '"effort": "medium",\n  "session": "fresh"'), 'outdated', 1],
+    ['a raise without its reason', 'daily-check-in', stored.replace('"effort": "medium"', '"effort": "high"'), 'malformed', 2],
+    ['effort below the medium floor', 'daily-check-in', stored.replace('"effort": "medium"', '"effort": "low"'), 'malformed', 2],
+    ['text inside the pointer hand-edited', 'daily-check-in', replaceBlockBody(stored, 'TASK-POINTER', 'TASK POINTER', 'TASK POINTER (edited)'), 'edited', 1],
+    ['owner lines in the additions section changed', 'daily-check-in', stored.replace('- none', '- Also list the example sweep.'), 'current', 0],
     ['legacy prompt, no markers', 'daily-check-in', 'EXAMPLE daily check-in\n1. Do the checks.\n', 'missing', 1],
-    ['legacy prompt with only a params block', 'daily-check-in', `${checkIn.match(fence)[0]}\nOld steps.\n`, 'missing', 1],
-    ['two BEGIN markers', 'daily-check-in', checkIn.replace('<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN TASK-DELIVERY', '<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN TASK-RUN-SETUP v2 toolkit=1.0.0 sha256=000000000000 -->\n<!-- AI-AGENT-TOOLKIT:claude-projects:BEGIN TASK-DELIVERY'), 'malformed', 2],
-    ['broken END marker', 'daily-check-in', checkIn.replace(':END TASK-DELIVERY', ':END OTHER'), 'malformed', 2],
-    ['bad params JSON', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": medium'), 'malformed', 2],
-    ['param fails validation', 'daily-check-in', checkIn.replace('"report_dir": "/mnt/project-files/daily-check-in"', '"report_dir": "/tmp/elsewhere"'), 'malformed', 2],
-    ['unknown param', 'daily-check-in', checkIn.replace('"effort": "medium"', '"effort": "medium", "note": "x"'), 'malformed', 2],
-    ['two params blocks', 'daily-check-in', checkIn.replace(fence, match => `${match}\n\n${match}`), 'malformed', 2],
-    ['unclosed params block', 'daily-check-in', checkIn.replace(/(```toolkit-task-params\n[\s\S]*?\n)```/, '$1'), 'malformed', 2],
-    ['markers without a params block', 'daily-check-in', checkIn.replace(fence, ''), 'malformed', 2],
-    ['a check-in prompt checked as the nudge', 'hourly-nudge', checkIn, 'malformed', 2],
-    ['custom: shell current, own section changed', 'custom', rendered('custom').replace('List the folder.', 'List both folders.'), 'current', 0],
-    ['custom: hand edit inside a shell block', 'custom', replaceBlockBody(rendered('custom'), 'TASK-RUN-SETUP', 'RUN SETUP', 'RUN SETUP (mine)'), 'edited', 1],
-    ['custom carrying a check-in block', 'custom', checkIn.replace(/"effort": "medium"/, '"effort": "medium", "session": "fresh"'), 'malformed', 2],
-    ['text before run setup', 'daily-check-in', `Project note first.\n${checkIn}`, 'misplaced', 1],
-    ['text after delivery', 'daily-check-in', `${checkIn}Project note last.\n`, 'misplaced', 1],
-    ['only blank lines around the blocks', 'daily-check-in', `\n\n${checkIn}\n\n`, 'current', 0]
+    ['legacy prompt with only a params block', 'daily-check-in', `${stored.match(fence)[0]}\nOld steps.\n`, 'missing', 1],
+    ['two pointers', 'daily-check-in', stored.replace(fence, match => `${match}\n\n${renderBlock(tasks().pointerBlock('daily-check-in', params('daily-check-in')))}`), 'malformed', 2],
+    ['a pointer and an old block together', 'daily-check-in', `${stored}\n${oldDelivery}\n`, 'outdated', 1],
+    ['a block another kind owns', 'daily-check-in', `${stored}\n${renderBlock({ source: 'claude-projects', name: 'HOURLY-NUDGE-CHECKS', version: '1.0.0', body: 'x' })}\n`, 'malformed', 2],
+    ['broken END marker', 'daily-check-in', stored.replace(':END TASK-POINTER', ':END OTHER'), 'malformed', 2],
+    ['bad params JSON', 'daily-check-in', stored.replace('"effort": "medium"', '"effort": medium'), 'malformed', 2],
+    ['param fails validation', 'daily-check-in', stored.replace('"report_dir": "/mnt/project-files/daily-check-in"', '"report_dir": "/tmp/elsewhere"'), 'malformed', 2],
+    ['unknown param', 'daily-check-in', stored.replace('"effort": "medium"', '"effort": "medium", "note": "x"'), 'malformed', 2],
+    ['two params blocks', 'daily-check-in', stored.replace(fence, match => `${match}\n\n${match}`), 'malformed', 2],
+    ['unclosed params block', 'daily-check-in', stored.replace(/(```toolkit-task-params\n[\s\S]*?\n)```/, '$1'), 'malformed', 2],
+    ['pointer without a params block', 'daily-check-in', stored.replace(fence, ''), 'malformed', 2],
+    ['a check-in pointer checked as the nudge', 'hourly-nudge', stored, 'malformed', 2],
+    ['a check-in full prompt checked as the nudge', 'hourly-nudge', before, 'malformed', 2],
+    ['custom: pointer current, own section changed', 'custom', pointer('custom').replace('List the folder.', 'List both folders.'), 'current', 0],
+    ['custom: hand edit inside the pointer', 'custom', replaceBlockBody(pointer('custom'), 'TASK-POINTER', 'TASK POINTER', 'TASK POINTER (mine)'), 'edited', 1],
+    ['text before the pointer', 'daily-check-in', `Project note first.\n${stored}`, 'misplaced', 1],
+    ['params block before the pointer', 'daily-check-in', stored.replace(fence, '').replace(/^/, `${stored.match(fence)[0]}\n\n`), 'misplaced', 1],
+    ['project text last, as rendered', 'daily-check-in', `${stored}Project note last.\n`, 'current', 0],
+    ['only blank lines around the prompt', 'daily-check-in', `\n\n${stored}\n\n`, 'current', 0]
   ];
-  assert.equal(rows[1][2], 'outdated', 'template changed on main');
-  for (const [label, kind, text, state, status] of rows) {
-    if (state === null) continue;
-    assert.deepEqual(cli(t, kind, text), { state, status }, label);
-  }
-  // Base blocks out of the fixed order.
-  const blocks = findBlocks(checkIn).blocks;
-  const checks = blocks.find(block => block.name === 'DAILY-CHECK-IN-CHECKS');
-  const checksText = checkIn.slice(checks.start, checks.end);
-  const swapped = checkIn.replace(`${checksText}\n`, '').replace('```toolkit-task-params', `${checksText}\n\n\`\`\`toolkit-task-params`);
-  assert.deepEqual(cli(t, 'daily-check-in', swapped), { state: 'misplaced', status: 1 }, 'checks before params');
-  // A Toolkit version bump with the same bodies reads outdated.
-  assert.equal(laterMain({ version: '99.0.0' }).check('daily-check-in', checkIn).state, 'outdated');
+  for (const [label, kind, text, state, status] of rows) assert.deepEqual(cli(t, kind, text), { state, status }, label);
   // Unknown task kind is a usage error.
-  assert.equal(run(['--check', 'drift-watch', file(t, 'p.md', checkIn)]).status, 2);
+  assert.equal(run(['--check', 'drift-watch', file(t, 'p.md', stored)]).status, 2);
 });
 
-test('refresh replaces only Toolkit text and keeps the params block and project text byte for byte', t => {
+test('refresh turns a full prompt into the pointer and keeps the params block and project text byte for byte', t => {
   const params = '```toolkit-task-params\n{"project":"EXAMPLE","repo":"example-owner/example-repo","report_dir":"/mnt/project-files/daily-check-in","effort":"medium"}\n```';
   const project = 'Project additions:\n- Also list the example sweep.\n  - indented, with trailing spaces   \n- Second rule.';
   const old = laterMain({ version: '1.0.0' });
-  const blocks = old.expectedBlocks('daily-check-in', validateParams('daily-check-in', JSON.parse(params.split('\n')[1]))).map(renderBlock);
+  const blocks = old.instructionBlocks('daily-check-in', validateParams('daily-check-in', JSON.parse(params.split('\n')[1]))).map(renderBlock);
   const live = [blocks[0], '', params, '', blocks[1], '', project, '', blocks[2], ''].join('\n');
   assert.equal(tasks().check('daily-check-in', live).state, 'outdated');
   const refreshed = tasks().refresh('daily-check-in', live);
   assert.equal(tasks().check('daily-check-in', refreshed).state, 'current');
+  assert.deepEqual(findBlocks(refreshed).blocks.map(block => block.name), ['TASK-POINTER']);
   assert.ok(refreshed.includes(`\n${params}\n`), 'params block kept byte for byte');
   assert.ok(refreshed.includes(`\n${project}\n`), 'project text kept byte for byte');
   // CLI agrees, and a refresh of a current prompt changes nothing.
@@ -151,10 +224,10 @@ test('refresh replaces only Toolkit text and keeps the params block and project 
   assert.equal(run(['--refresh', 'daily-check-in', target, '--session', 'bound']).stdout, refreshed);
   assert.equal(run(['--refresh', 'daily-check-in', target]).status, 2, 'a Toolkit task refresh names the session its replacement runs in');
   assert.equal(tasks().refresh('daily-check-in', refreshed), refreshed);
-  // Misplaced project text (after delivery) moves into the project section, words unchanged.
-  const misplaced = tasks().refresh('daily-check-in', `${refreshed}Late owner line.\n`);
+  // Project text before the pointer moves into the project section, words unchanged.
+  const misplaced = tasks().refresh('daily-check-in', `Early owner line.\n${refreshed}`);
   assert.equal(tasks().check('daily-check-in', misplaced).state, 'current');
-  assert.ok(misplaced.includes(`${project}\n\nLate owner line.\n`));
+  assert.ok(misplaced.includes(`Early owner line.\n\n${project}\n`));
 });
 
 test('refresh of an edited block keeps the added lines, labelled, and malformed holds', t => {
@@ -212,21 +285,21 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   // A step down below the default needs no reason; a raise with one renders it.
   assert.equal(validateParams('daily-check-in', { ...PARAMS['daily-check-in'], model: 'small' }).model, 'small');
   const raised = validateParams('hourly-nudge', { ...base, model: 'top', effort: 'high', raise_reason: 'missed checks at small' });
-  const prompt = tasks().render('hourly-nudge', raised);
+  const prompt = full('hourly-nudge', raised);
   assert.match(prompt, /Model tier for this task: top \(agent-cost-control ladder; on Claude, small is Haiku, mid Sonnet, top Opus\), effort high\./);
   assert.match(prompt, /Raised above the cheapest fitting step because: missed checks at small/);
   assert.match(prompt, /TIER GAP: served <model>\/<effort>, want top\/high/);
   assert.doesNotMatch(rendered('hourly-nudge'), /Raised above/);
   assert.match(rendered('daily-check-in'), /Model tier for this task: mid /);
   // A live prompt rendered before tiers existed still parses: its params take the default tier.
-  const legacy = rendered('hourly-nudge').replace(/,\n {2}"model": "small"/, '');
+  const legacy = pointer('hourly-nudge').replace(/,\n {2}"model": "small"/, '');
   assert.doesNotMatch(legacy, /"model"/);
   assert.equal(tasks().check('hourly-nudge', legacy).state, 'current');
   // A prompt rendered before tiers (no model key) with any old effort still checks and refreshes.
   const projectText = 'Project additions:\n- Keep this owner line.';
   for (const kind of ['daily-check-in', 'hourly-nudge', 'custom']) {
     for (const [effort, want, reason] of [['low', 'medium', undefined], ['medium', 'medium', undefined], ['high', 'high', LEGACY_RAISE], ['xhigh', 'xhigh', LEGACY_RAISE], ['max', 'max', LEGACY_RAISE]]) {
-      const old = laterMain({ version: '1.0.0' }).render(kind, params(kind), kind === 'custom' ? OWN_TEXT : projectText);
+      const old = full(kind, params(kind), kind === 'custom' ? OWN_TEXT : projectText, laterMain({ version: '1.0.0' }));
       const legacyPrompt = old.replace(/,\n {2}"model": "[a-z]+"/, '').replace('"effort": "medium"', `"effort": "${effort}"`);
       assert.doesNotMatch(legacyPrompt, /"model"/);
       assert.equal(tasks().check(kind, legacyPrompt).state, 'outdated', `${kind} ${effort}`);
@@ -247,19 +320,19 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   }
   // A swap carries a recorded raise by writing it into the saved params before the refresh,
   // so the prompt itself sets the raised effort and checks current.
-  const saved = laterMain({ version: '1.0.0' }).render('hourly-nudge', params('hourly-nudge'), projectText);
+  const saved = full('hourly-nudge', params('hourly-nudge'), projectText, laterMain({ version: '1.0.0' }));
   const withRaise = saved.replace('"effort": "medium"', '"effort": "high",\n  "raise_reason": "missed checks at medium"');
   const carried = tasks().refresh('hourly-nudge', withRaise, { session: 'bound' });
   assert.equal(tasks().check('hourly-nudge', carried).state, 'current');
-  assert.match(carried, /call mcp__hearthbot__set_effort_level with high;/);
-  assert.match(carried, /Raised above the cheapest fitting step because: missed checks at medium/);
+  assert.match(loadedFrom('hourly-nudge', carried), /call mcp__hearthbot__set_effort_level with high;/);
+  assert.match(loadedFrom('hourly-nudge', carried), /Raised above the cheapest fitting step because: missed checks at medium/);
   const swap = fs.readFileSync(path.join(path.dirname(SETUP), 'recurring-tasks.md'), 'utf8');
   assert.match(swap, /First make the saved params block match the task's entry: with a recorded raise, set `model`, `effort` and `raise_reason` to the higher of the template's and the raised values and the entry's reason; with none, set the template's tier, `medium` effort and no `raise_reason`/);
   assert.match(swap, /with its home thread started on the tier and effort in the rendered params/);
   // A removed raise is removed from the params too, so the prompt drops back to medium.
   const lowered = tasks().refresh('hourly-nudge', saved, { session: 'bound' });
-  assert.match(lowered, /call mcp__hearthbot__set_effort_level with medium;/);
-  assert.doesNotMatch(lowered, /Raised above/);
+  assert.match(loadedFrom('hourly-nudge', lowered), /call mcp__hearthbot__set_effort_level with medium;/);
+  assert.doesNotMatch(loadedFrom('hourly-nudge', lowered), /Raised above/);
   // Every rebuild renders the prompt the way the swap does, so a raise is carried. Both lines moved word for word
   // from the skill's Hourly nudge section into reference/periodic-runs.md.
   const skill = fs.readFileSync(path.join(path.dirname(SKILL), 'reference', 'periodic-runs.md'), 'utf8');
@@ -306,12 +379,12 @@ test('templates hold no ids, owner names, project-only tasks or old resolve rule
   }
   for (const kind of ['daily-check-in', 'hourly-nudge', 'custom']) {
     for (const repo of ['example-owner/example-repo', 'none']) {
-      const text = tasks().render(kind, validateParams(kind, { ...PARAMS[kind], repo }), kind === 'custom' ? OWN_TEXT : undefined);
+      const text = full(kind, validateParams(kind, { ...PARAMS[kind], repo }), kind === 'custom' ? OWN_TEXT : undefined);
       assert.doesNotMatch(text, /\{\{|^\[[a-z-]+\]/m, `${kind} ${repo}`);
       if (repo === 'none') assert.doesNotMatch(text, /example-owner\/example-repo/);
     }
   }
-  const noRepo = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'none', parent_issue: 'none' }));
+  const noRepo = full('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'none', parent_issue: 'none' }));
   assert.match(noRepo, /11\. GitHub: none \(no repo\)\./);
   assert.match(noRepo, /\*\*Binding:\*\* none \(no repo\)/);
   assert.doesNotMatch(noRepo, /issue #/);
@@ -322,7 +395,7 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
   for (const kind of ['daily-check-in', 'hourly-nudge', 'custom']) {
     const text = rendered(kind);
     for (const required of ['set_effort_level', '/latest.md (overwrite), then read it back', 'at most 1,500 characters', 'retry once',
-      'never claim it was delivered', 'Never end any message with a question to the owner', 'Project additions in this prompt override the Toolkit base where they differ',
+      'never claim it was delivered', 'Never end any message with a question to the owner', 'Project additions in the stored prompt override the Toolkit base where they differ',
       'Never write project memory, the binding line or project instructions', 'mcp__hearthbot__no_reply_needed']) {
       assert.ok(text.includes(required), `${kind}: ${required}`);
     }
@@ -336,7 +409,7 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
   assert.match(nudge, /Never resolve this home thread/);
   assert.match(nudge, /CONTEXT RESET DUE/);
   assert.doesNotMatch(nudge, /set_thread_resolved|Fresh session per run/);
-  const bound = tasks().render('custom', validateParams('custom', { ...PARAMS.custom, session: 'bound' }), OWN_TEXT);
+  const bound = full('custom', validateParams('custom', { ...PARAMS.custom, session: 'bound' }), OWN_TEXT);
   assert.match(bound, /Never resolve this home thread/);
   assert.doesNotMatch(bound, /set_thread_resolved/);
   // The fresh-session fallback renders as a fresh run that resolves its own thread, keeps session in
@@ -372,7 +445,7 @@ test('every Toolkit-made prompt carries the recurring-task requirements; fresh r
 test('only the project that runs the Toolkit repo watches other projects, and only reports', () => {
   const other = rendered('daily-check-in');
   assert.doesNotMatch(other, /OTHER PROJECTS:/);
-  const own = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'weijunswj/ai-agent-toolkit' }));
+  const own = full('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'weijunswj/ai-agent-toolkit' }));
   assert.match(own, /OTHER PROJECTS: this project runs the Toolkit repo/);
   for (const required of ['reusing the same list_triggers result (no extra calls)', 'Group the cloud tasks by hearth_channel_id',
     '"PROJECT TASKS MISSING: <PROJECT>=<task>[+<task>], ... | "', 'unless state.md already reported the same set',
@@ -383,7 +456,7 @@ test('only the project that runs the Toolkit repo watches other projects, and on
 
 test('the check-in carries every prefix in the fixed order and checks both Toolkit tasks; the nudge compares cheaply first', () => {
   const text = rendered('daily-check-in');
-  const order = ['CONTEXT RESET DUE', 'GUIDEBOOK MISSING or SKILL COPY STALE', 'SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PLUGIN BEHIND', 'TASK FAILING', 'PR ATTENTION'];
+  const order = ['CONTEXT RESET DUE', 'GUIDEBOOK MISSING or SKILL COPY STALE', 'SKILL UPDATE', 'BLOCK OUTDATED', 'BINDING STALE or BINDING UNKNOWN', 'TOOLKIT CHANGED', 'MEMORY FORMAT', 'TASKS OUTDATED', 'NUDGE NOT ARMED', 'PROJECT TASKS MISSING', 'PROJECT TASKS OUTDATED', 'PLUGIN BEHIND', 'TASK FAILING', 'PR ATTENTION'];
   const line = text.split('\n').find(entry => entry.startsWith('- First line:'));
   const positions = order.map(prefix => line.indexOf(prefix));
   assert.ok(positions.every((at, index) => at > -1 && (index === 0 || at > positions[index - 1])), line);
@@ -391,7 +464,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     '--check-memory', 'bound to its home thread (persist_session true), or a fresh session per run (persist_session false) only where the entry says fresh', 'CONTEXT RESET DUE, GUIDEBOOK MISSING', 'weekly-rebuild', 'unlisted', 'hearth_channel_id',
     'advice only', 'local, advice', 'Never suggest moving a local task to the cloud', '--declined-dedupe', 'overlaps',
     'remove only the ai-agent-toolkit plugin on claude.ai in a web browser', 'state done', 'older than 65 minutes', 'Never flag other memory lines',
-    'every run reaches the owner as one line', 'swaps each named Toolkit task from the template on main the same turn']) {
+    'every run reaches the owner as one line', 'so a Toolkit release alone never makes them outdated', 'The coordinator swaps each named Toolkit task in place the same turn']) {
     assert.ok(text.includes(required), required);
   }
   // The guidebook step compares the library copy with main, refreshes it only as the backstop, and names the Version for SKILL UPDATE.
@@ -407,7 +480,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.ok(text.includes(`put the owner's steps under **Plugin:** for the coordinator's plugin card: ${STEPS_TEXT} Missing account copy`));
   assert.ok(text.includes('Omit empty bullets except Guidebook, Block, Binding, Tasks, Nudge, Plugin and Run.'));
   // The check-in holds no card, so no run of it, bound or fresh, keeps its thread open for one.
-  const freshCheckIn = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], session: 'fresh' }));
+  const freshCheckIn = full('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], session: 'fresh' }));
   for (const rendered of [text, freshCheckIn]) assert.doesNotMatch(rendered, /skip the resolve in DELIVERY|posted a card/);
   // Both Toolkit tasks are bound now, so a bound check-in is never its own gap.
   assert.doesNotMatch(text, /the check-in runs a fresh session per run/);
@@ -451,7 +524,7 @@ test('every kind and session keeps separate per-run reports and stamps, with sco
   for (const [kind, slug] of Object.entries(stamps)) {
     for (const session of ['bound', 'fresh']) {
       const promptParams = validateParams(kind, { ...PARAMS[kind], session });
-      const text = tasks().render(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined);
+      const text = full(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined);
       const delivery = findBlocks(text).blocks.find(block => block.name === 'TASK-DELIVERY').body;
       const guard = text.split('\n').find(line => line.startsWith('- Read-only,'));
       const stamp = `/mnt/project-files/toolkit/task-runs/${slug}/<run UTC>.md`;
@@ -473,8 +546,7 @@ test('every kind and session keeps separate per-run reports and stamps, with sco
       assert.ok(delivery.indexOf('mcp__hearthbot__read_thread') < delivery.indexOf('Run stamp: create'));
       assert.ok(delivery.indexOf('Run stamp: create') < delivery.indexOf('Post exactly ONE message'));
       assert.doesNotMatch(delivery, /Full: [^\n]*\/latest\.md|overwrite \/mnt\/project-files\/toolkit\/task-runs\//);
-      assert.equal(tasks().check(kind, text).state, 'current');
-      assert.equal(tasks().refresh(kind, text), text, 'a refresh retains the current per-run contract');
+      assertStable(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined, 'a refresh retains the current per-run contract');
     }
   }
 });
@@ -496,10 +568,10 @@ test('all slugs hash the full identity and separate colliding paths, projects an
   ];
   const folders = rows.map(([kind, project, reportFolder, slug]) => {
     const promptParams = validateParams(kind, { ...PARAMS[kind], project, report_dir: `/mnt/project-files/${reportFolder}` });
-    const text = tasks().render(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined);
+    const text = full(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined);
     const folder = text.match(/Run stamp: create (\/mnt\/project-files\/toolkit\/task-runs\/[^/]+)\/<run UTC>\.md/)[1];
     assert.equal(folder, `/mnt/project-files/toolkit/task-runs/${slug}`);
-    assert.equal(tasks().refresh(kind, text), text, 'replacement task retains its identity');
+    assertStable(kind, promptParams, kind === 'custom' ? OWN_TEXT : undefined, 'replacement task retains its identity');
     return folder;
   });
   assert.equal(new Set(folders).size, rows.length, 'custom/custom and custom/Toolkit folders stay distinct');
@@ -513,14 +585,14 @@ test('old custom shells remain outdated advice until the owner approves that tas
   } });
   for (const session of ['bound', 'fresh']) {
     const promptParams = validateParams('custom', { ...PARAMS.custom, session });
-    const text = old.render('custom', promptParams, OWN_TEXT);
-    assert.equal(old.check('custom', text).state, 'current');
+    const text = full('custom', promptParams, OWN_TEXT, old);
     assert.equal(tasks().check('custom', text).state, 'outdated');
     assert.match(text, /Full: \/mnt\/project-files\/sweep\/latest\.md/);
     assert.doesNotMatch(text, /task-runs\/|Run stamp:|\.relayed|\.done/);
     const updated = tasks().refresh('custom', text);
     assert.equal(tasks().check('custom', updated).state, 'current');
     assert.ok(updated.includes(OWN_TEXT));
+    assert.match(tasks().expand('custom', promptParams), /task-runs\/custom-example-[0-9a-f]{10}\/<run UTC>\.md/);
   }
   const checkIn = rendered('daily-check-in');
   assert.ok(checkIn.includes('old shell: no run stamp or catch-up until the owner OKs the shell update'));
@@ -536,7 +608,7 @@ test('delivery ending matrix covers all sends in every kind and session without 
   ];
   for (const kind of Object.keys(PARAMS)) {
     for (const session of ['bound', 'fresh']) {
-      const text = tasks().render(kind, validateParams(kind, { ...PARAMS[kind], session }), kind === 'custom' ? OWN_TEXT : undefined);
+      const text = full(kind, validateParams(kind, { ...PARAMS[kind], session }), kind === 'custom' ? OWN_TEXT : undefined);
       const delivery = findBlocks(text).blocks.find(block => block.name === 'TASK-DELIVERY').body;
       const lines = delivery.split('\n');
       for (const [label, homePostSucceeded] of endings) {
@@ -578,14 +650,15 @@ test('old mutable delivery checks as outdated at the same version and refreshes 
   for (const kind of Object.keys(PARAMS)) {
     for (const session of ['bound', 'fresh']) {
       const promptParams = validateParams(kind, { ...PARAMS[kind], session });
-      const text = old.render(kind, promptParams, OWN_TEXT);
-      assert.equal(old.check(kind, text).state, 'current');
+      const text = full(kind, promptParams, OWN_TEXT, old);
       assert.equal(tasks().check(kind, text).state, 'outdated');
       const updated = tasks().refresh(kind, text);
       assert.equal(tasks().check(kind, updated).state, 'current');
       assert.ok(updated.includes(OWN_TEXT), 'owner steps survive the refresh');
-      assert.ok(updated.includes(`${promptParams.report_dir}/runs/<run UTC>.md`));
-      assert.equal(updated.includes('mcp__hearthbot__set_thread_resolved'), session === 'fresh');
+      const loaded = tasks().expand(kind, promptParams);
+      assert.ok(loaded.includes(`${promptParams.report_dir}/runs/<run UTC>.md`));
+      assert.equal(loaded.includes('mcp__hearthbot__set_thread_resolved'), session === 'fresh');
+      assert.equal(updated.includes('mcp__hearthbot__set_thread_resolved'), session === 'fresh', 'the pointer\'s load-failure ending follows the session too');
     }
   }
 });
@@ -750,7 +823,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     'Swap both from the template on main.', 'Start a new home thread for it.', 'The coordinator creates it again from main.']) assert.match(line, acts, line);
   const notPaths = [
     'Whenever the user asks for anything recurring', "**The project's own tasks**", 'Reference for the `web-controller-projects` skill',
-    'A cloud thread creates, recreates and deletes tasks', '3. Create the replacement', '4. Rewrite the `SCHEDULED TASKS:` line', '7. Age rebuild:', '**It is bound to its own home thread,**',
+    'A cloud thread creates, recreates and deletes tasks', '3. Same session as the entry', '4. Rewrite the `SCHEDULED TASKS:` line', '7. Age rebuild:', '**It is bound to its own home thread,**',
     'Every Toolkit scheduled task is bound to its own home thread (`<PROJECT>: <task name>`): start', '**Toolkit-made tasks** (the daily check-in and the hourly nudge) are rendered', 'Resolve candidates:',
     'When a recurring task replaces an older one, delete the older one',
     'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread', '2. Render the new prompt',
@@ -797,7 +870,7 @@ test('every rendered task stops first when it started outside its home thread', 
   const guard = '- First check, before anything else: if this turn has no mcp__hearthbot__ tools (listed directly or as deferred tools) or cannot read /mnt/project-files/, it started outside its home thread or project. Make no other tool call (no effort call, message, file write, resolve or retry) and skip every later step, DELIVERY included: end the turn with the single line "skipped: started outside its home thread".';
   for (const kind of Object.keys(PARAMS)) {
     for (const session of ['bound', 'fresh']) {
-      const text = tasks().render(kind, validateParams(kind, { ...PARAMS[kind], session }), kind === 'custom' ? OWN_TEXT : undefined);
+      const text = full(kind, validateParams(kind, { ...PARAMS[kind], session }), kind === 'custom' ? OWN_TEXT : undefined);
       const lines = text.split('\n');
       const heading = lines.findIndex(line => line.startsWith('RUN SETUP ('));
       assert.ok(heading > -1, `${kind} ${session}`);
@@ -819,7 +892,7 @@ for (const [variant, repo] of [['repo', 'example-owner/example-repo'], ['Toolkit
   for (const session of ['bound', 'fresh']) {
     test('plugin baseline and evidence contract: ' + variant + ', ' + session, () => {
       const promptParams = validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo, parent_issue: repo === 'none' ? 'none' : '12', session });
-      const text = tasks().render('daily-check-in', promptParams);
+      const text = full('daily-check-in', promptParams);
       const plugin = text.slice(text.indexOf('10. PLUGIN BEHIND:'), text.indexOf('11. GitHub'));
       const rows = [
         ['own session and nested timestamp', [/get_session` with no session_id and read `ccr\.created_at`, not a top-level created_at/, /never the coordinator's thread, the trigger creation time/]],
@@ -844,8 +917,7 @@ for (const [variant, repo] of [['repo', 'example-owner/example-repo'], ['Toolkit
         /baseline commit\/version and observed version \(or unverified\)/, /carry it forward while that gap remains, even on an unverified run/,
         /including a legacy "plugin behind <main version>"/, /only when this run verifies current, pinned or ahead; uncertainty never clears it/]) assert.match(state, pattern);
       assert.match(text, /Recompute the baseline in step 10 each run; an old state record is never evidence/);
-      assert.equal(tasks().check('daily-check-in', text).state, 'current');
-      assert.equal(tasks().refresh('daily-check-in', text), text, 'repeat refresh is stable');
+      assertStable('daily-check-in', promptParams, undefined, 'repeat refresh is stable');
     });
   }
 }
@@ -872,12 +944,11 @@ test('today-only plugin prompts become outdated at the same version and refresh 
   for (const repo of ['example-owner/example-repo', 'weijunswj/ai-agent-toolkit', 'none']) {
     for (const session of ['bound', 'fresh']) {
       const promptParams = validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo, parent_issue: repo === 'none' ? 'none' : '12', session });
-      const old = earlier.render('daily-check-in', promptParams).replace('- none', '- Keep this owner check.');
-      assert.equal(earlier.check('daily-check-in', old).state, 'current');
+      const old = full('daily-check-in', promptParams, undefined, earlier).replace('- none', '- Keep this owner check.');
       assert.equal(tasks().check('daily-check-in', old).state, 'outdated');
       const refreshed = tasks().refresh('daily-check-in', old, { session });
       assert.equal(tasks().check('daily-check-in', refreshed).state, 'current');
-      assert.ok(refreshed.includes('ccr.created_at'));
+      assert.ok(tasks().expand('daily-check-in', promptParams).includes('ccr.created_at'));
       assert.ok(refreshed.includes('Keep this owner check.'));
       assert.equal(refreshed.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1], old.match(/```toolkit-task-params\n([\s\S]*?)\n```/)[1]);
     }
@@ -887,7 +958,7 @@ test('today-only plugin prompts become outdated at the same version and refresh 
 test('rendered hourly nudges always reconcile owner asks and recovery, including quiet runs', () => {
   for (const repo of ['example-owner/example-repo', 'none']) {
     for (const session of ['bound', 'fresh']) {
-      const text = tasks().render('hourly-nudge', validateParams('hourly-nudge', {
+      const text = full('hourly-nudge', validateParams('hourly-nudge', {
         ...PARAMS['hourly-nudge'], repo, session
       }));
       for (const phrase of ['plus steps 2a, 2b, 4, 5 and 7 to 11 (and 5b when it applies)',
@@ -969,8 +1040,8 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
     assert.doesNotMatch(text, /fires it once|Fire it once|Test one run now|caught up by firing it/, name);
   }
   assert.ok(device.includes('- **Rotate long Remote Control lanes too.**') && device.includes('you end its session with `stop_remote_control` once the handoff is read back'), 'Remote Control lanes rotate too');
-  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
-  const freshAge = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
+  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PROJECT TASKS OUTDATED, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
+  const freshAge = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
   assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
   const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
   assert.match(skill, /\*\*Every task run reaches the project chat\.\*\*[^\n]*a prefixed line is work, never `no_reply_needed`\./);
@@ -986,7 +1057,7 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   // An open PR that needs a step gets a prefix, review-notification PRs included.
   assert.match(text, /An open PR with a failing check, a ready PR missing its UAT verdict, or an open PR with no update for 3 days \(review-notification PRs included\), unless the PR or its task records a wait with its blocker and the date it is due: start the first line with "PR ATTENTION: <n> \| "/);
   // A missing set reported before is not silenced forever: after 3 days it returns for the owner.
-  const own = tasks().render('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'weijunswj/ai-agent-toolkit' }));
+  const own = full('daily-check-in', validateParams('daily-check-in', { ...PARAMS['daily-check-in'], repo: 'weijunswj/ai-agent-toolkit' }));
   assert.match(own, /with the date it was first reported; once that date is 3 or more days old, start the first line with it again, marked "3 days"/);
   assert.match(own, /PROJECT TASKS MISSING set reported with the date it was first reported/);
   const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
@@ -1017,7 +1088,7 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
 // and flags any open PR with no owner or live next step; the coordinator routes it the same turn.
 test('periodic tasks give every open PR an owner and a next step, bot and workflow PRs included', () => {
   for (const session of ['bound', 'fresh']) {
-    const text = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
+    const text = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session }));
     const step = text.split('\n').find(line => line.startsWith('5. PRs'));
     assert.ok(step, `${session}: step 5`);
     for (const phrase of ['runs every time, even when step 1 found no change', 'a bot or workflow PR wakes no thread',
@@ -1025,7 +1096,7 @@ test('periodic tasks give every open PR an owner and a next step, bot and workfl
       'its owner (the thread that owns or watches it', 'or the merge train holding it', 'its live next step',
       'bot and workflow PRs included', '`PR UNOWNED`', '"PR UNOWNED: <n> | "']) assert.ok(step.includes(phrase), `${session}: ${phrase}`);
     assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11'), `${session}: quiet runs keep step 5`);
-    const none = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
+    const none = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo: 'none', session }));
     assert.ok(none.includes('5. PRs: none (no repo).') && !none.includes('every open PR on'), `${session}: no-repo nudge has no PR sweep`);
   }
   const checkIn = rendered('daily-check-in').split('\n').find(line => line.startsWith('11. GitHub'));
@@ -1042,7 +1113,7 @@ test('periodic tasks give every open PR an owner and a next step, bot and workfl
 test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pending, on every run', () => {
   for (const repo of ['example-owner/example-repo', 'none']) {
     for (const session of ['bound', 'fresh']) {
-      const text = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo, session }));
+      const text = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo, session }));
       const step = text.split('\n').find(line => line.startsWith('2b. CI waits'));
       assert.ok(step, `${repo}/${session}: step 2b`);
       for (const phrase of ['runs every time, even when step 1 found no change', 'page it on the no-change path too',

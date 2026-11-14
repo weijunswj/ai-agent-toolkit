@@ -4,10 +4,15 @@
 // Renders and checks the scheduled task prompts a Claude Projects coordinator runs (the daily
 // check-in, the hourly nudge and the shell around a project's own tasks), and checks the two
 // memory lines Toolkit defines. Read-only: it prints to stdout and never writes a prompt, a task
-// or memory. A prompt has a Toolkit base (managed blocks) and a project layer (the params block
-// and every line outside the blocks); a refresh replaces only the blocks.
+// or memory. A stored prompt is a pointer: one Toolkit block (TASK-POINTER), the params block and
+// the project layer (every line outside the block). Each run loads its instructions with --expand
+// from Toolkit main, so a release reaches every task without touching its stored prompt. The
+// pointer is checked by its text, not its version stamp, so it only goes out of date when its own
+// text changes. A prompt from before pointers (the full instructions as blocks) checks outdated,
+// and a refresh turns it into a pointer.
 //
-//   --render <kind> --params <file> [--project-text <file>]   the full prompt
+//   --render <kind> --params <file> [--project-text <file>]   the stored prompt (the pointer)
+//   --expand <kind> --params <file>                            this run's Toolkit instructions
 //   --name <kind> --params <file>                              the task name
 //   --check <kind> <prompt-file>        current | outdated | edited | missing | misplaced | malformed
 //   --refresh <kind> <prompt-file> [--params <file>] [--project-text <file>] [--session <bound|fresh>]
@@ -20,7 +25,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { renderBlock, findBlocks, blockState, normalizeBody } = require('./toolkit-managed-block.cjs');
+const { FORMAT, bodyDigest, renderBlock, findBlocks, normalizeBody } = require('./toolkit-managed-block.cjs');
 
 const TASKS_DIR = 'repo/contracts/claude-projects/web-controller-projects/tasks';
 const VERSION_FILE = 'repo/contracts/toolkit-local-bridge/version.json';
@@ -38,7 +43,8 @@ const SHELL = Object.freeze({
   setup: { name: 'TASK-RUN-SETUP', file: 'run-setup.md' },
   delivery: { name: 'TASK-DELIVERY', file: 'delivery.md' }
 });
-const OWN_NAMES = new Set([SHELL.setup.name, SHELL.delivery.name, ...Object.values(KINDS).filter(k => k.checks).map(k => k.checks.name)]);
+const POINTER = Object.freeze({ name: 'TASK-POINTER', file: 'pointer.md' });
+const CUSTOM_CHECKS = "CHECKS\n- This task's own steps are the project additions in its stored prompt. Run them in order.";
 const PROJECT_HEADING = 'Project additions (kept on every refresh; they override the Toolkit base where they differ):';
 const KEPT_LABEL = '(kept from an edit inside the block)';
 
@@ -126,6 +132,7 @@ function fill(template, kind, params) {
   const session = params.session || KINDS[kind].session;
   const values = {
     ...params,
+    kind,
     task_name: KINDS[kind].title ? taskName(kind, params) : 'this task',
     task_slug: taskSlug(kind, params),
     checkin_name: `${params.project}: ${KINDS['daily-check-in'].title}`,
@@ -217,24 +224,34 @@ class ProjectsTasks {
     return body;
   }
 
-  // The managed blocks this kind's prompt carries, in prompt order.
-  expectedBlocks(kind, params) {
+  // The instructions each run loads (--expand), in order: run setup, the kind's checks, delivery.
+  instructionBlocks(kind, params) {
     const { checks } = kindOf(kind);
     const version = this.version();
     const parts = [SHELL.setup, ...(checks ? [checks] : []), SHELL.delivery];
     return parts.map(part => ({ source: SOURCE, name: part.name, version, body: fill(this.template(part.file), kind, params) }));
   }
 
-  // fenceText keeps a live prompt's own params block, byte for byte, on a refresh.
+  pointerBlock(kind, params) {
+    return { source: SOURCE, name: POINTER.name, version: this.version(), body: fill(this.template(POINTER.file), kind, params) };
+  }
+
+  // The stored prompt. fenceText keeps a live prompt's own params block, byte for byte, on a refresh.
   render(kind, params, projectText, fenceText = paramsFence(params)) {
-    const [setup, ...rest] = this.expectedBlocks(kind, params).map(renderBlock);
-    const delivery = rest.pop();
     const project = normalizeProjectText(kind, projectText);
-    return [setup, '', fenceText, '', ...rest.flatMap(block => [block, '']), project, '', delivery, ''].join('\n');
+    return [renderBlock(this.pointerBlock(kind, params)), '', fenceText, '', project, ''].join('\n');
+  }
+
+  // What a run follows: plain text, no markers, read fresh from this checkout every run.
+  expand(kind, params) {
+    const blocks = this.instructionBlocks(kind, params).map(block => normalizeBody(block.body).replace(/\n+$/, ''));
+    if (kind === 'custom') blocks.splice(1, 0, CUSTOM_CHECKS);
+    const label = KINDS[kind].title ? taskName(kind, params) : 'a project task';
+    return [`TOOLKIT TASK INSTRUCTIONS (${label}, toolkit ${this.version()})`, ...blocks].join('\n\n') + '\n';
   }
 
   check(kind, text) {
-    return checkTask(kind, text, params => this.expectedBlocks(kind, params));
+    return checkTask(kind, text, params => ({ pointer: this.pointerBlock(kind, params), legacy: this.instructionBlocks(kind, params) }));
   }
 
   refresh(kind, text, { params: override, projectText, session } = {}) {
@@ -250,13 +267,13 @@ class ProjectsTasks {
     const lf = lfText(text);
     const { params: stored, legacy } = storedParams(kind, lf);
     const params = withSession(stored);
-    const expected = this.expectedBlocks(kind, params);
+    const expected = [this.pointerBlock(kind, params), ...this.instructionBlocks(kind, params)];
     const { blocks } = findBlocks(lf);
     const own = blocks.filter(block => block.source === SOURCE);
     const kept = [];
     for (const block of own) {
+      if (!tampered(block)) continue;
       const want = expected.find(entry => entry.name === block.name);
-      if (blockState(block, want) !== 'tampered') continue;
       const base = new Set(normalizeBody(want.body).split('\n').map(line => line.trim()));
       for (const line of normalizeBody(block.body).split('\n')) if (line.trim() && !base.has(line.trim())) kept.push(line);
     }
@@ -267,6 +284,11 @@ class ProjectsTasks {
     const fenceText = params.session === stored.session && !legacy ? lf.split('\n').slice(fence.startLine, fence.endLine + 1).join('\n') : paramsFence(params);
     return this.render(kind, params, project, fenceText);
   }
+}
+
+// A v2 block whose body no longer matches its own digest was edited by hand.
+function tampered(block) {
+  return block.format >= 2 && block.digest !== bodyDigest(block.body);
 }
 
 function normalizeProjectText(kind, projectText) {
@@ -296,10 +318,9 @@ function projectSegments(lf, own, fence) {
   return segments.map(segment => segment.join('\n').replace(/^\n+|\n+$/g, '')).filter(segment => segment.trim());
 }
 
-const RANK = { current: 0, misplaced: 1, outdated: 2, edited: 3 };
-
 // States, worst first: malformed, edited, outdated, misplaced, current. missing = no Toolkit
-// blocks at all (a hand-written prompt).
+// blocks at all (a hand-written prompt). A pointer is current while its text matches main's,
+// whatever release stamped it; a prompt from before pointers is outdated (edited when touched).
 function checkTask(kind, text, expectedFor) {
   kindOf(kind);
   const lf = lfText(text);
@@ -315,28 +336,21 @@ function checkTask(kind, text, expectedFor) {
     if (error instanceof TaskInputError) return { state: 'malformed', exitCode: 2 };
     throw error;
   }
-  const names = new Set(expected.map(block => block.name));
-  if (own.some(block => !names.has(block.name) || !OWN_NAMES.has(block.name))) return { state: 'malformed', exitCode: 2 };
-  let state = 'current';
-  for (const want of expected) {
-    const found = own.find(block => block.name === want.name);
-    const blockResult = { absent: 'edited', tampered: 'edited', stale: 'outdated', current: 'current' }[blockState(found, want)];
-    if (RANK[blockResult] > RANK[state]) state = blockResult;
-  }
-  if (state === 'current' && !inOrder(lf, own, fence, expected)) state = 'misplaced';
+  const legacyNames = new Set(expected.legacy.map(block => block.name));
+  const pointers = own.filter(block => block.name === POINTER.name);
+  const legacy = own.filter(block => legacyNames.has(block.name));
+  if (pointers.length + legacy.length !== own.length || pointers.length > 1) return { state: 'malformed', exitCode: 2 };
+  let state;
+  if (own.some(tampered)) state = 'edited';
+  else if (legacy.length || pointers[0].format !== FORMAT || normalizeBody(pointers[0].body) !== normalizeBody(expected.pointer.body)) state = 'outdated';
+  else state = inOrder(lf, pointers[0], fence) ? 'current' : 'misplaced';
   return { state, exitCode: state === 'current' ? 0 : 1 };
 }
 
-// Run setup first (only blank lines before it), then the params block, the task's checks,
-// and delivery last (only blank lines after it).
-function inOrder(lf, own, fence, expected) {
+// The pointer first (only blank lines before it), then the params block.
+function inOrder(lf, pointer, fence) {
   const lineOf = offset => lf.slice(0, offset).split('\n').length - 1;
-  const at = name => own.find(block => block.name === name);
-  const setup = at(SHELL.setup.name);
-  const delivery = at(SHELL.delivery.name);
-  if (lf.slice(0, setup.start).trim() || lf.slice(delivery.end).trim()) return false;
-  const order = [lineOf(setup.start), fence.startLine, ...expected.slice(1, -1).map(block => lineOf(at(block.name).start)), lineOf(delivery.start)];
-  return order.every((line, index) => index === 0 || line > order[index - 1]);
+  return !lf.slice(0, pointer.start).trim() && fence.startLine > lineOf(pointer.end);
 }
 
 // The two memory lines Toolkit defines. Nothing else in memory is read.
@@ -381,7 +395,7 @@ function parseArgs(args) {
     return positional;
   };
   const kindArg = value => { kindOf(value); return value; };
-  if (mode === '--render' || mode === '--name') {
+  if (mode === '--render' || mode === '--name' || mode === '--expand') {
     const positional = take(mode === '--render' ? ['--params', '--project-text'] : ['--params']);
     if (positional.length !== 1 || !options['--params']) throw new TaskInputError('TASK_ARGUMENTS');
     return { mode: mode.slice(2), kind: kindArg(positional[0]), params: options['--params'], projectText: options['--project-text'] };
@@ -401,10 +415,12 @@ function parseArgs(args) {
   throw new TaskInputError('TASK_ARGUMENTS');
 }
 
-function readParamsFile(kind, file) {
+// A run's params file is copied from its stored prompt, which may predate tiers: --expand migrates
+// it the way a refresh would, so an old pointer still loads.
+function readParamsFile(kind, file, { migrate = false } = {}) {
   let raw;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { throw new TaskInputError('TASK_PARAMS'); }
-  return validateParams(kind, raw);
+  return validateParams(kind, migrate ? migrateLegacy(raw).raw : raw);
 }
 
 function main(args = process.argv.slice(2)) {
@@ -415,6 +431,7 @@ function main(args = process.argv.slice(2)) {
     let output;
     let exitCode = 0;
     if (options.mode === 'render') output = tasks.render(options.kind, readParamsFile(options.kind, options.params), read(options.projectText));
+    else if (options.mode === 'expand') output = tasks.expand(options.kind, readParamsFile(options.kind, options.params, { migrate: true }));
     else if (options.mode === 'name') output = `${taskName(options.kind, readParamsFile(options.kind, options.params))}\n`;
     else if (options.mode === 'check') {
       const result = tasks.check(options.kind, read(options.file));
