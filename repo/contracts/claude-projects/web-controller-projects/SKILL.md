@@ -124,7 +124,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - **Listing tasks:** when the user asks to list their scheduled tasks, list the project's own (**Listing every task** in `reference/recurring-tasks.md`). Toolkit runs no tasks on a computer.
 - **Moving a task or catching up:** a move to a time already passed today skips today's run unless it already ran today, so catch it up the same turn by messaging its home thread to run its prompt; never fire_trigger a bound task from another thread (it runs with no project tools, files or memory). Never catch up a task whose entry says `stopped by owner`. Details in `reference/recurring-tasks.md`.
 - On every coordinator turn, check that each recurring task is still armed with a future next run; re-arm a missed one before ending the turn, unless its entry says `stopped by owner`.
-- When a skill update changes what the daily check-in or hourly nudge does, update those tasks' prompts in the same turn (the swap above) and confirm each next run is armed, skipping a task whose entry says `stopped by owner`.
+- The check-in and nudge load their instructions from `main` each run, so a skill update needs no swap. Swap only on TASKS OUTDATED, in place, never one marked `stopped by owner`.
 - **Every task run reaches the project chat.** Skip tasks marked `stopped by owner`; relay and finish pending runs using `.relayed` and `.done` (**Task run relay** in `reference/recurring-tasks.md`); a prefixed line is work, never `no_reply_needed`. A run outranks all in-flight work but answering the owner (**Task runs come first**).
 
 
