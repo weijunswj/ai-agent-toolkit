@@ -20,9 +20,9 @@ function gateRun(environment = process.env) { return LAUNCHER_MARKERS.some(name 
 function governed(input, environment = process.env) { return governance(input, environment).governed; }
 
 // Governance: the same script is Codex's UserPromptSubmit hook, so it shares the helper
-// hook's installed Windows launcher. In an undecided repository every prompt is held and every
-// state-changing tool refused (toolkit-governance-gate.cjs); everywhere, an agent may not answer the
-// governance question for the user. The gate loads inside the guarded path like the adapter.
+// hook's installed Windows launcher. In an undecided repository the governance question is attached
+// once per session and nothing is held (toolkit-governance-gate.cjs); everywhere, an agent may not
+// answer the governance question for the user. The gate loads inside the guarded path like the adapter.
 const gate = () => require('./toolkit-governance-gate.cjs');
 // The gate's never-act line, spelled out here because the gate module may be what failed to load.
 const NEVER_OWNER = 'Never act as the user: do not answer the governance question yourself, start a session or script to answer it, or click a confirmation through a UI or computer use.';
@@ -107,14 +107,14 @@ function decidePrompt(input, environment = process.env) {
   let approvalNote = '';
   try {
     const count = require('./toolkit-merge-hold.cjs').recordPrompt(input || {}, { environment });
-    if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s). Any governance hold still applies.`;
+    if (count) approvalNote = `Toolkit recorded ${count} explicit merge approval(s).`;
   } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
   const decision = new (gate().PromptHold)({ environment }).decide({ cwd: input?.cwd, prompt: input?.prompt, sessionId: gate().sessionIdOf(input) });
   if (decision.action === 'block') return { block: [decision.reason, approvalNote].filter(Boolean).join('\n') };
-  // A typed Toolkit command gets one advisory line; a failure adds nothing, and a turn that carries
-  // governance context gets no line.
+  // A typed Toolkit command gets one advisory line; a failure adds nothing, and the turn that
+  // carries the governance question gets no line.
   let typed = '';
-  if (!decision.context) try { typed = require('./toolkit-commands.cjs').phraseContext(gate().ownerReply(input?.prompt)); } catch { typed = ''; }
+  if (!decision.question) try { typed = require('./toolkit-commands.cjs').phraseContext(gate().ownerReply(input?.prompt)); } catch { typed = ''; }
   const context = [decision.context, approvalNote, typed].filter(Boolean).join('\n');
   return context ? { context } : {};
 }
