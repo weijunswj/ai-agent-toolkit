@@ -654,3 +654,54 @@ test('an open native child is still a proven refusal when the timeline cannot be
   const result = new IssueClosureGuard({ transport: github, repository: repo, uatState: body => uatVerdict(body).state }).checkTexts(['Closes #1']);
   assert.equal(result.status, 'refused', 'a cloud hook allows unknown, so a later failed read must not hide the open child');
 });
+
+// Shapes that hid a guarded gh write from the reader: each must refuse by name or reach the guard,
+// which refuses the close; the controls keep their earlier decision.
+test('hash values, data-owner groups, cmd scripts, runners and argument forms cannot hide a guarded write', () => {
+  const guard = { assertClosable() { return { status: 'refused', reason: 'open native descendants' }; }, checkTexts() { return { status: 'allowed' }; }, checkEdit() { return { status: 'allowed' }; } };
+  const close = `gh issue close 1 -R ${repo}`;
+  const all = ['PowerShell', 'Bash', 'exec_command'];
+  const powershell = ['PowerShell', 'exec_command'];
+  const hostile = [
+    [`$h=@{a=${close}}`, powershell], [`@{a=${close}}`, powershell], [`[pscustomobject]@{a=${close}}`, powershell],
+    [`$h=@{\n a=1\n b=${close}\n}`, powershell], [`Select-Object @{n='x';e=${close}}`, powershell],
+    [`Write-Host (Invoke-Command {${close}})`, all], [`cat (Invoke-Command {${close}})`, all],
+    [`Write-Output @{a=$(${close})}`, all], [`echo @{a=$(${close})}`, all],
+    [`cmd /c "type <# & ${close} & rem #>"`, all], [`cmd /c "type x & # & ${close}"`, all],
+    [`cmd /c "echo 'x & ${close} & rem '"`, all], [`cmd /c '"a\\" & ${close} & rem "'`, all], [`cmd /c "echo {x & ${close} & rem }"`, all],
+    [`iex @'\n${close}\n'@`, powershell], [`iex @"\n${close}\n"@`, powershell], [`pwsh -Command @'\n${close}\n'@`, powershell],
+    [`iex('${close}')`, powershell], [`Invoke-Expression ('${close}')`, powershell],
+    [`sh -c '"$0" "$@"' ${close}`, all], [`bash -c '"$@"' x ${close}`, all],
+    [`gh ('issue','close','1')`, powershell], [`gh issue ('close') 1 -R ${repo}`, powershell],
+    [`gh api ('repos/${repo}/issues/1') -X PATCH -f state=closed`, powershell],
+    ['gh api @params', powershell], ['gh api $e -X PATCH @f', powershell], ['gh pr edit 7 --add-label x @rest', powershell],
+    [`@{a=iex '${close}'}`, powershell], [`@{a=Invoke-Expression '${close}'}`, powershell], [`@{a=pwsh -c '${close}'}`, powershell],
+    [`@{a=bash -c '${close}'}`, powershell], [`@{a=cmd /c "${close}"}`, powershell],
+    [`@{a=Start-Process gh -ArgumentList 'issue close 1 -R ${repo}'}`, powershell],
+    [`sh -c '$1' x '${close}'`, all], [`sh -c "$1" x '${close}'`, ['PowerShell']], [`sh -c 'eval "$1"' x '${close}'`, all],
+    [`Write-Host {${close}}.Invoke()`, powershell], [`cat {${close}}.Invoke()`, powershell],
+    ['cmd /c "echo `" & ' + close + ' & rem `""', ['PowerShell']],
+    [`iex ('gh issue' + ' close 1 -R ${repo}')`, powershell], [`iex ('gh {0} close 1 -R ${repo}' -f 'issue')`, powershell],
+    [`bash -c '$@' x gh 'issue close 1 -R ${repo}'`, all], [`sh -c '$1 $2' x gh 'issue close 1 -R ${repo}'`, all],
+    [`sh -c '"$1" $2' x gh 'issue close 1 -R ${repo}'`, all],
+    [`Write-Output {${close}} | % Invoke`, powershell], [`echo {${close}} | ForEach-Object { & $_ }`, powershell],
+    [`iex ([string]::Concat('gh issue',' close 1 -R ${repo}'))`, powershell], [`iex ('gh issue','close 1 -R ${repo}' -join ' ')`, powershell],
+    [`Write-Host {${close}}?.Invoke()`, powershell],
+  ];
+  for (const [command, tools] of hostile) for (const tool_name of tools) {
+    const result = adapter.issueClosureDecision({ tool_name, tool_input: { command } }, { guard });
+    assert.ok(result?.deny, `${tool_name}: ${command}`);
+    assert.doesNotMatch(result.deny, /retry when GitHub is readable/, `${tool_name}: ${command}`);
+  }
+  const controls = [
+    [`Write-Host 'gh issue close 1'`, all], [`Write-Output @{a='gh issue close 1'}`, all], ['gh api $url', all],
+    [`gh pr create -R ${repo} --title T --body 'Refs #1' --assignee @me`, all], [`gh pr edit 7 -R ${repo} --add-reviewer @me`, all],
+    ['a=gh issue close 1', ['Bash']], ['@{a=Write-Host x}', powershell], ['$h=@{a=1}', powershell], [`sh -c 'echo "$1"' x 'gh pr view 7'`, all],
+    [`$p=@{a=1}; Invoke-RestMethod @p`, powershell], ['GH_REPO=o/r gh pr view 7', all], ['echo {gh issue close 1}.txt', ['Bash']], ['Write-Host {gh issue close 1} | Out-Null', powershell],
+    [`bash -c '$@' x gh 'pr view 7'`, all], [`iex "Write-Host ('a' + 'b')"`, powershell], [`<# gh issue close 1 #> gh pr view 7`, powershell], ['cmd /c "echo gh issue close 1"', all],
+    [`query='query { a }'; gh api graphql -f query="$query"; gh api graphql -f query="$query"`, all],
+    [`query='query { a }'; gh api graphql -F query="$query"; gh api graphql --raw-field query="$query"`, all],
+  ];
+  for (const [command, tools] of controls) for (const tool_name of tools)
+    assert.equal(adapter.issueClosureDecision({ tool_name, tool_input: { command } }, { guard }), null, `${tool_name}: ${command}`);
+});

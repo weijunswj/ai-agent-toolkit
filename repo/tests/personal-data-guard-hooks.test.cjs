@@ -275,19 +275,153 @@ test('installer --uninstall: removes the guard hooks, puts the earlier hook back
   assert.equal(repo.installer(['--uninstall', '--check']).status, 2);
 });
 
-test('installer: refuses the Toolkit repository itself, and --check there points at --uninstall for left-over hooks', (t) => {
+const GUARD_SOURCE = path.resolve(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'personal-data-guard.cjs');
+const IN_REPO_GUARD = 'skills/secure-ci-cd/scripts/personal-data-guard.cjs';
+
+const CONFORMANCE_MARKER = 'repo/scripts/toolkit-governance-conformance.cjs';
+
+// A Toolkit-shaped checkout: the real guard source at its in-repo path, the second Toolkit marker file,
+// the config, no vendored copy.
+function toolkitRepo(t) {
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n', [IN_REPO_GUARD]: fs.readFileSync(GUARD_SOURCE, 'utf8'), [CONFORMANCE_MARKER]: '// marker\n' });
+  return repo;
+}
+
+test('installer in a Toolkit checkout: hooks run the in-repo guard, with no copy and no workflow', (t) => {
+  const repo = toolkitRepo(t);
+  const result = repo.installer(['--workflow']);
+  assert.equal(result.status, 0, result.all);
+  assert.match(result.all, /Guard copy skipped: .*skills\/secure-ci-cd\/scripts\/personal-data-guard\.cjs/);
+  assert.match(result.all, /CI workflow skipped/);
+  assert.equal(fs.existsSync(path.join(repo.root, '.github', 'scripts')), false, 'no vendored copy');
+  assert.equal(fs.existsSync(path.join(repo.root, '.github', 'workflows')), false, 'no workflow');
+  assert.equal(repo.installer(['--check']).status, 0);
+
+  const value = markerEmail();
+  const before = head(repo);
+  repo.write('contact.txt', `${value}\n`);
+  repo.git(['add', 'contact.txt']);
+  const blocked = commitThroughHooks(repo, ['-m', 'add contact']);
+  assert.notEqual(blocked.status, 0, 'the in-repo guard blocks a staged hit');
+  assert.match(blocked.stderr, /contact\.txt:1:1 {2}email {2}PDG-EMAIL/);
+  assertNoEcho(assert, `${blocked.stdout}${blocked.stderr}`, value, 'pre-commit hook');
+  assert.equal(head(repo), before);
+  repo.git(['reset', '-q', 'contact.txt']);
+  fs.rmSync(path.join(repo.root, 'contact.txt'));
+  repo.write('notes.txt', 'clean\n');
+  repo.git(['add', 'notes.txt']);
+  const clean = commitThroughHooks(repo, ['-m', 'Add notes']);
+  assert.equal(clean.status, 0, clean.stderr);
+
+  const remote = new TestRepo(t, { config: null, bare: true });
+  repo.git(['remote', 'add', 'origin', remote.root]);
+  repo.git(['push', '-q', 'origin', 'main']);
+  repo.commit('contact list', { 'list.txt': `${value}\n` });
+  const push = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.notEqual(push.status, 0, 'pre-push runs the in-repo guard');
+  assert.match(push.stderr, /commit [0-9a-f]{12} list\.txt:1:1 {2}email/);
+});
+
+test('hooks: with no guard at the vendored or the in-repo path, commits are still blocked', (t) => {
   const repo = new TestRepo(t);
   repo.commit('base', { 'README.md': 'base\n' });
-  assert.equal(repo.installer([]).status, 0, 'an earlier install, before the refusal');
-  repo.write('skills/secure-ci-cd/scripts/personal-data-guard.cjs', '// the guard source\n');
-  let result = repo.installer([]);
-  assert.equal(result.status, 2);
-  assert.match(result.all, /is the Toolkit's own repository.*run the installer with --uninstall.*Nothing was installed/);
-  result = repo.installer(['--check']);
+  assert.equal(repo.installer([]).status, 0);
+  fs.rmSync(path.join(repo.root, '.github', 'scripts', 'personal-data-guard.cjs'));
+  repo.write('notes.txt', 'clean\n');
+  repo.git(['add', 'notes.txt']);
+  const commit = commitThroughHooks(repo, ['-m', 'Add notes']);
+  assert.notEqual(commit.status, 0, 'a missing guard blocks');
+  assert.match(commit.stderr, /neither \.github\/scripts\/personal-data-guard\.cjs nor skills\/secure-ci-cd\/scripts\/personal-data-guard\.cjs was found; blocked/);
+});
+
+test('installer in a Toolkit checkout: an older hook is drift, and a rerun repairs it', (t) => {
+  const repo = toolkitRepo(t);
+  const hooks = path.join(repo.root, '.git', 'hooks');
+  // The hook text from before the in-repo fallback: it only knew the vendored path.
+  for (const name of installer.HOOKS) {
+    const old = installer.hookText(name).replace(/^if \[ ! -f "\$guard" \]; then guard=.*\n/m, '');
+    assert.notEqual(old, installer.hookText(name));
+    fs.writeFileSync(path.join(hooks, name), old, { mode: 0o755 });
+  }
+  repo.write('notes.txt', 'clean\n');
+  repo.git(['add', 'notes.txt']);
+  assert.notEqual(commitThroughHooks(repo, ['-m', 'Add notes']).status, 0, 'the old hook blocks: it cannot find the guard');
+  let result = repo.installer(['--check']);
   assert.equal(result.status, 1);
-  assert.match(result.all, /guard hooks are still in this clone \(pre-commit, commit-msg, pre-push\); run the installer with --uninstall/);
+  assert.match(result.all, /Drift: hook pre-commit: outdated/);
+  result = repo.installer([]);
+  assert.equal(result.status, 0, result.all);
+  for (const name of installer.HOOKS) assert.equal(fs.readFileSync(path.join(hooks, name), 'utf8'), installer.hookText(name));
+  assert.equal(repo.installer(['--check']).status, 0);
+  const commit = commitThroughHooks(repo, ['-m', 'Add notes']);
+  assert.equal(commit.status, 0, commit.stderr);
+  repo.write('contact.txt', `${pii.email()}\n`);
+  repo.git(['add', 'contact.txt']);
+  assert.notEqual(commitThroughHooks(repo, ['-m', 'add contact']).status, 0, 'the repaired hook runs the real guard');
+});
+
+test('pre-push in a Toolkit checkout: the plain-text check runs from its in-repo source too', (t) => {
+  const repo = toolkitRepo(t);
+  assert.equal(repo.installer([]).status, 0);
+  const plainInstaller = path.resolve(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'install-plain-text-check.cjs');
+  const installed = require('node:child_process').spawnSync(process.execPath, [plainInstaller, '--repo', repo.root], { cwd: repo.root, env: repo.env, encoding: 'utf8', windowsHide: true });
+  assert.equal(installed.status, 0, `${installed.stdout}${installed.stderr}`);
+  // The Toolkit keeps the check source in place of a vendored copy, like the guard.
+  fs.rmSync(path.join(repo.root, '.github', 'scripts'), { recursive: true });
+  repo.write('skills/secure-ci-cd/scripts/plain-text-check.cjs', fs.readFileSync(path.resolve(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'plain-text-check.cjs'), 'utf8'));
+  repo.git(['add', '-A']);
+  repo.git(['commit', '-q', '--no-verify', '-m', 'plain-text check']);
+  const remote = new TestRepo(t, { config: null, bare: true });
+  repo.git(['remote', 'add', 'origin', remote.root]);
+  repo.git(['push', '-q', '-u', 'origin', 'main']);
+  // Built from pieces so this file carries no reference itself.
+  repo.commit('guide', { 'docs/guide.md': `See ${['#', '42'].join('')} for details.\n` });
+  const push = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.notEqual(push.status, 0, 'pre-push runs the in-repo plain-text check');
+  assert.match(push.stderr, /docs\/guide\.md:1: number-reference/);
+  repo.commit('plain guide', { 'docs/guide.md': 'See the install steps for details.\n' });
+  const clean = repo.git(['push', '-q', 'origin', 'main'], { allowFailure: true });
+  assert.equal(clean.status, 0, clean.stderr);
+});
+
+test('installer --check in a Toolkit checkout: no guard hooks is not drift, and --uninstall still removes them', (t) => {
+  const repo = toolkitRepo(t);
+  let result = repo.installer(['--check']);
+  assert.equal(result.status, 0, result.all);
+  assert.match(result.all, /no guard hooks are installed in it/);
+  assert.equal(repo.installer([]).status, 0);
   assert.equal(repo.installer(['--uninstall']).status, 0);
   result = repo.installer(['--check']);
   assert.equal(result.status, 0, result.all);
   assert.match(result.all, /no guard hooks are installed in it/);
+});
+
+test('installer in a Toolkit checkout: a leftover copy at .github/scripts shadows the in-repo guard, so it is drift and a warning', (t) => {
+  const repo = toolkitRepo(t);
+  assert.equal(repo.installer([]).status, 0);
+  // A stub that passes everything, as a hand copy left behind could.
+  repo.write('.github/scripts/personal-data-guard.cjs', '#!/usr/bin/env node\nprocess.exit(0);\n');
+  const result = repo.installer([]);
+  assert.equal(result.status, 0, result.all);
+  assert.match(result.all, /Warning: \.github\/scripts\/personal-data-guard\.cjs is in this Toolkit checkout, so the hooks run it instead of the in-repo guard; delete it/);
+  let check = repo.installer(['--check']);
+  assert.equal(check.status, 1, check.all);
+  assert.match(check.all, /Drift: \.github\/scripts\/personal-data-guard\.cjs is in this Toolkit checkout/);
+  assert.equal(repo.installer(['--uninstall']).status, 0);
+  check = repo.installer(['--check']);
+  assert.equal(check.status, 1, 'the copy is drift with no hooks installed too');
+  fs.rmSync(path.join(repo.root, '.github', 'scripts'), { recursive: true });
+  assert.equal(repo.installer(['--check']).status, 0);
+});
+
+test('installer: the guard source alone does not make a repository the Toolkit, so it gets the copy and workflow', (t) => {
+  const repo = new TestRepo(t);
+  repo.commit('base', { 'README.md': 'base\n', [IN_REPO_GUARD]: fs.readFileSync(GUARD_SOURCE, 'utf8') });
+  const result = repo.installer(['--workflow']);
+  assert.equal(result.status, 0, result.all);
+  assert.match(result.all, /Guard copied: /);
+  assert.match(result.all, /CI workflow added: /);
+  assert.doesNotMatch(result.all, /Toolkit's own/);
+  assert.equal(fs.existsSync(path.join(repo.root, '.github', 'scripts', 'personal-data-guard.cjs')), true);
 });

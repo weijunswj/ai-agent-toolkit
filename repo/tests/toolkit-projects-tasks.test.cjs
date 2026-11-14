@@ -280,13 +280,15 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   assert.match(checkIn, /each model or effort gap reported or still open \(task, served, wanted\)/);
   assert.match(checkIn, /listed under \*\*Tasks:\*\* as "effort kept from before tiers: confirm or lower"/);
   assert.ok(checkIn.includes(`reads "${LEGACY_RAISE}"`), 'the check-in names the exact migration reason');
-  assert.match(nudge0(), /the earliest future time an open post reply thread without an unanswered owner question or decision reaches 6 hours with no new message; this run's next scheduled time while a QUIET-6H candidate listed by this run is still unresolved/);
-  // The nudge closes quiet chat reply threads and lists threads due for rotation.
+  // The nudge never resolves a coordinator post or its reply thread (no session of its own: resolving
+  // it hides the chat message), and lists threads due for rotation.
   const nudge = fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
-  assert.match(nudge, /reason QUIET-6H, unresolved post reply threads with no new message for 6 hours or more/);
+  assert.doesNotMatch(nudge, /QUIET-6H|6 hours with no new message/);
+  assert.match(nudge, /Never list a post or its reply thread as a resolve candidate: it has no Claude session of its own, and resolving it hides the chat message\./);
+  assert.match(nudge, /Never list a task home thread, or a thread rooted in a coordinator project-chat post/);
+  assert.match(nudge, /Backlog sweep \(every run\): page list_threads for the states blocked, review_ready and done, with each thread's pull requests/);
+  assert.match(nudge, /A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done\./);
   assert.match(nudge, /Rotate: long-lived non-gate worker threads \(integrator, review runner, record keeper; never gate sessions/);
-  assert.match(nudge, /the QUIET-6H due time in the state file has not passed/);
-  assert.match(nudge, /no answer; never a task home thread\./);
   assert.match(nudge, /\*\*Rotate:\*\*/);
 });
 
@@ -432,7 +434,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.match(nudge, /Each run posts one line in its home thread \(DELIVERY\), and the coordinator relays it to the project chat\./);
   assert.doesNotMatch(nudge, /It runs silently|read_project_chat \(limit 1\)|its only thread-resolve pass|with the three conditions or QUIET-6H/);
   for (const required of ['list a thread when (1) and (3) hold', 'the state file says the last thread scan was complete', '`scan: complete` or `scan: <read> of <total>`', 'and its backstop thread-resolve pass.',
-    'with conditions (1) and (3), the relay state, or QUIET-6H', 'relay unverified', 'RESOLVE DUE: <n> | ', 'THREAD SCAN INCOMPLETE: <read> of <total> | ',
+    '**Resolve:** (threads with their own session, with conditions (1) and (3) and the relay state)', 'relay unverified', 'RESOLVE DUE: <n> | ', 'THREAD SCAN INCOMPLETE: <read> of <total> | ',
     'never report "none" for **Resolve:** from a partial scan', "the state file's resolve candidates that list_threads still shows unresolved", 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
@@ -923,7 +925,9 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
 test('the check-in turns stuck work into prefixes the coordinator must act on, and the controller owns every finding', () => {
   const text = rendered('daily-check-in');
   // A failing or missed task is no longer advice only.
-  assert.match(text, /never in the prefix, except an enabled task not stopped by the owner whose last run is read as failed, or as missing its last scheduled run: start the first line with "TASK FAILING: <names> \| "\. A task whose status cannot be read is "<name>: unverified" under \*\*Tasks:\*\*, and a disabled one stays advice\./);
+  assert.match(text, /never in the prefix, except an enabled task not stopped by the owner whose last run is read as failed, or as missing its last scheduled run: start the first line with "TASK FAILING: <names> \| "\. Device tasks report through the evidence store[^]*A task whose status cannot be read is "<name>: unverified" under \*\*Tasks:\*\*, and a disabled one stays advice\./);
+  // Device task-health flags in the store are read, not left for a local session line.
+  assert.match(text, /read its `task-health\/computer-\*\.json` files[^]*Each flag on a example-owner\/example-repo row joins TASK FAILING as "<computer>: <flag>", and a file over 2 days old as "<computer>: health file stale"; no store or an unreadable one is "task-health: unverified" under \*\*Tasks:\*\*\./);
   // An open PR that needs a step gets a prefix, review-notification PRs included.
   assert.match(text, /An open PR with a failing check, a ready PR missing its UAT verdict, or an open PR with no update for 3 days \(review-notification PRs included\), unless the PR or its task records a wait with its blocker and the date it is due: start the first line with "PR ATTENTION: <n> \| "/);
   // A missing set reported before is not silenced forever: after 3 days it returns for the owner.
@@ -944,7 +948,8 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
     'Re-read owed lists (promises, Lows children, pending owner OKs, review-only PRs) at session start and on every periodic run']) assert.ok(page.includes(required), required);
   const gates = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'gates.md'), 'utf8');
   for (const required of ["follow-up (Low or `POST_SHIP`; one record per PR, on an outcome child that joins the lane's next slice or starts within 3 days, unless the owner accepted it)",
-    "keep the UAT ask on the owner's waiting list until it is answered", 'then relaunch one successor or record the hold on the child']) assert.ok(gates.includes(required), required);
+    "keep the UAT ask on the owner's waiting list until it is answered", 'then relaunch one successor or record the hold on the child',
+    'Before a merge record is written, the G2 report is archived to the evidence store and read back, and the record (and its brief) names that path and the PASS head.']) assert.ok(gates.includes(required), required);
   // A verified plugin gap stays on the owner's list every run, not only on the run that first reports it.
   assert.match(text, /Missing account copy: say so under \*\*Plugin:\*\*\. While that verified gap remains, also list "update the Toolkit plugin on claude\.ai \(behind since <date>\)" under \*\*Waiting on owner:\*\* every run\./);
 });

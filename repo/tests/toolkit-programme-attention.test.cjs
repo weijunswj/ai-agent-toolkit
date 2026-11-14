@@ -77,7 +77,7 @@ test('completed PR attention is stable, can be acknowledged, survives incomplete
   assert.equal(reconcile().result.summary, 'No changes');
   assert.equal(fx.github.commits, commits);
   assert.deepEqual(entry('COMPLETED_PR_MISSING'), first);
-  assert.equal(fx.ctrl(['ack', '--finding', first.id]).error, null);
+  assert.equal(fx.ctrl(['ack', '--finding', first.id, '--next', 'Fix the catalogue entry today.']).error, null);
   assert.equal(entry('COMPLETED_PR_MISSING').state, 'acknowledged');
   fx.github.issuePrLinks.set(423, { timelineTruncated: true });
   assert.equal(reconcile().error, null);
@@ -245,10 +245,11 @@ test('E2: findings are added, kept without writes, acknowledged, resolved, retur
   // The sweep takes and releases its lease; no state is written.
   assert.equal(fx.github.commits, commits + 2, 'an unchanged run writes no state');
   // ack by the holder: acknowledged, still listed and printed.
-  assert.equal(fx.ctrl(['ack', '--finding', found.id]).result.state, 'acknowledged');
+  assert.equal(fx.ctrl(['ack', '--finding', found.id, '--next', 'Find the merged PR today.']).result.state, 'acknowledged');
   const listed = fx.run(['attention'], {}, { json: false }).result;
   assert.match(listed, /^Attention: 1 new, 1 acknowledged/);
   assert.match(listed, new RegExp(`${found.id} acknowledged NEEDS_PLACEMENT #470`));
+  assert.match(listed, /Promised by \S+Z: Find the merged PR today\./, 'the promised step and its due time are printed');
   // Condition gone on a partial reconcile or another source's complete run: unchanged.
   fx.github.issues.get(470).labels = ['programme:outside'];
   fx.run(['reconcile', '--apply', '--controller', '--session', controller.session, '--issue', '423']);
@@ -267,7 +268,7 @@ test('E2: findings are added, kept without writes, acknowledged, resolved, retur
   assert.equal(fx.ctrl(['dispose', '--finding', other.id, '--reason', 'tracked in the other board']).result.state, 'disposed');
   const doc = fx.parentDoc();
   assert.equal(doc.attention.find(entry => entry.id === other.id).state, 'disposed');
-  assert.deepEqual(doc.private.attention_notes, { [other.id]: 'tracked in the other board' });
+  assert.deepEqual(doc.private.attention_notes, { [found.id]: 'Find the merged PR today.', [other.id]: 'tracked in the other board' });
   assert.equal(JSON.stringify(doc.attention).includes('other board'), false, 'never in the public part');
   assert.equal(fx.run(['show', '--parent']).result.document.private, '(redacted; --include-private shows it)');
 });
@@ -277,7 +278,7 @@ test('E2: only the parent holder answers a finding; refresh takes no answer at a
   fx.github.addIssue(470);
   fx.run(['refresh']);
   const { id } = fx.parentDoc().attention[0];
-  for (const argv of [['ack', '--finding', id], ['dispose', '--finding', id, '--reason', 'x']]) {
+  for (const argv of [['ack', '--finding', id, '--next', 'x'], ['dispose', '--finding', id, '--reason', 'x']]) {
     assert.equal(fx.run([...argv, '--session', 'someone-else', '--controller']).error.code, 'ROLE_REFUSED', argv[0]);
     assert.equal(fx.run([...argv, '--session', 'lane-1', '--prefix', 'LANE-X-', '--controller']).error.code, 'ROLE_REFUSED');
     assert.equal(fx.run(argv).error.code, 'USAGE', 'without --controller');
@@ -289,7 +290,8 @@ test('E2: only the parent holder answers a finding; refresh takes no answer at a
 
 test('E2: the list keeps 200 entries by dropping the oldest closed ones, and stops adding at 500 open', () => {
   const at = n => new Date(Date.UTC(2026, 9, 1) + n * 60000).toISOString();
-  const entry = (n, entryState) => ({ id: state.findingId('inventory', 'NEEDS_PLACEMENT', n, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue: n, head: null, state: entryState, first_seen: at(n), changed_at: at(n) });
+  const entry = (n, entryState) => ({ id: state.findingId('inventory', 'NEEDS_PLACEMENT', n, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue: n, head: null, state: entryState, first_seen: at(n), changed_at: at(n),
+    ...(entryState === 'acknowledged' ? { due: at(10000) } : {}) });
   // 201 entries after a change: the oldest resolved or disposed goes first.
   const list = [...Array.from({ length: 150 }, (unused, n) => entry(n + 1, n % 2 ? 'resolved' : 'disposed')), ...Array.from({ length: 50 }, (unused, n) => entry(n + 1000, 'acknowledged'))];
   const seen = list.filter(item => item.state === 'acknowledged').map(item => ({ code: 'NEEDS_PLACEMENT', issue: item.issue }));
@@ -674,7 +676,8 @@ test('L4: inventory and attention only read GitHub, and the inventory command li
 test('N3: a dispose reason goes when its finding drops off the list, and stays while it is listed', () => {
   const fx = fixture();
   const at = n => new Date(Date.UTC(2026, 9, 1) + n * 60000).toISOString();
-  const entry = (n, entryState) => ({ id: state.findingId('inventory', 'NEEDS_PLACEMENT', n, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue: n, head: null, state: entryState, first_seen: at(n), changed_at: at(n) });
+  const entry = (n, entryState) => ({ id: state.findingId('inventory', 'NEEDS_PLACEMENT', n, ''), source: 'inventory', code: 'NEEDS_PLACEMENT', issue: n, head: null, state: entryState, first_seen: at(n), changed_at: at(n),
+    ...(entryState === 'acknowledged' ? { due: at(10000) } : {}) });
   // 200 closed entries: the oldest is disposed (it drops first), and one recent disposed entry stays.
   const list = Array.from({ length: 200 }, (unused, n) => entry(5000 + n, n === 0 || n === 199 ? 'disposed' : 'resolved'));
   const oldest = list[0].id;
@@ -732,19 +735,169 @@ test('work queue: a stalled-task finding is never acknowledged, leads the list, 
   list = state.foldAttention(list, { source: 'reconcile', complete: true, now: at(5), seen: [...seen, ...noise] });
   const idle = list.find(entry => entry.code === 'TASK_IDLE');
   const doc = { attention: list, private: {} };
-  assert.throws(() => state.answerFinding(doc, { id: idle.id, state: 'acknowledged', now: at(6) }), error => error.code === 'QUEUE_FINDING_NEEDS_ACTION' && /dispose --finding/.test(error.message));
+  assert.throws(() => state.answerFinding(doc, { next: 'Fixture next step', id: idle.id, state: 'acknowledged', now: at(6) }), error => error.code === 'QUEUE_FINDING_NEEDS_ACTION' && /dispose --finding/.test(error.message));
   // The line counts the queue, and the CURRENT block shows every queue entry ahead of twelve newer findings.
   assert.match(state.attentionLine(list, at(6)), /^Attention: 14 new, 0 acknowledged, 2 in the work queue$/);
   assert.deepEqual(state.workQueue(list).map(entry => entry.issue).sort(), [835, 877]);
   // Two days on, they show as work queue, never as waiting on the owner.
   assert.match(state.attentionLine(list, at(3000)), /, 2 in the work queue, 12 waiting on you$/);
   // Disposed with a reason, then the task moves (unseen on a complete run): resolved, so a later stall is new.
-  const disposed = state.answerFinding(doc, { id: idle.id, state: 'disposed', reason: 'owner parked it until Monday', now: at(7) });
+  const disposed = state.answerFinding(doc, { next: 'Fixture next step', id: idle.id, state: 'disposed', reason: 'owner parked it until Monday', now: at(7) });
   const moved = state.foldAttention(disposed.attention, { source: 'reconcile', complete: true, now: at(8), seen: [seen[1], ...noise] });
   assert.equal(moved.find(entry => entry.id === idle.id).state, 'resolved');
   const again = state.foldAttention(moved, { source: 'reconcile', complete: true, now: at(9), seen: [...seen, ...noise] });
   assert.equal(again.find(entry => entry.id === idle.id).state, 'new');
   // Other codes keep their old answers.
   const other = list.find(entry => entry.code === 'CLOSING_COMMENT_MISSING');
-  assert.equal(state.answerFinding(doc, { id: other.id, state: 'acknowledged', now: at(6) }).attention.find(entry => entry.id === other.id).state, 'acknowledged');
+  assert.equal(state.answerFinding(doc, { next: 'Fixture next step', id: other.id, state: 'acknowledged', now: at(6) }).attention.find(entry => entry.id === other.id).state, 'acknowledged');
+});
+
+// Findings are the controller's work: an acknowledgement is a promise with a next step and a due time,
+// and a missed one goes back to new and waits on the owner at once.
+test('an ack needs a next step and a due time within 72 hours; past due it is new and waiting at once', () => {
+  const base = Date.parse('2026-11-13T00:00:00.000Z');
+  const at = hours => new Date(base + hours * 3600000).toISOString();
+  const doc = state.newParent({ repository: 'acme/app', parentIssue: 421 });
+  doc.attention = state.foldAttention([], { source: 'reconcile', complete: true, now: at(0), seen: [{ code: 'CHECKS_RED', issue: 7, head: SHA_A }] });
+  const id = doc.attention[0].id;
+  assert.throws(() => state.answerFinding(doc, { id, state: 'acknowledged', now: at(0) }), /ack needs --next/);
+  assert.throws(() => state.answerFinding(doc, { id, state: 'acknowledged', next: 'x'.repeat(201), now: at(0) }), /ack needs --next/);
+  assert.throws(() => state.answerFinding(doc, { id, state: 'acknowledged', next: 'Fix CI', due: at(73), now: at(0) }), /at most 72 hours/);
+  assert.throws(() => state.answerFinding(doc, { id, state: 'acknowledged', next: 'Fix CI', due: at(-1), now: at(0) }), /after now/);
+  assert.throws(() => state.answerFinding(doc, { id, state: 'acknowledged', next: 'Fix CI', due: '2026-11-13T09:00:00', now: at(0) }), /with Z or an offset/, 'no zone is never read as local time');
+  assert.equal(state.answerFinding(doc, { id, state: 'acknowledged', next: 'Fix CI', due: '2026-11-13T17:00:00+08:00', now: at(0) }).attention[0].due, at(9));
+  const acked = state.answerFinding(doc, { id, state: 'acknowledged', next: 'Builder fixes CI today', now: at(0) });
+  assert.equal(acked.attention[0].due, at(24), 'due 24 hours ahead unless given');
+  assert.equal(acked.private.attention_notes[id], 'Builder fixes CI today');
+  assert.deepEqual(state.validateParent(acked), []);
+  assert.doesNotMatch(state.attentionLine(acked.attention, at(23)), /waiting on you/);
+  assert.match(state.attentionLine(acked.attention, at(24)), /1 waiting on you/, 'a missed promise waits on the owner at once');
+  // Any run past the due time stores it as new; it stays waiting until answered again.
+  const folded = state.foldAttention(acked.attention, { source: 'inventory', complete: true, now: at(25), seen: [] });
+  assert.equal(folded[0].state, 'new');
+  assert.match(state.attentionLine(folded, at(25)), /1 waiting on you/);
+  // Overdue, it is answered again with a new step; a still-current ack is not.
+  assert.equal(state.answerFinding(acked, { id, state: 'acknowledged', next: 'again', now: at(1) }), null, 'a current ack is left as it is');
+  const again = state.answerFinding(acked, { id, state: 'acknowledged', next: 'Owner told; fix lands tonight', now: at(25) });
+  assert.equal(again.attention[0].due, at(49));
+  assert.doesNotMatch(state.attentionLine(again.attention, at(26)), /waiting on you/);
+  // An acknowledgement from before due times falls due a day after its last change.
+  const legacy = [{ ...doc.attention[0], state: 'acknowledged', changed_at: at(0) }];
+  assert.equal(state.foldAttention(legacy, { source: 'inventory', complete: true, now: at(23), seen: [] }), legacy, 'not due yet: unchanged');
+  assert.equal(state.foldAttention(legacy, { source: 'inventory', complete: true, now: at(24), seen: [] })[0].state, 'new');
+  assert.throws(() => cli.parseArgs(['ack', '--finding', id, '--controller', '--session', 's']), /--next/);
+  assert.throws(() => cli.parseArgs(['dispose', '--finding', id, '--reason', 'r', '--next', 'n', '--controller', '--session', 's']), /--next and --due go with ack/);
+});
+
+test('every reported finding carries a next step, and a stuck sweep is a finding', () => {
+  for (const [code, entry] of Object.entries(state.FINDING_CODES)) assert.ok(typeof entry.next_action === 'string' && entry.next_action.length > 10, `${code} has a next action`);
+  for (const code of ['PR_WITHOUT_TASK', 'CLOSED_WITHOUT_ACCEPTANCE', 'CHILD_REOPENED', 'SWEEP_STUCK']) {
+    assert.equal(state.withNextAction({ code, issue: 5 }).detail, state.FINDING_CODES[code].next_action, `${code} prints its next step, never undefined`);
+  }
+  assert.equal(state.withNextAction({ code: 'CHECKS_RED', issue: 5, detail: 'own' }).detail, 'own');
+  assert.match(state.withNextAction({ code: 'NOT_A_CODE', issue: 5 }).detail, /Toolkit bug/);
+  // Every finding the reconciler pushes without its own detail is in the table.
+  const source = fs.readFileSync(path.join(__dirname, '../../skills/github-program-reconciler/scripts/programme-state.cjs'), 'utf8');
+  const bare = [...source.matchAll(/findings\.push\(\{ ?code: ?'([A-Z_]+)'(?:(?!detail)[^}])*\}\)/g)].map(match => match[1]);
+  assert.ok(bare.includes('SWEEP_STUCK'));
+  for (const code of bare) assert.ok(Object.hasOwn(state.FINDING_CODES, code), `${code} has a next action in FINDING_CODES`);
+  const stuck = state.foldAttention([], { source: 'reconcile', complete: false, now: '2026-11-13T00:00:00.000Z', seen: [{ code: 'SWEEP_STUCK', issue: 421 }] });
+  assert.equal(stuck[0].state, 'new');
+  assert.deepEqual(state.validateParent({ ...state.newParent({ repository: 'acme/app', parentIssue: 421 }), attention: stuck }), []);
+});
+
+test('every session-start problem line names who acts and when', () => {
+  const root = tmp();
+  const home = tmp();
+  const attentionDir = tmp();
+  const sessionsDir = tmp();
+  const now = new Date(2026, 10, 1, 12, 0, 0);
+  const programmeDeps = { attentionDir, sessionsDir, home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => now.toISOString() };
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
+  const evaluate = () => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps });
+  cache.writeCache('acme/app', { line: 'Attention: 2 new, 0 acknowledged', counts: { new: 2, acknowledged: 0 }, digest: 'd1', complete: true }, { attentionDir, now: () => now.toISOString() });
+  tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
+    purpose: 'Sweep.', repository: 'acme/app', created: '2026-10-30T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', job: 'programme-sweep', definition: '0123456789ab' }]);
+  const at = new Date(now.getTime() - 50 * 60000).toISOString();
+  tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 1, status: 'failed', summary: [] }, home);
+  const hash = checkpoint.sessionHash('exec-b');
+  checkpoint.writeLocalBinding({ session_hash: hash, repository: 'acme/app', issue: 423, assignment: 'g1-a1', repo_root: root, bound_at: 'x' }, { sessionsDir });
+  checkpoint.recordError(hash, 'GH_AUTH', 'gh is not signed in', { sessionsDir });
+  const line = evaluate();
+  for (const action of Object.values(gate.FINDING_ACTIONS)) assert.ok(line.includes(action), `${action} in ${line}`);
+  assert.match(line, /Attention: 2 new[^]*Run programme\.cjs attention for the list\. Controller: answer each new or overdue finding this turn/);
+  assert.match(line, /Programme sweep: last run failed[^]*see toolkit tasks\. Controller: fix the task this turn/);
+});
+
+test('a task line gets the controller action only for a fault, never against an owner stop', () => {
+  for (const line of ['Programme sweep: last run failed at 10:00Z; see toolkit tasks.', 'Programme sweep: held at 10:00Z; see toolkit tasks.',
+    'Programme sweep: skipped (offline), 3 runs in a row since 09:00Z; see toolkit tasks.', 'Programme sweep: no run since 07:00Z (over 2 hours); see toolkit tasks.',
+    'Task health: programme-sweep: task code older than managed checkout', 'health file not shared: no verified evidence store', 'Task health file is over 26 hours old']) {
+    assert.equal(gate.taskAction(line), ` ${gate.FINDING_ACTIONS.tasks}`, line);
+  }
+  assert.equal(gate.taskAction('Programme sweep: stopped by owner; see toolkit tasks.'), ' No action: the owner stopped it.');
+  assert.equal(gate.taskAction('Footer sweep: stopped by owner; see toolkit tasks.'), ' No action: the owner stopped it.');
+  assert.equal(gate.taskAction('Shard timings: deferred for 5 minutes, 1 deferral; awaiting an eligible task retry; see toolkit tasks.'), '');
+  assert.equal(gate.taskAction('Scheduled jobs: owned by other-pc; ask the owner to move them back.'), '');
+});
+
+test('an owner-stopped sweep at session start says no action is needed', () => {
+  const root = tmp();
+  const home = tmp();
+  const now = new Date(2026, 10, 1, 12, 0, 0);
+  const programmeDeps = { attentionDir: tmp(), sessionsDir: tmp(), home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => now.toISOString() };
+  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
+  tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
+    purpose: 'Sweep.', repository: 'acme/app', created: '2026-10-30T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', job: 'programme-sweep', definition: '0123456789ab', stopped_by_owner: true, stopped_at: '2026-10-31T00:00:00.000Z' }]);
+  const line = gate.sessionLine(root, { stateReader: () => enabled, programmeDeps });
+  assert.match(line, /Programme sweep: stopped by owner; see toolkit tasks\. No action: the owner stopped it\./);
+  assert.ok(!line.includes(gate.FINDING_ACTIONS.tasks), line);
+});
+
+test('work queue: a disposed stalled-task finding that is still seen stays disposed', () => {
+  const at = minute => new Date(Date.parse('2026-11-13T00:00:00Z') + minute * 60000).toISOString();
+  const seen = [{ code: 'TASK_IDLE', issue: 835 }];
+  const list = state.foldAttention([], { source: 'reconcile', complete: true, now: at(0), seen });
+  const disposed = state.answerFinding({ attention: list, private: {} }, { id: list[0].id, state: 'disposed', reason: 'blocked by the vendor fix', now: at(1) });
+  const still = state.foldAttention(disposed.attention, { source: 'reconcile', complete: true, now: at(60), seen });
+  assert.equal(still.find(entry => entry.id === list[0].id).state, 'disposed', 'the same stall keeps its answer');
+  assert.equal(state.workQueue(still).length, 0);
+});
+
+test('work queue: an older acknowledged stalled-task finding keeps its marker on CURRENT', () => {
+  const now = '2026-11-13T10:00:00.000Z';
+  const entry = { id: state.findingId('reconcile', 'TASK_IDLE', 835, ''), source: 'reconcile', code: 'TASK_IDLE', issue: 835, head: null, state: 'acknowledged', first_seen: now, changed_at: now };
+  const body = state.renderCurrentBlockBody({ revision: 1, outcomes: [], attention: [entry] }, new Map(), new Map(), now);
+  assert.match(body, /\*\*Work queue\*\* \(the controller acts on each now\)\n- \(acknowledged\) TASK_IDLE #835: /);
+});
+
+test('E3: the session-start line names the longest-stalled work-queue task and its next step', () => {
+  const dir = tmp();
+  const now = '2026-11-13T10:00:00.000Z';
+  const deps = { attentionDir: dir, now: () => now };
+  const entry = (code, issue, changed) => ({ id: state.findingId('reconcile', code, issue, ''), source: 'reconcile', code, issue, head: null, state: 'new', first_seen: changed, changed_at: changed });
+  const list = [entry('TASK_IDLE', 835, '2026-11-13T06:00:00.000Z'), entry('TASK_MERGED_OPEN', 877, '2026-11-13T00:03:00.000Z'), entry('NEEDS_PLACEMENT', 470, '2026-11-13T09:00:00.000Z')];
+  const [oldest] = state.workQueue(list);
+  cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true,
+    queue: { count: 2, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.changed_at, next: state.FINDING_CODES[oldest.code].next_action } } }, deps);
+  const line = cache.sessionAttention('acme/app', deps).line;
+  assert.match(line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Longest stalled on the work queue of 2: #877 \(TASK_MERGED_OPEN since 2026-11-13 00:03Z\); next step: judge its done-when, [^.]*\. Run programme\.cjs attention for the list$/);
+  // A cache from before this field, or with a malformed one, shows the plain line.
+  cache.writeCache('acme/app', { line: state.attentionLine(list, now), counts: state.attentionCounts(list), digest: state.attentionDigest(list), complete: true }, deps);
+  assert.match(cache.sessionAttention('acme/app', deps).line, /^Attention: 3 new, 0 acknowledged, 2 in the work queue\. Run programme\.cjs attention/);
+  for (const bad of [{ count: 0, oldest: { issue: 1, code: 'TASK_IDLE', since: now, next: 'x' } }, { count: 1, oldest: { issue: 1, code: 'TASK_IDLE', since: now, next: 'a\nb' } }, { count: 1, oldest: { issue: 1, code: 'lower', since: now, next: 'x' } }]) {
+    assert.equal(cache.queueText(bad), null, JSON.stringify(bad));
+  }
+});
+
+test('E3: attention writes the longest-stalled work-queue task into this computer\'s cache, and no free text', () => {
+  const fx = fixture();
+  fx.run(['refresh']);
+  const at = '2026-11-13T00:03:00.000Z';
+  fx.store.mutate('parent', 421, { writer: controller, change: doc => ({ ...doc, attention: [...(doc.attention || []),
+    { id: state.findingId('reconcile', 'TASK_MERGED_OPEN', 423, ''), source: 'reconcile', code: 'TASK_MERGED_OPEN', issue: 423, head: null, state: 'new', first_seen: at, changed_at: at }] }) });
+  fx.run(['attention']);
+  const written = cache.readCache('acme/app', { attentionDir: fx.attentionDir });
+  assert.deepEqual(written.queue, { count: 1, oldest: { issue: 423, code: 'TASK_MERGED_OPEN', since: at, next: state.FINDING_CODES.TASK_MERGED_OPEN.next_action } });
+  assert.match(cache.queueText(written.queue), /^Longest stalled on the work queue: #423 \(TASK_MERGED_OPEN since 2026-11-13 00:03Z\); next step: judge/);
 });

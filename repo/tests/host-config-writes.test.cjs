@@ -355,7 +355,10 @@ test('hostText: unavailable command and native spawn errors keep precise start d
 
 test('runtime: an answer survives failed shutdown; repair probes still require exit', async t => {
   const f = configFake(t, { mode: 'answer-orphan' });
-  const options = { ...quickProbe, codexHome: f.codexHome, codexCommand: CONFIG_FAKE };
+  // The fake answers at once; only its shutdown is held. A slow Windows runner can take longer than
+  // quickProbe's 500ms just to start the fake, so the answer gets a wider window here. The shutdown
+  // budgets stay quick, and they are what the repair probe's refusal measures.
+  const options = { ...quickProbe, timeoutMs: 10000, codexHome: f.codexHome, codexCommand: CONFIG_FAKE };
   const saved = { ...process.env };
   const env = isolatedEnv(f.codexHome, f.root);
   for (const key of Object.keys(process.env)) delete process.env[key];
