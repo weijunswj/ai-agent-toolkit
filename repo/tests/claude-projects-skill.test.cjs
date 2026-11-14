@@ -406,7 +406,7 @@ test('the merging agent bumps once at merge time; only older bumped PRs are reco
   assert.match(guide, /The merging agent bumps just before the merge, never the builder/);
   assert.match(guide, /`Bump: patch`, `Bump: minor` or `Bump: major`/);
   assert.match(guide, /An owner merge card goes up at the bumped head/);
-  assert.match(text, /Toolkit PRs hold main's version: before the check and any card, the merge thread merges `main` in, runs `bump-version\.cjs --next <level>` \(body `Bump:` line\) and waits for green CI\./);
+  assert.match(text, /Toolkit PRs hold main's version\. Ready PRs ride rolling merge trains unasked \(cheap, no gates: `CONTROLLER\.md`\); a lone one: the merge thread, before the check and any card, merges `main` in, runs `bump-version\.cjs --next <level>` \(body `Bump:` line\) and waits for green CI\./);
   assert.match(periodic, /Open Toolkit PRs hold main's version and the merge thread bumps each one at merge/);
   for (const surface of [text, root, guide]) assert.doesNotMatch(surface, /carry their own `bump-version|prepares its own Toolkit bump|## Prepare the branch bump/);
   // Older PRs that already carry a bump still reconcile: the workflow, then the hand command.
@@ -597,9 +597,9 @@ test('Projects keeps its Toolkit base layer current without touching the project
   for (const surface of [text, body, ...templates]) {
     assert.doesNotMatch(surface, /resolve window|idle window|default 2 days|IDLE-2D|thread default|weekday check-in|\* \* 1-5/i);
   }
-  assert.match(text, /\*\*Resolve on relay; the nudge is the backstop\.\*\* Threads never resolve themselves; you resolve a work thread or post the turn you relay its final result \(a merged or closed PR included\) or in the hourly pass, once all three hold: \(a\) its output is durably recorded[^\n]*\(b\) its latest result was relayed to the owner in project chat, or the owner replied after it; \(c\) nothing is open: owner question, decision or card, PR it owns or watches, or promised work\./);
+  assert.match(text, /\*\*Resolve on relay; the nudge is the backstop\.\*\* Threads never resolve themselves; you resolve a work thread the turn you relay its final result or in the hourly pass, only when all hold: \(a\) it has its own Claude session \(never your own project-chat post or the reply thread under it, as resolving it hides that message\) and is no task's home thread; \(b\) its output is durably recorded[^\n]*and every PR it lists is merged or closed; \(c\) its latest result was relayed to the owner in project chat, or the owner replied after it; \(d\) no owner test, card, question, decision or promised work is still owed; \(e\) its last report is final, not "waiting on CI"\. A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done\./);
   assert.match(body, /Threads never resolve themselves\. The coordinator resolves a thread on relaying its final result or in the hourly pass, once its output is recorded[^\n]*its result reached project chat or the owner replied after it, and nothing is open \(owner ask or card, a PR it owns or watches, promised work\)/);
-  assert.match(text, /resolving threads or posts that meet the resolve conditions are reversible housekeeping/);
+  assert.match(text, /resolving threads that meet the resolve conditions are reversible housekeeping/);
   // Block wording: attribution ban (the personal-data guard enforces it on PR text), home threads never resolved, post-edit rule.
   assert.match(body, /no "Generated with" footer, Co-Authored-By or Claude-Session trailers, session or thread links, or requester header\. Strip what the platform adds; CI fails it\./);
   assert.doesNotMatch(body, /Keep any attribution header/);
@@ -724,9 +724,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
   assert.match(text, /never swap again for the same gap/);
   assert.match(text, /it writes a handoff file in the shared folder/);
   assert.match(text, /Never rotate your own coordinator thread/);
-  // Closing: work threads on saved and relayed output, chat reply threads after 6 quiet hours, home threads never.
-  assert.match(text, /A chat reply thread \(replies under your project-chat post\) also closes after 6 quiet hours \(`QUIET-6H`\)/);
-  assert.match(text, /idleness alone never closes a work thread/);
+  // Closing: work threads on saved and relayed output; never the coordinator's own post or its reply
+  // thread (no session of its own: resolving it hides the chat message); home threads never.
+  assert.doesNotMatch(text, /QUIET-6H/);
+  assert.match(text, /Idleness alone never closes a work thread/);
   assert.match(text, /a task's home thread is never resolved/);
   // Instructions sync applies itself under safeguards.
   for (const required of ['**Apply it yourself, without asking, with these safeguards.**', 'No saved copy, no change.',
@@ -1064,7 +1065,7 @@ const ctaRecoveryCases = [
   ['finished superseded resolved cloud or working lane', 'device', ['Skip finished, superseded, resolved, cloud and already-working lanes']],
   ['device or prerequisite unavailable', 'device', ['Separate sessions still waiting for a device or another prerequisite from resumable sessions needing owner input']],
   ['missing session or failed incomplete inventory', 'device', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success', 'reads one thread per call by `thread_id`', 'an active session that is not connected or served is the usual parked case']],
-  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 4 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
+  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 2b, 4 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
   ['quiet run finds a missed ask', 'nudge', ['2a. Owner asks (runs every time, including the no-change path)', 'UNRELAYED ASK: <n> | ']],
   ['reaction without required native action', 'nudge', ['An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']],
   ['resume while approval is held', 'skill', ['type anything, such as `.`', 'Typing text resumes conversation; it grants no approval for held work']],
@@ -1152,4 +1153,17 @@ test('local Toolkit is the Projects base: every hook has a cloud row and every o
   assert.match(read(`${dir}/tasks/base-clash-check.md`), /Never edit the skill, the overrides list or the base to clear a clash/);
   // The gate rules name Projects' switch, so the base itself says where cloud auto-merge comes from.
   assert.match(read('repo/contracts/agent-rules/gate-rules.md'), /Claude Projects has no setup bank: its switch is the project line `- Task auto-merge: On` \(else Off\)/);
+});
+
+// A thread that ends its turn waiting on CI wakes only when the event reaches it; when the event never
+// arrives, green PRs sit idle. Executors arm their own check-in, briefs say so, and the nudge is the backstop.
+test('threads waiting on CI arm their own check-in, and the coordinator pings quiet ones', () => {
+  const block = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  assert.match(block, /^- Waiting on CI or any outside event: arm your own check-in about 15 minutes out before ending the turn; never rely on the event alone\.$/m);
+  const prs = read(SKILL_REL).split('## Pull requests and CI\n')[1].split('\n## ')[0];
+  assert.ok(prs.includes('- **Threads waiting on CI arm a check-in.** Every brief tells its thread to arm one (about 15 minutes, repeated and spaced out until handled) before ending a turn that waits on CI or another outside event.'));
+  assert.ok(prs.includes("The nudge's `CI WAIT QUIET` is the backstop: ping each listed thread that turn."));
+  const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`).split('## Acting on the nudge report\n')[1];
+  assert.ok(periodic.includes('- `CI WAIT QUIET`: message each listed thread that turn to check its CI and carry on, and to confirm it armed its own check-in'));
+  assert.ok(periodic.includes('the same thread listed again on the next run goes to the owner'));
 });

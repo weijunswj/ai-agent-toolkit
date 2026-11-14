@@ -13,7 +13,9 @@
 # governance GitHub App's token, minted for this repository with only contents and pull requests
 # write, is used for the push and the pull request alone, so the pull request's own checks start.
 # The checkout keeps no credentials and no token or key is printed. With no App configured the run
-# only reports what it would change; a configured App that cannot sign in fails the run. It never
+# only reports what it would change, and fails when a refresh is due (it cannot publish one); a
+# configured App that cannot sign in fails the run. A refresh pull request left open over 7 days
+# fails the run naming it, so it is merged or closed instead of blocking every later refresh. It never
 # runs for pull requests, forks or other branches.
 name: Toolkit Shard Timings
 
@@ -112,8 +114,8 @@ jobs:
             exit 1
           fi
           if [ -z "$TOOLKIT_SHARD_PUBLISH_TOKEN" ]; then
-            echo "::notice::No governance App is configured, so this run only reports what it would change."
-            node repo/scripts/refresh-shard-timings.cjs
+            echo "::notice::No governance App is configured, so this run only reports what it would change; it fails when a refresh is due."
+            node repo/scripts/refresh-shard-timings.cjs --fail-if-due
             exit $?
           fi
           echo "::add-mask::$(printf 'x-access-token:%s' "$TOOLKIT_SHARD_PUBLISH_TOKEN" | base64 -w0)"

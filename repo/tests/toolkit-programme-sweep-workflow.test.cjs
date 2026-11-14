@@ -83,17 +83,17 @@ function bindingV1() {
 }
 
 function runAction(mode, { env = {}, file = binding(), refresh = null } = {}) {
-  const notices = [], failures = [], outputs = [], summaries = [], refreshes = [], warnings = [];
+  const notices = [], failures = [], outputs = [], summaries = [], refreshes = [], warnings = [], tags = [];
   const runner = new (action().ProgrammeSweepAction)({
     env: { GITHUB_REPOSITORY: 'owner/repository', GITHUB_REF: 'refs/heads/main', DEFAULT_BRANCH: 'main', ...env }, root: ROOT,
     readFile: () => { if (file === null) throw Object.assign(new Error('absent'), { code: 'ENOENT' }); return Buffer.from(typeof file === 'string' ? file : JSON.stringify(file)); },
     validateBinding: value => state.validateBinding(value),
     refresh: input => { refreshes.push(input); return refresh ? refresh(input) : { status: 0, code: null, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [] } }; },
     notice: message => notices.push(message), failure: message => failures.push(message), output: (name, value) => outputs.push([name, value]), summary: line => summaries.push(line),
-    warning: message => warnings.push(message),
+    warning: (message, tag) => { warnings.push(message); tags.push(tag || null); },
   });
   const code = mode === 'store' ? runner.store() : runner.run();
-  return { code, notices, failures, outputs, summaries, refreshes, warnings };
+  return { code, notices, failures, outputs, summaries, refreshes, warnings, tags };
 }
 // Record 808: every skip is a visible warning that names the repository, the reason and the fix.
 function assertSkipWarning(result, reason) {
@@ -180,6 +180,12 @@ test('action: no App configured gives a warning naming the repository, the varia
   const result = runAction('run', { env: { STORE_REPOSITORY: 'owner/evidence', APP_CLIENT_ID_SET: 'false', MINT_OUTCOME: 'skipped/skipped' } });
   assert.equal(result.code, 0);
   assertSkipWarning(result, /TOOLKIT_GOVERNANCE_APP_CLIENT_ID.*TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY.*toolkit governance check/);
+  assert.deepEqual(result.tags, [{ title: gateScript().TITLES.skipped, code: 'no_app' }], 'the gate counts this skip by title and code');
+  const disabled = runAction('store', { file: binding({ governance: 'disabled' }) });
+  assert.equal(disabled.tags[0]?.title, gateScript().TITLES.skipped);
+  assert.match(disabled.tags[0]?.code, /^[a-z_]+$/);
+  const offDefault = runAction('store', { env: { GITHUB_REF: 'refs/heads/feature/x' } });
+  assert.deepEqual(offDefault.tags, [null], 'a manual run off the default branch never counts toward a streak');
   assert.equal(result.refreshes.length, 0);
 });
 
@@ -202,6 +208,11 @@ test('action: a healthy run writes the metrics line; a held pass is resumable; a
   const held = runAction('run', { env: minted, refresh: () => ({ status: 1, code: null, report: { metrics: 'Sweep: requests=300, tasks read=20, queue left=8', holds: [{ code: 'PASS_STOPPED' }] } }) });
   assert.equal(held.code, 0);
   assert.match(held.summaries[0], /this pass held, the next run retries/);
+  // The gate counts held runs by this title and code (three in a row turn it red).
+  assert.deepEqual(held.tags, [{ title: gateScript().TITLES.held, code: 'PASS_STOPPED' }]);
+  assert.deepEqual(ok.tags, [], 'a clean pass has no held warning');
+  assert.equal(action().holdCodes({ holds: [{ code: 'B_CODE' }, { code: 'A_CODE' }, { code: 'B_CODE' }, { code: 'not a code' }] }), 'A_CODE, B_CODE');
+  assert.equal(action().holdCodes({ holds: [{}] }), 'unnamed');
   const queued = runAction('run', { env: minted, refresh: () => ({ status: 0, code: null, report: { outcome: 'QUEUED', reason: 'another sweep is running' } }) });
   assert.deepEqual(queued.summaries, [action().NOTICES.queued]);
   const moved = runAction('run', { env: minted, refresh: () => ({ status: 2, code: 'MAIN_MOVED', report: null }) });
@@ -421,7 +432,7 @@ test('gate workflow: hourly at minute 41, narrow activity triggers, bots ignored
   assert.doesNotMatch(text, /^\s+(pull_request|push|repository_dispatch):/m);
   assert.match(text, /CI_WORKFLOW: validate\.yml$/m, 'the hourly start also counts finished CI runs');
   assert.match(text, /^permissions:\n  contents: read\n\n/m);
-  assert.match(text, /^    permissions:\n      actions: write\n      contents: read\n      issues: read\n    steps:/m, 'the built-in token reads issues and contents and starts workflow runs, nothing more');
+  assert.match(text, /^    permissions:\n      actions: write\n      checks: read\n      contents: read\n      issues: read\n    steps:/m, 'the built-in token reads issues, contents and run annotations and starts workflow runs, nothing more');
   assert.match(text, /^    if: \$\{\{ github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch' \|\| github\.event\.sender\.type != 'Bot'\) \}\}$/m);
   assert.match(text, /concurrency:\n  group: toolkit-programme-sweep-gate-\$\{\{ github\.repository \}\}\n  cancel-in-progress: false/);
   assert.match(text, /timeout-minutes: 3/);
@@ -494,13 +505,18 @@ test('gate: activity (a finished CI run included) starts a sweep when none finis
 
 const actionsToken = ['example', 'actions', 'token'].join('-');
 const gateBinding = JSON.stringify(binding());
-function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], binding = gateBinding, ci = [], jobs = [] } = {}) {
+function fakeGitHub({ runs = [done(2 * HOUR)], body = COMPLETE, changed = [], binding = gateBinding, ci = [], jobs = [], gateRuns = [], runJobs = {}, notes = {}, answers = {} } = {}) {
   const calls = [];
   const fetchImpl = async (url, options) => {
     const route = url.replace('https://api.github.com/repos/owner/repository/', '');
     calls.push(`${options.method} ${route}`);
     assert.equal(options.headers.authorization, `Bearer ${actionsToken}`);
-    const json = route.startsWith('actions/workflows/toolkit-programme-sweep.yml/runs') ? { workflow_runs: runs }
+    if (answers[route]) return { ok: false, status: answers[route], json: async () => ({}) };
+    const jobsOf = /^actions\/runs\/(\d+)\/jobs$/.exec(route)?.[1];
+    const notesOf = /^check-runs\/(\d+)\/annotations/.exec(route)?.[1];
+    const json = jobsOf && runJobs[jobsOf] ? { jobs: runJobs[jobsOf] } : notesOf ? (notes[notesOf] || [])
+      : route.startsWith('actions/workflows/toolkit-programme-sweep-gate.yml/runs') ? { workflow_runs: gateRuns }
+      : route.startsWith('actions/workflows/toolkit-programme-sweep.yml/runs') ? { workflow_runs: runs }
       : route === 'issues/421' ? { body: `# Programme\n\n${body}\n` } : route.startsWith('issues?') ? changed
         : route === 'contents/.github/toolkit-programme.json?ref=main' ? { content: Buffer.from(binding).toString('base64') }
           : route.startsWith('actions/workflows/validate.yml/runs') ? { workflow_runs: ci } : /^actions\/runs\/\d+\/jobs$/.test(route) ? { jobs } : null;
@@ -542,7 +558,79 @@ test('gate: a quiet hour reads four small answers and starts nothing; a change s
   assert.equal(quiet.calls.filter(call => /jobs$/.test(call)).length, 0);
   const off = fakeGitHub({ binding: JSON.stringify({ governance: 'disabled' }) });
   assert.equal((await gate({ env: gateEnv, fetchImpl: off.fetchImpl, now: T, log: () => {} })).start, false);
-  assert.deepEqual(off.calls, ['GET contents/.github/toolkit-programme.json?ref=main'], 'governance off reads only the binding');
+  assert.deepEqual(off.calls, ['GET contents/.github/toolkit-programme.json?ref=main', 'GET actions/workflows/toolkit-programme-sweep-gate.yml/runs?event=schedule&status=completed&per_page=2'],
+    'governance off on the hourly start reads the binding and the two earlier hourly gate runs');
+  const offByActivity = fakeGitHub({ binding: JSON.stringify({ governance: 'disabled' }) });
+  await gate({ env: commentEnv, fetchImpl: offByActivity.fetchImpl, now: T, log: () => {} });
+  assert.deepEqual(offByActivity.calls, ['GET contents/.github/toolkit-programme.json?ref=main'], 'activity reads only the binding');
+});
+
+// Findings are for action: three held or skipped runs in a row turn the hourly gate red.
+const finished = id => ({ ...done(2 * HOUR), id });
+const sweepJob = id => [{ id: id * 10, name: 'Refresh the programme' }, { id: id * 10 + 1, name: 'Start the next run after an early stop' }];
+const note = (title, message) => [{ title, annotation_level: 'warning', message }];
+function streakGitHub(findings, extra = {}) {
+  const runs = findings.map((_, index) => finished(100 + index));
+  const runJobs = Object.fromEntries(runs.map(run => [run.id, sweepJob(run.id)]));
+  const notes = Object.fromEntries(findings.map((found, index) => [(100 + index) * 10, found]));
+  return fakeGitHub({ runs, runJobs, notes, ...extra });
+}
+
+test('gate: three held sweeps in a row with the same codes turn the hourly gate red with the controller step; a clean one ends it', async () => {
+  const { gate } = gateScript();
+  const held = note('Programme Sweep held', '(PASS_STOPPED) Programme Sweep held: this pass held and the next run retries.');
+  const red = await gate({ env: gateEnv, fetchImpl: streakGitHub([held, held, held]).fetchImpl, now: T, log: () => {} });
+  assert.match(red.alert, /^Programme Sweep held 3 runs in a row \(PASS_STOPPED\) since .+\. Controller: read the held items on the programme page/);
+  assert.equal(red.start, false, 'the verdict itself is unchanged');
+  for (const findings of [[[], held, held], [held, held, []], [held, held, note('Programme Sweep held', '(OTHER_CODE) held')], [held, held]]) {
+    assert.equal((await gate({ env: gateEnv, fetchImpl: streakGitHub(findings).fetchImpl, now: T, log: () => {} })).alert, undefined, JSON.stringify(findings));
+  }
+  const quiet = streakGitHub([[], held, held]);
+  await gate({ env: gateEnv, fetchImpl: quiet.fetchImpl, now: T, log: () => {} });
+  assert.deepEqual(quiet.calls.filter(call => /jobs$|annotations/.test(call)), ['GET actions/runs/100/jobs', 'GET check-runs/1000/annotations?per_page=50'], 'a clean last run stops the read');
+  const byActivity = streakGitHub([held, held, held]);
+  assert.equal((await gate({ env: { ...gateEnv, EVENT_NAME: 'issues' }, fetchImpl: byActivity.fetchImpl, now: T, log: () => {} })).alert, undefined, 'activity never goes red');
+  assert.ok(!byActivity.calls.some(call => /annotations/.test(call)));
+});
+
+test('gate: three sweeps skipped in a row for the same reason turn it red with the owner step; mixed reasons or held and skipped do not', async () => {
+  const { gate } = gateScript();
+  const noApp = note('Programme Sweep skipped', '(no_app) Programme Sweep skipped on owner/repository: the governance GitHub App is not set up here.');
+  const held = note('Programme Sweep held', '(PASS_STOPPED) held');
+  const red = await gate({ env: { ...gateEnv, EVENT_NAME: 'workflow_dispatch' }, fetchImpl: streakGitHub([noApp, noApp, noApp]).fetchImpl, now: T, log: () => {} });
+  assert.match(red.alert, /^Programme Sweep skipped 3 runs in a row \(no_app\) since .+\. Owner: follow the fix in the sweep run's warning/);
+  assert.equal((await gate({ env: gateEnv, fetchImpl: streakGitHub([noApp, held, noApp]).fetchImpl, now: T, log: () => {} })).alert, undefined);
+  assert.equal((await gate({ env: gateEnv, fetchImpl: streakGitHub([noApp, noApp, note('Programme Sweep skipped', '(public_state) x')]).fetchImpl, now: T, log: () => {} })).alert, undefined);
+  assert.equal((await gate({ env: gateEnv, fetchImpl: streakGitHub([note('Programme Sweep skipped', 'no code'), noApp, noApp]).fetchImpl, now: T, log: () => {} })).alert, undefined, 'an untitled code never counts');
+});
+
+test('gate: a governance-off skip on the third hourly run in a row turns it red, naming the leftover workflows', async () => {
+  const { gate } = gateScript();
+  const off = JSON.stringify({ governance: 'disabled' });
+  const gateRuns = [{ id: 7, status: 'completed' }, { id: 8, status: 'completed' }];
+  const runJobs = { 7: [{ id: 70, name: 'Start the sweep if there is work' }], 8: [{ id: 80, name: 'Start the sweep if there is work' }] };
+  const skipped = note('Programme Sweep gate skipped', '(disabled) Programme Sweep gate skipped owner/repository: the programme file on main turns governance off.');
+  const lines = [];
+  const red = await gate({ env: gateEnv, fetchImpl: fakeGitHub({ binding: off, gateRuns, runJobs, notes: { 70: skipped, 80: skipped } }).fetchImpl, now: T, log: line => lines.push(line) });
+  assert.match(lines[0], /^::warning title=Programme Sweep gate skipped::\(disabled\) Programme Sweep gate skipped owner\/repository: /);
+  assert.match(red.alert, /3 hourly runs in a row \(disabled\).+remove the Toolkit Programme Sweep workflows/);
+  const once = await gate({ env: gateEnv, fetchImpl: fakeGitHub({ binding: off, gateRuns, runJobs, notes: { 70: skipped } }).fetchImpl, now: T, log: () => {} });
+  assert.equal(once.alert, undefined, 'an earlier run without the skip ends the streak');
+  const other = await gate({ env: gateEnv, fetchImpl: fakeGitHub({ binding: off, gateRuns, runJobs, notes: { 70: skipped, 80: note('Programme Sweep gate skipped', '(invalid) x') } }).fetchImpl, now: T, log: () => {} });
+  assert.equal(other.alert, undefined, 'a different reason ends the streak');
+});
+
+test('gate: only a 404 reads as no programme file; a 401, 403 or 5xx on the binding is not governance off', async () => {
+  const { gate, GitHubAnswerError, isBlip } = gateScript();
+  const route = 'contents/.github/toolkit-programme.json?ref=main';
+  const lines = [];
+  const missing = await gate({ env: gateEnv, fetchImpl: fakeGitHub({ answers: { [route]: 404 } }).fetchImpl, now: T, log: line => lines.push(line) });
+  assert.equal(missing.reason, 'governance off');
+  assert.match(lines[0], /\(unreadable\).+missing or unreadable/);
+  for (const status of [401, 403, 500]) {
+    await assert.rejects(gate({ env: gateEnv, fetchImpl: fakeGitHub({ answers: { [route]: status } }).fetchImpl, now: T, log: () => {} }),
+      error => error instanceof GitHubAnswerError && error.status === status && isBlip(error) === (status >= 500));
+  }
 });
 
 test('gate: a repository it skips gets one warning naming the repository, the reason and the fix (record 808)', async () => {
@@ -554,7 +642,7 @@ test('gate: a repository it skips gets one warning naming the repository, the re
     const off = fakeGitHub({ binding });
     assert.equal((await gate({ env: gateEnv, fetchImpl: off.fetchImpl, now: T, log: line => lines.push(line) })).start, false);
     assert.equal(lines.length, 1);
-    assert.match(lines[0], /^::warning::Programme Sweep gate skipped owner\/repository: /);
+    assert.match(lines[0], /^::warning title=Programme Sweep gate skipped::\((?:disabled|unreadable|invalid|no_parent)\) Programme Sweep gate skipped owner\/repository: /);
     assert.match(lines[0], reason);
     assert.match(lines[0], / Fix: \S/);
   }
@@ -806,6 +894,7 @@ test('refreshed: only a pass that ran says so; every skip and failure leaves foo
   const held = runAction('run', { env: minted, refresh: () => ({ status: 1, code: null, report: { metrics: 'Sweep: requests=4', holds: ['x'] } }) });
   assert.ok(held.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'), 'a held pass ran');
   for (const [label, env, refresh] of [
+    ['queued behind another sweep', minted, () => ({ status: 0, code: null, report: { outcome: 'QUEUED', reason: 'another sweep is running' } })],
     ['main moved', minted, () => ({ status: 1, code: 'MAIN_MOVED', report: null })],
     ['public state', minted, () => ({ status: 1, code: 'CLOUD_PUBLIC_STATE', report: null })],
     ['sign-in', minted, () => ({ status: 1, code: 'GH_AUTH', report: null })],

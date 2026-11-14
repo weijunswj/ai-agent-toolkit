@@ -1,4 +1,4 @@
-# Toolkit dependency auto-merge v3. Toolkit governance copies this file into governed repositories;
+# Toolkit dependency auto-merge v4. Toolkit governance copies this file into governed repositories;
 # change the template in the Toolkit, not a copy.
 #
 # Turns on GitHub auto-merge, merge commit only, for Dependabot patch and minor updates. GitHub then
@@ -6,7 +6,9 @@
 # default branch, the programme binding there sets dependency_updates.auto_merge to "patch-minor", an
 # active ruleset there requires at least one status check, and every commit on the pull request is
 # Dependabot's; auto-merge is pinned to the head commit it checked, and a re-run started by anyone
-# else never turns it on. These get one comment and stay open for the owner: major updates, minor
+# else never turns it on. When the policy is off, the binding cannot be read or no ruleset requires a
+# check, the pull request gets the same one comment naming why, so it never waits silently. These also
+# get one comment and stay open for the owner: major updates, minor
 # updates from a 0.x version and any update from a 0.0.x version, updates whose maintainers changed,
 # and GitHub Actions updates unless the binding sets github_actions to "auto-merge" (the default
 # keeps them for the owner). When anyone but Dependabot pushes to the pull request, re-runs it, or
@@ -76,19 +78,17 @@ jobs:
             echo "Flagged for the owner: $1"
           }
           if [ -z "$DEFAULT_BRANCH" ] || [ "$BASE" != "$DEFAULT_BRANCH" ]; then flag "it targets $BASE, not the default branch"; exit 0; fi
-          binding="$(gh api "repos/$REPOSITORY/contents/.github/toolkit-programme.json?ref=$DEFAULT_BRANCH" --jq '.content' | base64 -d)" || binding='{}'
+          if ! binding="$(gh api "repos/$REPOSITORY/contents/.github/toolkit-programme.json?ref=$DEFAULT_BRANCH" --jq '.content' | base64 -d)" || ! printf '%s' "$binding" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            flag "the programme binding on $DEFAULT_BRANCH could not be read, so the auto-merge policy is unknown"; exit 0
+          fi
           policy="$(printf '%s' "$binding" | jq -r '.dependency_updates.auto_merge // "off"' 2>/dev/null)" || policy=off
           actions="$(printf '%s' "$binding" | jq -r '.dependency_updates.github_actions // "owner"' 2>/dev/null)" || actions=owner
           if [ "$policy" != "patch-minor" ]; then
-            disarm
-            echo "Auto-merge is off in the programme binding on $DEFAULT_BRANCH; leaving this pull request for the owner."
-            exit 0
+            flag "auto-merge is off in the programme binding on $DEFAULT_BRANCH (dependency_updates.auto_merge is not patch-minor)"; exit 0
           fi
           required="$(gh api "repos/$REPOSITORY/rules/branches/$DEFAULT_BRANCH" --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]] | length')" || required=0
           if [ "${required:-0}" -lt 1 ]; then
-            disarm
-            echo "No active ruleset on $DEFAULT_BRANCH requires a status check, so auto-merge could merge untested code; leaving this pull request for the owner."
-            exit 0
+            flag "no active ruleset on $DEFAULT_BRANCH requires a status check, so auto-merge could merge untested code; add a ruleset with required checks (toolkit governance check names it)"; exit 0
           fi
           if [ "$MAINTAINER_CHANGES" = "true" ]; then flag "the package's maintainers changed"; exit 0; fi
           case "$ECOSYSTEM" in
