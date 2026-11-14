@@ -277,14 +277,23 @@ test('H1 and H2: the real script in a terminal takes the typed apply and writes 
 // ---- the repo block: --apply also merges the Claude Code repo block of a governed repository ----
 
 const ENABLED_BINDING = { schema: 'toolkit.programme-binding.v2', repository: 'Owner/Repo', governance: 'enabled', parents: [{ issue: 7, record_prefix: 'TEST-' }], store: { kind: 'github', repository: 'Owner/Store', branch: 'main', path: 'state/' }, required_checks: [] };
-// A real folder for the repository, a fake Git that names it, and its programme file.
+// The repository lives at the POSIX path /work/repo, as the Linux computer() sees it; every file call
+// under that path goes to a real temporary folder, so the test runs the same on Windows.
+const VROOT = '/work/repo';
 function governedRepo(t, pc, { binding = ENABLED_BINDING } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-perm-repo-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, '.github'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.github', 'toolkit-programme.json'), JSON.stringify(binding));
-  const run = (cmd, args) => (args[1] === root && args.slice(2).join(' ') === 'rev-parse --path-format=absolute --git-common-dir' ? { status: 0, stdout: `${root}/.git\n` } : { status: 1, stdout: '' });
-  return { root, local: path.join(root, '.claude', 'settings.local.json'), deps: { ...pc.deps, run } };
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-perm-repo-'));
+  t.after(() => fs.rmSync(real, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(real, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(real, '.github', 'toolkit-programme.json'), JSON.stringify(binding));
+  const map = arg => {
+    if (typeof arg !== 'string') return arg;
+    // On Windows, path.resolve gives the POSIX path a drive letter; it is still the same folder.
+    const text = slashed(arg).replace(/^[A-Za-z]:(?=\/)/, '');
+    return text === VROOT || text.startsWith(`${VROOT}/`) ? path.join(real, text.slice(VROOT.length)) : arg;
+  };
+  const repoFs = new Proxy(hostFs, { get: (target, name) => (typeof target[name] === 'function' ? (...args) => target[name](...args.map(map)) : target[name]) });
+  const run = (cmd, args) => (slashed(args[1]) === VROOT && args.slice(2).join(' ') === 'rev-parse --path-format=absolute --git-common-dir' ? { status: 0, stdout: `${VROOT}/.git\n` } : { status: 1, stdout: '' });
+  return { root: VROOT, local: path.join(real, '.claude', 'settings.local.json'), realRoot: real, deps: { ...pc.deps, fs: repoFs, run } };
 }
 
 test('run from a governed repository, --apply also merges its Claude Code repo block and reads it back', async t => {
