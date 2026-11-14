@@ -13,7 +13,8 @@
       "expect": { "decision": "deny" },
       "status": "known-bad",
       "lane": "Stop hooks failing open after update",
-      "added": "2026-10-30"
+      "added": "2026-10-30",
+      "issue": 1005
     },
     {
       "id": "U2",
@@ -38,7 +39,8 @@
       "status": "known-bad",
       "known_bad_on": ["claude"],
       "lane": "Stop hooks failing open after update",
-      "added": "2026-10-30"
+      "added": "2026-10-30",
+      "issue": 1005
     },
     {
       "id": "U4.push-check-throws.push",
@@ -52,7 +54,8 @@
       "status": "known-bad",
       "known_bad_on": ["claude"],
       "lane": "Stop hooks failing open after update",
-      "added": "2026-10-30"
+      "added": "2026-10-30",
+      "issue": 1005
     },
     {
       "id": "U4.push-check-throws.read",
@@ -87,7 +90,8 @@
       "expect": { "decision": "allow" },
       "status": "known-bad",
       "lane": "Stop hooks failing open after update",
-      "added": "2026-10-30"
+      "added": "2026-10-30",
+      "issue": 1005
     },
     {
       "id": "U4.push-check-stalls.push",
@@ -100,7 +104,8 @@
       "expect": { "decision": "deny" },
       "status": "known-bad",
       "lane": "Stop hooks failing open after update",
-      "added": "2026-10-30"
+      "added": "2026-10-30",
+      "issue": 1005
     },
     {
       "id": "U4.bad-json.push",
@@ -114,7 +119,8 @@
       "status": "known-bad",
       "known_bad_on": ["claude"],
       "lane": "Stop hooks failing open after update",
-      "added": "2026-10-30"
+      "added": "2026-10-30",
+      "issue": 1005
     },
     {
       "id": "TasksPolicyMissingEnabled",
