@@ -325,3 +325,49 @@ test('board note: each early stop reads calmly; only a stuck sweep warns', () =>
   assert.equal(line({ stuck: true, pausedBy: 'GitHub rate limit' }),
     '⚠️ Sweep stuck: no pass has finished since 12 Nov 2026, 04:00 SGT, and the passes in the last 6 hours read 2 tasks. 12 tasks still to check (GitHub rate limit).');
 });
+
+// saqg review: near the App limit, a pass that must read its large state documents one by one stops
+// before any write. Its stop reason names the documents, so the limit that bound it travels beside
+// it, and the sweep action never counts the pass as refreshed (no footer cleaning), but held.
+test('App limit during large-document recovery: no write, the limit is carried through, never refreshed', t => {
+  const f = fixture(t, { count: 20 });
+  f.run({ cloud: true });
+  f.stale();
+  const truncated = f.outcomes.slice(0, 15).map(outcome => `issue-${outcome.issue}.json`);
+  f.github.intercept(call => {
+    if (call.path !== 'graphql' || !call.body.query.includes('stateSnapshot')) return undefined;
+    const answer = f.github.route(call.method, call.path, call.body);
+    for (const entry of answer.json.data.repository.snapshot.entries) if (truncated.includes(entry.name)) entry.object = { text: null, isTruncated: true };
+    return answer;
+  });
+  // GitHub's hourly count holds just above the margin (500 of 5,000): enough to start, not enough to
+  // read fifteen documents one by one and keep the settlement reserve.
+  const left = { core: 570, graphql: 5000 };
+  const pinned = limited(f.github, left);
+  const transport = { request: (...input) => { const response = pinned.transport.request(...input); left.core = 570; return response; } };
+  const before = f.page();
+  const queueBefore = f.parent().sweep.queue;
+  const result = f.run({ cloud: true, transport });
+  assert.equal(result.report.sweep.noWrite, true, JSON.stringify(result.report.sweep));
+  assert.equal(result.report.sweep.reason, 'State documents too large for GraphQL');
+  assert.equal(result.report.sweep.limit, 'GitHub rate limit', 'the limit that bound the stop travels beside its reason');
+  assert.ok(result.report.holds.some(hold => hold.code === 'PASS_STOPPED'), JSON.stringify(result.report.holds));
+  assert.equal(f.page(), before, 'nothing is drawn');
+  assert.deepEqual(f.parent().sweep.queue, queueBefore, 'the saved place is kept');
+  // The sweep action: held, at the limit, never refreshed, so the footer step never runs.
+  const action = require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-action.cjs'));
+  const outputs = [], tags = [];
+  const runner = new action.ProgrammeSweepAction({
+    env: { GITHUB_REPOSITORY: 'example.test/app', STORE_REPOSITORY: 'example.test/store', APP_CLIENT_ID_SET: 'true', MINT_OUTCOME: 'success/success',
+      GOVERNED_TOKEN: 'example-governed', STORE_TOKEN: 'example-store', SWEEP_LOGIN: 'example[bot]' },
+    root: ROOT, refresh: () => ({ status: result.code, code: null, report: result.report }), notice: () => {}, failure: message => assert.fail(message),
+    output: (name, value) => outputs.push([name, value]), summary: () => {}, warning: (message, tag) => tags.push(tag || null) });
+  assert.equal(runner.run(), 0);
+  assert.equal(outputs.some(([name]) => name === 'refreshed'), false, 'not refreshed');
+  assert.ok(outputs.some(([name, value]) => name === 'at_limit' && value === 'true'), JSON.stringify(outputs));
+  assert.deepEqual(tags, [{ title: action.HELD_TITLE, code: 'PASS_STOPPED' }]);
+  // A new hour: the next run reads the large documents one by one and saves.
+  const next = f.run({ cloud: true });
+  assert.equal(next.code, 0, JSON.stringify(next.report.holds));
+  assert.equal(next.report.sweep.noWrite, false);
+});
