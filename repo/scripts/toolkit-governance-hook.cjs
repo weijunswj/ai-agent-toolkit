@@ -34,10 +34,11 @@ function readInput(text) {
   } catch { return {}; }
 }
 
-const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the governance question is not asked (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. A Claude Projects thread's task auto-merge switch is the project line read from its session context; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
+const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as on a computer; the governance question is not asked (a cloud session cannot keep the owner's answer). The programme file on origin's default branch decides governance here too. Task auto-merge is the repository's merged switch (task_prs.auto_merge); in a Claude Projects thread, a project line `- Task auto-merge: Off` in its session context forces it Off; a merge card tap at that head counts as the owner's approval. Issue closures the cloud check cannot prove unsafe are advisory. Required CI checks remain the backstop.";
 
-// Records this cloud session's Projects task auto-merge switch when the prompt starts with the
-// host's session context. Never throws; an unreadable or unwritable switch stays Off.
+// Records this cloud session's Projects task auto-merge project line (off, none or on) when the
+// prompt starts with the host's session context. Never throws; with no readable record the line
+// forces Off.
 function recordProjectsSwitch(input, options) {
   try {
     const projects = require('./toolkit-projects-cloud.cjs');

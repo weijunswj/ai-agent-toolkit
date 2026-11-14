@@ -283,9 +283,9 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   assert.deepEqual(codes, {
     // A missing machine answer is reported Off without asking a question. The governance App cannot
     // be read in a test run, so it is reported unverified and changes no exit code.
-    conformant: [0, 'conformant', 'GOVERNANCE_APP_UNVERIFIED,TASK_AUTO_MERGE_OFF'],
-    stale: [1, 'drift', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_STALE,TASK_AUTO_MERGE_OFF'],
-    edited: [1, 'drift', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_EDITED,TASK_AUTO_MERGE_OFF'],
+    conformant: [0, 'conformant', 'GOVERNANCE_APP_UNVERIFIED,TASK_AUTO_MERGE_UNSET'],
+    stale: [1, 'drift', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_STALE,TASK_AUTO_MERGE_UNSET'],
+    edited: [1, 'drift', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_EDITED,TASK_AUTO_MERGE_UNSET'],
     unasked: [1, 'drift', 'DECISION_PENDING'],
     incomplete: [1, 'drift', 'DECISION_PENDING'],
     plain: [1, 'drift', 'DECISION_PENDING'],
@@ -298,7 +298,7 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
   fs.rmSync(ctx.registryPath);
   assert.deepEqual(treeDigest(ctx.root), snapshot, 'check wrote nothing');
 
-  // Task auto-merge's effective machine setting is covered in toolkit-task-auto-merge.test.cjs, and
+  // The repository's task auto-merge switch is covered in toolkit-task-auto-merge.test.cjs, and
   // the governance App in toolkit-governance-app.test.cjs; these lists leave both out.
   const notTaskAutoMerge = id => !id.startsWith('TASK_AUTO_MERGE') && !id.startsWith('GOVERNANCE_APP');
   // An ENABLED repository without the no-force-push ruleset drifts; one GitHub cannot protect, or

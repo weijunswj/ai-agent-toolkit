@@ -69,6 +69,14 @@
         "github_actions": { "enum": ["auto-merge", "owner"] }
       }
     },
+    "task_prs": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The repository's one task auto-merge switch, read by every app and the Projects controller. after-gates lets a finished task pull request merge once its gates pass; off, or no key, waits for a typed merge. Only the owner changes it, by merging a binding pull request.",
+      "properties": {
+        "auto_merge": { "enum": ["off", "after-gates"] }
+      }
+    },
     "projection": {
       "type": "object",
       "additionalProperties": false,

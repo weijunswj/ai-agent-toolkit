@@ -11,7 +11,6 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-const { TaskAutoMergePreferences } = require('../scripts/toolkit-task-auto-merge-preferences.cjs');
 const hold = require('../scripts/toolkit-merge-hold.cjs');
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 const governance = require('../scripts/toolkit-governance-state.cjs');
@@ -65,7 +64,6 @@ function context(t, host = 'codex') {
   git(repo, ['checkout', '-q', 'feature']);
   const head = commit(repo, 'notes.md', 'task change\n');
   const ctx = { root, repo, main, head, authority, host, registryOptions: { registryPath, testOnly: true, host, home: path.join(root, 'home') } };
-  machine(ctx, 'after-gates');
   return ctx;
 }
 
@@ -90,7 +88,7 @@ function merged(ctx, value, { ageMs = 0 } = {}) {
   fs.writeFileSync(file, JSON.stringify(entry));
 }
 
-const YES = binding();
+const YES = binding({ task_prs: { auto_merge: 'after-gates' } });
 
 test('genuine standing task authority still reaches and cannot bypass closure refusal', t => {
   const ctx = context(t); merged(ctx, YES); const session = userSession(ctx);
@@ -102,11 +100,17 @@ test('genuine standing task authority still reaches and cannot bypass closure re
   assert.equal(decide(ctx,input), null);
 });
 
-function machine(ctx, value, host = ctx.host) {
-  const owner = new TaskAutoMergePreferences({ host, home: ctx.registryOptions.home });
-  if (value === null) {
-    fs.rmSync(path.join(ctx.registryOptions.home, '.ai-agent-toolkit', 'user-state', `task-auto-merge.${host}.v1.json`), { force: true });
-  } else owner.apply(value, owner.inspect());
+// Sets the repository's switch in the merged binding this computer read: null is no switch at all.
+function machine(ctx, value) {
+  merged(ctx, value === null ? binding() : binding({ task_prs: { auto_merge: value } }));
+}
+
+// Plants the per-app answers older Toolkit versions saved, each saying On.
+function legacyAnswers(ctx) {
+  const folder = governance.userStateDirectory(ctx.registryOptions);
+  fs.mkdirSync(folder, { recursive: true });
+  for (const host of ['codex', 'claude-code']) fs.writeFileSync(path.join(folder, `task-auto-merge.${host}.v1.json`), `${JSON.stringify({ schema: 'toolkit.task-auto-merge-preferences.v1', host, value: 'after-gates' })}\n`);
+  return folder;
 }
 
 const userSession = (ctx, id = 'user') => { gate.startSession({ session_id: id, source: 'startup', cwd: ctx.repo }, { registryOptions: ctx.registryOptions, environment: {}, host: ctx.host }); return id; };
@@ -121,7 +125,7 @@ const decide = (ctx, input, environment = {}) => hold.decide(input, {
   } },
 });
 
-test('terminal check names missing native session context before app preferences', t => {
+test('terminal check names missing native session context before the repository switch', t => {
   const ctx = context(t);
   merged(ctx, YES);
   const report = hold.check({}, ctx.repo, { registryOptions: ctx.registryOptions, environment: {} });
@@ -131,47 +135,67 @@ test('terminal check names missing native session context before app preferences
   assert.doesNotMatch(report.explanation, /answer is not On/);
 });
 
-test('binding: a retired task field is an unknown field and never grants permission', () => {
+test('binding: task_prs.auto_merge is the one switch, valid only as off or after-gates in a version 2 binding', () => {
   assert.ok(programmeState.validateBinding(binding()));
-  for (const task_prs of [{ auto_merge: 'off' }, { auto_merge: 'after-gates' }, {}, null]) {
-    assert.throws(() => programmeState.validateBinding(binding({ task_prs })), /unknown|task_prs/);
+  for (const value of ['off', 'after-gates']) assert.equal(programmeState.validateBinding(binding({ task_prs: { auto_merge: value } })).task_prs.auto_merge, value);
+  assert.ok(programmeState.validateBinding(binding({ task_prs: {} })), 'an empty switch is valid and off');
+  for (const task_prs of [{ auto_merge: 'on' }, { auto_merge: 'patch-minor' }, { auto_merge: 'off', extra: 1 }, null, 'after-gates']) {
+    assert.throws(() => programmeState.validateBinding(binding({ task_prs })), /task_prs/, JSON.stringify(task_prs));
   }
+  const v1 = { schema: 'toolkit.programme-binding.v1', repository: 'owner/a', parent_issue: 1, record_prefix: 'INT-A-', writer_prefix: 'A-', store: binding().store, required_checks: ['validate'] };
+  assert.throws(() => programmeState.validateBinding({ ...v1, task_prs: { auto_merge: 'after-gates' } }), /task_prs/, 'a version 1 binding has no switch');
   const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'contracts', 'programme-state', 'binding-v2.schema.json'), 'utf8'));
-  assert.equal(schema.properties.task_prs, undefined);
+  assert.deepEqual(schema.properties.task_prs.properties.auto_merge.enum, ['off', 'after-gates']);
+  assert.equal(schema.properties.task_prs.additionalProperties, false);
 });
 
 for (const HOST of ['codex', 'claude-code']) {
-  test(`${HOST}: resolver closure across machine answers and binding states`, t => {
+  test(`${HOST}: resolver closure across switch values and binding states (closure matrix)`, t => {
     const ctx = context(t, HOST);
-    const read = host => governance.taskAutoMerge(ctx.repo, { ...ctx.registryOptions, host });
-    for (const [record, expected] of [[null, 'off'], ['off', 'off'], ['after-gates', 'after-gates']]) {
-      machine(ctx, record);
-      merged(ctx, binding());
-      assert.equal(read(HOST).auto_merge, expected);
-      assert.equal(read('unknown').auto_merge, 'off');
-      for (const [value, options] of [
-        [null, {}], [{ ...YES, governance: 'disabled' }, {}], [{ ...YES, repository: 'owner/b' }, {}],
-        [YES, { ageMs: 25 * 60 * 60 * 1000 }], [binding({ task_prs: { auto_merge: 'after-gates' } }), {}],
-        [{ schema: 'toolkit.programme-binding.v1', repository: 'owner/a', parent_issue: 1, record_prefix: 'INT-A-', writer_prefix: 'A-', store: YES.store, required_checks: ['validate'] }, {}],
-      ]) {
-        merged(ctx, value, options);
-        assert.equal(read(HOST).auto_merge, 'off', JSON.stringify(value));
-      }
+    const read = () => governance.taskAutoMerge(ctx.repo, { ...ctx.registryOptions, host: HOST });
+    for (const [value, expected, reason] of [[null, 'off', 'no-switch-set'], ['off', 'off', 'repository-off'], ['after-gates', 'after-gates', 'repository-on']]) {
+      machine(ctx, value);
+      assert.equal(read().auto_merge, expected);
+      assert.equal(read().reason, reason);
+      assert.equal(read().answered, value !== null);
     }
-    merged(ctx, binding());
+    const on = { task_prs: { auto_merge: 'after-gates' } };
+    for (const [value, options] of [
+      [null, {}], [binding({ ...on, governance: 'disabled', parents: undefined, store: undefined, required_checks: undefined }), {}], [{ ...YES, repository: 'owner/b' }, {}],
+      [YES, { ageMs: 25 * 60 * 60 * 1000 }],
+      [{ schema: 'toolkit.programme-binding.v1', repository: 'owner/a', parent_issue: 1, record_prefix: 'INT-A-', writer_prefix: 'A-', store: YES.store, required_checks: ['validate'] }, {}],
+      [{ ...YES, task_prs: { auto_merge: 'yes' } }, {}],
+    ]) {
+      merged(ctx, value, options);
+      assert.equal(read().auto_merge, 'off', JSON.stringify(value));
+      assert.equal(read().answered, false, JSON.stringify(value));
+    }
     machine(ctx, null);
-    machine(ctx, 'after-gates', HOST === 'codex' ? 'claude-code' : 'codex');
-    assert.equal(read(HOST).auto_merge, 'off', 'the other app never grants permission');
-    machine(ctx, 'after-gates');
-    const preferenceFile = path.join(ctx.registryOptions.home, '.ai-agent-toolkit', 'user-state', `task-auto-merge.${HOST}.v1.json`);
-    fs.writeFileSync(`${preferenceFile}.lock`, 'unfinished setup write');
-    assert.equal(read(HOST).auto_merge, 'off', 'an unfinished or failed write grants nothing');
-    fs.unlinkSync(`${preferenceFile}.lock`);
-    fs.writeFileSync(preferenceFile, 'malformed');
-    assert.equal(read(HOST).auto_merge, 'off', 'unreadable preferences grant nothing');
+    legacyAnswers(ctx);
+    assert.equal(read().auto_merge, 'off', 'older per-app On answers grant nothing');
     fs.mkdirSync(path.join(ctx.repo, '.github'), { recursive: true });
-    fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), JSON.stringify(binding({ task_prs: { auto_merge: 'after-gates' } })));
-    assert.equal(read(HOST).auto_merge, 'off', 'a working-tree binding grants nothing');
+    fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), JSON.stringify(YES));
+    assert.equal(read().auto_merge, 'off', 'a working-tree binding grants nothing');
+    assert.equal(governance.taskAutoMerge(null, ctx.registryOptions).reason, 'repository-required');
+  });
+
+  test(`${HOST}: the old per-app answers are deleted only after the repository switch is merged and read back`, t => {
+    const ctx = context(t, HOST);
+    const folder = legacyAnswers(ctx);
+    fs.writeFileSync(path.join(folder, 'task-auto-merge.codex.v1.json.lock'), 'unfinished');
+    const present = () => governance.LEGACY_TASK_ANSWERS.filter(name => fs.existsSync(path.join(folder, name)));
+    for (const [value, options] of [[null, {}], [binding(), {}], [YES, { ageMs: 25 * 60 * 60 * 1000 }], [binding({ governance: 'disabled', parents: undefined, store: undefined, required_checks: undefined }), {}]]) {
+      merged(ctx, value, options);
+      assert.deepEqual(governance.retireLegacyTaskAnswers(ctx.repo, ctx.registryOptions), [], JSON.stringify(value));
+      assert.equal(present().length, 2, 'kept before the new switch is read back');
+      assert.equal(governance.legacyTaskAnswersPresent(ctx.registryOptions), true);
+    }
+    machine(ctx, 'off');
+    assert.deepEqual(governance.retireLegacyTaskAnswers(ctx.repo, ctx.registryOptions).sort(), [...governance.LEGACY_TASK_ANSWERS].sort());
+    assert.equal(present().length, 0, 'gone once an off switch is read back');
+    assert.equal(fs.existsSync(path.join(folder, 'task-auto-merge.codex.v1.json.lock')), false);
+    assert.equal(governance.legacyTaskAnswersPresent(ctx.registryOptions), false);
+    assert.deepEqual(governance.retireLegacyTaskAnswers(ctx.repo, ctx.registryOptions), [], 'nothing left to remove');
   });
 
 test('hold: with yes, only the pinned merge-commit merge in the user\'s own session passes without a typed approval', (t) => {
@@ -456,7 +480,7 @@ if (HOST === 'claude-code') test(`${HOST}: standing resume closure and diagnosti
   machine(ctx, 'after-gates');
   merged(ctx, YES, { ageMs: 25 * 60 * 60 * 1000 });
   const stale = hold.check(input, ctx.repo, options);
-  assert.equal(stale.autoMergeOn, true);
+  assert.equal(stale.autoMergeOn, false, 'a stale read switches nothing on');
   assert.equal(stale.bindingFresh, false);
   assert.equal(stale.reason, 'binding-not-fresh');
 });
@@ -493,18 +517,19 @@ test('hold: a typed approval works as before when the answer is yes, and a stand
   assert.match(decide(ctx, bash(ctx, `gh pr merge 8 --squash --match-head-commit ${HEAD}`, session)).deny, /--merge|--squash/, 'and is used once');
 });
 
-test(`${HOST}: governance reports effective app setting and source without asking`, t => {
+test(`${HOST}: governance reports the repository switch, and the upgrade line when it is not set`, t => {
   const conformance = require('../scripts/toolkit-governance-conformance.cjs');
   const ctx = context(t, HOST);
-  merged(ctx, binding());
   fs.mkdirSync(path.join(ctx.repo, '.github'), { recursive: true });
   fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), JSON.stringify(binding()));
-  for (const [value, id, reason] of [[null, 'TASK_AUTO_MERGE_OFF', 'no-answer-saved'], ['off', 'TASK_AUTO_MERGE_OFF', 'machine-off'], ['after-gates', 'TASK_AUTO_MERGE_ON', 'machine-on']]) {
+  for (const [value, id, words] of [[null, 'TASK_AUTO_MERGE_UNSET', /off here until you set it; say refresh governance/], ['off', 'TASK_AUTO_MERGE_OFF', /off \(repository-off\).*refresh governance/], ['after-gates', 'TASK_AUTO_MERGE_ON', /on \(repository-on\).*task_prs\.auto_merge/]]) {
     machine(ctx, value);
     const rows = conformance.checkConformance(ctx.repo, { ...ctx.registryOptions, offline: true }).findings.filter(entry => entry.id.startsWith('TASK_AUTO_MERGE'));
+    assert.equal(rows.length, 1);
     assert.equal(rows[0].id, id);
-    assert.match(rows[0].message, new RegExp(`machine:${HOST}; ${reason}`));
-    assert.doesNotMatch(rows[0].message, /ask the owner|task_prs|binding pull request|A\)/);
+    assert.equal(rows[0].severity, 'info', 'a line, never a hold');
+    assert.match(rows[0].message, words);
+    assert.doesNotMatch(rows[0].message, /setup toolkit|this app's answer/);
   }
 });
 
