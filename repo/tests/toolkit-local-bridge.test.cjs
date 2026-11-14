@@ -25,7 +25,8 @@ const {
   printUpdateReportLine,
   hookSkipLine,
   recordHookSkip,
-  clearHookSkips
+  clearHookSkips,
+  pluginVersionRow
 } = require('../scripts/toolkit-local-bridge.cjs');
 const {
   CACHE_FINGERPRINT_PATHS,
@@ -2703,7 +2704,7 @@ test('hook report is generated when repo auto-update fast-forwards and lists cha
   assert.equal(report.text.includes(`Running bridge version: \`${expectedBridgeVersion}\``), true);
   assert.match(report.text, /Recorded repo version:/);
   assert.match(report.text, /Recorded Codex plugin version:/);
-  assert.match(report.text, /Recorded Claude plugin version:/);
+  assert.doesNotMatch(report.text, /Recorded Claude plugin version:/, 'a Codex report never describes Claude');
   assert.match(report.text, /Hub reporting version:/);
   assert.match(report.text, /Downgrade enforcement scope: `codex-plugin only`/);
   assert.match(report.text, /- `VERSION\.txt`/);
@@ -3827,7 +3828,7 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /dedicated clean `main` checkout as the single update source/, relPath);
     assert.match(text, /%USERPROFILE%\\\.ai-agent-toolkit\\source\\ai-agent-toolkit/, relPath);
     assert.doesNotMatch(text, /~\/\.ai-agent-toolkit\/source\/ai-agent-toolkit/, relPath);
-    assert.match(text, /separate from the active Codex or Claude Code worktree, plugin caches, `\.tmp` directories, and temporary marketplace checkouts/i, relPath);
+    assert.match(text, /separate from the active coding session's worktree, plugin caches, `\.tmp` directories, and temporary marketplace checkouts/i, relPath);
     assert.match(text, /complete compact bank|semantic wizard model/i, relPath);
     assert.match(text, /report auto-open is not an ordinary question|failure-only behavior/i, relPath);
     assert.match(text, /Omit host-specific rows when they have no practical effect/i, relPath);
@@ -3975,4 +3976,12 @@ test('a bridge hook that keeps stopping on an error counts the session starts an
   clearHookSkips(argv);
   assert.equal(fs.existsSync(path.join(root, 'hub', 'hook-skips.json')), false, 'a completed hook run clears it');
   assert.deepEqual(recordHookSkip(argv, '2026-11-16T01:00:00.000Z'), { count: 1, since: '2026-11-16T01:00:00.000Z' });
+});
+
+test('an update report names only the triggering app\'s plugin version', () => {
+  const state = { bridge_versions_by_source: { 'codex-plugin': '3.1.0', 'claude-plugin': '3.2.0', repo: '3.3.0' } };
+  assert.deepEqual(pluginVersionRow('claude-plugin', state), ['- Recorded Claude plugin version: `3.2.0`']);
+  assert.deepEqual(pluginVersionRow('codex-plugin', state), ['- Recorded Codex plugin version: `3.1.0`']);
+  assert.deepEqual(pluginVersionRow('repo', state), [], 'a repo run names neither app');
+  assert.deepEqual(pluginVersionRow('claude-plugin', { bridge_versions_by_source: {} }), ['- Recorded Claude plugin version: `not recorded`']);
 });

@@ -30,7 +30,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { STORE_PUSH_MESSAGE, SHELLS, ShellCall, absoluteShellPath, githubSlug, assignVariable, assignmentOf, folderWord, plainGitLine, shellCommands, shellOf, shellPath, shellReadings } = require('./toolkit-shell-call.cjs');
 
-const MESSAGE = 'Remove the AI attribution lines (Co-Authored-By or Claude-Session trailers, claude.ai session links, "Generated with" footers) and retry.';
+const MESSAGE = 'Remove the AI attribution trailers, session links and generated footers, then retry.';
 const ATTRIBUTION_PATTERNS = Object.freeze([
   /https?:\/\/claude\.ai\/(?:code\/)?(?:session|chat)[^\s"'`)]*/i,
   /Generated with \[?Claude Code/i
