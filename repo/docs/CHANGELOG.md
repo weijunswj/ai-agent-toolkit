@@ -1,10 +1,20 @@
 # Toolkit Changelog
 
-## 3.94.1
+## 3.95.0 (rolling merge trains)
 
-### Fixed
+### Changed
 
-- **Evidence-store merges in cloud sessions:** a cloud session can now merge its evidence store's pull requests under the standing custody permission, as a computer session already could. A cloud session starts in the folder that holds the project's clones, so it had no cached parent binding and the merge hold refused every store merge for want of the user's approval. The hold now reads the parent's merged binding on demand in cloud sessions, with the same bounded read session start uses, and accepts an explicitly named store merge from that folder when the parent's clone sits in it. Every other check stays: a fresh merged binding that names the exact store, a private writable store, its default branch as the base, the full head SHA and a plain merge commit. Other repositories stay gated as before.
+- Controllers now run rolling merge trains on their own. While a landing is in flight, ready pull requests board the open train; when main frees, boarding closes, the train catches up with main, bumps once and merges after one CI run, and the next train opens at once. A lone ready pull request merges alone, and no pull request waits on a train. The Controller routes its merge step to the page that holds the train rule, the Claude Projects skill points there, and the hourly nudge flags ready pull requests that no train holds.
+- Running a merge train needs no planning or build gate and runs on the small model tier. The lane never fixes a conflict: it ejects the member and that member's builder fixes it. A train needs no review of its own once `verify` passes and CI is green; only files two or more members change get a short delta review.
+- The Claude Projects coordinator never resolves its own project-chat post or the reply thread under it, since that hides the chat message; quiet reply threads no longer close after six hours. It resolves a thread only when the thread has its own session, is no task home, every pull request it lists is merged or closed, nothing is owed by the owner and its last report is final. The hourly nudge sweeps blocked, review-ready and done threads against that checklist.
+
+### Added
+
+- `toolkit-merge-train.cjs catchup` merges main into a stacked train after the earlier landing and adds the one bump, with no rebuild or force-push.
+- A merge train holds at most six members (`build` refuses a seventh), and its body carries every member's `Pack changes` lines (`pack_changes` in the manifest). A member that fails CI or its delta review is ejected at once and the rest carry on; nobody edits a train or member body while its CI runs.
+- A stacked train's pull request targets the running train's branch until that train lands, so the version check does not report its waiting fragments as unfolded; it then targets main before `catchup`.
+- In Claude Projects the train's merge card goes up in the train thread, which runs `land` and the merge itself, because a relayed tap does not count there; the fallback is the owner typing `merge PR N at <full SHA> as a merge commit` in that thread.
+- `toolkit-merge-train.cjs verify` lists the files two or more members change (`overlap`) and the review the train needs (`review`).
 
 ## 3.94.0
 
