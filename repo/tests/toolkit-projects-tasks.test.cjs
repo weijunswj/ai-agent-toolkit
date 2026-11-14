@@ -419,12 +419,17 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.ok(nudge.indexOf('nudge-state.md') > -1 && nudge.indexOf('nudge-state.md') < nudge.indexOf('list_threads'), 'cheap compare before the sweep');
   assert.match(nudge, /no change since <time>/);
   assert.doesNotMatch(nudge, /BINDING|git ls-remote|guidebook checked/);
-  assert.equal((nudge.match(/git clone/g) || []).length, 1);
-  const guidebook = nudge.split('\n').find(line => line.startsWith('9. Guidebook'));
+  // Toolkit once, plus the project's own repository for the controller check when it is another one.
+  assert.equal((nudge.match(/git clone/g) || []).length, 2);
+  const guidebook = nudge.split('\n').find(line => line.startsWith('9. Guidebook and controller check'));
   for (const required of ['runs every time, even when step 1 found no change', 'the library folder can change while main is quiet',
     '`git clone --depth 1 https://github.com/weijunswj/ai-agent-toolkit TK` in your scratchpad (a fresh clone)',
-    'toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects',
-    'run it again with `--out` in place of `--check`', '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "']) assert.ok(guidebook.includes(required), required);
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme`', 'adding `--checkout R` when step 9a made one',
+    '`CONTROLLER CHECK: clear ...`: write "**Guidebook:** current" and "**Controller check:** clear", and read no further',
+    '`node TK/repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects`', 'the same with `--check` in place of `--out`',
+    '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "', '"CONTROLLER CHECK: <n> | "']) assert.ok(guidebook.includes(required), required);
+  assert.ok(nudge.includes('9a. Checkout for step 9\'s controller check (before it runs): R is TK when example-owner/example-repo is weijunswj/ai-agent-toolkit, else `git clone --depth 1 https://github.com/example-owner/example-repo R`'), 'repo checkout');
+  assert.ok(nudge.includes('"SKILL COPY FAILED: <reason> | ", "CONTROLLER CHECK: <n> | "'), 'first-line prefix');
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
   assert.match(nudge, /plus steps 2a, 2b, 4, 5 and 7 to 11 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(age\)/);
@@ -776,7 +781,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     '**Read it every turn**', '**One refresh, three routes.**', 'refreshes a stale or changed copy itself', 'start a cloud thread for the refresh at once', 'The daily check-in is the backstop',
     '**BLOCK CHANGED:**', '**Missing folder:**', '`SKILL COPY FAILED`: start one fresh refresh thread', 'a guidebook refresh reports BLOCK CHANGED', '`GUIDEBOOK MISSING` or `SKILL COPY STALE`',
     '9. the guidebook:', 'coordinator: refresh the guidebook', 'the guidebook refresh brings both here', '- Projects guidebook:', "Read the guidebook's `VERSION`",
-    'library copy of the Projects skill (the guidebook)', 'and the guidebook refresh (step 9)', '9. Guidebook (runs every time', 'With BLOCK CHANGED, the coordinator replaces the block',
+    'library copy of the Projects skill (the guidebook)', 'and the guidebook refresh (step 9)', '9. Guidebook and controller check (runs every time', 'With BLOCK CHANGED, the coordinator replaces the block',
     '**Refresh routes, a missing folder and `SKILL COPY FAILED`:**', '# Web Controller for Claude Projects: guidebook refresh', '## Refreshing the guidebook copy',
   ];
   const unguarded = [];

@@ -128,7 +128,7 @@ test('the CLI resolves gh to a full path and hides its window for both read-only
       if (name === './decision-tags.cjs') return require('../../skills/github-program-reconciler/scripts/decision-tags.cjs');
       if (name === 'node:child_process') return { spawnSync(executable, args, options) {
         calls.push({ executable, args, options });
-        return { status: 0, stdout: args.includes('--paginate') ? '[[]]' : '{"body":""}' };
+        return { status: 0, stdout: /\/comments\?/.test(args[1]) ? '[]' : '{"body":""}' };
       } };
       return require(name);
     },
@@ -143,6 +143,31 @@ test('the CLI resolves gh to a full path and hides its window for both read-only
     assert.equal(call.args[0], 'api');
     assert.equal(call.args.includes('--method'), false);
   }
+});
+
+test('the CLI reads comments by numbered pages until a short page, never through --paginate', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../skills/github-program-reconciler/scripts/decision-trace-audit.cjs'), 'utf8');
+  const endpoints = [];
+  let printed = '';
+  const page = (start, count) => JSON.stringify(Array.from({ length: count }, (_, index) => person(start + index, 'a note')));
+  const context = {
+    module: {}, process: { argv: ['node', 'audit', '--repo', 'acme/app', '--issue', '7'], stdout: { write(text) { printed += text; } } },
+    require(name) {
+      if (name === './resolve-executable.cjs') return { resolveExecutable() { return 'gh'; } };
+      if (name === './decision-tags.cjs') return require('../../skills/github-program-reconciler/scripts/decision-tags.cjs');
+      if (name === 'node:child_process') return { spawnSync(executable, args) {
+        assert.equal(args.includes('--paginate'), false);
+        endpoints.push(args[1]);
+        if (!/\/comments\?/.test(args[1])) return { status: 0, stdout: '{"body":""}' };
+        return { status: 0, stdout: /page=1$/.test(args[1]) ? page(1, 100) : page(101, 1) };
+      } };
+      return require(name);
+    },
+  };
+  context.require.main = context.module;
+  vm.runInNewContext(source, context);
+  assert.deepEqual(endpoints.slice(1), ['repos/acme/app/issues/7/comments?per_page=100&page=1', 'repos/acme/app/issues/7/comments?per_page=100&page=2']);
+  assert.equal(JSON.parse(printed).comments, 101);
 });
 
 test('loading the audit before programme state preserves the shared body threshold', () => {

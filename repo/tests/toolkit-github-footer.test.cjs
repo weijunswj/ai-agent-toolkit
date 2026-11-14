@@ -224,8 +224,12 @@ function fakeGh(state) {
     assert.deepEqual(args.slice(-2), ['--hostname', 'github.com']);
     if (args[1] === 'repos/acme/app') return JSON.stringify({ full_name: 'repository' in state ? state.repository : 'acme/app' });
     if (args[1] === 'user') return 'me\n';
-    if (args[1] === '--paginate') {
-      const endpoint = args[2];
+    if (/[?&]page=\d+$/.test(args[1])) {
+      // Numbered pages: everything on page 1, so page 1 is short and the list stops there.
+      assert.match(args[1], /per_page=100/);
+      assert.equal(args.includes('--paginate'), false);
+      const endpoint = args[1];
+      if (!/[?&]page=1$/.test(endpoint)) return '';
       if (/issues\/comments\?/.test(endpoint)) return lines(state.issueComments);
       if (/pulls\/comments\?/.test(endpoint)) return lines(state.reviewComments);
       if (/\/issues\?/.test(endpoint)) return lines(state.issues);
@@ -309,7 +313,7 @@ test('the sweep cleans existing posts with the right method and reads each back'
   assert.equal(state.written['repos/acme/app/pulls/comments/10'], 'reply');
   assert.ok(results.filter((row) => row.status === 'CLEANED').length === 4);
   assert.ok(!results.some((row) => /pullrequestreview-41/.test(row.url || '')), '--since skips pull requests not updated in the window');
-  assert.ok(calls.some((call) => call.args[2] === `repos/acme/app/issues/comments?per_page=100&since=${encodeURIComponent('2026-10-01T00:00:00.000Z')}`));
+  assert.ok(calls.some((call) => call.args[1] === `repos/acme/app/issues/comments?per_page=100&since=${encodeURIComponent('2026-10-01T00:00:00.000Z')}&page=1`));
   assert.equal(sweep.exitCode(results), sweep.EXIT.FIXED);
 });
 

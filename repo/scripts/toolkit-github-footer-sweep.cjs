@@ -58,10 +58,17 @@ function defaultGh(args, input) {
 
 const FIELDS = '{id, number, body, user: .user.login, html_url, updated_at}';
 
-// One JSON object per line from a paginated list.
+// Every item of a paged list, one JSON object per line from each page. Numbered pages rather than
+// --paginate: gh follows GitHub's next links, which name the repository by numeric ID, and the cloud
+// session proxy refuses those paths. Every endpoint here asks for per_page=100.
 function list(gh, endpoint) {
-  const out = gh(['api', '--paginate', endpoint, '--jq', `.[] | ${FIELDS} | @json`]);
-  return out.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+  const items = [];
+  for (let page = 1; ; page += 1) {
+    const out = gh(['api', `${endpoint}&page=${page}`, '--jq', `.[] | ${FIELDS} | @json`]);
+    const rows = out.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    items.push(...rows);
+    if (rows.length < 100) return items;
+  }
 }
 
 function getOne(gh, endpoint) {
