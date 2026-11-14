@@ -73,6 +73,16 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
     assert.equal(validateBinding({ ...binding, parent_lifecycle }), false);
     assert.throws(() => state.validateBinding({ ...binding, parent_lifecycle }), /invalid/);
   }
+  // ci_shards (the sharded CI offer's answer) is read and accepted, never acted on, in this release.
+  for (const ci_shards of [{ answer: 'yes' }, { answer: 'not-now', offered_at: '2026-11-14T18:00:00Z' }, { answer: 'never' }]) {
+    assert.equal(validateBinding({ ...binding, ci_shards }), true, JSON.stringify(ci_shards));
+    assert.deepEqual(state.validateBinding({ ...binding, ci_shards }).ci_shards, ci_shards);
+  }
+  for (const ci_shards of [{}, { answer: 'maybe' }, { answer: 'yes', shards: 4 }, { answer: 'yes', offered_at: 'yesterday' }, 'yes']) {
+    assert.equal(validateBinding({ ...binding, ci_shards }), false, JSON.stringify(ci_shards));
+    assert.throws(() => state.validateBinding({ ...binding, ci_shards }), /ci_shards/);
+  }
+  assert.throws(() => state.validateBinding({ ...v1, ci_shards: { answer: 'yes' } }), /invalid/, 'a version 1 binding carries no ci_shards');
   const { parent_lifecycle: _policy, ...unboundLifecycle } = binding;
   assert.equal(state.validateBinding(unboundLifecycle).parent_lifecycle, undefined, 'existing bindings acquire no lifecycle authority');
   for (const kind of ['set_parent_state', 'post_parent_repair']) {
