@@ -8,7 +8,7 @@ const test = require('node:test');
 const path = require('node:path');
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const state = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-state.cjs'));
-const { FakeGitHub } = require('./toolkit-programme-fake-github.cjs');
+const { FakeGitHub, blobSha } = require('./toolkit-programme-fake-github.cjs');
 
 const NOW = '2026-11-12T01:00:00.000Z';
 const controller = { session: 'fixture-controller', prefix: 'TEST-' };
@@ -156,10 +156,202 @@ test('snapshot: REST fallback reads the same documents', () => {
   assert.equal(f.store.read('child', 500).doc.next_action, 'Checked 500');
 });
 
+// GitHub's created-tree answer may list only the top-level entries of a nested path (`state` as a
+// tree), as the fakes answer by default; the read-back then checks Git's own blob id of each written text.
+function refuseGraphql(f) {
+  f.github.intercept(call => (call.path === 'graphql' ? { status: 403, json: { message: 'refused' } } : undefined));
+}
+function rewriteTreeCall(f, change) {
+  f.github.intercept(call => {
+    if (call.method !== 'POST' || !call.path.endsWith('/git/trees')) return undefined;
+    return change(call);
+  });
+}
+
+test('readback: a created tree that lists only top-level entries is checked by the local blob id', () => {
+  const f = fixture();
+  refuseGraphql(f);
+  let answer = null;
+  rewriteTreeCall(f, call => { answer = f.github.route(call.method, call.path, call.body); return answer; });
+  const result = f.store.commitBatch(f.stage());
+  assert.deepEqual(answer.json.tree.map(item => [item.path, item.type]), [['state', 'tree']], 'the fake answers top-level entries only');
+  assert.equal(result.written.length, 3);
+  for (const entry of result.written) assert.match(entry.blob, /^[0-9a-f]{40}$/);
+  f.github.hooks = [];
+  assert.equal(f.store.read('child', 500).doc.next_action, 'Checked 500');
+});
+
+test('readback: a listed blob id that does not agree with the written text is refused', () => {
+  const f = fixture();
+  refuseGraphql(f);
+  rewriteTreeCall(f, call => {
+    const answer = f.github.route(call.method, call.path, call.body);
+    answer.json.tree = call.body.tree.map(item => ({ path: item.path, type: 'blob', sha: 'f'.repeat(40) }));
+    return answer;
+  });
+  assert.throws(() => f.store.commitBatch(f.stage()), { code: 'STATE_READBACK_MISMATCH' });
+});
+
+test('readback: a stored blob that is not the written text is refused, even when GitHub lists it', () => {
+  const f = fixture();
+  refuseGraphql(f);
+  rewriteTreeCall(f, call => {
+    // GitHub stored other bytes than were sent, and its answer lists the stored blob's own id.
+    const body = { ...call.body, tree: call.body.tree.map(item => ({ ...item, content: `${item.content} ` })) };
+    const answer = f.github.route(call.method, call.path, body);
+    answer.json.tree = body.tree.map(item => ({ path: item.path, type: 'blob', sha: blobSha(item.content) }));
+    return answer;
+  });
+  assert.throws(() => f.store.commitBatch(f.stage()), { code: 'STATE_READBACK_MISMATCH' });
+});
+
+// GraphQL leaves out the text of a blob over about 1 MB; such a document is read whole by its blob id.
+function truncateLarge(f, names) {
+  f.github.intercept(call => {
+    if (call.path !== 'graphql' || !call.body.query.includes('stateSnapshot')) return undefined;
+    const answer = f.github.route(call.method, call.path, call.body);
+    for (const entry of answer.json.data.repository.snapshot.entries) {
+      if (names.includes(entry.name)) entry.object = { text: null, isTruncated: true };
+    }
+    return answer;
+  });
+}
+
+test('snapshot: a document too large for GraphQL is read whole by its blob id', () => {
+  const f = fixture();
+  const graph = f.store.readSnapshot();
+  truncateLarge(f, ['issue-500.json']);
+  const calls = f.github.calls.length;
+  const large = f.store.readSnapshot();
+  assert.equal(large.mode, 'graphql');
+  assert.equal(f.store.graphqlRefused, false);
+  const view = snapshot => [...snapshot.documents].map(([key, entry]) => [key, entry.sha, entry.error ? entry.error.code : state.canonicalText(entry.doc)]).sort();
+  assert.deepEqual(view(large), view(graph));
+  const blobs = f.github.calls.slice(calls).filter(call => /\/git\/blobs\//.test(call.path));
+  assert.equal(blobs.length, 1, 'only the large document is read as a blob');
+  // A state commit still reads back when a written document comes back truncated.
+  const result = f.store.commitBatch(f.stage());
+  assert.equal(result.written.length, 3);
+  f.github.hooks = [];
+  assert.equal(f.store.read('child', 500).doc.next_action, 'Checked 500');
+});
+
+test('snapshot: large documents over budget stop before writes', () => {
+  const f = fixture();
+  truncateLarge(f, ['issue-500.json', 'issue-501.json']);
+  const transport = Object.assign(Object.create(f.github), { left: () => 3, reserve: 2 });
+  const store = new state.StateStore({ transport, store: f.store.store, now: () => NOW });
+  assert.throws(() => store.readSnapshot(), error => error.code === 'PASS_STOPPED' && error.noWrite === true);
+});
+
+test('snapshot: a large document whose blob cannot be read stops with the failed read', () => {
+  const f = fixture();
+  truncateLarge(f, ['issue-500.json']);
+  f.github.intercept(call => (/\/git\/blobs\//.test(call.path) ? { status: 404, json: { message: 'Not Found' } } : undefined));
+  assert.throws(() => f.store.readSnapshot(), { code: 'GH_FAILED' });
+});
+
+// After the branch moved, the read-back reads no blob one by one and never stops on the budget.
+function lowBudgetCommit(f, { refuseGraphql = false } = {}) {
+  let left = 100;
+  const transport = Object.assign(Object.create(f.github), { left: () => left, reserve: 2 });
+  const store = new state.StateStore({ transport, store: f.store.store, now: () => NOW });
+  const batch = new state.StateBatch(store, store.readSnapshot(), 421);
+  batch.mutate('child', 500, { writer: f.writer, change: doc => { doc.next_action = 'Checked 500'; return doc; } });
+  if (refuseGraphql) f.github.intercept(call => (call.path === 'graphql' ? { status: 403, json: { message: 'refused' } } : undefined));
+  left = 2; // settlement at the reserve, as after a pass the request budget stopped
+  const calls = f.github.calls.length;
+  const result = store.commitBatch(batch);
+  const blobs = f.github.calls.slice(calls).filter(call => /\/git\/blobs\//.test(call.path)).length;
+  f.github.hooks = [];
+  return { result, blobs, head: batch.snapshot.head, store };
+}
+
+test('readback: a large unwritten document and a budget at the reserve do not fail a landed commit', () => {
+  const f = fixture();
+  truncateLarge(f, ['issue-501.json']);
+  const { result, blobs, head, store } = lowBudgetCommit(f);
+  assert.equal(result.written.length, 1);
+  assert.notEqual(result.head, head, 'the branch moved');
+  assert.equal(blobs, 0, 'the read-back reads no blob');
+  assert.equal(store.snapshotDoc(store.readSnapshot(), 'child', 500).doc.next_action, 'Checked 500', 'the commit landed');
+});
+
+test('readback: with GraphQL refused, a budget at the reserve does not fail a landed commit', () => {
+  const f = fixture();
+  const { result, blobs, store } = lowBudgetCommit(f, { refuseGraphql: true });
+  assert.equal(result.written.length, 1);
+  assert.equal(blobs, 0, 'the read-back compares blob ids, reading no blob');
+  assert.equal(store.snapshotDoc(store.readSnapshot(), 'child', 500).doc.next_action, 'Checked 500', 'the commit landed');
+});
+
+test('readback: a written document too large for GraphQL is checked by its local blob id', () => {
+  const f = fixture();
+  truncateLarge(f, ['issue-500.json']);
+  const { result, blobs } = lowBudgetCommit(f);
+  assert.equal(result.written.length, 1);
+  assert.equal(blobs, 0, 'checked by blob id, not read');
+  assert.match(result.written[0].blob, /^[0-9a-f]{40}$/);
+  // A commit whose large written document disagrees with an id GitHub lists is refused.
+  const g = fixture();
+  truncateLarge(g, ['issue-500.json']);
+  g.github.intercept(call => {
+    if (call.method !== 'POST' || !call.path.endsWith('/git/trees')) return undefined;
+    const answer = g.github.route(call.method, call.path, call.body);
+    answer.json.tree = call.body.tree.map(item => ({ path: item.path, type: 'blob', sha: 'f'.repeat(40) }));
+    return answer;
+  });
+  const batch = new state.StateBatch(g.store, g.store.readSnapshot(), 421);
+  batch.mutate('child', 500, { writer: g.writer, change: doc => { doc.next_action = 'Checked 500'; return doc; } });
+  assert.throws(() => g.store.commitBatch(batch), { code: 'STATE_READBACK_MISMATCH' });
+});
+
 test('snapshot: fallback over budget stops before writes', () => {
   const f = fixture();
   const transport = Object.assign(Object.create(f.github), { left: () => 3, reserve: 2 });
   transport.request = (...args) => (args[1] === 'graphql' ? { status: 502, json: {} } : f.github.request(...args));
   const store = new state.StateStore({ transport, store: f.store.store, now: () => NOW });
   assert.throws(() => store.readSnapshot(), error => error.code === 'PASS_STOPPED' && error.reason === 'GitHub GraphQL unavailable' && error.noWrite === true);
+});
+
+// The Contents API leaves out the text of a file over 1 MB (encoding "none", empty content).
+function contentsWithoutText(f, file) {
+  f.github.intercept(call => {
+    if (call.method !== 'GET' || !call.path.includes(`/contents/${file}`)) return undefined;
+    const answer = f.github.route(call.method, call.path, call.body);
+    if (answer.status === 200) answer.json = { ...answer.json, encoding: 'none', content: '' };
+    return answer;
+  });
+}
+
+test('read: a document too large for the Contents API is read whole by its blob id', () => {
+  const f = fixture();
+  const small = f.store.read('child', 500);
+  contentsWithoutText(f, 'state/issue-500.json');
+  const calls = f.github.calls.length;
+  const large = f.store.read('child', 500);
+  assert.equal(large.sha, small.sha);
+  assert.equal(state.canonicalText(large.doc), state.canonicalText(small.doc));
+  assert.equal(f.github.calls.slice(calls).filter(call => /\/git\/blobs\//.test(call.path)).length, 1, 'one blob read');
+});
+
+test('read: a large document whose blob cannot be read stops with the failed read', () => {
+  const f = fixture();
+  contentsWithoutText(f, 'state/issue-500.json');
+  f.github.intercept(call => (/\/git\/blobs\//.test(call.path) ? { status: 404, json: { message: 'Not Found' } } : undefined));
+  assert.throws(() => f.store.read('child', 500), { code: 'GH_FAILED' });
+});
+
+test('write: a document too large for the Contents API reads back at its commit by its blob id', () => {
+  const f = fixture();
+  const { doc, sha } = f.store.read('child', 500);
+  doc.next_action = 'Checked 500';
+  contentsWithoutText(f, 'state/issue-500.json');
+  const calls = f.github.calls.length;
+  const result = f.store.write('child', 500, doc, { sha, previous: null });
+  assert.equal(result.outcome, 'WRITTEN');
+  assert.equal(result.doc.next_action, 'Checked 500');
+  const readback = f.github.calls.slice(calls).filter(call => call.method === 'GET' && call.path.includes('/contents/state/issue-500.json'));
+  assert.ok(readback.some(call => /[?&]ref=[0-9a-z]+/.test(call.path) && !call.path.includes('ref=main')), 'read back at the write commit');
+  assert.equal(f.github.calls.slice(calls).filter(call => /\/git\/blobs\//.test(call.path)).length, 1, 'by its blob id');
 });

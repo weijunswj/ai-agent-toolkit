@@ -193,6 +193,14 @@ function formatReport(result) {
   return `${lines.join('\n')}\n`;
 }
 
+// Under GitHub Actions each finding is also an annotation on its file and line, so a warning shows
+// on the pull request instead of only inside the Validate log. Exit codes are unchanged.
+function annotation(item) {
+  const clean = value => String(value).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+  const property = value => clean(value).replace(/:/g, '%3A').replace(/,/g, '%2C');
+  return `::${item.severity === 'error' ? 'error' : 'warning'} file=${property(item.path)},line=${item.line},title=Fallback risk::${clean(`matched "${item.matched}" (${item.phrase}) - ${item.reason}`)}`;
+}
+
 function main() {
   const args = process.argv.slice(2);
   const targets = targetArgs(args);
@@ -204,11 +212,15 @@ function main() {
   } else {
     process.stdout.write(formatReport(result));
   }
+  if (process.env.GITHUB_ACTIONS === 'true' && !args.includes('--json')) {
+    for (const item of result.findings) process.stdout.write(`${annotation(item)}\n`);
+  }
   if (result.errors.length) process.exitCode = 1;
 }
 
 if (require.main === module) main();
 
 module.exports = {
+  annotation,
   auditFallbackRisk
 };

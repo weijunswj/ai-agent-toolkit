@@ -135,7 +135,7 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
+  assert.match(result.stdout, /^Toolkit: action needed \(this session start\): .+ Tell the owner before other work\.$/m);
 
   const report = readLatestReport(hub);
   assert.match(report.text, /Codex native plugin cache: `stale`/);
@@ -150,7 +150,9 @@ test('hook report tells user to run setup toolkit when Codex native plugin cache
     })
   });
   assert.equal(result.status, 0, result.stderr);
+  // The same action-required result writes no new report, but the session still hears about it.
   assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
+  assert.match(result.stdout, /^Toolkit: action needed \(2 session starts in a row since \d{4}-\d{2}-\d{2}\): enable Codex plugin auto-refresh in setup, or run setup toolkit\. Update report: toolkit-update-[\d-]+\.md in the Toolkit update-report folder\. Tell the owner before other work\.$/m);
   const repeatedState = readJson(path.join(hub, 'state.json'));
   assert.equal(repeatedState.last_update_report_path, report.reportPath);
   assert.equal(repeatedState.last_update_report_signature, report.state.last_update_report_signature);
@@ -300,7 +302,7 @@ test('Codex auto-refresh runs before a delegated hub sync failure', () => {
     })
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Toolkit local bridge sync complete\./);
+  assert.match(result.stdout, /^Toolkit: action needed \(this session start\): .+ Tell the owner before other work\.$/m);
   assert.match(result.stdout, /delegated repo sync failed/);
   assert.deepEqual(
     verifyInstalledCacheFreshness(stalePluginRoot, fixture.repo),

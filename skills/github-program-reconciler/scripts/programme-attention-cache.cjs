@@ -4,7 +4,8 @@
 // git, gh or network call. `programme.cjs refresh` and `programme.cjs attention` write it after
 // reading the parent document; the session-start line reads it and records which set it last
 // showed. It lives in Toolkit's own user-state, never the repository, and holds no free text: the
-// line, the counts and a digest of the open findings.
+// line, the counts, a digest of the open findings and the longest-stalled work-queue task (its
+// number, code, when it was flagged and the Toolkit's fixed next step for that code).
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -44,21 +45,40 @@ function writeAtomically(file, value) {
   fs.renameSync(temp, file);
 }
 
-// Records what a run on this computer read: { line, counts, digest, complete }. Keeps the digest last
-// shown at session start. Never throws: a cache that cannot be written only means session start says
-// it has not checked yet.
-function writeCache(repository, { line, counts, digest, complete }, deps = {}) {
+// Records what a run on this computer read: { line, counts, digest, complete, queue }. Keeps the digest
+// last shown at session start. Never throws: a cache that cannot be written only means session start
+// says it has not checked yet.
+function writeCache(repository, { line, counts, digest, complete, queue = null }, deps = {}) {
   const file = cacheFile(repository, deps);
   if (!file) return false;
   const previous = readCache(repository, deps);
   try {
     writeAtomically(file, {
       schema: CACHE_SCHEMA, repository: String(repository).toLowerCase(),
-      as_of: (deps.now || (() => new Date().toISOString()))(), complete: complete !== false, counts, line, digest,
+      as_of: (deps.now || (() => new Date().toISOString()))(), complete: complete !== false, counts, line, digest, queue: queueOf(queue),
       shown_digest: previous ? previous.shown_digest || null : null,
     });
     return true;
   } catch { return false; }
+}
+
+// The cached work-queue summary when it is well formed, else null (an older cache has none).
+function queueOf(value) {
+  const oldest = value?.oldest;
+  if (!Number.isInteger(value?.count) || value.count < 1 || !Number.isInteger(oldest?.issue) || oldest.issue < 1) return null;
+  if (!/^[A-Z][A-Z_]{0,39}$/.test(String(oldest.code)) || Number.isNaN(Date.parse(oldest.since))) return null;
+  if (typeof oldest.next !== 'string' || !oldest.next || oldest.next.length > 300 || /[\r\n]/.test(oldest.next)) return null;
+  return { count: value.count, oldest: { issue: oldest.issue, code: oldest.code, since: oldest.since, next: oldest.next } };
+}
+
+// `Longest stalled on the work queue: #<n> (<code> since <time>Z); next step: <step>`, or null.
+function queueText(value) {
+  const queue = queueOf(value);
+  if (!queue) return null;
+  const { issue, code, since, next } = queue.oldest;
+  const at = new Date(Date.parse(since)).toISOString().slice(0, 16).replace('T', ' ');
+  const of = queue.count > 1 ? ` of ${queue.count}` : '';
+  return `Longest stalled on the work queue${of}: #${issue} (${code} since ${at}Z); next step: ${next.replace(/^Controller:\s*/, '')}`;
 }
 
 function markShown(repository, digest, deps = {}) {
@@ -75,7 +95,8 @@ function ageText(ms) {
 }
 
 // The session-start line for a repository, or null when there is nothing to say, and whether a
-// background refresh is due: { line, refresh, age }. `age` is set when the cache is over an hour old.
+// background refresh is due: { line, refresh, age }, plus queueOnly when every open finding is on the
+// work queue. `age` is set when the cache is over an hour old.
 // While a finding is new or acknowledged the line shows at every start; "clear" shows once after each
 // change (every line shown records its set); with no cache it never says clear. The caller says
 // whether a refresh started.
@@ -89,7 +110,11 @@ function sessionAttention(repository, deps = {}) {
   const result = line => ({ line, refresh: stale, age: stale ? ageText(age) : null });
   if (open === 0 && cache.shown_digest === cache.digest) return result(null);
   if (cache.shown_digest !== cache.digest) markShown(repository, cache.digest, deps);
-  return result(open > 0 ? `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}. Run programme.cjs attention for the list` : `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}`);
+  const queue = open > 0 ? queueText(cache.queue) : null;
+  // Every open finding is on the work queue: the caller offers no ack, since those cannot be acked.
+  const queueOnly = Boolean(queue) && queueOf(cache.queue).count >= open;
+  const shown = result(open > 0 ? `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}.${queue ? ` ${queue}.` : ''} Run programme.cjs attention for the list` : `${cache.line}${stale ? ` (as of ${ageText(age)} ago)` : ''}`);
+  return queueOnly ? { ...shown, queueOnly: true } : shown;
 }
 
 // Background refreshes from session start are at most one per START_GAP_MS per repository on this
@@ -115,4 +140,4 @@ function claimBackgroundStart(repository, deps = {}) {
   return true;
 }
 
-module.exports = Object.freeze({ CACHE_SCHEMA, STALE_MS, START_GAP_MS, cacheDir, cacheFile, readCache, writeCache, markShown, sessionAttention, claimBackgroundStart, ageText });
+module.exports = Object.freeze({ CACHE_SCHEMA, STALE_MS, START_GAP_MS, cacheDir, cacheFile, readCache, writeCache, markShown, sessionAttention, claimBackgroundStart, ageText, queueText });
