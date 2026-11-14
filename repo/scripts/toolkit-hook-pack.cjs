@@ -16,6 +16,7 @@
 //     hook's onFailure setting) and checks it, and that no fixture file changed, against the row.
 // A row with status `known-bad` records a bug its lane has not fixed yet: the runner expects it to
 // still fail and reports it when it starts passing, so its lane flips it to `pass` in the fix.
+// One older than 30 days without an `issue` number fails the run (agedKnownBad).
 //
 // Usage:
 //   node repo/scripts/toolkit-hook-pack.cjs run [--suite <kind>] [--family <name>] [--rows <id,...>]
@@ -48,7 +49,7 @@ const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off'
 // The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
 const HOST_SESSIONS = Object.freeze(['matching', 'mismatching', 'empty']);
-const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'note', 'steps', 'host_session', 'postcondition']);
+const ROW_KEYS = new Set(['id', 'source', 'kind', 'hosts', 'event', 'payload', 'fixture', 'fault', 'expect', 'expect_by_host', 'status', 'known_bad_on', 'lane', 'added', 'issue', 'note', 'steps', 'host_session', 'postcondition']);
 const ID = /^[A-Z][A-Za-z0-9._-]*$/;
 // The plugin content the hooks can reach: both host manifests, the scripts and contracts, and the
 // skill scripts the hook modules load.
@@ -110,7 +111,8 @@ function rowErrors(row) {
     if (typeof row.lane !== 'string' || !row.lane.trim()) errors.push('a known-bad row names the lane that fixes it');
     if (typeof row.added !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.added)) errors.push('a known-bad row gives the date it was added (YYYY-MM-DD)');
     if (row.known_bad_on !== undefined && (!Array.isArray(row.known_bad_on) || !row.known_bad_on.length || row.known_bad_on.some(host => !row.hosts?.includes(host)))) errors.push('known_bad_on lists some of the row\'s hosts');
-  } else if (row.known_bad_on !== undefined || row.lane !== undefined || row.added !== undefined) errors.push('only a known-bad row has known_bad_on, lane or added');
+    if (row.issue !== undefined && (!Number.isInteger(row.issue) || row.issue < 1)) errors.push('issue is the number of the issue that tracks a known-bad row');
+  } else if (row.known_bad_on !== undefined || row.lane !== undefined || row.added !== undefined || row.issue !== undefined) errors.push('only a known-bad row has known_bad_on, lane, added or issue');
   if (row.fault !== undefined) {
     if (!FAULTS.includes(row.fault?.type)) errors.push(`fault.type must be one of ${FAULTS.join(', ')}`);
     else if (['remove-file', 'throw-module', 'stall-module'].includes(row.fault.type) && (typeof row.fault.file !== 'string' || !/^repo\/scripts\/[A-Za-z0-9._-]+$/.test(row.fault.file))) errors.push('this fault names a file under repo/scripts');
@@ -208,6 +210,16 @@ function loadCorpus({ root = ROOT, readFiles } = {}) {
   const seen = new Set();
   for (const row of rows) { if (seen.has(row.id)) errors.push(`row id ${row.id} is used twice`); seen.add(row.id); }
   return { errors, rows };
+}
+
+// Known-bad rows are owed fixes, not a resting place: one older than KNOWN_BAD_DAYS fails the run
+// unless it names the issue that tracks its fix. Checked by the runner against today's date, never
+// inside row validation, so a test clock never trips it.
+const KNOWN_BAD_DAYS = 30;
+function agedKnownBad(rows, now = Date.now()) {
+  return rows.filter(row => row.status === 'known-bad' && row.issue === undefined && /^\d{4}-\d{2}-\d{2}$/.test(row.added || '')
+    && now - Date.parse(`${row.added}T00:00:00Z`) > KNOWN_BAD_DAYS * 86400000)
+    .map(row => `row ${row.id} has been known-bad since ${row.added} (over ${KNOWN_BAD_DAYS} days; lane: ${row.lane}): fix it, or name the issue that tracks it in "issue"`);
 }
 
 // The corpus as it was at a commit (no rows when the commit has no pack yet).
@@ -840,6 +852,10 @@ async function run(options, out = process.stdout) {
   const corpus = loadCorpus();
   if (corpus.errors.length) { out.write(`Hook pack corpus problems:\n${corpus.errors.map(error => `  ${error}`).join('\n')}\n`); return 1; }
   let rows = selectRows(corpus.rows, options);
+  // Checked after the options, so a usage error still exits 2. The CI hook-pack jobs use the real
+  // clock (their red is the signal); tests pass a fixed clock through main's third argument.
+  const aged = agedKnownBad(corpus.rows, options.now ?? Date.now());
+  if (aged.length) { out.write(`Hook pack known-bad rows past their time:\n${aged.map(error => `  ${error}`).join('\n')}\n`); return 1; }
   if (options.against && !options.rows) {
     const old = new Set(corpusAt(options.against).rows.map(row => row.id));
     rows = rows.filter(row => !old.has(row.id));
@@ -932,7 +948,7 @@ function expectationChanges(baseRows, headRows) {
 // The fields a row may change without a reason: its known-bad bookkeeping, which only moves toward
 // passing once the lowering check above has run. Any other change (hosts, event, payload, fixture,
 // fault, expectation, kind, source or note) can change what the row proves.
-const BOOKKEEPING = new Set(['status', 'known_bad_on', 'lane', 'added']);
+const BOOKKEEPING = new Set(['status', 'known_bad_on', 'lane', 'added', 'issue']);
 
 // The rows a pull request body explains: each line under a "Pack changes" heading that names a row
 // id followed by a reason.
@@ -994,9 +1010,10 @@ function parseArgs(argv) {
   return options;
 }
 
-async function main(argv = process.argv.slice(2), out = process.stdout) {
+async function main(argv = process.argv.slice(2), out = process.stdout, { now } = {}) {
   let options;
   try { options = parseArgs(argv); } catch (error) { out.write(`${error.message}\n`); return 2; }
+  if (now !== undefined) options.now = now;
   try {
     if (options.command === 'validate') {
       const corpus = loadCorpus();
@@ -1014,6 +1031,6 @@ async function main(argv = process.argv.slice(2), out = process.stdout) {
 if (require.main === module) main().then(code => { process.exitCode = code; });
 
 module.exports = Object.freeze({
-  CORPUS_REL, FAULTS, HOSTS, KINDS, SCHEMA,
-  expectationChanges, explainedRows, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
+  CORPUS_REL, FAULTS, HOSTS, KINDS, KNOWN_BAD_DAYS, SCHEMA,
+  agedKnownBad, expectationChanges, explainedRows, hookDecision, hookContext, contextProblems, failureKind, hostCommand, loadCorpus, main, matches, meets, parseArgs, parseCorpusFile, rowErrors, selectHooks,
 });

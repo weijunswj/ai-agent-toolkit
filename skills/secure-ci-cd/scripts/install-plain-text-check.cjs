@@ -141,7 +141,8 @@ class PlainTextInstaller {
       try { config = check.readConfigFile(path.join(top, CONFIG_PATH)); }
       catch (error) {
         if (!(error instanceof check.CheckError)) throw error;
-        this.#say('NOTE: Settings could not be read or are invalid.');
+        // Unreadable settings stop the check (and the pre-push run of it), so they are drift.
+        problems.push(`settings ${slash(CONFIG_PATH)}: could not be read or are invalid; fix them or reinstall`);
       }
       if (config) {
         try {
@@ -149,7 +150,7 @@ class PlainTextInstaller {
           if (notice) this.#say(`NOTE: ${notice}`);
         } catch (error) {
           if (!(error instanceof check.CheckError)) throw error;
-          this.#say('NOTE: Baseline could not be read or is invalid.');
+          problems.push(`baseline ${config.baseline}: could not be read or is invalid; fix it, or rewrite it with plain-text-check.cjs --init-baseline`);
         }
       }
     }

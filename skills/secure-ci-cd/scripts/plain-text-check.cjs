@@ -422,14 +422,15 @@ function parseArgs(argv) {
 function report({ failures, stale, unusedKept, baseline, scoped }, config, out, err) {
   const notice = scoped ? null : baselineMigrationNotice(baseline, config);
   if (notice) out.write(`NOTE: ${notice}\n`);
-  for (const entry of stale) out.write(`NOTE: ${entry.file}: ${entry.rule} is in the baseline ${entry.count} time(s) but occurs ${entry.found}; run with --prune-baseline.\n`);
+  // The baseline only shrinks: an allowance for text that is gone fails until it is pruned.
+  for (const entry of stale) err.write(`FAIL: ${entry.file}: ${entry.rule} is in the baseline ${entry.count} time(s) but occurs ${entry.found}; run with --prune-baseline and commit the smaller baseline\n`);
   for (const entry of unusedKept) err.write(`FAIL: kept term "${entry.text}" for ${entry.file} is no longer needed (it exempts nothing); remove it from kept_terms\n`);
   if (failures.length) {
     for (const finding of failures) err.write(`FAIL: ${describeFailure(finding, config)}\n`);
     err.write(`\n${failures.length} item(s) to rewrite in plain English. Repository file links are fine.\n`);
     return 1;
   }
-  if (unusedKept.length) return 1;
+  if (unusedKept.length || stale.length) return 1;
   out.write('Plain-text check passed.\n');
   return 0;
 }

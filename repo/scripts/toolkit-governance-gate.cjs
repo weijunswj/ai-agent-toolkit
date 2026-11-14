@@ -1647,6 +1647,9 @@ function verdictLine(verdict, registryOptions, programmeDeps) {
 // drops these lines.
 const FINDING_ACTIONS = Object.freeze({
   attention: 'Controller: answer each new or overdue finding this turn (fix it, ack it with --next and a due time, or dispose of it with a reason).',
+  // Work-queue findings cannot be acknowledged (QUEUE_FINDING_NEEDS_ACTION), so a line with only those
+  // never offers an ack.
+  queue: 'Controller: take the next step named for each work-queue task this turn, or dispose of it with a reason; it clears by itself once the task moves.',
   tasks: 'Controller: fix the task this turn (toolkit tasks shows why), or tell the owner the exact step it needs.',
   checkpoint: 'Controller: check that session\'s work this turn and record it by hand if the record is lost; the session tells the controller if it is the one reading this.',
 });
@@ -1654,7 +1657,7 @@ const FINDING_ACTIONS = Object.freeze({
 // A task line needs the controller only when it reports a fault: a failed, held or skipped run, no
 // run for over 2 hours, a task-health flag, or a health file that is stale or not shared. An owner's stop, a plain deferral and another
 // computer's jobs (whose line names the owner's step) get no controller action.
-const TASK_FAULT = /(?:last run failed|held at|skipped|no run (?:since|recorded)|Task health: |health file not shared|Task health file is over)/;
+const TASK_FAULT = /(?:last run failed|held at|skipped|no run (?:since|recorded)|Task health: |Task health on other computers: |health file not shared|Task health file is over)/;
 function taskAction(line) {
   if (TASK_FAULT.test(line)) return ` ${FINDING_ACTIONS.tasks}`;
   return /stopped by owner/.test(line) ? ' No action: the owner stopped it.' : '';
@@ -1674,7 +1677,7 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
     if (attention.refresh && (deps.startRefresh || !offline) && cache.claimBackgroundStart(binding.repository, deps)) {
       try { (deps.startRefresh || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startRefresh)(state.root, deps); started = true; } catch { /* the hourly sweep covers it */ }
     }
-    if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.${/Run programme\.cjs attention/.test(attention.line) ? ` ${FINDING_ACTIONS.attention}` : ''}`);
+    if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.${/Run programme\.cjs attention/.test(attention.line) ? ` ${attention.queueOnly ? FINDING_ACTIONS.queue : FINDING_ACTIONS.attention}` : ''}`);
     // This computer's hourly sweep, when it held, skipped, failed or has not run for over 2 hours. A test
     // registry without its own home reads nothing.
     if (deps.home || registryOptions.testOnly !== true) {

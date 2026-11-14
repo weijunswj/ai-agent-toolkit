@@ -24,6 +24,38 @@ function writeLocal(file, value) {
   fs.writeFileSync(temp, bytes, { mode: 0o600 }); fs.renameSync(temp, file);
   if (fs.readFileSync(file, 'utf8') !== bytes) throw new Error('Health state readback failed');
 }
+// When each flag of each repository was first seen, carried from the last local file: a flag keeps its
+// first time while it stays, and a cleared flag drops out. { <repository lower>: { <flag>: <time> } }.
+function flagSince(doc, previous) {
+  const before = previous && typeof previous === 'object' ? previous : {};
+  const out = {};
+  for (const repo of doc.repos) {
+    const key = repo.repository.toLowerCase(), seen = before[key] && typeof before[key] === 'object' ? before[key] : {};
+    if (!repo.flags.length) continue;
+    out[key] = Object.fromEntries(repo.flags.map(flag => [flag, typeof seen[flag] === 'string' && Number.isFinite(Date.parse(seen[flag])) && Date.parse(seen[flag]) <= Date.parse(doc.time) ? seen[flag] : doc.time]));
+  }
+  return out;
+}
+// Other computers' flags for each of this computer's repositories, from the store files this run read
+// (validated peer files only). A peer file over two days old is itself named.
+function peerFlags(doc, others) {
+  const out = {};
+  for (const repo of doc.repos) {
+    const key = repo.repository.toLowerCase(), lines = [];
+    for (const other of others) {
+      if (other.computer === doc.computer) continue;
+      const row = other.repos.find(item => item.repository.toLowerCase() === key);
+      if (!row) continue;
+      if (Date.parse(doc.time) - Date.parse(other.time) > 48 * 3600000) lines.push(`${other.computer}: health file over 2 days old`);
+      else lines.push(...row.flags.filter(flag => !flag.startsWith('jobs run on ')).map(flag => `${other.computer}: ${flag}`));
+    }
+    if (lines.length) out[key] = [...new Set(lines)].slice(0, 20);
+  }
+  return out;
+}
+function readLocal(home) {
+  try { return JSON.parse(fs.readFileSync(localFile(home), 'utf8')); } catch { return null; }
+}
 function computerLabel(home) {
   const identity = tasks.computerIdentity(home);
   if (!identity) throw new Error('Run the approved task update to initialise this computer');
@@ -34,7 +66,7 @@ function safeFlag(flag) {
   if (typeof flag !== 'string') return false;
   if (flag === 'GitHub checkout has no FOOTER SWEEP' || /^jobs run on computer-[a-f0-9]{12}(?: and computer-[a-f0-9]{12})+$/.test(flag)) return true;
   const match = /^(programme-sweep|footer-sweep|shard-timings|task-health): (.+)$/.exec(flag);
-  return Boolean(match && (/^(missing task|disabled task|definition drift|task could not be read|skipped [1-9][0-9]* runs in a row|last run failed|task code older than managed checkout|missed scheduled run)$/.test(match[2]) || tasks.SKIP_REASON.test(match[2])));
+  return Boolean(match && (/^(missing task|disabled task|definition drift|task could not be read|skipped [1-9][0-9]* runs in a row|held [1-9][0-9]* runs in a row|last run failed|task code older than managed checkout|missed scheduled run)$/.test(match[2]) || tasks.SKIP_REASON.test(match[2])));
 }
 function assertHealth(doc, { peer = false } = {}) {
   if (!doc || doc.schema !== SCHEMA || !LABEL.test(doc.computer || '') || !Number.isFinite(Date.parse(doc.time)) || !/^\d+\.\d+\.\d+$/.test(doc.toolkit_version || '') || !Array.isArray(doc.repos)) throw new Error('Invalid health file');
@@ -173,6 +205,8 @@ class TaskHealth {
       if (row?.state === 'could not be read') flag('task could not be read');
       const quietSkip = status === 'skipped' && last?.reason === 'no shards yet';
       if (streak >= 3 && !quietSkip) flag(`skipped ${streak} runs in a row`);
+      const heldRuns = !stopped && status === 'held' && Number.isSafeInteger(last?.held_streak) ? last.held_streak : 0;
+      if (heldRuns >= 3) flag(`held ${heldRuns} runs in a row`);
       if (status === 'failed' || row?.native_failed) flag('last run failed');
       if (last?.reason && !quietSkip && tasks.SKIP_REASON.test(last.reason)) flag(last.reason);
       if (entry.toolkit_version !== this.version) flag('task code older than managed checkout');
@@ -190,8 +224,9 @@ class TaskHealth {
     if (!localLock) throw new Error('Task health already running');
     try {
       let doc = this.collect(), shared = false, note = LOCAL_ONLY, others = [];
+      const since = flagSince(doc, readLocal(this.home)?.flag_since);
       // Local evidence survives store contention, failed writes and readback failures.
-      writeLocal(localFile(this.home), { document: doc, shared, note });
+      writeLocal(localFile(this.home), { document: doc, shared, note, flag_since: since });
       const sharedRepos = [], failedRepos = [], failures = [];
       for (const target of this.stores()) {
         const part = { ...doc, repos: doc.repos.filter(repo => target.repositories.includes(repo.repository.toLowerCase())) };
@@ -202,7 +237,7 @@ class TaskHealth {
           if (!lock) throw new Error('Task health store busy; retry next run');
           try {
             const peers = target.store.list(); others.push(...peers); duplicateFlags(part, peers);
-            writeLocal(localFile(this.home), { document: doc, shared, shared_repos: sharedRepos, note });
+            writeLocal(localFile(this.home), { document: doc, shared, shared_repos: sharedRepos, note, flag_since: since });
             const file = `task-health/${doc.computer}.json`, previous = target.store.read(file);
             target.store.put(file, assertHealth(part), previous.sha);
             sharedRepos.push(...part.repos.map(repo => repo.repository.toLowerCase()));
@@ -212,7 +247,7 @@ class TaskHealth {
       // Every store is attempted; any failure still fails the run loudly afterwards.
       shared = doc.repos.length > 0 && doc.repos.every(repo => sharedRepos.includes(repo.repository.toLowerCase()));
       note = failures.length ? 'health file not shared: store update failed' : shared ? 'health file shared' : sharedRepos.length ? 'health file shared for some repositories' : LOCAL_ONLY;
-      writeLocal(localFile(this.home), { document: doc, shared, shared_repos: sharedRepos, failed_repos: failedRepos, note });
+      writeLocal(localFile(this.home), { document: doc, shared, shared_repos: sharedRepos, failed_repos: failedRepos, note, flag_since: since, peer_flags: peerFlags(doc, others) });
       if (failures.length) throw failures[0];
       return { document: doc, shared, shared_repos: sharedRepos, note, others };
     } finally { localLock.release(); }
@@ -228,8 +263,17 @@ function sessionHealth(repository, home, registry) {
     if (entry && tasks.readLastRun(entry.id, home)?.status === 'failed') parts.push('Task health: last run failed; see toolkit tasks.');
     const saved = JSON.parse(fs.readFileSync(localFile(home), 'utf8')), doc = assertHealth(saved.document);
     const repo = doc.repos.find(row => row.repository.toLowerCase() === repository.toLowerCase());
-    const flags = (repo?.flags || []).join('; ');
+    // Each flag carries its age in days once it has stood a day, so a stuck task reads as stuck.
+    const seen = saved.flag_since && typeof saved.flag_since === 'object' ? saved.flag_since[repository.toLowerCase()] || {} : {};
+    const age = flag => {
+      const days = typeof seen[flag] === 'string' ? Math.floor((Date.parse(doc.time) - Date.parse(seen[flag])) / 86400000) : 0;
+      return days >= 1 ? `${flag} (${days} day${days === 1 ? '' : 's'})` : flag;
+    };
+    const flags = (repo?.flags || []).map(age).join('; ');
     if (flags) parts.push(`Task health: ${flags}`);
+    const peers = saved.peer_flags && Array.isArray(saved.peer_flags[repository.toLowerCase()])
+      ? saved.peer_flags[repository.toLowerCase()].filter(line => typeof line === 'string' && /^computer-[a-f0-9]{12}: [A-Za-z0-9 ,;:().-]{1,200}$/.test(line)).slice(0, 10) : [];
+    if (peers.length) parts.push(`Task health on other computers: ${peers.join('; ')}`);
     const key = repository.toLowerCase(), perRepo = Array.isArray(saved.shared_repos) && Array.isArray(saved.failed_repos);
     const repoShared = saved.shared === true || (Array.isArray(saved.shared_repos) && saved.shared_repos.includes(key));
     const storeFailed = perRepo ? saved.failed_repos.includes(key) : saved.note === 'health file not shared: store update failed';
@@ -276,5 +320,5 @@ function main(argv = process.argv.slice(2), deps = {}) {
   (record.exit ? deps.stderr || console.error : deps.stdout || console.log)(record.summary.join('; '));
   return record.exit;
 }
-module.exports = { TaskHealth, HealthStore, SCHEMA, LOCAL_ONLY, assertHealth, duplicateFlags, latestSlot, computerLabel, localFile, writeLocal, sessionHealth, runHealthJob, freshCheckout, main };
+module.exports = { TaskHealth, HealthStore, SCHEMA, LOCAL_ONLY, assertHealth, duplicateFlags, flagSince, peerFlags, latestSlot, computerLabel, localFile, writeLocal, sessionHealth, runHealthJob, freshCheckout, main };
 if (require.main === module) process.exitCode = main();

@@ -163,7 +163,7 @@ test('the wrapper recognises legacy entries, explicitly migrates without raising
   assert.equal(run().status, 0);
   assert.deepEqual(fs.readFileSync(file), migrated);
   fs.writeFileSync(path.join(root, 'repo/docs/A.md'), `${link}\n`);
-  assert.equal(run().status, 0);
+  assert.equal(run().status, 1, 'an allowance above the text that is left fails until it is pruned');
   assert.deepEqual(fs.readFileSync(file), migrated);
   assert.equal(run('--prune-baseline').status, 0);
   assert.equal(JSON.parse(fs.readFileSync(file)).allowed[0].count, 1);
