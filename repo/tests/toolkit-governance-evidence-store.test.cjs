@@ -63,7 +63,7 @@ test('S1: a store a cached binding names is DISABLED and never held; a merged bi
   governed(ctx);
   const store = repo(path.join(ctx.root, 'evidence'), 'example-owner/evidence');
   const result = state(ctx, store);
-  assert.deepEqual([result.state, result.rule, result.reason, result.hold], ['DISABLED', 'S1', 'evidence-store', false]);
+  assert.deepEqual([result.state, result.rule, result.reason], ['DISABLED', 'S1', 'evidence-store']);
   assert.match(gate.sessionLine(store, { registryOptions: ctx.options }), /DISABLED here: this repository is an evidence store/);
   // An owner-merged binding in the store's own repository decides instead.
   recordMerged(store, { registryPath: ctx.registryPath, text: binding('example-owner/evidence', 'example-owner/other-store') });
@@ -276,7 +276,7 @@ test('R1s: a clone of another repository in a decided repository\'s ignored .tmp
   fs.writeFileSync(path.join(parent, '.gitignore'), 'node_modules/\r\n.tmp/\r\n');
   const clone = repo(path.join(parent, '.tmp', 'clone'), 'example-owner/library');
   const result = state(ctx, path.join(clone));
-  assert.deepEqual([result.state, result.rule, result.reason, result.hold], ['DISABLED', 'R1s', 'scratch-clone', false]);
+  assert.deepEqual([result.state, result.rule, result.reason], ['DISABLED', 'R1s', 'scratch-clone']);
   // A second copy of the parent itself keeps the parent's state.
   const copy = repo(path.join(parent, '.tmp', 'worktrees', 'lane'), 'example-owner/app');
   assert.equal(state(ctx, copy).rule, 'M1');

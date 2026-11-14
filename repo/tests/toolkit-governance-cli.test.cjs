@@ -228,7 +228,7 @@ test('not on github.com: DISABLED automatically, enable refuses and disable is a
       git(repo, ['config', '--add', 'remote.origin.url', 'https://github.com/example-owner/second.git']);
     }
     const status = JSON.parse((await run(ctx, repo, ['status', '--json'])).stdout);
-    assert.deepEqual([status.state, status.rule, status.hold, status.reason], ['DISABLED', 'R8', false, reason], name);
+    assert.deepEqual([status.state, status.rule, status.governed_effects_hold, status.reason], ['DISABLED', 'R8', false, reason], name);
     const shown = (await run(ctx, repo, ['status'])).stdout;
     assert.match(shown, /DISABLED automatically/);
     assert.ok(shown.includes(text));

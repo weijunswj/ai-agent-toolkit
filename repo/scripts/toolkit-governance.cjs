@@ -46,7 +46,7 @@ const RULES_TEXT = Object.freeze({
   UNAVAILABLE: "Couldn't check governance. Continue with global rules and coding gates; no governance effects or standing task auto-merge until it can be checked.",
   ERROR: 'Global rules and coding gates. The binding merged on the default branch cannot be used, so governed records, gate admission and finality hold until a pull request fixes it.',
   DISABLED: 'Global rules and coding gates, without GitHub governance. A governed block in AGENTS.md is not followed.',
-  UNDECIDED: `GitHub governance is not decided yet. A verified read-only account continues with global rules, without governance effects or standing task auto-merge. If this account can write, answer yes, no or later after Toolkit shows the question in this chat run. Other wording uses a one-use reply ticket; in your own terminal, ${CMD('enable')} or ${CMD('disable')} also works.`,
+  UNDECIDED: `GitHub governance is not decided yet, so it counts as off: work continues under the global rules, without governance effects or standing task auto-merge, and nothing waits on the answer. Toolkit asks once per session. An account that can write decides by sending \`toolkit governance enable\` or \`toolkit governance disable\` as a message, or by running ${CMD('enable')} or ${CMD('disable')} in its own terminal.`,
 });
 
 class GovernanceCliError extends Error {
