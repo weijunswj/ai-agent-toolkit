@@ -359,7 +359,7 @@ function describe(built, options) {
 // The plain-English table of what the blocks allow. Only Toolkit's own commands and this
 // repository's comments: nothing else is ever in a block.
 function permissionsTable(built) {
-  const cell = text => String(text).replace(/\|/g, '\\|');
+  const cell = text => String(text).replace(/[\\|]/g, match => `\\${match}`);
   return [
     'What these blocks let an agent do without asking (Toolkit\'s own commands only):',
     '',
