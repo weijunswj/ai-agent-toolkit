@@ -1,11 +1,10 @@
 # Toolkit Changelog
 
-## 3.96.0
+## 3.95.1
 
-### Added
+### Fixed
 
-- **Speed-first CI in `secure-ci-cd`:** a new guide, `templates/cicd/ci-speed.md`, aims CI at the shortest wait from push to a trusted green check without dropping a security gate or a test. It says what to measure first (runs per commit, cancel causes, jobs per run, queue versus run time, peak jobs against the account's concurrent job cap, setup times) and ranks the fixes cheapest first: light runs for title and body edits, concurrency that cancels only stale runs, fewer and fuller jobs, docs-only skips that keep required checks reporting, shard balancing, caching only where setup is slow, and flake hunting. Free fixes come first; a paid plan raising the cap stays the owner's call. The Toolkit's own measured CI is the worked example. The skill and the setup prompt point to it.
-- **New CI check-up rows:** `speed.edits` (an edit reruns heavy jobs), `speed.concurrency` (no group, a pull request group keyed on the commit SHA so stale runs are never cancelled, an edit cancelling the run on the same commit, or pushes sharing one group in a pull request and push workflow, so a burst of merges loses a waiting run) and `speed.slots` (a measured run that starts more than half the account's concurrent jobs). The settings file takes `concurrent_jobs` (default 20, the GitHub Free cap). All three are CHECK rows for the agent to judge.
+- **Evidence-store merges in cloud sessions:** a cloud session can now merge its evidence store's pull requests under the standing custody permission, as a computer session already could. A cloud session starts in the folder that holds the project's clones, so it had no cached parent binding and the merge hold refused every store merge for want of the user's approval. The hold now reads the parent's merged binding on demand in cloud sessions, with the same bounded read session start uses, and accepts an explicitly named store merge from that folder when the parent's clone sits in it. Every other check stays: a fresh merged binding that names the exact store, a private writable store, its default branch as the base, the full head SHA and a plain merge commit. Other repositories stay gated as before.
 
 ## 3.95.0 (rolling merge trains)
 
