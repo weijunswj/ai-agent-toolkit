@@ -19,7 +19,8 @@
 // other parts are in toolkit-remove-parts.cjs. The managed checkout and the rest of Toolkit's folder go
 // last, and only once no Toolkit plugin is installed; the plan lists the plugin uninstall lines, which
 // the agent runs after the owner's OK. A task the owner changed by hand is kept unless it is named with
-// --include; a task of the owner's own that Toolkit only lists (adopted) is always kept.
+// --include; a changed task with no marker, and a task of the owner's own that Toolkit only lists
+// (adopted), are always kept.
 //
 // --app is required: the agent first asks the owner whether to remove Toolkit from only the app it
 // runs in or from every app, and never picks for them. With one app, that app's plugin, global rules, settings, helper files and skill copies go. What every app
@@ -134,6 +135,7 @@ class ToolkitRemoval {
       const item = found.find(task => task.id === id);
       if (!item) throw new RemovalError(`--include names ${id}, which is not a task in the plan. Run plan without --include to see the ids.`);
       if (item.kind === 'adopted') throw new RemovalError(`${id} is your own task, which Toolkit only lists. Toolkit never removes it; delete it in Task Scheduler if you want it gone.`);
+      if (item.unmarked) throw new RemovalError(`${id} no longer carries Toolkit's marker and is not the copy Toolkit recorded, so Toolkit cannot tell it is still its own and never removes it. Delete it in Task Scheduler if you want it gone.`);
     }
     const listed = found.map(({ live, ...item }) => ({ ...item, action: KINDS[item.kind].removes || this.#include.includes(item.id) ? 'remove' : 'keep', definition: sha(windows.enrolledDefinition(live)) }));
     const going = listed.filter(item => item.action === 'remove');
@@ -201,7 +203,9 @@ class ToolkitRemoval {
     const snapshot = entry.toolkit_missing === true && live.description === DISABLED_DESCRIPTION && entry.enrolled?.definition_xml;
     // Otherwise its record names a task that is still there but no longer Toolkit's: it is listed as
     // kept, so its record and the shared runner it may still use stay too.
-    return snapshot && live.definition_xml === snapshot ? { ...item, kind: 'disabled' } : { ...item, kind: 'changed' };
+    // With no marker and no matching snapshot, Toolkit cannot prove the task is its own, so --include
+    // cannot name it either.
+    return snapshot && live.definition_xml === snapshot ? { ...item, kind: 'disabled' } : { ...item, kind: 'changed', unmarked: true };
   }
 
   // Toolkit's own task files under the user-state folder that go with the removed records.
@@ -329,7 +333,7 @@ function describePlan(plan) {
   if (plan.scheduler === 'not available on this system') lines.push('Scheduled tasks: not checked, because this system has no Windows Task Scheduler.');
   if (plan.nothing) lines.push("Nothing of Toolkit's is left to remove.");
   if (going.length) lines.push('Scheduled tasks to stop and remove:', ...going.map(item => `- ${taskLine(item)}`));
-  if (kept.length) lines.push('Scheduled tasks kept:', ...kept.map(item => `- ${taskLine(item)}${item.kind === 'changed' ? `. Add --include ${item.id} to remove it too` : '. Delete it in Task Scheduler yourself if you want it gone'}`));
+  if (kept.length) lines.push('Scheduled tasks kept:', ...kept.map(item => `- ${taskLine(item)}${item.kind === 'changed' && !item.unmarked ? `. Add --include ${item.id} to remove it too` : '. Delete it in Task Scheduler yourself if you want it gone'}`));
   if (plan.folders.length) lines.push('Task Scheduler folders:', ...plan.folders.map(item => `- \\${item.folder}\\: ${item.expected === 'removed' ? 'removed once empty' : 'kept, it still holds a task'}`));
   if (plan.stale_records.length) lines.push(`Records of tasks that are already gone: ${plan.stale_records.join(', ')}`);
   if (plan.state.length) lines.push("Toolkit's own task files:", ...plan.state.map(file => `- ${file}`));

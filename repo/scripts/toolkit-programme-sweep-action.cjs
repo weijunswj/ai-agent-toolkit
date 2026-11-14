@@ -80,6 +80,10 @@ function skipWarning(repository, status, detail = {}) {
 // TITLES): three runs in a row held, or skipped with the same code, turn the hourly gate red.
 const HELD_TITLE = 'Programme Sweep held';
 const SKIP_TITLE = 'Programme Sweep skipped';
+// A run that made no pass (queued behind another, paused at the App limit, main moved, off the
+// default branch) says so in a titled notice: the gate passes over it, so it neither counts toward
+// nor ends a held or skipped streak.
+const NO_PASS_TITLE = 'Programme Sweep no pass';
 // The hold codes a held pass names: the reconciler's own codes, never free text.
 function holdCodes(report) {
   const codes = [...new Set((Array.isArray(report?.holds) ? report.holds : []).map(hold => hold?.code).filter(code => /^[A-Z][A-Z0-9_]{0,63}$/.test(code || '')))];
@@ -225,7 +229,7 @@ function footerCounts(results) {
 class ProgrammeSweepAction {
   constructor({ env = process.env, root = env.GITHUB_WORKSPACE || process.cwd(), readFile = fs.readFileSync,
     validateBinding = binding => require(path.join(TOOLKIT_ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-state.cjs')).validateBinding(binding),
-    refresh = input => runRefresh(input), notice = message => process.stdout.write(`::notice::${message}\n`),
+    refresh = input => runRefresh(input), notice = (message, tag) => process.stdout.write(tag ? `::notice title=${tag.title}::(${tag.code}) ${message}\n` : `::notice::${message}\n`),
     failure = message => process.stderr.write(`${message}\n`), output = (name, value) => fs.appendFileSync(env.GITHUB_OUTPUT, `${name}=${value}\n`),
     summary = line => fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `${line}\n`), footers = input => runFooterSweep(input),
     warning = (message, tag) => process.stdout.write(tag ? `::warning title=${tag.title}::(${tag.code}) ${message}\n` : `::warning::${message}\n`), nowMs = Date.now } = {}) {
@@ -265,6 +269,7 @@ class ProgrammeSweepAction {
     const branch = this.env.DEFAULT_BRANCH || '';
     if (!branch || this.env.GITHUB_REF !== `refs/heads/${branch}`) {
       this.warning(skipWarning(this.env.GITHUB_REPOSITORY, 'off_default', { ref: this.env.GITHUB_REF, branch }));
+      this.notice('Programme Sweep made no pass: this run is off the default branch.', { title: NO_PASS_TITLE, code: 'off_default' });
       this.output('store', ''); return 0;
     }
     const binding = readCheckedOutBinding({ root: this.root, env: this.env, readFile: this.readFile, validateBinding: this.validateBinding });
@@ -290,7 +295,7 @@ class ProgrammeSweepAction {
     let result;
     try { result = this.refresh({ root: this.root, env }); } catch { this.failure(GENERAL_FAILURE); return 1; }
     if (result.code === 'GH_AUTH') { this.failure(SIGN_IN_FAILURE); return 1; }
-    if (result.code === 'MAIN_MOVED') { this.notice(NOTICES.main_moved); return 0; }
+    if (result.code === 'MAIN_MOVED') { this.notice(NOTICES.main_moved, { title: NO_PASS_TITLE, code: 'main_moved' }); return 0; }
     if (result.code === 'CLOUD_PUBLIC_STATE') { this.warning(skipWarning(env.GITHUB_REPOSITORY, 'public_state'), { title: SKIP_TITLE, code: 'public_state' }); return 0; }
     const held = result.status === 1 && Array.isArray(result.report?.holds) && result.report.holds.length > 0;
     if (result.status !== 0 && !held) { this.failure(failureLine(result)); return 1; }
@@ -298,6 +303,8 @@ class ProgrammeSweepAction {
     // A line that could carry a token is never written.
     if (!line || [env.GOVERNED_TOKEN, env.STORE_TOKEN].some(token => line.includes(token))) { this.failure(SUMMARY_FAILURE); return 1; }
     try { this.summary(line); } catch { this.failure(SUMMARY_FAILURE); return 1; }
+    const outcome = result.report?.outcome;
+    if (outcome === 'QUEUED' || outcome === 'PAUSED') this.notice(outcome === 'QUEUED' ? NOTICES.queued : NOTICES.paused, { title: NO_PASS_TITLE, code: outcome.toLowerCase() });
     // A held pass is green (the next run retries) but titled, so the hourly gate can count a streak.
     // A pass that saved nothing (PAUSED stays calm: it read nothing and the follow-up resumes it) is
     // held too, so the gate counts it toward its streak.
@@ -330,4 +337,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ HELD_TITLE, SKIP_TITLE, holdCodes, TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, atAppLimit, wroteNothing, followUpAt, ProgrammeSweepAction });
+module.exports = Object.freeze({ HELD_TITLE, SKIP_TITLE, NO_PASS_TITLE, holdCodes, TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, atAppLimit, wroteNothing, followUpAt, ProgrammeSweepAction });
