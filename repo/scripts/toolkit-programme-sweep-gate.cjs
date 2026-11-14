@@ -15,8 +15,8 @@
 //     finished (the sweep's own edits all land before its run finishes, so they never count; a
 //     green run that made no pass, such as one queued behind another sweep's lease, is not a sweep);
 //   - the last sweep finished six hours ago or more, so slower facts (checks, drift) still refresh.
-// A start from activity (including a finished CI run) waits until an hour after the last sweep
-// finished; the hourly start then picks the change up. Activity during a running sweep queues one
+// A start from activity (including a finished CI run) waits until an hour after the last sweep run
+// finished (one that made no pass included); the hourly start then picks the change up. Activity during a running sweep queues one
 // more run behind it, since the running pass may have read past the change, unless that run's
 // follow-up is already waiting to start the next one. Nothing starts while a sweep is already queued.
 const SWEEP_WORKFLOW = 'toolkit-programme-sweep.yml';
@@ -98,13 +98,15 @@ function decide({ event, now, runs, lines, changedSince, followUpWaiting = false
     if (followUpWaiting) return { start: false, reason: 'a follow-up run is already on its way' };
     return ACTIVITY_EVENTS.includes(event) ? { start: true, reason: 'activity during a running sweep; one more waits behind it' } : { start: false, reason: 'a sweep is running' };
   }
+  // Activity waits an hour after the newest green run, one that made no pass included: while another
+  // holder keeps the lease, each run it starts would only queue again. The hourly start picks the
+  // change up, measured from the last sweep that did work.
+  const latest = lastSweep(runs);
+  if (ACTIVITY_EVENTS.includes(event) && latest && now - Date.parse(latest.updated_at) < HOUR_MS) return { start: false, reason: 'a sweep finished within the last hour; the hourly start picks this change up' };
   const last = lastSweep(runs, noPass);
   if (!last) return { start: true, reason: 'no sweep has finished yet' };
   const ended = Date.parse(last.updated_at);
-  if (ACTIVITY_EVENTS.includes(event)) {
-    if (now - ended < HOUR_MS) return { start: false, reason: 'a sweep finished within the last hour; the hourly start picks this change up' };
-    return { start: true, reason: 'activity, and no sweep within the last hour' };
-  }
+  if (ACTIVITY_EVENTS.includes(event)) return { start: true, reason: 'activity, and no sweep within the last hour' };
   const pending = lines.filter(line => !line || !COMPLETE_LINE.test(line));
   if (pending.length) {
     const started = Date.parse(last.run_started_at || last.created_at);
@@ -177,10 +179,13 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     if (!findings.has(run.id)) findings.set(run.id, runFinding(call, run, SWEEP_JOB, [TITLES.held, TITLES.skipped], { neutral: true }));
     return findings.get(run.id);
   };
-  // Newest first, pass over green runs that made no pass until one that did work.
+  // Newest first, pass over green runs that made no pass until one that did work. A run whose finding
+  // cannot be read counts as a sweep, as before this check: the start goes ahead, and on the hourly
+  // start the streak read meets the same failure after it.
   const noPass = new Set();
   for (const run of runs.filter(finishedGreen)) {
-    const found = await findingOf(run);
+    let found;
+    try { found = await findingOf(run); } catch { break; }
     if (!found?.neutral || COUNTS_AS_SWEEP.has(found.code)) break;
     noPass.add(run.id);
   }

@@ -640,36 +640,44 @@ test('gate: a green run that made no pass (queued behind the lease, main moved, 
   const noPass = code => [{ title: 'Programme Sweep no pass', annotation_level: 'notice', message: `(${code}) x` }];
   // Newest first: a green run 5 minutes ago with the given finding, then the last real pass 7 hours ago;
   // an issue changed 2 hours ago.
-  const github = (finding, jobs = sweepJob(200)) => {
+  const gitHub = (finding, jobs = sweepJob(200)) => {
     const runs = [{ ...done(5 * 60 * 1000), id: 200 }, { ...done(7 * HOUR), id: 100 }];
     return fakeGitHub({ runs, runJobs: { 200: jobs, 100: sweepJob(100) }, notes: { 2000: finding, 1000: [] }, changed: [{ updated_at: new Date(T - 2 * HOUR).toISOString() }] });
   };
-  for (const event of ['schedule', 'issue_comment']) {
-    const env = { ...gateEnv, EVENT_NAME: event };
-    for (const code of ['queued', 'main_moved', 'off_default']) {
-      const lease = github(noPass(code));
-      const verdict = await gate({ env, fetchImpl: lease.fetchImpl, now: T, log: () => {} });
-      assert.equal(verdict.start, true, `${event} ${code}`);
-      assert.ok(lease.calls.includes('POST actions/workflows/toolkit-programme-sweep.yml/dispatches'));
-      assert.match(lease.calls.find(call => call.startsWith('GET issues?')), /since=2026-11-12T20%3A00%3A00\.000Z/, 'changes since the last pass that did work');
-    }
-    for (const jobs of [[], [{ id: 2000, name: 'Refresh the programme', conclusion: 'skipped' }]]) {
-      assert.equal((await gate({ env, fetchImpl: github([], jobs).fetchImpl, now: T, log: () => {} })).start, true, `${event} no sweep job`);
-    }
-    // A pass paused at the App limit still counts: activity waits, and the hourly start sees nothing new since it.
-    const paused = await gate({ env, fetchImpl: github(noPass('paused')).fetchImpl, now: T, log: () => {} });
-    assert.equal(paused.start, false, `${event} paused`);
-    // A real pass 5 minutes ago (clean or held) is the last sweep, as before.
-    assert.equal((await gate({ env, fetchImpl: github([]).fetchImpl, now: T, log: () => {} })).start, false, `${event} clean`);
+  const start = async (finding, event, jobs) => {
+    const github = gitHub(finding, jobs);
+    const verdict = await gate({ env: { ...gateEnv, EVENT_NAME: event }, fetchImpl: github.fetchImpl, now: T, log: () => {} });
+    return { verdict, github };
+  };
+  for (const code of ['queued', 'main_moved', 'off_default']) {
+    const { verdict, github } = await start(noPass(code), 'schedule');
+    assert.deepEqual(verdict, { start: true, reason: 'issues, pull requests or CI results changed since the last sweep' }, code);
+    assert.match(github.calls.find(call => call.startsWith('GET issues?')), /since=2026-11-12T20%3A00%3A00\.000Z/, 'changes since the last pass that did work');
+    // M1 (G2): activity still waits an hour after the newest run, so a held lease never starts a run per edit.
+    assert.deepEqual((await start(noPass(code), 'issue_comment')).verdict, { start: false, reason: 'a sweep finished within the last hour; the hourly start picks this change up' }, code);
   }
+  for (const jobs of [[], [{ id: 2000, name: 'Refresh the programme', conclusion: 'skipped' }]]) {
+    assert.equal((await start([], 'schedule', jobs)).verdict.start, true, 'no sweep job');
+  }
+  // A pass paused at the App limit still counts: the hourly start sees nothing new since it.
+  assert.deepEqual((await start(noPass('paused'), 'schedule')).verdict, { start: false, reason: 'nothing changed since the last sweep' });
+  // A real pass 5 minutes ago (clean) is the last sweep, as before.
+  assert.equal((await start([], 'schedule')).verdict.start, false);
+  // A queued run over an hour old no longer holds activity back; a real pass 7 hours ago is the last sweep.
+  const older = fakeGitHub({ runs: [{ ...done(HOUR + 60 * 1000), id: 200 }, { ...done(7 * HOUR), id: 100 }], runJobs: { 200: sweepJob(200), 100: sweepJob(100) }, notes: { 2000: noPass('queued'), 1000: [] } });
+  assert.deepEqual(await gate({ env: { ...gateEnv, EVENT_NAME: 'issues' }, fetchImpl: older.fetchImpl, now: T, log: () => {} }), { start: true, reason: 'activity, and no sweep within the last hour' });
+  // L1 (G2): a finding that cannot be read counts the run as a sweep; the gate decides as before, never red before a start.
+  const lost = fakeGitHub({ runs: [{ ...done(2 * HOUR), id: 200 }], answers: { 'actions/runs/200/jobs': 404 }, changed: [{ updated_at: new Date(T - HOUR).toISOString() }] });
+  assert.deepEqual(await gate({ env: { ...gateEnv, EVENT_NAME: 'issues' }, fetchImpl: lost.fetchImpl, now: T, log: () => {} }), { start: true, reason: 'activity, and no sweep within the last hour' });
   // decide(): runs named in noPass are passed over; with only those, no sweep has finished yet.
   const lease = { ...done(5 * 60 * 1000), id: 200 };
   assert.deepEqual(decide({ event: 'schedule', now: T, lines: [COMPLETE], changedSince: false, runs: [lease, { ...done(7 * HOUR), id: 100 }], noPass: new Set([200]) }),
     { start: true, reason: 'six hours since the last sweep' });
   assert.deepEqual(decide({ event: 'schedule', now: T, lines: [COMPLETE], changedSince: false, runs: [lease], noPass: new Set([200]) }),
     { start: true, reason: 'no sweep has finished yet' });
+  assert.equal(decide({ event: 'issues', now: T, lines: [COMPLETE], changedSince: true, runs: [lease], noPass: new Set([200]) }).start, false, 'only a queued run within the hour: activity waits');
   // Each run's jobs and annotations are read once per gate run: the streak reuses the last-sweep reads.
-  const reads = github(noPass('queued'));
+  const reads = gitHub(noPass('queued'));
   await gate({ env: gateEnv, fetchImpl: reads.fetchImpl, now: T, log: () => {} });
   const runReads = reads.calls.filter(call => /jobs$|annotations/.test(call));
   assert.deepEqual(runReads, [...new Set(runReads)]);
@@ -682,17 +690,16 @@ test('L2: a failure reading the streak after the start says the sweep started; a
   const script = path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-gate.cjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-gate-l2-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  // The last sweep (run 8, held) finished long ago, so the hourly start dispatches; the streak read
-  // then reaches run 9, whose jobs answer with the given status.
-  const runs = JSON.stringify([8, 9].map(id => ({ id, status: 'completed', conclusion: 'success', updated_at: '2026-01-01T00:00:00Z', created_at: '2026-01-01T00:00:00Z' })));
+  // The last sweep finished long ago, so the hourly start dispatches; its jobs answer with the given
+  // status. The read that picks the last sweep fails first and counts the run as a sweep, so the start
+  // goes ahead; the streak read then meets the same failure after it.
+  const runs = JSON.stringify([{ id: 9, status: 'completed', conclusion: 'success', updated_at: '2026-01-01T00:00:00Z', created_at: '2026-01-01T00:00:00Z' }]);
   const preload = status => {
     const file = path.join(dir, `fetch-${status}.cjs`);
     fs.writeFileSync(file, `globalThis.fetch = async (url, options) => {
       const ok = json => ({ ok: true, status: options.method === 'POST' ? 204 : 200, json: async () => json });
       if (/contents\\/\\.github\\/toolkit-programme\\.json/.test(url)) return ok({ content: Buffer.from(${JSON.stringify(gateBinding)}).toString('base64') });
       if (/actions\\/runs\\/9\\/jobs/.test(url)) return { ok: false, status: ${status}, json: async () => ({}) };
-      if (/actions\\/runs\\/8\\/jobs/.test(url)) return ok({ jobs: [{ id: 80, name: 'Refresh the programme' }] });
-      if (/check-runs\\/80\\/annotations/.test(url)) return ok([{ title: 'Programme Sweep held', annotation_level: 'warning', message: '(X) held' }]);
       if (/toolkit-programme-sweep\\.yml\\/runs/.test(url)) return ok({ workflow_runs: ${runs} });
       if (/issues\\/421$/.test(url)) return ok({ body: 'Board updated: x (state revision 1)' });
       return ok([]);
