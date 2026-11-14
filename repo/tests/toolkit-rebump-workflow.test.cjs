@@ -65,16 +65,20 @@ function runStep(t, env) {
   return { result, temp, calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [], output: fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : '' };
 }
 
-// With no key: a stand-in gh that answers the open pull request list and each one's files.
-function runNoKey(t, { open = '', files = {}, failList = false } = {}) {
+// With no key: a stand-in gh that answers the open pull request list, each one's files and each
+// head's comparison with main (behind unless named).
+const SHA = n => String(n).repeat(40).slice(0, 40);
+function runNoKey(t, { open = '', files = {}, compare = {}, failList = false, failCompare = false } = {}) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'rebump-nokey-'));
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
   const bin = path.join(temp, 'bin'); fs.mkdirSync(bin);
   const log = path.join(temp, 'calls.log');
   fs.writeFileSync(path.join(temp, 'open'), open);
   for (const [number, list] of Object.entries(files)) fs.writeFileSync(path.join(temp, `files-${number}`), list.join('\n'));
-  fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\necho "gh $2 key=\${GH_TOKEN:-none}" >> "${log}"\n` +
-    `case "$2" in *pulls\\?state=open*) ${failList ? 'exit 1' : `cat "${temp}/open"; exit 0`} ;; esac\n` +
+  for (const [sha, status] of Object.entries(compare)) fs.writeFileSync(path.join(temp, `compare-${sha}`), status);
+  fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\necho "gh $2 $3 key=\${GH_TOKEN:-none}" >> "${log}"\n` +
+    `case "$2" in *pulls\\?state=open*) ${failList ? 'exit 1' : `cat "${temp}/open"; exit 0`} ;;\n` +
+    `  *compare/main...*) ${failCompare ? 'exit 1' : `s=\${2##*...}; if [ -f "${temp}/compare-$s" ]; then cat "${temp}/compare-$s"; else echo behind; fi; exit 0`} ;; esac\n` +
     `n=$(echo "$2" | sed -n 's|.*/pulls/\\([0-9]*\\)/files.*|\\1|p'); [ -f "${temp}/files-$n" ] && cat "${temp}/files-$n"; exit 0\n`, { mode: 0o755 });
   for (const name of ['git', 'node']) fs.writeFileSync(path.join(bin, name), `#!/bin/sh\necho "${name} $*" >> "${log}"\nexit 0\n`, { mode: 0o755 });
   const output = path.join(temp, 'output');
@@ -82,24 +86,52 @@ function runNoKey(t, { open = '', files = {}, failList = false } = {}) {
     env: { PATH: `${bin}:/usr/bin:/bin`, HOME: temp, RUNNER_TEMP: temp, GITHUB_OUTPUT: output, GITHUB_SERVER_URL: 'https://github.com', AUTHORS: 'owner-1', READ_TOKEN: 'read-token', REPOSITORY: 'owner-1/repo' } });
   return { result, temp, calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) : [], output: fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : '' };
 }
+const VERSION_FILE = 'repo/contracts/toolkit-local-bridge/version.json';
 
 test('with no push key and no stale bump the step reads with the built-in token only and ends green and silent', linuxOnly, t => {
-  const { result, calls, output, temp } = runNoKey(t, { open: '5 owner-1\n6 someone-else\n', files: { 5: ['README.md'], 6: ['repo/contracts/toolkit-local-bridge/version.json'] } });
+  const { result, calls, output, temp } = runNoKey(t, { open: `5 owner-1 ${SHA(5)}\n6 someone-else ${SHA(6)}\n`, files: { 5: ['README.md'], 6: [VERSION_FILE] } });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, '', 'no note on every merge');
   assert.equal(output, 'ran=false\n');
-  assert.deepEqual(calls, ['gh repos/owner-1/repo/pulls?state=open&per_page=100 key=read-token', 'gh repos/owner-1/repo/pulls/5/files?per_page=100 key=read-token'], 'other authors are not read; nothing else runs');
+  assert.deepEqual(calls, ['gh repos/owner-1/repo/pulls?state=open&base=main&per_page=100 --paginate key=read-token', 'gh repos/owner-1/repo/pulls/5/files?per_page=100 --paginate key=read-token'], 'other authors are not read; every page is read; nothing else runs');
   assert.equal(fs.existsSync(path.join(temp, 'rebump-report.json')), false);
+  assert.match(fs.readFileSync(step, 'utf8'), /select\(\(\.draft \| not\) and \.base\.ref == "main" and \.head\.repo\.full_name == \.base\.repo\.full_name\)/, 'only pull requests into main');
 });
 
 test('with no push key a listed author\'s pull request carrying a stale bump fails the run naming it and the by-hand step', linuxOnly, t => {
-  const { result, output } = runNoKey(t, { open: '5 owner-1\n7 owner-1\n', files: { 5: ['repo/contracts/toolkit-local-bridge/version.json', 'README.md'], 7: ['repo/scripts/x.cjs'] } });
+  const { result, output, calls } = runNoKey(t, { open: `5 owner-1 ${SHA(5)}\n7 owner-1 ${SHA(7)}\n`, files: { 5: [VERSION_FILE, 'README.md'], 7: ['repo/scripts/x.cjs'] } });
   assert.equal(result.status, 1);
   assert.equal(output, 'ran=false\n');
   assert.match(result.stdout, /^::error title=Toolkit re-bump::Main moved and these pull requests carry a version bump that is now stale: #5\. .+toolkit-rebump-prs\.cjs --apply/m);
+  assert.ok(calls.includes(`gh repos/owner-1/repo/compare/main...${SHA(5)} --jq key=read-token`), 'the bumped head is compared with main');
+  assert.ok(!calls.some(call => call.includes(`compare/main...${SHA(7)}`)), 'a pull request without a bump is never compared');
   const unread = runNoKey(t, { failList: true });
   assert.equal(unread.result.status, 1, 'a list that cannot be read is red, not green');
   assert.match(unread.result.stdout, /could not be read/);
+});
+
+test('L1: with no push key a head that already contains main is current, not stale; an unreadable comparison or head is red', linuxOnly, t => {
+  // The merging agent merged main in and bumped again before this queued run read the list.
+  for (const status of ['ahead', 'identical']) {
+    const fresh = runNoKey(t, { open: `5 owner-1 ${SHA(5)}\n`, files: { 5: [VERSION_FILE] }, compare: { [SHA(5)]: status } });
+    assert.equal(fresh.result.status, 0, `${status}: ${fresh.result.stdout}`);
+    assert.equal(fresh.result.stdout, '');
+  }
+  for (const status of ['behind', 'diverged']) {
+    const stale = runNoKey(t, { open: `5 owner-1 ${SHA(5)}\n8 owner-1 ${SHA(8)}\n`, files: { 5: [VERSION_FILE], 8: [VERSION_FILE] }, compare: { [SHA(5)]: status, [SHA(8)]: 'ahead' } });
+    assert.equal(stale.result.status, 1, status);
+    assert.match(stale.result.stdout, /now stale: #5\./, `${status}: only the head behind main is named`);
+  }
+  // A long files list (every page read) still finds the version file at its end.
+  const many = Array.from({ length: 150 }, (_, index) => `docs/f${index}.md`).concat(VERSION_FILE);
+  assert.equal(runNoKey(t, { open: `5 owner-1 ${SHA(5)}\n`, files: { 5: many } }).result.status, 1);
+  const noCompare = runNoKey(t, { open: `5 owner-1 ${SHA(5)}\n`, files: { 5: [VERSION_FILE] }, failCompare: true });
+  assert.equal(noCompare.result.status, 1);
+  assert.match(noCompare.result.stdout, /^::error title=Toolkit re-bump::Pull request 5 could not be compared with main\./m);
+  const badHead = runNoKey(t, { open: '5 owner-1 not-a-sha\n', files: { 5: [VERSION_FILE] } });
+  assert.equal(badHead.result.status, 1);
+  assert.match(badHead.result.stdout, /head commit could not be read/);
+  assert.ok(!badHead.calls.some(call => call.includes('compare/')), 'an unsafe head never reaches the API');
 });
 
 test('with a push key it signs in, runs the command for the listed authors and keeps the report even when a pull request is held', linuxOnly, t => {

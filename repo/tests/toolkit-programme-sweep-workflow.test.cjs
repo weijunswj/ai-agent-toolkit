@@ -83,21 +83,21 @@ function bindingV1() {
 }
 
 function runAction(mode, { env = {}, file = binding(), refresh = null } = {}) {
-  const notices = [], failures = [], outputs = [], summaries = [], refreshes = [], warnings = [], tags = [];
+  const notices = [], failures = [], outputs = [], summaries = [], refreshes = [], warnings = [], tags = [], noticeTags = [];
   const runner = new (action().ProgrammeSweepAction)({
     env: { GITHUB_REPOSITORY: 'owner/repository', GITHUB_REF: 'refs/heads/main', DEFAULT_BRANCH: 'main', ...env }, root: ROOT,
     readFile: () => { if (file === null) throw Object.assign(new Error('absent'), { code: 'ENOENT' }); return Buffer.from(typeof file === 'string' ? file : JSON.stringify(file)); },
     validateBinding: value => state.validateBinding(value),
     refresh: input => { refreshes.push(input); return refresh ? refresh(input) : { status: 0, code: null, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [] } }; },
-    notice: message => notices.push(message), failure: message => failures.push(message), output: (name, value) => outputs.push([name, value]), summary: line => summaries.push(line),
+    notice: (message, tag) => { notices.push(message); noticeTags.push(tag || null); }, failure: message => failures.push(message), output: (name, value) => outputs.push([name, value]), summary: line => summaries.push(line),
     warning: (message, tag) => { warnings.push(message); tags.push(tag || null); },
   });
   const code = mode === 'store' ? runner.store() : runner.run();
-  return { code, notices, failures, outputs, summaries, refreshes, warnings, tags };
+  return { code, notices, failures, outputs, summaries, refreshes, warnings, tags, noticeTags };
 }
 // Record 808: every skip is a visible warning that names the repository, the reason and the fix.
 function assertSkipWarning(result, reason) {
-  assert.deepEqual(result.notices, [], 'a skip is a warning, not a quiet notice');
+  assert.deepEqual(result.notices.filter((_, index) => result.noticeTags[index]?.title !== action().NO_PASS_TITLE), [], 'a skip is a warning, not a quiet notice');
   assert.equal(result.warnings.length, 1);
   assert.match(result.warnings[0], /^Programme Sweep skipped on owner\/repository: /);
   assert.match(result.warnings[0], reason);
@@ -186,6 +186,7 @@ test('action: no App configured gives a warning naming the repository, the varia
   assert.match(disabled.tags[0]?.code, /^[a-z_]+$/);
   const offDefault = runAction('store', { env: { GITHUB_REF: 'refs/heads/feature/x' } });
   assert.deepEqual(offDefault.tags, [null], 'a manual run off the default branch never counts toward a streak');
+  assert.deepEqual(offDefault.noticeTags, [{ title: gateScript().TITLES.noPass, code: 'off_default' }], 'nor ends one');
   assert.equal(result.refreshes.length, 0);
 });
 
@@ -215,9 +216,15 @@ test('action: a healthy run writes the metrics line; a held pass is resumable; a
   assert.equal(action().holdCodes({ holds: [{}] }), 'unnamed');
   const queued = runAction('run', { env: minted, refresh: () => ({ status: 0, code: null, report: { outcome: 'QUEUED', reason: 'another sweep is running' } }) });
   assert.deepEqual(queued.summaries, [action().NOTICES.queued]);
+  // L3 (G2 of slice 4): a run that made no pass carries a titled notice the gate passes over.
+  assert.deepEqual(queued.noticeTags, [{ title: action().NO_PASS_TITLE, code: 'queued' }]);
+  assert.equal(action().NO_PASS_TITLE, gateScript().TITLES.noPass);
   const moved = runAction('run', { env: minted, refresh: () => ({ status: 2, code: 'MAIN_MOVED', report: null }) });
   assert.equal(moved.code, 0);
   assert.deepEqual(moved.notices, [action().NOTICES.main_moved]);
+  assert.deepEqual(moved.noticeTags, [{ title: action().NO_PASS_TITLE, code: 'main_moved' }]);
+  assert.deepEqual(ok.noticeTags, [], 'a clean pass has no no-pass notice, so it ends a streak');
+  assert.deepEqual(held.noticeTags, []);
   const leaking = runAction('run', { env: minted, refresh: () => ({ status: 0, code: null, report: { metrics: `Sweep: ${fakeToken}`, holds: [] } }) });
   assert.equal(leaking.code, 1);
   assert.deepEqual(leaking.summaries, [], 'a line that carries a token is never written');
@@ -576,13 +583,13 @@ function streakGitHub(findings, extra = {}) {
   return fakeGitHub({ runs, runJobs, notes, ...extra });
 }
 
-test('gate: three held sweeps in a row with the same codes turn the hourly gate red with the controller step; a clean one ends it', async () => {
+test('gate: three held sweeps in a row turn the hourly gate red with the controller step; a clean one ends it', async () => {
   const { gate } = gateScript();
   const held = note('Programme Sweep held', '(PASS_STOPPED) Programme Sweep held: this pass held and the next run retries.');
-  const red = await gate({ env: gateEnv, fetchImpl: streakGitHub([held, held, held]).fetchImpl, now: T, log: () => {} });
-  assert.match(red.alert, /^Programme Sweep held 3 runs in a row \(PASS_STOPPED\) since .+\. Controller: read the held items on the programme page/);
+  const red = await gate({ env: gateEnv, fetchImpl: streakGitHub([held, held, held, []]).fetchImpl, now: T, log: () => {} });
+  assert.match(red.alert, /^Programme Sweep held 3 runs in a row \(PASS_STOPPED\) since [^ ]+\. Controller: read the held items on the programme page/);
   assert.equal(red.start, false, 'the verdict itself is unchanged');
-  for (const findings of [[[], held, held], [held, held, []], [held, held, note('Programme Sweep held', '(OTHER_CODE) held')], [held, held]]) {
+  for (const findings of [[[], held, held], [held, held, []], [held, held]]) {
     assert.equal((await gate({ env: gateEnv, fetchImpl: streakGitHub(findings).fetchImpl, now: T, log: () => {} })).alert, undefined, JSON.stringify(findings));
   }
   const quiet = streakGitHub([[], held, held]);
@@ -591,6 +598,72 @@ test('gate: three held sweeps in a row with the same codes turn the hourly gate 
   const byActivity = streakGitHub([held, held, held]);
   assert.equal((await gate({ env: { ...gateEnv, EVENT_NAME: 'issues' }, fetchImpl: byActivity.fetchImpl, now: T, log: () => {} })).alert, undefined, 'activity never goes red');
   assert.ok(!byActivity.calls.some(call => /annotations/.test(call)));
+});
+
+test('L3: runs that made no pass neither count nor end a held streak; changed hold codes still count; since is the streak\'s start', async () => {
+  const { gate } = gateScript();
+  const held = code => note('Programme Sweep held', `(${code}) Programme Sweep held: this pass held and the next run retries.`);
+  const noPass = code => [{ title: 'Programme Sweep no pass', annotation_level: 'notice', message: `(${code}) x` }];
+  // Newest first: held, queued, held, main moved, held (codes changing), then a clean pass.
+  const findings = [held('PASS_STOPPED'), noPass('queued'), held('A_CODE, PASS_STOPPED'), noPass('main_moved'), held('B_CODE'), []];
+  const github = streakGitHub(findings);
+  const red = await gate({ env: gateEnv, fetchImpl: github.fetchImpl, now: T, log: () => {} });
+  assert.match(red.alert, /^Programme Sweep held 3 runs in a row \(A_CODE, B_CODE, PASS_STOPPED\) since /);
+  // The streak began with the oldest held run (index 4), not the oldest of the last three runs.
+  const runs = findings.map((_, index) => ({ ...done(2 * HOUR), id: 100 + index, run_started_at: `2026-11-13T0${index}:00:00Z` }));
+  const dated = streakGitHub(findings, { runs, runJobs: Object.fromEntries(runs.map(run => [run.id, sweepJob(run.id)])) });
+  assert.match((await gate({ env: gateEnv, fetchImpl: dated.fetchImpl, now: T, log: () => {} })).alert, / since 2026-11-13T04:00:00Z\. /);
+  // Five held runs read back to their start: the count says five.
+  const long = streakGitHub([held('X'), held('X'), held('X'), held('X'), held('X'), []]);
+  assert.match((await gate({ env: gateEnv, fetchImpl: long.fetchImpl, now: T, log: () => {} })).alert, /^Programme Sweep held 5 runs in a row \(X\) since [^ ]+\. /);
+  // Every run read is held: the streak may be older, so "or earlier".
+  assert.match((await gate({ env: gateEnv, fetchImpl: streakGitHub([held('X'), held('X'), held('X')]).fetchImpl, now: T, log: () => {} })).alert, / since \S+ or earlier\. /);
+  // A run whose sweep job was skipped or is missing is passed over too.
+  const skippedJob = streakGitHub([held('X'), [], held('X'), held('X'), []]);
+  const jobs = skippedJob.fetchImpl;
+  const patched = async (url, options) => {
+    if (/actions\/runs\/101\/jobs$/.test(url)) return { ok: true, status: 200, json: async () => ({ jobs: [{ id: 1010, name: 'Refresh the programme', conclusion: 'skipped' }] }) };
+    return jobs(url, options);
+  };
+  assert.match((await gate({ env: gateEnv, fetchImpl: patched, now: T, log: () => {} })).alert, /^Programme Sweep held 3 runs in a row/);
+  const noJob = async (url, options) => /actions\/runs\/101\/jobs$/.test(url) ? { ok: true, status: 200, json: async () => ({ jobs: [] }) } : jobs(url, options);
+  assert.match((await gate({ env: gateEnv, fetchImpl: noJob, now: T, log: () => {} })).alert, /^Programme Sweep held 3 runs in a row/);
+  // Only no-pass runs between two held runs: no streak.
+  assert.equal((await gate({ env: gateEnv, fetchImpl: streakGitHub([held('X'), noPass('queued'), noPass('paused'), held('X'), []]).fetchImpl, now: T, log: () => {} })).alert, undefined);
+  // A no-pass title at warning level, or a notice with another title, is a clean run.
+  assert.equal((await gate({ env: gateEnv, fetchImpl: streakGitHub([held('X'), note('Programme Sweep no pass', '(queued) x'), held('X'), held('X')]).fetchImpl, now: T, log: () => {} })).alert, undefined);
+});
+
+test('L2: a failure reading the streak after the start says the sweep started; a blip stays a notice and a set-up fault stays red', t => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const script = path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-gate.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-gate-l2-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // The last sweep finished long ago, so the hourly start dispatches; the streak read
+  // (a run's jobs) then answers with the given status.
+  const runs = JSON.stringify([{ id: 9, status: 'completed', conclusion: 'success', updated_at: '2026-01-01T00:00:00Z', created_at: '2026-01-01T00:00:00Z' }]);
+  const preload = status => {
+    const file = path.join(dir, `fetch-${status}.cjs`);
+    fs.writeFileSync(file, `globalThis.fetch = async (url, options) => {
+      const ok = json => ({ ok: true, status: options.method === 'POST' ? 204 : 200, json: async () => json });
+      if (/contents\\/\\.github\\/toolkit-programme\\.json/.test(url)) return ok({ content: Buffer.from(${JSON.stringify(gateBinding)}).toString('base64') });
+      if (/actions\\/runs\\/9\\/jobs/.test(url)) return { ok: false, status: ${status}, json: async () => ({}) };
+      if (/toolkit-programme-sweep\\.yml\\/runs/.test(url)) return ok({ workflow_runs: ${runs} });
+      if (/issues\\/421$/.test(url)) return ok({ body: 'Board updated: x (state revision 1)' });
+      return ok([]);
+    };\n`);
+    return file;
+  };
+  const env = { PATH: process.env.PATH, GITHUB_REPOSITORY: 'owner/repository', GH_TOKEN: actionsToken, EVENT_NAME: 'schedule' };
+  const blip = spawnSync(process.execPath, ['--require', preload(502), script], { env, encoding: 'utf8', timeout: 30000 });
+  assert.equal(blip.status, 0, blip.stderr);
+  assert.match(blip.stdout, /^Programme Sweep gate: started the sweep \(six hours since the last sweep\)\.$/m);
+  assert.match(blip.stdout, /^::notice::Programme Sweep gate started the sweep, but its held-streak check could not finish: GitHub answered 502 for GET actions\/runs\/9\/jobs\. The next hourly start checks again\.$/m);
+  assert.doesNotMatch(blip.stdout, /The next start tries again/);
+  const fault = spawnSync(process.execPath, ['--require', preload(403), script], { env, encoding: 'utf8', timeout: 30000 });
+  assert.equal(fault.status, 1, 'a set-up fault stays red');
+  assert.match(fault.stderr, /^Programme Sweep gate started the sweep, but its held-streak check failed: GitHub answered 403/m);
 });
 
 test('gate: three sweeps skipped in a row for the same reason turn it red with the owner step; mixed reasons or held and skipped do not', async () => {
@@ -741,7 +814,8 @@ test('L3 and L7: at the App limit the footer step skips; a private repository le
   const pausedPrivate = runAction('run', { env: { ...minted, REPOSITORY_PRIVATE: 'true' }, refresh: () => limited });
   const at = Number(pausedPrivate.outputs.find(([name]) => name === 'follow_up_at')?.[1]);
   assert.ok(at >= before + RESET_WAIT_MS && at <= Date.now() + RESET_WAIT_MS, 'a PAUSED pass on a private repository still follows up once the limit resets');
-  assert.deepEqual(pausedPrivate.notices, []);
+  assert.deepEqual(pausedPrivate.notices, [action().NOTICES.paused], 'only the no-pass notice the gate passes over');
+  assert.deepEqual(pausedPrivate.noticeTags, [{ title: action().NO_PASS_TITLE, code: 'paused' }]);
   const quick = runAction('run', { env: { ...minted, REPOSITORY_PRIVATE: 'true' }, refresh: () => timed });
   assert.ok(quick.outputs.some(([name]) => name === 'follow_up_at'), 'a time-limit stop still follows up at once');
   assert.equal(quick.outputs.some(([name]) => name === 'at_limit'), false, 'footer cleaning runs after a time-limit stop');

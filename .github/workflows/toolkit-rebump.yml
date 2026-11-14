@@ -12,8 +12,9 @@
 # token until a person approves them, and checks from a manually dispatched run do not count for a
 # pull request, so only a push with such a token gets the required checks running by themselves.
 # With no secret it re-bumps nothing: with the built-in token it lists the owner's open
-# same-repository pull requests that change the version file, ends green and silent when there are
-# none, and fails naming each when there are, so the merging agent re-bumps them by hand.
+# same-repository pull requests into main that change the version file and whose head does not yet
+# contain main, ends green and silent when there are none, and fails naming each when there are, so
+# the merging agent re-bumps them by hand.
 #
 # It checks out main only, without saved credentials. The pull request branch's own bump and
 # validation scripts run with every token variable removed from their environment. A pull request
