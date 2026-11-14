@@ -163,7 +163,7 @@ const HOOK_CASES = [
     { setup: editDefinition(G1, /\(SHA-256 `[0-9a-f]{64}`\)/, `(SHA-256 \`${'0'.repeat(64)}\`)`) }],
   ['A22', 'ENABLED repository is governed: a built-in agent is refused', launch('general-purpose'), 'deny', NOT_ALLOWED],
   ['A22', 'DISABLED repository is ungoverned: the lead launches any agent', launch('general-purpose'), 'pass', null, { cwd: c => c.declined, environment: NO_GATE }],
-  ['A22', 'UNDECIDED repository is the hard block: the governance gate refuses the launch', launch(G0), 'deny', /no governance decision yet/,
+  ['A22', 'UNDECIDED repository counts as off: the governance gate lets the launch through', launch(G0), 'pass', null,
     { cwd: c => c.undecided, gate: true }],
   ['A22', 'ENABLED repository passes the governance gate', launch(G0), 'pass', null, { gate: true }],
 ];

@@ -297,7 +297,7 @@ test('R1s: a clone of another repository in a decided repository\'s ignored .tmp
   assert.equal(state(ctx, clone).rule, 'R1s');
 });
 
-test('gate: no held prompt or refused tool inside an S1 or R1s repository, and no question when a command reaches one', (t) => {
+test('gate: no question and no refused tool inside an S1 or R1s repository, or when a command reaches one', (t) => {
   const ctx = scratch(t);
   const parent = governed(ctx);
   fs.writeFileSync(path.join(parent, '.gitignore'), '.tmp/\n');
@@ -306,23 +306,27 @@ test('gate: no held prompt or refused tool inside an S1 or R1s repository, and n
   const held = repo(path.join(ctx.root, 'held'), 'example-owner/undecided');
   const tools = new gate.ToolGate({ registryOptions: ctx.options, environment: {} });
   for (const cwd of [store, clone]) {
-    assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(cwd).hold, false, cwd);
+    assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(cwd).open, false, cwd);
+    assert.deepEqual(new gate.PromptHold({ registryOptions: ctx.options, environment: {} }).decide({ cwd, prompt: 'go', sessionId: 's1' }), { action: 'pass' }, cwd);
     assert.equal(tools.decide({ tool_name: 'Bash', cwd, session_id: 's1', tool_input: { command: 'git status' } }), null, cwd);
     assert.equal(tools.decide({ tool_name: 'Bash', cwd: parent, session_id: 's1', tool_input: { command: `cd "${cwd}" && git status` } }), null, `reach ${cwd}`);
     assert.equal(tools.decide({ tool_name: 'PowerShell', cwd: parent, session_id: 's1', tool_input: { command: `git -C "${cwd}" status` } }), null, `-C ${cwd}`);
     assert.match(gate.sessionLine(cwd, { registryOptions: ctx.options }), /DISABLED here/);
   }
-  // A held repository still refuses tools, and still asks when a command reaches it.
-  assert.match(tools.decide({ tool_name: 'Bash', cwd: held, session_id: 's1', tool_input: { command: 'git status' } })?.deny || '', /no governance decision yet/);
+  // An undecided repository is told apart: the question is open there, though no tool is refused for it.
+  assert.equal(new gate.GovernanceGate({ registryOptions: ctx.options }).evaluate(held).open, true);
+  assert.equal(tools.decide({ tool_name: 'Bash', cwd: held, session_id: 's1', tool_input: { command: 'git status' } }), null);
 });
 
-test('gate: a Projects thread can post in a held repository; its decision cards and other tools stay held', (t) => {
+test('gate: a Projects thread works in an undecided repository: its messages, decision cards and other tools all run', (t) => {
   const ctx = scratch(t);
   const held = repo(path.join(ctx.root, 'held'), 'example-owner/undecided');
   const tools = new gate.ToolGate({ registryOptions: ctx.options, environment: {} });
   const call = tool_name => tools.decide({ tool_name, cwd: held, session_id: 's1', tool_input: { text: 'Enable governance here? Reply yes, no or later.' } });
-  for (const tool of ['mcp__hearthbot__post_message', 'mcp__hearthbot__react', 'mcp__hearthbot__update_progress_checklist', 'mcp__hearthbot__no_reply_needed', 'ToolSearch']) assert.equal(call(tool), null, tool);
-  for (const tool of ['mcp__hearthbot__request_decision', 'mcp__hearthbot__post_widget', 'mcp__hearthbot__post_message_x', 'mcp__other__post_message', 'Read']) assert.match(call(tool)?.deny || '', /no governance decision yet/, tool);
+  for (const tool of ['mcp__hearthbot__post_message', 'mcp__hearthbot__react', 'mcp__hearthbot__update_progress_checklist', 'mcp__hearthbot__no_reply_needed', 'ToolSearch',
+    'mcp__hearthbot__request_decision', 'mcp__hearthbot__post_widget', 'mcp__hearthbot__post_message_x', 'mcp__other__post_message', 'Read']) assert.equal(call(tool), null, tool);
+  // The answer still comes only from the user: the governance CLI with a decision stays refused there.
+  assert.match(tools.decide({ tool_name: 'Bash', cwd: held, session_id: 's1', tool_input: { command: 'node repo/scripts/toolkit-governance.cjs enable' } })?.deny || '', /only the user answers the governance question/);
 });
 
 test('discover: not applicable for S1 and R1s, and a repository is never its own store candidate', (t) => {

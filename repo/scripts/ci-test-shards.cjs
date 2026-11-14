@@ -27,7 +27,8 @@ const REQUIRED_JOBS = Object.freeze(['gate', 'personal-data', 'issue-closure']);
 // The jobs each `--verify-ci --legs <name>` call needs to see succeed.
 const LEG_SETS = Object.freeze({ validate: REQUIRED_JOBS, gate: TEST_JOBS });
 const JOB_ORDER = Object.freeze(['route', ...TEST_JOBS, 'personal-data', 'issue-closure', 'gate', 'validate']);
-const HOOK_PACK_WINDOWS_FAMILIES = Object.freeze(['attribution', 'closure-matrix', 'closure-shell', 'fault', 'governance', 'issue-closure', 'merge', 'push', 'task-governance']);
+// The Windows hook-pack groups: each matrix member runs the families joined by +.
+const HOOK_PACK_WINDOWS_GROUPS = Object.freeze(['attribution+closure-matrix', 'closure-shell+push', 'governance+issue-closure', 'fault+merge+task-governance']);
 
 function platformSystem(platform = process.platform) {
   if (platform === 'win32') return 'windows';
@@ -400,8 +401,12 @@ const CLOCK_AHEAD_JOB = [
   '        run: node repo/scripts/run-tests.cjs --clock-ahead --clock-offset-days 400 --temp-root "${{ runner.temp }}/tests"',
 ].join('\n');
 
-// Linux runs the full hook pack; Windows runs each family separately to keep the same budget
-// with room for slower hosts. Both jobs are required, and fail-fast stays off for every family.
+// Linux runs the full hook pack. Windows starts its hooks far more slowly, so it splits the pack
+// into four groups of families with about the same measured time, each in its own job: four jobs
+// instead of one per family, since every job waits for one of the account's 20 concurrent runner
+// slots. A group joins its families with + (a comma would split the YAML flow list, and PowerShell
+// would split an unquoted comma list into an array); the value is quoted so the shell passes one word.
+// Both jobs are required, and fail-fast stays off for every group.
 const HOOK_PACK_JOB = [
   '  hook-pack:',
   ...SKIPPED_ON_LIGHT,
@@ -424,8 +429,8 @@ const HOOK_PACK_JOB = [
 const HOOK_PACK_WINDOWS_JOB = HOOK_PACK_JOB
   .replace('  hook-pack:', '  hook-pack-windows:')
   .replace('    runs-on: ${{ matrix.os }}', '    runs-on: windows-latest')
-  .replace('        os: [ubuntu-latest]', `        family: [${HOOK_PACK_WINDOWS_FAMILIES.join(', ')}]`)
-  .replace(' run --budget-seconds 360', ' run --family ${{ matrix.family }} --budget-seconds 360');
+  .replace('        os: [ubuntu-latest]', `        families: [${HOOK_PACK_WINDOWS_GROUPS.join(', ')}]`)
+  .replace(' run --budget-seconds 360', ' run --family "${{ matrix.families }}" --budget-seconds 420');
 
 // The check run names each test job reports in a run that ran it, by job: a matrix job adds its
 // value in brackets. The route job requires every one of them to have passed in a run it reuses.
@@ -435,7 +440,7 @@ function testJobCheckNames(manifest) {
     'tests-windows': shardIds(manifest, 'windows').map((id) => `tests-windows (${id})`),
     'tests-clock-ahead': ['tests-clock-ahead'],
     'hook-pack': ['hook-pack (ubuntu-latest)'],
-    'hook-pack-windows': HOOK_PACK_WINDOWS_FAMILIES.map((family) => `hook-pack-windows (${family})`),
+    'hook-pack-windows': HOOK_PACK_WINDOWS_GROUPS.map((group) => `hook-pack-windows (${group})`),
   };
 }
 
@@ -621,7 +626,7 @@ const WORKFLOW_HEADER = [
   '# attempt of each shard, so re-running a failed shard can clear it. The tests-clock-ahead job runs',
   '# the test files that pin a calendar date with Node\'s clock 400 days ahead, so a test that only',
   '# passes near the date it pins fails now rather than months later. The hook-pack job runs the full',
-  '# pack on Linux; hook-pack-windows runs every family separately. The personal-data job checks every',
+  '# pack on Linux; hook-pack-windows runs it in four groups of families. The personal-data job checks every',
   '# commit of the pull request or push, the commit messages, the branch name and the pull request',
   '# title and body for email addresses, phone numbers and WhatsApp links, and the title and body for',
   '# home-folder paths and AI attribution (values are never printed). The issue-closure job checks',
@@ -813,7 +818,7 @@ module.exports = Object.freeze({
   ROOT,
   SUMMARY_SCHEMA,
   GATE_VERIFY_COMMAND,
-  HOOK_PACK_WINDOWS_FAMILIES,
+  HOOK_PACK_WINDOWS_GROUPS,
   JOB_ORDER,
   LEG_SETS,
   REQUIRED_JOBS,

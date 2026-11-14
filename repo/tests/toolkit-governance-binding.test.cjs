@@ -592,14 +592,14 @@ test('D: consumers read ENABLED, DISABLED, ERROR and stale the same way', (t) =>
   };
   const gate = new GovernanceGate({ registryOptions: ctx.opts });
   const expect = {
-    enabled: { hold: false, governed: true, records: true, tiers: ['portable', 'governed'] },
-    disabled: { hold: false, governed: false, records: false, tiers: ['portable'] },
-    error: { hold: false, governed: false, records: false, tiers: ['portable'] },
-    stale: { hold: false, governed: true, records: false, tiers: ['portable', 'governed'] },
+    enabled: { open: false, governed: true, records: true, tiers: ['portable', 'governed'] },
+    disabled: { open: false, governed: false, records: false, tiers: ['portable'] },
+    error: { open: false, governed: false, records: false, tiers: ['portable'] },
+    stale: { open: false, governed: true, records: false, tiers: ['portable', 'governed'] },
   };
   for (const [kind, repo] of Object.entries(repos)) {
     const state = governance.governanceState(repo, ctx.opts);
-    assert.equal(gate.evaluate(repo).hold, expect[kind].hold, `${kind}: gate`);
+    assert.equal(gate.evaluate(repo).open, expect[kind].open, `${kind}: the gate has no question open`);
     assert.equal(governedRepo(repo, {}, { registryOptions: ctx.opts }).governed, expect[kind].governed, `${kind}: governed-repo`);
     assert.equal(checkpoint.githubGovernanceOn(repo, { governanceState: () => state }), expect[kind].records, `${kind}: programme records`);
     assert.deepEqual(catalogue.tiersFor(state.state, state.materials_complete), expect[kind].tiers, `${kind}: catalogue`);

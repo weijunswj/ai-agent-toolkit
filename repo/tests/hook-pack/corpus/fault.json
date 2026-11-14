@@ -199,7 +199,7 @@
         "file": "repo/scripts/toolkit-task-policy.cjs"
       },
       "expect": {
-        "decision": "deny"
+        "decision": "allow"
       },
       "status": "pass"
     }

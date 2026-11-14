@@ -245,134 +245,6 @@
       "status": "pass"
     },
     {
-      "id": "TasksIndependentRefusesForeignPath",
-      "source": "Exact command and independent task scope controls",
-      "kind": "hostile",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "payload": {
-        "tool_name": "Bash",
-        "tool_input": {
-          "command": "node \"{work}/other/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\""
-        }
-      },
-      "fixture": {
-        "repo": {
-          "governance": "undecided"
-        },
-        "managed_tasks": true
-      },
-      "expect": {
-        "decision": "deny"
-      },
-      "status": "pass"
-    },
-    {
-      "id": "TasksIndependentRefusesGovernedJob",
-      "source": "Exact command and independent task scope controls",
-      "kind": "hostile",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "payload": {
-        "tool_name": "Bash",
-        "tool_input": {
-          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\" --task programme-sweep"
-        }
-      },
-      "fixture": {
-        "repo": {
-          "governance": "undecided"
-        },
-        "managed_tasks": true
-      },
-      "expect": {
-        "decision": "deny"
-      },
-      "status": "pass"
-    },
-    {
-      "id": "TasksIndependentRefusesFolderOverride",
-      "source": "Exact command and independent task scope controls",
-      "kind": "hostile",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "payload": {
-        "tool_name": "Bash",
-        "tool_input": {
-          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\" --folder OTHER"
-        }
-      },
-      "fixture": {
-        "repo": {
-          "governance": "undecided"
-        },
-        "managed_tasks": true
-      },
-      "expect": {
-        "decision": "deny"
-      },
-      "status": "pass"
-    },
-    {
-      "id": "TasksIndependentRefusesCompound",
-      "source": "Exact command and independent task scope controls",
-      "kind": "hostile",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "payload": {
-        "tool_name": "Bash",
-        "tool_input": {
-          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\"; echo extra"
-        }
-      },
-      "fixture": {
-        "repo": {
-          "governance": "undecided"
-        },
-        "managed_tasks": true
-      },
-      "expect": {
-        "decision": "deny"
-      },
-      "status": "pass"
-    },
-    {
-      "id": "TasksIndependentRefusesGovernedEnrolment",
-      "source": "Footer exception must not retire a governed task",
-      "kind": "hostile",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "payload": {
-        "tool_name": "Bash",
-        "tool_input": {
-          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\""
-        }
-      },
-      "fixture": {
-        "repo": {
-          "governance": "undecided"
-        },
-        "managed_tasks": true,
-        "windows_tasks": [
-          "programme-sweep"
-        ]
-      },
-      "expect": {
-        "decision": "deny"
-      },
-      "status": "pass"
-    },
-    {
       "id": "TasksRegistryIndependentList",
       "source": "Shared task policy includes the managed registry list command",
       "kind": "benign",
@@ -643,36 +515,6 @@
       "status": "pass"
     },
     {
-      "id": "TasksHealthUpdaterStillNeedsGovernance",
-      "source": "Scheduled task health and independent-policy regression",
-      "kind": "hostile",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "event": "PreToolUse",
-      "payload": {
-        "tool_name": "Bash",
-        "tool_input": {
-          "command": "node \"{work}/repo/scripts/toolkit-update-scheduled-task.cjs\" --apply"
-        }
-      },
-      "fixture": {
-        "repo": {
-          "governance": "undecided"
-        },
-        "windows_tasks": [
-          "footer-sweep",
-          "task-health"
-        ],
-        "managed_tasks": true
-      },
-      "expect": {
-        "decision": "deny"
-      },
-      "status": "pass"
-    },
-    {
       "id": "TasksUncertainAuthDeferredShardLine",
       "source": "Weekly authentication failure must stay visible without a cleaner",
       "kind": "state",
@@ -731,6 +573,16 @@
           "health file not shared: no verified evidence store"
         ]
       },
+      "status": "pass"
+    },
+    {
+      "id": "TasksUndecidedRepoHoldsNoTaskCommand",
+      "source": "ask once, never freeze: an undecided repository holds no command; the task script checks governance itself before any effect",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\" --task programme-sweep"}},
+      "fixture": {"repo":{"governance":"undecided"},"managed_tasks":true},
+      "expect": {"decision":"allow"},
       "status": "pass"
     }
   ]
