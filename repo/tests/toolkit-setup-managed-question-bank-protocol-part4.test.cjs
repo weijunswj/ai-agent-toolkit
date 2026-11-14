@@ -137,7 +137,7 @@ test('Claude plan, JSON and explain are observational and launch no Claude sessi
     const result = run([
       ...mode, '--host', 'claude-code', '--repo-root', fixture.managedPath,
       '--repo-remote', fixture.origin, '--claude-cli', fakeClaude,
-      '--yes-recommended', '--task-auto-merge', 'after-gates', '--claude-settings', 'enable',
+      '--yes-recommended', '--claude-settings', 'enable',
     ], { env, timeout: 300000 });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, mode.includes('--explain') ? /Update source/i : /root-only|root agent/i);

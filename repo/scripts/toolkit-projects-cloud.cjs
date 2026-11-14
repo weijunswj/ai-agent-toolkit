@@ -11,15 +11,18 @@
 //                    who tapped (actor_account_id, the same as the message's author-id). Only that
 //                    whole shape counts, for that pull request at that SHA, once (the decision id
 //                    is the delivery id the approval store keeps a receipt for).
-//   Auto-merge switch The project line `- Task auto-merge: On` in the owner's project instructions,
+//   Off override    The project line `- Task auto-merge: Off` in the owner's project instructions,
 //                    which the host puts at the very start of a thread's first prompt inside
 //                    `<session-context nonce="X">` ... `</session-context nonce="X">`, as one
 //                    `<project-instructions nonce="Y">` ... `</project-instructions nonce="Y">`
-//                    block. Only that block counts: the shared-file, repository and folder lists
-//                    beside it, and anything after the context (a relay, a citation, a note), are
-//                    never read. Exactly one such line, On or Off; none, or more than one, is Off.
-//                    It is a snapshot from the first prompt: a later change to the project line
-//                    reaches only threads started after it, and a new container forgets it (Off).
+//                    block. The repository's merged switch (task_prs.auto_merge) is the only grant;
+//                    this line can only force it Off. Only that block counts: the shared-file,
+//                    repository and folder lists beside it, and anything after the context (a
+//                    relay, a citation, a note), are never read. No line defers to the binding; an
+//                    On line grants nothing; an Off line, two lines, a second instructions opener or
+//                    an unclosed block force Off. It is a snapshot from the first prompt: a later
+//                    change reaches only threads started after it, and a session with no snapshot
+//                    (a new container) is forced Off.
 //
 // Tripwire, not a lock: a fully forged top-level wake or session context with the right shape
 // would count, as for the typed `merge N` the Projects wake reader already accepts. Required CI and
@@ -81,10 +84,13 @@ function mergeCardTap(prompt) {
   return { repository: tap[1], pr: Number(tap[2]), sha: tap[3], id, sentAt: message['sent-at'] || null };
 }
 
-// 'on' or 'off' from the owner's project instructions inside the host's session context at the
-// start of this prompt, or null when the prompt does not start with one. Only the
+// The project line as read from the owner's project instructions inside the host's session context
+// at the start of this prompt: 'off' forces task auto-merge Off for this thread; 'none' (no line)
+// and 'on' leave the repository's merged switch (task_prs.auto_merge) in charge, since an On line
+// grants nothing on its own. null when the prompt does not start with a session context. Only the
 // `<project-instructions nonce="Y">` block nested in it counts, up to its own closing tag: the rest
 // of the session context also lists shared files, repositories and folders, which agents can name.
+// Anything unclear (two lines, a second instructions opener, an unclosed block or context) is 'off'.
 function switchSetting(prompt) {
   const text = String(prompt || '');
   if (text.length > MAX_PROMPT) return null;
@@ -99,11 +105,15 @@ function switchSetting(prompt) {
   const close = context.indexOf(`</project-instructions nonce="${blocks[0][1]}">`, start);
   if (close < 0) return 'off';
   const lines = context.slice(start, close).split(/\r?\n/).filter(line => /^\s*-\s*Task auto-merge\s*:/i.test(line));
+  if (lines.length === 0) return 'none';
   if (lines.length !== 1) return 'off';
   return /^\s*-\s*Task auto-merge\s*:\s*On\b/.test(lines[0]) ? 'on' : 'off';
 }
 
-// The switch as read for each cloud session on this container. A store that cannot be read is Off.
+// The project line as read for each cloud session on this container. It only ever forces Off: a
+// session whose instructions were read with no Off line defers to the merged binding. A session with
+// no record (its instructions were never read here, or the container restarted) and a store that
+// cannot be read both force Off, so a lost Off line never turns task auto-merge On.
 class ProjectsSwitch {
   #file; #now;
 
@@ -117,13 +127,13 @@ class ProjectsSwitch {
       const parsed = JSON.parse(fs.readFileSync(this.#file, 'utf8'));
       if (!parsed || parsed.schema !== SWITCH_SCHEMA || !parsed.sessions || typeof parsed.sessions !== 'object' || Array.isArray(parsed.sessions)) return {};
       const oldest = this.#now().getTime() - MAX_SWITCH_AGE_MS;
-      return Object.fromEntries(Object.entries(parsed.sessions).filter(([, entry]) => entry && ['on', 'off'].includes(entry.value) && Date.parse(entry.at) >= oldest));
-    } catch { return {}; }
+      return Object.fromEntries(Object.entries(parsed.sessions).filter(([, entry]) => entry && ['on', 'off', 'none'].includes(entry.value) && Date.parse(entry.at) >= oldest));
+    } catch (error) { return error?.code === 'ENOENT' ? {} : null; }
   }
 
   record(sessionId, value) {
-    if (typeof sessionId !== 'string' || !ID.test(sessionId) || !['on', 'off'].includes(value)) return false;
-    const sessions = this.#read();
+    if (typeof sessionId !== 'string' || !ID.test(sessionId) || !['on', 'off', 'none'].includes(value)) return false;
+    const sessions = this.#read() || {};
     delete sessions[sessionId];
     sessions[sessionId] = { value, at: this.#now().toISOString() };
     const kept = Object.fromEntries(Object.entries(sessions).slice(-MAX_SESSIONS));
@@ -136,7 +146,10 @@ class ProjectsSwitch {
     return true;
   }
 
-  on(sessionId) { return typeof sessionId === 'string' && this.#read()[sessionId]?.value === 'on'; }
+  forcedOff(sessionId) {
+    const sessions = typeof sessionId === 'string' ? this.#read() : null;
+    return !sessions || !['on', 'none'].includes(sessions[sessionId]?.value);
+  }
 }
 
 module.exports = Object.freeze({ SWITCH_BASENAME, mergeCardQuestion, mergeCardTap, switchSetting, ProjectsSwitch });

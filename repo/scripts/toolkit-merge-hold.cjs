@@ -1212,7 +1212,8 @@ function nestedRefusal(text) {
 }
 
 // The owner's standing answer for the repository of folder `cwd`: { repository, scope } when the
-// app-local answer is On, the merged binding enables governance and the user started this session;
+// repository's merged binding switches task auto-merge on, the app is a known one and the user
+// started this session;
 // otherwise a structured failure. `scope(head)` is the merge-scope verdict against this folder's copy of
 // the remote's default branch, or null when git cannot read it.
 function standingAnswer(input, cwd, { environment = process.env, registryOptions = {}, now, host = null } = {}) {
@@ -1221,22 +1222,24 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   try { root = repository ? governance.findGitRoot(cwd) : null; } catch { root = null; }
   const answer = root ? governance.taskAutoMerge(root, { ...registryOptions, host, ...(now ? { now } : {}) }) : null;
   const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
-  // A Claude Projects cloud thread has no setup bank: its switch is the project line read from the
-  // host's session context (toolkit-projects-cloud.cjs), and the one named merge thread stands in
-  // for a session the owner started (gate rules, Task auto-merge), so no origin check applies.
+  // A Claude Projects cloud thread reads the same repository switch. Its project line can only force
+  // Off (toolkit-projects-cloud.cjs), and the one named merge thread stands in for a session the
+  // owner started (gate rules, Task auto-merge), so no origin check applies.
   const cloud = Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true';
-  let cloudOn = false;
-  if (cloud) { try { cloudOn = new projectsCloud.ProjectsSwitch({ directory: governance.userStateDirectory(registryOptions), now }).on(sessionId); } catch { cloudOn = false; } }
+  let forcedOff = false;
+  if (cloud) { try { forcedOff = new projectsCloud.ProjectsSwitch({ directory: governance.userStateDirectory(registryOptions), now }).forcedOff(sessionId); } catch { forcedOff = true; } }
   const checks = {
     repositoryValid: Boolean(repository && root),
-    autoMergeOn: cloud ? cloudOn : answer?.preference?.status === 'saved' && answer.preference.value === 'after-gates',
+    knownHost: governance.normaliseHost(host) !== null,
+    autoMergeOn: answer?.auto_merge === 'after-gates' && !forcedOff,
     bindingFresh: answer?.fresh === true,
     ...sessionChecks(sessionId, environment || {}, registryOptions, now, host),
   };
   const reason = !checks.nativeSessionContext ? 'no-native-session-context'
     : !checks.repositoryValid ? 'no-repository'
-    : !checks.autoMergeOn ? 'auto-merge-off'
     : !checks.bindingFresh ? 'binding-not-fresh'
+    : !checks.autoMergeOn ? 'auto-merge-off'
+    : !checks.knownHost ? 'unknown-host'
     : !checks.sessionMarked ? 'no-session-mark'
     : checks.launcherMarker ? 'launcher-marker'
     : !checks.hostSessionMatches ? 'host-session-mismatch'
@@ -1258,7 +1261,8 @@ function standingReason(reason) {
   return {
     'no-native-session-context': "this terminal has no native session context; run the check in the session with Toolkit's hook",
     'no-repository': 'this folder has no usable GitHub repository',
-    'auto-merge-off': "this app's task auto-merge answer is not On or cannot be read (in a Claude Projects thread: the project line `- Task auto-merge: On` was not in this thread's session context)",
+    'unknown-host': 'this app is not one Toolkit knows, so it never merges on a standing answer',
+    'auto-merge-off': "this repository's merged governance binding does not set task_prs.auto_merge to after-gates (refresh governance shows or changes it), or, in a Claude Projects thread, the project line `- Task auto-merge: Off` (or unclear or unread project instructions) forces it Off",
     'binding-not-fresh': 'the enabled merged governance binding is missing, invalid or not fresh',
     'no-session-mark': 'this session has no readable session-start mark',
     'launcher-marker': 'a Toolkit launcher marker is present',

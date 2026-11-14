@@ -21,42 +21,27 @@ function snapshotTree(root) {
 
 // Split by complete test declarations to keep the per-file time budget.
 for (const host of ['codex', 'claude-code']) {
-  test(`${host}: setup applies On, Current and Off to only its own file`, () => {
+  test(`${host}: setup writes no task auto-merge answer, keeps an old one for governance to remove, and says where it moved`, () => {
     const root = tmpRoot();
     const { origin, setupRepo } = createGitBackedSetupRepo(root);
     // The fake bridge writes its invocation log inside this disposable source clone.
     fs.appendFileSync(path.join(setupRepo, '.git', 'info', 'exclude'), '\nBRIDGE_ARGS.log\n');
     const env = isolatedHomeEnv(root);
     const file = path.join(root, '.ai-agent-toolkit', 'user-state', `task-auto-merge.${host}.v1.json`);
-    const other = path.join(root, '.ai-agent-toolkit', 'user-state', `task-auto-merge.${host === 'codex' ? 'claude-code' : 'codex'}.v1.json`);
     const args = ['--execute', '--host', host, '--repo-root', setupRepo, '--repo-remote', origin,
       '--yes-recommended', '--codex-helper-capacity', 'keep', '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions'];
-    for (const [choice, expected] of [['after-gates', 'after-gates'], ['keep', 'after-gates'], ['off', 'off']]) {
-      const before = fs.existsSync(file) ? fs.readFileSync(file) : null;
-      const result = run([...args, '--task-auto-merge', choice], { env, taskAutoMergeQuestion: true });
-      assert.ok([0, core.SETUP_ACTION_REQUIRED].includes(result.status), result.stderr || result.stdout);
-      assert.equal(JSON.parse(fs.readFileSync(file)).value, expected);
-      if (choice === 'keep') assert.deepEqual(fs.readFileSync(file), before);
-      assert.equal(fs.existsSync(other), false);
-      if (host === 'claude-code') assert.doesNotMatch(result.stdout, /May Codex|## Antigravity/);
-    }
-  });
-
-  test(`${host}: task preference is not written before complete answers; unreadable records stop all writes`, () => {
-    const root = tmpRoot();
-    const env = isolatedHomeEnv(root);
-    const file = path.join(root, '.ai-agent-toolkit', 'user-state', `task-auto-merge.${host}.v1.json`);
-    const partial = run(['--execute', '--host', host, '--task-auto-merge', 'after-gates'], { env, input: '', taskAutoMergeQuestion: true });
-    assert.equal(partial.status, core.SETUP_PAUSED_FOR_QUESTION_BANK);
-    assert.equal(fs.existsSync(file), false);
-    writeFile(file, 'unreadable');
-    const blockedPlan = run(['--plan', '--host', host, '--json'], { env, taskAutoMergeQuestion: true });
-    const row = JSON.parse(blockedPlan.stdout).question_bank.find(row => row.id === 'task-auto-merge');
-    assert.equal(row.availability.status, 'blocked');
-    const blocked = run(['--execute', '--host', host, '--yes-recommended'], { env, input: '', taskAutoMergeQuestion: true });
-    assert.equal(blocked.status, 1);
-    assert.match(blocked.stderr, /blocked|Could not read/);
-    assert.equal(fs.readFileSync(file, 'utf8'), 'unreadable');
-    assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit', 'source')), false);
+    const fresh = run(args, { env });
+    assert.ok([0, core.SETUP_ACTION_REQUIRED].includes(fresh.status), fresh.stderr || fresh.stdout);
+    assert.equal(fs.existsSync(file), false, 'setup saves no per-app answer');
+    assert.doesNotMatch(fresh.stdout, /May (Codex|Claude Code) merge|now lives in each repository's governance/);
+    const old = JSON.stringify({ schema: 'toolkit.task-auto-merge-preferences.v1', host, value: 'after-gates' });
+    writeFile(file, old);
+    const upgraded = run(args, { env });
+    assert.ok([0, core.SETUP_ACTION_REQUIRED].includes(upgraded.status), upgraded.stderr || upgraded.stdout);
+    assert.match(upgraded.stdout, /Task auto-merge now lives in each repository's governance; say refresh governance to see or change it\./);
+    assert.equal(fs.readFileSync(file, 'utf8'), old, 'only a governance read-back of the new switch removes it');
+    const rejected = run([...args, '--task-auto-merge', 'after-gates'], { env });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /Unknown|Unsupported/i);
   });
 }
