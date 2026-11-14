@@ -27,7 +27,6 @@ const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Setup', type: ['refresh toolkit', 'toolkit refresh'], does: 'Update Toolkit on this computer to the newest version.' }),
   Object.freeze({ group: 'Setup', type: ['remove toolkit'], does: "Choose this app or every app, list what Toolkit put there, then remove it after your OK." }),
   Object.freeze({ group: 'Keys', type: ['toolkit env', 'toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
-  Object.freeze({ group: 'Permissions', type: ['toolkit permissions'], does: 'Print the paste-once permission blocks for this computer and this repository; `toolkit permissions --apply`, typed by you in your own terminal, adds them.' }),
   Object.freeze({ group: 'Governance', type: ['toolkit governance', 'governance setup'], does: "Guide Toolkit's GitHub governance for this repository: see whether it is on, turn it on, change task auto-merge or turn it off. Each change is one pull request for you to merge." }),
   Object.freeze({ group: 'Merge', type: ['merge N'], does: 'Approve the merge of pull request N.' }),
 ])
@@ -55,7 +54,7 @@ Object.freeze(ACTIONS);
 const PHRASES = Object.freeze(Object.keys(ACTIONS));
 
 // The order the groups print in; a group with no commands is left out.
-const GROUPS = Object.freeze(['Setup', 'Keys', 'Permissions', 'Governance', 'Merge']);
+const GROUPS = Object.freeze(['Setup', 'Keys', 'Governance', 'Merge']);
 
 // The command list as one small two-column Markdown table per group.
 function listText() {

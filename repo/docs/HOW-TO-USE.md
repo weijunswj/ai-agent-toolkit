@@ -72,7 +72,6 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 - `refresh toolkit` or `toolkit refresh`: update Toolkit on this computer to the newest version.
 - `remove toolkit`: choose this app only or every app, see what Toolkit put there, then remove it after your OK, plugin included. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
 - `toolkit env` or `toolkit show env`: open your keys in your editor. Values stay on this computer and never pass through chat.
-- `toolkit permissions`: print the paste-once permission blocks for this computer and this repository. `toolkit permissions --apply`, typed by you in your own terminal, adds them.
 - `toolkit governance` or `governance setup`: a guide to Toolkit's GitHub governance for this repository. It shows whether governance is on and its merged answers, then offers the next step: turn it on, change task auto-merge or turn it off. Each change is one pull request for you to merge.
 - `merge N`: approve the merge of pull request N.
 
@@ -84,6 +83,7 @@ These still work when typed as a whole message, but the list leaves them out bec
 - `refresh governance` or `toolkit refresh governance`: show this repository's merged governance answers (task auto-merge switch, evidence store, checks) and its permission block. Ask to turn task auto-merge on or off and Toolkit prepares one pull request for you to merge; it applies only after your merge.
 - `toolkit governance enable` or `toolkit governance disable`: your answer to Toolkit's governance question. It prepares a pull request for you to merge, and counts only while that question is open for this repository.
 - `toolkit governance status`, `check`, `discover`, `catalogue`, `security` and `migrate`: governance tools that agents and setup run. Each runs that same subcommand of `toolkit-governance.cjs` and nothing else, except `migrate`, which the agent hands to you to run in your own terminal.
+- `toolkit permissions`: print the paste-once permission blocks for this computer and, in a governed repository, for this repository. `toolkit permissions --apply`, typed by you in your own terminal, adds them.
 - `toolkit update scheduled task`: review and update Toolkit's scheduled tasks on this computer.
 
 ### Manual Skill-Folder Copying
