@@ -421,41 +421,22 @@ test('E3: sessionLine appends the cached line and Checkpoint lines for an ENABLE
   assert.doesNotMatch(evaluate(enabled), /Checkpoint:/, 'gone after a later good checkpoint');
 });
 
-test('E3: sessionLine adds the Programme sweep line when this computer\'s hourly sweep skipped, from local files only', () => {
+test('E3: sessionLine never reads the retired Windows task registry, whatever an old sweep task recorded', () => {
   const root = tmp();
   const home = tmp();
-  const now = new Date(2026, 10, 1, 12, 0, 0); // local noon, inside the sweep's hours
+  const now = new Date(2026, 10, 1, 12, 0, 0);
   const programmeDeps = { attentionDir: tmp(), sessionsDir: tmp(), home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => now.toISOString() };
   const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
-  const evaluate = (deps = programmeDeps, registryOptions) => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps: deps, registryOptions });
-  assert.doesNotMatch(evaluate(), /Programme sweep:/, 'no task recorded here');
+  const evaluate = () => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps });
   tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
     purpose: 'Sweep.', repository: 'acme/app', created: '2026-10-30T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', job: 'programme-sweep', definition: '0123456789ab' }]);
   const at = new Date(now.getTime() - 50 * 60000).toISOString();
-  tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 0, status: 'skipped', reason: 'offline', skipped_streak: 3, skipped_since: new Date(now.getTime() - 170 * 60000).toISOString(), summary: ['skipped: offline'] }, home);
-  assert.match(evaluate(), /Toolkit governance: ENABLED[^]* Programme sweep: skipped \(offline\), 3 runs in a row since [^;]+; see toolkit tasks\./);
-  assert.doesNotMatch(evaluate({ ...programmeDeps, home: undefined }, { testOnly: true }), /Programme sweep:/, 'a test registry without its own home reads nothing');
-  tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 0, status: 'ok', summary: [] }, home);
-  assert.doesNotMatch(evaluate(), /Programme sweep:/, 'gone after a good run');
-  tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 0, status: 'held', summary: ['Private diagnostic'] }, home);
-  const expected = /Programme sweep: held at \d\d:\d\dZ; see toolkit tasks\./;
-  const adapter = { startSession: () => {}, sessionIdOf: gate.sessionIdOf, sessionLine: () => evaluate() };
-  const input = { cwd: root, session_id: 'held-session' };
-  const claude = require('../scripts/toolkit-governance-hook.cjs').respond('SessionStart', input, { gate: adapter, environment: {} });
-  const codexHook = require('../scripts/toolkit-codex-session-start.cjs');
-  let codex = '';
-  const originalLog = console.log;
-  const originalRoot = process.env.PLUGIN_ROOT;
-  try {
-    console.log = text => { codex += text; };
-    assert.equal(codexHook.main(codexHook.HOOK_ARGS, { input, gate: adapter, bridge: { run: () => ({ status: 0 }) } }), 0);
-  } finally {
-    console.log = originalLog;
-    if (originalRoot === undefined) delete process.env.PLUGIN_ROOT; else process.env.PLUGIN_ROOT = originalRoot;
+  for (const status of ['skipped', 'held', 'failed']) {
+    tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: status === 'failed' ? 1 : 0, status, reason: 'offline', skipped_streak: 3, summary: [] }, home);
+    const line = evaluate();
+    assert.match(line, /Toolkit governance: ENABLED/);
+    assert.doesNotMatch(line, /Programme sweep:|Task health|see toolkit tasks/, status);
   }
-  assert.match(claude.hookSpecificOutput.additionalContext, expected);
-  assert.match(codex, expected);
-  assert.doesNotMatch(codex, /Private diagnostic/);
 });
 
 test('E3: attention reports gh signed out as unknown, never clear', () => {
@@ -816,10 +797,6 @@ test('every session-start problem line names who acts and when', () => {
   const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
   const evaluate = () => gate.sessionLine(root, { stateReader: () => enabled, programmeDeps });
   cache.writeCache('acme/app', { line: 'Attention: 2 new, 0 acknowledged', counts: { new: 2, acknowledged: 0 }, digest: 'd1', complete: true }, { attentionDir, now: () => now.toISOString() });
-  tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
-    purpose: 'Sweep.', repository: 'acme/app', created: '2026-10-30T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', job: 'programme-sweep', definition: '0123456789ab' }]);
-  const at = new Date(now.getTime() - 50 * 60000).toISOString();
-  tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: 1, status: 'failed', summary: [] }, home);
   const hash = checkpoint.sessionHash('exec-b');
   checkpoint.writeLocalBinding({ session_hash: hash, repository: 'acme/app', issue: 423, assignment: 'g1-a1', repo_root: root, bound_at: 'x' }, { sessionsDir });
   checkpoint.recordError(hash, 'GH_AUTH', 'gh is not signed in', { sessionsDir });
@@ -827,7 +804,6 @@ test('every session-start problem line names who acts and when', () => {
   for (const [key, action] of Object.entries(gate.FINDING_ACTIONS)) if (key !== 'queue') assert.ok(line.includes(action), `${action} in ${line}`);
   assert.ok(!line.includes(gate.FINDING_ACTIONS.queue), 'the queue action is only for a queue-only line');
   assert.match(line, /Attention: 2 new[^]*Run programme\.cjs attention for the list\. Controller: answer each new or overdue finding this turn/);
-  assert.match(line, /Programme sweep: last run failed[^]*see toolkit tasks\. Controller: fix the task this turn/);
 
   // Only work-queue findings open: the action names the queue step and never offers an ack, which
   // a work-queue finding refuses.
@@ -840,32 +816,6 @@ test('every session-start problem line names who acts and when', () => {
   // One open finding outside the queue brings the full action back.
   cache.writeCache('acme/app', { line: 'Attention: 3 new, 0 acknowledged, 2 in the work queue', counts: { new: 3, acknowledged: 0 }, digest: 'd3', complete: true, queue }, { attentionDir, now: () => now.toISOString() });
   assert.ok(evaluate().includes(gate.FINDING_ACTIONS.attention));
-});
-
-test('a task line gets the controller action only for a fault, never against an owner stop', () => {
-  for (const line of ['Programme sweep: last run failed at 10:00Z; see toolkit tasks.', 'Programme sweep: held at 10:00Z; see toolkit tasks.',
-    'Programme sweep: skipped (offline), 3 runs in a row since 09:00Z; see toolkit tasks.', 'Programme sweep: no run since 07:00Z (over 2 hours); see toolkit tasks.',
-    'Task health: programme-sweep: task code older than managed checkout', 'Programme sweep: held at 10:00Z, 3 runs in a row since 08:00Z; see toolkit tasks.',
-    'Task health on other computers: computer-0123456789ab: footer-sweep: last run failed', 'health file not shared: no verified evidence store', 'Task health file is over 26 hours old']) {
-    assert.equal(gate.taskAction(line), ` ${gate.FINDING_ACTIONS.tasks}`, line);
-  }
-  assert.equal(gate.taskAction('Programme sweep: stopped by owner; see toolkit tasks.'), ' No action: the owner stopped it.');
-  assert.equal(gate.taskAction('Footer sweep: stopped by owner; see toolkit tasks.'), ' No action: the owner stopped it.');
-  assert.equal(gate.taskAction('Shard timings: deferred for 5 minutes, 1 deferral; awaiting an eligible task retry; see toolkit tasks.'), '');
-  assert.equal(gate.taskAction('Scheduled jobs: owned by other-pc; ask the owner to move them back.'), '');
-});
-
-test('an owner-stopped sweep at session start says no action is needed', () => {
-  const root = tmp();
-  const home = tmp();
-  const now = new Date(2026, 10, 1, 12, 0, 0);
-  const programmeDeps = { attentionDir: tmp(), sessionsDir: tmp(), home, mergedBinding: () => ({ repository: 'acme/app' }), startRefresh: () => {}, now: () => now.toISOString() };
-  const enabled = { state: 'ENABLED', rule: 'M1', materials_complete: true, programme_records_bind: true, root };
-  tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
-    purpose: 'Sweep.', repository: 'acme/app', created: '2026-10-30T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', job: 'programme-sweep', definition: '0123456789ab', stopped_by_owner: true, stopped_at: '2026-10-31T00:00:00.000Z' }]);
-  const line = gate.sessionLine(root, { stateReader: () => enabled, programmeDeps });
-  assert.match(line, /Programme sweep: stopped by owner; see toolkit tasks\. No action: the owner stopped it\./);
-  assert.ok(!line.includes(gate.FINDING_ACTIONS.tasks), line);
 });
 
 test('work queue: a disposed stalled-task finding that is still seen stays disposed', () => {

@@ -423,4 +423,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
   } catch (error) { err(`Scheduled task update held: ${tasks.safeText(error.message)}\n`); return 1; }
 }
 module.exports = { TaskUpdater, KINDS, CHECK_MAX_AGE_MS, readApproval, saveApproval, approvalQuestion, discoverCheckouts, main };
-if (require.main === module) process.exitCode = main();
+// Retired: `toolkit update scheduled task` no longer changes anything. Toolkit does not run scheduled
+// tasks on a computer any more; the cloud runs those jobs. It prints one line and exits 0.
+const RETIRED_LINE = 'toolkit update scheduled task is retired: the cloud runs these jobs, and setup no longer creates or updates tasks on this computer. Say "remove toolkit" to list and remove old Toolkit tasks.';
+if (require.main === module) { process.stdout.write(`${RETIRED_LINE}\n`); process.exitCode = 0; }

@@ -31,28 +31,22 @@ test('T5 Projects runs the shared journey first, then extras, with relay as last
   assert.doesNotMatch(setup + read(SKILL_REL), /weekly audit/i);
   assert.match(read(SKILL_REL), /otherwise follow the takeover playbook's owner relay, last after own tools and executors/);
   const takeover = read('repo/docs/agent-playbooks/controller-takeover.md');
-  for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Task pack', 'Gate pack']) assert.ok(takeover.includes(`**${name}:**`), name);
+  for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Gate pack']) assert.ok(takeover.includes(`**${name}:**`), name);
+  assert.ok(!takeover.includes('**Task pack:**'), 'Toolkit applies no computer tasks, so there is no Task pack');
   assert.doesNotMatch(takeover, /\bR\d+\b/);
   for (const phrase of ['Text first, card last', 'put every host question card below its explanation']) assert.ok(read(SKILL_REL).includes(phrase));
 });
 
-test('Projects P2 fills the gate route and runs the deferred device task check', () => {
+test('Projects P2 fills the gate route, and no step waits on a device for scheduled tasks', () => {
   const setup = read(`${REFERENCE_DIR}/setup.md`);
-  const note = 'Before a device is named, step 9b reports "not checked here" and P2 runs it when work runs on this device.';
   const folder = 'When any gate runs on this device (placement `remote_control`), write the folder into the `GATE ROUTE:` line, which generic step 5 saved before the device was named.';
-  const tasks = 'If generic step 9b reported "not checked here" for want of a device, run it on this device now, under its own fresh ENABLED guard and standing approval.';
-  const check = text => {
-    assert.ok(text.split('## Projects notes on the generic steps')[1].split('## Projects extras')[0].includes(note), note);
-    const p2 = text.split('P2. **')[1].split('P3. **')[0];
-    for (const clause of [folder, tasks]) assert.ok(p2.includes(clause), clause);
-  };
-  check(setup);
-  for (const clause of [note, folder, tasks]) {
-    assert.throws(() => check(setup.replace(clause, '')), { code: 'ERR_ASSERTION' }, clause);
-  }
-  assert.throws(() => check(setup.replace(' when work runs on this device', '')), { code: 'ERR_ASSERTION' }, 'P2 condition');
+  const p2 = setup.split('P2. **')[1].split('P3. **')[0];
+  assert.ok(p2.includes(folder), folder);
+  assert.doesNotMatch(setup, /step 9b|standing approval|toolkit-windows-tasks|Programme sweep on a device/);
+  assert.match(setup, /Programme Sweep workflow keeps the programme pages current[^\n]*set up no sweep on the device/);
   const inventory = JSON.parse(read('repo/contracts/claude-projects/web-controller-projects/setup-inventory.json'));
   assert.deepEqual(inventory.rows.find(row => row.id === 'gate-route').setup_steps, ['generic-5', 'P2']);
+  assert.equal(inventory.rows.some(row => row.id === 'programme-sweep'), false, 'setup creates no device sweep');
 });
 
 // Source contracts, not a role classifier: copied instructions and paths must never supply
@@ -495,7 +489,7 @@ test('Projects wires managed instructions, promises and fresh scheduled sessions
   assert.doesNotMatch(read(SKILL_REL), /&(?:lt|gt|amp|quot);/);
   // Setup reads the guidebook first, refreshing it when missing or not current.
   assert.match(text, /check guidebook VERSION against a fresh Toolkit main copy using the guidebook reference/);
-  assert.match(text, /guidebook VERSION, check-in time, nudge state, programme sweep when armed, recurring-task home and next work item/);
+  assert.match(text, /guidebook VERSION, check-in time, nudge state, latest cloud sweep result when ENABLED, recurring-task home and next work item/);
   // Genuine lag is measured against the check-in session baseline, with an explicit today fallback.
   assert.match(text, /`PLUGIN BEHIND`: this check-in's observed Toolkit plugin copy is strictly more than 24 hours behind main as it was when this check-in's own session started/);
   assert.match(text, /main today only when the report explicitly says "session start unavailable; comparing with main today"/);
@@ -787,7 +781,7 @@ test('nothing tells the owner to upload the Projects skill by hand', () => {
 test('device steps go to the Remote Control session, not the owner', () => {
   const text = read(SKILL_REL);
   // The owner was once asked to create a local scheduled task that a Remote Control session could create.
-  assert.match(text, /Use local rc on the user's device only when the step needs it:.*installs, setup and device tasks/);
+  assert.match(text, /Use local rc on the user's device only when the step needs it:.*installs and setup, the user's final-product UAT/);
   assert.match(text, /Hand the user a device step only when its safety check blocks the session\./);
   assert.match(read('repo/contracts/agent-rules/global-rules.md'), /never ask them to run commands, or to do a device step an agent there can do unless a safety check blocks it\./);
 });
@@ -822,48 +816,25 @@ test('Projects lists every owner-hands step when it reports what waits on the ow
   assert.match(nudge, /\*\*Waiting on owner:\*\* \([^\n]*plus every step only the owner can do that is not done yet, optional ones and ones posted only inside a thread included;/);
 });
 
-test('the device programme sweep needs both GitHub governance ENABLED and a named device', () => {
-  // Cloud-only projects have no device to run it on, so neither half alone may set it up or suggest it.
+test('the programme sweep runs in the cloud: Projects sets up, suggests and applies no computer task for it', () => {
   const at = rel => read(`repo/contracts/claude-projects/web-controller-projects/${rel}`);
-  assert.match(at('reference/setup.md'), /confirms a fresh merged enabled binding and P2 named a device: also set up the \*\*Programme sweep on a device\*\*/);
-  assert.match(at('reference/setup.md'), /A pending yes, open proposal, stale read or failed read grants no governance effects/);
-  assert.match(at('reference/setup.md'), /With governance in any other state, or no device, do not create it or suggest it/);
-  assert.match(at('reference/recurring-tasks.md'), /Only for a repository whose GitHub governance is ENABLED, in a project whose memory names a device \(Projects extra P2\); in any other case, never create or suggest it\./);
-  assert.match(at('SKILL.md'), /only when ENABLED and a device is named\)/);
+  const recurring = at('reference/recurring-tasks.md');
+  assert.match(recurring, /\*\*Programme sweep in the cloud\.\*\* Each governed repository carries the Toolkit Programme Sweep workflow/);
+  assert.match(recurring, /`toolkit governance check` names the reason and the fix/);
+  assert.match(recurring, /setup names them and points to `remove toolkit`, whose plan the owner confirms/);
+  assert.match(recurring, /Never create, re-arm or suggest a local programme sweep/);
+  assert.match(at('SKILL.md'), /\*\*Programme pages refresh themselves in the cloud\.\*\*[^\n]*never set up a sweep on a computer/);
   const nudge = at('tasks/hourly-nudge.md');
-  assert.match(nudge, /Check the `SCHEDULED TASKS:` line before claiming device-task coverage or absence/);
-  assert.match(nudge, /if the device programme sweep entry says `stopped by owner`, report "device programme sweep stopped by owner"/);
-  assert.match(nudge, /device programme sweep needs a fresh local plan\/apply check; coordinator: follow reference\/recurring-tasks\.md/);
-  assert.doesNotMatch(nudge, /needs local setup/);
-  assert.doesNotMatch(nudge, /no device programme sweep task armed/);
-  const sweep = JSON.parse(at('setup-inventory.json')).rows.find(row => row.id === 'programme-sweep');
-  assert.match(sweep.artefact, /GitHub governance ENABLED and a device named/);
-});
-
-test('on a Windows device every governed repository gets its own programme sweep line, not only Toolkit', () => {
-  // Setup reports the managed and original project repositories; direct plan remains available.
-  const recurring = read('repo/contracts/claude-projects/web-controller-projects/reference/recurring-tasks.md');
-  assert.match(recurring, /Setup reports the managed repository and the original project/);
-  assert.match(recurring, /only PROGRAMME SWEEP counts as programme refresh coverage/);
-  assert.match(recurring, /fresh matching disabled governance or confirmed binding absence/);
-  assert.match(recurring, /never repeat it after an owner stop/);
-  assert.match(recurring, /recorded managed Toolkit checkout[\s\S]*main checkout, never a linked worktree/);
-  assert.match(recurring, /read-only plan command `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <repo>`/);
-  assert.match(recurring, /run exactly `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>`/);
-  assert.match(recurring, /hand the owner a device step only when the host blocks the session/);
-  assert.match(recurring, /when the nudge reports a missing device task, have a local device session follow the plan\/apply route below/);
-  assert.match(recurring, /A fresh confirmed governance change lets `apply` switch the proven owned cleaner shape in the same folder and checkout/);
-  assert.match(recurring, /carries its earlier valid scan boundary/);
-  assert.match(recurring, /registers and reads back the destination before retiring the source/);
-  assert.match(recurring, /modified proven-owned PROGRAMME SWEEP or SHARD TIMINGS task requires the owner's keep-or-replace answer for that exact observed definition each time/);
-  assert.match(recurring, /Keep leaves it unchanged and holds the switch/);
-  assert.match(recurring, /before updating `SCHEDULED TASKS:`/);
-  assert.doesNotMatch(recurring, /paste the programme sweep line from setup|put it on the owner's pending list until it exists|no device programme sweep task armed/);
-  const reconciler = read('skills/github-program-reconciler/SKILL.md');
-  assert.match(reconciler, /An eligible local agent registers it from the recorded managed Toolkit checkout against the repository's main checkout under the global Toolkit task standing approval\. Setup and `plan` only report what is needed\. Owner stops and native denials remain stops\./);
-  assert.doesNotMatch(reconciler, /once the user pastes|the line that setup prints/);
-  const windowsTasks = require('../scripts/toolkit-windows-tasks.cjs');
-  assert.equal(windowsTasks.parseArgs(['plan', '--repo-root', 'C:\\work\\other']).repo_root, 'C:\\work\\other');
+  assert.match(nudge, /read the latest run of the Toolkit Programme Sweep workflow on \{\{repo\}\}'s default branch/);
+  assert.match(nudge, /start the first line with "CLOUD SWEEP: <why> \| "/);
+  assert.match(at('reference/periodic-runs.md'), /- `CLOUD SWEEP`: [^\n]*Never set up a sweep on a computer instead\./);
+  assert.doesNotMatch(at('tasks/daily-check-in.md'), /task-health/);
+  const all = ['SKILL.md', 'reference/recurring-tasks.md', 'reference/setup.md', 'tasks/hourly-nudge.md', 'tasks/daily-check-in.md'].map(at).join('\n');
+  assert.doesNotMatch(all, /toolkit-windows-tasks|toolkit-tasks\.cjs|PROGRAMME SWEEP|FOOTER SWEEP|SHARD TIMINGS|Task Scheduler|task standing approval|device programme sweep/);
+  for (const file of ['reference/setup.md', 'reference/recurring-tasks.md']) assert.doesNotMatch(at(file), /relays the merged decision to the named device lane/);
+  assert.equal(JSON.parse(at('setup-inventory.json')).rows.some(row => row.id === 'programme-sweep'), false);
+  assert.match(read('skills/github-program-reconciler/SKILL.md'), /Toolkit Programme Sweep workflow/);
+  assert.doesNotMatch(read('skills/github-program-reconciler/SKILL.md'), /toolkit-windows-tasks|task standing approval/);
 });
 
 // Moving a task can skip today's run, and fire_trigger on a bound task runs it unwired.
@@ -919,7 +890,7 @@ test('Projects runs cloud first and names the work that needs a device', () => {
   for (const phrase of ['**Cloud first.** Run every step a cloud thread can do in the cloud',
     'G0, G2 and rechecks on their pinned routes', 'Use local rc on the user\'s device only when the step needs it',
     'the Toolkit hooks must actually run there', 'Windows-sensitive or real-host checks and smokes',
-    'installs, setup and device tasks', 'the user\'s final-product UAT', 'files only on the device',
+    'installs and setup', 'the user\'s final-product UAT', 'files only on the device',
     'a route only the device has', 'Hand the user a device step only when its safety check blocks the session',
     'Project lines name the device, its folder and any exceptions']) assert.ok(where.includes(phrase), phrase);
   assert.doesNotMatch(text, /Hybrid by default/);
@@ -1113,23 +1084,6 @@ test('recovery reports stay observational and both periodic findings route to th
   assert.ok(nudge.includes('This task never wakes lanes, posts a separate recovery announcement or edits the coordinator'));
 });
 
-
-test('merged governance routes immediately from Projects to the device; session start informs the device agent', () => {
-  for (const file of ['reference/setup.md', 'reference/recurring-tasks.md']) {
-    const text = read(`repo/contracts/claude-projects/web-controller-projects/${file}`);
-    assert.match(text, /After the owner merges a governance decision, the coordinator immediately relays the merged decision to the named device lane/);
-    assert.match(text, /reads fresh status from origin's default branch, runs `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs plan --repo-root <repo>`/);
-    assert.match(text, /applies a verified mismatch with `node <Toolkit>\/repo\/scripts\/toolkit-windows-tasks\.cjs apply --repo-root <repo>` under standing approval/);
-    assert.match(text, /reads back installed tasks, enrolments and the cleaner's first result/);
-    assert.match(text, /Update `SCHEDULED TASKS:` only after that read-back/);
-    assert.match(text, /A pending proposal never triggers a switch/);
-    assert.match(text, /Session start on the device informs an agent/);
-  }
-  const nudge = read('repo/contracts/claude-projects/web-controller-projects/tasks/hourly-nudge.md');
-  assert.match(nudge, /else if fresh origin-default-branch status confirms ENABLED and it lists an active PROGRAMME SWEEP/);
-  assert.match(nudge, /else if fresh status confirms disabled or absent governance, report "programme refresh is not selected; coordinator: relay the merged decision to the device lane/);
-  assert.match(read('repo/docs/agent-playbooks/INDEX.md'), /Triggers: governance decision merges, reading task-sync guidance, task-shape mismatches/);
-});
 
 test('local Toolkit is the Projects base: every hook has a cloud row and every override names its base clause', () => {
   const dir = 'repo/contracts/claude-projects/web-controller-projects';
