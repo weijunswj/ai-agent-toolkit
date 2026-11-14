@@ -227,6 +227,10 @@ function controllerCheck(options, deps = {}) {
   return { host, governed: Boolean(governed), repo, checks, attention: count('attention'), failed: count('failed'), skipped: count('skipped') };
 }
 
+// refs checks the Toolkit copy itself and needs no input, so it alone never makes a run clear: a
+// caller that passed none of the controller's inputs ran nothing about the repository it controls.
+const ranForController = report => report.checks.some(check => check.name !== 'refs' && check.state === 'ok');
+
 // Compact by default, so a clean periodic run costs one short line: only what needs action is
 // printed, and the checks that passed or were skipped appear as names on the first line.
 function format(report, { expand = false } = {}) {
@@ -235,7 +239,7 @@ function format(report, { expand = false } = {}) {
   const tail = `${passed ? `ok: ${passed}` : ''}${passed && skipped ? '; ' : ''}${skipped ? `skipped: ${skipped}` : ''}`;
   const lines = [report.attention || report.failed
     ? `CONTROLLER CHECK: ${report.attention} need attention, ${report.failed} could not run${tail ? ` (${tail})` : ''}`
-    : passed ? `CONTROLLER CHECK: clear (${tail})` : `CONTROLLER CHECK: nothing ran (${tail}): pass the inputs each skipped check names (--expand lists them)`];
+    : ranForController(report) ? `CONTROLLER CHECK: clear (${tail})` : `CONTROLLER CHECK: nothing ran (${tail}): pass the inputs each skipped check names (--expand lists them)`];
   const label = { attention: 'ATTENTION', failed: 'FAILED', ok: 'OK', skipped: 'SKIPPED' };
   // Attention first, then what could not run, so the list reads in the order it needs action.
   for (const state of expand ? ['attention', 'failed', 'ok', 'skipped'] : ['attention', 'failed']) {
@@ -257,7 +261,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
   const report = controllerCheck(options, deps);
   out(options.json ? `${JSON.stringify(report, null, 2)}\n` : format(report, options));
   // Nothing run is never clear: a caller with no inputs must not read silence as health.
-  return report.attention || report.failed || !report.checks.some(check => check.state === 'ok') ? 1 : 0;
+  return report.attention || report.failed || !ranForController(report) ? 1 : 0;
 }
 
 module.exports = { parseArgs, controllerCheck, format, main, CHECKS, SCRIPTS };

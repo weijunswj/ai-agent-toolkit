@@ -149,8 +149,8 @@ test('a run where every check is skipped says nothing ran and exits 1, never cle
   const { code, text } = run(['--host', 'chat', '--skip', 'refs']);
   assert.equal(code, 1);
   assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: guidebook instructions memory tasks programme traces ci footer refs\): pass the inputs each skipped check names/);
-  // With no inputs at all, the Toolkit's own script-reference check still runs.
+  // With no inputs at all only the Toolkit's own script-reference check runs, which is not a clear run.
   const bare = run(['--host', 'chat']);
-  assert.equal(bare.code, 0);
-  assert.match(bare.text, /^CONTROLLER CHECK: clear \(ok: refs; skipped:/);
+  assert.equal(bare.code, 1);
+  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: guidebook instructions memory tasks programme traces ci footer\)/);
 });
