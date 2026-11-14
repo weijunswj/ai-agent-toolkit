@@ -1,6 +1,6 @@
 # Changelog Fragments
 
-A branch writes its notes here and keeps `main`'s version; the Toolkit version bump happens once, at merge time. Use one file named after the branch with `/` replaced by `-`, for example `claude-fix-setup.md`. The pull request body names the level in one line, `Bump: patch`, `Bump: minor` or `Bump: major`. Nothing reads that line by machine: the merging agent checks it against the rule below, and a missing or wrong line is corrected at merge, not a blocker.
+A branch writes its notes here and keeps `main`'s version; the Toolkit version bump happens once, at merge time. Name the file after the branch, with `/` replaced by `-`, for example `claude-fix-setup.md`. The pull request body names the level in one line, `Bump: patch`, `Bump: minor` or `Bump: major`. Nothing reads that line by machine: the merging agent checks it against the rule below, and a missing or wrong line is corrected at merge, not a blocker.
 
 A fragment holds what a version entry in [CHANGELOG.md](../CHANGELOG.md) holds: `###` section headings and bullets, starting with the first `###` heading. An optional first line `Title: <words>` adds words to the version heading. Leave the `##` version heading out; the bump command adds it.
 
