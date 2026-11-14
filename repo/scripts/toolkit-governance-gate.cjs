@@ -1751,5 +1751,6 @@ module.exports = Object.freeze({
   terminalCommand,
   PICKER_INPUT,
   PICKER_QUESTION,
+  PickerNotes,
   pickerInput,
 });
