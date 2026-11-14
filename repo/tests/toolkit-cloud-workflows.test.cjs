@@ -281,3 +281,20 @@ test('cloud workflows: the governance enable proposal carries the copies', () =>
   assert.match(text, /require\('\.\/toolkit-cloud-workflows\.cjs'\)\.WORKFLOWS\.map\(workflow => workflow\.file\)/);
   assert.deepEqual(workflows.WORKFLOWS.map(row => row.file), ['.github/workflows/toolkit-programme-sweep.yml', '.github/workflows/toolkit-programme-sweep-gate.yml']);
 });
+
+test('governance check names a governed repository the cloud sweep skips, with the fix, and never as drift', () => {
+  let merged = null;
+  const reach = () => conformance.cloudSweepReachFindings({ root: '/repo' }, { mergedBinding: root => { assert.equal(root, '/repo'); return merged; } });
+  const ids = () => reach().map(entry => `${entry.id}:${entry.severity}`);
+  assert.deepEqual(ids(), [], 'no merged binding, nothing to say');
+  merged = { repository: 'acme/app', store: { repository: 'acme/evidence' } };
+  assert.deepEqual(ids(), []);
+  merged = { repository: 'acme/app', state: { branch: 'toolkit-state' } };
+  assert.deepEqual(ids(), ['CLOUD_SWEEP_PUBLIC_STATE:info']);
+  assert.match(reach()[0].message, /public branch[^]*toolkit store[^]*programme\.cjs refresh by hand/);
+  merged = { repository: 'acme/app', store: { repository: 'someone/evidence' } };
+  assert.deepEqual(ids(), ['CLOUD_SWEEP_FOREIGN_STORE:info']);
+  assert.match(reach()[0].message, /someone\/evidence belongs to another owner/);
+  // Toolkit no longer sweeps from a computer, so the sweep's own skip warnings never point to one.
+  for (const status of ['public_state', 'foreign_store']) assert.doesNotMatch(action.skipWarning('acme/app', status), /computer/);
+});

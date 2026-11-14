@@ -116,7 +116,7 @@ test('cloud: public state branch is refused with a warning', () => {
   const result = runAction('store', { file: binding({ publicState: true }) });
   assert.equal(result.code, 0);
   assert.deepEqual(result.outputs, [['store', '']]);
-  assertSkipWarning(result, /public branch; the cloud sweep does not run it yet/);
+  assertSkipWarning(result, /public branch, which the cloud sweep does not run/);
 });
 
 for (const [label, file, reason] of [['absent', null, /no programme file/], ['disabled', binding({ governance: 'disabled' }), /turns governance off/],

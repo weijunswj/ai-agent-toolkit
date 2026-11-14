@@ -1465,17 +1465,9 @@ class ToolGate {
 
 function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {} } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
-  let tasks;
-  let registry;
-  // A test registry without an isolated home must never read this computer's task registry.
-  if (programmeDeps.home || registryOptions.testOnly !== true) {
-    try { tasks = require('./toolkit-tasks.cjs'); registry = tasks.readRegistry(programmeDeps.home); } catch { /* retain original context */ }
-  }
-  const original = verdictLine(verdict, registryOptions, { ...programmeDeps, registry });
-  try {
-    const advisory = registry && tasks?.taskGovernanceLine(verdict.state, { ...programmeDeps, registry });
-    return advisory ? `${original} ${advisory}` : original;
-  } catch { return original; }
+  // Toolkit runs no scheduled tasks on a computer any more (the cloud sweep does that work), so the
+  // session line reads no task registry and names no computer task.
+  return verdictLine(verdict, registryOptions, programmeDeps);
 }
 
 function verdictLine(verdict, registryOptions, programmeDeps) {
@@ -1501,18 +1493,8 @@ const FINDING_ACTIONS = Object.freeze({
   // Work-queue findings cannot be acknowledged (QUEUE_FINDING_NEEDS_ACTION), so a line with only those
   // never offers an ack.
   queue: 'Controller: take the next step named for each work-queue task this turn, or dispose of it with a reason; it clears by itself once the task moves.',
-  tasks: 'Controller: fix the task this turn (toolkit tasks shows why), or tell the owner the exact step it needs.',
   checkpoint: 'Controller: check that session\'s work this turn and record it by hand if the record is lost; the session tells the controller if it is the one reading this.',
 });
-
-// A task line needs the controller only when it reports a fault: a failed, held or skipped run, no
-// run for over 2 hours, a task-health flag, or a health file that is stale or not shared. An owner's stop, a plain deferral and another
-// computer's jobs (whose line names the owner's step) get no controller action.
-const TASK_FAULT = /(?:last run failed|held at|skipped|no run (?:since|recorded)|Task health: |Task health on other computers: |health file not shared|Task health file is over)/;
-function taskAction(line) {
-  if (TASK_FAULT.test(line)) return ` ${FINDING_ACTIONS.tasks}`;
-  return /stopped by owner/.test(line) ? ' No action: the owner stopped it.' : '';
-}
 
 function programmeLines(state, registryOptions = {}, deps = {}) {
   const lines = [];
@@ -1529,13 +1511,6 @@ function programmeLines(state, registryOptions = {}, deps = {}) {
       try { (deps.startRefresh || require('../../skills/github-program-reconciler/scripts/programme-refresh-trigger.cjs').startRefresh)(state.root, deps); started = true; } catch { /* the hourly sweep covers it */ }
     }
     if (attention.line) lines.push(`${attention.line}${started ? '; a refresh has started in the background' : ''}.${/Run programme\.cjs attention/.test(attention.line) ? ` ${attention.queueOnly ? FINDING_ACTIONS.queue : FINDING_ACTIONS.attention}` : ''}`);
-    // This computer's hourly sweep, when it held, skipped, failed or has not run for over 2 hours. A test
-    // registry without its own home reads nothing.
-    if (deps.home || registryOptions.testOnly !== true) {
-      const now = deps.now ? new Date(deps.now()) : new Date();
-      const sweep = require('./toolkit-tasks.cjs').sweepLine(binding.repository, { home: deps.home, now, registry: deps.registry });
-      if (sweep) lines.push(`${sweep}${taskAction(sweep)}`);
-    }
   } catch { /* no attention line */ }
   try {
     const checkpoint = require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs');
@@ -1571,7 +1546,6 @@ function insideRepository(cwd) {
 module.exports = Object.freeze({
   ANSWER,
   FINDING_ACTIONS,
-  taskAction,
   HOST_SESSION_VARIABLE,
   LAUNCHER_MARKERS,
   normaliseHost,
