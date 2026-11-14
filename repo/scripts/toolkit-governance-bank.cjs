@@ -52,8 +52,10 @@ function statusRow({ id, section, title, current, text }) {
 }
 
 // The bank for one repository. `state` is the governance state, `task` the merged switch ('after-gates',
-// 'off' or 'unset'), `merged` the merged binding (or null), `permissions` { missing, checked }.
-function governanceBankSpecs({ state, task = 'unset', merged = null, permissions = { checked: false, missing: 0 } }) {
+// 'off' or 'unset'), `merged` the merged binding (or null), `permissions` { missing, checked }, and
+// `adoption` what turning governance on would make in a repository that is not prepared yet
+// (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on).
+function governanceBankSpecs({ state, task = 'unset', merged = null, permissions = { checked: false, missing: 0 }, adoption = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
   const specs = [];
@@ -84,6 +86,26 @@ function governanceBankSpecs({ state, task = 'unset', merged = null, permissions
       bank.wizardChoice('off', 'Off', 'Every pull request waits for your typed merge.'),
     ],
   }));
+  if (adoption && adoption.blocked) {
+    specs.push(statusRow({ id: 'setup-pieces', section, title: 'Store and parent issue', current: 'Could not be checked', text: `GitHub could not be read (${adoption.blocked}), so turning on makes nothing until it can` }));
+  } else if (adoption) {
+    if (adoption.store_choice) {
+      specs.push(bank.resolvedQuestion({
+        id: 'evidence-store', key: 'evidenceStore', section, title: 'Evidence store',
+        whatThisControls: 'The separate private repository where agents keep plans, reviews and archives for this one.',
+        current: adoption.found_store.split('/')[1],
+        recommendation: { value: 'keep', outcome: `Governance uses ${adoption.found_store}.`, reason: 'It is private, yours and already laid out as a store.' },
+        choices: [
+          bank.wizardChoice('keep', 'Keep current', `Governance uses ${adoption.found_store}.`),
+          bank.wizardChoice('new', 'Create a new private store', `Toolkit creates a private ${adoption.store_name} when governance turns on.`),
+        ],
+      }));
+    } else {
+      specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: adoption.found_store ? adoption.found_store.split('/')[1] : 'None yet', text: adoption.found_store ? 'Reused when governance turns on' : `Toolkit creates a private ${adoption.store_name} when governance turns on` }));
+    }
+    specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: adoption.parent.create ? 'None yet' : `#${adoption.parent.issue}`, text: adoption.parent.create ? 'Toolkit opens one when governance turns on' : 'Reused when governance turns on' }));
+    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'none yet', text: 'Taken from what the default branch already enforces' }));
+  }
   if (state.state === 'ENABLED' && merged) {
     specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository, text: 'Bound in the merged programme file' }));
     specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: merged.required_checks.length ? merged.required_checks.join(', ') : 'none listed', text: 'Bound in the merged programme file' }));
@@ -137,7 +159,7 @@ function selectionsOf(parsed, specs) {
     // A hidden twin (the choice that changes nothing) applies as Keep current.
     return spec && spec.folded_value === chosen ? spec.folded_into : chosen;
   };
-  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), permissionBlocks: value('permission-blocks') };
+  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store') };
 }
 
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
