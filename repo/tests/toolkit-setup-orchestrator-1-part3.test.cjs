@@ -30,7 +30,7 @@ test('canonical question specification orders delegation before plugin auto-refr
   };
   const keys = core.setupQuestionSpecs(args, current).map((spec) => spec.key);
   assert.deepEqual(keys, [
-    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention', 'codexDocLimit', 'codexHelperCapacity', 'codexPluginAutoRefresh', 'taskAutoMerge',
+    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention', 'codexDocLimit', 'codexHelperCapacity', 'codexPluginAutoRefresh',
   ]);
   assert.equal(args.setupChoices.codexHelperCapacity, '');
 });

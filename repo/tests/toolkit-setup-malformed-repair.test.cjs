@@ -96,7 +96,7 @@ test('plan, JSON and explain question surfaces remain coherent and read-only for
     const before = snapshot();
     const result = run([
       ...mode, '--repo-root', setupRepo, '--repo-remote', origin,
-      '--skip-codex-plugin-auto-refresh', '--yes-recommended', '--task-auto-merge', 'after-gates',
+      '--skip-codex-plugin-auto-refresh', '--yes-recommended',
     ], { env, timeout: 300000 });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.doesNotMatch(result.stdout, /codex-helper-agents|Codex helper agents/);

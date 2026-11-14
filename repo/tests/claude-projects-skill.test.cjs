@@ -1143,7 +1143,7 @@ test('local Toolkit is the Projects base: every hook has a cloud row and every o
   for (const row of rows) assert.equal(row.split(' | ').length, 4, row.slice(0, 80));
   // Each override names the base clause it changes, why, the owner's decision and when it ends.
   const overrides = read(`${dir}/reference/base-overrides.md`).split('\n').filter(line => line.startsWith('| ') && !/^\| (?:Override|---)/.test(line));
-  assert.ok(overrides.length >= 6);
+  assert.ok(overrides.length >= 5);
   for (const row of overrides) {
     const cells = row.split(' | ');
     assert.equal(cells.length, 5, row.slice(0, 80));
@@ -1151,8 +1151,12 @@ test('local Toolkit is the Projects base: every hook has a cloud row and every o
     assert.match(cells[3], /^\d{1,2} \w{3} \d{4}: /, row.slice(0, 80));
   }
   assert.match(read(`${dir}/tasks/base-clash-check.md`), /Never edit the skill, the overrides list or the base to clear a clash/);
-  // The gate rules name Projects' switch, so the base itself says where cloud auto-merge comes from.
-  assert.match(read('repo/contracts/agent-rules/gate-rules.md'), /Claude Projects has no setup bank: its switch is the project line `- Task auto-merge: On` \(else Off\)/);
+  // The base itself says where cloud auto-merge comes from: the same repository switch, and the old
+  // project line goes only after that switch is merged and read back.
+  assert.match(read('repo/contracts/agent-rules/gate-rules.md'), /`task_prs\.auto_merge` is the only switch, one per repository, read alike by every app and the Projects controller/);
+  assert.match(read('repo/contracts/agent-rules/gate-rules.md'), /Only after the new switch is merged and read back does Toolkit delete the old per-app answers and the controller remove any Projects `- Task auto-merge:` line/);
+  assert.match(read(`${dir}/reference/base-overrides.md`), /the pull request setting it merges, a governance read \(`toolkit-governance\.cjs status`\) shows it back fresh, then the controller removes the line/);
+  assert.doesNotMatch(read(`${dir}/reference/base-overrides.md`), /^\| Task auto-merge switch is the project line/m);
 });
 
 // A thread that ends its turn waiting on CI wakes only when the event reaches it; when the event never
@@ -1166,4 +1170,23 @@ test('threads waiting on CI arm their own check-in, and the coordinator pings qu
   const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`).split('## Acting on the nudge report\n')[1];
   assert.ok(periodic.includes('- `CI WAIT QUIET`: message each listed thread that turn to check its CI and carry on, and to confirm it armed its own check-in'));
   assert.ok(periodic.includes('the same thread listed again on the next run goes to the owner'));
+});
+
+// Two hourly runs arrived during busy merge work; the coordinator did a partial pass and wrote `.done`
+// for both. A task run now outranks other in-flight work except answering the owner, every step runs
+// that turn, and an unfinished step leaves `.done` missing with the open step on the promise list.
+test('task runs come first, and a partial pass never writes .done', () => {
+  const skillLine = read(SKILL_REL).split('\n').find(line => line.startsWith('- **Every task run reaches'));
+  assert.ok(skillLine.endsWith('A run outranks all in-flight work but answering the owner (**Task runs come first**).'));
+  const recurring = read(`${REFERENCE_DIR}/recurring-tasks.md`).split('**Task run relay.**\n')[1];
+  const rule = recurring.split('\n')[0];
+  assert.ok(rule.startsWith('- **Task runs come first.**'), 'first bullet under Task run relay');
+  for (const phrase of ['outranks all other in-flight work except answering the owner',
+    'In the turn it arrives, before relaying thread updates, merge work or anything queued',
+    'act on every prefix and every step its report or its task\'s own checklist names',
+    'A partial pass is never done: never write `.done` while any step is unfinished, however busy the turn',
+    'leave `.done` missing (the stamp stays unchanged), add the run UTC and the open step to the promise list',
+    'finish that step first next turn']) {
+    assert.ok(rule.includes(phrase), phrase);
+  }
 });
