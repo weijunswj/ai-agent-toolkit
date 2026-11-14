@@ -10,6 +10,7 @@
 // exact head the merging agent may merge, by the repository's normal merge route.
 //
 //   node repo/scripts/toolkit-merge-train.cjs build  --manifest <file> --branch <name> [--main <ref>] [--onto <ref>] [--out <file>] [--json]
+//   node repo/scripts/toolkit-merge-train.cjs catchup --manifest <file> [--main <ref>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs verify --manifest <file> --head <ref> [--main <ref>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs body   --manifest <file> [--json]
 //   node repo/scripts/toolkit-merge-train.cjs split  --manifest <file> --out-prefix <path> [--json]
@@ -21,7 +22,9 @@
 //     "members": [ { "pr": 12, "head": "<40-hex SHA the review passed>", "g2": "<report link>",
 //                    "tier": "LIGHT|NORMAL|RISKY", "bump": "patch|minor|major|none",
 //                    "uat": "UAT: NOT_REQUIRED (...)", "links": ["Closes #34"],
-//                    "owner_ok": "<link to the owner's typed merge OK; RISKY members only>" } ] }
+//                    "owner_ok": "<link to the owner's typed merge OK; RISKY members only>",
+//                    "pack_changes": ["<row id>: <why>", ...]   (optional: the member's own "Pack changes" lines) } ] }
+// build takes at most six members; body copies every member's pack_changes under one "## Pack changes".
 // With no bump_command, a repository holding repo/scripts/bump-version.cjs uses the line above and
 // any other repository takes no bump commit; "none" turns the bump off. The command runs without a
 // shell, with {level} as the highest member level and {base} as the main commit.
@@ -30,13 +33,17 @@
 // other worktree. It resets --branch to --onto (default
 // --main, default origin/main), merges each member head, ejects one that conflicts or is already on
 // main, then runs the bump command and commits the result. --onto another train's head combines new
-// members while that train waits on CI: such a stacked train takes no bump and cannot land; rebuild
-// it on main once the earlier train has merged. --out writes the boarded manifest, with the ejected
-// members and their reasons under "ejected", for verify, body and land.
+// members while that train waits on CI: such a stacked train takes no bump and cannot land until
+// the earlier train has merged. Then catchup, run in a clean checkout of the stacked train, merges
+// main in as one merge commit (no rebuild and no force-push) and adds the one bump; a main that does
+// not merge cleanly is refused, never hand-fixed. --out writes the boarded manifest, with the
+// ejected members and their reasons under "ejected", for catchup, verify, body and land.
 //
 // verify walks the train's first-parent commits after main and refuses anything that is not a
 // member merge or a main catch-up merge whose tree equals Git's own clean merge, or a last bump
 // commit whose tree equals a fresh run of the bump command. Every member must board exactly once.
+// It also lists every file two or more members change ("overlap") and the review the train needs:
+// none when there is no overlap, else a delta review of the shared files.
 // land re-runs verify, requires main to be inside the train (else main moved: rebuild), every
 // member's pull request open at its boarded head, the train pull request at --head and an owner OK
 // for every RISKY member, then names the pull request and head to merge. --live reads those pull request facts from
@@ -55,7 +62,9 @@ const TIERS = Object.freeze(['LIGHT', 'NORMAL', 'RISKY']);
 const TOOLKIT_BUMP = 'node repo/scripts/bump-version.cjs --next {level} --base {base}';
 const UAT_LINE = /^UAT: (NOT_REQUIRED|OWNER_TEST_NEEDED|PASSED)\b/;
 const LINK_LINE = /^(Closes|Fixes|Resolves|Refs) #\d+$/;
-const COMMANDS = Object.freeze(['build', 'verify', 'body', 'split', 'land']);
+// A train holds at most this many members; the next ready PRs board the next train.
+const MAX_MEMBERS = 6;
+const COMMANDS = Object.freeze(['build', 'catchup', 'verify', 'body', 'split', 'land']);
 
 class TrainError extends Error {
   constructor(message, code = 2) { super(message); this.code = code; }
@@ -132,6 +141,9 @@ function checkManifest(value) {
     if (member.links !== undefined && (!Array.isArray(member.links) || !member.links.every(line => typeof line === 'string' && LINK_LINE.test(line.trim())))) {
       throw new TrainError(`${where}: "links" lines must each be "Closes #n", "Fixes #n", "Resolves #n" or "Refs #n"`);
     }
+    if (member.pack_changes !== undefined && (!Array.isArray(member.pack_changes) || !member.pack_changes.every(line => typeof line === 'string' && line.trim() && !line.includes('\n')))) {
+      throw new TrainError(`${where}: "pack_changes" must be the member's own "Pack changes" lines, one string each`);
+    }
     if (member.owner_ok !== undefined && (typeof member.owner_ok !== 'string' || !member.owner_ok.trim())) {
       throw new TrainError(`${where}: "owner_ok" must link the owner's typed merge OK`);
     }
@@ -167,6 +179,9 @@ function memberMessage(member) {
 
 function build(cwd, manifest, options) {
   const branch = safeRef(options.branch || '', '--branch');
+  if (manifest.members.length > MAX_MEMBERS) {
+    throw new TrainError(`a train holds at most ${MAX_MEMBERS} members; board the rest on the next train`, 1);
+  }
   const here = fs.realpathSync(git(cwd, ['rev-parse', '--show-toplevel']).stdout);
   const elsewhere = git(cwd, ['worktree', 'list', '--porcelain']).stdout.split('\n\n')
     .map(block => ({ tree: (block.match(/^worktree (.+)$/m) || [])[1], ref: (block.match(/^branch (.+)$/m) || [])[1] }))
@@ -206,7 +221,7 @@ function build(cwd, manifest, options) {
         if (options.out) fs.writeFileSync(options.out, `${JSON.stringify(out, null, 2)}\n`);
         return {
           ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, onto, stacked, level, bump: null,
-          boarded: boarded.map(member => member.pr), ejected: out.ejected,
+          boarded: boarded.map(member => member.pr), ejected: out.ejected, next: ejectedNext(out.ejected),
           problems: [`${error.message}; a member that already carries its own version bump must hold main's version before it boards`],
         };
       }
@@ -220,7 +235,45 @@ function build(cwd, manifest, options) {
   const head = git(cwd, ['rev-parse', 'HEAD']).stdout;
   const out = { ...manifest, members: boarded, ejected: ejected.map(({ pr, head: sha, reason }) => ({ pr, head: sha, reason })) };
   if (options.out) fs.writeFileSync(options.out, `${JSON.stringify(out, null, 2)}\n`);
-  return { ok: boarded.length > 0, branch, head, main, onto, stacked, level, bump, boarded: boarded.map(member => member.pr), ejected: out.ejected };
+  return { ok: boarded.length > 0, branch, head, main, onto, stacked, level, bump, boarded: boarded.map(member => member.pr), ejected: out.ejected, next: ejectedNext(out.ejected) };
+}
+
+function catchup(cwd, manifest, options) {
+  if (git(cwd, ['status', '--porcelain']).stdout) throw new TrainError('catchup needs a clean checkout of the train; use its own worktree');
+  const main = resolve(cwd, options.main, '--main');
+  const branch = git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']).stdout;
+  const missing = manifest.members.filter(member => !isAncestor(cwd, member.head, 'HEAD')).map(member => `#${member.pr}`);
+  if (missing.length) throw new TrainError(`the checkout is not this train: ${missing.join(', ')} not on ${branch}`, 1);
+  if (isAncestor(cwd, main, 'HEAD')) throw new TrainError('main is already inside the train; nothing to catch up', 1);
+  if (git(cwd, ['rev-list', '--parents', '-n', '1', 'HEAD']).stdout.split(/\s+/).length !== 3) {
+    throw new TrainError('the train already carries its bump: only a stacked train (built with --onto) catches up; rebuild this one on main', 1);
+  }
+  const before = git(cwd, ['rev-parse', 'HEAD']).stdout;
+  const merged = git(cwd, ['-c', 'rerere.enabled=false', 'merge', '--no-ff', '--no-edit', '-m', `Merge train: catch up with main at ${main.slice(0, 12)}`, main], { allowFail: true });
+  if (merged.status !== 0) {
+    git(cwd, ['merge', '--abort'], { allowFail: true });
+    return { ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, problems: ['main does not merge cleanly into the train: eject the clashing member (split or rebuild without it), never hand-fix'] };
+  }
+  const level = trainLevel(manifest.members);
+  let bump = null;
+  const argv = bumpArgv(cwd, manifest, level, main);
+  if (argv) {
+    try {
+      runBump(cwd, argv);
+    } catch (error) {
+      // Undo the local catch-up merge too, so the train is left exactly as it was: a catch-up
+      // merge with no bump after it would not verify. Nothing here was pushed yet.
+      git(cwd, ['reset', '--quiet', '--hard', before], { allowFail: true });
+      git(cwd, ['clean', '--quiet', '-fd'], { allowFail: true });
+      return { ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, level, problems: [error.message] };
+    }
+    git(cwd, ['add', '--all']);
+    if (git(cwd, ['diff', '--cached', '--quiet'], { allowFail: true }).status !== 0) {
+      git(cwd, ['commit', '--quiet', '--no-verify', '-m', `Merge train: bump ${level} for ${manifest.members.map(member => `#${member.pr}`).join(', ')}`]);
+      bump = git(cwd, ['rev-parse', 'HEAD']).stdout;
+    }
+  }
+  return { ok: true, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, level, bump };
 }
 
 function reproducesBump(cwd, manifest, commit, parent, level, main) {
@@ -283,7 +336,39 @@ function verify(cwd, manifest, options) {
   for (const member of manifest.members) {
     if (!seen.has(member.pr)) problems.push(`#${member.pr} at ${member.head.slice(0, 12)} is not on the train`);
   }
-  return { ok: problems.length === 0, head, main, members: manifest.members.map(member => member.pr), level, problems };
+  const last = commits[commits.length - 1];
+  if (last && last.length === 3 && bumpArgv(cwd, manifest, level, main)) {
+    problems.push('the train has no bump commit: build it on main, or run catchup on a stacked train, before verify');
+  }
+  const overlap = memberOverlap(cwd, manifest.members, main);
+  const review = overlap.length ? 'delta review of the shared files' : 'none: verify and green CI suffice';
+  return { ok: problems.length === 0, head, main, members: manifest.members.map(member => member.pr), level, overlap, review, problems };
+}
+
+// Files that two or more members change, each counted from where that member left main. A train
+// with none needs no review of its own once verify passes and CI is green; shared files get a
+// short delta review, because each member's review saw only its own change to them.
+function memberOverlap(cwd, members, main) {
+  const owners = new Map();
+  for (const member of members) {
+    const base = git(cwd, ['merge-base', main, member.head]).stdout;
+    const listed = git(cwd, ['diff', '--name-only', '-z', '--no-renames', base, member.head]).stdout;
+    for (const file of listed.split('\0').filter(Boolean)) owners.set(file, [...(owners.get(file) || []), member.pr]);
+  }
+  return [...owners].filter(([, prs]) => prs.length > 1).map(([file, prs]) => ({ file, members: prs })).sort((a, b) => a.file.localeCompare(b.file));
+}
+
+// What the merging agent does about each ejected member: it never just drops off the train.
+function ejectedNext(ejected = []) {
+  return ejected.map(row => `#${row.pr}: ${row.reason === 'already on the train base' ? 'already landed; record it and drop it from the queue'
+    : 'land it on its own, or rejoin the next train once its review passes the head it boards at'} (${row.reason})`);
+}
+
+// The manifest's ejected rows as plain table cells (a pull request number, a full SHA, a fixed reason).
+function ejectedRows(manifest) {
+  if (!Array.isArray(manifest.ejected)) return [];
+  return manifest.ejected.filter(row => row && Number.isInteger(row.pr) && row.pr > 0)
+    .map(row => ({ pr: row.pr, head: SHA.test(row.head || '') ? row.head : 'unknown', reason: String(row.reason || 'no reason recorded').replace(/[|\r\n`]/g, ' ').slice(0, 200) }));
 }
 
 function body(manifest) {
@@ -313,6 +398,15 @@ function body(manifest) {
       ? `Refs ${line.replace(/^\S+ /, '')} (closed by #${member.pr}'s own closing line when the train lands)`
       : line))),
   ];
+  const ejected = ejectedRows(manifest);
+  if (ejected.length) {
+    lines.push('', '### Ejected', '', 'These did not board. The merging agent lands each on its own or rejoins it to the next train; none is left behind.', '',
+      '| Pull request | Head | Reason | Next step |', '|---|---|---|---|',
+      ...ejected.map(row => `| #${row.pr} | \`${row.head}\` | ${row.reason} | ${ejectedNext([row])[0].replace(/^#\d+: /, '').replace(/ \(.*\)$/, '')} |`));
+  }
+  // Hook-pack rows a member changed stay explained on the train, or the pack check fails it.
+  const pack = members.flatMap(member => (member.pack_changes || []).map(line => line.trim()));
+  if (pack.length) lines.push('', '## Pack changes', '', ...pack);
   while (lines[lines.length - 1] === '') lines.pop();
   return `${lines.join('\n')}\n`;
 }
@@ -389,6 +483,7 @@ function run(argv, cwd = process.cwd()) {
   const options = parseArgs(argv);
   const manifest = readManifest(options.manifest);
   if (options.command === 'build') return build(cwd, manifest, options);
+  if (options.command === 'catchup') return catchup(cwd, manifest, options);
   if (options.command === 'verify') return verify(cwd, manifest, options);
   if (options.command === 'body') return { ok: true, body: body(manifest) };
   if (options.command === 'split') {
@@ -403,10 +498,11 @@ function print(result, json) {
   if (result.body) { process.stdout.write(result.body); return; }
   const lines = [result.ok ? 'OK' : 'REFUSED'];
   for (const [key, value] of Object.entries(result)) {
-    if (key === 'ok' || key === 'problems' || value === undefined) continue;
+    if (key === 'ok' || key === 'problems' || key === 'next' || value === undefined) continue;
     lines.push(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`);
   }
   for (const problem of result.problems || []) lines.push(`- ${problem}`);
+  if ((result.next || []).length) lines.push('Ejected, still owed:', ...result.next.map(line => `- ${line}`));
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
@@ -424,4 +520,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { TOOLKIT_BUMP, TrainError, body, build, checkManifest, land, run, split, trainLevel, trainTier, verify };
+module.exports = { MAX_MEMBERS, TOOLKIT_BUMP, TrainError, body, build, catchup, checkManifest, ejectedNext, land, run, split, trainLevel, trainTier, verify };

@@ -1,5 +1,110 @@
 # Toolkit Changelog
 
+## 3.100.0 (Threads self-check CI waits)
+
+### Added
+
+- **Threads waiting on CI arm their own check-in:** the Projects managed block tells every thread to arm a check-in about 15 minutes out before ending a turn that waits on CI or any outside event, instead of relying on that event alone. The Projects skill tells every brief to say so.
+- **Hourly nudge flags quiet CI waits:** a new step runs on every nudge, the no-change path included. It lists each thread quiet for 20 minutes or more whose pull request CI is still pending, or finished after the thread's latest message, under `CI WAIT QUIET`, and the coordinator pings each one that turn. The same thread listed again on the next run goes to the owner.
+
+### Changed
+
+- **Projects wording trims:** a few managed-block and skill lines are shorter, with no rule dropped, to keep both under their byte caps.
+
+## 3.99.0 (cloud and CI findings keep asking until they clear)
+
+### Changed
+
+- **Held and skipped sweeps turn red:** each held sweep pass and each skip now prints a titled warning with its code. On the hourly start or a start by hand the sweep gate reads the last runs' warnings: three sweeps in a row held, or skipped for the same reason, or three hourly gate runs in a row skipped because governance is off, turn the gate run red with the step that clears it. Activity runs never go red for this, and the first clean run ends it. The gate's built-in token gains `checks: read` to read those warnings.
+- **The sweep gate tells a missing programme file from a refused read:** only a 404 means there is no file; a 401, 403 or server error on the binding is no longer read as governance off.
+- **Dependabot pull requests never wait silently:** when auto-merge is off in the binding, the binding cannot be read or no ruleset requires a check, the pull request gets the one marked comment naming why. The template moves to v4, so governed copies show drift until `toolkit governance security` refreshes them.
+- **Shard timing drift with no App fails the daily run:** a report-only run that finds a refresh due fails with the owner's step (`--fail-if-due`), and a refresh pull request open over 7 days fails the run naming it.
+- **Fallback-risk findings show on the pull request:** under GitHub Actions each one is also a file and line annotation.
+- **Re-bump without a key checks instead of repeating a note:** with no push key the workflow lists the owner's open pull requests that carry a version bump and fails naming them, or ends green and silent when there are none. A held re-bump comment keeps the day the hold began, and a hold over 7 days fails the run naming it and the hand command.
+
+## 3.98.1
+
+### Changed
+
+- **State document reads:** a single read of a state document over 1 MB now uses the same blob read as the sweep's snapshot. Tests now pin the failure code for a blob that cannot be read, and cover a write of such a document read back at its own commit.
+
+## 3.98.0 (findings keep asking until they clear)
+
+### Changed
+
+- **An action-required update report keeps asking:** while it is open, every bridge hook run prints `Toolkit: action needed (...)` with the cause, how many session starts in a row have seen it and the report's file name, and says to tell the owner before other work. A repeat of the same result writes no new report but still prints the line; a run that needs no action clears it, and cleanup never deletes the open report.
+- **Rule-drift notes repeat:** the repository-rules note shows at every session start while the finding holds, with its count, and names the step as due before the current task ends instead of "when convenient". It still never halts work.
+- **Held programme refreshes are counted:** held runs keep `held_streak` and `held_since` like skips, an incomplete inventory is held rather than done, the session line shows the count, and TASK HEALTH flags three held runs in a row.
+- **Task health shows age and peers:** a flag that has stood a day or more shows its age in days, and the session line names other computers' flags for the same repository.
+- **Unverified is not conformant:** an online `toolkit governance check` that could not confirm a setting reports `unverified`, exits 3 and names the repository admin's step. Offline runs keep exit 0.
+- **Merge-train ejections are listed:** the build prints a next step for each ejected member and the train body gets an `Ejected` section.
+- **Plain-text check:** unreadable settings or baseline are drift in `--check`, and a stale baseline allowance fails a full run until `--prune-baseline` lowers it.
+- **Hook pack:** a known-bad row over 30 days old fails the run unless it names its tracking issue in `issue`.
+- **Bridge hook errors are counted:** a hook that keeps stopping on an error says how many session starts in a row and to tell the owner.
+- **Work-queue-only attention:** when every open finding is on the work queue, the session-start action names the queue step and no longer offers an ack, which a work-queue finding refuses.
+
+## 3.97.0 (Merge by card in Claude Code)
+
+### Fixed
+
+- **VPS daily security report template says notifications are required:** its notes line, the skill README, checklist, description, routing table and safety matrix now match the check, where a missing notification is a FAIL row, instead of saying notifications may be set up.
+- **State commit read-back:** the check after a state commit now compares every written file with Git's own blob id of the written text, computed locally. It no longer depends on how GitHub shapes its answer for a created tree, which may list only the top-level folder of a nested file. An id GitHub does list must agree, and any mismatch is refused.
+- **Large state documents:** the programme sweep now reads a state document over about 1 MB whole by its blob id, instead of holding it as unreadable. GitHub's one-request state read leaves out the text of such a file. A pass that cannot fit those extra reads in its budget stops before any write. The check after a state commit compares blob ids instead of reading those files again, so it never stops a commit that has already landed.
+- **Queued sweep runs:** a cloud sweep run that only queues behind another sweep no longer cleans footers, since it ran no pass and holds no lease.
+
+### Added
+
+- In Claude Code on this computer, a tap can replace typed `merge N`. When the merge hold refuses a merge that names its full head SHA, it hands back one exact card: "Merge owner/name#N at <short SHA>?" with Merge and Not now. The owner's tap on Merge approves that pull request at that commit, once. Not now approves nothing and withdraws an unused approval for it.
+- The card counts only in a chat the owner started, shown exactly as given, as a plain tap. A changed card, a card asked with its answer filled in, words typed into Other, an answer the host marks as idle, a follow-up, typed text or noted, an answer with a field the reader does not know, and a launched, resumed or unmarked session record nothing. Nothing is refused for the card's sake, so ordinary questions are untouched.
+- A card event whose environment holds `TOOLKIT_HOST_SESSION` records nothing: the host's hook process carries none, and a session's shell commands do. Two command-line shapes are refused like a fed prompt, read from the text alone: one that names a hook script (or a file named after one, such as its tests) and a tool event (`PreToolUse`, `PostToolUse` or the card functions) and also runs node, bun or deno anywhere, unless the word straight after it is `--test` or `test`; and one that names a hook script and has a command starting `env` whose leading words (dash options or NAME=value) include `-i`, `--ignore-environment` or `-` as a word of its own. Ordinary work of either shape is refused too, such as a search or commit message about the hooks chained with any node run; run those as separate commands.
+- Known limits: this is a tripwire, not a lock. Any command or script that starts a hook script without `TOOLKIT_HOST_SESSION` can still feed a card event in the owner's own chat, because the refusals catch only those two exact shapes (a wrapper before `env`, other `env` option spellings, clearing the variable another way, a node one-liner or a saved script all get through), as it can already feed typed `merge N`. A host that answers the card itself, with no tap, is not told apart either: a permission answer from an SDK callback, a permission hook (from any plugin or from settings), a permission-prompt tool or a launcher, a reply a connected client sends to a background session, and an automatic answer the host does not mark.
+
+### Changed
+
+- The order for a merge that needs the owner is now: task auto-merge when it applies, then the card, then typed `merge N`. Codex keeps typed `merge N`. This card records nothing in a cloud session, where the Claude Projects merge card applies instead.
+- Hook pack rows may use a placeholder in an object key, so a card answer can be keyed by its question.
+
+## 3.96.0
+
+### Added
+
+- **Speed-first CI in `secure-ci-cd`:** a new guide, `templates/cicd/ci-speed.md`, aims CI at the shortest wait from push to a trusted green check without dropping a security gate or a test. It says what to measure first (runs per commit, cancel causes, jobs per run, queue versus run time, peak jobs against the account's concurrent job cap, setup times) and ranks the fixes cheapest first: light runs for title and body edits, concurrency that cancels only stale runs, fewer and fuller jobs, docs-only skips that keep required checks reporting, shard balancing, caching only where setup is slow, and flake hunting. Free fixes come first; a paid plan raising the cap stays the owner's call. The Toolkit's own measured CI is the worked example. The skill and the setup prompt point to it.
+- **New CI check-up rows:** `speed.edits` (an edit reruns heavy jobs), `speed.concurrency` (no group, a pull request group keyed on the commit SHA so stale runs are never cancelled, an edit cancelling the run on the same commit, or pushes sharing one group in a pull request and push workflow, so a burst of merges loses a waiting run) and `speed.slots` (a measured run that starts more than half the account's concurrent jobs). The settings file takes `concurrent_jobs` (default 20, the GitHub Free cap). All three are CHECK rows for the agent to judge.
+
+## 3.95.1
+
+### Fixed
+
+- **Evidence-store merges in cloud sessions:** a cloud session can now merge its evidence store's pull requests under the standing custody permission, as a computer session already could. A cloud session starts in the folder that holds the project's clones, so it had no cached parent binding and the merge hold refused every store merge for want of the user's approval. The hold now reads the parent's merged binding on demand in cloud sessions, with the same bounded read session start uses, and accepts an explicitly named store merge from that folder when the parent's clone sits in it. Every other check stays: a fresh merged binding that names the exact store, a private writable store, its default branch as the base, the full head SHA and a plain merge commit. Other repositories stay gated as before.
+
+## 3.95.0 (rolling merge trains)
+
+### Changed
+
+- Controllers now run rolling merge trains on their own. While a landing is in flight, ready pull requests board the open train; when main frees, boarding closes, the train catches up with main, bumps once and merges after one CI run, and the next train opens at once. A lone ready pull request merges alone, and no pull request waits on a train. The Controller routes its merge step to the page that holds the train rule, the Claude Projects skill points there, and the hourly nudge flags ready pull requests that no train holds.
+- Running a merge train needs no planning or build gate and runs on the small model tier. The lane never fixes a conflict: it ejects the member and that member's builder fixes it. A train needs no review of its own once `verify` passes and CI is green; only files two or more members change get a short delta review.
+- The Claude Projects coordinator never resolves its own project-chat post or the reply thread under it, since that hides the chat message; quiet reply threads no longer close after six hours. It resolves a thread only when the thread has its own session, is no task home, every pull request it lists is merged or closed, nothing is owed by the owner and its last report is final. The hourly nudge sweeps blocked, review-ready and done threads against that checklist.
+
+### Added
+
+- `toolkit-merge-train.cjs catchup` merges main into a stacked train after the earlier landing and adds the one bump, with no rebuild or force-push.
+- A merge train holds at most six members (`build` refuses a seventh), and its body carries every member's `Pack changes` lines (`pack_changes` in the manifest). A member that fails CI or its delta review is ejected at once and the rest carry on; nobody edits a train or member body while its CI runs.
+- A stacked train's pull request targets the running train's branch until that train lands, so the version check does not report its waiting fragments as unfolded; it then targets main before `catchup`.
+- In Claude Projects the train's merge card goes up in the train thread, which runs `land` and the merge itself, because a relayed tap does not count there; the fallback is the owner typing `merge PR N at <full SHA> as a merge commit` in that thread.
+- `toolkit-merge-train.cjs verify` lists the files two or more members change (`overlap`) and the review the train needs (`review`).
+
+## 3.94.0
+
+### Changed
+
+- An acknowledged programme finding is now a promise: `ack` needs `--next <step>` and sets a due time (24 hours ahead unless `--due` gives one, at most 72). Past due the finding is new again, counts as waiting on the owner at once, and `attention` prints it as OVERDUE with the promised step. Acknowledgements made before this change fall due 24 hours after their last change.
+- A holder order's dry run now runs every write against an in-memory copy with the real run's content checks (fence, finding state, field limits, document validation), and reports each write as `WOULD_RUN` or `REFUSED` with its code. An order whose `ack` step or `dispose` reason is over 200 characters is refused whole.
+- Every reported finding prints its next step; findings that printed "undefined" now print their code's next action.
+- The board's "Sweep stuck" warning is also a `SWEEP_STUCK` finding, so it reaches the Attention line. Only a sweep pass resolves it.
+- Session-start lines for programme attention, a failing hourly sweep and a failed checkpoint now end with who acts and when.
+- The Projects daily check-in reads device task-health files from the evidence store and adds their flags to `TASK FAILING`.
+- A merge record names the G2 report's evidence-store path and PASS head, and the report is archived before the record. A cloud session that cannot write the state store hands holder orders to a computer session with the order's expiry as the deadline.
+
 ## 3.93.1 (PR edits no longer cancel CI checks; Work queue named at session start)
 
 ### Fixed

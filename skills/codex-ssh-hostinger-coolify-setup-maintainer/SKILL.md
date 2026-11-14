@@ -1,6 +1,6 @@
 ---
 name: codex-ssh-hostinger-coolify-setup-maintainer
-description: Use when Codex is explicitly asked to handle production-sensitive Hostinger VPS plus Coolify setup, SSH preflight, deployment maintenance, daily security checks, optional alerts, upgrade advisory, intrusion-signal review, incident response, or evidence-based PASS/WARN/FAIL reports with owner approval gates.
+description: Use when Codex is explicitly asked to handle production-sensitive Hostinger VPS plus Coolify setup, SSH preflight, deployment maintenance, daily security checks, required daily alerts, upgrade advisory, intrusion-signal review, incident response, or evidence-based PASS/WARN/FAIL reports with owner approval gates.
 ---
 
 
