@@ -224,8 +224,12 @@ function fakeGh(state) {
     assert.deepEqual(args.slice(-2), ['--hostname', 'github.com']);
     if (args[1] === 'repos/acme/app') return JSON.stringify({ full_name: 'repository' in state ? state.repository : 'acme/app' });
     if (args[1] === 'user') return 'me\n';
-    if (args[1] === '--paginate') {
-      const endpoint = args[2];
+    if (/[?&]page=\d+$/.test(args[1])) {
+      // Numbered pages: everything on page 1, so page 1 is short and the list stops there.
+      assert.match(args[1], /per_page=100/);
+      assert.equal(args.includes('--paginate'), false);
+      const endpoint = args[1];
+      if (!/[?&]page=1$/.test(endpoint)) return '';
       if (/issues\/comments\?/.test(endpoint)) return lines(state.issueComments);
       if (/pulls\/comments\?/.test(endpoint)) return lines(state.reviewComments);
       if (/\/issues\?/.test(endpoint)) return lines(state.issues);
@@ -309,7 +313,7 @@ test('the sweep cleans existing posts with the right method and reads each back'
   assert.equal(state.written['repos/acme/app/pulls/comments/10'], 'reply');
   assert.ok(results.filter((row) => row.status === 'CLEANED').length === 4);
   assert.ok(!results.some((row) => /pullrequestreview-41/.test(row.url || '')), '--since skips pull requests not updated in the window');
-  assert.ok(calls.some((call) => call.args[2] === `repos/acme/app/issues/comments?per_page=100&since=${encodeURIComponent('2026-10-01T00:00:00.000Z')}`));
+  assert.ok(calls.some((call) => call.args[1] === `repos/acme/app/issues/comments?per_page=100&since=${encodeURIComponent('2026-10-01T00:00:00.000Z')}&page=1`));
   assert.equal(sweep.exitCode(results), sweep.EXIT.FIXED);
 });
 
@@ -386,4 +390,33 @@ test('the sweep --author edits only that login\'s posts and never asks who is si
   }
   assert.match(err, /--author needs a GitHub login/);
   assert.match(err, /use --author or --any-author, not both/);
+});
+
+test('the pull request list stops paging at the first page that reaches pulls older than the window', () => {
+  const pull = (n, updated) => JSON.stringify({ id: n, number: n, body: '', user: 'me', html_url: `https://github.com/acme/app/pull/${n}`, updated_at: updated });
+  const asked = [];
+  const gh = (args) => {
+    if (!/[?&]page=\d+$/.test(args[1])) return '[]';
+    asked.push(args[1]);
+    if (/\/pulls\?.*page=1$/.test(args[1])) return Array.from({ length: 100 }, (_, i) => pull(i + 1, i < 99 ? '2026-11-14T00:00:00Z' : '2026-10-01T00:00:00Z')).join('\n');
+    if (/\/pulls\?/.test(args[1])) throw new Error('read past the window');
+    return '';
+  };
+  sweep.findFooted(gh, 'acme/app', '2026-11-13T00:00:00Z');
+  assert.equal(asked.filter(endpoint => /\/pulls\?/.test(endpoint)).length, 1);
+  assert.equal(asked.filter(endpoint => /\/reviews\?/.test(endpoint)).length, 99);
+});
+
+test('the sweep reads numbered pages until a short page and stops at the page cap', () => {
+  const row = id => JSON.stringify({ id, number: id, body: 'plain', user: 'me', html_url: `https://github.com/acme/app/issues/${id}`, updated_at: '2026-11-14T00:00:00Z' });
+  const full = () => Array.from({ length: 100 }, (_, i) => row(i + 1)).join('\n');
+  const pages = [];
+  sweep.findFooted((args) => {
+    if (!/[?&]page=\d+$/.test(args[1])) return '[]';
+    pages.push(args[1]);
+    return /issues\/comments\?.*page=1$/.test(args[1]) ? full() : '';
+  }, 'acme/app', null);
+  assert.ok(pages.includes('repos/acme/app/issues/comments?per_page=100&page=2'), 'a full page asks for the next one');
+  assert.ok(!pages.includes('repos/acme/app/issues/comments?per_page=100&page=3'), 'a short page ends the list');
+  assert.throws(() => sweep.findFooted((args) => (/[?&]page=\d+$/.test(args[1]) ? full() : '[]'), 'acme/app', null), /more than 10000 items/);
 });

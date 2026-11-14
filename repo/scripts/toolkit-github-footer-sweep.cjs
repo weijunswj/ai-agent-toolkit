@@ -58,10 +58,21 @@ function defaultGh(args, input) {
 
 const FIELDS = '{id, number, body, user: .user.login, html_url, updated_at}';
 
-// One JSON object per line from a paginated list.
-function list(gh, endpoint) {
-  const out = gh(['api', '--paginate', endpoint, '--jq', `.[] | ${FIELDS} | @json`]);
-  return out.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+// Every item of a paged list, one JSON object per line from each page. Numbered pages rather than
+// --paginate: gh follows GitHub's next links, which name the repository by numeric ID, and the cloud
+// session proxy refuses those paths. Every endpoint here asks for per_page=100.
+const MAX_PAGES = 100;
+// `stop`, when given, ends the read after the page holding the first row it matches (for a list sorted
+// newest first, the first row older than the window).
+function list(gh, endpoint, stop = null) {
+  const items = [];
+  for (let page = 1; ; page += 1) {
+    if (page > MAX_PAGES) throw new Error(`${endpoint} has more than ${MAX_PAGES * 100} items; the sweep stops rather than report a partial scan`);
+    const out = gh(['api', `${endpoint}&page=${page}`, '--jq', `.[] | ${FIELDS} | @json`]);
+    const rows = out.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    items.push(...rows);
+    if (rows.length < 100 || (stop && rows.some(stop))) return items;
+  }
 }
 
 function getOne(gh, endpoint) {
@@ -80,8 +91,9 @@ function findFooted(gh, repo, since) {
     add(/\/pull\/\d+$/.test(item.html_url || '') ? 'pull_request' : 'issue', item, `repos/${repo}/issues/${item.number}`, 'PATCH');
   }
   // Reviews have no repository-wide list: read them per pull request updated in the window.
-  for (const pull of list(gh, `repos/${repo}/pulls?per_page=100&state=all&sort=updated&direction=desc`)) {
-    if (since && pull.updated_at && pull.updated_at < since) continue;
+  const older = (pull) => Boolean(since && pull.updated_at && pull.updated_at < since);
+  for (const pull of list(gh, `repos/${repo}/pulls?per_page=100&state=all&sort=updated&direction=desc`, older)) {
+    if (older(pull)) continue;
     for (const item of list(gh, `repos/${repo}/pulls/${pull.number}/reviews?per_page=100`)) {
       add('review', item, `repos/${repo}/pulls/${pull.number}/reviews/${item.id}`, 'PUT');
     }

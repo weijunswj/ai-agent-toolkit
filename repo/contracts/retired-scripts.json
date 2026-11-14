@@ -1,0 +1,12 @@
+{
+  "schema": "toolkit-retired-scripts/v1",
+  "description": "Scripts kept only so retired features can clean up after themselves. Nothing may offer them as live commands: no permission row runs them, and only the files listed in allowed_in may name them. check-script-references.cjs enforces this; add a script here in the change that retires it.",
+  "scripts": [
+    { "path": "repo/scripts/toolkit-windows-tasks.cjs", "reason": "Old Windows scheduled tasks are retired; only remove toolkit and setup clean-up still call it.", "allowed_in": ["repo/ARCHITECTURE.md"] },
+    { "path": "repo/scripts/toolkit-tasks.cjs", "reason": "The task registry served the retired Windows scheduled tasks.", "allowed_in": ["repo/ARCHITECTURE.md"] },
+    { "path": "repo/scripts/toolkit-scheduled-job.cjs", "reason": "The retired stub a leftover Windows task still runs.", "allowed_in": ["repo/ARCHITECTURE.md"] },
+    { "path": "repo/scripts/toolkit-update-scheduled-task.cjs", "reason": "toolkit update scheduled task only says the tasks are retired.", "allowed_in": ["repo/ARCHITECTURE.md"] },
+    { "path": "repo/scripts/toolkit-task-health.cjs", "reason": "Reported on the retired Windows scheduled tasks.", "allowed_in": ["repo/ARCHITECTURE.md"] },
+    { "path": "repo/scripts/toolkit-task-launcher.cjs", "reason": "Launcher safety net for the retired Windows scheduled tasks.", "allowed_in": ["repo/ARCHITECTURE.md"] }
+  ]
+}
