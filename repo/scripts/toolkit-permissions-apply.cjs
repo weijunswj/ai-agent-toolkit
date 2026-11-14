@@ -182,7 +182,7 @@ async function main(argv, deps = {}) {
   try {
     const options = parseApplyArgs(argv);
     const marker = AGENT_MARKERS.find(name => Boolean(environment[name]));
-    if (marker) throw new ApplyStop(`this shell was started by a coding agent (${marker}). Agents never write permission settings.`, 'the owner runs this in their own PowerShell or terminal, outside any agent. Nothing was written.');
+    if (marker) throw new ApplyStop(`this shell was started by a coding agent (${marker}). Agents never run --apply.`, 'the owner runs this in their own PowerShell or terminal, outside any agent. Nothing was written.');
     const tty = (deps.tty || (() => ({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) })))();
     if (!tty.stdin || !tty.stdout) throw new ApplyStop('--apply needs a terminal you type into; it does not read answers from a pipe or print into a file.', 'run it yourself in PowerShell or a terminal window. Nothing was written.');
 
