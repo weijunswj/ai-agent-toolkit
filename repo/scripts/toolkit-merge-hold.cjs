@@ -967,7 +967,7 @@ function judge(merge, approvals, standing = null, evidence = null) {
 // what an approval can allow; '' when there is none.
 function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   if (stateWords(text)) return refuse('Toolkit\'s user-state files (merge approvals, GitHub observations and pending proposals) and its session variable must be read and changed only by Toolkit itself. Never act as the user.');
-  if (clearedHostEnvironment(text)) return refuse('starting Claude or Codex with an empty environment hides the running session, so this launch is refused.');
+  if (clearedHostEnvironment(text)) return refuse('starting another coding-agent session with an empty environment hides the running session, so this launch is refused.');
   // Search arguments and test files are not hook invocations. Read the common command wrappers
   // and Node's harmless warning flag; Codex's start script writes a mark without any event flag.
   const sessionStartFeed = hookStartFeed(text);
@@ -978,7 +978,7 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
     let index = 0;
     while (index < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]) || /^(?:env|npx|bunx|pnpm|dlx|exec|nohup|start)$/i.test(words[index]) || (words[index].startsWith('-') && index > 0))) index += 1;
     if (words.slice(0, index + 1).some(word => HOST_WORD.test(path.basename(word))) && mergeWording(text)) {
-      return refuse('a session an agent starts must not approve a merge, so starting Claude or Codex with a command that mentions merging is refused. Ask the user.');
+      return refuse('a session an agent starts must not approve a merge, so starting another coding-agent session with a command that mentions merging is refused. Ask the user.');
     }
   }
   if (GH_ALIAS_MERGE.test(text)) return refuse('a gh alias would hide a merge from Toolkit\'s check, so it is refused.');

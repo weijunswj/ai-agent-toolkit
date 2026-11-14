@@ -469,7 +469,7 @@ function setupPlan(options = {}) {
       custom_override: Boolean(options.repoRootExplicit),
       purpose: 'single clean main checkout used as the default update source'
     },
-    checklist_explanation: '**Toolkit will use a dedicated clean `main` checkout as the single update source. Active Codex or Claude Code sessions may remain on PR branches, but plugin updates will not depend on those branches.**',
+    checklist_explanation: '**Toolkit will use a dedicated clean `main` checkout as the single update source. Active coding sessions may remain on PR branches, but plugin updates will not depend on those branches.**',
     preferences: preferenceSummary(options),
     question_bank: options.questionBank || [],
     steps: [
@@ -544,7 +544,7 @@ function setupPlan(options = {}) {
       },
       {
         id: 'final_bridge_audit',
-        title: 'Run and parse the final bridge audit before any Codex config commitment',
+        title: 'Run and parse the final bridge audit before any app config commitment',
         commands: [relNodeCommand('repo/scripts/toolkit-local-bridge.cjs', ['--audit', ...hubArgs])]
       },
       {
@@ -3755,7 +3755,7 @@ function activeToolkitWarning(args) {
   if (!branch || branch === args.repoBranch) return '';
   return [
     `Active Toolkit worktree is on ${branch}, not ${args.repoBranch}.`,
-    'This is okay: the active Codex or Claude Code session may be on a PR branch.',
+    'This is okay: the active coding session may be on a PR branch.',
     `Toolkit updates will use the managed clean ${args.repoBranch} checkout instead: ${args.repoRoot}`
   ].join(' ');
 }
@@ -4379,11 +4379,12 @@ function printInstallCheck(result) {
   }
 }
 
-// The Toolkit global rules for every harness setup manages, rendered from the managed checkout.
+// The Toolkit global rules for the app this setup runs in (plus Antigravity when managed), rendered
+// from the managed checkout. The other app refreshes its own file at its own session start.
 // Codex's instruction limit follows the owner's answer to the setup question.
 function setupGlobalRules(args) {
   return new GlobalRules({ toolkitRoot: args.repoRoot, retentionDays: args.updateReportRetentionDays,
-    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules }), codexDocLimit: args.codexDocLimitMode || 'report',
+    harnesses: GlobalRules.setupHarnesses({ antigravity: args.antigravityGlobalRules, host: args.host }), codexDocLimit: args.codexDocLimitMode || 'report',
     workingFolder: process.env[SETUP_START_FOLDER_ENV] || process.cwd() });
 }
 
