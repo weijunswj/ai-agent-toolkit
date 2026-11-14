@@ -4,7 +4,7 @@ Source: repo/contracts/agent-rules/repo-local
 Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
 -->
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.110.0 sha256=782cbb876f30 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.110.1 sha256=782cbb876f30 -->
 # Toolkit-Governed Repository Rules
 
 On github.com, only the valid `.github/toolkit-programme.json` merged on origin's default branch decides on/off on every computer. Enabled binds this block: programme records, decision traces and evidence custody. Pending proposals and local answers decide nothing. Unreadable GitHub permits ordinary work with a note, without governance effects or standing task auto-merge. Coding gates and delegation always apply from the user-level global rules and gate rules. If missing, read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Outside rules win on conventions; only the floor's named evidence-store line can relax it.
