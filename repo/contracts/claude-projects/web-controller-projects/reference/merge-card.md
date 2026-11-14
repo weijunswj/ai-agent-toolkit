@@ -2,7 +2,7 @@
 
 Reference for the `web-controller-projects` skill, opened by the merge thread before it posts an owner merge card, and again before it merges on the tap. The skill's precedence, style and approvals apply; where this file and the skill differ, the skill wins.
 
-An owner tap is good for one merge attempt. Anything that starts a required check after the tap (a body or title edit, a push, a programme page refresh that edits the body) makes GitHub refuse the merge, and the refused attempt spends the tap, so the owner has to tap again and the queue waits for another CI run.
+An owner tap is good for one merge attempt. Anything that starts a required check after the tap (a body or title edit, a push, the programme sweep editing the body) makes GitHub refuse the merge, and the refused attempt spends the tap, so the owner has to tap again and the queue waits for another CI run.
 
 ## Before the card
 1. Bring the branch current: merge `main` in, run `bump-version.cjs --next <level>` from the body's `Bump:` line, push, and wait for green CI.
@@ -13,4 +13,4 @@ An owner tap is good for one merge attempt. Anything that starts a required chec
 ## After the tap
 - Edit nothing on the pull request until it lands or GitHub refuses it: no body or title edit, no push, no footer strip, no programme page write to its body.
 - Just before merging, run the readiness check again with `--body-sha <the sha256 from the card step>`. On exit 0, merge with `--match-head-commit <full SHA>`. On exit 1 (the head or body moved), do not merge: say why, wait for green, run the card step again and post a fresh card.
-- Once it lands or is refused, the usual post-merge steps resume, body edits included.
+- Once it lands or is refused, the usual post-merge steps apply again, body edits included.
