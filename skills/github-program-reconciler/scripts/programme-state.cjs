@@ -2614,7 +2614,7 @@ class StateStore {
       if (large.length && typeof this.transport.left === 'function' && this.transport.left() < large.length + (this.transport.reserve || 0)) {
         throw Object.assign(new ProgrammeError('PASS_STOPPED', 'Some state documents are too large for one GraphQL read and cannot be read one by one within this pass.'), { reason: 'State documents too large for GraphQL', noWrite: true });
       }
-      for (const entry of large) files.set(entry.name, { text: this.readBlob(dir, entry.name, entry.oid), sha: entry.oid });
+      for (const entry of large) files.set(entry.name, { text: this.readBlob(`${dir}/${entry.name}`, entry.oid), sha: entry.oid });
       return { files, mode: 'graphql' };
     }
     this.graphqlRefused = true;
@@ -2630,15 +2630,15 @@ class StateStore {
     const files = new Map(others.map(entry => [entry.name, { text: null, sha: isSha(entry.sha) ? entry.sha : null }]));
     for (const entry of wanted) {
       if (!isSha(entry.sha)) { files.set(entry.name, { text: null, sha: null }); continue; }
-      files.set(entry.name, { text: this.readBlob(dir, entry.name, entry.sha), sha: entry.sha });
+      files.set(entry.name, { text: this.readBlob(`${dir}/${entry.name}`, entry.sha), sha: entry.sha });
     }
     return { files, mode: 'rest' };
   }
 
   // One state file's whole text by its blob id (the Git Data API serves blobs up to 100 MB).
-  readBlob(dir, name, sha) {
+  readBlob(filePath, sha) {
     const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${sha}`);
-    if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${dir}/${name}`);
+    if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${filePath}`);
     return Buffer.from(blob.json.content, 'base64').toString('utf8');
   }
 
@@ -2794,17 +2794,16 @@ class StateStore {
     }
     if (response.status === 404) return { doc: null, sha: null };
     if (response.status !== 200) throw ghFailure(response, `Reading ${docPath}`);
-    let content = response.json.content;
-    if (response.json.encoding !== 'base64') {
+    let text;
+    if (response.json.encoding === 'base64') text = Buffer.from(response.json.content, 'base64').toString('utf8');
+    else {
       // The Contents API leaves out the text of a file over 1 MB (encoding "none"); it is then read
-      // whole by its blob id, which the Git Data API serves up to 100 MB.
+      // whole by its blob id.
       if (!isSha(response.json.sha)) throw new ProgrammeError('STATE_INVALID', `${docPath} is too large to read through the Contents API.`);
-      const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${response.json.sha}`);
-      if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${docPath}`);
-      content = blob.json.content;
+      text = this.readBlob(docPath, response.json.sha);
     }
     let doc;
-    try { doc = JSON.parse(Buffer.from(content, 'base64').toString('utf8')); }
+    try { doc = JSON.parse(text); }
     catch { throw new ProgrammeError('STATE_INVALID', `${docPath} is not valid JSON.`); }
     return { doc: this.validateRead(kind, doc), sha: response.json.sha };
   }
