@@ -1028,6 +1028,30 @@ test('App limit and no-write stops: never refreshed, so footer cleaning never ru
   assert.match(step('Clean the cloud footer from the owner\'s posts'), /steps\.refresh\.outputs\.refreshed == 'true'/);
 });
 
+// saqg review: a pass whose state commit did not read back as written reports a
+// STATE_READBACK_MISMATCH hold and no verified write, but not noWrite (the commit may stand). It must
+// not count as refreshed, so footer cleaning never edits a post on an unverified save.
+test('state readback mismatch: never refreshed, so footer cleaning is skipped; the pass is held', () => {
+  const mismatch = { code: 'STATE_READBACK_MISMATCH', target: '#421', detail: 'state/parent-421.json did not read back as written in the state commit.' };
+  const unverified = { status: 1, code: null, report: { metrics: 'Sweep: requests=40', holds: [mismatch], writes: { state: 0, github: 0 },
+    sweep: { read: 3, left: 0, noWrite: false, reason: null, limit: null } } };
+  const result = runAction('run', { env: minted, refresh: () => unverified });
+  assert.equal(result.code, 0);
+  assert.equal(result.outputs.some(([name]) => name === 'refreshed'), false, 'not refreshed');
+  assert.equal(result.outputs.some(([name]) => name === 'at_limit'), false, 'not at the limit');
+  assert.deepEqual(result.tags, [{ title: action().HELD_TITLE, code: 'STATE_READBACK_MISMATCH' }]);
+  assert.equal(action().saveUnverified(unverified.report), true);
+  assert.equal(action().wroteNothing(unverified.report), false, 'the reconciler does not report it as noWrite');
+  // Another hold beside a verified save still counts as refreshed: only the readback decides.
+  const other = { status: 1, code: null, report: { metrics: 'Sweep: requests=40', holds: [{ code: 'STATE_WRITE_FAILED', target: '#500', detail: 'x' }], sweep: { read: 3, left: 0, noWrite: false } } };
+  assert.equal(action().saveUnverified(other.report), false);
+  assert.ok(runAction('run', { env: minted, refresh: () => other }).outputs.some(([name, value]) => name === 'refreshed' && value === 'true'));
+  // The footer step then sees no REFRESHED and edits nothing.
+  const footers = runFooters({ env: { REFRESHED: '' } });
+  assert.deepEqual([footers.code, footers.calls.length], [0, 0]);
+  assert.deepEqual(footers.warnings, [action().FOOTER_SKIPPED]);
+});
+
 test('footers: without a refresh that ran this commit, nothing is edited and one warning says so', () => {
   for (const REFRESHED of ['', 'false', undefined]) {
     const result = runFooters({ env: { REFRESHED } });

@@ -371,3 +371,43 @@ test('App limit during large-document recovery: no write, the limit is carried t
   assert.equal(next.code, 0, JSON.stringify(next.report.holds));
   assert.equal(next.report.sweep.noWrite, false);
 });
+
+// saqg review: a cloud pass whose state commit does not read back as written holds with
+// STATE_READBACK_MISMATCH and counts no state effect, yet reports noWrite false (the commit may
+// stand). The sweep action must not count it as refreshed, so footer cleaning never runs.
+test('state readback mismatch in a real cloud pass: held, never refreshed, so footer cleaning is skipped', t => {
+  const f = fixture(t, { count: 6 });
+  // The read-back of the new state commit shows other text than was written, once.
+  let failed = false;
+  f.github.intercept(call => {
+    if (failed || call.path !== 'graphql' || !call.body.query.includes('stateSnapshot')) return undefined;
+    if (!call.body.variables.directory.startsWith(`${f.github.sweepHead}:`) || !f.github.sweepCommits.has(f.github.sweepHead)) return undefined;
+    failed = true;
+    const answer = f.github.route(call.method, call.path, call.body);
+    for (const entry of answer.json.data.repository.snapshot.entries) if (typeof entry.object?.text === 'string') entry.object.text = entry.object.text.replace('"revision": ', '"revision": 9');
+    return answer;
+  });
+  const result = f.run({ cloud: true });
+  assert.ok(result.report.holds.some(hold => hold.code === 'STATE_READBACK_MISMATCH'), JSON.stringify(result.report.holds));
+  assert.equal(failed, true, 'the read-back was forced');
+  assert.equal(result.report.writes.state, 0, 'no verified state write');
+  assert.equal(result.report.sweep.noWrite, false, 'the reconciler does not call it noWrite');
+  const action = require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-action.cjs'));
+  const outputs = [], tags = [];
+  const runner = new action.ProgrammeSweepAction({
+    env: { GITHUB_REPOSITORY: 'example.test/app', STORE_REPOSITORY: 'example.test/store', APP_CLIENT_ID_SET: 'true', MINT_OUTCOME: 'success/success',
+      GOVERNED_TOKEN: 'example-governed', STORE_TOKEN: 'example-store', SWEEP_LOGIN: 'example[bot]' },
+    root: ROOT, refresh: () => ({ status: result.code, code: null, report: result.report }), notice: () => {}, failure: message => assert.fail(message),
+    output: (name, value) => outputs.push([name, value]), summary: () => {}, warning: (message, tag) => tags.push(tag || null) });
+  assert.equal(runner.run(), 0);
+  assert.equal(outputs.some(([name]) => name === 'refreshed'), false, `not refreshed: ${JSON.stringify(outputs)}`);
+  assert.deepEqual(tags, [{ title: action.HELD_TITLE, code: action.holdCodes(result.report) }]);
+  assert.match(action.holdCodes(result.report), /STATE_READBACK_MISMATCH/);
+  // The footer step reads REFRESHED from that output: unset, it edits nothing.
+  let called = 0;
+  const footers = new action.ProgrammeSweepAction({ env: { GITHUB_REPOSITORY: 'example.test/app', STORE_REPOSITORY: 'example.test/store', REFRESHED: outputs.find(([name]) => name === 'refreshed')?.[1] || '',
+    GOVERNED_TOKEN: 'example-governed', STORE_TOKEN: 'example-store' }, root: ROOT, footers: () => { called += 1; return { status: 0, results: [] }; },
+    warning: () => {}, notice: () => {}, failure: message => assert.fail(message), summary: () => {}, output: () => {} });
+  assert.equal(footers.cleanFooters(), 0);
+  assert.equal(called, 0, 'no post is read or edited');
+});

@@ -19,9 +19,11 @@
 // (REPOSITORY_PRIVATE) a pass stopped mid-way at the App limit gets no waiting runner, since that
 // costs paid minutes and the hourly gate resumes it from its board note; a PAUSED pass keeps its one. `at_limit` tells the footer step to skip a run at the App limit.
 //
-// `refreshed` tells the footer step the pass ran on this commit and saved its work; any skip,
-// failure, run queued behind another sweep, pass that wrote nothing (`sweep.noWrite`) or pass that
-// stopped at GitHub's hourly App limit leaves it unset. The App limit is read from the stop's reason
+// `refreshed` tells the footer step the pass ran on this commit and saved its work, read back as
+// written; any skip, failure, run queued behind another sweep, pass that wrote nothing
+// (`sweep.noWrite`), pass whose state commit did not read back as written (a STATE_READBACK_MISMATCH
+// hold: the commit may stand but cannot be trusted) or pass that stopped at GitHub's hourly App limit
+// leaves it unset. The App limit is read from the stop's reason
 // or from the limit that bound it (`sweep.limit`), since a stop at the limit can name another cause,
 // such as state documents too large for one GraphQL read. A pass that wrote nothing is reported held.
 //
@@ -183,6 +185,13 @@ function wroteNothing(report) {
   return report?.outcome === 'PAUSED' || report?.sweep?.noWrite === true;
 }
 
+// Whether the pass's state save is unverified: its state commit did not read back as written, so no
+// state effect counts. The reconciler reports it as a STATE_READBACK_MISMATCH hold, not as noWrite,
+// because the commit may stand.
+function saveUnverified(report) {
+  return Array.isArray(report?.holds) && report.holds.some(hold => hold?.code === 'STATE_READBACK_MISMATCH');
+}
+
 // When the next run should start after this pass, or 0 when the hourly start is enough. A pass that
 // read something and left tasks follows up, so a pass that cannot make progress never loops. A pass
 // that found GitHub's hourly App count already at the margin read nothing, yet its run still counts
@@ -314,9 +323,10 @@ class ProgrammeSweepAction {
     // it, and the sweep that is running needs no follow-up from it.
     if (result.report?.outcome === 'QUEUED') return 0;
     const limited = atAppLimit(result.report);
-    // The pass ran on this commit and saved its work below the App limit: only then may the footer
-    // step edit posts. A pass that saved nothing, or stopped at the limit, refreshed nothing.
-    if (!limited && !wroteNothing(result.report)) try { this.output('refreshed', 'true'); } catch { /* footer cleaning skips with its warning */ }
+    // The pass ran on this commit and saved its work, read back as written, below the App limit: only
+    // then may the footer step edit posts. A pass that saved nothing, whose save did not read back, or
+    // that stopped at the limit refreshed nothing.
+    if (!limited && !wroteNothing(result.report) && !saveUnverified(result.report)) try { this.output('refreshed', 'true'); } catch { /* footer cleaning skips with its warning */ }
     // At GitHub's hourly App limit, footer cleaning skips this run: its reads would spend the margin.
     if (limited) try { this.output('at_limit', 'true'); } catch { /* footer cleaning runs; the margin still holds */ }
     const now = this.nowMs();
@@ -337,4 +347,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ HELD_TITLE, SKIP_TITLE, NO_PASS_TITLE, holdCodes, TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, atAppLimit, wroteNothing, followUpAt, ProgrammeSweepAction });
+module.exports = Object.freeze({ HELD_TITLE, SKIP_TITLE, NO_PASS_TITLE, holdCodes, TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, atAppLimit, wroteNothing, saveUnverified, followUpAt, ProgrammeSweepAction });
