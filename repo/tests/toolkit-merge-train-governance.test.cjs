@@ -67,6 +67,17 @@ test('with trains off, build, catchup and land refuse; verify, body and eject st
   assert.equal(train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'governance turned off', '--main', 'main'], f.repo, f.opts).ok, true);
 });
 
+test('a stale read of the binding asks for a fresh read, not a lone merge', t => {
+  const f = fixture(t);
+  const bindingCache = require('../scripts/toolkit-governance-binding.cjs');
+  const identity = governance.readIdentity(f.repo);
+  const file = bindingCache.cacheFileFor(governance.userStateDirectory(f.opts.registryOptions), identity.repository_id);
+  const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...entry, fetched_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString() }));
+  const stale = /merge trains could not be confirmed on here \(fresh-enabled-binding-required\): read it again online with .*toolkit-governance\.cjs" status, then retry\./;
+  assert.throws(() => train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, f.main)] }), '--branch', 'toolkit-train/one', '--main', 'main'], f.repo, f.opts), stale);
+});
+
 test('land names the auto route only with task auto-merge on, a clean scope and UAT line, and no RISKY member', t => {
   const f = fixture(t);
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });

@@ -734,7 +734,13 @@ function landRoute(cwd, manifest, main, options) {
 // Refuses a command that starts, grows or lands a train unless merge trains are on here.
 function requireTrains(cwd, options) {
   const state = governance.mergeTrain(cwd, options.registryOptions || {});
-  if (!state.on) throw new TrainError(`merge trains are off here (${state.reason}): they run only while governance is enabled and task_prs.merge_train is not off. Merge each ready pull request alone.`, 1);
+  if (state.on) return;
+  // Off by the merged binding (governance off or undecided, or the switch off): each PR merges alone.
+  // Anything else (a stale or missing read, an unreadable repository) may only need a fresh read.
+  const decided = ['repository-off'].includes(state.reason) || ['DISABLED', 'UNDECIDED'].includes(governance.governanceState(cwd, options.registryOptions || {}).state);
+  throw new TrainError(decided
+    ? `merge trains are off here (${state.reason}): they run only while governance is enabled and task_prs.merge_train is not off. Merge each ready pull request alone.`
+    : `merge trains could not be confirmed on here (${state.reason}): read it again online with ${governance.governanceCommand('status')}, then retry.`, 1);
 }
 
 function parseArgs(argv) {
