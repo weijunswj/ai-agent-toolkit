@@ -995,7 +995,7 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
         "Reuse step 4's current Remote Control findings", 'Do not count it as working because a coordinator message was sent to it',
         '"UNRELAYED ASK: <n> | "', '**Unrelayed:**', '**Waiting on owner:**',
         'A lane whose device is confirmed not reachable also goes under **Waiting on owner:**', 'the step "bring Claude on that device back online"',
-        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | ", "ROTATE DUE: <n> | ", "LANES UNDER CAP:', '"WORK QUEUE: <n> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes',
+        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | ", "ROTATE DUE: <n> | ", "LANES UNDER CAP:', '"WORK QUEUE: <n> | ", "PROGRAMME FINDINGS: <n> new | ", "CLOUD SWEEP: <why> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes',
         'the programme graph is the queue', 'it needs the coordinator\'s step this turn even when lanes are full', 'A failed status read is "could not be checked", never offline',
         'An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']) {
         assert.ok(text.includes(phrase), `${repo}/${session}: ${phrase}`);
@@ -1052,7 +1052,7 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
     assert.doesNotMatch(text, /fires it once|Fire it once|Test one run now|caught up by firing it/, name);
   }
   assert.ok(device.includes('- **Rotate long Remote Control lanes too.**') && device.includes('you end its session with `stop_remote_control` once the handoff is read back'), 'Remote Control lanes rotate too');
-  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PROJECT TASKS OUTDATED, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
+  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PROJECT TASKS OUTDATED, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, TRACE GAPS, WORKFLOW FAILING, CI GAPS, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
   const freshAge = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
   assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
   const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
@@ -1136,7 +1136,36 @@ test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pendi
         assert.ok(step.includes(phrase), `${repo}/${session}: ${phrase}`);
       }
       assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11 (and 5b when it applies)'));
-      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "PR UNOWNED: <n> | ", "WORK QUEUE: <n> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
+      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "PR UNOWNED: <n> | ", "WORK QUEUE: <n> | ", "PROGRAMME FINDINGS: <n> new | ", "CLOUD SWEEP: <why> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
     }
   }
+});
+
+// The programme findings and cloud sweep prefixes belong to the report's first-line list, never to a step's own text.
+test('rendered hourly nudges list PROGRAMME FINDINGS and CLOUD SWEEP only in the first-line prefix list', () => {
+  for (const repo of ['example-owner/example-repo', 'none']) {
+    for (const session of ['bound', 'fresh']) {
+      const text = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo, session }));
+      const lines = text.split('\n');
+      const first = lines.find(line => line.startsWith('- First line:'));
+      assert.ok(first, `${repo}/${session}: first-line list`);
+      for (const prefix of ['"PROGRAMME FINDINGS: <n> new | "', '"CLOUD SWEEP: <why> | "']) {
+        assert.ok(first.indexOf(prefix) > first.indexOf('"WORK QUEUE: <n> | "'), `${repo}/${session}: ${prefix} after WORK QUEUE`);
+        assert.ok(first.indexOf(prefix) < first.indexOf('"NEEDS SETUP:'), `${repo}/${session}: ${prefix} before NEEDS SETUP`);
+      }
+      const lanes = lines.find(line => line.startsWith('11. Lanes'));
+      assert.ok(lanes && !lanes.includes('PROGRAMME FINDINGS'), `${repo}/${session}: step 11 has no findings prefix`);
+    }
+  }
+});
+
+// The owner's catch-what-was-missed checks run in the daily check-in, each with its own first-line prefix.
+test('rendered daily check-ins run the decision trace, workflow health and CI check-up checkers', () => {
+  const text = rendered('daily-check-in');
+  const step = text.slice(text.indexOf('11b. CHECKERS'), text.indexOf('12. Promises'));
+  for (const phrase of ['decision-trace-audit.cjs --repo', 'unlinked_decisions', '"TRACE GAPS: <unlinked> unlinked, <unmarked> unmarked | "',
+    'that have a `schedule` trigger', '"WORKFLOW FAILING: <names> | "', 'ci-checkup.cjs --repo <clone>', '"CI GAPS: <n> | "']) {
+    assert.ok(step.includes(phrase), phrase);
+  }
+  assert.ok(text.indexOf('**Checkers:**', text.indexOf('REPORT')) > 0, 'the report has a Checkers bullet');
 });
