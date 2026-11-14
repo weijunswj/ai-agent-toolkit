@@ -12,53 +12,46 @@ const SCRIPT = require.resolve('../scripts/toolkit-commands.cjs');
 const wake = (attributes, text) => `<wake reason="mention" current-time="2026-11-11T05:00:00Z"><project id="chan_example" type="project"><thread ts="cmsg_thread"><message trigger="true" ${attributes} id="cmsg_one" sent-at="2026-11-11T05:00:00Z">${text}</message></thread></project></wake>`;
 
 test('exactly these typed commands are recognised', () => {
-  assert.deepEqual([...commands.PHRASES].sort(), ['refresh governance', 'setup governance', 'toolkit cmd', 'toolkit command', 'toolkit governance catalogue', 'toolkit governance check', 'toolkit governance discover',
-    'toolkit governance migrate', 'toolkit governance security', 'toolkit governance status', 'toolkit refresh', 'toolkit refresh governance', 'toolkit setup', 'toolkit setup governance', 'toolkit show env']);
+  assert.deepEqual([...commands.PHRASES].sort(), ['governance setup', 'refresh governance', 'setup governance', 'toolkit cmd', 'toolkit command', 'toolkit env', 'toolkit governance',
+    'toolkit refresh', 'toolkit refresh governance', 'toolkit setup', 'toolkit setup governance', 'toolkit show env']);
 });
 
-test('setup governance and refresh governance run their own subcommand, and a switch change only prepares a pull request', () => {
-  const script = path.join(__dirname, '..', 'scripts', 'toolkit-governance.cjs');
-  for (const verb of ['setup', 'refresh']) {
-    for (const phrase of [`${verb} governance`, `toolkit ${verb} governance`]) {
-      assert.deepEqual(commands.typedCommand(` ${phrase.toUpperCase()}. `), { phrase, action: 'governance', subcommand: verb });
-      const context = commands.phraseContext(phrase);
-      assert.ok(context.includes(`Run exactly \`node "${script}" ${verb}\``), phrase);
-      assert.ok(context.includes(`\`node "${script}" ${verb} --set on\``) && context.includes(`--set off`), phrase);
-      assert.match(context, /only prepares a pull request for the user to merge/);
-    }
+test('the governance tools are no longer typed commands: agents, setup and CI run them', () => {
+  for (const subcommand of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate']) {
+    assert.equal(commands.typedCommand(`toolkit governance ${subcommand}`), null, subcommand);
+    assert.equal(commands.phraseContext(`toolkit governance ${subcommand}`), '', subcommand);
+  }
+});
+
+test('setup governance and refresh governance, which Toolkit tells the user to say, open the governance guide', () => {
+  for (const phrase of ['setup governance', 'toolkit setup governance', 'refresh governance', 'toolkit refresh governance']) {
+    assert.deepEqual(commands.typedCommand(` ${phrase.toUpperCase()}. `), { phrase, action: 'guide' });
+    assert.equal(commands.phraseContext(phrase).replace(`\`${phrase}\``, ''), commands.phraseContext('toolkit governance').replace('`toolkit governance`', ''), phrase);
   }
   assert.equal(commands.typedCommand('toolkit setup').action, 'setup', 'plain toolkit setup is still machine setup');
   assert.equal(commands.typedCommand('please refresh governance'), null);
-  assert.ok(/'setup'/.test(fs.readFileSync(script, 'utf8').match(/const COMMANDS = Object\.freeze\(\[[^\]]*\]\)/)[0]));
 });
 
-test('a typed `toolkit governance check` runs the check subcommand, not status or the attention list', () => {
-  assert.deepEqual(commands.typedCommand('toolkit governance check'), { phrase: 'toolkit governance check', action: 'governance', subcommand: 'check' });
-  const context = commands.phraseContext('toolkit governance check');
+test('the governance guide runs setup, then offers the next step without answering for the user', () => {
   const script = path.join(__dirname, '..', 'scripts', 'toolkit-governance.cjs');
-  assert.ok(context.startsWith(`Toolkit command: the user typed \`toolkit governance check\`. Run exactly \`node "${script}" check\` in this repository`), context);
-  assert.match(context, /Run no other command in its place: no other governance subcommand, and not the programme `attention` list\.$/);
-  assert.doesNotMatch(context, /toolkit-governance\.cjs" status/);
-  // The named script really takes `check` as its own subcommand.
-  assert.ok(/'check'/.test(fs.readFileSync(script, 'utf8').match(/const COMMANDS = Object\.freeze\(\[[^\]]*\]\)/)[0]));
-});
-
-test('each typed governance phrase names its own subcommand of toolkit-governance.cjs', () => {
-  const script = path.join(__dirname, '..', 'scripts', 'toolkit-governance.cjs');
-  for (const subcommand of ['status', 'check', 'discover', 'catalogue', 'security']) {
-    const typed = commands.typedCommand(`  Toolkit  Governance ${subcommand.toUpperCase()}. `);
-    assert.deepEqual(typed, { phrase: `toolkit governance ${subcommand}`, action: 'governance', subcommand }, subcommand);
-    const context = commands.phraseContext(`toolkit governance ${subcommand}`);
-    assert.ok(context.includes(`Run exactly \`node "${script}" ${subcommand}\``), subcommand);
-    for (const other of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate'].filter(word => word !== subcommand)) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${subcommand} names ${other}`);
+  for (const phrase of ['toolkit governance', 'governance setup']) {
+    assert.deepEqual(commands.typedCommand(` ${phrase.toUpperCase()}. `), { phrase, action: 'guide' });
+    const context = commands.phraseContext(phrase);
+    assert.ok(/'setup'/.test(fs.readFileSync(script, 'utf8').match(/const COMMANDS = Object\.freeze\(\[[^\]]*\]\)/)[0]));
+    assert.ok(context.includes(`Run exactly \`node "${script}" setup\``), phrase);
+    assert.ok(context.includes(`\`node "${script}" refresh --set on\``) && context.includes(`refresh --set off`), phrase);
+    assert.match(context, /it asks two questions there, governance on and then task auto-merge on or off, and prepares one pull request with both/);
+    assert.doesNotMatch(context, /toolkit governance enable/, 'the guide always asks the task auto-merge question');
+    assert.ok(context.includes(`turn governance off, which the user does by running \`node "${script}" disable\` in their own terminal`), phrase);
+    assert.match(context, /Never answer the governance question for the user\.$/);
+    for (const other of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate', 'enable']) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${phrase} runs ${other}`);
   }
-  const migrate = commands.phraseContext('toolkit governance migrate');
-  assert.match(migrate, /do not run it: give the user this exact command to run in their own terminal/);
-  assert.ok(migrate.endsWith(`\`node "${script}" migrate\``), migrate);
+  // The gate's answer phrases stay the gate's.
+  assert.equal(commands.typedCommand('toolkit governance enable'), null);
 });
 
 test('governance answers and other governance wording stay with the gate or plain text', () => {
-  const plain = ['toolkit governance enable', 'toolkit governance disable', 'toolkit governance decline', 'toolkit governance', 'toolkit governance check --offline',
+  const plain = ['toolkit governance enable', 'toolkit governance disable', 'toolkit governance decline', 'toolkit governance check --offline',
     'toolkit governance check --json', 'toolkit governance check please', 'run toolkit governance check', 'toolkit governance reopen', 'toolkit governance publish', 'governance check'];
   for (const text of plain) assert.equal(commands.phraseContext(text), '', text);
 });
@@ -66,13 +59,13 @@ test('governance answers and other governance wording stay with the gate or plai
 test('each typed command maps to its own action, whatever the letter case, spacing or closing full stop', () => {
   const cases = [
     ['toolkit cmd', 'list'], ['toolkit command', 'list'], ['toolkit refresh', 'refresh'], ['toolkit setup', 'setup'], ['toolkit show env', 'env'],
-    ['  TOOLKIT   Show\tEnv.  ', 'env'], ['Toolkit Cmd', 'list'],
+    ['  TOOLKIT   Show\tEnv.  ', 'env'], ['Toolkit Cmd', 'list'], ['toolkit env', 'env'], ['Toolkit Env.', 'env'], ['toolkit governance', 'guide'], ['Governance Setup', 'guide'],
   ];
   for (const [text, action] of cases) assert.equal(commands.typedCommand(text)?.action, action, text);
 });
 
 test('anything that is not the whole message is plain text', () => {
-  const plain = ['toolkit set env', 'toolkit env', 'toolkit', 'toolkit cmd please', 'please toolkit cmd', 'toolkit cmd\ntoolkit setup', 'toolkit cmd..', 'toolkit cmd!',
+  const plain = ['toolkit set env', 'toolkit', 'toolkit cmd please', 'please toolkit cmd', 'toolkit cmd\ntoolkit setup', 'toolkit cmd..', 'toolkit cmd!',
     'toolkit-cmd', '`toolkit cmd`', '"toolkit cmd"', 'toolkit show env OPENAI_API_KEY', '<b>toolkit cmd</b>', '', ' ', `toolkit cmd${' '.repeat(80)}`, null, undefined, 7, {}, ['toolkit cmd']];
   for (const text of plain) {
     assert.equal(commands.typedCommand(text), null, String(text));
@@ -89,9 +82,18 @@ test('the context line names the phrase and the one action to take', () => {
   assert.match(env, /Never run the one-key `set` prompt/);
 });
 
-test('the list names every typed command and is what the script prints', () => {
+test('the list shows only the commands a user types, and is what the script prints', () => {
   const list = commands.listText();
-  for (const phrase of commands.PHRASES) assert.ok(list.includes(`\`${phrase}\``), phrase);
+  const rows = commands.COMMANDS.flatMap(command => command.type);
+  assert.deepEqual(rows, ['toolkit cmd', 'toolkit command', 'setup toolkit', 'toolkit setup', 'refresh toolkit', 'toolkit refresh', 'remove toolkit', 'toolkit env', 'toolkit show env',
+    'toolkit governance', 'governance setup', 'merge N']);
+  for (const phrase of rows) assert.ok(list.includes(`\`${phrase}\``), phrase);
+  // Other governance phrases and older commands still work when typed, but the list leaves them out.
+  for (const hidden of ['toolkit permissions', 'toolkit update scheduled task', 'setup governance', 'refresh governance', 'toolkit governance enable', 'toolkit governance disable']) assert.ok(!list.includes(`\`${hidden}\``), hidden);
+  for (const subcommand of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate']) assert.ok(!list.includes(`toolkit governance ${subcommand}`), subcommand);
+  // Every typed phrase is listed, or opens the same action as a listed one.
+  const listedActions = new Set(rows.map(phrase => commands.typedCommand(phrase)?.action).filter(Boolean));
+  for (const phrase of commands.PHRASES) assert.ok(rows.includes(phrase) || listedActions.has(commands.typedCommand(phrase).action), phrase);
   const run = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' });
   assert.equal(run.status, 0);
   assert.equal(run.stdout, `${list}\n`);
@@ -144,7 +146,8 @@ function prompt(decision, text, extra = {}, environment = {}) {
 
 test('Claude Code prompt hook: a typed command adds its line on an ordinary pass', () => {
   assert.match(prompt({ action: 'pass' }, 'toolkit show env').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit show env`\./);
-  assert.match(prompt({ action: 'pass' }, 'toolkit governance check').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit governance check`\. Run exactly `node "[^"]*toolkit-governance\.cjs" check`/);
+  assert.match(prompt({ action: 'pass' }, 'toolkit governance').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit governance`\. Guide the user through Toolkit's GitHub governance for this repository\. Run exactly `node "[^"]*toolkit-governance\.cjs" setup`/);
+  assert.deepEqual(prompt({ action: 'pass' }, 'toolkit governance check'), {});
   assert.deepEqual(prompt({ action: 'pass' }, 'toolkit set env'), {});
 });
 

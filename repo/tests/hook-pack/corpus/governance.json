@@ -994,7 +994,7 @@
       "event": "UserPromptSubmit",
       "payload": { "prompt": "toolkit cmd" },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit cmd`.", "**Keys**\n\n| Type this | What it does |\n| --- | --- |\n| `toolkit show env` | Open your keys"] },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit cmd`.", "**Keys**\n\n| Type this | What it does |\n| --- | --- |\n| `toolkit env` or `toolkit show env` | Open your keys"] },
       "status": "pass"
     },
     {
@@ -1042,16 +1042,26 @@
       "status": "pass"
     },
     {
-      "id": "CMD.toolkit-governance-check-runs-check",
-      "source": "owner repro 12 Nov 2026: a typed governance phrase runs its own toolkit-governance.cjs subcommand",
+      "id": "CMD.toolkit-governance-opens-the-guide",
+      "source": "owner 14 Nov 2026: toolkit governance is the one governance entry and guides on, the auto-merge switch and off",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "payload": { "prompt": "toolkit governance" },
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance`. Guide the user through Toolkit's GitHub governance for this repository. Run exactly `node \"", "toolkit-governance.cjs\" setup` in this repository and show the user its output", "Never answer the governance question for the user."] },
+      "status": "pass"
+    },
+    {
+      "id": "CMD.toolkit-governance-check-is-not-a-command",
+      "source": "owner 14 Nov 2026: the governance tools are run by agents, setup and CI, not typed",
       "kind": "benign",
       "hosts": ["claude", "codex"],
       "event": "UserPromptSubmit",
       "payload": { "prompt": "toolkit governance check" },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance check`. Run exactly `node \"", "toolkit-governance.cjs\" check`", "not the programme `attention` list"] },
-      "status": "pass",
-      "note": "Typing the phrase once ran status and the attention list instead of the check."
+      "expect": { "decision": "allow", "context_excludes": ["Toolkit command:"] },
+      "status": "pass"
     },
     {
       "id": "CMD.toolkit-set-env-is-not-a-command",
