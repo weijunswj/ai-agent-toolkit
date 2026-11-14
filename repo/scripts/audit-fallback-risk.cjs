@@ -201,6 +201,22 @@ function annotation(item) {
   return `::${item.severity === 'error' ? 'error' : 'warning'} file=${property(item.path)},line=${item.line},title=Fallback risk::${clean(`matched "${item.matched}" (${item.phrase}) - ${item.reason}`)}`;
 }
 
+// GitHub shows at most 10 warning and 10 error annotations from one step and drops the rest without
+// a word. Past that, each severity keeps 9 file annotations and a 10th that says how many more the
+// log holds, errors first, so a long report never hides its overflow.
+const ANNOTATIONS_PER_SEVERITY = 10;
+function annotations(findings) {
+  const lines = [];
+  for (const severity of ['error', 'warning']) {
+    const items = findings.filter(item => (item.severity === 'error' ? 'error' : 'warning') === severity);
+    if (items.length <= ANNOTATIONS_PER_SEVERITY) { lines.push(...items.map(annotation)); continue; }
+    const shown = ANNOTATIONS_PER_SEVERITY - 1;
+    lines.push(...items.slice(0, shown).map(annotation));
+    lines.push(`::${severity} title=Fallback risk::${items.length - shown} more fallback risk ${severity}s are not shown here (GitHub shows 10 per step); the audit log in this step lists all ${items.length}.`);
+  }
+  return lines;
+}
+
 function main() {
   const args = process.argv.slice(2);
   const targets = targetArgs(args);
@@ -213,7 +229,7 @@ function main() {
     process.stdout.write(formatReport(result));
   }
   if (process.env.GITHUB_ACTIONS === 'true' && !args.includes('--json')) {
-    for (const item of result.findings) process.stdout.write(`${annotation(item)}\n`);
+    for (const line of annotations(result.findings)) process.stdout.write(`${line}\n`);
   }
   if (result.errors.length) process.exitCode = 1;
 }
@@ -222,5 +238,6 @@ if (require.main === module) main();
 
 module.exports = {
   annotation,
+  annotations,
   auditFallbackRisk
 };

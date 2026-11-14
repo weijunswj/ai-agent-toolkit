@@ -87,6 +87,23 @@ test('fallback-risk audit CLI exits nonzero only for error findings', () => {
   assert.match(errorResult.stderr, /1 error\(s\), 0 warning\(s\)/);
 });
 
+test('L4: past GitHub\'s 10 annotations per step, each severity shows 9 and a 10th naming how many more the log holds', () => {
+  const { annotations } = require(auditScript);
+  const finding = (severity, index) => ({ severity, path: `docs/${severity}-${index}.md`, line: index + 1, matched: 'm', phrase: 'p', reason: 'r' });
+  const few = [...Array.from({ length: 10 }, (_, index) => finding('warning', index)), finding('error', 0)];
+  const shown = annotations(few);
+  assert.equal(shown.length, 11, 'ten or fewer per severity are all shown');
+  assert.match(shown[0], /^::error file=docs\/error-0\.md/, 'errors first');
+  const many = [...Array.from({ length: 25 }, (_, index) => finding('warning', index)), ...Array.from({ length: 12 }, (_, index) => finding('error', index))];
+  const capped = annotations(many);
+  const errors = capped.filter(line => line.startsWith('::error')), warnings = capped.filter(line => line.startsWith('::warning'));
+  assert.equal(errors.length, 10);
+  assert.equal(warnings.length, 10);
+  assert.equal(errors[9], '::error title=Fallback risk::3 more fallback risk errors are not shown here (GitHub shows 10 per step); the audit log in this step lists all 12.');
+  assert.equal(warnings[9], '::warning title=Fallback risk::16 more fallback risk warnings are not shown here (GitHub shows 10 per step); the audit log in this step lists all 25.');
+  assert.match(warnings[8], /^::warning file=docs\/warning-8\.md,line=9,/);
+});
+
 test('fallback-risk audit: under GitHub Actions each finding is a file and line annotation, escaped', () => {
   const { annotation } = require(auditScript);
   assert.equal(annotation({ severity: 'warning', path: 'docs/a,b:c.md', line: 7, matched: 'fallback', phrase: 'use a fallback', reason: 'say what fails\nand why' }),

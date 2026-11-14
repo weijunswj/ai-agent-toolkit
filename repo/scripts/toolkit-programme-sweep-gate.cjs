@@ -36,15 +36,18 @@ const COMPLETE_LINE = /^Board updated: .+ \(state revision \d+\)$/;
 const LIMIT_NOTE = /hourly App limit/;
 const SAFE_REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 // Findings are for action: a sweep that holds or skips, or a gate that skips, says so in a titled
-// warning each run (an annotation on that run). Three in a row with the same code turn the hourly
-// gate red with the step that clears it. Only the hourly start and a start by hand go red, so the
-// gate's check on pull requests stays about pull requests. The gate keeps no state: it reads the
-// annotations of the last runs (the built-in token's checks: read).
+// warning each run (an annotation on that run). Three in a row turn the hourly gate red with the
+// step that clears it: held runs whatever their hold codes, skipped runs with the same code. A run
+// that made no pass (queued behind another, paused at the App limit, main moved, off the default
+// branch: a titled notice), or whose sweep job did not run, neither counts nor ends a streak. Only
+// the hourly start and a start by hand go red, so the gate's check on pull requests stays about pull
+// requests. The gate keeps no state: it reads the annotations of the last runs (the built-in token's
+// checks: read).
 const STREAK = 3;
 const SWEEP_JOB = 'Refresh the programme';
 const GATE_JOB = 'Start the sweep if there is work';
 const GATE_WORKFLOW = 'toolkit-programme-sweep-gate.yml';
-const TITLES = Object.freeze({ held: 'Programme Sweep held', skipped: 'Programme Sweep skipped', gate: 'Programme Sweep gate skipped' });
+const TITLES = Object.freeze({ held: 'Programme Sweep held', skipped: 'Programme Sweep skipped', gate: 'Programme Sweep gate skipped', noPass: 'Programme Sweep no pass' });
 const STREAK_EVENTS = Object.freeze(['schedule', 'workflow_dispatch']);
 // The code a titled warning carries: `<title> (<code>)` at the start of its message.
 const CODE = /^\(([A-Za-z0-9_,; -]{1,200})\)/;
@@ -153,7 +156,7 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     // This run counts as one; the earlier finished hourly runs make up the rest.
     const earlier = ((await call('GET', `actions/workflows/${GATE_WORKFLOW}/runs?event=schedule&status=completed&per_page=${STREAK - 1}`)).workflow_runs || []).slice(0, STREAK - 1);
     const codes = [];
-    for (const run of earlier) codes.push((await runFinding(call, run, GATE_JOB, TITLES.gate))?.code || null);
+    for (const run of earlier) codes.push((await runFinding(call, run, GATE_JOB, [TITLES.gate]))?.code || null);
     if (codes.length === STREAK - 1 && codes.every(item => item === code)) {
       verdict.alert = `Programme Sweep gate skipped ${repository} ${STREAK} hourly runs in a row (${code}): ${why}. Owner: turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows (both workflow files) if ${repository} should not be governed.`;
     }
@@ -184,44 +187,63 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
   if (verdict.start) await call('POST', `actions/workflows/${SWEEP_WORKFLOW}/dispatches`, { ref: BRANCH });
   log(`Programme Sweep gate: ${verdict.start ? 'started the sweep' : 'nothing to start'} (${verdict.reason}).`);
   if (STREAK_EVENTS.includes(env.EVENT_NAME || '')) {
-    const streak = await sweepStreak(call, runs);
+    // The start (or not) above is done: a failure from here on says so, rather than "the next start
+    // tries again" as if nothing had happened. The verdict rules (blip a notice, set-up fault red)
+    // stay the same.
+    let streak;
+    try { streak = await sweepStreak(call, runs); } catch (error) {
+      if (error && typeof error === 'object') error.after = verdict.start ? 'started the sweep' : 'started nothing';
+      throw error;
+    }
     if (streak) verdict.alert = streak;
   }
   return verdict;
 }
 
 // The titled finding (held or skipped) on one run's job, or null. A run of the wrong shape, a job
-// that is missing or an annotation without a code counts as no finding, which ends a streak.
-async function runFinding(call, run, jobName, ...titles) {
+// that is missing or an annotation without a code counts as no finding, which ends a streak. With
+// `neutral`, a run that made no pass answers { neutral: true }: its job is missing or skipped, or it
+// carries the titled no-pass notice.
+async function runFinding(call, run, jobName, titles, { neutral = false } = {}) {
   if (!Number.isSafeInteger(run?.id)) return null;
   const job = ((await call('GET', `actions/runs/${run.id}/jobs`)).jobs || []).find(item => item.name === jobName && Number.isSafeInteger(item.id));
-  if (!job) return null;
+  if (!job) return neutral ? { neutral: true } : null;
+  if (neutral && job.conclusion === 'skipped') return { neutral: true };
   // A job's id is its check run's id.
   const notes = await call('GET', `check-runs/${job.id}/annotations?per_page=50`);
+  let noPass = false;
   for (const note of Array.isArray(notes) ? notes : []) {
+    if (neutral && note?.title === TITLES.noPass && note.annotation_level === 'notice') noPass = true;
     if (!titles.includes(note?.title) || note.annotation_level !== 'warning') continue;
     const code = CODE.exec(String(note.message || ''))?.[1];
     if (code) return { title: note.title, code, at: run.run_started_at || run.created_at || null };
   }
-  return null;
+  return noPass ? { neutral: true } : null;
 }
 
-// The last STREAK finished sweeps: all held, or all skipped, with the same code? Stops reading at
-// the first run that breaks the streak, so a quiet hour costs two small reads.
+// Did the finished sweeps end in STREAK or more held runs in a row (any hold codes), or skipped runs
+// in a row with the same code? Runs that made no pass are passed over. Stops reading at the first run
+// that breaks the streak, so a quiet hour costs two small reads; a streak is read back to its start,
+// within the runs the gate already listed, so "since" names when it began.
 async function sweepStreak(call, runs) {
-  const finished = runs.filter(run => run.status === 'completed' && run.conclusion === 'success').slice(0, STREAK);
-  if (finished.length < STREAK) return null;
-  let first = null, since = null;
+  const finished = runs.filter(run => run.status === 'completed' && run.conclusion === 'success');
+  let first = null, since = null, count = 0, broken = false;
+  const codes = new Set();
   for (const run of finished) {
-    const found = await runFinding(call, run, SWEEP_JOB, TITLES.held, TITLES.skipped);
-    if (!found || (first && (found.title !== first.title || found.code !== first.code))) return null;
+    const found = await runFinding(call, run, SWEEP_JOB, [TITLES.held, TITLES.skipped], { neutral: true });
+    if (found?.neutral) continue;
+    if (!found || (first && (found.title !== first.title || (found.title === TITLES.skipped && found.code !== first.code)))) { broken = true; break; }
     first = first || found;
+    for (const code of found.code.split(/,\s*/)) codes.add(code);
     since = found.at;
+    count += 1;
   }
-  const when = since ? ` since ${since}` : '';
+  if (count < STREAK) return null;
+  const when = since ? ` since ${since}${broken ? '' : ' or earlier'}` : '';
+  const named = first.title === TITLES.held ? [...codes].sort().join(', ') : first.code;
   return first.title === TITLES.held
-    ? `Programme Sweep held ${STREAK} runs in a row (${first.code})${when}. Controller: read the held items on the programme page and clear their cause, or ask the owner; the first clean sweep clears this.`
-    : `Programme Sweep skipped ${STREAK} runs in a row (${first.code})${when}. Owner: follow the fix in the sweep run's warning (toolkit governance check names it), or remove the Toolkit Programme Sweep workflows if this repository should not be governed.`;
+    ? `Programme Sweep held ${count} runs in a row (${named})${when}. Controller: read the held items on the programme page and clear their cause, or ask the owner; the first clean sweep clears this.`
+    : `Programme Sweep skipped ${count} runs in a row (${named})${when}. Owner: follow the fix in the sweep run's warning (toolkit governance check names it), or remove the Toolkit Programme Sweep workflows if this repository should not be governed.`;
 }
 
 // The sweep's follow-up: after a pass stops early, start one more run on main. A pass paused at
@@ -264,8 +286,14 @@ if (require.main === module) {
     process.stdout.write(`::error title=Programme Sweep needs action::${verdict.alert}\n`);
     process.exitCode = 1;
   }, error => {
-    if (!isBlip(error)) { process.stderr.write(`Programme Sweep ${which} failed: ${error?.message}\n`); process.exitCode = 1; return; }
     const what = error instanceof GitHubAnswerError ? error.message : 'GitHub did not answer.';
+    // After the start: the sweep did (or did not) start; only the held-streak read is left undone.
+    if (error?.after) {
+      if (!isBlip(error)) { process.stderr.write(`Programme Sweep gate ${error.after}, but its held-streak check failed: ${error?.message}\n`); process.exitCode = 1; return; }
+      process.stdout.write(`::notice::Programme Sweep gate ${error.after}, but its held-streak check could not finish: ${what} The next hourly start checks again.\n`);
+      return;
+    }
+    if (!isBlip(error)) { process.stderr.write(`Programme Sweep ${which} failed: ${error?.message}\n`); process.exitCode = 1; return; }
     process.stdout.write(`::notice::Programme Sweep ${which} could not finish: ${what} The next start tries again.\n`);
   });
 }

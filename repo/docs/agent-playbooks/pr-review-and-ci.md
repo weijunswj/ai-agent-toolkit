@@ -55,6 +55,8 @@ On Windows the selected hourly `PROGRAMME SWEEP` or `FOOTER SWEEP` runs it first
 
 Post a short summary of the merge's external effects (what changes on the user's machines, hooks, rules, setup defaults and other repositories) naming the pull request, before asking the owner to approve it. No hook checks the summary.
 
+Finish every body edit before asking. Run `node repo/scripts/toolkit-auto-merge-eligible.cjs` at the head and fix the body lines it names (the UAT line first), then wait for the Validate run those edits start to go green. Where the owner taps a card, run `node repo/scripts/toolkit-merge-card-ready.cjs --repo <owner/name> --pr <n> --head <full SHA>` and ask only on exit 0. After the owner approves, change nothing on the pull request (body, title or branch) until it lands: each change starts a required check run, GitHub refuses the merge meanwhile, and the refused attempt uses up the approval. Before merging on a card tap, run the readiness check again with `--body-sha` set to the value it printed.
+
 The merge hold waits for the owner's approval, in this order:
 
 - **Task auto-merge:** with the switch On and an eligible pull request, the merge needs no approval (gate rules, task auto-merge).
