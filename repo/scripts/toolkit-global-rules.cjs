@@ -450,10 +450,12 @@ class GlobalRules {
     }
   }
 
-  // The harnesses setup manages: Claude Code and Codex always; Antigravity when enabled or
-  // when its file already carries the block.
-  static setupHarnesses({ environment = process.env, antigravity = false } = {}) {
-    const harnesses = ['claude-code', 'codex'];
+  // The harnesses setup manages: only the app setup runs in when `host` names it (each app keeps
+  // its own file current at its own session start), else Claude Code and Codex for a run that
+  // covers every app; plus Antigravity when enabled or when its file already carries the block.
+  static setupHarnesses({ environment = process.env, antigravity = false, host = null } = {}) {
+    if (host !== null && !['claude-code', 'codex'].includes(host)) fail('GLOBAL_RULES_HARNESS_UNKNOWN', `Unknown host: ${host}`);
+    const harnesses = host ? [host] : ['claude-code', 'codex'];
     if (antigravity) return [...harnesses, 'antigravity'];
     const text = readIfExists(harnessFile('antigravity', environment || {}));
     const carries = text !== null && findBlocks(text).blocks.some(block => block.name === BLOCK_NAME);

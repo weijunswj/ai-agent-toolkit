@@ -41,7 +41,7 @@ test('the governance guide runs setup, then offers the next step without answeri
     assert.ok(context.includes(`Run exactly \`node "${script}" setup\``), phrase);
     assert.match(context, /works like setup toolkit's: the user replies `all recommended` or only their changes, such as `1\.2=B`/);
     assert.match(context, /one-use ticket/);
-    assert.match(context, /once, in full and as printed.*never summarise it, shorten it or repeat it/);
+    assert.match(context, /once, in full and as printed, every table, any permission table and every permission block included, and the reply line; never summarise it, shorten it or repeat it, then stop\./);
     assert.doesNotMatch(context, /--set|own terminal|toolkit governance enable/, 'no terminal hop and no switch flag');
     assert.match(context, /Never answer the bank for the user\.$/);
     for (const other of ['status', 'check', 'discover', 'security', 'migrate', 'enable']) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${phrase} runs ${other}`);
