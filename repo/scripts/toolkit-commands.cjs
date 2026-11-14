@@ -26,7 +26,7 @@ const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Setup', type: ['refresh toolkit', 'toolkit refresh'], does: 'Update Toolkit on this computer to the newest version.' }),
   Object.freeze({ group: 'Setup', type: ['remove toolkit'], does: "Choose this app or every app, list what Toolkit put there, then remove it after your OK." }),
   Object.freeze({ group: 'Keys', type: ['toolkit env', 'toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance', 'governance setup'], does: "Guide Toolkit's GitHub governance for this repository: see whether it is on, turn it on, change task auto-merge or turn it off. Each change is one pull request for you to merge." }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance', 'governance setup'], does: "Show this repository's governance choices, answered like setup toolkit: governance on or off, task auto-merge and permission blocks. Each change is one pull request for you to merge." }),
   Object.freeze({ group: 'Merge', type: ['merge N'], does: 'Approve the merge of pull request N.' }),
 ]);
 
@@ -38,9 +38,8 @@ const ACTIONS = {
   'toolkit env': 'env',
   'toolkit show env': 'env',
 };
-// The governance guide: the one governance entry. It runs setup, which in a governed repository is
-// refresh, and then offers the next step. `setup governance` and `refresh governance`, which Toolkit's
-// own messages tell the user to say, open the same guide. `toolkit governance enable` and `disable`
+// The governance question bank: the one governance entry. `setup governance` and `refresh governance`,
+// which Toolkit's own messages tell the user to say, open the same bank. `toolkit governance enable` and `disable`
 // are answers the governance gate reads, so they are not here; the governance tools (status, check
 // and the rest) are run by agents, setup and CI, not typed.
 for (const phrase of ['toolkit governance', 'governance setup', 'setup governance', 'toolkit setup governance', 'refresh governance', 'toolkit refresh governance']) ACTIONS[phrase] = 'guide';

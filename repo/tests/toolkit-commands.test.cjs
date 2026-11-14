@@ -145,7 +145,7 @@ function prompt(decision, text, extra = {}, environment = {}) {
 
 test('Claude Code prompt hook: a typed command adds its line on an ordinary pass', () => {
   assert.match(prompt({ action: 'pass' }, 'toolkit show env').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit show env`\./);
-  assert.match(prompt({ action: 'pass' }, 'toolkit governance').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit governance`\. Guide the user through Toolkit's GitHub governance for this repository\. Run exactly `node "[^"]*toolkit-governance\.cjs" setup`/);
+  assert.match(prompt({ action: 'pass' }, 'toolkit governance').hookSpecificOutput.additionalContext, /^Toolkit command: the user typed `toolkit governance`\. Show the user Toolkit's governance question bank for this repository\. Run exactly `node "[^"]*toolkit-governance\.cjs" setup`/);
   assert.deepEqual(prompt({ action: 'pass' }, 'toolkit governance check'), {});
   assert.deepEqual(prompt({ action: 'pass' }, 'toolkit set env'), {});
 });
