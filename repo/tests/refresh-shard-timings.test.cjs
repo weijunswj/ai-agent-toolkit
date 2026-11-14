@@ -35,10 +35,11 @@ function summary(system, times) {
 
 const even = Object.fromEntries(FILES.map((file) => [file, 10]));
 
-test('arguments: report by default, --write or --open-pr but not both, numeric --run', () => {
-  assert.deepEqual(refresh.parseArgs([]), { run: null, write: false, openPr: false });
+test('arguments: report by default, one of --write, --open-pr or --fail-if-due, numeric --run', () => {
+  assert.deepEqual(refresh.parseArgs([]), { run: null, write: false, openPr: false, failIfDue: false });
   assert.equal(refresh.parseArgs(['--run', '123', '--write']).run, '123');
-  assert.throws(() => refresh.parseArgs(['--write', '--open-pr']), /not both/);
+  assert.equal(refresh.parseArgs(['--fail-if-due']).failIfDue, true);
+  for (const pair of [['--write', '--open-pr'], ['--write', '--fail-if-due'], ['--open-pr', '--fail-if-due']]) assert.throws(() => refresh.parseArgs(pair), /Use one of --write, --open-pr or --fail-if-due/);
   assert.throws(() => refresh.parseArgs(['--run', 'latest']), /numeric run id/);
   assert.throws(() => refresh.parseArgs(['--merge']), /Unknown argument/);
 });
@@ -172,6 +173,38 @@ test('--open-pr forwards the selected root and keeps the main-only guard; defaul
   assert.equal(refresh.main(['--repo-root', selected, '--open-pr'], deps), 2);
   assert.match(errors.join(''), /--open-pr reads main runs only/);
   assert.equal(published.length, 2);
+});
+
+test('--fail-if-due: a report run that cannot publish fails when a refresh is due, and passes when none is', (t) => {
+  const selected = checkout(t);
+  const before = fs.readFileSync(path.join(selected, ...shards.MANIFEST_REL.split('/')));
+  const errors = [];
+  const deps = {
+    readRun: () => ({ databaseId: 123, headBranch: 'main', headSha: 'a'.repeat(40) }),
+    readSummaries: () => shards.SYSTEMS.map(system => summary(system, even)),
+    publish() { assert.fail('a report run never publishes'); },
+    out: { write() {} }, err: { write(text) { errors.push(text); } },
+  };
+  assert.equal(refresh.main(['--repo-root', selected, '--fail-if-due'], deps), 1);
+  assert.match(errors.join(''), /A refresh trigger crossed and this run cannot publish\. Owner: set up the governance App .+ or run node repo\/scripts\/refresh-shard-timings\.cjs --write and open the pull request by hand/);
+  assert.deepEqual(fs.readFileSync(path.join(selected, ...shards.MANIFEST_REL.split('/'))), before, 'it changes nothing');
+  assert.equal(refresh.main(['--repo-root', selected, '--write'], { ...deps, err: { write(text) { assert.fail(text); } } }), 0);
+  errors.length = 0;
+  assert.equal(refresh.main(['--repo-root', selected, '--fail-if-due'], deps), 0, 'once refreshed, nothing is due');
+  assert.deepEqual(errors, []);
+});
+
+test('--open-pr: a refresh pull request open over 7 days fails the run naming it; a newer one stays a quiet skip', () => {
+  const run = { databaseId: 123, headBranch: 'main', headSha: 'a'.repeat(40) };
+  const now = Date.parse('2026-11-14T00:00:00Z');
+  const errors = [];
+  const at = days => new Date(now - days * 86400000).toISOString();
+  const deps = open => ({ now, out: { write() {} }, err: { write(text) { errors.push(text); } }, readRun: () => run,
+    publish() { assert.fail('an open refresh pull request blocks a second one'); }, findOpen: () => open });
+  assert.equal(refresh.main(['--open-pr'], deps([{ number: 41, headRefName: `${refresh.REFRESH_BRANCH_PREFIX}1`, createdAt: at(7) }])), 0, 'seven days is still within its time');
+  assert.deepEqual(errors, []);
+  assert.equal(refresh.main(['--open-pr'], deps([{ number: 41, headRefName: `${refresh.REFRESH_BRANCH_PREFIX}1`, createdAt: at(8) }])), 1);
+  assert.match(errors.join(''), /open over 7 days: #41 \(open since 2026-11-06\)\. Owner or controller: merge or close it/);
 });
 
 test('--open-pr opens nothing while an earlier shard timing pull request is open', () => {

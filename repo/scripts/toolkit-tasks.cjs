@@ -254,8 +254,10 @@ function legacySweepLine(repository, { home = os.homedir(), now = new Date(), re
   const schedule = installedHours(entry.schedule);
   const intoWindow = schedule ? ((now.getHours() * 60 + now.getMinutes()) - schedule.hour * 60 - schedule.minute + 1440) % 1440 : null;
   const stale = schedule && (schedule.hours === 24 || intoWindow >= STALE_MS / 60000 && intoWindow < schedule.hours * 60) && (!at || now.getTime() - Date.parse(at) > STALE_MS);
+  const heldRuns = last?.status === 'held' && Number.isInteger(last.held_streak) && last.held_streak > 1 && typeof last.held_since === 'string' && !Number.isNaN(Date.parse(last.held_since))
+    ? `, ${last.held_streak} runs in a row since ${shortTime(last.held_since, now)}` : '';
   const status = skipText(last, now) || (last?.status === 'deferred' ? deferredText(last, now)
-    : last && ['failed', 'held'].includes(last.status) && at ? `${last.status} at ${shortTime(at, now)}` : null);
+    : last && ['failed', 'held'].includes(last.status) && at ? `${last.status} at ${shortTime(at, now)}${heldRuns}` : null);
   if (stale) return `${withShard(`${label}: no run ${at ? `since ${shortTime(at, now)} ` : 'recorded '}(over 2 hours)${status ? `; the last one ${status}` : ''}`)}; see toolkit tasks.`;
   if (status) return `${withShard(`${label}: ${status.startsWith('failed') ? 'last run ' : ''}${status}`)}; see toolkit tasks.`;
   if (deferredShard) return `${withShard(null)}; see toolkit tasks.`;

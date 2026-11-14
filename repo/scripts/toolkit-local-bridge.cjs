@@ -755,6 +755,7 @@ function defaultState() {
     last_repo_update_error: '',
     last_update_report_path: '',
     last_update_report_signature: '',
+    open_action_report: null,
     update_report_enabled: true,
     codex_doc_limit_enabled: false,
     update_report_open_enabled: false,
@@ -789,6 +790,7 @@ function normalizedState(raw) {
   state.last_repo_update_error = state.last_repo_update_error || '';
   state.last_update_report_path = state.last_update_report_path || '';
   state.last_update_report_signature = state.last_update_report_signature || '';
+  state.open_action_report = normalizedOpenActionReport(state.open_action_report);
   state.update_report_enabled = state.update_report_enabled !== false;
   state.legacy_update_report_open_migrated = raw?.update_report_open_enabled === true
     || raw?.legacy_update_report_open_migrated === true;
@@ -979,6 +981,8 @@ function cleanupUpdateReports(options = {}) {
   const nowMs = options.nowMs || Date.now();
   const cutoffMs = nowMs - (retentionDays * 24 * 60 * 60 * 1000);
   const currentRunPath = options.currentRunPath ? path.resolve(options.currentRunPath) : '';
+  // An action-required report stays until a run clears its cause, whatever its age.
+  const keepPaths = new Set((options.keepPaths || []).filter(Boolean).map((value) => path.resolve(value)));
   const result = {
     retention_days: retentionDays,
     report_log_directory: reportDir,
@@ -1012,7 +1016,7 @@ function cleanupUpdateReports(options = {}) {
       result.skipped_count += 1;
       continue;
     }
-    if (currentRunPath && path.resolve(filePath) === currentRunPath) {
+    if ((currentRunPath && path.resolve(filePath) === currentRunPath) || keepPaths.has(path.resolve(filePath))) {
       result.skipped_count += 1;
       continue;
     }
@@ -1431,21 +1435,22 @@ function runAgentRulesPreflight(args, options = {}) {
   return { ...result, status: 'needs-attention', direction: sourceVersion ? 'drift' : newer ? 'newer' : 'differs' };
 }
 
-// One neutral line. Never an instruction to halt work or to question the user.
+// One neutral line. Never an instruction to halt work or to question the user; it names the step and
+// that it is due before the current task ends, and repeats at each session start while it holds.
 function formatAgentRulesPreflight(result) {
   if (result.status !== 'needs-attention') return '';
   const files = [...new Set((result.findings || []).map((finding) => finding.file))].join(', ');
   if (result.direction === 'newer') {
-    return `Toolkit note: this repository's Toolkit rules may come from a newer Toolkit (${result.authorVersion}) than the running copy (${result.runningVersion}); the repository rules are authoritative. Refresh Toolkit when convenient. No files were changed.`;
+    return `Toolkit note: this repository's Toolkit rules may come from a newer Toolkit (${result.authorVersion}) than the running copy (${result.runningVersion}); the repository rules are authoritative. Next step: refresh Toolkit (setup toolkit) before this task ends. No files were changed.`;
   }
   if (result.direction === 'drift') {
-    return `Toolkit note: this Toolkit checkout's managed instruction blocks (${files}) differ from its own templates; regenerate them with node repo/scripts/sync-agent-instruction-shims.cjs when convenient. No files were changed.`;
+    return `Toolkit note: this Toolkit checkout's managed instruction blocks (${files}) differ from its own templates; next step: regenerate them with node repo/scripts/sync-agent-instruction-shims.cjs --write before this task ends. No files were changed.`;
   }
   if ((result.findings || []).length && result.findings.every((finding) => finding.kind === 'repo-check')) {
     const state = result.findings.some((finding) => finding.detail === 'missing') ? 'are missing or differ from' : 'differ from';
-    return `Toolkit note: this repository's Toolkit checks (${files}) ${state} the running Toolkit ${result.runningVersion}; refresh them with repository-agent-rules when convenient. No files were changed.`;
+    return `Toolkit note: this repository's Toolkit checks (${files}) ${state} the running Toolkit ${result.runningVersion}; next step: refresh them with repository-agent-rules before this task ends. No files were changed.`;
   }
-  return `Toolkit note: this repository's Toolkit rules (${files}) differ from the running Toolkit ${result.runningVersion} templates; refresh them with repository-agent-rules when convenient. No files were changed.`;
+  return `Toolkit note: this repository's Toolkit rules (${files}) differ from the running Toolkit ${result.runningVersion} templates; next step: refresh them with repository-agent-rules before this task ends. No files were changed.`;
 }
 
 function agentRulesNoticeKey(result, message) {
@@ -1455,11 +1460,11 @@ function agentRulesNoticeKey(result, message) {
   return digest.digest('hex');
 }
 
-// Remembers which notices were already shown, so a notice appears once per
-// (root, running version, finding digest); resume and compact never replay it.
-// The ledger sits beside the hub snapshot directory (next to update.lock), never
-// inside it: snapshot writes replace that directory wholesale. It never lives in
-// the repository.
+// Counts the session starts that showed each notice, per (root, running version, finding digest),
+// so the line can say how long the finding has stood. The note shows at every session start while
+// the finding holds; a changed finding starts its own count. The ledger sits beside the hub snapshot
+// directory (next to update.lock), never inside it: snapshot writes replace that directory wholesale.
+// It never lives in the repository.
 class AgentRulesNoticeLedger {
   static LIMIT = 200;
   #file;
@@ -1472,23 +1477,32 @@ class AgentRulesNoticeLedger {
     } catch { return {}; }
   }
 
-  // Returns true when this key is new and records it; a failed write still shows it.
-  claim(key) {
+  // Records one more showing of this key: { since, count }. A failed write still shows the notice.
+  // Schema 1 kept a bare timestamp per key; it reads as one earlier showing.
+  record(key) {
     const shown = this.#read();
-    if (Object.hasOwn(shown, key)) return false;
-    shown[key] = timestamp();
-    const kept = Object.entries(shown).sort((left, right) => String(right[1]).localeCompare(String(left[1])))
+    const previous = shown[key];
+    const before = typeof previous === 'string' ? { since: previous, count: 1 }
+      : previous && typeof previous === 'object' && typeof previous.since === 'string' ? { since: previous.since, count: Number.isSafeInteger(previous.count) && previous.count > 0 ? previous.count : 1 }
+        : null;
+    const entry = before ? { since: before.since, count: before.count + 1, last: timestamp() } : { since: timestamp(), count: 1, last: timestamp() };
+    shown[key] = entry;
+    const lastOf = (value) => String(typeof value === 'string' ? value : value?.last || value?.since || '');
+    const kept = Object.entries(shown).sort((left, right) => lastOf(right[1]).localeCompare(lastOf(left[1])))
       .slice(0, AgentRulesNoticeLedger.LIMIT);
-    try { if (this.#file) writeJson(this.#file, { schema_version: 1, shown: Object.fromEntries(kept) }); }
-    catch { /* rate limiting is best effort; the notice itself is harmless */ }
-    return true;
+    try { if (this.#file) writeJson(this.#file, { schema_version: 2, shown: Object.fromEntries(kept) }); }
+    catch { /* the count is best effort; the notice itself still shows */ }
+    return entry;
   }
 }
 
 function maybePrintAgentRulesPreflight(args, state = null, hubPath = '') {
   const result = runAgentRulesPreflight(args, { state });
   const message = formatAgentRulesPreflight(result);
-  if (message && new AgentRulesNoticeLedger(hubPath).claim(agentRulesNoticeKey(result, message))) console.log(message);
+  if (message) {
+    const seen = new AgentRulesNoticeLedger(hubPath).record(agentRulesNoticeKey(result, message));
+    console.log(seen.count > 1 ? `${message} (Seen at ${seen.count} session starts since ${String(seen.since).slice(0, 10)}.)` : message);
+  }
   return result;
 }
 
@@ -1871,28 +1885,65 @@ function updateReportSignature({ args, checksum, context }) {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
+// The action-required report still open: { path, cause, since, sessions }, or null. It stays open,
+// and every hook run says so, until a run that is not action-required clears it.
+function normalizedOpenActionReport(value) {
+  if (!value || typeof value !== 'object' || typeof value.path !== 'string' || !value.path) return null;
+  const sessions = Number.isSafeInteger(value.sessions) && value.sessions > 0 ? value.sessions : 1;
+  const since = typeof value.since === 'string' && Number.isFinite(Date.parse(value.since)) ? value.since : '';
+  return { path: value.path, cause: String(value.cause || '').slice(0, 300), since, sessions, signature: String(value.signature || '') };
+}
+
+// The action-required cause in one plain line, without Markdown or paths.
+function actionCause(args, state, context) {
+  const repo = context.repo || {};
+  const warning = repo.error || context.warning || '';
+  const action = actionTldr({ repo, nativePluginCache: context.nativePluginCache || {}, installCheck: context.installCheck || null, warning, state });
+  const firstInstallAction = (context.installCheck?.actions || [])[0];
+  const text = action === 'see Install check below' && firstInstallAction ? `install check: ${firstInstallAction}` : action;
+  return sanitizeOutputMessage(String(text || 'see the update report').replace(/`/g, '')).replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
 function maybeWriteUpdateReport({ args, hubPath, state, checksum, context, writeReport = writeUpdateReportFile, openReport = openUpdateReport }) {
   const classification = classifyUpdateReport(context);
-  if (!shouldConsiderUpdateReport(args, state) || !classification.meaningful) {
-    return { state, reportPath: '' };
-  }
+  if (!shouldConsiderUpdateReport(args, state)) return { state, reportPath: '' };
+  // A run that needs no action clears an open action-required report; the caller saves the state.
+  const cleared = !classification.actionable && Boolean(state.open_action_report);
+  if (cleared) state.open_action_report = null;
+  if (!classification.meaningful) return { state, reportPath: '', ...(cleared ? { stateChanged: true } : {}) };
   const reportContext = {
     cleanup: state.last_update_report_cleanup || {},
     ...context,
     timestamp: context.timestamp || timestamp()
   };
   const signature = updateReportSignature({ args, checksum, context: reportContext });
+  const open = classification.actionable ? normalizedOpenActionReport(state.open_action_report) : null;
   if (!args.openUpdateReport && state.last_update_report_signature === signature) {
-    return { state, reportPath: '' };
+    // The same action-required result as last time: no new file, but the session still hears about it.
+    if (open && open.signature === signature && fs.existsSync(open.path)) {
+      state.open_action_report = { ...open, sessions: open.sessions + 1 };
+      return { state, reportPath: '', actionRequired: state.open_action_report, stateChanged: true };
+    }
+    if (!classification.actionable) return { state, reportPath: '', ...(cleared ? { stateChanged: true } : {}) };
   }
   const markdown = buildUpdateReport({ args, state, checksum, context: reportContext });
   const reportPath = writeReport(markdown);
   state.last_update_report_path = reportPath;
   state.last_update_report_signature = signature;
+  if (classification.actionable) {
+    // A changed action-required result keeps counting from the first one still unresolved.
+    state.open_action_report = {
+      path: reportPath,
+      cause: actionCause(args, state, reportContext),
+      since: open?.since || reportContext.timestamp,
+      sessions: (open?.sessions || 0) + 1,
+      signature
+    };
+  }
   if (args.openUpdateReport || classification.actionable) {
     openReport(reportPath);
   }
-  return { state, reportPath };
+  return { state, reportPath, ...(classification.actionable ? { actionRequired: state.open_action_report } : {}) };
 }
 
 const OUTPUT_PATH_PLACEHOLDER = '<private-path>';
@@ -2029,8 +2080,19 @@ function sanitizeOutputMessage(message) {
   return output + input.slice(copyFrom);
 }
 
-function printUpdateReportLine(args, reportPath) {
-  if (!reportPath) return;
+// One line per hook run: while an action-required report is open it names the cause, how many
+// session starts in a row have seen it and that the owner hears first; otherwise "sync complete" when
+// a report was written. Never a full path: the report is named by its file name.
+function printUpdateReportLine(args, report) {
+  const value = typeof report === 'string' ? { reportPath: report } : (report || {});
+  const open = value.actionRequired;
+  if (open) {
+    const since = open.since ? ` since ${String(open.since).slice(0, 10)}` : '';
+    const count = open.sessions > 1 ? `${open.sessions} session starts in a row${since}` : 'this session start';
+    console.log(`Toolkit: action needed (${count}): ${open.cause || 'see the update report'}. Update report: ${path.basename(open.path)} in the Toolkit update-report folder. Tell the owner before other work.`);
+    return;
+  }
+  if (!value.reportPath) return;
   console.log('Toolkit local bridge sync complete.');
 }
 
@@ -3172,11 +3234,11 @@ class RepositoryAutoUpdateOperation {
         nativePluginCache: nativePluginCacheStatus(args, statusState)
       } });
     statusState = report.state;
-    if (report.reportPath) {
+    if (report.reportPath || report.stateChanged) {
       snapshot = { ...snapshot, state: statusState };
       this.#write(snapshot);
     }
-    printUpdateReportLine(args, report.reportPath);
+    printUpdateReportLine(args, report);
     return this.#hookSafe(error, snapshot, statusState);
   }
 
@@ -3228,7 +3290,7 @@ class RepositoryAutoUpdateOperation {
               nativePluginCache: this.#nativePluginCache
             } });
           failedState = report.state;
-          if (report.reportPath) {
+          if (report.reportPath || report.stateChanged) {
             failedSnapshot = { ...failedSnapshot, state: failedState };
             this.#write(failedSnapshot);
           }
@@ -3237,7 +3299,7 @@ class RepositoryAutoUpdateOperation {
       } finally {
         releaseLock(relock);
       }
-      printUpdateReportLine(args, report.reportPath);
+      printUpdateReportLine(args, report);
       return this.#hookSafe(error, this.#snapshot, report.state);
     }
   }
@@ -3263,7 +3325,7 @@ class RepositoryAutoUpdateOperation {
         };
         report = maybeWriteUpdateReport({ args, hubPath, state: reportState, checksum: reportSnapshot.checksum, context: reportContext });
         if (testHooks.afterFinalReportBuild) testHooks.afterFinalReportBuild({ args, report, reportContext, reportSnapshot });
-        if (report.reportPath) {
+        if (report.reportPath || report.stateChanged) {
           reportSnapshot = { ...reportSnapshot, state: report.state };
           this.#write(reportSnapshot);
         }
@@ -3272,7 +3334,7 @@ class RepositoryAutoUpdateOperation {
     } finally {
       releaseLock(reportLock);
     }
-    printUpdateReportLine(args, report.reportPath);
+    printUpdateReportLine(args, report);
     if (!report.reportPath && !args.hook && this.#updateResult.status === 'up-to-date') {
       console.log('Toolkit already up to date.');
     }
@@ -3327,7 +3389,7 @@ function persistActiveWrite({
       checksum: snapshot.checksum,
       context: buildReportContext(state)
     });
-    if (report.reportPath) {
+    if (report.reportPath || report.stateChanged) {
       snapshot = { ...snapshot, state: report.state };
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
     }
@@ -3366,7 +3428,7 @@ class LocalBridgeRun {
   #cleanupReports(state) {
     const args = this.#args;
     const cleanupResult = args.write
-      ? cleanupUpdateReports({ retentionDays: state.update_report_retention_days })
+      ? cleanupUpdateReports({ retentionDays: state.update_report_retention_days, keepPaths: [state.open_action_report?.path] })
       : (state.last_update_report_cleanup || {
           retention_days: state.update_report_retention_days,
           report_log_directory: updateReportDir(),
@@ -3390,7 +3452,7 @@ class LocalBridgeRun {
       buildReportContext: (state) => this.#reportContext(state) });
     const { checksum } = report.snapshot || snapshot;
     const finalAudit = buildAudit({ args, hubPath, state: report.state, checksum });
-    if (report.reportPath) printUpdateReportLine(args, report.reportPath);
+    if (report.reportPath || report.actionRequired) printUpdateReportLine(args, report);
     else if (!args.hook) console.log('Toolkit local bridge sync complete.');
     return { status: 0, audit: finalAudit };
   }
@@ -3419,13 +3481,13 @@ class LocalBridgeRun {
       writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
       const report = maybeWriteUpdateReport({ args, hubPath, state, checksum, context: this.#reportContext(state) });
       state = report.state;
-      if (report.reportPath) {
+      if (report.reportPath || report.stateChanged) {
         snapshot = { ...snapshot, state };
         writeHubSnapshot({ hubPath, args, ...snapshot }, testHooks);
       }
       const finalAudit = buildAudit({ args, hubPath, state, checksum });
       if (args.audit) console.log(JSON.stringify(finalAudit, null, 2));
-      else if (report.reportPath) printUpdateReportLine(args, report.reportPath);
+      else if (report.reportPath || report.actionRequired) printUpdateReportLine(args, report);
       else if (!args.hook) console.log('Toolkit local bridge sync complete.');
       return { status: 0, audit: finalAudit };
     } finally {
@@ -3513,14 +3575,44 @@ class LocalBridgeRun {
 }
 function run(argv=process.argv.slice(2),testHooks={}){return new LocalBridgeRun(argv,testHooks).execute();}
 
+// Session starts in a row whose bridge hook stopped on an error. Kept beside the hub snapshot
+// directory (like the notice ledger); a hook run that completes removes it. Best effort only.
+function hookSkipFile(argv) {
+  const index = argv.indexOf('--hub');
+  const inline = argv.find((arg) => arg.startsWith('--hub='));
+  const hub = index >= 0 && argv[index + 1] ? argv[index + 1] : inline ? inline.slice('--hub='.length) : defaultHubPath();
+  return path.join(path.dirname(path.resolve(hub)), 'hook-skips.json');
+}
+
+function recordHookSkip(argv, now = timestamp()) {
+  try {
+    const file = hookSkipFile(argv);
+    const previous = readJsonIfExists(file);
+    const count = Number.isSafeInteger(previous?.count) && previous.count > 0 ? previous.count + 1 : 1;
+    const since = count > 1 && typeof previous.since === 'string' ? previous.since : now;
+    writeJson(file, { schema_version: 1, count, since });
+    return { count, since };
+  } catch { return { count: 1, since: now }; }
+}
+
+function clearHookSkips(argv) {
+  try { fs.rmSync(hookSkipFile(argv), { force: true }); } catch { /* best effort */ }
+}
+
+function hookSkipLine(message, skips) {
+  const base = `Toolkit local bridge hook skipped: ${sanitizeOutputMessage(message)}`;
+  return skips.count > 1 ? `${base} (${skips.count} session starts in a row since ${String(skips.since).slice(0, 10)}; tell the owner before other work)` : base;
+}
+
 if (require.main === module) {
   try {
     const result = run();
+    if (process.argv.includes('--hook')) clearHookSkips(process.argv.slice(2));
     process.exit(result.status || 0);
   } catch (error) {
     const reconciliationRequested = process.argv.some((arg) => arg === '--reconcile-staging' || arg.startsWith('--reconcile-staging='));
     if (process.argv.includes('--hook') && !reconciliationRequested) {
-      console.log(`Toolkit local bridge hook skipped: ${sanitizeOutputMessage(error.message)}`);
+      console.log(hookSkipLine(error.message, recordHookSkip(process.argv.slice(2))));
       process.exit(0);
     }
     console.error(`FAIL: ${sanitizeOutputMessage(error.message)}`);
@@ -3546,6 +3638,10 @@ module.exports = {
   updateReportSignature,
   classifyUpdateReport,
   maybeWriteUpdateReport,
+  printUpdateReportLine,
+  hookSkipLine,
+  recordHookSkip,
+  clearHookSkips,
   updateReportDir,
   cleanupUpdateReports,
   sanitizeOutputMessage,

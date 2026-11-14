@@ -68,6 +68,11 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // its default branch as the bound branch and PR base, and the command's full head SHA. Only the
 // plain merge-commit CLI and connector shapes above qualify, from the store's own folder or an
 // explicitly named target from its parent. A name prefix or governance-off state grants nothing.
+// A cloud session (CLAUDE_CODE_REMOTE=true) usually starts in the folder that holds the project's
+// clones, so session start caches no parent binding: there, when no fresh cached binding names the
+// store, the hold reads the clones' merged bindings on demand (the same bounded read session start
+// uses), and an explicitly named store merge from that folder counts as from the parent when the
+// parent's clone is one of its subfolders.
 //
 // The merge card (Claude Code on this computer): a tap in place of the typed line. When a merge that
 // names its repository, number and full head SHA is refused for want of an approval, in a session
@@ -1276,14 +1281,56 @@ function standingReason(reason) {
 // capped by the shared invocation deadline. Successful reads
 // are reused only between those two passes in the same hook invocation; local guards run again.
 class EvidenceStoreMerges {
-  constructor(cwd, { registryOptions = {}, now, environment = process.env, readEvidenceGitHub, evidenceResponses = new Map(), deadline } = {}) {
+  constructor(cwd, { registryOptions = {}, now, environment = process.env, readEvidenceGitHub, refreshEvidenceBinding, evidenceResponses = new Map(), deadline } = {}) {
     this.cwd = cwd;
     this.registryOptions = registryOptions;
     this.now = now || (() => new Date());
     this.environment = environment;
     this.read = readEvidenceGitHub;
-    this.deadline = Math.min(deadline ?? Infinity, globalThis.performance.now() + 4000);
+    this.shared = deadline ?? Infinity;
+    this.deadline = Math.min(this.shared, globalThis.performance.now() + 4000);
     this.responses = evidenceResponses;
+    this.cloud = Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true';
+    this.refreshBinding = refreshEvidenceBinding || ((folder, budget) => governance.refreshMergedBinding(folder, this.registryOptions, { ...budget, environment: this.environment }));
+  }
+
+  // Cloud only: the GitHub repositories this session can read a parent binding from, as
+  // [{ folder, slug }]. The session folder's own repository, or, when the session folder is not
+  // inside a repository (a cloud container clones each project repository into its own subfolder),
+  // up to eight of its immediate subfolders. The store itself is never a candidate.
+  cloudCandidates(target) {
+    if (!this.cloud || !this.cwd) return [];
+    const own = repositoryOf(this.cwd);
+    if (own) return own.toLowerCase() === target ? [] : [{ folder: this.cwd, slug: own.toLowerCase(), child: false }];
+    let names;
+    try { names = fs.readdirSync(this.cwd, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).map(entry => entry.name).sort().slice(0, 8); } catch { return []; }
+    return names.map(name => path.join(this.cwd, name))
+      .filter(folder => { try { return fs.lstatSync(path.join(folder, '.git')).isDirectory(); } catch { return false; } })
+      .map(folder => ({ folder, slug: (repositoryOf(folder) || '').toLowerCase(), child: true }))
+      .filter(entry => entry.slug && entry.slug !== target);
+  }
+
+  // A cloud container starts with no cached parent binding: its session-start refresh reads only
+  // the folder the session starts in, which is usually not a repository. When no fresh cached
+  // binding names this store, read the candidates' merged bindings now, with the same bounded git
+  // read session start and `toolkit governance status` use, then let the usual checks run on the
+  // result. This adds no authority: only a fresh merged binding on a parent's default branch counts.
+  // Whether the target is a store is only known after the read, so any cloud merge without a typed
+  // approval may pay for it: a store merge's read is cached; a merge of a repository no binding
+  // names repeats the read and is then refused as before. It
+  // fetches into the clones' tracking refs and writes the binding cache exactly as session start
+  // does. Clones beyond the folder cap are never read, which refuses rather than allows.
+  refreshCloudParents(target, candidates) {
+    const budgetMs = Math.min(this.shared - 2500, globalThis.performance.now() + 4500) - globalThis.performance.now();
+    if (candidates.length === 0 || !(budgetMs > 0)) return false;
+    const deadline = Date.now() + budgetMs;
+    let refreshed = false;
+    for (const candidate of candidates) {
+      if (Date.now() >= deadline) break;
+      try { refreshed = this.refreshBinding(candidate.folder, { deadline }).refreshed === true || refreshed; } catch { /* the cached read stays */ }
+    }
+    this.deadline = Math.min(this.shared, globalThis.performance.now() + 4000);
+    return refreshed;
   }
 
   request(apiPath) {
@@ -1302,21 +1349,28 @@ class EvidenceStoreMerges {
     // supported standing-merge shape, but not the task preference or the session's origin.
     const target = merge.repository.toLowerCase();
     const here = repositoryOf(this.cwd)?.toLowerCase();
-    let bindings;
-    let ownBinding;
-    try {
+    const readBindings = () => {
       const stateDirectory = governance.userStateDirectory(this.registryOptions);
-      bindings = bindingCache.readAllBindingCaches(stateDirectory).map(({ entry, identity }) =>
+      const all = bindingCache.readAllBindingCaches(stateDirectory).map(({ entry, identity }) =>
         governance.judgeMerged(entry, identity, this.now()));
       // Read the exact target separately: the bounded scan may not include its own binding.
       const remote = validateRemoteIdentity(`https://github.com/${target}.git`);
       const identity = { remote, repository_id: repositoryIdForCanonicalRemote(remote.canonical) };
-      ownBinding = governance.judgeMerged(bindingCache.readBindingCache(identity, stateDirectory), identity, this.now());
-    } catch { return null; }
+      return { all, own: governance.judgeMerged(bindingCache.readBindingCache(identity, stateDirectory), identity, this.now()) };
+    };
     // A naming binding at any freshness supplies recovery text only, never merge authority.
-    const naming = bindings.filter(judged => judged.status === 'enabled'
+    const namingOf = all => all.filter(judged => judged.status === 'enabled'
       && judged.binding.store?.kind === 'github' && judged.binding.store.repository.toLowerCase() === target
       && judged.binding.repository.toLowerCase() !== target);
+    let bindings;
+    let ownBinding;
+    try { ({ all: bindings, own: ownBinding } = readBindings()); } catch { return null; }
+    let naming = namingOf(bindings);
+    const candidates = this.cloudCandidates(target);
+    if (!naming.some(judged => judged.fresh) && this.refreshCloudParents(target, candidates)) {
+      try { ({ all: bindings, own: ownBinding } = readBindings()); } catch { return null; }
+      naming = namingOf(bindings);
+    }
     if (naming.length === 0) return null;
     const failed = (reason, recovery = null) => ({ eligible: false, reason, recovery });
     if (ownBinding.status === 'enabled') {
@@ -1324,7 +1378,13 @@ class EvidenceStoreMerges {
     }
     const sameOwner = naming.filter(judged => judged.binding.repository.split('/')[0].toLowerCase() === target.split('/')[0]);
     if (sameOwner.length === 0) return failed('the parent repository and store do not share an owner');
-    const inFolder = sameOwner.filter(judged => here === target || (merge.explicit && here === judged.binding.repository.toLowerCase()));
+    // In a cloud container the session folder may hold the project's clones side by side: an
+    // explicitly named store merge from there counts as from the parent when the parent's own
+    // clone is one of those subfolders.
+    const cloned = new Set(candidates.filter(entry => entry.child).map(entry => entry.slug));
+    const inFolder = sameOwner.filter(judged => here === target
+      || (merge.explicit && here === judged.binding.repository.toLowerCase())
+      || (merge.explicit && !here && cloned.has(judged.binding.repository.toLowerCase())));
     const bound = inFolder.find(judged => judged.fresh) || inFolder[0] || sameOwner[0];
     const problem = standingProblem(merge, { repository: merge.repository });
     if (problem) {
@@ -1377,7 +1437,7 @@ function readClosureFile(file) {
   return fs.readFileSync(file, 'utf8');
 }
 
-function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, evidenceResponses, closureGuard, transport, deadline, timeoutMs = 30000, deadlineMs = 120000, maxRequests = 500 } = {}) {
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, refreshEvidenceBinding, evidenceResponses, closureGuard, transport, deadline, timeoutMs = 30000, deadlineMs = 120000, maxRequests = 500 } = {}) {
   deadline ??= globalThis.performance.now() + (host === 'claude' ? 7500 : host === 'codex' ? 50000 : deadlineMs);
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
@@ -1419,7 +1479,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   if (merges.length === 0) return null;
   const approvals = new MergeApprovals({ registryOptions, now });
   const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now, host });
-  const evidence = new EvidenceStoreMerges(cwd, { registryOptions, now, environment: environment || {}, readEvidenceGitHub, evidenceResponses, deadline });
+  const evidence = new EvidenceStoreMerges(cwd, { registryOptions, now, environment: environment || {}, readEvidenceGitHub, refreshEvidenceBinding, evidenceResponses, deadline });
   const used = [];
   for (const merge of merges) {
     // Preserve specific authority refusals; closure safety still precedes approval consumption.

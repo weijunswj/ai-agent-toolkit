@@ -22,7 +22,9 @@
 // the skips in a row (skipped_streak, from skipped_since); the first ok or held run after them says
 // "Resumed after N skipped runs since <time>" and clears both, and a failed run keeps them. The
 // session-start line and `toolkit tasks` read these fields, because Task Scheduler shows every skip
-// as success. Exit 0 ok, held, deferred or skipped; 1 failed; 2 bad arguments.
+// as success. Held runs are counted the same way (held_streak, held_since): an ok run clears them
+// and says "Cleared after N held runs"; TASK HEALTH flags three held runs in a row. A programme
+// refresh whose inventory came back incomplete is held, not ok. Exit 0 ok, held, deferred or skipped; 1 failed; 2 bad arguments.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -382,7 +384,12 @@ function refreshStep(job) {
       job.note('Programme refresh queued: another pass is already running.');
       return 'held';
     }
-    job.note(`Programme refresh: done${report && report.inventory && report.inventory.complete === false ? ' (inventory incomplete)' : ''}.`);
+    // An incomplete inventory is not a finished pass: it holds, so held runs in a row are counted.
+    if (report && report.inventory && report.inventory.complete === false) {
+      job.note('Programme refresh held: the inventory is incomplete; the next run reads it again.');
+      return 'held';
+    }
+    job.note('Programme refresh: done.');
     return 'ok';
   }
   if (run.status === 1) {
@@ -488,6 +495,13 @@ function skipStreak(previous) {
   const count = previous && Number.isInteger(previous.skipped_streak) && previous.skipped_streak > 0 ? previous.skipped_streak : 0;
   const since = previous && typeof previous.skipped_since === 'string' && !Number.isNaN(Date.parse(previous.skipped_since)) ? previous.skipped_since : null;
   return count && since ? { skipped_streak: count, skipped_since: since } : {};
+}
+
+// The held runs in a row so far, from the previous record: { held_streak, held_since } or {}.
+function heldStreak(previous) {
+  const count = previous && Number.isInteger(previous.held_streak) && previous.held_streak > 0 ? previous.held_streak : 0;
+  const since = previous && typeof previous.held_since === 'string' && !Number.isNaN(Date.parse(previous.held_since)) ? previous.held_since : null;
+  return count && since ? { held_streak: count, held_since: since } : {};
 }
 
 function deferral(previous, at, key) {
@@ -620,6 +634,7 @@ function runJobLocked(job, options, deps, key) {
     ? { footer_sweep_since: previous.footer_sweep_since }
     : {};
   const streak = skipStreak(previous);
+  const held = heldStreak(previous);
   const repository = require('./toolkit-windows-tasks.cjs').repositoryOf(job.identity());
   const base = { schema: 'toolkit.task-last-run.v1', id: options.taskId, job: options.job, started,
     ...(repository ? { repository } : previous && Object.hasOwn(previous, 'repository') ? { repository: previous.repository } : {}) };
@@ -649,11 +664,16 @@ function runJobLocked(job, options, deps, key) {
   else if (['ok', 'held'].includes(outcome.status) && streak.skipped_streak) {
     job.note(`Resumed after ${streak.skipped_streak} skipped run${streak.skipped_streak === 1 ? '' : 's'} since ${streak.skipped_since.slice(0, 16).replace('T', ' ')} UTC.`);
   }
+  // Held runs are counted like skips: an ok run clears the count; any other result keeps it.
+  let holds = {};
+  if (outcome.status === 'held') holds = { held_streak: (held.held_streak || 0) + 1, held_since: held.held_since || started };
+  else if (outcome.status === 'ok' && held.held_streak) job.note(`Cleared after ${held.held_streak} held run${held.held_streak === 1 ? '' : 's'} since ${held.held_since.slice(0, 16).replace('T', ' ')} UTC.`);
+  else if (outcome.status !== 'ok') holds = held;
   const exit = outcome.status === 'failed' ? 1 : 0;
   const record = { ...base, finished: job.now().toISOString(), exit, status: outcome.status, summary: job.summary, ...carried, ...(outcome.reason ? { reason: outcome.reason } : {}),
     ...Object.fromEntries(['footer_status', 'programme_status', 'footer_reason', 'programme_reason'].filter(key => outcome[key] !== undefined).map(key => [key, outcome[key]])),
     ...(outcome.footer_sweep_since ? { footer_sweep_since: outcome.footer_sweep_since } : {}),
-    ...(outcome.status === 'deferred' ? deferral(previous, started, key) : {}), ...skips };
+    ...(outcome.status === 'deferred' ? deferral(previous, started, key) : {}), ...skips, ...holds };
   try { job.writeRecord(record); }
   finally {
     if (!job.release()) {
