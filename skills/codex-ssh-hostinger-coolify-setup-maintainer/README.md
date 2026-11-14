@@ -18,4 +18,4 @@ Boundary note: For Hostinger VPS plus Coolify deployment setup/maintenance, use 
 
 Codex must inspect and report before changing anything, must not print secrets, must not disable SSH, must not enable UFW or apply restrictive firewall changes until recovery is documented, SSH is allowed first, the current SSH session stays open, and a second SSH session is tested, and must require explicit owner approval for production-sensitive actions.
 
-Daily security checks are read-only reports plus optional owner-configured notification delivery. They must not change packages, restart services, mutate Docker, change firewall rules, resize servers, upgrade paid plans, change billing, or perform remediation. Intrusion checks are signals only and must not be described as proof that no intruder exists.
+Daily security checks are read-only reports plus required owner-configured notification delivery. They must not change packages, restart services, mutate Docker, change firewall rules, resize servers, upgrade paid plans, change billing, or perform remediation. Intrusion checks are signals only and must not be described as proof that no intruder exists.
