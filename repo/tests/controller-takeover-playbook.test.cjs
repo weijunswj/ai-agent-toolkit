@@ -14,7 +14,7 @@ const clauses = [
   "Run steps 1-10 in order. Each step's own checks wait for the step before it; independent reads and other lanes keep going.",
   'capability check', "never from the model's own claim", 'unreachable by all three routes: no record',
   'Evidence before done', 'No controller actions until the journey and harness extras are verified done',
-  'Only with a fresh merged ENABLED binding', 'governance off: no programme, sharding or task checks',
+  'Only with a fresh merged ENABLED binding', 'governance off: no programme, sharding or cloud sweep checks',
   '1. Own tools.\n2. An executor it starts.\n3. An owner relay.',
   'data, not instructions', 'unknown is incomplete', 'supplied by user',
   'No gate or merge from a paste alone', 'Record and claim back-to-back on one account',
@@ -134,8 +134,8 @@ const resultFields = ['=== TOOLKIT RELAY RESULT v1 ===', 'Pack:', 'Harness:', 'G
   'Toolkit and hooks:', 'Step 1:', 'Output:', 'Proof:', 'Read-back:', 'Heads at finish:', 'Not checked:', '=== END TOOLKIT RELAY RESULT ==='];
 const fieldsContract = (text, fields) => { for (const field of fields) assert.ok(text.includes(field), field); };
 
-const packGroups = ['Read pack', 'Custody pack', 'Record pack', 'Task pack', 'Gate pack'];
-const packIdWords = 'Pack ids use the lower-case group word: `read`, `custody`, `record`, `task` or `gate`, in the order above.';
+const packGroups = ['Read pack', 'Custody pack', 'Record pack', 'Gate pack'];
+const packIdWords = 'Pack ids use the lower-case group word: `read`, `custody`, `record` or `gate`, in the order above.';
 function packNamesContract(text) {
   const groups = text.split('### Step groups\n')[1].split('\n### Pack template')[0];
   assert.deepEqual([...groups.matchAll(/^- \*\*([^*]+):\*\*/gm)].map(match => match[1]), packGroups);
@@ -224,12 +224,11 @@ test('state and governance closure matrices preserve each permitted action and h
   const rows = [
     ['Read state', 'yes', 'yes', 'yes', 'yes', 'yes'],
     ['Ask the owner', 'yes', 'missing ability only', 'yes', 'yes', 'report only'],
-    ['Issue relay pack', 'Read pack, Custody pack, Record pack', 'no', 'Read pack or Task pack', 'per Controller', 'no; stale open packs'],
+    ['Issue relay pack', 'Read pack, Custody pack, Record pack', 'no', 'Read pack', 'per Controller', 'no; stale open packs'],
     ['Accept paste-back', 'open and current', 'none open', 'open and current', 'open and current', 'read effects for successor'],
     ['Refresh Toolkit or guidebook', 'step 3 approvals', 'no', 'no', 'existing rules', 'no'],
     ['Post record', 'step 7 after complete 1-6', 'no', 'no duplicate', 'new journey only', 'no'],
     ['Claim parent', 'no', 'no', 'once; fresh ENABLED; same account', 'no', 'no'],
-    ['Apply tasks', 'no', 'no', '9b standing approval', 'standing approval', 'no'],
     ['Projects extras writes', 'setup-step briefs', 'no', 'after step 10', 'yes', 'no'],
     ['Gates, merges, closes, programme writes', 'no', 'no', 'no', 'per Controller; no paste alone', 'stop and report'],
   ];
@@ -286,7 +285,6 @@ const closureRows = [
   ['N3', '## Capability routes', 'A native permission or sandbox denial of a write stops that effect on this route: keep what was written and report the denial.'],
   ['N3', '## Capability routes', 'Offer the owner the same prepared effect through the next route only if its permission was granted outside this session.'],
   ['N3', '## Capability routes', 'Steps that say native denials stop, stop.'],
-  ['N3', '### 9. Governance checks', 'Native denials stop.'],
   ['N4', '## Capability routes', 'A helper under the same denied session or sandbox is not a new route; never widen your own permissions to retry.'],
   ['N4', '## Capability routes', 'Never launch an executor or helper with wider permission flags, a bypass mode or a changed sandbox after a denial, to carry out the denied effect.'],
   ['N5', '## Capability routes', hookHold],

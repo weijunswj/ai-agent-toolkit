@@ -91,7 +91,7 @@ test('controller bootstrap is explicit-only and depends on accepted live governa
 test('T9 explicit takeover routes to the shared journey without replacing dependency proof', () => {
   const skill = readSkill('SKILL.md');
   const playbook = fs.readFileSync(path.join(root, 'repo/docs/agent-playbooks/controller-takeover.md'), 'utf8');
-  for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Task pack', 'Gate pack']) assert.ok(playbook.includes(`**${name}:**`), name);
+  for (const name of ['Read pack', 'Custody pack', 'Record pack', 'Gate pack']) assert.ok(playbook.includes(`**${name}:**`), name);
   assert.doesNotMatch(playbook, /\bR\d+\b/);
   for (const phrase of ['you are taking over as controller for <repo>',
     'repo/docs/agent-playbooks/controller-takeover.md)',

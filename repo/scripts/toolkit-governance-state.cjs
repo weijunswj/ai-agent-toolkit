@@ -403,15 +403,21 @@ function evidenceStoreRepositories(options = {}, now = new Date()) {
   return Object.freeze({ stores });
 }
 
-// The repositories ("owner/name") whose cached merged binding has governance on, sorted. Only a hint
-// for the governance App removal steps; this computer may not know every governed repository.
-function enabledRepositories(options = {}, now = new Date()) {
+// The cached merged bindings with governance on, sorted by repository. Only a hint: this computer may
+// not know every governed repository.
+function enabledBindings(options = {}, now = new Date()) {
   const found = [];
   for (const { identity, entry } of bindingCache.readAllBindingCaches(userStateDirectory(options))) {
     const judged = judgeMerged(entry, identity, now);
-    if (judged.status === 'enabled') found.push(judged.binding.repository);
+    if (judged.status === 'enabled') found.push(judged.binding);
   }
-  return found.sort();
+  return found.sort((a, b) => String(a.repository).localeCompare(String(b.repository)));
+}
+
+// The repositories ("owner/name") whose cached merged binding has governance on, sorted. Only a hint
+// for the governance App removal steps; this computer may not know every governed repository.
+function enabledRepositories(options = {}, now = new Date()) {
+  return enabledBindings(options, now).map(binding => binding.repository);
 }
 
 // A name or shared owner supplies no exemption.
@@ -645,6 +651,7 @@ module.exports = Object.freeze({
   TRACKING_HOST,
   localRepositoryId,
   evidenceStoreRepositories,
+  enabledBindings,
   enabledRepositories,
   evidenceStoreOf,
   GOVERNED_BLOCK,
