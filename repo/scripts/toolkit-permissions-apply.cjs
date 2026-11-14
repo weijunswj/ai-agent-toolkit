@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-// `toolkit permissions --apply`: the owner's own one-command paste of the computer blocks.
+// `toolkit permissions --apply`: the owner's own one-command paste of the permission blocks.
 //
-//   node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex]
+//   node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex] [--repo-root <checkout>]
 //
 // The owner types this in their own terminal. It shows what would change, waits for the typed word
 // `apply`, backs each file up, merges the computer block into it, reads it back and lists what
@@ -17,7 +17,10 @@
 //
 // Claude Code: the user settings file. Missing lines are added; every other key and line is kept;
 // stale Toolkit lines are reported, never removed. Codex: Toolkit's own rules file, replaced whole.
-// Only the computer blocks: the repo block is still pasted by hand.
+// Claude Code also gets the repo block, merged the same way into the governed repository's
+// `.claude/settings.local.json`: the repository of --repo-root, or the current folder. Without a
+// governed repository it says so and merges the computer blocks only; with --repo-root it stops.
+// The Codex repo block holds only prompt rules, so it is still pasted by hand.
 //
 // Exit codes: 0 written or already current, 1 stopped (nothing written), 2 usage.
 
@@ -35,12 +38,13 @@ class ApplyStop extends Error {
 }
 
 function parseApplyArgs(argv) {
-  const options = { hosts: ['claude', 'codex'] };
+  const options = { hosts: ['claude', 'codex'], repoRoot: null };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = argv[index + 1];
     if (arg === '--host' && ['claude', 'codex'].includes(value)) { options.hosts = [value]; index += 1; continue; }
-    throw new ApplyStop(`--apply takes only --host claude|codex, not ${JSON.stringify(arg)}.`, 'see the usage line.', 2);
+    if (arg === '--repo-root' && options.repoRoot === null && typeof value === 'string' && value && !value.startsWith('--')) { options.repoRoot = value; index += 1; continue; }
+    throw new ApplyStop(`--apply takes only --host claude|codex and --repo-root <checkout>, not ${JSON.stringify(arg)}.`, 'see the usage line.', 2);
   }
   return options;
 }
@@ -151,7 +155,7 @@ class PermissionsApply {
 }
 
 function describePlan(plan) {
-  const app = APPS[plan.host];
+  const app = plan.scope === 'repo' ? `${APPS[plan.host]} repo block` : APPS[plan.host];
   if (plan.skip) return [`${app}: skipped. ${plan.skip}`];
   if (plan.current) return [`${app}: ${plan.target} already holds the block. Nothing to change.`];
   if (plan.host === 'claude') {
@@ -185,13 +189,18 @@ async function main(argv, deps = {}) {
     const PermissionBlocks = deps.PermissionBlocks || require('./toolkit-permissions.cjs').PermissionBlocks;
     const blocks = new PermissionBlocks(deps);
     const applier = new PermissionsApply(deps);
-    const plans = options.hosts.map((host) => {
-      const built = blocks.build({ host, scope: 'computer' });
-      const check = file => blocks.check(file, built)[0].stale;
-      return applier.plan(built.blocks[0], check);
+    const notes = [];
+    const plans = options.hosts.flatMap((host) => {
+      // Claude Code also takes the repo block; the Codex repo block holds only prompt rules.
+      const built = blocks.build({ host, scope: host === 'claude' ? 'all' : 'computer', repoRoot: options.repoRoot });
+      for (const stop of built.stops) {
+        if (options.repoRoot) throw new ApplyStop(`${stop.stopped}`, `${stop.next} Nothing was written.`);
+        notes.push(`Repo block: none here (${stop.stopped.replace(/^no repo block: /, '').replace(/\.$/, '')}). Run it from a governed repository, or add --repo-root <checkout>, to add that repository's block too.`);
+      }
+      return built.blocks.map(block => ({ ...applier.plan(block, file => blocks.check(file, { blocks: [block] })[0].stale), scope: block.scope, block }));
     });
 
-    out(`${['Toolkit permissions --apply: merges the computer permission blocks into this computer\'s app settings.', '', ...plans.flatMap(describePlan), ''].join('\n')}\n`);
+    out(`${['Toolkit permissions --apply: merges the Toolkit permission blocks into this computer\'s app settings.', '', ...plans.flatMap(describePlan), ...notes, ''].join('\n')}\n`);
     const pending = plans.filter(plan => !plan.skip && !plan.current);
     if (!pending.length) { out('Nothing to change. Nothing was written.\n'); return 0; }
 
@@ -201,12 +210,12 @@ async function main(argv, deps = {}) {
     for (const plan of pending) {
       const backup = applier.write(plan);
       const count = plan.host === 'claude' ? `added ${plan.missing.allow.length} allow and ${plan.missing.ask.length} ask lines` : `wrote ${ruleKeys(plan.after).length} rules`;
-      out(`${APPS[plan.host]}: ${count} to ${plan.target}. ${backup ? `Backup: ${backup}` : 'New file, so no backup.'}\n`);
+      out(`${APPS[plan.host]}${plan.scope === 'repo' ? ' repo block' : ''}: ${count} to ${plan.target}. ${backup ? `Backup: ${backup}` : 'New file, so no backup.'}\n`);
     }
-    for (const host of options.hosts.filter(name => name === 'claude' && pending.some(plan => plan.host === name))) {
-      const built = blocks.build({ host, scope: 'computer' });
-      const report = blocks.check(built.blocks[0].target, built)[0];
-      if (report.missing.length) throw new ApplyStop(`${built.blocks[0].target} is still missing ${report.missing.length} lines after the write.`, 'restore the backup and paste the block by hand.');
+    // Read back each Claude Code file written, against the block it was given.
+    for (const plan of pending.filter(item => item.host === 'claude')) {
+      const report = blocks.check(plan.target, { blocks: [plan.block] })[0];
+      if (report.missing.length) throw new ApplyStop(`${plan.target} is still missing ${report.missing.length} lines after the write.`, 'restore the backup and paste the block by hand.');
     }
     out('Done. Restart Claude Code and Codex so they read the new lines. To undo, copy the backup file back over the settings file.\n');
     return 0;

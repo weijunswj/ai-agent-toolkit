@@ -346,6 +346,7 @@ class ToolkitGovernanceCli {
     let permissions = null;
     try { permissions = this.#permissionsPrinter(state.root); } catch { permissions = null; }
     lines.push('', ...(permissions ? permissions.split('\n') : ['Repo permission block: could not be printed here; run toolkit permissions.']), '');
+    if (permissions) lines.push(PERMISSIONS_RELAY, '');
     const value = { state: state.state, task_auto_merge: task.value, removed_legacy_answers: task.removed, store: merged?.store.repository || null, required_checks: merged ? [...merged.required_checks] : null };
     if (!switchTo) {
       lines.push('To change task auto-merge, say refresh governance with on or off. Toolkit prepares one binding pull request; it applies only after you merge it.');
@@ -451,6 +452,9 @@ function switchText(mergedText, parsed, switchTo) {
   }
   return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
 }
+
+// Command output can sit folded away in the app, so the agent repeats the block in its reply.
+const PERMISSIONS_RELAY = 'Agents: in your reply, show the owner the permission block above in full (the block itself, the file it goes in and the one-paste owner command), not a summary of it. Offer two ways to add it: the owner pastes that command into their own PowerShell or terminal, or you add the block for them if they ask. Write it only on the owner\'s own ask (safety-gates playbook), and never run the command yourself.';
 
 // The repository's permission block for this app, as toolkit permissions prints it.
 function defaultPermissionsPrinter(root) {
