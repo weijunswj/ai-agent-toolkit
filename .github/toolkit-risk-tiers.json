@@ -58,8 +58,7 @@
     "!repo/scripts/generate-n8n-stack-launcher-flow.cjs",
     "!repo/scripts/generate-setup-question-docs.cjs",
     "!repo/scripts/run-validation-gate.cjs",
-    "!repo/scripts/watch-project-sources.cjs",
-    "!skills/github-program-reconciler/scripts/decision-history.cjs"
+    "!repo/scripts/watch-project-sources.cjs"
   ],
   "normal": [
     "skills/**",

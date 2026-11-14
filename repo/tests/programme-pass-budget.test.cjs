@@ -819,7 +819,7 @@ test('reads: settled children are reused, and the oldest share is read again eac
 
 test('reads: a changed settled child is read live', t => {
   const f = readFixture(t);
-  for (const number of [100, 101, 102, 103]) f.github.addComment(number, { body: `Story ${number}` });
+  for (const number of [100, 101, 102, 103]) f.github.addComment(number, { body: `Story\n---\nStory ${number}` });
   f.run(); f.run(); f.run();
   const live = (result, number) => f.gets(result.calls, new RegExp(`^${APP}/issues/${number}/comments`)) > 0;
   // A new comment moves the update time and the count.

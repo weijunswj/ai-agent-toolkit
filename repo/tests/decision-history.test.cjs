@@ -190,7 +190,8 @@ test('the CLI only reads through gh, resolved to a full path with its window hid
         if (args[1] === 'graphql') return { status: 0, stdout: JSON.stringify({ data: { repository: { issue: { lastEditedAt: '2026-10-20T00:00:00Z', userContentEdits: { totalCount: 3 } } } } }) };
         if (String(args[1]).includes('contents/')) return { status: 0, stdout: JSON.stringify({ content: binding }) };
         const issue = /issues\/(\d+)\/comments/.exec(args.join(' '))?.[1];
-        return { status: 0, stdout: JSON.stringify([[{ id: Number(issue) * 10, user: { login: 'owner' }, created_at: '2026-10-01T00:00:00Z', body: tagged('SCOPE', `Decision on ${issue}`) }]]) };
+        assert.ok(!args.includes('--paginate'), 'pages are read by number, never through next-page links');
+        return { status: 0, stdout: JSON.stringify([{ id: Number(issue) * 10, user: { login: 'owner' }, created_at: '2026-10-01T00:00:00Z', body: tagged('SCOPE', `Decision on ${issue}`) }]) };
       } };
       return require(name);
     },
@@ -225,4 +226,77 @@ test('the G0 history step is routed from the rules, both playbook indexes, the P
   const text = read(playbook);
   assert.ok(text.includes(`--child <n>`) && text.includes('SCOPE-CONFIRMED') && text.includes('never every child'));
   assert.doesNotMatch(text, /github\.com|#\d/);
+});
+
+test('programme.cjs trace <n> runs the decision history for that issue against the checkout origin', () => {
+  const cli = require(path.join(SCRIPTS, 'programme.cjs'));
+  assert.deepEqual(cli.traceArgs(['865']), { issue: 865, passed: [], repoRoot: null });
+  assert.deepEqual(cli.traceArgs(['12', '--full', '--json', '--edits', '--max', '4', '--repo-root', '/repo']), { issue: 12, passed: ['--full', '--json', '--edits', '--max', '4'], repoRoot: '/repo' });
+  for (const bad of [[], ['x'], ['0'], ['12', '--bogus'], ['12', '--max'], ['12', '--max', '--full']]) assert.throws(() => cli.traceArgs(bad), { code: 'USAGE' }, JSON.stringify(bad));
+  let called = null;
+  let printed = '';
+  const code = cli.main(['trace', '865', '--json'], { originUrl: 'https://github.com/acme/app.git', stdout: { write: text => { printed += text; } },
+    decisionHistory: { main: (argv, out) => { called = argv; out.write('history\n'); return 0; } } });
+  assert.equal(code, 0);
+  assert.deepEqual(called, ['--repo', 'acme/app', '--child', '865', '--json']);
+  assert.equal(printed, 'history\n');
+  assert.throws(() => cli.main(['trace', '865'], { originUrl: 'https://example.test/acme/app.git', decisionHistory: { main: () => 0 } }), { code: 'REPO_IDENTITY_MISMATCH' });
+});
+
+test('the decision-trace playbook and governed rules send agents to programme.cjs trace, not a body trace', () => {
+  const root = path.resolve(__dirname, '../..');
+  const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+  const playbook = read('skills/repository-agent-rules/repo-local/docs/agent-playbooks/decision-trace.md');
+  assert.ok(playbook.includes('programme.cjs trace <n>'));
+  assert.doesNotMatch(playbook, /comment trace on each issue body is the ledger/);
+  const rules = read('repo/contracts/agent-rules/toolkit-governed-rules.md');
+  assert.match(rules, /Decision traces:[^\n]*page bodies keep one link, never a trace[^\n]*`programme\.cjs trace <n>`/);
+  assert.doesNotMatch(rules, /issue body is the canonical record/);
+  assert.ok(read('repo/docs/agent-playbooks/controller-takeover.md').includes('`programme.cjs trace <parent>`'));
+  assert.ok(read('skills/controller-bootstrap/SKILL.md').includes('`programme.cjs trace <parent>`'));
+});
+
+// A gh double that answers the binding and comment reads the real trace path makes, and records them.
+function ghDouble(binding, commentsByIssue) {
+  const calls = [];
+  const gh = args => {
+    calls.push(args);
+    assert.ok(!args.includes('--paginate'), 'GitHub next-page links are never followed');
+    const path = args[1];
+    if (/contents\/\.github\/toolkit-programme\.json$/.test(path)) return JSON.stringify({ content: Buffer.from(JSON.stringify(binding)).toString('base64') });
+    const match = /^repos\/acme\/app\/issues\/(\d+)\/comments\?per_page=100&page=(\d+)$/.exec(path);
+    assert.ok(match, `unexpected read ${path}`);
+    const all = commentsByIssue[match[1]] || [];
+    const page = Number(match[2]);
+    return JSON.stringify(all.slice((page - 1) * 100, page * 100));
+  };
+  return { gh, calls };
+}
+
+for (const [label, binding] of [
+  ['version 2 (parents list)', { schema: 'toolkit.programme-binding.v2', repository: 'acme/app', parents: [{ issue: 421, record_prefix: PREFIX }] }],
+  ['version 1 (parent_issue)', { schema: 'toolkit.programme-binding.v1', repository: 'acme/app', parent_issue: 421, record_prefix: PREFIX }],
+]) test(`programme.cjs trace reads the ${label} binding and pages comments by number`, () => {
+  const cli = require(path.join(SCRIPTS, 'programme.cjs'));
+  const childComments = Array.from({ length: 150 }, (_, at) => comment(10000 + at, at === 149 ? tagged('Scope', `${PREFIX}900 latest call`) : `note ${at}`));
+  const { gh, calls } = ghDouble(binding, { 421: [comment(1, tagged('Plan', `${PREFIX}001 programme call`))], 865: childComments });
+  let printed = '';
+  const code = cli.main(['trace', '865', '--json'], { originUrl: 'https://github.com/acme/app.git', gh, stdout: { write: text => { printed += text; } } });
+  assert.equal(code, 0);
+  const history = JSON.parse(printed);
+  assert.equal(history.parent, 421, 'the parent comes from the binding');
+  assert.equal(history.child, 865);
+  assert.equal(history.child_trace.counts.comments, 150, 'both pages of the child are read');
+  assert.ok(history.child_trace.live.some(entry => entry.record === `${PREFIX}900`), 'the record prefix comes from the binding');
+  assert.ok(history.parent_trace.live.some(entry => entry.record === `${PREFIX}001`));
+  const paths = calls.map(args => args[1]);
+  assert.deepEqual(paths.filter(item => item.includes('/865/')), ['repos/acme/app/issues/865/comments?per_page=100&page=1', 'repos/acme/app/issues/865/comments?per_page=100&page=2']);
+  assert.equal(paths.filter(item => item.includes('/421/')).length, 1);
+});
+
+test('a binding with no parent stops with a plain message instead of reading issue NaN', () => {
+  const cli = require(path.join(SCRIPTS, 'programme.cjs'));
+  const { gh, calls } = ghDouble({ schema: 'toolkit.programme-binding.v2', repository: 'acme/app', parents: [] }, {});
+  assert.throws(() => cli.main(['trace', '865'], { originUrl: 'https://github.com/acme/app.git', gh, stdout: { write() {} } }), /names no parent issue; pass --parent <n>/);
+  assert.equal(calls.some(args => /NaN/.test(args.join(' '))), false);
 });

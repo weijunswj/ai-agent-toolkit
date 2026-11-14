@@ -152,7 +152,7 @@ test('a pass that reaches the request cap at minute 20 stops, saves its place an
   // Twelve seconds a request and a cap of 100: the cap comes long before the 50-minute budget.
   const f = fixture(t, { count: 30, slow: 12000 });
   for (const outcome of f.parent().outcomes) {
-    f.github.addComment(outcome.issue, { body: `Note on ${outcome.issue}` });
+    f.github.addComment(outcome.issue, { body: `Note\n---\nNote on ${outcome.issue}` });
     Object.assign(f.github.issues.get(outcome.issue), { title: `Renamed ${outcome.issue}`, updated_at: f.tick() });
   }
   const capped = f.run(['refresh', '--scheduled'], { requestCap: 100 });
