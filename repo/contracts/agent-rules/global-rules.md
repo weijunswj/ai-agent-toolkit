@@ -78,6 +78,32 @@ Shipping bias never overrides approvals, safety gates, privacy, required validat
 
 **Finish authorised work before stopping.** Carry every dependency-ready safe step of authorised work to the actual deliverable in one run where practical (implementation, targeted tests, CI, authorised publication with conflict controls, readback), then report once instead of asking whether to continue. A plan, green test, commit, draft PR, helper return, checkpoint, upload, CI watcher start or progress note is not a finish. A genuine user decision, new scope or spend, missing permission, credential or route, unknown external effect, incomplete CI or pending independent review holds only the steps that depend on it; continue the rest and report the exact hold and next action. This never authorises working around a denial, an unsafe retry, a duplicate writer, an unapproved model launch or claimed background work.
 
+## Development Principles
+
+All development aims at these; repository rules may add, never relax:
+
+- **Tests first:** each escaped bug gets a permanent test before merge, end-to-end first; no silent skips; fixed means the installed build has it.
+- **Fast CI:** shard or cache with coverage unchanged, each file within its time budget; no duplicate runs; free fixes first; tests and CI evolve with the code.
+- **Grouped changes:** one coherent PR per goal; dependency updates grouped, not one PR per package.
+- **Slim:** no dead code or unneeded compatibility (Change-local hygiene); no scraps.
+- **Platform first:** use built-in host features; custom guards only for real risks, each naming the failure it prevents.
+- **Never silently wrong:** fail loudly and heal missed steps; must-hold rules live in hooks, scripts or CI.
+- **Generic:** shared rules and tools name no project, issue or record unless needed.
+- **One source of truth:** every rule or fact has one home; edit the source and regenerate, never a copy or summary.
+- **Lean always-on text:** always-loaded instructions stay short; detail lives in files read at the step that needs it.
+- **Checks over judgement:** prove results with tests, parsers and validators; a model never grades its own output.
+- **Vet outside material:** review and pin third-party code, packages and skills before use; never run upstream code to judge it.
+- **Cheapest capable route:** the cheapest model and effort that does the job; any raise states its reason.
+- **Fix the root cause:** reuse first, then the smallest real fix; any fallback narrow, visible, tested.
+- **Ship, then improve:** basics, ship, observe, improve; finish authorised work before stopping.
+- **Check by risk, not size:** review and testing follow what a change touches.
+- **Private by default:** logs and errors carry no secrets or personal data.
+- **Plain words:** human-facing text uses plain names and describes current behaviour.
+- **Written, not remembered:** progress and decisions live in the branch, PR and records, never only in chat or memory.
+- **Feedback is input, not spec:** check it against current code first.
+- **Readers before writers:** new keys or formats reach readers before anything writes them.
+- **Owner-only deletes:** merged branches are left to the host's auto-delete setting where on; any other branch delete, a closed pull request's included, needs the owner's OK. Permission settings change only on the owner's explicit ask.
+
 ## Engineering Defaults
 
 - **Errors and privacy:** user-facing errors are generic with a support-safe reference that matches the server log entry. Logs hold no prompts, uploads, model outputs, secrets, auth headers or cookies, payment data, private connector data or unneeded personal data.
@@ -104,7 +130,7 @@ New or changed human-facing work (screens, labels, messages, errors, documents, 
 
 ## Validation And Git
 
-Use the repository's documented validation, else the smallest relevant check. Keep tests fast: shard or cache only with coverage unchanged, each file within its time budget. Run targeted tests locally and let CI run the full gate (locally only without CI, or for broad, risky, workflow, generator, package or security-sensitive changes, known CI failures or thin coverage). Check long runs early against their usual time and stop one far over; when done or interrupted, stop the process trees you started. Say why when you skip validation.
+Use the repository's documented validation, else the smallest relevant check. Run targeted tests locally and let CI run the full gate (locally only without CI, or for broad, risky, workflow, generator, package or security-sensitive changes, known CI failures or thin coverage). Check long runs early against their usual time and stop one far over; when done or interrupted, stop the process trees you started. Say why when you skip validation.
 
 After requested edits in a git repository with a remote, unless the user asked for local-only work: validate, commit to a non-default branch, push, and open the PR with a body matching the full base-to-head diff (scope, safety, validation, generated output, user-facing behaviour). Update the body when scope or user-facing behaviour changes, and once before asking to merge. Check CI on the exact PR head (GitHub: `gh pr checks <PR> --watch --interval 60`), no keepalive loops or duplicate watchers, and never claim CI passed without every required check. On failure, read the logs and make one targeted fix; after two failed fixes, stop and report. If CI is inaccessible, say so and give the command. Never push failed validation, live or runtime files, or safety-blocked changes.
 

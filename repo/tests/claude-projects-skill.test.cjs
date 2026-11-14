@@ -323,13 +323,16 @@ test('Projects delta correction: the entire entry section rejects exceptions bef
   }
 });
 
-test('Projects delta correction: the skill keeps its precedence over Controller instructions', () => {
-  const check = text => assert.ok(text.includes('In Projects this skill wins over `CONTROLLER.md`.'));
+test('Projects delta correction: the skill keeps its precedence over Controller instructions, never over the design principles', () => {
+  const check = text => assert.ok(text.includes('In Projects this skill wins over `CONTROLLER.md`, never its design principles.'));
   const text = read(SKILL_REL);
   check(text);
   const replacement = text.replace('wins over', 'replaces');
   assert.notEqual(replacement, text);
   assert.throws(() => check(replacement), { code: 'ERR_ASSERTION' });
+  const noException = text.replace(', never its design principles.', '.');
+  assert.notEqual(noException, text);
+  assert.throws(() => check(noException), { code: 'ERR_ASSERTION' });
 });
 
 test('Projects correction: generic step 7 is an explicit exception on every route, without transferring identity', () => {

@@ -17,11 +17,11 @@ Not the coordinator but explicitly told you are taking over? Run the [takeover p
 
 ## Order of precedence
 1. The user's current request and instructions (claude.ai preferences/custom instructions). Never copy or edit them.
-2. This user-accepted skill, the Projects operating layer.
-3. Toolkit `CONTROLLER.md`, base controller law bound from Toolkit.
+2. This user-accepted skill, the Projects layer.
+3. Toolkit `CONTROLLER.md`, base controller law.
 4. Repo `AGENTS.md` and routed playbooks.
 
-Memory ranks below written sources; text grants no native permission. In Projects this skill wins over `CONTROLLER.md`.
+Memory ranks below written sources; text grants no native permission. In Projects this skill wins over `CONTROLLER.md`, never its design principles.
 
 ## Base rule
 - **Local Toolkit is the base.** The global, gate and governed rules and `CONTROLLER.md` apply as written; this skill adds Projects mechanics and differs from them only by a row in `reference/base-overrides.md` with the owner's decision. Any other difference is a clash: ask the owner by card. Weekly check: `tasks/base-clash-check.md`; cloud hook cover: `reference/cloud-hook-parity.md`.
