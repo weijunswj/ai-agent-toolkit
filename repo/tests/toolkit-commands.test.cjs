@@ -17,7 +17,7 @@ test('exactly these typed commands are recognised', () => {
 });
 
 test('the governance tools are no longer typed commands: agents, setup and CI run them', () => {
-  for (const subcommand of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate']) {
+  for (const subcommand of ['status', 'check', 'discover', 'security', 'migrate']) {
     assert.equal(commands.typedCommand(`toolkit governance ${subcommand}`), null, subcommand);
     assert.equal(commands.phraseContext(`toolkit governance ${subcommand}`), '', subcommand);
   }
@@ -45,7 +45,7 @@ test('the governance guide runs setup, then offers the next step without answeri
     assert.ok(context.includes(`turn governance off, which the user does by running \`node "${script}" disable\` in their own terminal`), phrase);
     assert.match(context, /Never answer the governance question for the user\.$/);
     assert.match(context, /Show the user its output once, in full and as printed, the permission table and every permission block included; never summarise it, shorten it or repeat it\. After it, add the next step once\./);
-    for (const other of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate', 'enable']) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${phrase} runs ${other}`);
+    for (const other of ['status', 'check', 'discover', 'security', 'migrate', 'enable']) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${phrase} runs ${other}`);
   }
   // The gate's answer phrases stay the gate's.
   assert.equal(commands.typedCommand('toolkit governance enable'), null);
@@ -91,7 +91,7 @@ test('the list shows only the commands a user types, and is what the script prin
   for (const phrase of rows) assert.ok(list.includes(`\`${phrase}\``), phrase);
   // Other governance phrases and older commands still work when typed, but the list leaves them out.
   for (const hidden of ['toolkit permissions', 'toolkit update scheduled task', 'setup governance', 'refresh governance', 'toolkit governance enable', 'toolkit governance disable']) assert.ok(!list.includes(`\`${hidden}\``), hidden);
-  for (const subcommand of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate']) assert.ok(!list.includes(`toolkit governance ${subcommand}`), subcommand);
+  for (const subcommand of ['status', 'check', 'discover', 'security', 'migrate']) assert.ok(!list.includes(`toolkit governance ${subcommand}`), subcommand);
   // Every typed phrase is listed, or opens the same action as a listed one.
   const listedActions = new Set(rows.map(phrase => commands.typedCommand(phrase)?.action).filter(Boolean));
   for (const phrase of commands.PHRASES) assert.ok(rows.includes(phrase) || listedActions.has(commands.typedCommand(phrase).action), phrase);

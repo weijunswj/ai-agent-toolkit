@@ -1,5 +1,17 @@
 # Toolkit Changelog
 
+## 3.110.0 (cloud sweep runs queued holder orders)
+
+### Removed
+
+- `toolkit governance reopen` and `toolkit governance catalogue` are gone. Nothing called them: reopen only printed "Nothing changed", and the catalogue was a list nobody read once `toolkit cmd` stopped offering it.
+- The per-state skill catalogue code and its skill tier file go with it, and `toolkit governance check` no longer reports catalogue drift. The skill routing test still checks that every routed skill exists.
+- The governance guard no longer lists `reopen` or `repair` as decision words, since neither is a governance command.
+
+### Added
+
+- The cloud Programme Sweep now runs holder orders the controller queues in the private evidence store (`orders/pending/<order_id>.json`, or `.dry-run.json` for a rehearsal). Each runs at the start of the pass, inside the sweep lease, with `run-order`'s own rules, and is filed under `orders/done/` or `orders/refused/` with its result, so a controller with no shell no longer needs a session on a computer for its board writes. The run summary shows only counts and warns when an order was refused.
+
 ## 3.109.0
 
 ### Changed
