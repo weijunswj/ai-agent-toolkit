@@ -2,10 +2,15 @@
 
 ## 3.94.0
 
-### Added
+### Changed
 
-- **Speed-first CI in `secure-ci-cd`:** a new guide, `templates/cicd/ci-speed.md`, aims CI at the shortest wait from push to a trusted green check without dropping a security gate or a test. It says what to measure first (runs per commit, cancel causes, jobs per run, queue versus run time, peak jobs against the account's concurrent job cap, setup times) and ranks the fixes cheapest first: light runs for title and body edits, concurrency that cancels only stale runs, fewer and fuller jobs, docs-only skips that keep required checks reporting, shard balancing, caching only where setup is slow, and flake hunting. Free fixes come first; a paid plan raising the cap stays the owner's call. The Toolkit's own measured CI is the worked example. The skill and the setup prompt point to it.
-- **New CI check-up rows:** `speed.edits` (an edit reruns heavy jobs), `speed.concurrency` (no group, a pull request group keyed on the commit SHA so stale runs are never cancelled, an edit cancelling the run on the same commit, or pushes sharing one group in a pull request and push workflow, so a burst of merges loses a waiting run) and `speed.slots` (a measured run that starts more than half the account's concurrent jobs). The settings file takes `concurrent_jobs` (default 20, the GitHub Free cap). All three are CHECK rows for the agent to judge.
+- An acknowledged programme finding is now a promise: `ack` needs `--next <step>` and sets a due time (24 hours ahead unless `--due` gives one, at most 72). Past due the finding is new again, counts as waiting on the owner at once, and `attention` prints it as OVERDUE with the promised step. Acknowledgements made before this change fall due 24 hours after their last change.
+- A holder order's dry run now runs every write against an in-memory copy with the real run's content checks (fence, finding state, field limits, document validation), and reports each write as `WOULD_RUN` or `REFUSED` with its code. An order whose `ack` step or `dispose` reason is over 200 characters is refused whole.
+- Every reported finding prints its next step; findings that printed "undefined" now print their code's next action.
+- The board's "Sweep stuck" warning is also a `SWEEP_STUCK` finding, so it reaches the Attention line. Only a sweep pass resolves it.
+- Session-start lines for programme attention, a failing hourly sweep and a failed checkpoint now end with who acts and when.
+- The Projects daily check-in reads device task-health files from the evidence store and adds their flags to `TASK FAILING`.
+- A merge record names the G2 report's evidence-store path and PASS head, and the report is archived before the record. A cloud session that cannot write the state store hands holder orders to a computer session with the order's expiry as the deadline.
 
 ## 3.93.1 (PR edits no longer cancel CI checks; Work queue named at session start)
 

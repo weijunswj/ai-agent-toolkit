@@ -11,7 +11,7 @@
 // string does today; it narrows that word to named writes, a time limit and a trail. It never
 // claims, takes over, creates the parent or moves the state.
 const crypto = require('node:crypto');
-const { ProgrammeError } = require('./programme-state.cjs');
+const { ProgrammeError, ATTENTION_NOTE_LIMIT, DUE_TIME } = require('./programme-state.cjs');
 
 const SCHEMA = 'toolkit.programme-holder-order.v1';
 const MAX_OPS = 60;
@@ -21,7 +21,7 @@ const PREFIX_FLAG = 'prefix';
 // The writes an order may carry, each with its required and optional fields. Never: claim, a
 // takeover, init-parent, migrate-state; refresh needs no order, anyone runs it.
 const OPS = Object.freeze({
-  ack: { required: ['finding'], optional: [] },
+  ack: { required: ['finding', 'next'], optional: ['due'] },
   dispose: { required: ['finding', 'reason'], optional: [] },
   update: { required: ['issue', 'patch'], optional: [] },
   'update-parent': { required: ['patch'], optional: [] },
@@ -59,9 +59,14 @@ function checkOp(op, at) {
   if (op.finding !== undefined && !/^[0-9a-f]{12}$/.test(String(op.finding))) throw refuse(`write ${at + 1} needs the 12-character finding id`);
   if (op.patch !== undefined && (!op.patch || typeof op.patch !== 'object' || Array.isArray(op.patch))) throw refuse(`write ${at + 1} needs its patch as a JSON object`);
   if (op.supersede !== undefined && typeof op.supersede !== 'boolean') throw refuse(`write ${at + 1} needs supersede as true or false`);
-  for (const key of ['reason', 'assignment', 'role', 'record', 'consume', 'verdict', 'at-head']) {
+  for (const key of ['reason', 'assignment', 'role', 'record', 'consume', 'verdict', 'at-head', 'next', 'due']) {
     if (op[key] !== undefined && !text(op[key], 500)) throw refuse(`write ${at + 1} needs ${key} as non-empty text`);
   }
+  // The finding's own limits, so an order is refused whole before a run stops on one write.
+  for (const key of ['next', 'reason']) {
+    if (['ack', 'dispose'].includes(op.command) && op[key] !== undefined && op[key].length > ATTENTION_NOTE_LIMIT) throw refuse(`write ${at + 1} (${op.command}) needs ${key} of at most ${ATTENTION_NOTE_LIMIT} characters`);
+  }
+  if (op.due !== undefined && !DUE_TIME.test(op.due)) throw refuse(`write ${at + 1} (ack) needs due as an ISO 8601 date and time with Z or an offset`);
   if (op.command === 'return' && Boolean(op.record) === Boolean(op.consume)) throw refuse(`write ${at + 1} (return) needs exactly one of record or consume`);
   if (op.command === 'return' && op.consume && !op.verdict) throw refuse(`write ${at + 1} (return consume) needs a verdict`);
   return op;
