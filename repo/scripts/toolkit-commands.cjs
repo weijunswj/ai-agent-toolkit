@@ -4,8 +4,9 @@
 // The Toolkit command list, and the typed commands the prompt hooks recognise.
 //
 // A typed command is the user's whole message and nothing else: `toolkit cmd`, `toolkit command`,
-// `toolkit refresh`, `toolkit setup`, `toolkit show env`, or `toolkit governance` followed by one of
-// the subcommands in GOVERNANCE below. For one of those the prompt hook adds a
+// `toolkit refresh`, `toolkit setup`, `toolkit show env`, `setup governance`, `refresh governance`, or
+// `toolkit governance` followed by one of the subcommands in GOVERNANCE below. The printed list shows
+// only the commands a user would type; the governance subcommands stay recognised without being listed. For one of those the prompt hook adds a
 // short context line that tells the agent what the user asked for, so the agent never has to guess
 // from loose words (an owner once typed "toolkit set env" and got the one-key prompt instead of the
 // editor). Every other request stays plain language, read by the skills.
@@ -17,25 +18,21 @@
 
 const path = require('node:path');
 
-// Each command as the user types it, its group in the printed list, and what it does in one line.
-// All are read as plain language by their skill; the phrases in ACTIONS below are also matched
-// exactly by the prompt hooks. Dropping a command is dropping its one entry here.
+// Each command the printed list shows, as the user types it, its group and what it does in one
+// line. The list holds only commands a user would type themselves; the phrases in ACTIONS below are
+// matched exactly by the prompt hooks whether listed or not, so a command left off the list still
+// works when typed. Dropping a command from the list is dropping its one entry here.
 const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Setup', type: ['toolkit cmd', 'toolkit command'], does: 'Show this list.' }),
   Object.freeze({ group: 'Setup', type: ['setup toolkit', 'toolkit setup'], does: 'Set up Toolkit on this computer, or change your setup answers.' }),
   Object.freeze({ group: 'Setup', type: ['refresh toolkit', 'toolkit refresh'], does: 'Update Toolkit on this computer to the newest version.' }),
-  Object.freeze({ group: 'Keys', type: ['toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
   Object.freeze({ group: 'Setup', type: ['toolkit update scheduled task'], does: "Review and update Toolkit's scheduled tasks on this computer." }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance enable', 'toolkit governance disable'], does: "Turn Toolkit's GitHub governance on or off for this repository. It prepares a pull request for you to merge." }),
-  Object.freeze({ group: 'Governance', type: ['setup governance', 'toolkit setup governance'], does: "Turn governance on here and set the repository's task auto-merge switch in the same pull request; in a governed repository it is refresh governance." }),
-  Object.freeze({ group: 'Governance', type: ['refresh governance', 'toolkit refresh governance'], does: "Show this repository's merged governance answers (task auto-merge switch, evidence store, checks) and its permission block; a change to the switch is one pull request for you to merge." }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance status'], does: "Show whether Toolkit's GitHub governance is on for this repository, and refresh this computer's copy of the merged binding." }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance check'], does: "Check this repository against Toolkit's governance rules and GitHub settings. It changes nothing." }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance discover'], does: 'List what Toolkit finds for a governance setup here (parent issue, evidence store, checks). It changes nothing.' }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance catalogue'], does: 'List the skills offered in this repository under its governance state. It changes nothing.' }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance security'], does: "Turn on GitHub's free dependency and security settings for a governed repository." }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance migrate'], does: 'Get the command that offers protection and security fixes; you run it in your own terminal and answer its question there.' }),
   Object.freeze({ group: 'Setup', type: ['remove toolkit'], does: "Choose this app or every app, list what Toolkit put there, then remove it after your OK." }),
+  Object.freeze({ group: 'Keys', type: ['toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
+  Object.freeze({ group: 'Permissions', type: ['toolkit permissions'], does: 'Print the paste-once permission blocks for this computer and this repository; `toolkit permissions --apply`, typed by you in your own terminal, adds them.' }),
+  Object.freeze({ group: 'Governance', type: ['setup governance', 'toolkit setup governance'], does: "Turn Toolkit's GitHub governance on for this repository and set its task auto-merge switch in the same pull request; in a governed repository it is refresh governance." }),
+  Object.freeze({ group: 'Governance', type: ['refresh governance', 'toolkit refresh governance'], does: "Show this repository's merged governance answers (task auto-merge switch, evidence store, checks) and its permission block; a change to the switch is one pull request for you to merge." }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance disable'], does: "Turn Toolkit's GitHub governance off for this repository. It prepares a pull request for you to merge." }),
   Object.freeze({ group: 'Merge', type: ['merge N'], does: 'Approve the merge of pull request N.' }),
 ]);
 
@@ -58,7 +55,7 @@ Object.freeze(ACTIONS);
 const PHRASES = Object.freeze(Object.keys(ACTIONS));
 
 // The order the groups print in; a group with no commands is left out.
-const GROUPS = Object.freeze(['Setup', 'Keys', 'Governance', 'Merge']);
+const GROUPS = Object.freeze(['Setup', 'Keys', 'Permissions', 'Governance', 'Merge']);
 
 // The command list as one small two-column Markdown table per group.
 function listText() {

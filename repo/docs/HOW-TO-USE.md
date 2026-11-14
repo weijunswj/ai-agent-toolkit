@@ -65,26 +65,23 @@ Detailed plugin verification and bridge command mechanics live in [Toolkit Local
 
 ### Commands You Can Type
 
-Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup`, `toolkit show env` and the `toolkit governance` status, check, discover, catalogue, security and migrate commands are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing; each of those `toolkit governance` commands runs that same subcommand of `toolkit-governance.cjs` and nothing else, except `migrate`, which the agent hands to you to run in your own terminal. A phrase inside a longer message is ordinary text. The one message that carries Toolkit's governance question gets no command line; send the phrase again after answering. Everything else is plain language: ask in your own words.
+Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit refresh`, `toolkit setup`, `toolkit show env`, `setup governance` and `refresh governance` are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing. A phrase inside a longer message is ordinary text. The one message that carries Toolkit's governance question gets no command line; send the phrase again after answering. Everything else is plain language: ask in your own words.
 
 - `toolkit cmd` or `toolkit command`: show this list.
 - `setup toolkit` or `toolkit setup`: set up Toolkit on this computer, or change your setup answers.
 - `refresh toolkit` or `toolkit refresh`: update Toolkit on this computer to the newest version.
 - `toolkit show env`: open your keys in your editor. Values stay on this computer and never pass through chat.
 - `toolkit update scheduled task`: review and update Toolkit's scheduled tasks on this computer.
-- `toolkit governance enable` or `toolkit governance disable`: turn Toolkit's GitHub governance on or off for this repository. It prepares a pull request for you to merge.
+- `toolkit permissions`: print the paste-once permission blocks for this computer and this repository. `toolkit permissions --apply`, typed by you in your own terminal, adds them.
 - `setup governance` or `toolkit setup governance`: turn Toolkit's GitHub governance on for this repository and set its task auto-merge switch in the same pull request. In a governed repository it is `refresh governance`.
 - `refresh governance` or `toolkit refresh governance`: show this repository's merged governance answers (task auto-merge switch, evidence store, checks) and its permission block. Ask to turn task auto-merge on or off and Toolkit prepares one pull request for you to merge; it applies only after your merge.
-- `toolkit governance status`: show whether Toolkit's GitHub governance is on for this repository, and refresh this computer's copy of the merged binding.
-- `toolkit governance check`: check this repository against Toolkit's governance rules and GitHub settings. It changes nothing.
-- `toolkit governance discover`: list what Toolkit finds for a governance setup here (parent issue, evidence store, checks). It changes nothing.
-- `toolkit governance catalogue`: list the skills offered in this repository under its governance state. It changes nothing.
-- `toolkit governance security`: turn on GitHub's free dependency and security settings for a governed repository.
-- `toolkit governance migrate`: get the command that offers protection and security fixes; you run it in your own terminal and answer its question there.
+- `toolkit governance disable`: turn Toolkit's GitHub governance off for this repository. It prepares a pull request for you to merge.
 - `remove toolkit`: choose this app only or every app, see what Toolkit put there, then remove it after your OK, plugin included. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
 - `merge N`: approve the merge of pull request N.
 
 `node repo/scripts/toolkit-commands.cjs` prints the same list.
+
+Toolkit's governance tools (`toolkit governance enable`, `status`, `check`, `discover`, `catalogue`, `security` and `migrate`) still work when typed as a whole message, but the list leaves them out: agents and setup run them, and the commands above cover turning governance on or off, seeing its answers and changing the switch. Each typed `toolkit governance` subcommand runs that same subcommand of `toolkit-governance.cjs` and nothing else, except `migrate`, which the agent hands to you to run in your own terminal.
 
 ### Manual Skill-Folder Copying
 

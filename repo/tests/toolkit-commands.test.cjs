@@ -89,9 +89,16 @@ test('the context line names the phrase and the one action to take', () => {
   assert.match(env, /Never run the one-key `set` prompt/);
 });
 
-test('the list names every typed command and is what the script prints', () => {
+test('the list shows only the commands a user types, and is what the script prints', () => {
   const list = commands.listText();
-  for (const phrase of commands.PHRASES) assert.ok(list.includes(`\`${phrase}\``), phrase);
+  for (const phrase of ['toolkit cmd', 'toolkit command', 'toolkit refresh', 'toolkit setup', 'toolkit show env', 'setup governance', 'toolkit setup governance', 'refresh governance', 'toolkit refresh governance']) {
+    assert.ok(commands.PHRASES.includes(phrase), phrase);
+    assert.ok(list.includes(`\`${phrase}\``), phrase);
+  }
+  for (const phrase of ['toolkit permissions', 'toolkit governance disable', 'toolkit update scheduled task', 'remove toolkit', 'merge N']) assert.ok(list.includes(`\`${phrase}\``), phrase);
+  // Internal or rarely typed governance tools still work when typed, but the list leaves them out.
+  for (const subcommand of ['enable', 'status', 'check', 'discover', 'catalogue', 'security', 'migrate']) assert.ok(!list.includes(`toolkit governance ${subcommand}`), subcommand);
+  for (const subcommand of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate']) assert.equal(commands.typedCommand(`toolkit governance ${subcommand}`)?.subcommand, subcommand);
   const run = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' });
   assert.equal(run.status, 0);
   assert.equal(run.stdout, `${list}\n`);
@@ -104,7 +111,7 @@ test('the list is one two-column table per group, in group order, with every com
   assert.equal(lines.at(-1), 'Anything else: ask in your own words.');
   const headings = lines.filter(line => /^\*\*[^*]+\*\*$/.test(line)).map(line => line.slice(2, -2));
   assert.deepEqual(headings, [...commands.GROUPS]);
-  assert.deepEqual(commands.GROUPS, ['Setup', 'Keys', 'Governance', 'Merge']);
+  assert.deepEqual(commands.GROUPS, ['Setup', 'Keys', 'Permissions', 'Governance', 'Merge']);
   assert.equal(lines.filter(line => line === '| Type this | What it does |').length, commands.GROUPS.length);
   for (const command of commands.COMMANDS) {
     assert.ok(commands.GROUPS.includes(command.group), `${command.type[0]} has no known group`);
