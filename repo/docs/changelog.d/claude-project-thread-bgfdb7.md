@@ -12,3 +12,4 @@ Title: setup stops all scheduled task work
 ### Added
 
 - `toolkit governance check` names a governed repository the cloud sweep skips (state on a public branch, or an evidence store under another owner), with the fix. The sweep's own skip warnings no longer point to a computer sweep.
+- Setup and refresh name each governed repository this computer knows that the cloud sweep skips, one line per reason it can tell offline, and point at `toolkit governance check` for the governance App and the sweep workflow.

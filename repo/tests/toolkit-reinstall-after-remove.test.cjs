@@ -11,7 +11,7 @@ const note = require('../scripts/toolkit-reinstall-note.cjs');
 const { ClaudeHelperDefinitions, ClaudeHelperAgentRenderer, AgentDirectoryInstaller } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { CodexHelperDefinitions } = require('../scripts/toolkit-codex-helper-agents.cjs');
 const { parseTomlDocument } = require('../scripts/codex-delegation-common.cjs');
-const { leftoverTaskLines } = require('../scripts/setup-toolkit-core.cjs');
+const { leftoverTaskLines, cloudSweepSkipLines } = require('../scripts/setup-toolkit-core.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const PLUGIN = 'ai-agent-toolkit@ai-agent-toolkit-local';
@@ -207,6 +207,23 @@ test('setup names leftover Toolkit tasks once and points to remove toolkit, with
   assert.deepEqual(leftoverTaskLines({ home: 'H', platform: 'win32', registry: { readRegistry: () => { throw new Error('locked'); } } }), []);
   assert.deepEqual(leftoverTaskLines({ home: 'H', platform: 'win32', registry: { readRegistry: () => ({ status: 'unreadable' }) } }), []);
   assert.deepEqual(calls, ['H', 'H']);
+});
+
+test('setup names each governed repository the cloud sweep skips, one line per reason, then points at the online check', () => {
+  const bindings = [
+    { repository: 'me/public-state', state: { branch: 'toolkit-state' }, store: null },
+    { repository: 'me/foreign', store: { kind: 'github', repository: 'other/store' } },
+    { repository: 'me/fine', store: { kind: 'github', repository: 'me/store' } },
+  ];
+  const lines = cloudSweepSkipLines({ bindings: () => bindings });
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /^Cloud sweep: me\/public-state is skipped because its programme state is on a public branch\. Move the state to a private evidence store[^]*programme\.cjs refresh/);
+  assert.match(lines[1], /^Cloud sweep: me\/foreign is skipped because its evidence store other\/store belongs to another owner/);
+  assert.match(lines[2], /toolkit governance check in each governed repository/);
+  assert.equal(lines.some(line => line.includes('me/fine')), false);
+  assert.deepEqual(cloudSweepSkipLines({ bindings: () => [bindings[2]] }), [lines[2]]);
+  assert.deepEqual(cloudSweepSkipLines({ bindings: () => [] }), []);
+  assert.deepEqual(cloudSweepSkipLines({ bindings: () => { throw new Error('unreadable'); } }), []);
 });
 
 test('the removal plan and result show the reinstall note as saved, not kept', (t) => {

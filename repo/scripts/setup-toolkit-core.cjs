@@ -4457,7 +4457,7 @@ class ToolkitSetupExecution {
     const installCheck = args.host === 'claude-code' ? runClaudeInstallCheck(args, nativeCache, delegation) : null;
     printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
-    for (const line of leftoverTaskLines()) console.log(line);
+    for (const line of [...leftoverTaskLines(), ...cloudSweepSkipLines()]) console.log(line);
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
     const codexHelpers = args.host === 'claude-code' ? null : runCodexHelperAgents(args);
     notice.addGlobalRules(globalRules).addInstallCheck(installCheck);
@@ -4481,6 +4481,23 @@ function leftoverTaskLines({ home = os.homedir(), platform = process.platform, r
   const left = read.tasks.filter(entry => entry?.host === 'windows' && !entry.adopted);
   if (!left.length) return [];
   return [`Scheduled tasks: ${left.length} old Toolkit task${left.length === 1 ? ' is' : 's are'} still recorded on this computer. The cloud runs these jobs now, and setup no longer changes them. Say "remove toolkit" to list and remove them after your OK.`];
+}
+
+// Record 808: with no computer sweep, setup names each governed repository this computer knows that
+// the cloud sweep skips, one line per repository and reason it can tell offline (public state, an
+// evidence store under another owner). The governance App and the sweep workflow need GitHub, so the
+// last line points at the check that reads them. Cached bindings only; an unreadable cache prints nothing.
+function cloudSweepSkipLines({ bindings = () => require('./toolkit-governance-state.cjs').enabledBindings(), skipReason = (binding) => require('./toolkit-governance-conformance.cjs').cloudSweepSkipReason(binding) } = {}) {
+  let known;
+  try { known = bindings(); } catch { return []; }
+  if (!Array.isArray(known) || !known.length) return [];
+  const lines = [];
+  for (const binding of known) {
+    const reason = skipReason(binding);
+    if (reason) lines.push(`Cloud sweep: ${binding.repository} is skipped because ${reason.why}. ${reason.fix}; until then run programme.cjs refresh there by hand.`);
+  }
+  lines.push('Cloud sweep: to check the governance App and the sweep workflow too, run toolkit governance check in each governed repository.');
+  return lines;
 }
 
 // Toolkit supports Windows computers only. Linux stays a build machine: CI runners set CI=true, and the
@@ -4590,6 +4607,7 @@ module.exports = {
   assertSupportedComputer,
   NewSessionNotice,
   leftoverTaskLines,
+  cloudSweepSkipLines,
   SCHEDULED_TASK_FLAG_RETIRED,
   gitFailureHint,
   nativePluginRebindFailure,

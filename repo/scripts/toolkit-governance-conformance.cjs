@@ -330,15 +330,20 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
 // Record 808: a governed repository the cloud sweep skips gets one line here. Toolkit no longer sweeps
 // from a computer, so nothing else runs its pass: state on a public branch, or an evidence store under
 // another owner (one governance App cannot reach it). Reported as info with the fix; never a drift.
-function cloudSweepReachFindings(state, options = {}) {
-  const binding = (options.mergedBinding || governance.mergedBinding)(state.root, options);
-  if (!binding) return [];
-  const handRun = 'until then nothing sweeps this repository, so run programme.cjs refresh by hand';
-  if (binding.state) return [finding('CLOUD_SWEEP_PUBLIC_STATE', 'info', `The cloud sweep skips this repository: its programme state is on a public branch. Move the state to a private evidence store (say toolkit store); ${handRun}.`)];
+// Setup names the same reasons for every governed repository this computer knows.
+function cloudSweepSkipReason(binding) {
+  if (!binding) return null;
+  if (binding.state) return { code: 'CLOUD_SWEEP_PUBLIC_STATE', why: 'its programme state is on a public branch', fix: 'Move the state to a private evidence store (say toolkit store)' };
   const owner = String(binding.repository || '').split('/')[0].toLowerCase();
   const store = String(binding.store?.repository || '');
-  if (owner && store && store.split('/')[0].toLowerCase() !== owner) return [finding('CLOUD_SWEEP_FOREIGN_STORE', 'info', `The cloud sweep skips this repository: its evidence store ${store} belongs to another owner, so one governance App cannot reach it. Move the store under this repository's owner; ${handRun}.`)];
-  return [];
+  if (owner && store && store.split('/')[0].toLowerCase() !== owner) return { code: 'CLOUD_SWEEP_FOREIGN_STORE', why: `its evidence store ${store} belongs to another owner, so one governance App cannot reach it`, fix: "Move the store under this repository's owner" };
+  return null;
+}
+
+function cloudSweepReachFindings(state, options = {}) {
+  const reason = cloudSweepSkipReason((options.mergedBinding || governance.mergedBinding)(state.root, options));
+  if (!reason) return [];
+  return [finding(reason.code, 'info', `The cloud sweep skips this repository: ${reason.why}. ${reason.fix}; until then nothing sweeps this repository, so run programme.cjs refresh by hand.`)];
 }
 
 // Cloud sweep copies left in a repository whose merged binding turns governance off. The pull request
@@ -383,4 +388,4 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
   });
 }
 
-module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, cloudSweepReachFindings, enforcementStatus, expectedGovernedBlock, unverifiedExit, report, QUESTION_HOOK });
+module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, cloudSweepReachFindings, cloudSweepSkipReason, enforcementStatus, expectedGovernedBlock, unverifiedExit, report, QUESTION_HOOK });
