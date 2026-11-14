@@ -94,7 +94,6 @@ All development aims at these; repository rules may add, never relax:
 - **One source of truth:** every rule or fact has one home; edit the source and regenerate, never a copy or summary.
 - **Lean always-on text:** always-loaded instructions stay short; detail lives in files read at the step that needs it.
 - **Checks over judgement:** prove results with tests, parsers and validators; a model never grades its own output.
-- **Reuse first:** extend an existing task, issue, skill, file or job before adding a new one.
 - **Vet outside material:** review and pin third-party code, packages and skills before use; never run upstream code to judge it.
 - **Cheapest capable route:** the cheapest model and effort that does the job; any raise states its reason.
 
