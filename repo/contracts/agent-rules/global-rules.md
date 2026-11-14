@@ -96,14 +96,14 @@ All development aims at these; repository rules may add, never relax:
 - **Checks over judgement:** prove results with tests, parsers and validators; a model never grades its own output.
 - **Vet outside material:** review and pin third-party code, packages and skills before use; never run upstream code to judge it.
 - **Cheapest capable route:** the cheapest model and effort that does the job; any raise states its reason.
-- **Fix the root cause:** reuse first, then the smallest real fix; no broad fallbacks.
+- **Fix the root cause:** reuse first, then the smallest real fix; any fallback narrow, visible, tested.
 - **Ship, then improve:** basics, ship, observe, improve; finish authorised work before stopping.
 - **Check by risk, not size:** review and testing follow what a change touches.
 - **Private by default:** logs and errors carry no secrets or personal data.
 - **Plain words:** human-facing text uses plain names and describes current behaviour.
 - **Written, not remembered:** progress and decisions live in the branch, PR and records, never only in chat or memory.
 - **Feedback is input, not spec:** check it against current code first.
-- **Readers before writers:** new keys or formats reach every reader before anything writes them.
+- **Readers before writers:** new keys or formats reach readers before anything writes them.
 - **Owner-only deletes:** merged branches are left to the host's auto-delete setting where on; any other branch delete, a closed pull request's included, needs the owner's OK. Permission settings change only on the owner's explicit ask.
 
 ## Engineering Defaults
