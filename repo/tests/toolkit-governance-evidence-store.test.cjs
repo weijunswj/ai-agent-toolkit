@@ -163,7 +163,8 @@ function cloudStoreMerge(t, { cloud = true, refreshed = true, parentStore = 'exa
     },
     refreshEvidenceBinding(folder, budget) {
       refreshes.push(folder);
-      assert.ok(Number.isFinite(budget.deadline));
+      // A whole millisecond: the git read passes what is left of it to spawnSync as a timeout.
+      assert.ok(Number.isInteger(budget.deadline));
       if (!refreshed || folder !== parent) return { refreshed: false, error: 'remote-unreachable' };
       recordMerged(parent, { registryPath: ctx.registryPath, text: binding('example-owner/app', parentStore) });
       return { refreshed: true, error: null };

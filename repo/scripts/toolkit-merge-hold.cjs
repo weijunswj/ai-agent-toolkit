@@ -1338,7 +1338,8 @@ class EvidenceStoreMerges {
   refreshCloudParents(target, candidates) {
     const budgetMs = Math.min(this.shared - 2500, globalThis.performance.now() + 4500) - globalThis.performance.now();
     if (candidates.length === 0 || !(budgetMs > 0)) return false;
-    const deadline = Date.now() + budgetMs;
+    // A whole-millisecond deadline: the git read hands what is left of it to spawnSync as a timeout.
+    const deadline = Date.now() + Math.floor(budgetMs);
     let refreshed = false;
     for (const candidate of candidates) {
       if (Date.now() >= deadline) break;
