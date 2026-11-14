@@ -12,8 +12,24 @@ const SCRIPT = require.resolve('../scripts/toolkit-commands.cjs');
 const wake = (attributes, text) => `<wake reason="mention" current-time="2026-11-11T05:00:00Z"><project id="chan_example" type="project"><thread ts="cmsg_thread"><message trigger="true" ${attributes} id="cmsg_one" sent-at="2026-11-11T05:00:00Z">${text}</message></thread></project></wake>`;
 
 test('exactly these typed commands are recognised', () => {
-  assert.deepEqual([...commands.PHRASES].sort(), ['toolkit cmd', 'toolkit command', 'toolkit governance catalogue', 'toolkit governance check', 'toolkit governance discover',
-    'toolkit governance migrate', 'toolkit governance security', 'toolkit governance status', 'toolkit refresh', 'toolkit setup', 'toolkit show env']);
+  assert.deepEqual([...commands.PHRASES].sort(), ['refresh governance', 'setup governance', 'toolkit cmd', 'toolkit command', 'toolkit governance catalogue', 'toolkit governance check', 'toolkit governance discover',
+    'toolkit governance migrate', 'toolkit governance security', 'toolkit governance status', 'toolkit refresh', 'toolkit refresh governance', 'toolkit setup', 'toolkit setup governance', 'toolkit show env']);
+});
+
+test('setup governance and refresh governance run their own subcommand, and a switch change only prepares a pull request', () => {
+  const script = path.join(__dirname, '..', 'scripts', 'toolkit-governance.cjs');
+  for (const verb of ['setup', 'refresh']) {
+    for (const phrase of [`${verb} governance`, `toolkit ${verb} governance`]) {
+      assert.deepEqual(commands.typedCommand(` ${phrase.toUpperCase()}. `), { phrase, action: 'governance', subcommand: verb });
+      const context = commands.phraseContext(phrase);
+      assert.ok(context.includes(`Run exactly \`node "${script}" ${verb}\``), phrase);
+      assert.ok(context.includes(`\`node "${script}" ${verb} --set on\``) && context.includes(`--set off`), phrase);
+      assert.match(context, /only prepares a pull request for the user to merge/);
+    }
+  }
+  assert.equal(commands.typedCommand('toolkit setup').action, 'setup', 'plain toolkit setup is still machine setup');
+  assert.equal(commands.typedCommand('please refresh governance'), null);
+  assert.ok(/'setup'/.test(fs.readFileSync(script, 'utf8').match(/const COMMANDS = Object\.freeze\(\[[^\]]*\]\)/)[0]));
 });
 
 test('a typed `toolkit governance check` runs the check subcommand, not status or the attention list', () => {

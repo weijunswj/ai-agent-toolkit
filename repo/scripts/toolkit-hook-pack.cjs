@@ -44,8 +44,9 @@ const EVENTS = Object.freeze(['PreToolUse', 'PostToolUse', 'UserPromptSubmit', '
 const STATUSES = Object.freeze(['pass', 'known-bad']);
 const FAULTS = Object.freeze(['deleted-plugin-root', 'remove-file', 'throw-module', 'stall-module', 'bad-json', 'empty-input']);
 const GOVERNANCE = Object.freeze(['enabled', 'disabled', 'undecided', 'none']);
-// App-local task answers in each fixture home; the stale variant ages only its governance binding.
-const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'codex-only', 'claude-code-only', 'unreadable']);
+// The repository's task auto-merge switch in the fixture's merged binding: on, on but read over a day
+// ago, off, not set (the upgrade), not set with older per-app On answers planted, and a version 1 binding.
+const TASK_AUTO_MERGE = Object.freeze(['after-gates', 'after-gates-stale', 'off', 'unset', 'legacy-on', 'v1']);
 // The gate role a Toolkit launcher marks a gate run with (TOOLKIT_GATE_ROLE).
 const GATE_ROLES = Object.freeze(['G0', 'G1', 'G2']);
 const HOST_SESSIONS = Object.freeze(['matching', 'mismatching', 'empty']);
@@ -628,25 +629,27 @@ cp.spawnSync = function(file, args, options) {
     this.env.NODE_OPTIONS = [this.env.NODE_OPTIONS, `--require "${quotedPreload}"`].filter(Boolean).join(' ');
   }
 
-  // A fresh enabled binding plus separate app-local answers in this fixture's home.
+  // A fresh enabled binding carrying the repository's switch (task_prs), in this fixture's home.
+  // legacy-on and v1 also plant the per-app On answers older Toolkit versions saved: they grant nothing.
   #taskAutoMerge(slug, answer, support) {
-    const text = `${JSON.stringify({
+    const v1 = answer === 'v1';
+    const switchValue = answer === 'off' ? 'off' : ['after-gates', 'after-gates-stale'].includes(answer) ? 'after-gates' : null;
+    const text = `${JSON.stringify(v1 ? {
+      schema: 'toolkit.programme-binding.v1', repository: slug, parent_issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX',
+      store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
+      required_checks: ['validate'],
+    } : {
       schema: 'toolkit.programme-binding.v2', repository: slug, governance: 'enabled',
       parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }],
       store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
       required_checks: ['validate'],
+      ...(switchValue ? { task_prs: { auto_merge: switchValue } } : {}),
     }, null, 2)}
 `;
     fs.writeFileSync(path.join(this.work, '.github', 'toolkit-programme.json'), text);
-    const { TaskAutoMergePreferences } = require('./toolkit-task-auto-merge-preferences.cjs');
-    for (const host of ['codex', 'claude-code']) {
-      if (answer.endsWith('-only') && answer !== `${host}-only`) continue;
-      if (answer === 'unreadable') {
-        fs.writeFileSync(path.join(this.home, '.ai-agent-toolkit', 'user-state', `task-auto-merge.${host}.v1.json`), 'malformed');
-        continue;
-      }
-      const owner = new TaskAutoMergePreferences({ home: this.home, host });
-      owner.apply(answer === 'off' ? 'off' : 'after-gates', owner.inspect());
+    if (answer === 'legacy-on' || v1) {
+      for (const host of ['codex', 'claude-code']) fs.writeFileSync(path.join(this.home, '.ai-agent-toolkit', 'user-state', `task-auto-merge.${host}.v1.json`),
+        `${JSON.stringify({ schema: 'toolkit.task-auto-merge-preferences.v1', host, value: 'after-gates' }, null, 2)}\n`);
     }
     // A stale read is one over a day old, as when this computer has not reached GitHub since.
     support.recordMerged(this.work, { home: this.home, text, now: this.#now(answer === 'after-gates-stale' ? 25 * 60 * 60 * 1000 : 0) });

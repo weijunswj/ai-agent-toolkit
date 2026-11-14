@@ -891,8 +891,8 @@
       "status": "pass"
     },
     {
-      "id": "MERGE.machine-on",
-      "source": "app-local task merge preference: current machine answer",
+      "id": "MERGE.repo-switch-on",
+      "source": "per-repo task auto-merge switch: the merged binding sets after-gates",
       "kind": "benign",
       "hosts": ["claude", "codex"],
       "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
@@ -901,38 +901,37 @@
       "status": "pass"
     },
     {
-      "id": "MERGE.machine-unreadable",
-      "source": "app-local task merge preference: current machine answer",
+      "id": "MERGE.repo-switch-v1",
+      "source": "per-repo task auto-merge switch: closure matrix, enabled v1 binding",
       "kind": "benign",
       "hosts": ["claude", "codex"],
       "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "unreadable", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
-      "expect": {"decision": "deny"},
-      "status": "pass"
-    },
-    {
-      "id": "MERGE.machine-codex-only",
-      "source": "app-local task merge preference: the other app file grants nothing",
-      "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}, "host": "claude-code"},
-      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "codex-only", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "v1", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
       "expect": {"decision": "deny"},
       "status": "pass",
-      "expect_by_host": {"codex": {"decision": "allow"}, "claude": {"decision": "deny"}},
-      "note": "Only the app with its own saved On answer may merge. The payload cannot select the other app."
+      "note": "A version 1 binding has no switch, so it never merges without a typed merge, even with older per-app On answers on this computer."
     },
     {
-      "id": "MERGE.machine-claude-code-only",
-      "source": "app-local task merge preference: the other app file grants nothing",
+      "id": "MERGE.repo-switch-unset",
+      "source": "per-repo task auto-merge switch: closure matrix, fresh v2 binding with no task_prs",
       "kind": "benign",
       "hosts": ["claude", "codex"],
-      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}, "host": "codex"},
-      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "claude-code-only", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "unset", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
       "expect": {"decision": "deny"},
       "status": "pass",
-      "expect_by_host": {"codex": {"decision": "deny"}, "claude": {"decision": "allow"}},
-      "note": "Only the app with its own saved On answer may merge. The payload cannot select the other app."
+      "note": "The upgrade row: a governed repository whose binding sets no switch is off until the owner merges one."
+    },
+    {
+      "id": "MERGE.legacy-app-answer-ignored",
+      "source": "per-repo task auto-merge switch: an older per-app On answer grants nothing",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "legacy-on", "commits": [{"files": {"README.md": "fixture\n"}, "message": "base"}, {"files": {"notes.md": "task change\n"}, "message": "task change"}]}, "owner_session": true},
+      "expect": {"decision": "deny"},
+      "status": "pass",
+      "note": "Both older per-app answers say On, but the repository binding sets no switch, so the merge waits for a typed merge."
     },
     {
       "id": "MERGE.machine-on-hook",
@@ -1005,12 +1004,12 @@
       "status": "pass"
     },
     {
-      "id": "MERGE.machine-on-preference",
-      "source": "owner-typed merge exception: protected paths stay manual with machine On",
+      "id": "MERGE.repo-switch-binding-change",
+      "source": "per-repo task auto-merge switch: the pull request that changes the switch itself waits for the owner's typed merge",
       "kind": "benign",
       "hosts": ["claude", "codex"],
       "payload": {"tool_name": "Bash", "tool_input": {"command": "gh pr merge 5 --merge --match-head-commit {head}"}},
-      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {"repo/scripts/toolkit-task-auto-merge-preferences.cjs": "changed\n"}, "message": "task change"}]}, "owner_session": true},
+      "fixture": {"repo": {"governance": "enabled", "branch": "feature", "task_auto_merge": "after-gates", "commits": [{"files": {"README.md": "fixture\n", "repo/contracts/agent-rules/global-rules.md": "rules\n"}, "message": "base"}, {"files": {".github/toolkit-programme.json": "{\"task_prs\": {\"auto_merge\": \"off\"}}\n"}, "message": "task change"}]}, "owner_session": true},
       "expect": {"decision": "deny"},
       "status": "pass"
     },

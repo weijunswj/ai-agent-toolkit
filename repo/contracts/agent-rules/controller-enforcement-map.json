@@ -375,12 +375,17 @@
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Merge trains:**",
-      "covers": "The merge-train script refuses a train that holds anything but member merges at their reviewed heads, clean main catch-up merges and one reproducible bump, and its land check refuses a moved main, a moved member head or a RISKY member with no owner OK. Choosing which PRs ride together and running the merge stay instruction-only.",
+      "covers": "The merge-train script refuses a train that holds anything but member merges at their reviewed heads, clean main catch-up merges and one reproducible bump, and its land check refuses a moved main, a moved member head or a RISKY member with no owner OK. Its eject command takes a boarded member off a pushed train with recorded reverts only, which verify accepts exactly, and land refuses while an ejected pull request still points into the train. Choosing which PRs ride together and running the merge stay instruction-only.",
       "enforced_by": [
         {
           "kind": "script",
           "path": "repo/scripts/toolkit-merge-train.cjs",
           "test": "repo/tests/toolkit-merge-train.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train.cjs",
+          "test": "repo/tests/toolkit-merge-train-eject.test.cjs"
         }
       ]
     },

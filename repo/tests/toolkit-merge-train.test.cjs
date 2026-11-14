@@ -2,69 +2,11 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { spawnSync } = require('node:child_process');
 const train = require('../scripts/toolkit-merge-train.cjs');
-
-const SCRIPT = path.join(__dirname, '..', 'scripts', 'toolkit-merge-train.cjs');
-const BUMP_SCRIPT = [
-  "'use strict';",
-  "const fs = require('node:fs');",
-  "const [level, base] = process.argv.slice(2);",
-  "const [major, minor, patch] = fs.readFileSync('VERSION', 'utf8').trim().split('.').map(Number);",
-  "const next = level === 'major' ? [major + 1, 0, 0] : level === 'minor' ? [major, minor + 1, 0] : [major, minor, patch + 1];",
-  "fs.writeFileSync('VERSION', `${next.join('.')}\\n`);",
-  "fs.writeFileSync('BUMP-BASE', `${base}\\n`);",
-  '',
-].join('\n');
-
-function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-train-test-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const repo = path.join(root, 'repo');
-  fs.mkdirSync(repo);
-  const git = (...args) => {
-    const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
-    if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
-    return result.stdout.trim();
-  };
-  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true }); fs.writeFileSync(path.join(repo, rel), text); };
-  git('init', '--quiet', '--initial-branch=main');
-  git('config', 'user.name', 'Train test');
-  git('config', 'user.email', 'train@example.com');
-  git('config', 'commit.gpgsign', 'false');
-  write('VERSION', '1.0.0\n');
-  write('a.txt', 'one\ntwo\nthree\n');
-  write('scripts/bump.cjs', BUMP_SCRIPT);
-  git('add', '--all');
-  git('commit', '--quiet', '-m', 'base');
-  const main = git('rev-parse', 'HEAD');
-  const branch = (name, files) => {
-    git('switch', '--quiet', '-c', name, main);
-    for (const [rel, text] of Object.entries(files)) write(rel, text);
-    git('add', '--all');
-    git('commit', '--quiet', '-m', `work on ${name}`);
-    const head = git('rev-parse', 'HEAD');
-    git('switch', '--quiet', 'main');
-    return head;
-  };
-  const member = (pr, head, extra = {}) => ({ pr, head, g2: `G2 PASS report for ${pr}`, tier: 'NORMAL', bump: 'patch', uat: 'UAT: NOT_REQUIRED (internal)', links: [`Refs #${pr + 100}`], ...extra });
-  const manifestFile = (value, name = 'manifest.json') => {
-    const file = path.join(root, name);
-    fs.writeFileSync(file, JSON.stringify({ repository: 'example/repo', bump_command: 'node scripts/bump.cjs {level} {base}', ...value }));
-    return file;
-  };
-  const cli = (...args) => spawnSync(process.execPath, [SCRIPT, ...args, '--json'], { cwd: repo, encoding: 'utf8' });
-  return { root, repo, git, write, main, branch, member, manifestFile, cli };
-}
-
-function built(f, members, extra = {}) {
-  const out = path.join(f.root, 'boarded.json');
-  const result = train.run(['build', '--manifest', f.manifestFile({ members, ...extra }), '--branch', 'toolkit-train/one', '--main', 'main', '--out', out], f.repo);
-  return { result, out, boarded: JSON.parse(fs.readFileSync(out, 'utf8')) };
-}
+const { fixture, built } = require('./support/merge-train-fixture.cjs');
 
 test('a clean train boards each member at its reviewed head, bumps once at the highest level and verifies', t => {
   const f = fixture(t);
@@ -262,8 +204,9 @@ test('once the running train lands, catchup merges main into the stacked train, 
   f.git('switch', '--quiet', 'main');
   f.git('merge', '--quiet', '--no-ff', '--no-edit', first.result.head);
   f.git('switch', '--quiet', 'toolkit-train/two');
-  const caught = train.catchup(f.repo, manifest, { main: 'main' });
+  const caught = train.catchup(f.repo, manifest, { main: 'main', out });
   assert.equal(caught.ok, true, JSON.stringify(caught));
+  assert.equal(JSON.parse(fs.readFileSync(out, 'utf8')).stacked, undefined, 'catchup drops the stacked mark');
   assert.equal(caught.level, 'minor');
   assert.ok(caught.bump, 'one bump commit after the catch-up merge');
   assert.equal(f.git('show', `${caught.head}:VERSION`), '1.1.0', 'the bump runs on top of the landed train');
@@ -461,19 +404,20 @@ test('the controller, the changelog guide and the repo map describe the train th
   assert.match(finish, /Never hand-fix a train: a conflict, moved head or failed bump ejects that member to a later train once fixed and re-reviewed; red CI splits it \(`split`\)/);
   assert.match(finish, /RISKY members each need the owner's typed OK/);
   const guide = read('repo/docs/changelog.d/README.md');
-  for (const command of ['build', 'verify', 'body', 'land']) assert.match(guide, new RegExp(`toolkit-merge-train\\.cjs ${command} --manifest`));
+  for (const command of ['build', 'verify', 'body', 'land', 'eject']) assert.match(guide, new RegExp(`toolkit-merge-train\\.cjs ${command} --manifest`));
+  assert.match(guide, /\*\*Eject after boarding:\*\* .*It never rewrites the branch/);
   assert.match(guide, /\*\*Batches:\*\* several merge-ready pull requests land as one merge train that bumps once/);
-  assert.match(read('repo/ARCHITECTURE.md'), /`repo\/scripts\/toolkit-merge-train\.cjs` \(`build`, `catchup`, `verify`, `body`, `split`, `land`; never merges/);
+  assert.match(read('repo/ARCHITECTURE.md'), /`repo\/scripts\/toolkit-merge-train\.cjs` \(`build`, `catchup`, `verify`, `body`, `split`, `land`, `eject`; never merges/);
   // Every controller type learns the train is its own default: CONTROLLER.md routes the merge step
   // to the page that holds it, the Projects skill puts it ahead of the one-PR bump route, and the
   // hourly nudge flags ready PRs that should ride together.
   // A train lane is mechanical: no G0 or G1, the small tier, no conflict fixes, and no G2 of its
   // own unless verify lists files two or more members change.
   const roles = read('repo/controller/roles-and-routes.md');
-  assert.match(roles, /\*\*Merge-train lanes:\*\* running a train \(`toolkit-merge-train\.cjs` build, catchup, verify, body, land\) is mechanical: no G0 or G1, the small tier at medium effort/);
+  assert.match(roles, /\*\*Merge-train lanes:\*\* running a train \(`toolkit-merge-train\.cjs` build, catchup, verify, body, land, eject\) is mechanical: no G0 or G1, the small tier at medium effort/);
   assert.match(roles, /The lane never resolves a conflict or edits code; it ejects the member, whose builder fixes it\./);
   assert.match(roles, /The train needs no G2 of its own once `verify` passes and CI is green; only files `verify` lists under `overlap` \(two or more members change them\) get a short delta review\./);
-  assert.match(roles, /A train holds at most 6 members \(`build` refuses a seventh\); later ready PRs board the next\. A member that fails CI or its delta review is ejected at once and the rest carry on/);
+  assert.match(roles, /A train holds at most 6 members \(`build` refuses a seventh\); later ready PRs board the next\. A member that fails CI or its delta review is ejected at once and the rest carry on: once the train is pushed, `eject` adds revert commits on the same branch and PR, never a rebuild or force-push\./);
   assert.match(roles, /Never edit a train or member PR body while its CI runs; queue the edit until CI ends\./);
   assert.match(roles, /The train's merge ask goes up where `land` and the merge run, never relayed/);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/reference/cloud-hook-parity.md'), /A merge train's merge thread is the train thread: it posts the card for the train PR at its head and runs `land` and the merge itself[\s\S]*Fallback: the owner types `merge PR N at <full SHA> as a merge commit` in the train thread\./);

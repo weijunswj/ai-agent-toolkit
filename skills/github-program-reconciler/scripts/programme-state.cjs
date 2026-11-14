@@ -1017,6 +1017,9 @@ function validateBinding(binding) {
       check(errors, isObject(updates) && Object.keys(updates).every(key => ['auto_merge', 'github_actions'].includes(key)), 'dependency_updates may hold only auto_merge and github_actions');
       check(errors, isObject(updates) && optional(updates.auto_merge, value => ['off', 'patch-minor'].includes(value)) && optional(updates.github_actions, value => ['auto-merge', 'owner'].includes(value)), 'dependency_updates.auto_merge must be off or patch-minor, and github_actions auto-merge or owner');
     }
+    // The repository's one task auto-merge switch; a missing key is off.
+    const taskPrs = binding.task_prs;
+    if (taskPrs !== undefined) check(errors, v2 && isObject(taskPrs) && Object.keys(taskPrs).every(key => key === 'auto_merge') && optional(taskPrs.auto_merge, value => ['off', 'after-gates'].includes(value)), 'task_prs may hold only auto_merge, off or after-gates, in a version 2 binding');
     // The Windows Task Scheduler folder for this repository's no-AI tasks (toolkit-windows-tasks.cjs).
     check(errors, optional(binding.schedule_folder, value => typeof value === 'string' && /^[A-Z0-9][A-Z0-9-]{0,31}$/.test(value)), 'schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
     const projection = binding.projection;
@@ -1035,7 +1038,7 @@ function validateBinding(binding) {
 }
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
-const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
@@ -2570,7 +2573,7 @@ class StateStore {
       }
       // Reading every large document must still leave the settlement reserve; otherwise stop before any write.
       if (large.length && typeof this.transport.left === 'function' && this.transport.left() < large.length + (this.transport.reserve || 0)) {
-        throw Object.assign(new ProgrammeError('PASS_STOPPED', 'Some state documents are too large for one GraphQL read and cannot be read one by one within this pass.'), { reason: 'State documents too large for GraphQL', noWrite: true });
+        throw Object.assign(new ProgrammeError('PASS_STOPPED', 'Some state documents are too large for one GraphQL read and cannot be read one by one within this pass.'), { reason: 'State documents too large for GraphQL', noWrite: true, limit: this.budgetLimit() });
       }
       for (const entry of large) files.set(entry.name, { text: this.readBlob(`${dir}/${entry.name}`, entry.oid), sha: entry.oid });
       return { files, mode: 'graphql' };
@@ -2583,7 +2586,7 @@ class StateStore {
     const others = listing.json.filter(entry => entry?.type === 'file' && !wanted.includes(entry));
     // Reading every blob must still leave the settlement reserve; otherwise stop before any write.
     if (wanted.length && typeof this.transport.left === 'function' && this.transport.left() < wanted.length + (this.transport.reserve || 0)) {
-      throw Object.assign(new ProgrammeError('PASS_STOPPED', 'GitHub refused GraphQL and the state documents cannot be read one by one within this pass.'), { reason: 'GitHub GraphQL unavailable', noWrite: true });
+      throw Object.assign(new ProgrammeError('PASS_STOPPED', 'GitHub refused GraphQL and the state documents cannot be read one by one within this pass.'), { reason: 'GitHub GraphQL unavailable', noWrite: true, limit: this.budgetLimit() });
     }
     const files = new Map(others.map(entry => [entry.name, { text: null, sha: isSha(entry.sha) ? entry.sha : null }]));
     for (const entry of wanted) {
@@ -2591,6 +2594,13 @@ class StateStore {
       files.set(entry.name, { text: this.readBlob(`${dir}/${entry.name}`, entry.sha), sha: entry.sha });
     }
     return { files, mode: 'rest' };
+  }
+
+  // Which request limit stopped a read: GitHub's hourly App limit or the pass's own cap, when the
+  // transport is a sweep's request budget; null otherwise. The sweep action reads it to tell a stop at
+  // the App limit from any other stop.
+  budgetLimit() {
+    return typeof this.transport.bound === 'function' ? this.transport.bound() : null;
   }
 
   // One state file's whole text by its blob id (the Git Data API serves blobs up to 100 MB).
@@ -5698,7 +5708,7 @@ class Reconciler {
       // A queued pass cut in planning keeps its queue: every task it put in order stays to be read.
       if (this.queued && this.sweepOrder && parentRead.doc) this.sweepChange = this.queueChange(parentRead.doc, this.sweepOrder, []);
       return { parent: parentRead.doc, override: Boolean(parentOverride), children: new Map(), findings: [finding], effects: [], resolutions: [], snapshot: this.snapshot,
-        holds: [{ code: 'PASS_STOPPED', target: `#${this.binding.parent_issue}`, detail: findingText(finding) }], complete: false, stopped: true, reason: error.reason || null, noWrite: Boolean(error.noWrite) };
+        holds: [{ code: 'PASS_STOPPED', target: `#${this.binding.parent_issue}`, detail: findingText(finding) }], complete: false, stopped: true, reason: error.reason || null, noWrite: Boolean(error.noWrite), limit: error.limit || null };
     } finally {
       this.planning = false;
       // Kept even when planning was cut, so a slow first pass makes the next one cheaper.
@@ -6977,7 +6987,10 @@ class Reconciler {
         board_time: this.board?.time || null,
         read: sweep?.read.length ?? 0, tasks: sweep?.read || [], why: sweep?.why || {}, left: sweep ? sweep.left.length + sweep.failed.length : (this.sweepOrder?.length ?? plan.parent?.sweep?.queue.length ?? 0),
         changedCursor: sweep?.changedCursor || null,
-        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : null) };
+        noWrite: Boolean(plan.noWrite), reason: this.stopReason || plan.reason || this.pass.stopReason || this.pausedBy || (this.pass.stopped ? 'time limit' : sweep?.left.length ? 'tasks still to check' : null),
+        // The request limit that bound the stop, kept apart from the reason so a stop whose reason
+        // names something else (a document too large for GraphQL) still reads as at the App limit.
+        limit: plan.limit || this.pass.stopReason || (this.pausedBy && this.pausedBy !== 'time limit' ? this.pausedBy : null) };
     }
     return report;
   }
