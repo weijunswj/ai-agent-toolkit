@@ -348,16 +348,16 @@ function cloudSweepReachFindings(state, options = {}) {
   return [finding(reason.code, 'info', `The cloud sweep skips this repository: ${reason.why}. ${reason.fix}; until then nothing sweeps this repository, so run programme.cjs refresh by hand.`)];
 }
 
-// Cloud sweep copies left in a repository whose merged binding turns governance off. The pull request
-// that turns governance off removes them; a copy still here means it was made before that, or by hand.
-// Only a file carrying the Toolkit's rendered-copy marker counts. Report only, never a drift.
+// Toolkit workflow copies left in a repository whose merged binding turns governance off: the sweep
+// and its gate, and the test shards and Shard Timings copies. The pull request that turns governance
+// off removes them; a copy still here means it was made before that, or by hand. Only a file starting
+// with the Toolkit's rendered-copy marker counts, found by that marker wherever the test shards copy's
+// list put it. Report only, never a drift.
 function cloudWorkflowLeftovers(state) {
   const workflows = require('./toolkit-cloud-workflows.cjs');
   if (workflows.isToolkitCheckout(state.root)) return [];
-  const left = workflows.WORKFLOWS.map(row => row.file).filter(file => {
-    try { return workflows.MARKER.test(fs.readFileSync(path.join(state.root, ...file.split('/')), 'utf8').replace(/\r\n/g, '\n')); } catch { return false; }
-  });
-  return left.length ? [finding('CLOUD_WORKFLOW_LEFT_OVER', 'info', `Governance is off, but the cloud sweep copies are still here: ${left.join(', ')}. Remove them in a pull request; they do nothing while governance is off.`)] : [];
+  const left = workflows.markedCopies(state.root).map(row => row.file);
+  return left.length ? [finding('CLOUD_WORKFLOW_LEFT_OVER', 'info', `Governance is off, but the Toolkit's cloud workflow copies are still here: ${left.join(', ')}. Remove them in a pull request; they do nothing for governance while it is off.`)] : [];
 }
 
 // The cloud jobs guide from the contract: each job and the tokens it mints from the governance App.

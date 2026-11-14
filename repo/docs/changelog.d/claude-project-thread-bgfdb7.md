@@ -9,3 +9,8 @@ Title: sharded test workflow copies for governed repositories
 ### Changed
 
 - The installer copies neither workflow into a repository without a usable shard list and says why. A change to the list's shards makes the test shards copy outdated, not edited, and `toolkit governance check` reports the new copies' drift with what it costs the repository.
+- Turning governance off removes the test shards and Shard Timings copies too, and the left-over reports name them. The Toolkit copies are now found by their rendered-copy marker, so the test shards copy is found at whatever name its shard list chose, and a marker for another copy at a path does not count.
+
+### Known limits
+
+- The test shards jobs set up Node only, so a command that needs another runtime or packages it does not have (such as pytest) does not run there yet.

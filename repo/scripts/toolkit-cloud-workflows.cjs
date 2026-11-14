@@ -254,6 +254,47 @@ function shardCopies(target) {
   return { notCopied, rows: [] };
 }
 
+// The Toolkit copy a workflow file is, from its first line: the copy's id when the file starts with the
+// rendered-copy marker of a known copy at a path that copy can have, otherwise null. Every copy has a
+// fixed path except the test shards workflow, which goes to the name its shard list chose, so a copy
+// is found by its marker, not only by the fixed file list.
+const COPY_IDS = new Set([...WORKFLOWS, ...SHARD_WORKFLOWS].map(row => row.id));
+const WORKFLOW_PATH = /^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/;
+function copyIdAt(file, text) {
+  if (!WORKFLOW_PATH.test(file) || typeof text !== 'string') return null;
+  const normalised = normalise(text);
+  const marker = MARKER.exec(normalised);
+  if (!marker || normalised.indexOf(marker[0]) !== 0 || !COPY_IDS.has(marker[1])) return null;
+  const fixed = [...WORKFLOWS, ...SHARD_WORKFLOWS].find(row => row.id === marker[1] && row.id !== 'test-shards');
+  return !fixed || fixed.file === file ? marker[1] : null;
+}
+
+// The workflow files a rules refresh may look at for Toolkit copies: every fixed copy path plus each
+// .yml or .yaml file in .github/workflows (`names` lists that folder; null when it cannot be read).
+function copyCandidates(names) {
+  const fixed = [...WORKFLOWS, ...SHARD_WORKFLOWS].map(row => row.file);
+  const listed = (names || []).filter(name => /^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(name)).map(name => `.github/workflows/${name}`).filter(file => !fixed.includes(file)).sort();
+  return [...fixed, ...listed];
+}
+
+// The Toolkit copies in a checkout, found by marker: [{ id, file, edited }]. Links and other
+// non-regular files are never read.
+function markedCopies(root) {
+  let names = null;
+  try { names = fs.readdirSync(path.join(root, '.github', 'workflows')); } catch { names = null; }
+  const found = [];
+  for (const file of copyCandidates(names)) {
+    const absolute = path.join(root, ...file.split('/'));
+    let text;
+    try { if (!fs.lstatSync(absolute).isFile()) continue; text = fs.readFileSync(absolute, 'utf8'); } catch { continue; }
+    const id = copyIdAt(file, text);
+    if (!id) continue;
+    const normalised = normalise(text), marker = MARKER.exec(normalised);
+    found.push({ id, file, edited: bodyHash(normalised.slice(marker[0].length + 1)) !== marker[3] });
+  }
+  return found;
+}
+
 function apply(result) {
   for (const row of result.rows) {
     if (row.state === 'current') continue;
@@ -292,4 +333,4 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
+module.exports = Object.freeze({ TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, copyCandidates, copyIdAt, markedCopies, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
