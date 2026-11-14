@@ -74,6 +74,46 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // uses), and an explicitly named store merge from that folder counts as from the parent when the
 // parent's clone is one of its subfolders.
 //
+// The merge card (Claude Code on this computer): a tap in place of the typed line. When a merge that
+// names its repository, number and full head SHA is refused for want of an approval, in a session
+// that could record a typed one, the refusal carries one exact AskUserQuestion input: "Merge
+// owner/name#N at <7 characters>?" with the options Merge (its description names the full SHA) and
+// Not now. cardAsked (PreToolUse) notes that exact call for the session's run; cardAnswered
+// (PostToolUse) records an approval for that pull request at that full SHA when the answer the host
+// reports is a plain Merge, and removes any unused approval for it when the answer is Not now.
+// Nothing is refused for the card's sake: a card with other wording, options or keys, a card asked
+// with an answer already filled in, a call that was not noted, a typed "Other" answer, an answer the
+// host marks as idle, follow-up, free text or noted, any field the reader does not know, and a card
+// in a launched, resumed or unmarked session all record nothing. Any exact card counts, whether or
+// not a refusal came first: the user still taps and the SHA is pinned.
+// Shell feeds: the host starts its tool hooks with its own environment, and only a session's shell
+// commands carry TOOLKIT_HOST_SESSION, so a card event whose environment holds that variable at all
+// (matching, different or empty) is a shell feed and is neither noted nor counted. The typed route
+// cannot use this test, because a typed line may arrive where the variable matches. The tripwire
+// below refuses two command-line shapes, read from the text alone (see the refused list). This is
+// a tripwire, not a lock: any command or script that starts a hook script without the variable can
+// still feed a card event in the user's own chat, as it can feed a typed line, so the card adds no
+// route the typed line lacks.
+// It prevents no new failure; the failure it must not cause is an approval the owner did not give,
+// so it trusts only what the typed route already trusts (the session's start marks) plus the host's
+// own report of the tap. Accepted gaps, where the host itself reports an answer nobody tapped:
+//   - a permission answer that carries the answers: an SDK canUseTool callback, a PermissionRequest
+//     hook (from any plugin or from the user's or a project's settings), a permission-prompt tool,
+//     or a launcher's answer. These reach a
+//     session a program started. Such a session counts as user-started only where the typed route
+//     already has that limit: one launched from a Codex shell or from anywhere else without the
+//     host-session variable. A PermissionRequest hook installed on this computer reaches every chat;
+//   - a background session, where a reply sent by a connected client answers the open question;
+//   - a host that auto-resolves the card without marking it (the marked idle path records nothing);
+//   - any shell feed outside the two refused shapes: a wrapper before env (timeout, nice, nohup and
+//     the like), other env option spellings (combined, after an option with an argument, long
+//     prefixes, -C dir), the variable cleared another way (unset or Remove-Item by pattern, exec -c,
+//     Start-Process -UseNewEnvironment), a node one-liner that starts the hook, a saved script, a
+//     session whose shell export failed, and the wrapped feeds the typed route also lists.
+// Never click a card through a UI or computer use. Codex has no card and keeps the typed line. This
+// card records nothing in a cloud session; a Claude Projects thread uses its own posted decision card
+// instead (cloudCard below, read by toolkit-projects-cloud.cjs).
+//
 // What one approval allows: one merge, of that pull request in that repository, within a day, by any
 // session on this computer. A typed SHA pins the head commit; without one the merge must still name
 // the head it expects, so a push after that read makes GitHub refuse it. Connector auto-merge cannot
@@ -103,8 +143,13 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 //     that only ever removes a line), or that sets or clears TOOLKIT_HOST_SESSION (assignment,
 //     unset, env -u, Remove-Item Env:\, export -n, declare +x, SetEnvironmentVariable, or an empty
 //     environment on a host launch through env -i, --ignore-environment or a bare -), names
-//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt
-//     or a SessionStart event.
+//     Toolkit's user-state folder, or the hook scripts together with what would feed them a prompt,
+//     a SessionStart event, or a tool event (PreToolUse, PostToolUse or the card functions) when
+//     any command in the text runs node, bun or deno and the word after it is not --test or test;
+//     also text that names the hook scripts with a command that starts env whose leading words
+//     (dash options or NAME=value) include -i, --ignore-environment or a bare - as its own word. Both read the whole text, so a search, diff
+//     or commit message about the hooks in the same text as a node run, or after such an env, is
+//     refused too; run it as a separate command.
 //
 // Not covered: a fresh `codex exec` launch from a running Codex shell still keeps standing as it
 // did before, wrapped or nested host launches (bash -lc, timeout, Start-Process and the like),
@@ -210,6 +255,9 @@ const STATE_WORDS = /merge-approvals|[\\/]\.ai-agent-toolkit[\\/]user-state\b|\b
 const PROMPT_HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook)/i;
 const HOOK_FEED = /toolkit-(?:merge-hold|governance-hook|codex-helper-hook|codex-session-start)/i;
 const FEED_WORDS = /\brequire\b|\brecordPrompt\b|\bUserPromptSubmit\b|\bimport\b/;
+// Tool-event words count only in a command that runs a script runtime (not its test runner), so a
+// search, a diff or a commit message that names a hook script and an event is not a feed.
+const TOOL_FEED_WORDS = /\bPreToolUse\b|\bPostToolUse\b|\bcardAsked\b|\bcardAnswered\b/;
 const HOST_WORD = /^(?:claude|codex)(?:-code)?(?:\.exe|\.cmd|\.ps1)?$|claude-code|@openai\/codex/i;
 // gh pr merge flags that take a value, so the value is not read as the pull request.
 const VALUE_FLAGS = new Set(['--repo', '-R', '--match-head-commit', '--subject', '-t', '--body', '-b', '--body-file', '-F', '--author-email', '-A']);
@@ -285,6 +333,16 @@ class MergeApprovals {
     const state = this.#read();
     state.approvals = state.approvals.filter(entry => !(entry.pr === approval.pr && entry.at === approval.at && entry.repository === approval.repository));
     this.#write(state);
+  }
+
+  // Removes every unused approval for this repository and number; returns how many went.
+  drop(repository, pr) {
+    const wanted = String(repository).toLowerCase();
+    const state = this.#read();
+    const kept = state.approvals.filter(entry => !(entry.pr === pr && entry.repository.toLowerCase() === wanted));
+    const dropped = state.approvals.length - kept.length;
+    if (dropped > 0) this.#write({ ...state, approvals: kept });
+    return dropped;
   }
 }
 
@@ -728,6 +786,137 @@ function standingProblem(merge, standing) {
   return '';
 }
 
+// ---- merge card -------------------------------------------------------------------------------
+
+const CARD_TOOL = 'AskUserQuestion';
+const CARD_HEADER = 'Merge';
+const CARD_KEYS = Object.freeze(['questions', 'metadata']);
+// After the tap the host hands back what it asked plus what it collected.
+const CARD_ANSWERED_KEYS = Object.freeze([...CARD_KEYS, 'answers', 'annotations']);
+const CARD_RESPONSE_KEYS = Object.freeze(['questions', 'answers', 'annotations']);
+const CARD_QUESTION = new RegExp(`^Merge (${SLUG})#([1-9]\\d{0,5}) at ([0-9a-f]{7})\\?$`);
+const CARD_MERGE = /^Merge it at commit ([0-9a-f]{40})\. Nothing else is approved\.$/;
+const CARD_NOT_NOW = 'Leave it open. Nothing is merged.';
+const CARD_LABELS = Object.freeze(['Merge', 'Not now']);
+const CARD_UNCOUNTED = `Toolkit: no merge approval was recorded from that card. It counts only as Toolkit's exact merge card, in a chat the user started, answered by the user's own plain tap on Merge with no note, typed text or follow-up. ${ASK_TEXT}`;
+
+// The one AskUserQuestion input that is the merge card for a pull request at a full head SHA.
+function mergeCard(repository, pr, sha) {
+  return { questions: [{ question: `Merge ${repository}#${pr} at ${sha.slice(0, 7)}?`, header: CARD_HEADER, multiSelect: false, options: [
+    { label: CARD_LABELS[0], description: `Merge it at commit ${sha}. Nothing else is approved.` },
+    { label: CARD_LABELS[1], description: CARD_NOT_NOW },
+  ] }] };
+}
+
+function plainObject(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+
+// What an exact merge card asks, { repository, pr, sha, question }, or null for anything else: other
+// keys, more questions, other options or wording, or a short and a full SHA that disagree. The
+// host's own `kind: "choice"` on the question is the only addition read as the same card. As asked
+// (PreToolUse) an answers field is another key; `answered` reads the input the host hands back
+// after the tap, which also carries answers and annotations.
+function cardOf(toolInput, answered = false) {
+  if (!plainObject(toolInput)) return null;
+  if (Object.keys(toolInput).some(key => !(answered ? CARD_ANSWERED_KEYS : CARD_KEYS).includes(key))) return null;
+  const questions = toolInput.questions;
+  if (!Array.isArray(questions) || questions.length !== 1) return null;
+  const [question] = questions;
+  if (!plainObject(question) || typeof question.question !== 'string' || question.question.length > MAX_APPROVAL_LINE) return null;
+  if (Object.keys(question).some(key => !['question', 'header', 'multiSelect', 'options', 'kind'].includes(key))) return null;
+  if (question.header !== CARD_HEADER || (question.multiSelect !== undefined && question.multiSelect !== false)) return null;
+  if (Object.hasOwn(question, 'kind') && question.kind !== 'choice') return null;
+  const asked = CARD_QUESTION.exec(question.question);
+  const options = question.options;
+  if (!asked || !Array.isArray(options) || options.length !== 2) return null;
+  if (!options.every((option, index) => plainObject(option)
+    && Object.keys(option).every(key => ['label', 'description'].includes(key)) && option.label === CARD_LABELS[index] && typeof option.description === 'string')) return null;
+  const full = CARD_MERGE.exec(options[0].description);
+  if (!full || options[1].description !== CARD_NOT_NOW || !full[1].startsWith(asked[3])) return null;
+  return { repository: asked[1], pr: Number(asked[2]), sha: full[1], question: question.question };
+}
+
+// What a card's note must say for its answer to count: this card, for this pull request and SHA.
+function cardMark(card) { return `merge-card ${card.repository.toLowerCase()}#${card.pr} ${card.sha}`; }
+
+// Whether this run of the session may take an approval the way a typed line does. A card event
+// also needs an environment with no host-session variable at all: the host's own hook process has
+// none, and a command run from a session's shell has one.
+function cardSession(input, environment, registryOptions, now) {
+  const sessionId = input && typeof input.session_id === 'string' ? input.session_id : null;
+  if ((environment || {})[gate.HOST_SESSION_VARIABLE] !== undefined) return null;
+  // A cloud session runs this hold too, but its taps go through the Projects merge card, never this one.
+  if ((environment || {}).CLAUDE_CODE_REMOTE === 'true') return null;
+  if (!startedByUser(sessionChecks(sessionId, environment || {}, registryOptions, now))) return null;
+  const mark = new gate.SessionEpochs({ registryOptions, now }).get(sessionId);
+  return mark === null ? null : { sessionId, mark };
+}
+
+// PreToolUse: notes an exact merge card shown by a session that may take an approval, so the answer
+// that comes back is known to come from that call. Decides nothing and refuses nothing.
+function cardAsked(input, { environment = process.env, registryOptions = {}, now } = {}) {
+  if (String(input && input.tool_name || '') !== CARD_TOOL) return false;
+  const card = cardOf(input.tool_input);
+  const session = card && cardSession(input, environment, registryOptions, now);
+  if (!session) return false;
+  try {
+    new gate.PickerNotes({ registryOptions, now }).note(input.tool_use_id, { session_id: session.sessionId, session: session.mark, repository: cardMark(card) });
+    return true;
+  } catch { return false; }
+}
+
+// The one label the host reports for the card, or null. Default-deny: every field must be one the
+// reader knows, the answers must hold this question alone, and annotations must be empty.
+function cardLabel(holder, card, keys) {
+  if (!plainObject(holder) || Object.keys(holder).some(key => !keys.includes(key))) return null;
+  if (Object.hasOwn(holder, 'annotations') && !(plainObject(holder.annotations) && Object.keys(holder.annotations).length === 0)) return null;
+  const answers = holder.answers;
+  if (!plainObject(answers) || Object.keys(answers).length !== 1 || !Object.hasOwn(answers, card.question)) return null;
+  return CARD_LABELS.includes(answers[card.question]) ? answers[card.question] : null;
+}
+
+// PostToolUse: the card's answer. null when the call was not a merge card; else { context } for
+// the agent, after recording the approval (Merge) or removing unused ones (Not now).
+function cardAnswered(input, { environment = process.env, registryOptions = {}, now } = {}) {
+  if (String(input && input.tool_name || '') !== CARD_TOOL) return null;
+  // A cloud session says nothing here: its merge approvals come from the Projects merge card.
+  if ((environment || {}).CLAUDE_CODE_REMOTE === 'true') return null;
+  const response = plainObject(input.tool_response) ? input.tool_response : {};
+  const questions = Array.isArray(response.questions) ? response.questions : [];
+  if (!questions.some(question => question && typeof question.question === 'string' && question.question.length <= MAX_APPROVAL_LINE && CARD_QUESTION.test(question.question))) return null;
+  // Taken whatever follows, so one note answers one call.
+  const noted = new gate.PickerNotes({ registryOptions, now }).take(input.tool_use_id);
+  // The card shown must still be exactly Toolkit's: changed options make the tap mean something else.
+  const shown = cardOf({ questions });
+  // Where the host also hands back the input, that must be the same exact card, and any answer it
+  // carries must be the one the host reports.
+  const asked = input.tool_input === undefined ? shown : cardOf(input.tool_input, true);
+  const card = shown && asked && cardMark(shown) === cardMark(asked) ? shown : null;
+  const session = card && cardSession(input, environment, registryOptions, now);
+  let label = card ? cardLabel(response, card, CARD_RESPONSE_KEYS) : null;
+  if (label !== null && plainObject(input.tool_input) && (Object.hasOwn(input.tool_input, 'answers') || Object.hasOwn(input.tool_input, 'annotations'))
+    && cardLabel(input.tool_input, card, CARD_ANSWERED_KEYS) !== label) label = null;
+  // Not now withdraws whatever else the answer carries: it only ever removes.
+  if (label === null && card && plainObject(response.answers) && response.answers[card.question] === CARD_LABELS[1]) label = CARD_LABELS[1];
+  if (!session || noted === null || noted.session_id !== session.sessionId || noted.session !== session.mark || noted.repository !== cardMark(card) || label === null) return { context: CARD_UNCOUNTED };
+  const name = `${card.repository}#${card.pr}`;
+  const approvals = new MergeApprovals({ registryOptions, now });
+  if (label === CARD_LABELS[1]) {
+    approvals.drop(card.repository, card.pr);
+    return { context: `Toolkit: the user tapped Not now for ${name}, so no merge approval is recorded and any unused one for it is removed. Do not merge it, and do not show the card again for this commit unless the user asks.` };
+  }
+  approvals.add([{ repository: card.repository, pr: card.pr, sha: card.sha, session: session.sessionId, card: true }]);
+  return { context: `Toolkit recorded the user's tap on Merge as one approval for ${name} at ${card.sha}. Run the same merge again, naming that head commit. A new head needs a new card.` };
+}
+
+// The merge card offer added to a refusal that asks for the user's approval, when this session
+// could record one and the merge names everything the card needs; '' otherwise.
+function cardOffer(merge, input, { environment, registryOptions, now, host }) {
+  if (host !== 'claude' || !merge || merge.pr === null || typeof merge.repository !== 'string' || !new RegExp(`^${SLUG}$`).test(merge.repository)) return '';
+  if (!cardSession(input, environment, registryOptions, now)) return '';
+  if (!(typeof merge.sha === 'string' && /^[0-9a-f]{40}$/i.test(merge.sha))) return ' To offer the user a tap card instead of typing, retry this merge naming its full 40 character head SHA.';
+  return ` In this chat the user may tap instead of typing: after the merge summary, call ${CARD_TOOL} once with exactly this input, adding no answers field, and retry this merge only after Toolkit says the tap was recorded: ${JSON.stringify(mergeCard(merge.repository, merge.pr, merge.sha.toLowerCase()))}`;
+}
+
 // The refusal for one requested merge, or the approval it uses. `standing` is the owner's standing
 // answer evaluation for this folder's repository, including a safe reason when unavailable.
 function judge(merge, approvals, standing = null, evidence = null) {
@@ -778,7 +967,8 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
   // Search arguments and test files are not hook invocations. Read the common command wrappers
   // and Node's harmless warning flag; Codex's start script writes a mark without any event flag.
   const sessionStartFeed = hookStartFeed(text);
-  if (HOOK_FEED.test(text) && ((PROMPT_HOOK_FEED.test(text) && FEED_WORDS.test(text)) || sessionStartFeed)) return refuse('merge authority must come from the user, so commands that load Toolkit\'s hook scripts or feed them a prompt or session-start event are refused.');
+  if (HOOK_FEED.test(text) && clearedEnvironment(text)) return refuse('merge authority must come from the user, so a command that names Toolkit\'s hook scripts and starts with an empty environment is refused.');
+  if (HOOK_FEED.test(text) && ((PROMPT_HOOK_FEED.test(text) && (FEED_WORDS.test(text) || (TOOL_FEED_WORDS.test(text) && runsScript(text)))) || sessionStartFeed)) return refuse('merge authority must come from the user, so commands that load Toolkit\'s hook scripts or feed them a prompt, tool or session-start event are refused.');
   const parts = segments(text);
   for (const words of parts) {
     let index = 0;
@@ -858,7 +1048,9 @@ function shellRefusal(text, cwd, registryOptions = {}, shell = null) {
 
 // Read command position with shell quoting intact: an env launch inside a message is just text.
 // Reuse the host-launch pattern and common wrappers above, within this command only.
-function clearedHostEnvironment(text) {
+// Whether any command in the text starts env with an emptied environment (-i, --ignore-environment
+// or a bare -), and, when `host` is set, goes on to start Claude or Codex.
+function clearedEnvironment(text, host = false) {
   return shellCommands(text).some(({ words }) => {
     let index = words[0] === '&' ? 1 : 0;
     while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] || '')) index += 1;
@@ -869,8 +1061,20 @@ function clearedHostEnvironment(text) {
       if (['-i', '--ignore-environment', '-'].includes(words[index])) cleared = true;
       index += 1;
     }
-    return cleared && HOST_WORD.test(path.basename(words[index] || ''));
+    return cleared && (!host || HOST_WORD.test(path.basename(words[index] || '')));
   });
+}
+
+function clearedHostEnvironment(text) { return clearedEnvironment(text, true); }
+
+// Whether a command in the text runs a script runtime (node, bun or deno) other than its test runner.
+function runsScript(text) {
+  return shellCommands(text).some(({ words }) => words.some((word, index) => {
+    if (!/^(?:node|node\.exe|bun|bun\.exe|deno|deno\.exe)$/i.test(path.basename(word))) return false;
+    let next = index + 1;
+    while (words[next] === '--no-warnings') next += 1;
+    return !['--test', 'test'].includes(words[next]);
+  }));
 }
 
 function hookStartFeed(text, depth = 0) {
@@ -1276,7 +1480,12 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   for (const merge of merges) {
     // Preserve specific authority refusals; closure safety still precedes approval consumption.
     const { refusal, approval } = judge(merge, approvals, standing, evidence);
-    if (refusal) return cloudCard(refusal, merge, environment);
+    if (refusal) {
+      // A Projects cloud thread gets its posted merge card; elsewhere Claude Code may offer the tap card.
+      const cloud = cloudCard(refusal, merge, environment);
+      if (cloud !== refusal) return cloud;
+      return refusal.deny.endsWith(ASK_TEXT) ? { deny: refusal.deny + cardOffer(merge, input, { environment: environment || {}, registryOptions, now, host }) } : refusal;
+    }
     if (!consume) continue;
     const call = ShellCall.from(input);
     let mergeTexts = [];
@@ -1381,5 +1590,5 @@ if (require.main === module) process.exitCode = main();
 
 module.exports = Object.freeze({
   APPROVALS_BASENAME, APPROVALS_SCHEMA, CHECK_FAILED, CONNECTOR_MERGE, MAX_AGE_MS, MAX_COMMAND_CHARS, MergeApprovals, MergeHoldError,
-  approvalsIn, check, connectorMergeArgs, decide, main, mayMerge, mergeWording, recordPrompt, shellMerges, standingAnswer,
+  approvalsIn, cardAnswered, cardAsked, cardOf, check, connectorMergeArgs, decide, main, mergeCard, mayMerge, mergeWording, recordPrompt, shellMerges, standingAnswer,
 });
