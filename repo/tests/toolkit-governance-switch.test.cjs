@@ -78,7 +78,7 @@ test('refresh governance shows the merged answers, and keeps the old per-app ans
   assert.match(result.out, /Evidence store: toolkit-test-fixture\/store/);
   assert.match(result.out, /Required checks: validate/);
   assert.match(result.out, /Repo block for Claude Code/, 'the permission block is printed again');
-  assert.match(result.out, /Agents: in your reply, show the owner the permission block above in full .*not a summary of it\. Offer two ways to add it: the owner pastes that command .*or you add the block for them if they ask\. Write it only on the owner's own ask/, 'the agent is told to repeat the block, since command output can be folded away');
+  assert.match(result.out, /Agents: in your reply, show the owner the permission table and block above in full .*not a summary of it\. Offer two ways to add it: the owner pastes that command .*or you add the block for them if they ask\. Write it only on the owner's own ask/, 'the agent is told to repeat the block, since command output can be folded away');
   assert.match(result.out, /say refresh governance with on or off.*applies only after you merge it/);
   assert.equal(present().length, 2, 'no switch read back yet, so the old answers stay');
   assert.equal(fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8'), before, 'refresh never writes the binding');

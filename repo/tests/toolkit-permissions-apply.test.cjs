@@ -346,3 +346,18 @@ test('the printed shortcut is one pasteable command that carries --repo-root whe
   assert.ok(text.includes(`\n    node "${TK}/repo/scripts/toolkit-permissions.cjs" --apply --repo-root "${repo.root}"\n`), text);
   assert.doesNotMatch(text, /no agent writes/);
 });
+
+test('the print opens with a plain table of every Toolkit command a block allows, and every allowed row has its explanation', t => {
+  const grouped = permissions.TABLE_GROUPS.flatMap(group => group.ids);
+  for (const row of permissions.ROWS) assert.ok(grouped.includes(row.id), `${row.id} has a table row`);
+  assert.equal(new Set(grouped).size, grouped.length, 'each row is explained once');
+  const pc = computer(t, { codex: false });
+  const repo = governedRepo(t, pc);
+  const out = [];
+  assert.equal(permissions.main(['--repo-root', repo.root], { ...repo.deps, stdout: text => out.push(text) }), 0);
+  const text = out.join('');
+  assert.ok(text.indexOf('| Command | Lets the agent | Still asks for | Still checked by |') < text.indexOf('== Computer block'), 'the table comes before the blocks');
+  assert.match(text, /\| `gh pr comment` \(this repository\) \| Comment on this repository's pull requests\. \| `--delete-last` \|/);
+  assert.match(text, /\| Evidence store \(`toolkit-store\.cjs`\) \|/);
+  assert.doesNotMatch(text, /Windows tasks/, 'Windows-only rows are left out on Linux');
+});

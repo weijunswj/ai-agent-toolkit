@@ -454,7 +454,7 @@ function switchText(mergedText, parsed, switchTo) {
 }
 
 // Command output can sit folded away in the app, so the agent repeats the block in its reply.
-const PERMISSIONS_RELAY = 'Agents: in your reply, show the owner the permission block above in full (the block itself, the file it goes in and the one-paste owner command), not a summary of it. Offer two ways to add it: the owner pastes that command into their own PowerShell or terminal, or you add the block for them if they ask. Write it only on the owner\'s own ask (safety-gates playbook), and never run the command yourself.';
+const PERMISSIONS_RELAY = 'Agents: in your reply, show the owner the permission table and block above in full (the table, the block itself, the file it goes in and the one-paste owner command), not a summary of it. Offer two ways to add it: the owner pastes that command into their own PowerShell or terminal, or you add the block for them if they ask. Write it only on the owner\'s own ask (safety-gates playbook), and never run the command yourself.';
 
 // The repository's permission block for this app, as toolkit permissions prints it.
 function defaultPermissionsPrinter(root) {
