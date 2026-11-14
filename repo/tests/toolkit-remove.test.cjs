@@ -149,6 +149,22 @@ for (const row of MATRIX) test(`removal matrix: ${row.row}`, t => {
   }
 });
 
+// A changed task with no marker may no longer be Toolkit's at all, so --include cannot name it and the
+// plan does not offer it; a changed task that still carries the marker can still be named.
+for (const row of MATRIX.filter(item => item.kind === 'changed' && !item.include)) test(`removal matrix: ${row.row}, named with --include`, t => {
+  const w = world(t), e = enrol(t, w, 'widget');
+  row.arrange(w, e);
+  const text = removal.describePlan(owner(w).plan()).join('\n');
+  const marked = row.row === 'changed by hand';
+  assert.equal(text.includes(`Add --include ${e.entry.id}`), marked);
+  if (marked) assert.equal(owner(w, { include: [e.entry.id] }).plan().tasks.find(task => task.id === e.entry.id).action, 'remove');
+  else {
+    assert.match(text, /Delete it in Task Scheduler yourself/);
+    assert.throws(() => owner(w, { include: [e.entry.id] }).plan(), /no longer carries Toolkit's marker .* Delete it in Task Scheduler/);
+    assert.ok(e.live(), 'the task is untouched');
+  }
+});
+
 test('a record with no task behind it is cleared, and a task that is not Toolkit\'s is never listed or touched', t => {
   const w = world(t), e = enrol(t, w, 'widget');
   const folder = e.entry.folder;
