@@ -74,10 +74,10 @@ test('shard timings workflow: the App token is minted for this repository with t
   assert.equal((text.match(/secrets\.TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY/g) || []).length, 1, 'only the mint step reads the key');
 });
 
-test('shard timings workflow: without the App it only reports; with it it opens at most one pull request', () => {
+test('shard timings workflow: without the App it reports and fails when a refresh is due; with it it opens at most one pull request', () => {
   const refresh = step('Refresh the shard timings');
   assert.match(refresh, /GH_TOKEN: \$\{\{ github\.token \}\}/, 'reads use the built-in token');
-  assert.match(refresh, /if \[ -z "\$TOOLKIT_SHARD_PUBLISH_TOKEN" \]; then[\s\S]*node repo\/scripts\/refresh-shard-timings\.cjs\r?\n[\s\S]*exit \$\?/);
+  assert.match(refresh, /if \[ -z "\$TOOLKIT_SHARD_PUBLISH_TOKEN" \]; then[\s\S]*node repo\/scripts\/refresh-shard-timings\.cjs --fail-if-due\r?\n[\s\S]*exit \$\?/, 'without the App a due refresh fails the run');
   assert.match(refresh, /node repo\/scripts\/refresh-shard-timings\.cjs --open-pr\s*$/);
   assert.doesNotMatch(refresh, /echo "\$TOOLKIT_SHARD_PUBLISH_TOKEN"|set -x/, 'the token is never printed');
 });
