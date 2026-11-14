@@ -163,7 +163,8 @@ function cloudStoreMerge(t, { cloud = true, refreshed = true, parentStore = 'exa
     },
     refreshEvidenceBinding(folder, budget) {
       refreshes.push(folder);
-      assert.ok(Number.isFinite(budget.deadline));
+      // A whole millisecond: the git read passes what is left of it to spawnSync as a timeout.
+      assert.ok(Number.isInteger(budget.deadline));
       if (!refreshed || folder !== parent) return { refreshed: false, error: 'remote-unreachable' };
       recordMerged(parent, { registryPath: ctx.registryPath, text: binding('example-owner/app', parentStore) });
       return { refreshed: true, error: null };
@@ -186,6 +187,56 @@ test('cloud: a store merge from the parent clone itself reads that binding on de
   const { hold, input, options, refreshes, parent } = cloudStoreMerge(t);
   assert.equal(hold.decide({ ...input, cwd: parent }, options), null);
   assert.deepEqual(refreshes, [parent]);
+});
+
+// A cloud thread that archives evidence usually works inside the store's own clone, so the session
+// folder is the store itself: its sibling clones in the shared folder are the parent candidates.
+test('cloud: a store merge from the store clone itself reads the sibling parent binding on demand', t => {
+  const { ctx, hold, input, options, refreshes, parent } = cloudStoreMerge(t);
+  const store = path.join(ctx.root, 'evidence');
+  assert.equal(hold.decide({ ...input, cwd: store }, options), null);
+  assert.deepEqual(refreshes, [parent]);
+  // From a folder inside the store clone too, and the fresh read is reused.
+  const inner = path.join(store, 'evidence', 'pr1-g2');
+  fs.mkdirSync(inner, { recursive: true });
+  assert.equal(hold.decide({ ...input, cwd: inner }, options), null);
+  assert.deepEqual(refreshes, [parent]);
+  // A plain shell merge from the store folder passes too; a squash still does not.
+  const { ctx: shellCtx, hold: shellHold, options: shellOptions, refreshes: shellReads, parent: shellParent, sha } = cloudStoreMerge(t);
+  const shell = rest => ({ cwd: path.join(shellCtx.root, 'evidence'), tool_name: 'Bash', tool_input: { command: `${['g', 'h'].join('')} pr merge 251 ${rest}` } });
+  assert.ok(shellHold.decide(shell(`--squash --match-head-commit ${sha}`), shellOptions).deny);
+  assert.equal(shellHold.decide(shell(`--merge --match-head-commit ${sha}`), shellOptions), null);
+  assert.deepEqual(shellReads, [shellParent]);
+});
+
+test('cloud: from the store clone, a sibling that does not name the store, no sibling, or a non-cloud session stays gated', t => {
+  {
+    const { ctx, hold, input, options } = cloudStoreMerge(t, { parentStore: 'example-owner/other-store' });
+    assert.match(hold.decide({ ...input, cwd: path.join(ctx.root, 'evidence') }, options).deny, /no unused approval/);
+  }
+  {
+    const { ctx, hold, input, options, refreshes } = cloudStoreMerge(t, { withParent: false });
+    assert.match(hold.decide({ ...input, cwd: path.join(ctx.root, 'evidence') }, options).deny, /no unused approval/);
+    assert.deepEqual(refreshes, []);
+  }
+  {
+    const { ctx, hold, input, options, refreshes } = cloudStoreMerge(t, { cloud: false });
+    assert.match(hold.decide({ ...input, cwd: path.join(ctx.root, 'evidence') }, options).deny, /no unused approval/);
+    assert.deepEqual(refreshes, []);
+  }
+  {
+    // A repository that is not a store, merged from its own clone: the sibling parent is read, but its
+    // binding names another store, so the merge stays gated.
+    const { ctx, hold, input, options, refreshes, parent } = cloudStoreMerge(t);
+    const other = repo(path.join(ctx.root, 'other'), 'example-owner/other');
+    assert.match(hold.decide({ ...input, cwd: other, tool_input: { ...input.tool_input, repo: 'other' } }, options).deny, /no unused approval/);
+    assert.ok(refreshes.includes(parent));
+  }
+  {
+    // A merge of another repository from the store folder reads the sibling, then is refused as before.
+    const { ctx, hold, input, options } = cloudStoreMerge(t);
+    assert.match(hold.decide({ ...input, cwd: path.join(ctx.root, 'evidence'), tool_input: { ...input.tool_input, repo: 'app' } }, options).deny, /no unused approval/);
+  }
 });
 
 test('cloud: the exemption still needs a fresh binding that names this store, and a plain merge commit', t => {

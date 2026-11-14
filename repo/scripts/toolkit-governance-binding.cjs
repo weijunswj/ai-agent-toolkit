@@ -126,8 +126,9 @@ function parseSymref(text) {
 function readDefaultBranchBinding(root, { runGit = defaultRunGit, timeout = GIT_TIMEOUT_MS, deadline = null, expectedRemote = null, hooksDir = null, environment = process.env } = {}) {
   const git = (args, commandDeadline = deadline) => {
     try {
-      const remaining = commandDeadline === null ? timeout : Math.min(timeout, commandDeadline - Date.now());
-      if (remaining <= 0) throw new Error('read budget exhausted');
+      // Whole milliseconds: spawnSync throws on a fractional timeout, which would read as offline.
+      const remaining = Math.floor(commandDeadline === null ? timeout : Math.min(timeout, commandDeadline - Date.now()));
+      if (!(remaining > 0)) throw new Error('read budget exhausted');
       return runGit(args, { cwd: root, timeout: remaining });
     } catch { return { status: null, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) }; }
   };
