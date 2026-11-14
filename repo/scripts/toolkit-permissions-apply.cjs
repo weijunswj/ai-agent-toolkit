@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 'use strict';
 
-// `toolkit permissions --apply`: the owner's own one-command paste of the permission blocks.
+// `toolkit permissions --apply` and `--remove`: the owner's own one command that sets Toolkit's
+// permission lines up to date, or takes them out.
 //
 //   node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex] [--repo-root <checkout>]
+//   node repo/scripts/toolkit-permissions.cjs --remove [--host claude|codex] [--repo-root <checkout>]
 //
 // The owner types this in their own terminal. It shows what would change, waits for the typed word
-// `apply`, backs each file up, merges the computer block into it, reads it back and lists what
-// changed. Agents never run it. The only hard block is the app's own: the computer block holds an
+// `apply`, backs each file up, writes it, reads it back and lists what changed. Agents never run it. The only hard block is the app's own: the computer block holds an
 // ask line (Claude Code) and a prompt rule (Codex) for this exact command, and `--apply` must be the
 // first argument so the Codex rule matches. A command written another way (another interpreter
 // form, or a script that loads this file) matches neither. The two checks below are speed bumps,
@@ -15,8 +16,10 @@
 //   - it refuses in a shell a coding agent started (the exact markers `toolkit env show` refuses on);
 //   - it needs a terminal on stdin and stdout and the typed word; a pipe or file never answers.
 //
-// Claude Code: the user settings file. Missing lines are added; every other key and line is kept;
-// stale Toolkit lines are reported, never removed. Codex: Toolkit's own rules file, replaced whole.
+// Claude Code: the user settings file. --apply adds missing lines and takes out stale Toolkit lines
+// (ones for another Toolkit folder or a retired command); --remove takes out every Toolkit line.
+// Every other key and line is kept. Codex: Toolkit's own rules file, replaced whole, or deleted by
+// --remove (its backup stays).
 // Claude Code also gets the repo block, merged the same way into the governed repository's
 // `.claude/settings.local.json`: the repository of --repo-root, or the current folder. Without a
 // governed repository it says so and merges the computer blocks only; with --repo-root it stops.
@@ -37,14 +40,14 @@ class ApplyStop extends Error {
   constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); this.exitCode = exitCode; }
 }
 
-function parseApplyArgs(argv) {
-  const options = { hosts: ['claude', 'codex'], repoRoot: null };
+function parseApplyArgs(argv, mode = 'apply') {
+  const options = { hosts: ['claude', 'codex'], repoRoot: null, mode };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const value = argv[index + 1];
     if (arg === '--host' && ['claude', 'codex'].includes(value)) { options.hosts = [value]; index += 1; continue; }
     if (arg === '--repo-root' && options.repoRoot === null && typeof value === 'string' && value && !value.startsWith('--')) { options.repoRoot = value; index += 1; continue; }
-    throw new ApplyStop(`--apply takes only --host claude|codex and --repo-root <checkout>, not ${JSON.stringify(arg)}.`, 'see the usage line.', 2);
+    throw new ApplyStop(`--${mode} takes only --host claude|codex and --repo-root <checkout>, not ${JSON.stringify(arg)}.`, 'see the usage line.', 2);
   }
   return options;
 }
@@ -81,15 +84,17 @@ class PermissionsApply {
     }
   }
 
-  // What one block would change. Reads only.
-  plan(block, check) {
+  // What one block would change. Reads only. `mode` is 'apply' (bring the lines up to date) or
+  // 'remove' (take every Toolkit line out).
+  plan(block, check, mode = 'apply') {
     const before = this.#read(block.target);
     if (before === null && this.#danglingLink(block.target)) throw new ApplyStop(`${block.target} is a link to a file that does not exist.`, 'fix or remove the link, then run it again. Nothing was written.');
     if (block.host === 'codex') {
       const codexHome = this.#environment.CODEX_HOME || path.join(this.#home, '.codex');
       if (!this.#fs.existsSync(codexHome)) return { host: 'codex', target: block.target, skip: `Codex has no settings folder on this computer (${codexHome}).` };
-      const same = before !== null && before.replace(/\r\n/g, '\n') === block.text;
       const old = ruleKeys(before);
+      if (mode === 'remove') return { host: 'codex', target: block.target, before, after: null, current: before === null, added: [], removed: old, replaced: false, deleted: before !== null };
+      const same = before !== null && before.replace(/\r\n/g, '\n') === block.text;
       const next = ruleKeys(block.text);
       return { host: 'codex', target: block.target, before, after: block.text, current: same,
         added: next.filter(key => !old.includes(key)), removed: old.filter(key => !next.includes(key)), replaced: before !== null && !same };
@@ -106,15 +111,23 @@ class PermissionsApply {
       }
     }
     const permissions = settings.permissions || {};
-    const missing = { allow: block.allow.filter(line => !(permissions.allow || []).includes(line)), ask: block.ask.filter(line => !(permissions.ask || []).includes(line)) };
+    const stale = before !== null ? check(block.target) : [];
+    const has = (key, line) => (permissions[key] || []).includes(line);
+    const missing = mode === 'remove' ? { allow: [], ask: [] } : { allow: block.allow.filter(line => !has('allow', line)), ask: block.ask.filter(line => !has('ask', line)) };
+    const removed = mode === 'remove'
+      ? { allow: [...block.allow, ...stale].filter(line => has('allow', line)), ask: block.ask.filter(line => has('ask', line)) }
+      : { allow: stale.filter(line => has('allow', line)), ask: [] };
     const merged = { ...settings, permissions: { ...permissions } };
-    for (const key of ['allow', 'ask']) if (missing[key].length) merged.permissions[key] = [...(permissions[key] || []), ...missing[key]];
-    const current = !missing.allow.length && !missing.ask.length;
+    for (const key of ['allow', 'ask']) {
+      if (!missing[key].length && !removed[key].length) continue;
+      merged.permissions[key] = [...(permissions[key] || []).filter(line => !removed[key].includes(line)), ...missing[key]];
+    }
+    const current = !missing.allow.length && !missing.ask.length && !removed.allow.length && !removed.ask.length;
     // Keep the file's own layout: its indent, line endings and byte order mark.
     const indent = (before && /^\uFEFF?\{\r?\n([ \t]+)\S/.exec(before)) ? /^\uFEFF?\{\r?\n([ \t]+)\S/.exec(before)[1] : 2;
     const eol = before && before.includes('\r\n') ? '\r\n' : '\n';
     const after = `${before && before.startsWith('\uFEFF') ? '\uFEFF' : ''}${JSON.stringify(merged, null, indent).replace(/\n/g, eol)}${eol}`;
-    return { host: 'claude', target: block.target, before, after, current, missing, stale: before !== null ? check(block.target) : [] };
+    return { host: 'claude', target: block.target, before, after, current, missing, removed };
   }
 
   #stamp() { return this.#now().toISOString().replace(/[-:]/g, '').replace(/\./, ''); }
@@ -142,9 +155,13 @@ class PermissionsApply {
       const mode = plan.before !== null ? fs.statSync(real).mode & 0o777 : null;
       if (plan.before !== null) backup = this.#backup(real);
       else fs.mkdirSync(path.dirname(real), { recursive: true });
-      fs.writeFileSync(temp, plan.after, { flag: 'wx', ...(mode !== null ? { mode } : {}) });
-      if (mode !== null && this.#platform !== 'win32') fs.chmodSync(temp, mode);
-      fs.renameSync(temp, real);
+      // --remove deletes Toolkit's own Codex rules file; the backup keeps a copy.
+      if (plan.after === null) fs.rmSync(real);
+      else {
+        fs.writeFileSync(temp, plan.after, { flag: 'wx', ...(mode !== null ? { mode } : {}) });
+        if (mode !== null && this.#platform !== 'win32') fs.chmodSync(temp, mode);
+        fs.renameSync(temp, real);
+      }
     } catch (error) {
       try { fs.rmSync(temp, { force: true }); } catch { /* the temp file may not exist */ }
       throw new ApplyStop(`${plan.target} could not be written (${error && error.code ? error.code : 'error'}).${backup ? ` Your backup is ${backup}.` : ''}`, 'check the folder\'s permissions and run it again.');
@@ -157,16 +174,18 @@ class PermissionsApply {
 function describePlan(plan) {
   const app = plan.scope === 'repo' ? `${APPS[plan.host]} repo block` : APPS[plan.host];
   if (plan.skip) return [`${app}: skipped. ${plan.skip}`];
-  if (plan.current) return [`${app}: ${plan.target} already holds the block. Nothing to change.`];
+  if (plan.current) return [`${app}: ${plan.target} ${plan.after === null || plan.removed ? 'holds no Toolkit lines' : 'already holds the block'}. Nothing to change.`];
   if (plan.host === 'claude') {
     return [
       `${app}: ${plan.target}${plan.before === null ? ' (new file)' : ''}`,
       ...plan.missing.allow.map(line => `  + allow ${line}`),
       ...plan.missing.ask.map(line => `  + ask   ${line}`),
-      ...plan.stale.map(line => `  ! stale, kept: ${line}`),
+      ...plan.removed.allow.map(line => `  - allow ${line}`),
+      ...plan.removed.ask.map(line => `  - ask   ${line}`),
       '  Every other line and setting in the file stays.',
     ];
   }
+  if (plan.deleted) return [`${app}: ${plan.target} (Toolkit's own rules file, deleted)`, ...plan.removed.map(key => `  - ${key}`)];
   return [
     `${app}: ${plan.target}${plan.before === null ? ' (new file)' : ' (Toolkit\'s own rules file, replaced whole)'}`,
     ...plan.added.map(key => `  + ${key}`),
@@ -180,11 +199,12 @@ async function main(argv, deps = {}) {
   const err = deps.stderr || (text => process.stderr.write(text));
   const environment = deps.environment || process.env;
   try {
-    const options = parseApplyArgs(argv);
+    const options = parseApplyArgs(argv, deps.mode || 'apply');
+    const flag = `--${options.mode}`;
     const marker = AGENT_MARKERS.find(name => Boolean(environment[name]));
-    if (marker) throw new ApplyStop(`this shell was started by a coding agent (${marker}). Agents never run --apply.`, 'the owner runs this in their own PowerShell or terminal, outside any agent. Nothing was written.');
+    if (marker) throw new ApplyStop(`this shell was started by a coding agent (${marker}). Agents never run ${flag}.`, 'the owner runs this in their own PowerShell or terminal, outside any agent. Nothing was written.');
     const tty = (deps.tty || (() => ({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) })))();
-    if (!tty.stdin || !tty.stdout) throw new ApplyStop('--apply needs a terminal you type into; it does not read answers from a pipe or print into a file.', 'run it yourself in PowerShell or a terminal window. Nothing was written.');
+    if (!tty.stdin || !tty.stdout) throw new ApplyStop(`${flag} needs a terminal you type into; it does not read answers from a pipe or print into a file.`, 'run it yourself in PowerShell or a terminal window. Nothing was written.');
 
     const PermissionBlocks = deps.PermissionBlocks || require('./toolkit-permissions.cjs').PermissionBlocks;
     const blocks = new PermissionBlocks(deps);
@@ -197,10 +217,13 @@ async function main(argv, deps = {}) {
         if (options.repoRoot) throw new ApplyStop(`${stop.stopped}`, `${stop.next} Nothing was written.`);
         notes.push(`Repo block: none here (${stop.stopped.replace(/^no repo block: /, '').replace(/\.$/, '')}). Run it from a governed repository, or add --repo-root <checkout>, to add that repository's block too.`);
       }
-      return built.blocks.map(block => ({ ...applier.plan(block, file => blocks.check(file, { blocks: [block] })[0].stale), scope: block.scope, block }));
+      return built.blocks.map(block => ({ ...applier.plan(block, file => blocks.check(file, { blocks: [block] })[0].stale, options.mode), scope: block.scope, block }));
     });
 
-    out(`${['Toolkit permissions --apply: merges the Toolkit permission blocks into this computer\'s app settings.', '', ...plans.flatMap(describePlan), ...notes, ''].join('\n')}\n`);
+    const title = options.mode === 'remove'
+      ? 'Toolkit permissions --remove: takes Toolkit\'s permission lines out of this computer\'s app settings.'
+      : 'Toolkit permissions --apply: brings Toolkit\'s permission lines in this computer\'s app settings up to date.';
+    out(`${[title, '', ...plans.flatMap(describePlan), ...notes, ''].join('\n')}\n`);
     const pending = plans.filter(plan => !plan.skip && !plan.current);
     if (!pending.length) { out('Nothing to change. Nothing was written.\n'); return 0; }
 
@@ -209,13 +232,16 @@ async function main(argv, deps = {}) {
 
     for (const plan of pending) {
       const backup = applier.write(plan);
-      const count = plan.host === 'claude' ? `added ${plan.missing.allow.length} allow and ${plan.missing.ask.length} ask lines` : `wrote ${ruleKeys(plan.after).length} rules`;
-      out(`${APPS[plan.host]}${plan.scope === 'repo' ? ' repo block' : ''}: ${count} to ${plan.target}. ${backup ? `Backup: ${backup}` : 'New file, so no backup.'}\n`);
+      const count = plan.host === 'claude'
+        ? `added ${plan.missing.allow.length + plan.missing.ask.length} and removed ${plan.removed.allow.length + plan.removed.ask.length} lines in`
+        : plan.after === null ? 'deleted' : `wrote ${ruleKeys(plan.after).length} rules to`;
+      out(`${APPS[plan.host]}${plan.scope === 'repo' ? ' repo block' : ''}: ${count} ${plan.target}. ${backup ? `Backup: ${backup}` : 'New file, so no backup.'}\n`);
     }
     // Read back each Claude Code file written, against the block it was given.
     for (const plan of pending.filter(item => item.host === 'claude')) {
       const report = blocks.check(plan.target, { blocks: [plan.block] })[0];
-      if (report.missing.length) throw new ApplyStop(`${plan.target} is still missing ${report.missing.length} lines after the write.`, 'restore the backup and paste the block by hand.');
+      const left = options.mode === 'remove' ? plan.block.allow.length + plan.block.ask.length - report.missing.length : report.missing.length + report.stale.length;
+      if (left) throw new ApplyStop(`${plan.target} still ${options.mode === 'remove' ? 'holds' : 'misses or holds stale'} ${left} Toolkit lines after the write.`, 'restore the backup, then run it again.');
     }
     out('Done. Restart Claude Code and Codex so they read the new lines. To undo, copy the backup file back over the settings file.\n');
     return 0;
@@ -226,4 +252,4 @@ async function main(argv, deps = {}) {
   }
 }
 
-module.exports = Object.freeze({ PermissionsApply, ApplyStop, AGENT_MARKERS, CONFIRM, parseApplyArgs, main });
+module.exports = Object.freeze({ PermissionsApply, ApplyStop, AGENT_MARKERS, CONFIRM, parseApplyArgs, ruleKeys, main });
