@@ -13,7 +13,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
 const MANIFEST_REL = '.github/toolkit-test-shards.json';
 const MANIFEST_SCHEMA = 'toolkit-test-shards/v2';
@@ -218,6 +218,15 @@ function argvFor(command, file) {
   return command.map((part) => (part === FILES_ARG ? file : part));
 }
 
+// Stops a timed-out command and every process it started: its process group on Linux, its process
+// tree (taskkill /T) on Windows. Best effort; a process already gone is fine.
+function stopTree(child, platform = process.platform) {
+  if (!child || !Number.isInteger(child.pid)) { try { child?.kill?.('SIGKILL'); } catch {} return; }
+  if (platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  else { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }
+  try { child.kill('SIGKILL'); } catch {}
+}
+
 // Runs one file's command and resolves { code, seconds, error }. Never throws: a program that cannot
 // start (not installed, or a script Windows only runs through a shell) is that file's failure.
 function runOne({ root, command, file, env, spawnFn, clock, write, timeoutSeconds = DEFAULT_FILE_TIMEOUT_SECONDS }) {
@@ -225,7 +234,8 @@ function runOne({ root, command, file, env, spawnFn, clock, write, timeoutSecond
     const [program, ...args] = argvFor(command, file);
     const started = clock();
     let child;
-    try { child = spawnFn(program, args, { cwd: root, env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    // On Linux the command leads its own process group, so a timeout can stop everything it started.
+    try { child = spawnFn(program, args, { cwd: root, env, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch (error) { resolve({ code: null, seconds: 0, error: error.message }); return; }
     const chunks = [];
     child.stdout?.on('data', (chunk) => chunks.push(chunk));
@@ -234,7 +244,11 @@ function runOne({ root, command, file, env, spawnFn, clock, write, timeoutSecond
     // A file that hangs is stopped and fails by name, so one stuck test cannot hold the shard until
     // the CI job's own limit.
     const timer = setTimeout(() => {
-      try { child.kill('SIGKILL'); } catch {}
+      stopTree(child);
+      // A process the test started may still hold the output pipes; closing them here lets the shard
+      // finish now instead of when that process ends.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       finish(null, `timed out after ${timeoutSeconds} s`);
     }, timeoutSeconds * 1000);
     const finish = (code, error) => {

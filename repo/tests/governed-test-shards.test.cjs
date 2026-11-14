@@ -95,6 +95,16 @@ test('a file that hangs is stopped at file_timeout_seconds and fails by name, an
   assert.equal(governed.DEFAULT_FILE_TIMEOUT_SECONDS, 900);
 });
 
+test('a timeout stops the processes a test started too, so the shard ends at the limit', async (t) => {
+  const GRANDCHILD = "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { stdio: 'inherit' });\nsetTimeout(() => {}, 20000);\n";
+  const root = repo(t, { 'tests/spawns.test.js': GRANDCHILD }, nodeList([{ id: `${SYSTEM}-1`, rest: true }], { file_timeout_seconds: 1 }));
+  const started = Date.now();
+  const { exitCode, summary } = await governed.runShard({ root, manifest: governed.loadManifest(root), system: SYSTEM, shardId: `${SYSTEM}-1`, out: sink() });
+  assert.equal(exitCode, 1);
+  assert.equal(summary.files[0].error, 'timed out after 1 s');
+  assert.ok(Date.now() - started < 10000, `the shard ended at the limit, not when the grandchild did (${Date.now() - started} ms)`);
+});
+
 test('Python tests run through the same command mode', { skip: python ? false : 'no python on this machine' }, async (t) => {
   const root = repo(t, { 'tests/test_ok.py': 'assert 1 + 1 == 2\n', 'tests/test_bad.py': 'raise SystemExit(3)\n' },
     { schema: governed.MANIFEST_SCHEMA, systems: { [SYSTEM]: { command: [python, '{files}'], discover: 'tests/test_*.py', shards: [{ id: `${SYSTEM}-1`, rest: true }] } } });
