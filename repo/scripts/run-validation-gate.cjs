@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// The full validation gate has one list: the "Run validation" step of .github/workflows/validate.yml,
+// The full validation gate has one list: the "Run validation" step of the gate job in .github/workflows/validate.yml,
 // which CI runs on every pull request and push to main. `npm run validate:all` runs the same commands,
 // in the same order, from that step, stopping at the first failure. In CI the last command checks the
 // summaries of the test shards that ran before it; locally there are no shards, so the gate runs every
@@ -14,7 +14,7 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'validate.yml');
-const { VERIFY_COMMAND, gateCommands } = require('./ci-test-shards.cjs');
+const { GATE_VERIFY_COMMAND: VERIFY_COMMAND, gateCommands } = require('./ci-test-shards.cjs');
 const { CI_COMMAND: DURATIONS_COMMAND } = require('./check-test-durations.cjs');
 const LOCAL_TESTS = 'node repo/scripts/run-tests.cjs --all';
 

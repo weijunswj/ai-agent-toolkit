@@ -17,7 +17,18 @@ const TEST_DIR_REL = 'repo/tests';
 const TEST_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.test\.cjs$/;
 const SYSTEMS = Object.freeze(['linux', 'windows']);
 const SHARD_ID = /^[a-z]+-[1-9][0-9]*$/;
-const REQUIRED_JOBS = Object.freeze(['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'hook-pack-windows', 'personal-data', 'issue-closure']);
+// The jobs that run the test files and the hook pack. On a pull request title or body edit the route
+// job can skip them all and the gate job reuses their results from an earlier run that tested the
+// same commit (repo/scripts/ci-validate-route.cjs); every other event runs them.
+const TEST_JOBS = Object.freeze(['tests-linux', 'tests-windows', 'tests-clock-ahead', 'hook-pack', 'hook-pack-windows']);
+// The jobs the required validate check needs: the gate (every repository check plus the test legs,
+// run here or reused) and the two jobs that read the pull request text, which run on every event.
+const REQUIRED_JOBS = Object.freeze(['gate', 'personal-data', 'issue-closure']);
+// The jobs each `--verify-ci --legs <name>` call needs to see succeed.
+const LEG_SETS = Object.freeze({ validate: REQUIRED_JOBS, gate: TEST_JOBS });
+const JOB_ORDER = Object.freeze(['route', ...TEST_JOBS, 'personal-data', 'issue-closure', 'gate', 'validate']);
+// The Windows hook-pack groups: each matrix member runs the families joined by +.
+const HOOK_PACK_WINDOWS_GROUPS = Object.freeze(['attribution+closure-matrix', 'closure-shell+push', 'governance+issue-closure', 'fault+merge+task-governance']);
 
 function platformSystem(platform = process.platform) {
   if (platform === 'win32') return 'windows';
@@ -178,14 +189,17 @@ function relativeTestFile(root, file) {
 
 // The one check behind the aggregate CI step: every leg succeeded, and for each system the leg
 // summaries cover the discovered files exactly once, each with at least one test and no failure.
-function verifyCiSummaries({ manifest, discovered, summaries, needs }) {
+// requiredJobs: the jobs `needs` must hold (the validate check's by default). commit: when given (in
+// CI, the commit the run tested), every shard summary must say it tested that commit, so results
+// reused from another run only count when that run tested the same code.
+function verifyCiSummaries({ manifest, discovered, summaries, needs, requiredJobs = REQUIRED_JOBS, commit = null }) {
   const errors = [];
   const totals = {};
   try { assertManifest(manifest, discovered); }
   catch (error) { return { errors: [error.message], totals }; }
   if (!needs || typeof needs !== 'object' || Array.isArray(needs) || Object.keys(needs).length === 0) errors.push('the test leg results (needs) are missing');
   else {
-    for (const job of REQUIRED_JOBS) if (!Object.hasOwn(needs, job)) errors.push(`required job ${job} is missing from needs`);
+    for (const job of requiredJobs) if (!Object.hasOwn(needs, job)) errors.push(`required job ${job} is missing from needs`);
     for (const [job, value] of Object.entries(needs)) {
       const result = value && value.result;
       if (result !== 'success') errors.push(`test job ${job} finished as ${result || 'unknown'}, not success`);
@@ -200,6 +214,10 @@ function verifyCiSummaries({ manifest, discovered, summaries, needs }) {
     // A clock-ahead run checks only the files that pin a date, so it never stands in for a shard.
     if (summary.clock_offset_days !== undefined) {
       errors.push(`a ${summary.system} summary ran with the clock moved ${summary.clock_offset_days} days ahead, so it does not count as a shard run`);
+      continue;
+    }
+    if (commit && summary.commit !== commit) {
+      errors.push(`a ${summary.system} summary of shard ${summary.shard} tested commit ${String(summary.commit || 'unknown').slice(0, 12)}, not ${commit.slice(0, 12)}`);
       continue;
     }
     const legs = bySystem.get(summary.system);
@@ -254,16 +272,13 @@ function verifyCiSummaries({ manifest, discovered, summaries, needs }) {
 }
 
 const RUNNER = { linux: 'ubuntu-latest', windows: 'windows-latest' };
+// The gate job's summary check (the test legs) and the validate job's (the jobs it needs). Both
+// re-read the shard summaries and the commit they tested.
+const GATE_VERIFY_COMMAND = 'node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/test-summaries" --legs gate';
 const VERIFY_COMMAND = 'node repo/scripts/run-tests.cjs --verify-ci "$RUNNER_TEMP/test-summaries"';
 const GATE_STEP = 'Run validation';
-const AGGREGATE_HEADER = [
-  '  validate:',
-  `    needs: [${REQUIRED_JOBS.join(', ')}]`,
-  '    if: ${{ !cancelled() }}',
-  '    runs-on: ubuntu-latest',
-  '    timeout-minutes: 15',
-  '    steps:',
-];
+const ROUTE_COMMAND = 'node repo/scripts/ci-validate-route.cjs route';
+const LEGS_COMMAND = 'node repo/scripts/ci-validate-route.cjs legs';
 // A gate command other than the last: one repository script with plain arguments and no shell syntax.
 const PLAIN_GATE_COMMAND = /^node repo\/scripts\/[A-Za-z0-9._-]+\.cjs( [A-Za-z0-9._=\/-]+)*$/;
 // Ways to make a test step pass without running the tests; none may appear anywhere in the workflow.
@@ -279,11 +294,32 @@ const FORBIDDEN = [
   [/node --test\b/, 'node --test outside the runner'],
 ];
 
+const CHECKOUT_STEP = [
+  '      - name: Checkout',
+  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+  '        with:',
+  '          fetch-depth: 0',
+  '          persist-credentials: false',
+  '',
+  '      - name: Set up Node',
+  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
+  '        with:',
+  '          node-version: 22',
+];
+
+// Every test and hook-pack job waits for the route job and runs unless the run is cancelled or the
+// route job chose a light run. A route job that failed gives no mode, so the jobs run in full.
+const SKIPPED_ON_LIGHT = [
+  '    needs: [route]',
+  "    if: ${{ !cancelled() && needs.route.outputs.mode != 'light' }}",
+];
+
 // The exact text of one system's test job. Pinning it whole means a narrowed file list, a filter,
 // a condition, a masked exit code or a matrix edit is a visible change to this function too.
 function testJobText(system, ids) {
   return [
     `  tests-${system}:`,
+    ...SKIPPED_ON_LIGHT,
     `    runs-on: ${RUNNER[system]}`,
     '    timeout-minutes: 30',
     '    strategy:',
@@ -291,16 +327,7 @@ function testJobText(system, ids) {
     '      matrix:',
     `        shard: [${ids.join(', ')}]`,
     '    steps:',
-    '      - name: Checkout',
-    '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
-    '        with:',
-    '          fetch-depth: 0',
-    '          persist-credentials: false',
-    '',
-    '      - name: Set up Node',
-    '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
-    '        with:',
-    '          node-version: 22',
+    ...CHECKOUT_STEP,
     '',
     '      - name: Install dependencies',
     '        run: npm ci --ignore-scripts',
@@ -313,39 +340,54 @@ function testJobText(system, ids) {
     '      - name: Run test shard',
     `        run: node repo/scripts/run-tests.cjs --shard \${{ matrix.shard }} --os ${system} --temp-root "\${{ runner.temp }}/tests" --summary "\${{ runner.temp }}/summary/test-summary-\${{ matrix.shard }}-attempt-\${{ github.run_attempt }}.json"`,
     '',
-    // A failed shard still uploads its summary, so the validate job names the failed tests. Each run
+    // A failed shard still uploads its summary, so the gate job names the failed tests. Each run
     // attempt uploads its own artifact: a re-run of a failed shard adds a second one, and the
-    // validate job keeps the newest attempt of each shard (two artifacts of one name would leave it
-    // reading whichever the download picked, the failed one included).
+    // gate job keeps the newest attempt of each shard (two artifacts of one name would leave it
+    // reading whichever the download picked, the failed one included). The name ends with the
+    // tested commit, so the route job can tell which commit a run's summaries belong to.
     '      - name: Upload test summary',
     '        if: ${{ !cancelled() }}',
     '        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2',
     '        with:',
-    '          name: test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}',
+    '          name: test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}-${{ github.sha }}',
     '          path: ${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json',
     '          if-no-files-found: error',
     '          retention-days: 7',
   ].join('\n');
 }
 
+// The route job: a full or a light run (repo/scripts/ci-validate-route.cjs). It reads the event and
+// earlier runs of this workflow with a read-only token, and on any doubt or error it chooses full.
+const ROUTE_JOB = [
+  '  route:',
+  '    runs-on: ubuntu-latest',
+  '    timeout-minutes: 5',
+  '    permissions:',
+  '      actions: read',
+  '      contents: read',
+  '    outputs:',
+  '      mode: ${{ steps.route.outputs.mode }}',
+  '      run_id: ${{ steps.route.outputs.run_id }}',
+  '    steps:',
+  ...CHECKOUT_STEP,
+  '',
+  '      - name: Choose a full or a light run',
+  '        id: route',
+  '        env:',
+  '          GH_TOKEN: ${{ github.token }}',
+  `        run: ${ROUTE_COMMAND}`,
+].join('\n');
+
 // The exact text of the clock-ahead job: the test files that pin a calendar date, run with Node's
 // clock moved 400 days ahead (run-tests.cjs --clock-ahead). It uploads no summary, so it never
-// counts toward shard coverage; the validate job needs it, so a failure fails the required check.
+// counts toward shard coverage; the gate job needs it, so a failure fails the required check.
 const CLOCK_AHEAD_JOB = [
   '  tests-clock-ahead:',
+  ...SKIPPED_ON_LIGHT,
   '    runs-on: ubuntu-latest',
   '    timeout-minutes: 30',
   '    steps:',
-  '      - name: Checkout',
-  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
-  '        with:',
-  '          fetch-depth: 0',
-  '          persist-credentials: false',
-  '',
-  '      - name: Set up Node',
-  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
-  '        with:',
-  '          node-version: 22',
+  ...CHECKOUT_STEP,
   '',
   '      - name: Install dependencies',
   '        run: npm ci --ignore-scripts',
@@ -367,6 +409,7 @@ const CLOCK_AHEAD_JOB = [
 // Both jobs are required, and fail-fast stays off for every group.
 const HOOK_PACK_JOB = [
   '  hook-pack:',
+  ...SKIPPED_ON_LIGHT,
   '    runs-on: ${{ matrix.os }}',
   '    timeout-minutes: 15',
   '    strategy:',
@@ -374,16 +417,7 @@ const HOOK_PACK_JOB = [
   '      matrix:',
   '        os: [ubuntu-latest]',
   '    steps:',
-  '      - name: Checkout',
-  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
-  '        with:',
-  '          fetch-depth: 0',
-  '          persist-credentials: false',
-  '',
-  '      - name: Set up Node',
-  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
-  '        with:',
-  '          node-version: 22',
+  ...CHECKOUT_STEP,
   '',
   '      - name: Install dependencies',
   '        run: npm ci --ignore-scripts',
@@ -395,8 +429,20 @@ const HOOK_PACK_JOB = [
 const HOOK_PACK_WINDOWS_JOB = HOOK_PACK_JOB
   .replace('  hook-pack:', '  hook-pack-windows:')
   .replace('    runs-on: ${{ matrix.os }}', '    runs-on: windows-latest')
-  .replace('        os: [ubuntu-latest]', '        families: [attribution+closure-matrix, closure-shell+push, governance+issue-closure, fault+merge+task-governance]')
+  .replace('        os: [ubuntu-latest]', `        families: [${HOOK_PACK_WINDOWS_GROUPS.join(', ')}]`)
   .replace(' run --budget-seconds 360', ' run --family "${{ matrix.families }}" --budget-seconds 420');
+
+// The check run names each test job reports in a run that ran it, by job: a matrix job adds its
+// value in brackets. The route job requires every one of them to have passed in a run it reuses.
+function testJobCheckNames(manifest) {
+  return {
+    'tests-linux': shardIds(manifest, 'linux').map((id) => `tests-linux (${id})`),
+    'tests-windows': shardIds(manifest, 'windows').map((id) => `tests-windows (${id})`),
+    'tests-clock-ahead': ['tests-clock-ahead'],
+    'hook-pack': ['hook-pack (ubuntu-latest)'],
+    'hook-pack-windows': HOOK_PACK_WINDOWS_GROUPS.map((group) => `hook-pack-windows (${group})`),
+  };
+}
 
 // The exact text of the personal-data job: every commit of the pull request or push, its messages,
 // branch name and pull request text, checked by the personal-data guard. The validate job waits
@@ -406,16 +452,7 @@ const PERSONAL_DATA_JOB = [
   '    runs-on: ubuntu-latest',
   '    timeout-minutes: 15',
   '    steps:',
-  '      - name: Checkout',
-  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
-  '        with:',
-  '          fetch-depth: 0',
-  '          persist-credentials: false',
-  '',
-  '      - name: Set up Node',
-  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
-  '        with:',
-  '          node-version: 22',
+  ...CHECKOUT_STEP,
   '',
   '      - name: Check for personal data',
   '        run: node skills/secure-ci-cd/scripts/personal-data-guard.cjs ci',
@@ -430,16 +467,7 @@ const ISSUE_CLOSURE_JOB = [
   '      issues: read',
   '      pull-requests: read',
   '    steps:',
-  '      - name: Checkout',
-  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
-  '        with:',
-  '          fetch-depth: 0',
-  '          persist-credentials: false',
-  '',
-  '      - name: Set up Node',
-  '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
-  '        with:',
-  '          node-version: 22',
+  ...CHECKOUT_STEP,
   '',
   '      - name: Check current pull request closure references',
   "        if: ${{ github.event_name == 'pull_request' }}",
@@ -448,21 +476,38 @@ const ISSUE_CLOSURE_JOB = [
   '        run: node repo/scripts/toolkit-issue-closure.cjs',
 ].join('\n');
 
-// The exact text of the validate job around its gate commands. The commands stay listed only in
-// validate.yml, the one gate list; each is checked on its own (PLAIN_GATE_COMMAND, VERIFY_COMMAND last).
-function validateJobText(commands) {
+const GATE_HEADER = [
+  '  gate:',
+  `    needs: [route, ${TEST_JOBS.join(', ')}]`,
+  '    if: ${{ !cancelled() }}',
+  '    runs-on: ubuntu-latest',
+  '    timeout-minutes: 15',
+  '    permissions:',
+  '      actions: read',
+  '      contents: read',
+  '    outputs:',
+  '      legs_run_id: ${{ steps.legs.outputs.run_id }}',
+  '      legs_reused: ${{ steps.legs.outputs.reused }}',
+  '    steps:',
+];
+
+// The exact text of the gate job around its gate commands. The commands stay listed only in
+// validate.yml, the one gate list; each is checked on its own (PLAIN_GATE_COMMAND, GATE_VERIFY_COMMAND
+// last). The "Find the test legs" step gives the test job results and the run whose summaries to
+// read: this run's, or, on a light run, the earlier run's, checked again here.
+function gateJobText(commands) {
   return [
-    ...AGGREGATE_HEADER,
-    '      - name: Checkout',
-    '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
-    '        with:',
-    '          fetch-depth: 0',
-    '          persist-credentials: false',
+    ...GATE_HEADER,
+    ...CHECKOUT_STEP,
     '',
-    '      - name: Set up Node',
-    '        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0',
-    '        with:',
-    '          node-version: 22',
+    '      - name: Find the test legs',
+    '        id: legs',
+    '        env:',
+    '          GH_TOKEN: ${{ github.token }}',
+    '          ROUTE_MODE: ${{ needs.route.outputs.mode }}',
+    '          ROUTE_RUN_ID: ${{ needs.route.outputs.run_id }}',
+    '          NEEDS: ${{ toJSON(needs) }}',
+    `        run: ${LEGS_COMMAND}`,
     '',
     '      - name: Download test summaries',
     '        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2',
@@ -470,6 +515,8 @@ function validateJobText(commands) {
     '          pattern: test-summary-*',
     '          path: ${{ runner.temp }}/test-summaries',
     '          merge-multiple: true',
+    '          run-id: ${{ steps.legs.outputs.run_id }}',
+    "          github-token: ${{ steps.legs.outputs.reused == 'true' && github.token || '' }}",
     '',
     '      - name: Set up Python',
     '        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0',
@@ -478,15 +525,49 @@ function validateJobText(commands) {
     '',
     '      # The one gate list: `npm run validate:all` runs these same commands (repo/scripts/run-validation-gate.cjs),',
     '      # except that locally the last command runs every test file instead of checking the shard summaries.',
-    '      - name: Run validation',
+    `      - name: ${GATE_STEP}`,
     '        env:',
     '          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}',
-    '          TEST_LEGS: ${{ toJSON(needs) }}',
+    '          TEST_LEGS: ${{ steps.legs.outputs.legs }}',
     '          PR_BODY: ${{ github.event.pull_request.body }}',
     '        run: |',
     ...commands.map((command) => `          ${command}`),
   ].join('\n');
 }
+
+const AGGREGATE_HEADER = [
+  '  validate:',
+  `    needs: [${REQUIRED_JOBS.join(', ')}]`,
+  '    if: ${{ !cancelled() }}',
+  '    runs-on: ubuntu-latest',
+  '    timeout-minutes: 15',
+  '    permissions:',
+  '      actions: read',
+  '      contents: read',
+  '    steps:',
+];
+
+// The exact text of the required validate job: no condition on any step, the summaries the gate
+// job checked downloaded again, and one command, the summary check over the jobs it needs.
+const VALIDATE_JOB = [
+  ...AGGREGATE_HEADER,
+  ...CHECKOUT_STEP,
+  '',
+  '      - name: Download test summaries',
+  '        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2',
+  '        with:',
+  '          pattern: test-summary-*',
+  '          path: ${{ runner.temp }}/test-summaries',
+  '          merge-multiple: true',
+  '          run-id: ${{ needs.gate.outputs.legs_run_id || github.run_id }}',
+  "          github-token: ${{ needs.gate.outputs.legs_reused == 'true' && github.token || '' }}",
+  '',
+  '      - name: Check every job passed',
+  '        env:',
+  '          TEST_LEGS: ${{ toJSON(needs) }}',
+  '        run: |',
+  `          ${VERIFY_COMMAND}`,
+].join('\n');
 
 // The commands of the named step's `run: |` block, one per line.
 function gateCommands(source, stepName = GATE_STEP) {
@@ -523,32 +604,36 @@ const WORKFLOW_HEADER = [
   '',
   '# One run at a time for each pull request; every push keeps its own run. A new commit, an open or a',
   '# reopen cancels the run in progress, because the code changed. A title or body edit never cancels',
-  '# it: the edit run waits and then runs in full, so the newest event always finishes last and a',
-  '# fixed body still clears the required check. GitHub keeps one waiting run per group, so a burst',
-  '# of edits runs once.',
+  '# it: the edit run waits and then runs, so the newest event always finishes last and a fixed body',
+  '# still clears the required check. GitHub keeps one waiting run per group, so a burst of edits',
+  '# runs once.',
   'concurrency:',
   "  group: validate-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}",
   "  cancel-in-progress: ${{ github.event.action != 'edited' }}",
   '',
-  '# The test files run in shards on Linux and Windows (repo/contracts/ci/test-shards.json). The',
-  '# validate job runs after every shard, also when one failed: its "Run validation" step runs the',
-  '# repository checks, fails any test file over its time budget (check-test-durations.cjs), and then',
-  '# proves from the shard summaries that each system ran every test file once with no failure. A',
-  '# failed, cancelled or skipped shard fails it (a shard over its timeout counts as cancelled); a',
-  '# cancelled run reports validate as cancelled, not failed. Each run attempt uploads its own summary artifact',
-  '# and the check keeps the newest attempt of each shard, so re-running a failed shard can clear',
-  '# validate. The tests-clock-ahead job runs the test files that',
-  '# pin a calendar date with Node\'s clock 400 days ahead, so a test that only passes near the date',
-  '# it pins fails now rather than months later; validate waits for it. The hook-pack job runs the',
-  '# full pack on Linux; hook-pack-windows runs it in four groups of families. Both are required by validate.',
-  '# The personal-data job checks',
-  '# every commit of the pull request or push, the commit messages, the branch name and the pull',
-  '# request title and body for email addresses, phone numbers and WhatsApp links, and the title and',
-  '# body for home-folder paths and AI attribution (values are never printed); validate waits for it',
-  '# too, so a hit or a scan error fails the required check. An edit to the title or body runs the',
-  '# whole workflow again, so a fixed body clears the required check without a new commit.',
-  '# The issue-closure job checks live PR text and all commits against native descendant state;',
-  '# validate also waits for that read-only closure backstop.',
+  '# The route job decides first (repo/scripts/ci-validate-route.cjs). A pull request title or body',
+  '# edit is a light run when an earlier run of this workflow tested exactly the same code: the same',
+  '# head, the same tested merge commit (named in its summary artifacts), every test and hook-pack job',
+  '# passed in its newest attempt, and its summaries still kept. A light run skips the test and',
+  '# hook-pack jobs and the gate job reuses that run\'s results. Every other event, and any doubt or',
+  '# error, is a full run. The test files run in shards on Linux and Windows',
+  '# (repo/contracts/ci/test-shards.json), and each summary records the commit it tested. The gate',
+  '# job runs after every shard, also when one failed: its "Run validation" step runs the repository',
+  '# checks, fails any test file over its time budget (check-test-durations.cjs), and then proves from',
+  '# the shard summaries that each system ran every test file once with no failure on this run\'s',
+  '# commit. A failed, cancelled or skipped shard fails it (a shard over its timeout counts as',
+  '# cancelled). Each run attempt uploads its own summary artifact and the check keeps the newest',
+  '# attempt of each shard, so re-running a failed shard can clear it. The tests-clock-ahead job runs',
+  '# the test files that pin a calendar date with Node\'s clock 400 days ahead, so a test that only',
+  '# passes near the date it pins fails now rather than months later. The hook-pack job runs the full',
+  '# pack on Linux; hook-pack-windows runs it in four groups of families. The personal-data job checks every',
+  '# commit of the pull request or push, the commit messages, the branch name and the pull request',
+  '# title and body for email addresses, phone numbers and WhatsApp links, and the title and body for',
+  '# home-folder paths and AI attribution (values are never printed). The issue-closure job checks',
+  '# live PR text and all commits against native descendant state. Both run on every event, light',
+  '# runs included, so a fixed body clears them without a new commit. The required validate job',
+  '# needs the gate, personal-data and issue-closure jobs and checks the shard summaries again; a',
+  '# cancelled run reports it as cancelled, not failed.',
   'jobs:',
 ].join('\n');
 
@@ -558,6 +643,8 @@ const WORKFLOW_HEADER = [
 function workflowText(manifest, commands) {
   return [
     WORKFLOW_HEADER,
+    ROUTE_JOB,
+    '',
     testJobText('linux', shardIds(manifest, 'linux')),
     '',
     testJobText('windows', shardIds(manifest, 'windows')),
@@ -572,7 +659,9 @@ function workflowText(manifest, commands) {
     '',
     ISSUE_CLOSURE_JOB,
     '',
-    validateJobText(commands),
+    gateJobText(commands),
+    '',
+    VALIDATE_JOB,
     '',
   ].join('\n');
 }
@@ -627,8 +716,9 @@ function workflowErrors(source, manifest) {
   catch (error) { commandError = error.message; }
   const text = commands ? withPinUpdatesAccepted(raw, workflowText(manifest, commands)) : raw;
   const jobs = workflowJobs(text);
-  const expected = [...REQUIRED_JOBS, 'validate'];
-  if ([...jobs.keys()].join(',') !== expected.join(',')) errors.push(`validate.yml jobs must be exactly ${expected.join(', ')} in that order (found ${[...jobs.keys()].join(', ') || 'none'})`);
+  if ([...jobs.keys()].join(',') !== JOB_ORDER.join(',')) errors.push(`validate.yml jobs must be exactly ${JOB_ORDER.join(', ')} in that order (found ${[...jobs.keys()].join(', ') || 'none'})`);
+  const route = jobs.get('route');
+  if (route !== undefined && route !== ROUTE_JOB) errors.push('the route job differs from its pinned text');
   for (const system of SYSTEMS) {
     const job = jobs.get(`tests-${system}`);
     if (job !== undefined && job !== testJobText(system, shardIds(manifest, system))) errors.push(`the tests-${system} job differs from the pinned text for shards ${shardIds(manifest, system).join(', ')}`);
@@ -643,22 +733,31 @@ function workflowErrors(source, manifest) {
   const issueClosure = jobs.get('issue-closure');
   if (issueClosure !== undefined && issueClosure !== ISSUE_CLOSURE_JOB) errors.push('the issue-closure job differs from its pinned text');
   if (personalData !== undefined && personalData !== PERSONAL_DATA_JOB) errors.push('the personal-data job differs from its pinned text');
+  const gate = jobs.get('gate');
+  if (gate !== undefined) {
+    const lines = gate.split('\n');
+    if (lines.slice(0, GATE_HEADER.length).join('\n') !== GATE_HEADER.join('\n')) errors.push(`the gate job must start with needs: [route, ${TEST_JOBS.join(', ')}], if: \${{ !cancelled() }}, runs-on: ubuntu-latest, timeout-minutes: 15, read-only permissions and its two outputs`);
+    const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
+    if (names.join('|') !== `Checkout|Set up Node|Find the test legs|Download test summaries|Set up Python|${GATE_STEP}`) errors.push(`the gate job steps must be Checkout, Set up Node, Find the test legs, Download test summaries, Set up Python, ${GATE_STEP}`);
+    if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the gate job may have a condition');
+    if (lines[lines.length - 1].trim() !== GATE_VERIFY_COMMAND) errors.push(`the ${GATE_STEP} step must end with ${GATE_VERIFY_COMMAND}`);
+  }
   const aggregate = jobs.get('validate');
   if (aggregate !== undefined) {
     const lines = aggregate.split('\n');
-    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push(`the validate job must start with needs: [${REQUIRED_JOBS.join(', ')}], if: \${{ !cancelled() }}, runs-on: ubuntu-latest and timeout-minutes: 15`);
+    if (lines.slice(0, AGGREGATE_HEADER.length).join('\n') !== AGGREGATE_HEADER.join('\n')) errors.push(`the validate job must start with needs: [${REQUIRED_JOBS.join(', ')}], if: \${{ !cancelled() }}, runs-on: ubuntu-latest, timeout-minutes: 15 and read-only permissions`);
     const names = lines.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.replace(/^ {6}- name: /, ''));
-    if (names.join('|') !== 'Checkout|Set up Node|Download test summaries|Set up Python|Run validation') errors.push('the validate job steps must be Checkout, Set up Node, Download test summaries, Set up Python, Run validation (Run validation is step 6)');
+    if (names.join('|') !== 'Checkout|Set up Node|Download test summaries|Check every job passed') errors.push('the validate job steps must be Checkout, Set up Node, Download test summaries, Check every job passed');
     if (lines.filter((line) => /^ {8}if:/.test(line)).length) errors.push('no step in the validate job may have a condition');
-    if (lines[lines.length - 1].trim() !== VERIFY_COMMAND) errors.push(`the Run validation step must end with ${VERIFY_COMMAND}`);
-    if (!/^ {10}TEST_LEGS: \$\{\{ toJSON\(needs\) \}\}$/m.test(aggregate)) errors.push('the Run validation step must pass TEST_LEGS: ${{ toJSON(needs) }}');
+    if (lines[lines.length - 1].trim() !== VERIFY_COMMAND) errors.push(`the validate job must end with ${VERIFY_COMMAND}`);
+    if (!/^ {10}TEST_LEGS: \$\{\{ toJSON\(needs\) \}\}$/m.test(aggregate)) errors.push('the validate job must pass TEST_LEGS: ${{ toJSON(needs) }}');
   }
   if (commandError) errors.push(commandError);
   if (commands) {
     for (const command of commands.slice(0, -1)) {
-      if (!PLAIN_GATE_COMMAND.test(command)) errors.push(`the Run validation command "${command}" must be a plain node repo/scripts/<name>.cjs line with no shell syntax`);
+      if (!PLAIN_GATE_COMMAND.test(command)) errors.push(`the ${GATE_STEP} command "${command}" must be a plain node repo/scripts/<name>.cjs line with no shell syntax`);
     }
-    if (text !== workflowText(manifest, commands)) errors.push('validate.yml differs from its pinned text (repo/scripts/ci-test-shards.cjs workflowText); only the Run validation command list and the commit SHA and version comment of a pinned action may change');
+    if (text !== workflowText(manifest, commands)) errors.push(`validate.yml differs from its pinned text (repo/scripts/ci-test-shards.cjs workflowText); only the ${GATE_STEP} command list and the commit SHA and version comment of a pinned action may change`);
   }
   return errors;
 }
@@ -718,7 +817,13 @@ module.exports = Object.freeze({
   MANIFEST_SCHEMA,
   ROOT,
   SUMMARY_SCHEMA,
+  GATE_VERIFY_COMMAND,
+  HOOK_PACK_WINDOWS_GROUPS,
+  JOB_ORDER,
+  LEG_SETS,
+  REQUIRED_JOBS,
   SYSTEMS,
+  TEST_JOBS,
   VERIFY_COMMAND,
   affectedTestFiles,
   assertManifest,
@@ -735,8 +840,9 @@ module.exports = Object.freeze({
   shardIds,
   systemShards,
   testFileErrors,
+  gateJobText,
+  testJobCheckNames,
   testJobText,
-  validateJobText,
   workflowText,
   verifyCiSummaries,
   workflowErrors,

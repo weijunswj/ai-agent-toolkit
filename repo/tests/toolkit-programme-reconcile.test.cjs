@@ -1981,14 +1981,29 @@ test('binding checks name workflow jobs that always wait for every test job', ()
   const tests = [...jobs].filter(([, body]) => /(?:^|\n)\s+(?:run:\s*)?(?:node\s+[^\n]*run-tests\.cjs(?![^\n]*--verify-ci)|node\s+--test\b|npm\s+(?:run\s+)?test\b)/.test(body)).map(([name]) => name);
   assert.ok(tests.length > 0, 'the workflow must contain test jobs');
   assert.ok(binding.required_checks.length > 0, 'the binding must require a check');
+  const needsOf = (body) => /^    needs:\s*\[([^\]]*)\]/m.exec(body)?.[1].split(',').map(value => value.trim().replace(/^['"]|['"]$/g, ''))
+    || [...(body.match(/^    needs:\s*\r?\n((?:      - [\w-]+\r?\n)+)/m)?.[1] || '').matchAll(/- ([\w-]+)/g)].map(match => match[1]);
+  // The required check runs after failed tests too; only a cancelled run skips it, and that run
+  // reports cancelled. It may wait for a test job through another job that also always runs.
+  const alwaysRuns = (name, body) => assert.match(body, /^    if: \$\{\{\s*(?:always\(\)|!cancelled\(\))\s*\}\}\s*$/m, `${name} must run even after failed tests`);
   for (const name of binding.required_checks) {
     const body = jobs.get(name);
     assert.ok(body, `required check ${name} must be a workflow job`);
-    // `!cancelled()` runs after failed tests too; only a cancelled run skips it, and that run reports cancelled.
-    assert.match(body, /^    if: \$\{\{\s*(?:always\(\)|!cancelled\(\))\s*\}\}\s*$/m, `${name} must run even after failed tests`);
-    const needs = /^    needs:\s*\[([^\]]*)\]/m.exec(body)?.[1].split(',').map(value => value.trim().replace(/^['"]|['"]$/g, ''))
-      || [...(body.match(/^    needs:\s*\r?\n((?:      - [\w-]+\r?\n)+)/m)?.[1] || '').matchAll(/- ([\w-]+)/g)].map(match => match[1]);
-    for (const testJob of tests.filter(job => job !== name)) assert.ok(needs.includes(testJob), `${name} must need ${testJob}`);
+    alwaysRuns(name, body);
+    const waited = new Set();
+    const queue = [...needsOf(body)];
+    while (queue.length) {
+      const job = queue.shift();
+      if (waited.has(job)) continue;
+      waited.add(job);
+      const jobBody = jobs.get(job);
+      assert.ok(jobBody, `${name} needs ${job}, which must be a workflow job`);
+      const further = needsOf(jobBody);
+      // A job between the required check and a test job must not be skipped when a test job failed.
+      if (further.some(next => tests.includes(next))) alwaysRuns(job, jobBody);
+      queue.push(...further);
+    }
+    for (const testJob of tests.filter(job => job !== name)) assert.ok(waited.has(testJob), `${name} must need ${testJob}`);
   }
 });
 

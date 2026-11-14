@@ -9,6 +9,8 @@
 //   node repo/scripts/run-tests.cjs --shard windows-2 --os windows   one CI shard
 //   node repo/scripts/run-tests.cjs --plan             the shards and their estimated times
 //   node repo/scripts/run-tests.cjs --verify-ci <dir>  the CI aggregate check over the leg summaries
+//                                                      (--legs gate: the gate job's check of the test jobs;
+//                                                      by default the validate job's check of its needs)
 //   node repo/scripts/run-tests.cjs --clock-ahead      the test files that pin a calendar date, with
 //                                                      Node's clock moved 400 days ahead
 //
@@ -29,7 +31,8 @@
 // a drive root is refused. On Windows the folder is used in its long form, never an 8.3 short name.
 // Options: --summary <file> writes the run's JSON summary,
 // --report-durations <file> writes seconds per file, --concurrency <n> (default 3), --base <ref>
-// for --changed (default origin/main).
+// for --changed (default origin/main). In GitHub Actions a shard summary records the commit the run
+// tested (GITHUB_SHA) as `commit`, and --verify-ci there accepts only summaries of the run's own commit.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -46,7 +49,7 @@ const STALE_RUN_AGE_MS = 24 * 60 * 60 * 1000;
 // Written into every run folder this runner creates; the stale sweep removes only folders that carry it.
 const RUN_MARKER = '.toolkit-test-run';
 const RESULTS_FILE = 'test-results.jsonl';
-const USAGE = 'Usage: node repo/scripts/run-tests.cjs [--changed | --all | --shard <id> --os <linux|windows> | --clock-ahead | --plan | --verify-ci <dir> | <test file>...] [--clock-offset-days <n>] [--temp-root <dir>] [--summary <file>] [--report-durations <file>] [--concurrency <n>] [--base <ref>]';
+const USAGE = 'Usage: node repo/scripts/run-tests.cjs [--changed | --all | --shard <id> --os <linux|windows> | --clock-ahead | --plan | --verify-ci <dir> [--legs gate|validate] | <test file>...] [--clock-offset-days <n>] [--temp-root <dir>] [--summary <file>] [--report-durations <file>] [--concurrency <n>] [--base <ref>]';
 // The run modes a moved clock may go with: a shard run proves CI coverage, so it keeps the real clock.
 const CLOCK_MODES = new Set(['clock-ahead', 'files', 'changed', 'all']);
 
@@ -54,7 +57,7 @@ class UsageError extends Error {}
 
 function parseArgs(argv) {
   const options = { mode: null, files: [], concurrency: DEFAULT_CONCURRENCY, base: 'origin/main', clockOffsetDays: null };
-  const valued = new Set(['--shard', '--os', '--temp-root', '--summary', '--report-durations', '--concurrency', '--base', '--verify-ci', '--clock-offset-days']);
+  const valued = new Set(['--shard', '--os', '--temp-root', '--summary', '--report-durations', '--concurrency', '--base', '--verify-ci', '--clock-offset-days', '--legs']);
   const setMode = (mode) => {
     if (options.mode && options.mode !== mode) throw new UsageError(`Choose one of --changed, --all, --shard, --clock-ahead, --plan, --verify-ci or test files (got ${options.mode} and ${mode}).`);
     options.mode = mode;
@@ -72,6 +75,10 @@ function parseArgs(argv) {
       else if (arg === '--report-durations') options.reportDurations = value;
       else if (arg === '--base') options.base = value;
       else if (arg === '--verify-ci') { setMode('verify-ci'); options.verifyDir = value; }
+      else if (arg === '--legs') {
+        if (!Object.hasOwn(shards.LEG_SETS, value)) throw new UsageError(`--legs is one of ${Object.keys(shards.LEG_SETS).join(', ')}.`);
+        options.legs = value;
+      }
       else if (arg === '--concurrency') {
         if (!/^[1-9][0-9]?$/.test(value)) throw new UsageError('--concurrency takes a whole number from 1 to 99.');
         options.concurrency = Number(value);
@@ -90,6 +97,7 @@ function parseArgs(argv) {
   if (!options.mode) options.mode = 'changed';
   if (options.mode === 'shard' && !options.os) throw new UsageError('--shard needs --os linux or --os windows.');
   if (options.os && options.mode !== 'shard') throw new UsageError('--os goes with --shard.');
+  if (options.legs && options.mode !== 'verify-ci') throw new UsageError('--legs goes with --verify-ci.');
   if (options.clockOffsetDays !== null && !CLOCK_MODES.has(options.mode)) throw new UsageError('--clock-offset-days goes with --clock-ahead, --changed, --all or test files.');
   if (options.mode === 'clock-ahead' && options.clockOffsetDays === null) options.clockOffsetDays = CLOCK_AHEAD_DAYS;
   return options;
@@ -287,6 +295,11 @@ function readSummaries(dir) {
   return found;
 }
 
+// The commit a GitHub Actions run tested, or null outside one.
+function testedCommit(env = process.env) {
+  return env.GITHUB_ACTIONS === 'true' && /^[0-9a-f]{40}$/.test(env.GITHUB_SHA || '') ? env.GITHUB_SHA : null;
+}
+
 function verifyCi(root, options, out, err) {
   const manifest = shards.loadManifest(root);
   const discovered = shards.discoverTestFiles(root);
@@ -294,7 +307,8 @@ function verifyCi(root, options, out, err) {
   try { needs = JSON.parse(process.env.TEST_LEGS || 'null'); }
   catch { needs = null; }
   const summaries = fs.existsSync(options.verifyDir) ? readSummaries(options.verifyDir) : [];
-  const { errors, totals } = shards.verifyCiSummaries({ manifest, discovered, summaries, needs });
+  const requiredJobs = shards.LEG_SETS[options.legs || 'validate'];
+  const { errors, totals } = shards.verifyCiSummaries({ manifest, discovered, summaries, needs, requiredJobs, commit: testedCommit() });
   errors.push(...shards.testFileErrors(root));
   errors.push(...shards.workflowErrors(fs.readFileSync(path.join(root, '.github', 'workflows', 'validate.yml'), 'utf8'), manifest));
   for (const system of Object.keys(totals)) {
@@ -378,6 +392,9 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
       // GitHub Actions numbers each run attempt; the CI check keeps the newest summary of a shard.
       const attempt = Number(process.env.GITHUB_RUN_ATTEMPT);
       if (selection.shard && Number.isInteger(attempt) && attempt > 0) summary.run_attempt = attempt;
+      // The commit the run tested, so a later run can reuse this summary only for the same code.
+      const commit = testedCommit();
+      if (selection.shard && commit) summary.commit = commit;
       out.write(`${totalsLine(summary)}\n`);
       if (summary.missing.length) err.write(`No result for ${summary.missing.join(', ')}: the file did not load.\n`);
       if (options.summary) writeJson(options.summary, summary);
@@ -401,4 +418,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ CLOCK_AHEAD_DAYS, CLOCK_PRELOAD, RUN_MARKER, TestRun, main, parseArgs, summarize, tempRootError });
+module.exports = Object.freeze({ CLOCK_AHEAD_DAYS, CLOCK_PRELOAD, RUN_MARKER, TestRun, main, parseArgs, summarize, tempRootError, testedCommit });
