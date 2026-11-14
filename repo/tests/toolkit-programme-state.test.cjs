@@ -380,6 +380,52 @@ test('a priority tie is named only among queued rows of one group', () => {
   assert.deepEqual(state.orderTies(parent, new Map()).map(tie => tie.map(outcome => outcome.issue)), [[2, 3, 4, 10]]);
 });
 
+test('an outcome pinned last sorts after every unpinned open outcome, even ones added after it', () => {
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  const validateParent = ajv.compile(schema('parent-state-v1.schema.json'));
+  const outcomes = [
+    { issue: 2, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 3, class: 'COMMITTED', parent: 7, order: 2, last: true },
+    { issue: 4, class: 'OPTIONAL', parent: 7, order: 3 },
+    { issue: 5, class: 'COMMITTED', parent: 7, order: 4 },
+    { issue: 6, class: 'COMPLETED', parent: 7, order: 5 },
+    { issue: 8, class: 'OPTIONAL', parent: 7, order: 0, last: true },
+  ];
+  const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes });
+  assert.deepEqual(state.validateParent(parent), []);
+  assert.equal(validateParent(parent), true, JSON.stringify(validateParent.errors));
+  const rows = body => body.split('\n').filter(line => /^\|#\d+\|/.test(line)).map(line => Number(line.split('|')[1].slice(1)));
+  const body = state.renderParentBlockBody(parent, new Map(), new Map());
+  assert.deepEqual(rows(body), [2, 5, 4, 3, 8, 6], 'unpinned LATER and OPTIONAL rows first, then pinned rows by group, then finished rows');
+  assert.match(body, /Order: NOW, LATER by priority, OPTIONAL, tasks pinned last, COMPLETED/);
+  assert.match(state.renderCurrentBlockBody(parent, new Map(), new Map()), /\*\*Start next:\*\* #2 \(#2\)/, 'the top unpinned task starts next');
+  // A task added later takes the next order and still lands before the pinned one.
+  const added = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [...outcomes, { issue: 9, class: 'COMMITTED', parent: 7, order: 6 }] });
+  assert.deepEqual(rows(state.renderParentBlockBody(added, new Map(), new Map())), [2, 5, 9, 4, 3, 8, 6]);
+  // Only the pinned task left: it starts next. A finished pinned task sorts as finished.
+  const alone = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: outcomes.filter(entry => [3, 6].includes(entry.issue)) });
+  assert.match(state.renderCurrentBlockBody(alone, new Map(), new Map()), /\*\*Start next:\*\* #3 \(#3\)/);
+  const done = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 3, class: 'COMPLETED', parent: 7, order: 2, last: true }, { issue: 2, class: 'COMMITTED', parent: 7, order: 9 }] });
+  const doneBody = state.renderParentBlockBody(done, new Map(), new Map());
+  assert.deepEqual(rows(doneBody), [2, 3]);
+  assert.doesNotMatch(doneBody, /tasks pinned last/, 'the order line names pinned tasks only while one is open');
+  assert.doesNotMatch(state.renderParentBlockBody(state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [outcomes[0]] }), new Map(), new Map()), /tasks pinned last/);
+  // Pinned rows tie only with each other.
+  const ties = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [
+    { issue: 2, class: 'COMMITTED', parent: 7, order: 1 },
+    { issue: 3, class: 'COMMITTED', parent: 7, order: 1, last: true },
+    { issue: 4, class: 'COMMITTED', parent: 7, order: 2, last: true },
+    { issue: 5, class: 'COMMITTED', parent: 7, order: 2, last: true },
+  ] });
+  assert.deepEqual(state.orderTies(ties, new Map()).map(tie => tie.map(entry => entry.issue)), [[4, 5]]);
+  // Only true pins; anything else is refused by both validators.
+  for (const value of [false, 'yes', 1]) {
+    const bad = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 2, class: 'COMMITTED', parent: 7, order: 1, last: value }] });
+    assert.match(state.validateParent(bad).join('\n'), /outcomes\[0\]\.last must be true or left out/);
+    assert.equal(validateParent(bad), false);
+  }
+});
+
 test('older class names are read as COMMITTED and anything else is refused', () => {
   for (const cls of ['CORE', 'HARDENING', 'LATER']) {
     const parent = state.newParent({ repository: 'acme/app', parentIssue: 7, outcomes: [{ issue: 8, class: cls, parent: 7, order: 0 }] });
