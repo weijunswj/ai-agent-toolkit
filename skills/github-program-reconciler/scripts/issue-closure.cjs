@@ -56,6 +56,42 @@ function owedUat(body) {
   return null;
 }
 
+// A merge train pull request carries its members: it merges each member's reviewed head, Refs
+// every member's task and holds one UAT line for the whole train (the strictest member's). Its body
+// is recognised by the `## Merge train` heading and member table that toolkit-merge-train.cjs body
+// writes. Returns the member PR numbers, sorted, or null for any other body.
+const TRAIN_HEADING = /^## Merge train[ \t]*$/m;
+const TRAIN_TABLE = /^\| Member \| Reviewed head \|/m;
+const TRAIN_ROW = /^\| #([1-9][0-9]*) \| `([0-9a-f]{40})` \|/gm;
+// The member rows of a train body ({ pr, head }), or null for any other body.
+function mergeTrainRows(body) {
+  if (typeof body !== 'string' || body.length > 1024 * 1024 || !TRAIN_HEADING.test(body) || !TRAIN_TABLE.test(body)) return null;
+  const rows = new Map();
+  for (const match of body.matchAll(TRAIN_ROW)) if (Number.isSafeInteger(Number(match[1])) && !rows.has(Number(match[1]))) rows.set(Number(match[1]), { pr: Number(match[1]), head: match[2] });
+  return rows.size ? [...rows.values()].sort((a, b) => a.pr - b.pr) : null;
+}
+function mergeTrainMembers(body) {
+  const rows = mergeTrainRows(body);
+  return rows ? rows.map(row => row.pr) : null;
+}
+// A table alone proves nothing. A member was carried by a merged train only when GitHub marked it
+// merged with the train (an indirect merge lands seconds after it), and by an open train only while
+// that member is open at the exact head the table names.
+const TRAIN_MERGE_WINDOW_MS = 10 * 60 * 1000;
+function trainCarried(train, member, head) {
+  if (!train || !member) return false;
+  if (train.state === 'MERGED') {
+    const from = Date.parse(train.merged_at); const at = Date.parse(member.merged_at);
+    return member.state === 'MERGED' && Number.isFinite(from) && Number.isFinite(at) && at >= from && at - from <= TRAIN_MERGE_WINDOW_MS;
+  }
+  return train.state === 'OPEN' && member.state === 'OPEN' && typeof member.head === 'string' && member.head.toLowerCase() === head;
+}
+// The members a train's own OWNER_TEST_NEEDED line names as owing the owner's test.
+function trainOwing(body) {
+  const line = /^UAT: OWNER_TEST_NEEDED \(([^\r\n]*)\)[ \t]*$/m.exec(String(body || ''));
+  return new Set(line ? [...line[1].matchAll(/#([1-9][0-9]*)/g)].map(match => Number(match[1])) : []);
+}
+
 const allowed = extra => ({ status: 'allowed', ...extra });
 const unknown = reason => ({ status: 'unknown', reason });
 class IssueClosureGuard {
@@ -73,16 +109,50 @@ class IssueClosureGuard {
   ownerTestPrs(repository, number, budget) {
     if (typeof this.uatState !== 'function') return [];
     const events = this.pages(`repos/${repository}/issues/${number}/timeline`, budget);
-    const found = new Set();
+    const merged = new Map();
     for (const event of events) {
       if (event?.event !== 'cross-referenced') continue;
       const source = event.source?.issue;
       if (!source?.pull_request?.merged_at || !Number.isSafeInteger(source.number)) continue;
       const from = /^https:\/\/api\.github\.com\/repos\/([^/]+\/[^/]+)\//.exec(source.repository_url ? `${source.repository_url}/` : '')?.[1]?.toLowerCase();
       if (from !== repository.toLowerCase()) continue;
-      if (this.uatState(typeof source.body === 'string' ? source.body : '') === 'OWNER_TEST_NEEDED') found.add(source.number);
+      merged.set(source.number, { body: typeof source.body === 'string' ? source.body : '', merged_at: source.pull_request.merged_at });
+    }
+    const found = new Set();
+    const asMerged = entry => entry && { state: 'MERGED', merged_at: entry.merged_at };
+    for (const [pr, { body, merged_at }] of merged) {
+      if (this.uatState(body) !== 'OWNER_TEST_NEEDED') continue;
+      // A merge train's UAT line is its strictest member's. It releases this task only when every
+      // member it references here was carried by the train, owes nothing by its own strict UAT line
+      // (NOT_REQUIRED or PASSED) and is not named by the train's line as owing the owner's test.
+      const rows = mergeTrainRows(body);
+      if (rows) {
+        const owing = trainOwing(body);
+        const train = { state: 'MERGED', merged_at };
+        const backing = rows.filter(row => row.pr !== pr && merged.has(row.pr));
+        if (backing.length && backing.every(row => trainCarried(train, asMerged(merged.get(row.pr)), row.head) && !owing.has(row.pr)
+          && ['NOT_REQUIRED', 'PASSED'].includes(this.uatState(merged.get(row.pr).body)))
+          && this.carriedHeads(repository, pr, backing, budget)) continue;
+      }
+      found.add(pr);
     }
     return [...found].sort((a, b) => a - b);
+  }
+
+  // A table and merge times can still be pasted. Each member must have merged at the head its row
+  // names, and that head must sit inside the train's own branch: one PR read per member, one for the
+  // train and one compare per member. A failed read is an unknown, never a release.
+  carriedHeads(repository, train, rows, budget) {
+    const head = this.get(`repos/${repository}/pulls/${train}`, budget)?.head?.sha;
+    if (!/^[0-9a-f]{40}$/i.test(head || '')) throw new Error('Merge train head unreadable.');
+    for (const row of rows) {
+      const member = this.get(`repos/${repository}/pulls/${row.pr}`, budget);
+      if (member?.merged !== true || String(member.head?.sha || '').toLowerCase() !== row.head) return false;
+      if (row.head === head.toLowerCase()) continue;
+      const status = this.get(`repos/${repository}/compare/${row.head}...${head}?per_page=1`, budget)?.status;
+      if (!['ahead', 'identical'].includes(status)) return false;
+    }
+    return true;
   }
 
   budget() { return { requests: 0, deadline: Math.min(this.deadline ?? Infinity, this.now() + this.deadlineMs) }; }
@@ -214,4 +284,4 @@ class IssueClosureGuard {
     } catch (error) { return unknown(`PR metadata or commits could not be read completely. ${error.message} Retry with a current explicit PR and head.`); }
   }
 }
-module.exports = { closingReferences, owedUat, IssueClosureGuard };
+module.exports = { closingReferences, owedUat, mergeTrainRows, mergeTrainMembers, trainCarried, TRAIN_MERGE_WINDOW_MS, IssueClosureGuard };
