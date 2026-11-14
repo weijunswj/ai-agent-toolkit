@@ -168,7 +168,7 @@ test('gate: it turns governance on for exactly the files the sweep reads as enab
   for (const [label, file] of [
     ['v1', bindingV1()], ['v2 enabled', binding()], ['v2 disabled', binding({ governance: 'disabled' })],
     ['v1 with governance disabled', { ...bindingV1(), governance: 'disabled' }], ['v1 with governance enabled', { ...bindingV1(), governance: 'enabled' }],
-    ['v1 with v2 parents', { ...bindingV1(), parents }], ['v1 with parent_lifecycle', { ...bindingV1(), parent_lifecycle: { reopen_incomplete: true, complete_when_children_closed: true } }], ['no schema, enabled', { ...v2NoParents, schema: undefined, parents }],
+    ['v1 with v2 parents', { ...bindingV1(), parents }], ['v1 with parent_lifecycle', { ...bindingV1(), parent_lifecycle: { reopen_incomplete: true, complete_when_children_closed: true } }], ['v1 with detach_finished_children', { ...bindingV1(), detach_finished_children: true }], ['no schema, enabled', { ...v2NoParents, schema: undefined, parents }],
     ['v2 without a governance key', { ...v2NoParents, governance: undefined, parents }], ['unknown schema', { ...bindingV1(), schema: 'toolkit.programme-binding.v9' }],
   ]) {
     const file2 = JSON.parse(JSON.stringify(file));

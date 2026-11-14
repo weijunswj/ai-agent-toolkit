@@ -148,7 +148,7 @@ const denied = result => result.hookSpecificOutput?.permissionDecision === 'deny
 
 test('cloud matrix: switch On merges an eligible head pinned as a merge commit, and nothing looser', t => {
   const ctx = context(t);
-  assert.match(start(ctx).hookSpecificOutput.additionalContext, /the merge hold runs as on a computer; the undecided-repository hold does not/);
+  assert.match(start(ctx).hookSpecificOutput.additionalContext, /the merge hold runs as on a computer; the governance question is not asked/);
   prompt(ctx, firstPrompt(['- Task auto-merge: On (user, 12 Nov)']));
   assert.deepEqual(tool(ctx, merge(ctx, ctx.head)), {}, 'switch On, scope exit 0, merge commit, head pinned');
   assert.ok(denied(tool(ctx, merge(ctx, ctx.head, { merge_method: 'squash' }))), 'squash');

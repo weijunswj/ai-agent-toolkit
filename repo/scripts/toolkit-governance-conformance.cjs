@@ -14,7 +14,7 @@
 // only), the dependency and security settings (toolkit-governance-security.cjs: Dependabot alerts,
 // security and version updates, secret scanning, push protection, CodeQL, private vulnerability
 // reporting, and auto-merge only where the binding allows it and the default branch is protected),
-// whether the repository carries a current plain-text check, and whether prompt-hold enforcement is
+// whether the repository carries a current plain-text check, and whether the governance question hook is
 // active on each host. Enforcement never counts as active unless a host really runs the hook:
 // hosts without plugin hooks (cloud sessions, Claude Projects threads) and OpenCode are
 // `unsupported`.
@@ -33,11 +33,11 @@ const governanceApp = require('./toolkit-governance-app.cjs');
 const ROOT = path.resolve(__dirname, '..', '..');
 const GOVERNED_SOURCE_REL = 'repo/contracts/agent-rules/toolkit-governed-rules.md';
 const VERSION_REL = 'repo/contracts/toolkit-local-bridge/version.json';
-const PROMPT_HOLD_HOOK = 'toolkit-governance-hook';
-// Each host's hook file and the script its UserPromptSubmit entry must run. Codex's prompt hold runs
+const QUESTION_HOOK = 'toolkit-governance-hook';
+// Each host's hook file and the script its UserPromptSubmit entry must run. Codex's question hook runs
 // the helper hook script, so it shares that hook's installed Windows launcher.
 const HOST_HOOK_FILES = Object.freeze({
-  claude_code: Object.freeze({ parts: ['.claude-plugin', 'hooks', 'hooks.json'], script: `${PROMPT_HOLD_HOOK}.cjs`, reason: 'installed-state-not-checked' }),
+  claude_code: Object.freeze({ parts: ['.claude-plugin', 'hooks', 'hooks.json'], script: `${QUESTION_HOOK}.cjs`, reason: 'installed-state-not-checked' }),
   codex: Object.freeze({ parts: ['.codex-plugin', 'hooks', 'hooks.json'], script: 'toolkit-codex-helper-hook.cjs', reason: 'runs-once-you-trust-the-plugin-hooks' }),
 });
 
@@ -48,8 +48,8 @@ function expectedGovernedBlock(root = ROOT) {
   return { source: GOVERNED_SOURCE_REL, name: governance.GOVERNED_BLOCK, version, body };
 }
 
-// Whether this Toolkit copy ships a prompt-submit hold hook for a host. A host whose hook files
-// carry no hold hook reports `inactive`; a shipped hook is not yet proof that it is installed
+// Whether this Toolkit copy ships the prompt-submit question hook for a host. A host whose hook files
+// carry no question hook reports `inactive`; a shipped hook is not yet proof that it is installed
 // and trusted on this computer.
 function enforcementStatus(root = ROOT) {
   const hosts = {};
@@ -62,7 +62,7 @@ function enforcementStatus(root = ROOT) {
     } catch { shipped = false; }
     hosts[host] = shipped
       ? { status: 'shipped', reason: spec.reason }
-      : { status: 'inactive', reason: 'prompt-hold-hook-not-shipped' };
+      : { status: 'inactive', reason: 'question-hook-not-shipped' };
   }
   hosts.opencode = { status: 'unsupported', reason: 'no-prompt-blocking-mechanism' };
   hosts.cloud_and_projects = { status: 'unsupported', reason: 'not-enforced-in-cloud-sessions' };
@@ -372,4 +372,4 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
   });
 }
 
-module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, enforcementStatus, expectedGovernedBlock, unverifiedExit, report, PROMPT_HOLD_HOOK });
+module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, enforcementStatus, expectedGovernedBlock, unverifiedExit, report, QUESTION_HOOK });

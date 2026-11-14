@@ -14,7 +14,7 @@
 //                   says which rules each hook covers there)
 //
 // A Claude Code cloud session runs the hooks synced from the claude.ai account copy too, the merge
-// hold included (not the undecided-repository hold, which a cloud container cannot keep an answer
+// hold included (not the governance question, which a cloud container cannot keep an answer
 // for), but the programme refresh cannot write without a signed-in gh, so the portable path still
 // applies there.
 
