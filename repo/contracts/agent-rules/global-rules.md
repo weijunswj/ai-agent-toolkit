@@ -88,7 +88,7 @@ All development aims at these; repository rules may add, never relax:
 - **Fast CI:** shard or cache with coverage unchanged, each file within its time budget; no duplicate runs; free fixes first; tests and CI evolve with the code.
 - **Grouped changes:** one coherent PR per goal; dependency updates grouped, not one PR per package.
 - **Slim:** no dead code or unneeded compatibility (Change-local hygiene); no scraps.
-- **Platform first:** use built-in host features; custom guards only for real risks.
+- **Platform first:** use built-in host features; custom guards only for real risks, each naming the failure it prevents.
 - **Never silently wrong:** fail loudly and heal missed steps; must-hold rules live in hooks, scripts or CI.
 - **Generic:** shared rules and tools name no project, issue or record unless needed.
 - **One source of truth:** every rule or fact has one home; edit the source and regenerate, never a copy or summary.
@@ -96,6 +96,15 @@ All development aims at these; repository rules may add, never relax:
 - **Checks over judgement:** prove results with tests, parsers and validators; a model never grades its own output.
 - **Vet outside material:** review and pin third-party code, packages and skills before use; never run upstream code to judge it.
 - **Cheapest capable route:** the cheapest model and effort that does the job; any raise states its reason.
+- **Fix the root cause:** reuse first, then the smallest real fix; no broad fallbacks.
+- **Ship, then improve:** basics, ship, observe, improve; finish authorised work before stopping.
+- **Check by risk, not size:** review and testing follow what a change touches.
+- **Private by default:** logs and errors carry no secrets or personal data.
+- **Plain words:** human-facing text uses plain names and describes current behaviour.
+- **Written, not remembered:** progress and decisions live in the branch, PR and records, never chat or memory.
+- **Feedback is input, not spec:** check it against current code first.
+- **Readers before writers:** new keys or formats reach every reader before anything writes them.
+- **Owner-only deletes:** merged branches are left to the host's auto-delete setting where on; any other branch delete, a closed pull request's included, needs the owner's OK. Permission settings change only on the owner's explicit ask.
 
 ## Engineering Defaults
 
