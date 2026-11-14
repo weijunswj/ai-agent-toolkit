@@ -851,9 +851,11 @@ async function run(options, out = process.stdout) {
   const started = Date.now();
   const corpus = loadCorpus();
   if (corpus.errors.length) { out.write(`Hook pack corpus problems:\n${corpus.errors.map(error => `  ${error}`).join('\n')}\n`); return 1; }
-  const aged = agedKnownBad(corpus.rows, options.now || Date.now());
-  if (aged.length) { out.write(`Hook pack known-bad rows past their time:\n${aged.map(error => `  ${error}`).join('\n')}\n`); return 1; }
   let rows = selectRows(corpus.rows, options);
+  // Checked after the options, so a usage error still exits 2. The CI hook-pack jobs use the real
+  // clock (their red is the signal); tests pass a fixed clock through main's third argument.
+  const aged = agedKnownBad(corpus.rows, options.now ?? Date.now());
+  if (aged.length) { out.write(`Hook pack known-bad rows past their time:\n${aged.map(error => `  ${error}`).join('\n')}\n`); return 1; }
   if (options.against && !options.rows) {
     const old = new Set(corpusAt(options.against).rows.map(row => row.id));
     rows = rows.filter(row => !old.has(row.id));
@@ -1008,9 +1010,10 @@ function parseArgs(argv) {
   return options;
 }
 
-async function main(argv = process.argv.slice(2), out = process.stdout) {
+async function main(argv = process.argv.slice(2), out = process.stdout, { now } = {}) {
   let options;
   try { options = parseArgs(argv); } catch (error) { out.write(`${error.message}\n`); return 2; }
+  if (now !== undefined) options.now = now;
   try {
     if (options.command === 'validate') {
       const corpus = loadCorpus();
