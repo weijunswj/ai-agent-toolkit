@@ -78,7 +78,7 @@ const CONTEXT = Object.freeze({
   env: () => 'Open the env editor: follow the toolkit-env skill and run its `edit` route. Never run the one-key `set` prompt for this phrase, and never print a key value in chat.',
   guide: () => {
     const command = subcommand => `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
-    return `Guide the user through Toolkit's GitHub governance for this repository. Run exactly \`${command('setup')}\` in this repository and show the user its output; run no other governance subcommand first. `
+    return `Guide the user through Toolkit's GitHub governance for this repository. Run exactly \`${command('setup')}\` in this repository; run no other governance subcommand first. Show the user its output once, in full and as printed, the permission table and every permission block included; never summarise it, shorten it or repeat it. After it, add the next step once. `
       + `If governance is on, it shows the merged answers: offer to change task auto-merge with \`${command('refresh')} --set on\` or \`${command('refresh')} --set off\` (it only prepares a pull request for the user to merge), or to turn governance off, which the user does by running \`${command('disable')}\` in their own terminal. `
       + `If governance is off or not decided, tell the user they turn it on by running \`${command('setup')}\` in their own terminal: it asks two questions there, governance on and then task auto-merge on or off, and prepares one pull request with both. Every change is a pull request for the user to merge. Never answer the governance question for the user.`;
   },
