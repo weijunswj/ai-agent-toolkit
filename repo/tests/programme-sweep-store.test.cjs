@@ -339,5 +339,19 @@ test('read: a large document whose blob cannot be read stops with the failed rea
   const f = fixture();
   contentsWithoutText(f, 'state/issue-500.json');
   f.github.intercept(call => (/\/git\/blobs\//.test(call.path) ? { status: 404, json: { message: 'Not Found' } } : undefined));
-  assert.throws(() => f.store.read('child', 500), error => Boolean(error.code) && error.code !== 'STATE_INVALID');
+  assert.throws(() => f.store.read('child', 500), { code: 'GH_FAILED' });
+});
+
+test('write: a document too large for the Contents API reads back at its commit by its blob id', () => {
+  const f = fixture();
+  const { doc, sha } = f.store.read('child', 500);
+  doc.next_action = 'Checked 500';
+  contentsWithoutText(f, 'state/issue-500.json');
+  const calls = f.github.calls.length;
+  const result = f.store.write('child', 500, doc, { sha, previous: null });
+  assert.equal(result.outcome, 'WRITTEN');
+  assert.equal(result.doc.next_action, 'Checked 500');
+  const readback = f.github.calls.slice(calls).filter(call => call.method === 'GET' && call.path.includes('/contents/state/issue-500.json'));
+  assert.ok(readback.some(call => /[?&]ref=[0-9a-z]+/.test(call.path) && !call.path.includes('ref=main')), 'read back at the write commit');
+  assert.equal(f.github.calls.slice(calls).filter(call => /\/git\/blobs\//.test(call.path)).length, 1, 'by its blob id');
 });
