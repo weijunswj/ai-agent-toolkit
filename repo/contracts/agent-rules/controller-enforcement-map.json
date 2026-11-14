@@ -381,6 +381,11 @@
           "kind": "script",
           "path": "repo/scripts/toolkit-merge-train.cjs",
           "test": "repo/tests/toolkit-merge-train.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train.cjs",
+          "test": "repo/tests/toolkit-merge-train-eject.test.cjs"
         }
       ]
     },
