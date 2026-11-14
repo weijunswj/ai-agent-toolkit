@@ -61,9 +61,11 @@ const FIELDS = '{id, number, body, user: .user.login, html_url, updated_at}';
 // Every item of a paged list, one JSON object per line from each page. Numbered pages rather than
 // --paginate: gh follows GitHub's next links, which name the repository by numeric ID, and the cloud
 // session proxy refuses those paths. Every endpoint here asks for per_page=100.
+const MAX_PAGES = 100;
 function list(gh, endpoint) {
   const items = [];
   for (let page = 1; ; page += 1) {
+    if (page > MAX_PAGES) throw new Error(`${endpoint} has more than ${MAX_PAGES * 100} items; the sweep stops rather than report a partial scan`);
     const out = gh(['api', `${endpoint}&page=${page}`, '--jq', `.[] | ${FIELDS} | @json`]);
     const rows = out.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
     items.push(...rows);

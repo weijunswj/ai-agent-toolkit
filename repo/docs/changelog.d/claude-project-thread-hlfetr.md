@@ -6,4 +6,4 @@
 
 ### Fixed
 
-- The decision-trace audit and the footer sweep read GitHub lists by numbered pages, so they also run in cloud sessions, whose proxy refuses the numeric-ID next-page links that `gh api --paginate` follows.
+- The footer sweep reads GitHub lists by numbered pages (at most 100), so it also runs in cloud sessions, whose proxy refuses the numeric-ID next-page links that `gh api --paginate` follows.

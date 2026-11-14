@@ -333,15 +333,8 @@ function gh(args) {
 
 function fetchIssue(repo, issue) {
   const body = JSON.parse(gh(['api', `repos/${repo}/issues/${issue}`])).body || '';
-  // Numbered pages rather than --paginate: gh follows GitHub's next links, which name the repository
-  // by numeric ID, and the cloud session proxy refuses those paths.
-  const comments = [];
-  for (let page = 1; ; page += 1) {
-    const rows = JSON.parse(gh(['api', `repos/${repo}/issues/${issue}/comments?per_page=100&page=${page}`]));
-    comments.push(...rows);
-    if (rows.length < 100) break;
-  }
-  return { body, comments };
+  const pages = gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`]);
+  return { body, comments: JSON.parse(pages).flat() };
 }
 
 function parseArgs(argv) {
