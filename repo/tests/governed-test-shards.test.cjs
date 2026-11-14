@@ -83,6 +83,18 @@ test('a file name reaches the program as one argument, never as shell syntax', a
   assert.deepEqual(seen, [{ program: NODE, args: ['--test', 'tests/a;echo hi.test.js'], shell: false }]);
 });
 
+test('a file that hangs is stopped at file_timeout_seconds and fails by name, and the others still finish', async (t) => {
+  const HANG = "setTimeout(() => {}, 60000);\n";
+  const root = repo(t, { 'tests/a.test.js': PASS, 'tests/hang.test.js': HANG },
+    nodeList([{ id: `${SYSTEM}-1`, rest: true }], { file_timeout_seconds: 1 }));
+  const started = Date.now();
+  const { exitCode, summary } = await governed.runShard({ root, manifest: governed.loadManifest(root), system: SYSTEM, shardId: `${SYSTEM}-1`, out: sink() });
+  assert.equal(exitCode, 1);
+  assert.ok(Date.now() - started < 30000, 'the hung file is stopped, not waited out');
+  assert.deepEqual(summary.files.map((entry) => [entry.file, entry.passed, entry.error || null]), [['tests/a.test.js', 1, null], ['tests/hang.test.js', 0, 'timed out after 1 s']]);
+  assert.equal(governed.DEFAULT_FILE_TIMEOUT_SECONDS, 900);
+});
+
 test('Python tests run through the same command mode', { skip: python ? false : 'no python on this machine' }, async (t) => {
   const root = repo(t, { 'tests/test_ok.py': 'assert 1 + 1 == 2\n', 'tests/test_bad.py': 'raise SystemExit(3)\n' },
     { schema: governed.MANIFEST_SCHEMA, systems: { [SYSTEM]: { command: [python, '{files}'], discover: 'tests/test_*.py', shards: [{ id: `${SYSTEM}-1`, rest: true }] } } });
@@ -100,6 +112,10 @@ test('the list refuses shells, a missing or doubled {files}, bad globs, unknown 
     [withLinux({ command: ['bash', '-c', '{files}'] }), /may not start with a shell/],
     [withLinux({ command: ['/usr/bin/env', 'pytest', '{files}'] }), /may not start with a shell/],
     [withLinux({ command: ['pwsh.exe', '{files}'] }), /may not start with a shell/],
+    [withLinux({ command: ['C:\\Windows\\System32\\CMD.EXE', '/c', '{files}'] }), /may not start with a shell/],
+    [withLinux({ command: ['/usr/bin/bash.exe', '{files}'] }), /may not start with a shell/],
+    [withLinux({ command: ['busybox', 'sh', '{files}'] }), /may not start with a shell/],
+    [withLinux({ command: ['xargs', 'pytest', '{files}'] }), /may not start with a shell/],
     [withLinux({ command: ['pytest', 'tests'] }), /exactly once/],
     [withLinux({ command: ['pytest', '{files}', '{files}'] }), /exactly once/],
     [withLinux({ command: ['pytest --x {files}'] }), /at least two/],
@@ -114,6 +130,8 @@ test('the list refuses shells, a missing or doubled {files}, bad globs, unknown 
     [{ ...base, workflow: '../validate.yml' }, /workflow must be a file name/],
     [{ ...base, systems: { mac: base.systems.linux } }, /unknown system mac/],
     [{ ...base, durations_seconds: { windows: {} } }, /windows is not a system this list names/],
+    [{ ...base, file_timeout_seconds: 0 }, /file_timeout_seconds must be a whole number/],
+    [{ ...base, file_timeout_seconds: 1.5 }, /file_timeout_seconds must be a whole number/],
   ];
   for (const [manifest, expected] of cases) assert.match(governed.manifestErrors(manifest, found).join('\n'), expected, JSON.stringify(manifest.systems?.linux?.command || manifest.schema));
   assert.match(governed.manifestErrors(base, { linux: [] }).join('\n'), /finds no test file/);

@@ -24,12 +24,15 @@ const FILES_ARG = '{files}';
 const DEFAULT_WORKFLOW = 'toolkit-test-shards.yml';
 const WORKFLOW_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/;
 const DEFAULT_CONCURRENCY = 3;
+// One test file's command is stopped after this many seconds unless the list sets file_timeout_seconds.
+const DEFAULT_FILE_TIMEOUT_SECONDS = 900;
+const MAX_FILE_TIMEOUT_SECONDS = 7200;
 // Programs that read their arguments as shell code. A command that starts with one would undo the
 // no-shell rule, so the list refuses it.
-const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'cmd.exe', 'powershell', 'powershell.exe', 'pwsh', 'pwsh.exe', 'env']);
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'cmd', 'powershell', 'pwsh', 'env', 'busybox', 'xargs']);
 // Folders discovery never enters: version control, installed packages and the pinned Toolkit copy.
 const SKIPPED_FOLDERS = new Set(['.git', 'node_modules', '.toolkit', '.venv', 'venv', '__pycache__']);
-const TOP_KEYS = new Set(['schema', 'description', 'workflow', 'systems', 'budgets', 'durations_seconds']);
+const TOP_KEYS = new Set(['schema', 'description', 'workflow', 'systems', 'budgets', 'durations_seconds', 'file_timeout_seconds']);
 const SYSTEM_KEYS = new Set(['command', 'discover', 'shards']);
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -74,11 +77,17 @@ function discoverFiles(root, glob) {
   return found.sort();
 }
 
+// The program's bare name: either separator, any case, without a Windows program suffix, so
+// C:\\Windows\\System32\\cmd.exe and /bin/bash.exe compare as cmd and bash on every system.
+function programName(program) {
+  return program.split(/[\\/]/).pop().toLowerCase().replace(/\.(exe|com|bat|cmd)$/, '');
+}
+
 function commandError(command) {
   if (!Array.isArray(command) || command.length < 2 || !command.every((part) => typeof part === 'string' && part.length > 0)) return 'command must be a list of at least two non-empty strings, such as ["python", "-m", "pytest", "{files}"]';
   if (command.filter((part) => part === FILES_ARG).length !== 1) return `command must hold "${FILES_ARG}" exactly once, as its own argument`;
   if (command[0] === FILES_ARG) return 'command must start with the program to run';
-  if (SHELLS.has(path.basename(command[0]).toLowerCase())) return `command may not start with a shell (${command[0]}): name the test program itself`;
+  if (SHELLS.has(programName(command[0]))) return `command may not start with a shell (${command[0]}): name the test program itself`;
   return null;
 }
 
@@ -90,6 +99,7 @@ function manifestErrors(manifest, discoveredBySystem = {}) {
   if (manifest.schema !== MANIFEST_SCHEMA) errors.push(`schema must be ${MANIFEST_SCHEMA}`);
   for (const key of Object.keys(manifest)) if (!TOP_KEYS.has(key)) errors.push(`unknown key ${key}`);
   if (manifest.workflow !== undefined && (typeof manifest.workflow !== 'string' || !WORKFLOW_FILE.test(manifest.workflow))) errors.push('workflow must be a file name in .github/workflows, such as toolkit-test-shards.yml');
+  if (manifest.file_timeout_seconds !== undefined && !(Number.isInteger(manifest.file_timeout_seconds) && manifest.file_timeout_seconds >= 1 && manifest.file_timeout_seconds <= MAX_FILE_TIMEOUT_SECONDS)) errors.push(`file_timeout_seconds must be a whole number of seconds from 1 to ${MAX_FILE_TIMEOUT_SECONDS}`);
   const systems = manifest.systems;
   if (!isObject(systems) || !Object.keys(systems).length) return [...errors, 'systems must name linux, windows or both'];
   for (const system of Object.keys(systems)) {
@@ -210,7 +220,7 @@ function argvFor(command, file) {
 
 // Runs one file's command and resolves { code, seconds, error }. Never throws: a program that cannot
 // start (not installed, or a script Windows only runs through a shell) is that file's failure.
-function runOne({ root, command, file, env, spawnFn, clock, write }) {
+function runOne({ root, command, file, env, spawnFn, clock, write, timeoutSeconds = DEFAULT_FILE_TIMEOUT_SECONDS }) {
   return new Promise((resolve) => {
     const [program, ...args] = argvFor(command, file);
     const started = clock();
@@ -221,9 +231,16 @@ function runOne({ root, command, file, env, spawnFn, clock, write }) {
     child.stdout?.on('data', (chunk) => chunks.push(chunk));
     child.stderr?.on('data', (chunk) => chunks.push(chunk));
     let settled = false;
+    // A file that hangs is stopped and fails by name, so one stuck test cannot hold the shard until
+    // the CI job's own limit.
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+      finish(null, `timed out after ${timeoutSeconds} s`);
+    }, timeoutSeconds * 1000);
     const finish = (code, error) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       const output = Buffer.concat(chunks).toString('utf8');
       write(`--- ${file}\n${output}${output && !output.endsWith('\n') ? '\n' : ''}`);
       resolve({ code, seconds: Math.round((clock() - started) / 100) / 10, error });
@@ -250,7 +267,7 @@ async function runShard({ root, manifest, system, shardId, concurrency = DEFAULT
   const worker = async () => {
     while (queue.length) {
       const file = queue.shift();
-      results.set(file, await runOne({ root, command, file, env: childEnv, spawnFn, clock, write: (text) => out.write(text) }));
+      results.set(file, await runOne({ root, command, file, env: childEnv, spawnFn, timeoutSeconds: manifest.file_timeout_seconds || DEFAULT_FILE_TIMEOUT_SECONDS, clock, write: (text) => out.write(text) }));
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, worker));
@@ -359,6 +376,7 @@ async function main(argv, { out = process.stdout, err = process.stderr, env = pr
 }
 
 module.exports = Object.freeze({
+  DEFAULT_FILE_TIMEOUT_SECONDS,
   DEFAULT_WORKFLOW,
   FILES_ARG,
   MANIFEST_REL,
