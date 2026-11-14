@@ -86,3 +86,16 @@ test('fallback-risk audit CLI exits nonzero only for error findings', () => {
   assert.match(errorResult.stderr, /Errors:/);
   assert.match(errorResult.stderr, /1 error\(s\), 0 warning\(s\)/);
 });
+
+test('fallback-risk audit: under GitHub Actions each finding is a file and line annotation, escaped', () => {
+  const { annotation } = require(auditScript);
+  assert.equal(annotation({ severity: 'warning', path: 'docs/a,b:c.md', line: 7, matched: 'fallback', phrase: 'use a fallback', reason: 'say what fails\nand why' }),
+    '::warning file=docs/a%2Cb%3Ac.md,line=7,title=Fallback risk::matched "fallback" (use a fallback) - say what fails%0Aand why');
+  assert.match(annotation({ severity: 'error', path: 'x.md', line: 1, matched: 'm', phrase: 'p', reason: 'r' }), /^::error file=x\.md,line=1,title=Fallback risk::/);
+  const plain = spawnSync(process.execPath, [auditScript], { encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: '' } });
+  const actions = spawnSync(process.execPath, [auditScript], { encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: 'true' } });
+  assert.equal(actions.status, plain.status, 'the exit code does not change');
+  const findings = auditFallbackRisk().findings.length;
+  assert.equal((actions.stdout.match(/^::(?:warning|error) file=/gm) || []).length, findings);
+  assert.doesNotMatch(plain.stdout, /^::/m, 'outside GitHub Actions the report is unchanged');
+});

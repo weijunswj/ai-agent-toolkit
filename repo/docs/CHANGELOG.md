@@ -1,5 +1,37 @@
 # Toolkit Changelog
 
+## 3.99.0 (cloud and CI findings keep asking until they clear)
+
+### Changed
+
+- **Held and skipped sweeps turn red:** each held sweep pass and each skip now prints a titled warning with its code. On the hourly start or a start by hand the sweep gate reads the last runs' warnings: three sweeps in a row held, or skipped for the same reason, or three hourly gate runs in a row skipped because governance is off, turn the gate run red with the step that clears it. Activity runs never go red for this, and the first clean run ends it. The gate's built-in token gains `checks: read` to read those warnings.
+- **The sweep gate tells a missing programme file from a refused read:** only a 404 means there is no file; a 401, 403 or server error on the binding is no longer read as governance off.
+- **Dependabot pull requests never wait silently:** when auto-merge is off in the binding, the binding cannot be read or no ruleset requires a check, the pull request gets the one marked comment naming why. The template moves to v4, so governed copies show drift until `toolkit governance security` refreshes them.
+- **Shard timing drift with no App fails the daily run:** a report-only run that finds a refresh due fails with the owner's step (`--fail-if-due`), and a refresh pull request open over 7 days fails the run naming it.
+- **Fallback-risk findings show on the pull request:** under GitHub Actions each one is also a file and line annotation.
+- **Re-bump without a key checks instead of repeating a note:** with no push key the workflow lists the owner's open pull requests that carry a version bump and fails naming them, or ends green and silent when there are none. A held re-bump comment keeps the day the hold began, and a hold over 7 days fails the run naming it and the hand command.
+
+## 3.98.1
+
+### Changed
+
+- **State document reads:** a single read of a state document over 1 MB now uses the same blob read as the sweep's snapshot. Tests now pin the failure code for a blob that cannot be read, and cover a write of such a document read back at its own commit.
+
+## 3.98.0 (findings keep asking until they clear)
+
+### Changed
+
+- **An action-required update report keeps asking:** while it is open, every bridge hook run prints `Toolkit: action needed (...)` with the cause, how many session starts in a row have seen it and the report's file name, and says to tell the owner before other work. A repeat of the same result writes no new report but still prints the line; a run that needs no action clears it, and cleanup never deletes the open report.
+- **Rule-drift notes repeat:** the repository-rules note shows at every session start while the finding holds, with its count, and names the step as due before the current task ends instead of "when convenient". It still never halts work.
+- **Held programme refreshes are counted:** held runs keep `held_streak` and `held_since` like skips, an incomplete inventory is held rather than done, the session line shows the count, and TASK HEALTH flags three held runs in a row.
+- **Task health shows age and peers:** a flag that has stood a day or more shows its age in days, and the session line names other computers' flags for the same repository.
+- **Unverified is not conformant:** an online `toolkit governance check` that could not confirm a setting reports `unverified`, exits 3 and names the repository admin's step. Offline runs keep exit 0.
+- **Merge-train ejections are listed:** the build prints a next step for each ejected member and the train body gets an `Ejected` section.
+- **Plain-text check:** unreadable settings or baseline are drift in `--check`, and a stale baseline allowance fails a full run until `--prune-baseline` lowers it.
+- **Hook pack:** a known-bad row over 30 days old fails the run unless it names its tracking issue in `issue`.
+- **Bridge hook errors are counted:** a hook that keeps stopping on an error says how many session starts in a row and to tell the owner.
+- **Work-queue-only attention:** when every open finding is on the work queue, the session-start action names the queue step and no longer offers an ack, which a work-queue finding refuses.
+
 ## 3.97.0 (Merge by card in Claude Code)
 
 ### Fixed

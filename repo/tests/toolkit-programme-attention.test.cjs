@@ -824,15 +824,29 @@ test('every session-start problem line names who acts and when', () => {
   checkpoint.writeLocalBinding({ session_hash: hash, repository: 'acme/app', issue: 423, assignment: 'g1-a1', repo_root: root, bound_at: 'x' }, { sessionsDir });
   checkpoint.recordError(hash, 'GH_AUTH', 'gh is not signed in', { sessionsDir });
   const line = evaluate();
-  for (const action of Object.values(gate.FINDING_ACTIONS)) assert.ok(line.includes(action), `${action} in ${line}`);
+  for (const [key, action] of Object.entries(gate.FINDING_ACTIONS)) if (key !== 'queue') assert.ok(line.includes(action), `${action} in ${line}`);
+  assert.ok(!line.includes(gate.FINDING_ACTIONS.queue), 'the queue action is only for a queue-only line');
   assert.match(line, /Attention: 2 new[^]*Run programme\.cjs attention for the list\. Controller: answer each new or overdue finding this turn/);
   assert.match(line, /Programme sweep: last run failed[^]*see toolkit tasks\. Controller: fix the task this turn/);
+
+  // Only work-queue findings open: the action names the queue step and never offers an ack, which
+  // a work-queue finding refuses.
+  const queue = { count: 2, oldest: { issue: 835, code: 'TASK_IDLE', since: '2026-11-01T00:00:00.000Z', next: state.FINDING_CODES.TASK_IDLE.next_action } };
+  cache.writeCache('acme/app', { line: 'Attention: 2 new, 0 acknowledged, 2 in the work queue', counts: { new: 2, acknowledged: 0 }, digest: 'd2', complete: true, queue }, { attentionDir, now: () => now.toISOString() });
+  const queued = evaluate();
+  assert.ok(queued.includes(gate.FINDING_ACTIONS.queue), queued);
+  assert.ok(!queued.includes(gate.FINDING_ACTIONS.attention), queued);
+  assert.doesNotMatch(gate.FINDING_ACTIONS.queue, /\back\b/);
+  // One open finding outside the queue brings the full action back.
+  cache.writeCache('acme/app', { line: 'Attention: 3 new, 0 acknowledged, 2 in the work queue', counts: { new: 3, acknowledged: 0 }, digest: 'd3', complete: true, queue }, { attentionDir, now: () => now.toISOString() });
+  assert.ok(evaluate().includes(gate.FINDING_ACTIONS.attention));
 });
 
 test('a task line gets the controller action only for a fault, never against an owner stop', () => {
   for (const line of ['Programme sweep: last run failed at 10:00Z; see toolkit tasks.', 'Programme sweep: held at 10:00Z; see toolkit tasks.',
     'Programme sweep: skipped (offline), 3 runs in a row since 09:00Z; see toolkit tasks.', 'Programme sweep: no run since 07:00Z (over 2 hours); see toolkit tasks.',
-    'Task health: programme-sweep: task code older than managed checkout', 'health file not shared: no verified evidence store', 'Task health file is over 26 hours old']) {
+    'Task health: programme-sweep: task code older than managed checkout', 'Programme sweep: held at 10:00Z, 3 runs in a row since 08:00Z; see toolkit tasks.',
+    'Task health on other computers: computer-0123456789ab: footer-sweep: last run failed', 'health file not shared: no verified evidence store', 'Task health file is over 26 hours old']) {
     assert.equal(gate.taskAction(line), ` ${gate.FINDING_ACTIONS.tasks}`, line);
   }
   assert.equal(gate.taskAction('Programme sweep: stopped by owner; see toolkit tasks.'), ' No action: the owner stopped it.');

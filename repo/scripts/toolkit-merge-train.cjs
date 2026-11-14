@@ -221,7 +221,7 @@ function build(cwd, manifest, options) {
         if (options.out) fs.writeFileSync(options.out, `${JSON.stringify(out, null, 2)}\n`);
         return {
           ok: false, branch, head: git(cwd, ['rev-parse', 'HEAD']).stdout, main, onto, stacked, level, bump: null,
-          boarded: boarded.map(member => member.pr), ejected: out.ejected,
+          boarded: boarded.map(member => member.pr), ejected: out.ejected, next: ejectedNext(out.ejected),
           problems: [`${error.message}; a member that already carries its own version bump must hold main's version before it boards`],
         };
       }
@@ -235,7 +235,7 @@ function build(cwd, manifest, options) {
   const head = git(cwd, ['rev-parse', 'HEAD']).stdout;
   const out = { ...manifest, members: boarded, ejected: ejected.map(({ pr, head: sha, reason }) => ({ pr, head: sha, reason })) };
   if (options.out) fs.writeFileSync(options.out, `${JSON.stringify(out, null, 2)}\n`);
-  return { ok: boarded.length > 0, branch, head, main, onto, stacked, level, bump, boarded: boarded.map(member => member.pr), ejected: out.ejected };
+  return { ok: boarded.length > 0, branch, head, main, onto, stacked, level, bump, boarded: boarded.map(member => member.pr), ejected: out.ejected, next: ejectedNext(out.ejected) };
 }
 
 function catchup(cwd, manifest, options) {
@@ -358,6 +358,19 @@ function memberOverlap(cwd, members, main) {
   return [...owners].filter(([, prs]) => prs.length > 1).map(([file, prs]) => ({ file, members: prs })).sort((a, b) => a.file.localeCompare(b.file));
 }
 
+// What the merging agent does about each ejected member: it never just drops off the train.
+function ejectedNext(ejected = []) {
+  return ejected.map(row => `#${row.pr}: ${row.reason === 'already on the train base' ? 'already landed; record it and drop it from the queue'
+    : 'land it on its own, or rejoin the next train once its review passes the head it boards at'} (${row.reason})`);
+}
+
+// The manifest's ejected rows as plain table cells (a pull request number, a full SHA, a fixed reason).
+function ejectedRows(manifest) {
+  if (!Array.isArray(manifest.ejected)) return [];
+  return manifest.ejected.filter(row => row && Number.isInteger(row.pr) && row.pr > 0)
+    .map(row => ({ pr: row.pr, head: SHA.test(row.head || '') ? row.head : 'unknown', reason: String(row.reason || 'no reason recorded').replace(/[|\r\n`]/g, ' ').slice(0, 200) }));
+}
+
 function body(manifest) {
   const members = manifest.members;
   const level = trainLevel(members);
@@ -385,6 +398,12 @@ function body(manifest) {
       ? `Refs ${line.replace(/^\S+ /, '')} (closed by #${member.pr}'s own closing line when the train lands)`
       : line))),
   ];
+  const ejected = ejectedRows(manifest);
+  if (ejected.length) {
+    lines.push('', '### Ejected', '', 'These did not board. The merging agent lands each on its own or rejoins it to the next train; none is left behind.', '',
+      '| Pull request | Head | Reason | Next step |', '|---|---|---|---|',
+      ...ejected.map(row => `| #${row.pr} | \`${row.head}\` | ${row.reason} | ${ejectedNext([row])[0].replace(/^#\d+: /, '').replace(/ \(.*\)$/, '')} |`));
+  }
   // Hook-pack rows a member changed stay explained on the train, or the pack check fails it.
   const pack = members.flatMap(member => (member.pack_changes || []).map(line => line.trim()));
   if (pack.length) lines.push('', '## Pack changes', '', ...pack);
@@ -479,10 +498,11 @@ function print(result, json) {
   if (result.body) { process.stdout.write(result.body); return; }
   const lines = [result.ok ? 'OK' : 'REFUSED'];
   for (const [key, value] of Object.entries(result)) {
-    if (key === 'ok' || key === 'problems' || value === undefined) continue;
+    if (key === 'ok' || key === 'problems' || key === 'next' || value === undefined) continue;
     lines.push(`${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`);
   }
   for (const problem of result.problems || []) lines.push(`- ${problem}`);
+  if ((result.next || []).length) lines.push('Ejected, still owed:', ...result.next.map(line => `- ${line}`));
   process.stdout.write(`${lines.join('\n')}\n`);
 }
 
@@ -500,4 +520,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { MAX_MEMBERS, TOOLKIT_BUMP, TrainError, body, build, catchup, checkManifest, land, run, split, trainLevel, trainTier, verify };
+module.exports = { MAX_MEMBERS, TOOLKIT_BUMP, TrainError, body, build, catchup, checkManifest, ejectedNext, land, run, split, trainLevel, trainTier, verify };

@@ -19,7 +19,10 @@
 // the run and, when the shards are out of balance, files moved between the named shards (the rest
 // shard keeps every file no named shard lists). --open-pr does the same on a new branch from
 // origin/main in a temporary worktree, pushes it and opens a pull request; with no trigger crossed
-// it opens nothing.
+// it opens nothing. While an earlier refresh pull request is open it opens no second one, and one
+// open for over 7 days fails the run naming it: merge or close it.
+// --fail-if-due makes a report run fail when a refresh trigger crossed, for a run that cannot
+// publish (no governance App), so the drift does not repeat as a green report forever.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -33,16 +36,18 @@ const ARTIFACT_PATTERN = 'test-summary-*';
 const UNTIMED_SHARE = 0.1;
 const IMBALANCE_RATIO = Object.freeze({ linux: 1.5, windows: 1.3 });
 const CONCURRENCY = 3; // run-tests.cjs default; node --test runs three files at a time per shard
-const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--run <id>] [--write | --open-pr]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
+const STALE_PR_DAYS = 7;
+const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--run <id>] [--write | --open-pr | --fail-if-due]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
-  const options = { run: null, write: false, openPr: false };
+  const options = { run: null, write: false, openPr: false, failIfDue: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--write') options.write = true;
     else if (arg === '--open-pr') options.openPr = true;
+    else if (arg === '--fail-if-due') options.failIfDue = true;
     else if (arg === '--repo-root') {
       const value = argv[index += 1];
       if (!value || !path.isAbsolute(value)) throw new UsageError('--repo-root needs an absolute checkout path');
@@ -55,7 +60,7 @@ function parseArgs(argv) {
     } else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new UsageError(`Unknown argument: ${arg}`);
   }
-  if (options.write && options.openPr) throw new UsageError('Use --write or --open-pr, not both');
+  if ([options.write, options.openPr, options.failIfDue].filter(Boolean).length > 1) throw new UsageError('Use one of --write, --open-pr or --fail-if-due');
   return options;
 }
 
@@ -230,7 +235,7 @@ function prBody(run, plan) {
 // open, a scheduled run opens no second one.
 const REFRESH_BRANCH_PREFIX = 'toolkit/shard-timings-';
 function openRefreshPrs(root) {
-  const open = JSON.parse(command('gh', ['pr', 'list', '--state', 'open', '--base', 'main', '--limit', '100', '--json', 'number,headRefName'], { cwd: root }));
+  const open = JSON.parse(command('gh', ['pr', 'list', '--state', 'open', '--base', 'main', '--limit', '100', '--json', 'number,headRefName,createdAt'], { cwd: root }));
   return open.filter(pr => typeof pr.headRefName === 'string' && pr.headRefName.startsWith(REFRESH_BRANCH_PREFIX));
 }
 
@@ -293,7 +298,7 @@ function openPr(root, run, out) {
   }
 }
 
-function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, readRun = latestGreenRun, readSummaries = downloadSummaries, publish = openPr, findOpen = openRefreshPrs } = {}) {
+function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, readRun = latestGreenRun, readSummaries = downloadSummaries, publish = openPr, findOpen = openRefreshPrs, now = Date.now() } = {}) {
   let options;
   try {
     options = parseArgs(argv);
@@ -312,6 +317,11 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
       const open = findOpen(root);
       if (open.length) {
         out.write(`A shard timing pull request is already open (#${open.map(pr => pr.number).join(', #')}); no new pull request.\n`);
+        const stale = open.filter(pr => now - Date.parse(pr.createdAt || '') > STALE_PR_DAYS * 86400000);
+        if (stale.length) {
+          err.write(`Shard timing pull request${stale.length > 1 ? 's' : ''} open over ${STALE_PR_DAYS} days: ${stale.map(pr => `#${pr.number} (open since ${String(pr.createdAt).slice(0, 10)})`).join(', ')}. Owner or controller: merge or close ${stale.length > 1 ? 'them' : 'it'}; the next run then opens a fresh refresh.\n`);
+          return 1;
+        }
         return 0;
       }
       return publish(root, run, out);
@@ -324,6 +334,9 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
     else if (options.write) {
       fs.writeFileSync(path.join(root, ...shards.MANIFEST_REL.split('/')), manifestText(plan.manifest));
       out.write(`Updated ${shards.MANIFEST_REL}.\n`);
+    } else if (options.failIfDue) {
+      err.write('A refresh trigger crossed and this run cannot publish. Owner: set up the governance App (TOOLKIT_GOVERNANCE_APP_CLIENT_ID and TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY) so the daily run opens the pull request, or run node repo/scripts/refresh-shard-timings.cjs --write and open the pull request by hand.\n');
+      return 1;
     } else out.write('A refresh trigger crossed; run again with --write or --open-pr to apply it.\n');
     return 0;
   } catch (error) {
@@ -334,4 +347,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ IMBALANCE_RATIO, UNTIMED_SHARE, REFRESH_BRANCH_PREFIX, main, manifestText, parseArgs, planRefresh, publishEnv, rebalance, timingsFromSummaries });
+module.exports = Object.freeze({ STALE_PR_DAYS, IMBALANCE_RATIO, UNTIMED_SHARE, REFRESH_BRANCH_PREFIX, main, manifestText, parseArgs, planRefresh, publishEnv, rebalance, timingsFromSummaries });
