@@ -1074,5 +1074,17 @@ test('action: holder orders the pass ran add a counts line; a refused one also w
   assert.deepEqual(ran.warnings, [action().ORDERS_REFUSED]);
   const done = runAction('refresh', { env: minted, refresh: () => report({ done: 1, refused: 0, pending: 0, results: [] }) });
   assert.deepEqual(done.warnings, []);
-  assert.deepEqual(action().ordersLine({ done: -1, refused: 'x', pending: 3 }), { line: 'Holder orders: done=0, refused=0, left pending=3', refused: 0 });
+  assert.deepEqual(action().ordersLine({ done: -1, refused: 'x', pending: 3 }), { line: 'Holder orders: done=0, refused=0, left pending=3', refused: 0, retrying: 0, unreadable: null });
+});
+
+test('action: orders retrying after a GitHub failure, or a queue that could not be read, warn each run', () => {
+  const report = orders => ({ status: 0, code: null, report: { metrics: 'Sweep: requests=40, tasks read=3, queue left=0', holds: [], orders } });
+  const retrying = runAction('refresh', { env: minted, refresh: () => report({ done: 0, refused: 0, pending: 1, retrying: 1, results: [] }) });
+  assert.deepEqual(retrying.warnings, [action().ORDERS_RETRYING]);
+  const capped = runAction('refresh', { env: minted, refresh: () => report({ done: 10, refused: 0, pending: 2, retrying: 0, results: [] }) });
+  assert.deepEqual(capped.warnings, []);
+  const unreadable = runAction('refresh', { env: minted, refresh: () => report({ done: 0, refused: 0, pending: 0, retrying: 0, unreadable: 'GH_FAILED', results: [] }) });
+  assert.equal(unreadable.code, 0);
+  assert.match(unreadable.summaries[1], /could not be read \(GH_FAILED\)/);
+  assert.deepEqual(unreadable.warnings, [action().ORDERS_RETRYING]);
 });

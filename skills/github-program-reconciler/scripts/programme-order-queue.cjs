@@ -26,8 +26,12 @@ const DRY_SUFFIX = '.dry-run.json';
 const ORDER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$/;
 // Codes that mean "try again next run": the order stays pending. Anything else is final.
 const RETRY = code => /^GH_/.test(code || '') || ['STATE_CONFLICT', 'STATE_READBACK_MISMATCH', 'PASS_STOPPED', 'TOKEN_ROUTE_REFUSED'].includes(code);
-// Codes that end the pass itself: they are raised again, and the order stays pending.
-const RAISE = new Set(['PASS_LOCK_LOST', 'PASS_STOPPED']);
+// Codes that end the pass itself, as everywhere else in the reconciler (programme-state STOPS_PASS):
+// they are raised again and the order stays pending. A code-less error is a bug, never an order's
+// fault, so it is raised too. STALE_WRITER is the exception: inside an order it means the parent
+// changed holder or epoch after the order's fence check, so that one order is refused, not the pass.
+const RAISE = new Set(['PASS_LOCK_LOST', 'PASS_STOPPED', 'SWEEP_STOP']);
+const raises = error => !error?.code || RAISE.has(error.code);
 
 // The order id and mode a pending file name carries, or null for a name that is not an order.
 function parseName(name) {
@@ -53,7 +57,7 @@ class OrderQueue {
     const dir = `${this.dir}pending`;
     const response = this.transport.request('GET', `${this.contents(dir)}?ref=${encodeURIComponent(this.store.store.branch)}`);
     if (response.status === 404) return [];
-    if (response.status !== 200 || !Array.isArray(response.json)) throw new state.ProgrammeError('GH_REQUEST_FAILED', `Listing ${dir} failed (${response.status}).`);
+    if (response.status !== 200 || !Array.isArray(response.json)) throw new state.ProgrammeError('GH_FAILED', `Listing ${dir} failed (${response.status}).`, { status: response.status });
     return response.json.filter(entry => entry?.type === 'file' && String(entry.name).endsWith('.json'))
       .map(entry => ({ name: String(entry.name), sha: entry.sha, path: `${dir}/${entry.name}` }))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -61,7 +65,7 @@ class OrderQueue {
 
   readText(file) {
     const response = this.transport.request('GET', `${this.contents(file)}?ref=${encodeURIComponent(this.store.store.branch)}`);
-    if (response.status !== 200) throw new state.ProgrammeError('GH_REQUEST_FAILED', `Reading ${file} failed (${response.status}).`);
+    if (response.status !== 200) throw new state.ProgrammeError('GH_FAILED', `Reading ${file} failed (${response.status}).`);
     if (response.json?.encoding !== 'base64') return null;
     const bytes = Buffer.from(response.json.content, 'base64');
     return bytes.length > MAX_ORDER_BYTES ? null : bytes.toString('utf8').replace(/^﻿/, '');
@@ -81,7 +85,7 @@ class OrderQueue {
     const response = this.transport.request('PUT', this.contents(file), {
       message: `programme order: ${folder} ${name}`, content: Buffer.from(text, 'utf8').toString('base64'), branch: this.store.store.branch, ...(sha ? { sha } : {}),
     });
-    if (![200, 201].includes(response.status)) throw new state.ProgrammeError('GH_REQUEST_FAILED', `Writing ${file} failed (${response.status}).`);
+    if (![200, 201].includes(response.status)) throw new state.ProgrammeError('GH_FAILED', `Writing ${file} failed (${response.status}).`);
     const commit = response.json?.commit?.sha;
     const back = commit ? this.transport.request('GET', `${this.contents(file)}?ref=${encodeURIComponent(commit)}`) : null;
     if (!back || back.status !== 200 || Buffer.from(back.json?.content || '', 'base64').toString('utf8') !== text) {
@@ -91,7 +95,7 @@ class OrderQueue {
 
   remove(entry) {
     const response = this.transport.request('DELETE', this.contents(entry.path), { message: `programme order: take ${entry.name} off the queue`, sha: entry.sha, branch: this.store.store.branch });
-    if (response.status !== 200 && response.status !== 404) throw new state.ProgrammeError('GH_REQUEST_FAILED', `Removing ${entry.path} failed (${response.status}).`);
+    if (response.status !== 200 && response.status !== 404) throw new state.ProgrammeError('GH_FAILED', `Removing ${entry.path} failed (${response.status}).`);
   }
 
   // One order: { order_id, mode, outcome, code? }. `outcome` is DONE, READY, WOULD_STOP (a dry run),
@@ -110,7 +114,7 @@ class OrderQueue {
     let report;
     try { report = this.runOrder({ orderValue: order, session: this.session, dryRun: named.dryRun }); }
     catch (error) {
-      if (RAISE.has(error.code)) throw error;
+      if (raises(error)) throw error;
       if (RETRY(error.code)) return { ...base, outcome: 'PENDING', code: error.code };
       return refuse(error.code || 'FAIL', error.message, null, order);
     }
@@ -131,13 +135,20 @@ class OrderQueue {
 
   // Every pending order this pass takes, oldest first; the rest wait for the next run.
   run() {
-    const entries = this.pending();
+    let entries;
+    // A queue that cannot be listed costs this run its orders, never its refresh: the orders keep
+    // their place, and the summary warns with the code.
+    try { entries = this.pending(); }
+    catch (error) {
+      if (raises(error)) throw error;
+      return { done: 0, refused: 0, pending: 0, retrying: 0, unreadable: /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : 'FAIL', results: [] };
+    }
     const results = [];
     for (const entry of entries.slice(0, MAX_ORDERS_PER_PASS)) {
       // One order's failure never stops the pass: it stays pending, and its expiry ends it in time.
       try { results.push(this.runOne(entry)); }
       catch (error) {
-        if (RAISE.has(error.code)) throw error;
+        if (raises(error)) throw error;
         results.push({ order_id: parseName(entry.name)?.id || entry.name, mode: parseName(entry.name)?.dryRun ? 'dry-run' : 'apply', outcome: 'PENDING', code: /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code || '') ? error.code : 'FAIL' });
       }
     }
@@ -146,6 +157,9 @@ class OrderQueue {
       done: results.filter(item => ['DONE', 'READY', 'WOULD_STOP'].includes(item.outcome)).length,
       refused: count('REFUSED') + count('STOPPED'),
       pending: count('PENDING') + Math.max(0, entries.length - MAX_ORDERS_PER_PASS),
+      // Orders that met a failure this run and wait for the next one: the summary warns each run, so
+      // a lasting failure is seen before the order's own expiry hides its cause.
+      retrying: count('PENDING'),
       results,
     };
   }

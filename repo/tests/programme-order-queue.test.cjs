@@ -73,7 +73,7 @@ test('a queued order runs inside the cloud pass, as the holder, and is filed und
   f.enqueue('ack-500-1.json', f.order());
   const result = f.run();
   assert.equal(result.error, null, result.error?.message);
-  assert.deepEqual(result.report.orders, { done: 1, refused: 0, pending: 0, results: [{ order_id: 'ack-500-1', mode: 'apply', outcome: 'DONE' }] });
+  assert.deepEqual(result.report.orders, { done: 1, refused: 0, pending: 0, retrying: 0, results: [{ order_id: 'ack-500-1', mode: 'apply', outcome: 'DONE' }] });
   // Acknowledged by the order; the same pass then resolves it, since #500 is in the catalogue.
   assert.notEqual(f.finding().state, 'new');
   assert.deepEqual(f.file('done/ack-500-1.json').results.map(entry => entry.outcome), ['WRITTEN', 'WRITTEN']);
@@ -159,6 +159,7 @@ test('a passing GitHub failure leaves the order pending for the next run, which 
   const first = f.run();
   assert.equal(first.error, null, first.error?.message);
   assert.equal(first.report.orders.pending, 1);
+  assert.equal(first.report.orders.retrying, 1, 'the summary warns while it retries');
   assert.match(first.report.orders.results[0].code, /^GH_/);
   assert.ok(f.file('pending/ack-500-1.json'), 'the order stays queued');
   assert.equal(f.file('done/ack-500-1.json'), null);
@@ -210,7 +211,7 @@ test('an empty queue costs one listing and adds nothing to the report counts', t
   const f = fixture(t);
   const result = f.run();
   assert.equal(result.error, null, result.error?.message);
-  assert.deepEqual(result.report.orders, { done: 0, refused: 0, pending: 0, results: [] });
+  assert.deepEqual(result.report.orders, { done: 0, refused: 0, pending: 0, retrying: 0, results: [] });
   assert.equal(f.github.calls.filter(call => call.path.includes('/orders/')).length, 1);
 });
 
@@ -220,4 +221,67 @@ test('file names map to an order id and mode', () => {
   assert.equal(queue.parseName('a.json'), null);
   assert.equal(queue.parseName('notes.txt'), null);
   assert.equal(queue.parseName('../x.json'), null);
+});
+
+// G2 L1 and L4: a queue that cannot be listed costs the run its orders, never its refresh.
+test('an unreadable queue leaves the orders queued and the refresh still runs', t => {
+  const f = fixture(t);
+  f.enqueue('ack-500-1.json', f.order());
+  const request = f.github.request.bind(f.github);
+  f.github.request = (method, endpoint, body, options) => (method === 'GET' && /\/orders\/pending\?/.test(endpoint)
+    ? { status: 403, json: { message: 'secondary rate limit' } } : request(method, endpoint, body, options));
+  const result = f.run();
+  assert.equal(result.error, null, result.error?.message);
+  assert.equal(result.report.orders.unreadable, 'GH_FAILED');
+  assert.ok(result.report.metrics, 'the pass ran');
+  assert.ok(f.file('pending/ack-500-1.json'));
+});
+
+// A queue on a fake store, for the rows that need a stubbed run-order.
+function bareQueue(t, runOrder, count = 1) {
+  const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
+  const store = new state.StateStore({ transport: github, store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' } });
+  for (let i = 0; i < count; i += 1) github.putFile(`${PENDING}order-${String(i).padStart(2, '0')}.json`, { order_id: `order-${String(i).padStart(2, '0')}` });
+  const q = new queue.OrderQueue({ store, runOrder, session: 'cloud-sweep-1', runId: '1', now: () => new Date(NOW).toISOString() });
+  return { github, q, pending: () => [...github.files.keys()].filter(key => key.startsWith(PENDING)) };
+}
+
+test('a lost lease, a spent budget or a code-less error mid-order ends the pass and keeps the order queued', t => {
+  for (const error of [new state.ProgrammeError('PASS_LOCK_LOST', 'lost'), new state.ProgrammeError('PASS_STOPPED', 'spent'), new TypeError('a bug')]) {
+    const b = bareQueue(t, () => { throw error; });
+    assert.throws(() => b.q.run(), thrown => thrown === error);
+    assert.equal(b.pending().length, 1);
+    assert.equal(b.github.calls.filter(call => call.path.includes('/orders/done/') || call.path.includes('/orders/refused/')).length, 0);
+  }
+});
+
+test('a takeover after the fence check refuses that one order, not the pass', t => {
+  const b = bareQueue(t, () => { throw new state.ProgrammeError('STALE_WRITER', 'The parent moved.'); });
+  const result = b.q.run();
+  assert.equal(result.results[0].outcome, 'REFUSED');
+  assert.equal(result.results[0].code, 'STALE_WRITER');
+  assert.equal(b.pending().length, 0);
+});
+
+test('a result shaped like a secret is filed with its codes only', t => {
+  const shaped = `gh${'p_'}${'A'.repeat(30)}`;
+  const b = bareQueue(t, () => ({ outcome: 'STOPPED', digest: 'd', next_action: 'stopped', results: [{ at: 1, command: 'ack', outcome: 'REFUSED', code: 'ROLE_REFUSED', detail: shaped }] }));
+  b.q.run();
+  const filed = b.github.readFile('state/orders/refused/order-00.json');
+  assert.equal(filed.redacted, true);
+  assert.equal(filed.code, 'ROLE_REFUSED');
+  assert.equal(filed.order, null);
+  assert.ok(!JSON.stringify(filed).includes(shaped));
+});
+
+test('a pass runs at most 10 orders, oldest name first; the rest wait for the next run', t => {
+  const ran = [];
+  const b = bareQueue(t, ({ orderValue }) => { ran.push(orderValue.order_id); return { outcome: 'DONE', digest: 'd', results: [] }; }, 12);
+  const result = b.q.run();
+  assert.equal(ran.length, queue.MAX_ORDERS_PER_PASS);
+  assert.deepEqual(ran, [...ran].sort());
+  assert.equal(result.done, 10);
+  assert.equal(result.pending, 2);
+  assert.equal(result.retrying, 0, 'waiting behind the cap is not a failure');
+  assert.deepEqual(b.pending().map(name => name.slice(PENDING.length)), ['order-10.json', 'order-11.json']);
 });
