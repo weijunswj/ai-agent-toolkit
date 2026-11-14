@@ -65,7 +65,7 @@ Detailed plugin verification and bridge command mechanics live in [Toolkit Local
 
 ### Commands You Can Type
 
-Type one of these as your whole message in Codex or Claude Code. Apart from `remove toolkit` and `merge N`, which Toolkit's skills read, each is matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing. A phrase inside a longer message is ordinary text. The one message that carries Toolkit's governance question gets no command line; send the phrase again after answering. Everything else is plain language: ask in your own words.
+Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, `toolkit command`, `toolkit setup`, `toolkit refresh`, `toolkit env`, `toolkit show env`, `toolkit governance` and `governance setup` are matched exactly by Toolkit's prompt hook on your own computer, so the agent is told which action you asked for instead of guessing; Toolkit's skills read the others. A phrase inside a longer message is ordinary text. The one message that carries Toolkit's governance question gets no command line; send the phrase again after answering. Everything else is plain language: ask in your own words.
 
 - `toolkit cmd` or `toolkit command`: show this list.
 - `setup toolkit` or `toolkit setup`: set up Toolkit on this computer, or change your setup answers.
