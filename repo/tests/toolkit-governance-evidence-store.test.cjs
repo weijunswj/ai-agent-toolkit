@@ -225,6 +225,14 @@ test('cloud: from the store clone, a sibling that does not name the store, no si
     assert.deepEqual(refreshes, []);
   }
   {
+    // A repository that is not a store, merged from its own clone: the sibling parent is read, but its
+    // binding names another store, so the merge stays gated.
+    const { ctx, hold, input, options, refreshes, parent } = cloudStoreMerge(t);
+    const other = repo(path.join(ctx.root, 'other'), 'example-owner/other');
+    assert.match(hold.decide({ ...input, cwd: other, tool_input: { ...input.tool_input, repo: 'other' } }, options).deny, /no unused approval/);
+    assert.ok(refreshes.includes(parent));
+  }
+  {
     // A merge of another repository from the store folder reads the sibling, then is refused as before.
     const { ctx, hold, input, options } = cloudStoreMerge(t);
     assert.match(hold.decide({ ...input, cwd: path.join(ctx.root, 'evidence'), tool_input: { ...input.tool_input, repo: 'app' } }, options).deny, /no unused approval/);
