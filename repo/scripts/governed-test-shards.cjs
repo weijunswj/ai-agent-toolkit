@@ -492,7 +492,22 @@ async function main(argv, { out = process.stdout, err = process.stderr, env = pr
   }
 }
 
+// The test programs the copied shard jobs can run: they set up Node only, so a list whose command
+// needs another runtime (python, pytest, npx and the like) would fail on every file there. The
+// installer refuses such a list by name until the jobs set that runtime up.
+const SUPPORTED_PROGRAMS = Object.freeze(['node']);
+function unsupportedPrograms(manifest) {
+  const found = new Set();
+  for (const entry of Object.values(isObject(manifest?.systems) ? manifest.systems : {})) {
+    const program = Array.isArray(entry?.command) && typeof entry.command[0] === 'string' ? programName(entry.command[0]) : null;
+    if (program && !SUPPORTED_PROGRAMS.includes(program)) found.add(program);
+  }
+  return [...found].sort();
+}
+
 module.exports = Object.freeze({
+  SUPPORTED_PROGRAMS,
+  unsupportedPrograms,
   DEFAULT_FILE_TIMEOUT_SECONDS,
   DEFAULT_WORKFLOW,
   FILES_ARG,

@@ -148,6 +148,21 @@ test('cloud workflows: the shard copies go only to a repository with a usable sh
   assert.ok(fs.existsSync(path.join(named, '.github/workflows/shards.yml')));
   const clash = governedRepo(t, list(undefined, { workflow: 'toolkit-shard-timings.yml' }));
   assert.match(workflows.plan({ repo: clash, root: ROOT, commit: COMMIT }).not_copied[0].reason, /names toolkit-shard-timings\.yml for its workflow, a file another Toolkit copy uses/);
+  // The copied jobs set up Node only: a list whose command needs another runtime is refused by name,
+  // never copied to fail on every file.
+  for (const command of [['python', '-m', 'pytest', '{files}'], ['C:/Python312/python.exe', '{files}'], ['pytest', '{files}'], ['npx', 'jest', '{files}']]) {
+    const pythonList = list(undefined);
+    pythonList.systems.linux.command = command;
+    const other = governedRepo(t, pythonList);
+    const plan = workflows.plan({ repo: other, root: ROOT, commit: COMMIT });
+    assert.deepEqual(plan.rows.map(row => row.id).filter(id => id === 'test-shards' || id === 'shard-timings'), [], command.join(' '));
+    assert.equal(plan.not_copied.length, 2);
+    assert.match(plan.not_copied[0].reason, /runs (python|pytest|npx), and the copied shard jobs set up Node only/);
+    assert.equal(fs.existsSync(path.join(other, '.github/workflows/toolkit-test-shards.yml')), false);
+  }
+  const nodeExe = list(undefined);
+  nodeExe.systems.linux.command = ['/usr/local/bin/node', '--test', '{files}'];
+  assert.equal(workflows.plan({ repo: governedRepo(t, nodeExe), root: ROOT, commit: COMMIT }).not_copied.length, 0, 'node by any path is supported');
   // A list removed later leaves the copies alone and says so.
   fs.rmSync(path.join(good, governed.MANIFEST_REL));
   const after = workflows.plan({ repo: good, root: ROOT, commit: COMMIT });

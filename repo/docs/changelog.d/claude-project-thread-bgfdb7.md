@@ -13,4 +13,4 @@ Title: sharded test workflow copies for governed repositories
 
 ### Known limits
 
-- The test shards jobs set up Node only, so a command that needs another runtime or packages it does not have (such as pytest) does not run there yet.
+- The test shards jobs set up Node only, so the installer refuses a list whose command starts with another program (such as `python`, `pytest` or `npx`), naming it, and copies neither workflow there.

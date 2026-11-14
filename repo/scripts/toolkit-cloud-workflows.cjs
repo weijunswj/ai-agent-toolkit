@@ -240,6 +240,7 @@ function shardCopies(target) {
   let reason = null;
   if (list.state === 'missing') reason = `the repository has no shard list at ${governedShards.MANIFEST_REL}`;
   else if (list.state === 'invalid') reason = `the shard list ${governedShards.MANIFEST_REL} is not usable (${String(list.errors[0]).split('\n').pop().replace(/^- /, '').replace(/\.$/, '')})`;
+  else if (governedShards.unsupportedPrograms(list.manifest).length) reason = `the shard list runs ${governedShards.unsupportedPrograms(list.manifest).join(', ')}, and the copied shard jobs set up Node only, so its tests could not run there yet; use a node command or keep the tests in the repository's own CI`;
   else if (RESERVED.has(workflow)) reason = `the shard list names ${workflow} for its workflow, a file another Toolkit copy uses`;
   if (!reason) {
     const input = { systems: governedShards.shardIds(list.manifest) };
