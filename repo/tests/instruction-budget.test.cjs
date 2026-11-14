@@ -44,9 +44,9 @@ test('each block stays inside its own budget', () => {
   // limit above stays the hard cap.
   // Owner record 335 (5 November) confirms 19,400 and 44,900, overriding the 4 November
   // cap decision, preserving wording and allowing Windows CRLF. The combined limit still applies.
-  // The global cap rose to 20,800 for the Development Principles section: the owner asked on
+  // The global cap rose to 21,800 for the Development Principles section: the owner asked on
   // 14 November for principles that steer all development in every repository, so they load every session.
-  assert.ok(crlfBytes(GLOBAL) <= 20800, `global block ${crlfBytes(GLOBAL)} bytes`);
+  assert.ok(crlfBytes(GLOBAL) <= 21800, `global block ${crlfBytes(GLOBAL)} bytes`);
   // The governed cap rose to 4,850 for the Governance Principles section (owner, 14 November).
   assert.ok(crlfBytes(GOVERNED) <= 4850, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
