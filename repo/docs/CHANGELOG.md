@@ -1,5 +1,33 @@
 # Toolkit Changelog
 
+## 3.103.0 (Light Validate runs on PR title or body edits; Task runs come first; one task auto-merge switch per repository)
+
+### Changed
+
+- **A pull request title or body edit no longer reruns the test shards when their results already exist.** A new `route` job lets the Validate run go light when the event is an edit with no base change and an earlier run of the workflow tested exactly the same code: the same head, the same tested merge commit, every test and hook-pack job passed in its newest attempt, and its shard summaries still kept. A light run skips the 17 test and hook-pack jobs (13 of them on Windows) and runs only the route, `personal-data`, `issue-closure`, `gate` and `validate` jobs on Linux. Once GitHub has recomputed the merge commit for a moved `main`, the commit differs and the edit runs in full; until then the edit reuses results for the same merge commit a full run would test. Every other event, and any doubt or error, runs in full too.
+- **The Validate gate list moved to a new `gate` job.** It runs every repository check and the Pack changes check over the test results of this run, or of the reused run after checking it again (`repo/scripts/ci-validate-route.cjs legs`). The required `validate` job now needs `gate`, `personal-data` and `issue-closure` and checks the shard summaries again. Its name, its `!cancelled()` condition and the `TEST_LEGS: ${{ toJSON(needs) }}` summary check stay as they were, so governance protection P3 and P4 still hold.
+- **Shard summaries record the commit they tested.** In GitHub Actions each summary holds `commit`, its artifact name ends with that commit, and `run-tests.cjs --verify-ci` refuses a summary of another commit. `--verify-ci --legs gate` checks the test jobs; without `--legs` it checks the validate job's needs.
+- The workflow drift guard, the validation-floor and binding tests, the validation strategy doc, the hook pack README and the secure CI/CD prompt template describe the new jobs.
+- **Projects skill trim:** the gate route line drops its long example, since the format and the per-gate example already show it, keeping the skill under its byte cap.
+- Task auto-merge is now one switch per repository: `task_prs.auto_merge` (`after-gates` or `off`) in the governance binding merged on the default branch. Every app and the Projects controller read the same switch; no key is off. A working tree, label, project line or app-local file grants nothing.
+- Setup no longer asks a task auto-merge question, and the `--task-auto-merge` flag is gone. Setup says once per run, while an older per-app answer is still on the computer, that the switch now lives in each repository's governance.
+- The gate rules' Task auto-merge section names the binding switch as the only switch, and the Projects project line is no longer an override.
+
+### Fixed
+
+- **Cloud sweep at the App limit:** a programme sweep pass that stops at GitHub's hourly App limit, or saves nothing, no longer counts as refreshed, so the footer clean-up never runs after it. A stop while reading state documents too large for one GraphQL read now carries the limit that bound it, so the sweep action sees it as an App-limit stop, reports it held and follows up once the limit resets.
+
+### Added
+
+- **Scheduled task runs outrank other work:** the Projects skill now says a task run outranks all in-flight work except answering the owner. The coordinator handles it in the turn it arrives, before relaying thread updates or merge work, and acts on every step its report or its task's own checklist names.
+- **No `.done` after a partial pass:** the coordinator never writes `.done` while any step is unfinished. A step that truly cannot finish leaves `.done` missing, goes on the promise list with its run time, and is finished first on the next turn.
+- `setup governance` and `refresh governance` typed commands. `setup governance` asks the switch together with the governance yes in the same proposal; in a governed repository it is `refresh governance`. `refresh governance` shows the merged answers (governance, switch, evidence store, required checks) and the repository's permission block, and with `--set on` or `--set off` prepares one pull request that changes only the switch. It never writes the binding itself.
+- A governed repository whose binding sets no switch shows one line, "Task auto-merge is off here until you set it; say refresh governance", in `toolkit governance status`, `check` and `refresh`. It is a line, not a hold.
+
+### Removed
+
+- The per-app task auto-merge answers older versions saved under `~/.ai-agent-toolkit/user-state/` are machine-wide: the first governance read on this computer that reads any repository's new switch back fresh deletes them, and never before.
+
 ## 3.102.0
 
 ### Added
