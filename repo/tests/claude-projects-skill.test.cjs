@@ -1064,7 +1064,7 @@ const ctaRecoveryCases = [
   ['finished superseded resolved cloud or working lane', 'device', ['Skip finished, superseded, resolved, cloud and already-working lanes']],
   ['device or prerequisite unavailable', 'device', ['Separate sessions still waiting for a device or another prerequisite from resumable sessions needing owner input']],
   ['missing session or failed incomplete inventory', 'device', ['Page through `list_threads`', '`remote_control_status` as supported by the host', 'A missing session, failed status read or incomplete inventory is not success', 'reads one thread per call by `thread_id`', 'an active session that is not connected or served is the usual parked case']],
-  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 4 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
+  ['quiet run after connection recovery', 'nudge', ['plus steps 2a, 2b, 4 and 7 to 11', '4. Remote Control (runs every time, even when step 1 found no change)']],
   ['quiet run finds a missed ask', 'nudge', ['2a. Owner asks (runs every time, including the no-change path)', 'UNRELAYED ASK: <n> | ']],
   ['reaction without required native action', 'nudge', ['An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']],
   ['resume while approval is held', 'skill', ['type anything, such as `.`', 'Typing text resumes conversation; it grants no approval for held work']],
@@ -1152,4 +1152,17 @@ test('local Toolkit is the Projects base: every hook has a cloud row and every o
   assert.match(read(`${dir}/tasks/base-clash-check.md`), /Never edit the skill, the overrides list or the base to clear a clash/);
   // The gate rules name Projects' switch, so the base itself says where cloud auto-merge comes from.
   assert.match(read('repo/contracts/agent-rules/gate-rules.md'), /Claude Projects has no setup bank: its switch is the project line `- Task auto-merge: On` \(else Off\)/);
+});
+
+// A thread that ends its turn waiting on CI wakes only when the event reaches it; when the event never
+// arrives, green PRs sit idle. Executors arm their own check-in, briefs say so, and the nudge is the backstop.
+test('threads waiting on CI arm their own check-in, and the coordinator pings quiet ones', () => {
+  const block = read('repo/contracts/claude-projects/web-controller-projects/project-instructions.md');
+  assert.match(block, /^- Waiting on CI or any outside event: arm your own check-in about 15 minutes out before ending the turn; never rely on the event alone\.$/m);
+  const prs = read(SKILL_REL).split('## Pull requests and CI\n')[1].split('\n## ')[0];
+  assert.ok(prs.includes('- **Threads waiting on CI arm a check-in.** Every brief tells its thread to arm one (about 15 minutes, repeated and spaced out until handled) before ending a turn that waits on CI or another outside event.'));
+  assert.ok(prs.includes("The nudge's `CI WAIT QUIET` is the backstop: ping each listed thread that turn."));
+  const periodic = read(`${REFERENCE_DIR}/periodic-runs.md`).split('## Acting on the nudge report\n')[1];
+  assert.ok(periodic.includes('- `CI WAIT QUIET`: message each listed thread that turn to check its CI and carry on, and to confirm it armed its own check-in'));
+  assert.ok(periodic.includes('the same thread listed again on the next run goes to the owner'));
 });

@@ -426,7 +426,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'toolkit-projects-guidebook.cjs --check /mnt/project-files/toolkit/web-controller-projects',
     'run it again with `--out` in place of `--check`', '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "']) assert.ok(guidebook.includes(required), required);
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
-  assert.match(nudge, /plus steps 2a, 4 and 7 to 11 \(and 5b when it applies\)/);
+  assert.match(nudge, /plus steps 2a, 2b, 4 and 7 to 11 \(and 5b when it applies\)/);
   assert.match(nudge, /CONTEXT RESET DUE \(weekly\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
@@ -890,7 +890,7 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
       const text = tasks().render('hourly-nudge', validateParams('hourly-nudge', {
         ...PARAMS['hourly-nudge'], repo, session
       }));
-      for (const phrase of ['plus steps 2a, 4 and 7 to 11 (and 5b when it applies)',
+      for (const phrase of ['plus steps 2a, 2b, 4 and 7 to 11 (and 5b when it applies)',
         'skip the other checks in steps 2 to 6', '2a. Owner asks (runs every time, including the no-change path)',
         'Page the inventories and read enough source history to identify each ask and any later answer or completed action',
         'also check older asks absent from later relays',
@@ -952,4 +952,25 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
     'Before a merge record is written, the G2 report is archived to the evidence store and read back, and the record (and its brief) names that path and the PASS head.']) assert.ok(gates.includes(required), required);
   // A verified plugin gap stays on the owner's list every run, not only on the run that first reports it.
   assert.match(text, /Missing account copy: say so under \*\*Plugin:\*\*\. While that verified gap remains, also list "update the Toolkit plugin on claude\.ai \(behind since <date>\)" under \*\*Waiting on owner:\*\* every run\./);
+});
+
+// A thread silently waiting on CI makes no activity, so the CI-wait check runs on the no-change path too,
+// and its prefix sits between LANES UNDER CAP and WORK QUEUE.
+test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pending, on every run', () => {
+  for (const repo of ['example-owner/example-repo', 'none']) {
+    for (const session of ['bound', 'fresh']) {
+      const text = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo, session }));
+      const step = text.split('\n').find(line => line.startsWith('2b. CI waits'));
+      assert.ok(step, `${repo}/${session}: step 2b`);
+      for (const phrase of ['runs every time, even when step 1 found no change', 'page it on the no-change path too',
+        'other than task home threads', 'no activity for 20 minutes or more', 'owns or watches an open PR',
+        'says it waits on CI or another outside event', 'still pending, or finished after the thread\'s latest message',
+        '`CI WAIT QUIET` with the thread linked by its title, the PR number, the CI state and the minutes quiet',
+        '"CI WAIT QUIET: <n> | "', 'this task never messages threads itself']) {
+        assert.ok(step.includes(phrase), `${repo}/${session}: ${phrase}`);
+      }
+      assert.ok(text.includes('plus steps 2a, 2b, 4 and 7 to 11 (and 5b when it applies)'));
+      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | " and "WORK QUEUE: <n> | " prefixes'));
+    }
+  }
 });
