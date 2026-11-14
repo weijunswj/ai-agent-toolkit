@@ -806,6 +806,7 @@ test('refreshed: only a pass that ran says so; every skip and failure leaves foo
   const held = runAction('run', { env: minted, refresh: () => ({ status: 1, code: null, report: { metrics: 'Sweep: requests=4', holds: ['x'] } }) });
   assert.ok(held.outputs.some(([name, value]) => name === 'refreshed' && value === 'true'), 'a held pass ran');
   for (const [label, env, refresh] of [
+    ['queued behind another sweep', minted, () => ({ status: 0, code: null, report: { outcome: 'QUEUED', reason: 'another sweep is running' } })],
     ['main moved', minted, () => ({ status: 1, code: 'MAIN_MOVED', report: null })],
     ['public state', minted, () => ({ status: 1, code: 'CLOUD_PUBLIC_STATE', report: null })],
     ['sign-in', minted, () => ({ status: 1, code: 'GH_AUTH', report: null })],

@@ -13,6 +13,17 @@
 const crypto = require('node:crypto');
 
 const blobSha = text => crypto.createHash('sha1').update(`blob ${Buffer.byteLength(text)}\0${text}`).digest('hex');
+// GitHub's create-tree answer: the new root tree's own entries. A nested path shows only as its
+// top-level folder (a tree entry), so a caller cannot read a nested blob id from it.
+const topLevelEntries = (entries, sha) => {
+  const seen = new Map();
+  for (const entry of entries) {
+    const [head, ...rest] = entry.path.split('/');
+    seen.set(head, rest.length ? { path: head, type: 'tree', sha: crypto.createHash('sha1').update(`tree-${sha}-${head}`).digest('hex') }
+      : { path: head, type: 'blob', sha: blobSha(entry.content) });
+  }
+  return [...seen.values()];
+};
 const ok = (status, json) => ({ status, json });
 
 class FakeGitHub {
@@ -141,7 +152,7 @@ class FakeGitHub {
       for (const entry of body.tree) files.set(entry.path, { text: entry.content, sha: blobSha(entry.content) });
       const sha = crypto.createHash('sha1').update(`tree-${++this.sweepSequence}`).digest('hex');
       this.sweepTrees.set(sha, files);
-      return ok(201, { sha, tree: body.tree.map(entry => ({ path: entry.path, type: 'blob', sha: blobSha(entry.content) })) });
+      return ok(201, { sha, tree: topLevelEntries(body.tree, sha) });
     }
     if (/^repos\/[^/]+\/[^/]+\/git\/commits$/.test(path) && method === 'POST') {
       const sha = crypto.createHash('sha1').update(`commit-${++this.sweepSequence}`).digest('hex');
@@ -414,4 +425,4 @@ function gatedChild(state, doc, { role = 'G1', assignment = `${role.toLowerCase(
   return next;
 }
 
-module.exports = { FakeGitHub, blobSha, gatedChild };
+module.exports = { FakeGitHub, blobSha, gatedChild, topLevelEntries };
