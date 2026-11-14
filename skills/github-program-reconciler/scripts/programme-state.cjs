@@ -111,6 +111,15 @@ const MAX_TOPIC_COMMENTS_PER_PASS = 5;
 const TEXT_LIMIT = 200;
 
 const sha256 = text => crypto.createHash('sha256').update(text).digest('hex');
+// Git's own blob id for a text (a SHA-1 repository): the id GitHub gives the blob it stores for it.
+const gitBlobId = text => crypto.createHash('sha1').update(`blob ${Buffer.byteLength(text, 'utf8')}\0`).update(text, 'utf8').digest('hex');
+// The blob id a written entry must have in a created tree: Git's own id of the written text. When
+// GitHub's answer lists the path itself, that id must agree, or nothing is expected (a mismatch).
+const createdBlobId = (tree, entry) => {
+  const local = gitBlobId(entry.text);
+  const listed = (tree?.tree || []).find(item => item.path === entry.path)?.sha;
+  return listed === undefined || listed === local ? local : null;
+};
 const clone = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -157,7 +166,7 @@ function check(errors, condition, message) { if (!condition) errors.push(message
 const SHAPES = {
   child: { all: ['schema', 'repository', 'issue', 'revision', 'fence', 'lifecycle', 'completed_at', 'release', 'gate', 'candidate', 'pr', 'uat', 'review', 'blockers', 'next_action', 'pending_effects', 'journals_seen', 'private', 'volatile', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'], optional: ['volatile', 'journals_seen', 'completed_at', 'prs', 'before_close', 'closed_by_sweep', 'added_by_sweep'] },
   parent: { all: ['schema', 'repository', 'parent_issue', 'revision', 'fence', 'release_plan', 'outcomes', 'pending_effects', 'attention', 'page_archive', 'private', 'volatile', 'sweep'], optional: ['volatile', 'attention', 'page_archive', 'sweep'] },
-  finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics', 'kind'], optional: ['diagnostics', 'kind'] },
+  finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics', 'kind', 'due'], optional: ['diagnostics', 'kind', 'due'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
   outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix'] },
@@ -375,6 +384,7 @@ const FINDING_CODES = Object.freeze({
   ARCHIVE_COMMENT_UNTRUSTED: { source: 'reconcile', next_action: 'Controller: inspect the archive comments on the page this finding names; redraw can publish a fresh verified graph part; archived notes are in the saved page copies in the private store under page-copies/issue-<n>/ and are restored by putting them back on the page under `## Archive` for a fresh comment; the finding stays open until disposed' },
   ARCHIVE_SECTION_UNSAFE: { source: 'reconcile', next_action: 'Controller: fix the text under the `## Archive` line as the reason says, or remove that line; nothing was moved' },
   PASS_STOPPED: { source: 'reconcile', next_action: 'Run refresh again to finish the remaining work' },
+  SWEEP_STUCK: { source: 'reconcile', next_action: 'Controller: the programme sweep has not finished a pass for 6 hours and read under 10 tasks; check its last runs (rate limit, sign-in, lock) and fix the cause, or tell the owner the exact step it needs today' },
   SWEEP_TASK_UNREADABLE: { source: 'reconcile', next_action: 'Controller: check why the sweep could not read this task three passes in a row; it keeps trying after the other tasks' },
   STATE_BRANCH_BUSY: { source: 'reconcile', next_action: 'Controller: something else kept moving the state branch during three sweeps in a row; find the other writer' },
   GRAPHQL_REFUSED: { source: 'reconcile', next_action: 'Controller: GitHub refused GraphQL to three sweeps in a row; check the sign-in and GitHub status, the sweep reads one document at a time meanwhile' },
@@ -406,6 +416,15 @@ const WORK_QUEUE_CODES = new Set(Object.keys(FINDING_CODES).filter(code => FINDI
 // Findings with no issue of their own.
 const ISSUELESS_CODES = new Set(['INVENTORY_INCOMPLETE', 'ATTENTION_FULL']);
 const ATTENTION_NOTE_LIMIT = 200;
+// An acknowledgement is a promise with a deadline: it names the next step (kept with the dispose
+// reasons in `private.attention_notes`) and a due time, 24 hours ahead unless given, at most 72.
+// Past due the finding is new again and counts as waiting on the owner at once. An acknowledged
+// entry from before due times existed falls due 24 hours after its last change.
+const ACK_DUE_HOURS = 24;
+const ACK_DUE_MAX_HOURS = 72;
+const HOUR_MS = 60 * 60 * 1000;
+// A due time is full ISO 8601 with Z or an offset, so text without a zone is never read as local time.
+const DUE_TIME = /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d{1,3})?)?(?:Z|[+-]\d\d:\d\d)$/;
 const BODY_SECTION_KINDS = ['CURRENT', 'STATE', 'CONTEXT', 'TRACE', 'NAV', 'hand_written'];
 const SIZE_CODES = ['BODY_TOO_LARGE', 'BODY_NEAR_LIMIT'];
 const PAGE_CODES = SIZE_CODES;
@@ -570,6 +589,7 @@ function validateAttention(errors, attention) {
     check(errors, FINDING_STATES.includes(entry.state), `${at}.state must be ${FINDING_STATES.join(', ')}`);
     for (const field of ['first_seen', 'changed_at']) check(errors, isText(entry[field]) && !Number.isNaN(Date.parse(entry[field])), `${at}.${field} must be a date and time`);
     check(errors, entry.code === 'CLOSING_COMMENT_MISSING' ? ['pr','issue'].includes(entry.kind) : entry.kind === undefined, `${at}.kind belongs to a closing finding and must be pr or issue`);
+    check(errors, entry.due === undefined || (isText(entry.due) && !Number.isNaN(Date.parse(entry.due))), `${at}.due must be a date and time`);
     check(errors, FINDING_ID.test(String(entry.id)) && entry.id === findingId(entry.source, entry.code, entry.issue, entry.head, entry.kind), `${at}.id must be the finding's own id`);
     check(errors, !ids.has(entry.id), `${at}.id is repeated`);
     ids.add(entry.id);
@@ -608,7 +628,7 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
       const newEvent = ONE_TIME_CODES.has(code) || (code === 'PASS_STOPPED' && diagnosticsChanged);
       const reopens = fresh && (existing.state === 'resolved' || (newEvent && ['acknowledged', 'disposed'].includes(existing.state)));
       if (reopens) {
-        existing.state = 'new'; existing.changed_at = now;
+        existing.state = 'new'; existing.changed_at = now; delete existing.due;
         if (code === 'CLOSING_COMMENT_MISSING') existing.first_seen = now;
         changed = true;
       }
@@ -632,6 +652,8 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
       [...PAGE_CODES, 'ARCHIVE_COMMENT_UNTRUSTED', 'ARCHIVE_SECTION_UNSAFE', 'PASS_STOPPED'].includes(finding.code) ? finding.diagnostics : null,
       finding.code === 'CLOSING_COMMENT_MISSING' ? finding.kind : null);
   }
+  // After this run's reports, so a fresh event reopens as itself, not as a missed promise.
+  if (expireAcknowledged(list, now)) changed = true;
   for (const entry of complete ? list : []) {
     // Only the reconciler's complete successful redraw/readback settles a size finding. This also
     // protects an affected page first reported by another writer after the planning snapshot.
@@ -643,10 +665,46 @@ function foldAttention(current, { source, seen = [], complete, now, hold = [] })
     if (entry.code === 'ATTENTION_FULL' && open() - 1 >= ATTENTION_LIMIT) continue;
     entry.state = 'resolved';
     entry.changed_at = now;
+    delete entry.due;
     changed = true;
   }
   if (!changed) return current || [];
   return boundAttention(list);
+}
+
+// When an acknowledged finding falls due: its own due time, else 24 hours after its last change.
+function ackDue(entry) {
+  if (entry.state !== 'acknowledged' && !entry.due) return null;
+  const due = entry.due ? Date.parse(entry.due) : Date.parse(entry.changed_at) + ACK_DUE_HOURS * HOUR_MS;
+  return Number.isNaN(due) ? null : due;
+}
+
+// An open finding whose acknowledgement has passed its due time: the promised step was missed.
+function ackOverdue(entry, time) {
+  const due = ackDue(entry);
+  return OPEN_FINDING_STATES.includes(entry.state) && due !== null && due <= time;
+}
+
+// Acknowledged findings past due become new again, in place; true when any did.
+function expireAcknowledged(list, now) {
+  const time = Date.parse(now);
+  let changed = false;
+  for (const entry of list) {
+    if (entry.state !== 'acknowledged' || !ackOverdue(entry, time)) continue;
+    entry.due = new Date(ackDue(entry)).toISOString();
+    entry.state = 'new';
+    entry.changed_at = now;
+    changed = true;
+  }
+  return changed;
+}
+
+// A reported finding always says what to do: its own detail, else its code's next action from the
+// fixed table. A code with neither is a programming error, caught by the tests.
+function withNextAction(finding) {
+  if (isText(finding.detail)) return finding;
+  const known = Object.hasOwn(FINDING_CODES, finding.code) ? FINDING_CODES[finding.code].next_action : null;
+  return { ...finding, detail: known || `Controller: no next step is recorded for ${finding.code}; report it as a Toolkit bug` };
 }
 
 // Keeps at most ATTENTION_KEEP entries by dropping the oldest resolved or disposed ones first.
@@ -657,9 +715,9 @@ function boundAttention(list) {
   return list.filter(entry => !drop.has(entry.id));
 }
 
-// The holder's answer to one finding: acknowledged (still listed) or disposed, with its reason kept
-// only in `private.attention_notes`.
-function answerFinding(doc, { id, state, reason = null, now }) {
+// The holder's answer to one finding: acknowledged (still listed, with its next step and due time)
+// or disposed, the next step or reason kept only in `private.attention_notes`.
+function answerFinding(doc, { id, state, reason = null, next = null, due = null, now }) {
   if (!['acknowledged', 'disposed'].includes(state)) throw new ProgrammeError('USAGE', 'A finding is acknowledged or disposed.');
   const entry = (doc.attention || []).find(item => item.id === id);
   if (!entry) throw new ProgrammeError('FINDING_UNKNOWN', `No finding ${id} on the parent document. Run programme.cjs attention to list them.`);
@@ -669,16 +727,30 @@ function answerFinding(doc, { id, state, reason = null, now }) {
   if (state === 'disposed' && (!isText(reason) || reason.length > ATTENTION_NOTE_LIMIT)) {
     throw new ProgrammeError('USAGE', `dispose needs --reason <text> of at most ${ATTENTION_NOTE_LIMIT} characters.`);
   }
-  if (entry.state === state || (state === 'acknowledged' && entry.state !== 'new')) {
-    if (entry.state === state) return null;
+  let dueAt = null;
+  if (state === 'acknowledged') {
+    if (!isText(next) || next.length > ATTENTION_NOTE_LIMIT) throw new ProgrammeError('USAGE', `ack needs --next <the step you will take> of at most ${ATTENTION_NOTE_LIMIT} characters.`);
+    const time = Date.parse(now);
+    if (due !== null && !DUE_TIME.test(String(due))) throw new ProgrammeError('USAGE', 'ack --due must be an ISO 8601 date and time with Z or an offset, for example 2026-11-14T09:00:00Z.');
+    dueAt = due === null ? time + ACK_DUE_HOURS * HOUR_MS : Date.parse(due);
+    if (Number.isNaN(dueAt) || dueAt <= time || dueAt > time + ACK_DUE_MAX_HOURS * HOUR_MS) {
+      throw new ProgrammeError('USAGE', `ack --due must be a date and time after now and at most ${ACK_DUE_MAX_HOURS} hours ahead; a longer wait is a tracked task, or dispose with a reason.`);
+    }
+  }
+  // An acknowledgement past its due time is answered again as if new: the missed step needs a new one.
+  const current = entry.state === 'acknowledged' && ackOverdue(entry, Date.parse(now)) ? 'new' : entry.state;
+  if (current === state || (state === 'acknowledged' && current !== 'new')) {
+    if (current === state) return null;
     throw new ProgrammeError('FINDING_STATE', `Finding ${id} is ${entry.state}; only a new finding is acknowledged.`);
   }
-  const next = clone(doc);
-  const target = next.attention.find(item => item.id === id);
+  const changed = clone(doc);
+  const target = changed.attention.find(item => item.id === id);
   target.state = state;
   target.changed_at = now;
-  if (state === 'disposed') next.private = { ...next.private, attention_notes: { ...(next.private.attention_notes || {}), [id]: reason } };
-  return next;
+  if (state === 'acknowledged') target.due = new Date(dueAt).toISOString();
+  else delete target.due;
+  changed.private = { ...changed.private, attention_notes: { ...(changed.private.attention_notes || {}), [id]: state === 'disposed' ? reason : next } };
+  return changed;
 }
 
 function attentionCounts(attention) {
@@ -687,9 +759,10 @@ function attentionCounts(attention) {
 }
 
 // `Attention: <n> new, <m> acknowledged` or `Attention: clear`.
+// Waiting on you: new for a day, or an acknowledgement whose due time passed (at once).
 function waitingFindings(attention, now) {
   const time = Date.parse(now);
-  return openFindings(attention).filter(entry => entry.state === 'new' && time - Date.parse(entry.changed_at) >= 24 * 60 * 60 * 1000);
+  return openFindings(attention).filter(entry => ackOverdue(entry, time) || (entry.state === 'new' && time - Date.parse(entry.changed_at) >= 24 * HOUR_MS));
 }
 
 function attentionLine(attention, now = new Date().toISOString()) {
@@ -2468,9 +2541,13 @@ class StateStore {
   }
 
   // The state directory at one commit: every file's text and blob id. GraphQL reads it in one
-  // request. When GitHub refuses GraphQL, one REST listing plus one blob read per document is used
-  // instead, inside the same request budget; the caller learns which route ran (`mode`).
-  readTree(ref) {
+  // request. GraphQL leaves out the text of a blob over about 1 MB (`isTruncated`), so each such
+  // document is then read whole by its blob id. When GitHub refuses GraphQL, one REST listing plus
+  // one blob read per document is used instead. Both routes stay inside the same request budget and
+  // the caller learns which route ran (`mode`). With `texts: false` (the read-back after a commit,
+  // which compares blob ids when a text is missing) no blob is read one by one, so no budget check
+  // can stop it after the branch has already moved.
+  readTree(ref, { texts = true } = {}) {
     const dir = this.store.path.replace(/\/$/, '');
     const [owner, name] = this.store.repository.split('/');
     const response = this.transport.request('POST', 'graphql', {
@@ -2482,31 +2559,43 @@ class StateStore {
     if (response.status === 200 && !response.json?.errors?.length && repo) {
       this.graphqlRefused = false;
       const files = new Map();
+      const large = [];
       for (const entry of repo.snapshot?.entries || []) {
         if (entry.type !== 'blob') continue;
         const truncated = entry.object?.isTruncated || typeof entry.object?.text !== 'string';
         files.set(entry.name, { text: truncated ? null : entry.object.text, sha: entry.oid || null });
+        if (texts && truncated && DOCUMENT_FILE.test(String(entry.name)) && isSha(entry.oid)) large.push(entry);
       }
+      // Reading every large document must still leave the settlement reserve; otherwise stop before any write.
+      if (large.length && typeof this.transport.left === 'function' && this.transport.left() < large.length + (this.transport.reserve || 0)) {
+        throw Object.assign(new ProgrammeError('PASS_STOPPED', 'Some state documents are too large for one GraphQL read and cannot be read one by one within this pass.'), { reason: 'State documents too large for GraphQL', noWrite: true });
+      }
+      for (const entry of large) files.set(entry.name, { text: this.readBlob(`${dir}/${entry.name}`, entry.oid), sha: entry.oid });
       return { files, mode: 'graphql' };
     }
     this.graphqlRefused = true;
     const listing = this.transport.request('GET', `${this.encodedContents(dir)}?ref=${encodeURIComponent(ref)}`);
     if (listing.status === 404) return { files: new Map(), mode: 'rest' };
     if (listing.status !== 200 || !Array.isArray(listing.json)) throw ghFailure(listing, `Listing ${dir}`);
-    const wanted = listing.json.filter(entry => entry?.type === 'file' && DOCUMENT_FILE.test(String(entry.name)));
-    const others = listing.json.filter(entry => entry?.type === 'file' && !DOCUMENT_FILE.test(String(entry.name)));
+    const wanted = texts ? listing.json.filter(entry => entry?.type === 'file' && DOCUMENT_FILE.test(String(entry.name))) : [];
+    const others = listing.json.filter(entry => entry?.type === 'file' && !wanted.includes(entry));
     // Reading every blob must still leave the settlement reserve; otherwise stop before any write.
-    if (typeof this.transport.left === 'function' && this.transport.left() < wanted.length + (this.transport.reserve || 0)) {
+    if (wanted.length && typeof this.transport.left === 'function' && this.transport.left() < wanted.length + (this.transport.reserve || 0)) {
       throw Object.assign(new ProgrammeError('PASS_STOPPED', 'GitHub refused GraphQL and the state documents cannot be read one by one within this pass.'), { reason: 'GitHub GraphQL unavailable', noWrite: true });
     }
     const files = new Map(others.map(entry => [entry.name, { text: null, sha: isSha(entry.sha) ? entry.sha : null }]));
     for (const entry of wanted) {
       if (!isSha(entry.sha)) { files.set(entry.name, { text: null, sha: null }); continue; }
-      const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${entry.sha}`);
-      if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${dir}/${entry.name}`);
-      files.set(entry.name, { text: Buffer.from(blob.json.content, 'base64').toString('utf8'), sha: entry.sha });
+      files.set(entry.name, { text: this.readBlob(`${dir}/${entry.name}`, entry.sha), sha: entry.sha });
     }
     return { files, mode: 'rest' };
+  }
+
+  // One state file's whole text by its blob id (the Git Data API serves blobs up to 100 MB).
+  readBlob(filePath, sha) {
+    const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${sha}`);
+    if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${filePath}`);
+    return Buffer.from(blob.json.content, 'base64').toString('utf8');
   }
 
   // Every parent and child document at the branch head, each with its own blob id: the version its
@@ -2633,15 +2722,18 @@ class StateStore {
     throw new ProgrammeError('GH_FAILED', 'The state branch update got no reply twice, so nothing else ran. Run refresh again.');
   }
 
-  // The new commit must hold exactly what was written: every text by GraphQL, or, when GraphQL is
-  // refused, every blob id GitHub returned for the created tree (no local hash is computed).
+  // The new commit must hold exactly what was written: every text GraphQL returns, and otherwise
+  // (GraphQL refused, or a document too large for its text) the blob id, checked against Git's own
+  // blob id of the written text, computed here. GitHub's create-tree answer may list only the
+  // top-level entries of a nested path, so it is not the source; an id it does list must agree.
+  // It runs after the branch moved, so it reads no blob one by one and never stops on the pass budget.
   readBack(commitSha, written, tree) {
-    const { files, mode } = this.readTree(commitSha);
+    const { files } = this.readTree(commitSha, { texts: false });
     for (const entry of written) {
       const name = entry.path.slice(this.store.path.length);
       const found = files.get(name);
-      const expected = mode === 'rest' ? (tree.tree || []).find(item => item.path === entry.path)?.sha : null;
-      if (!found || (mode === 'graphql' ? found.text !== entry.text : !isSha(expected) || found.sha !== expected)) {
+      const expected = createdBlobId(tree, entry);
+      if (!found || (found.text !== null ? found.text !== entry.text : !isSha(expected) || found.sha !== expected)) {
         throw new ProgrammeError('STATE_READBACK_MISMATCH', `${entry.path} did not read back as written in the state commit.`);
       }
       entry.blob = found.sha;
@@ -2658,17 +2750,16 @@ class StateStore {
     }
     if (response.status === 404) return { doc: null, sha: null };
     if (response.status !== 200) throw ghFailure(response, `Reading ${docPath}`);
-    let content = response.json.content;
-    if (response.json.encoding !== 'base64') {
+    let text;
+    if (response.json.encoding === 'base64') text = Buffer.from(response.json.content, 'base64').toString('utf8');
+    else {
       // The Contents API leaves out the text of a file over 1 MB (encoding "none"); it is then read
-      // whole by its blob id, which the Git Data API serves up to 100 MB.
+      // whole by its blob id.
       if (!isSha(response.json.sha)) throw new ProgrammeError('STATE_INVALID', `${docPath} is too large to read through the Contents API.`);
-      const blob = this.transport.request('GET', `repos/${this.store.repository}/git/blobs/${response.json.sha}`);
-      if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw ghFailure(blob, `Reading ${docPath}`);
-      content = blob.json.content;
+      text = this.readBlob(docPath, response.json.sha);
     }
     let doc;
-    try { doc = JSON.parse(Buffer.from(content, 'base64').toString('utf8')); }
+    try { doc = JSON.parse(text); }
     catch { throw new ProgrammeError('STATE_INVALID', `${docPath} is not valid JSON.`); }
     return { doc: this.validateRead(kind, doc), sha: response.json.sha };
   }
@@ -5477,12 +5568,14 @@ class Reconciler {
     const adoptionHolds = (observed.additions || []).map(outcome=>findingId('reconcile','CHILD_ADDED',outcome.issue));
     const stoppedHolds = openFindings(parent.attention).filter(entry => entry.code === 'PASS_STOPPED').map(entry => entry.id);
     const sweep = observed.sweep;
+    // Only a sweep pass can tell that the sweep is no longer stuck.
+    const sweepStuckHolds = sweep ? [] : openFindings(parent.attention).filter(entry => entry.code === 'SWEEP_STUCK').map(entry => entry.id);
     const tasks = new Set(parent.outcomes.map(outcome => outcome.issue));
     const unread = !this.scope ? [] : (parent.attention || []).filter(entry => tasks.has(entry.issue) ? !this.scope.has(entry.issue)
       : sweep && (!sweep.changedComplete || sweep.left.length || sweep.failed.length)).map(entry => entry.id);
     if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds,
-        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...unread, ...(observed.prGraph?.holdWithoutTask || []),
+        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...sweepStuckHolds, ...unread, ...(observed.prGraph?.holdWithoutTask || []),
         ...(parent.attention || []).filter(entry=>entry.code==='CLOSING_COMMENT_MISSING' && !observed.closing?.checked.has(`${entry.kind}:${entry.issue}`)).map(entry=>entry.id)] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;
@@ -5580,6 +5673,9 @@ class Reconciler {
     ], observed, holds);
     const findings = [...queueFindings];
     if (this.pass.progress?.interrupted) findings.push({ code: 'PASS_STOPPED', issue: parent.parent_issue, diagnostics: this.pass.progress.interrupted });
+    // The board's "Sweep stuck" warning is a finding too, so it reaches the Attention line and the
+    // controller's queue instead of living only on the page.
+    if (this.queued?.stuck?.(this.sweepRead || 0)?.stuck) findings.push({ code: 'SWEEP_STUCK', issue: parent.parent_issue });
     const effects = [];
     if (observed.additions.length) {
       effects.push({kind:'add_native_children',target:{issue:parent.parent_issue},outcomes:observed.additions});
@@ -6703,7 +6799,7 @@ class Reconciler {
       store: { ...this.binding.store },
       mode: apply ? 'apply' : 'dry-run',
       parent_revision: plan.parent?.revision ?? null,
-      findings: plan.findings,
+      findings: plan.findings.map(withNextAction),
       close_list: plan.findings.filter(finding => finding.code === 'READY_TO_CLOSE').map(({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review }) => ({ issue, pr, head, gate, gate_accepted, accepted, closable, uat, review })),
       effects: plan.effects.map(effect => ({ kind: effect.kind, target: effect.target, text: effect.text, ...(effect.backfill ? { backfill: effect.backfill } : {}) })),
       recovered: plan.resolutions,
@@ -6812,7 +6908,7 @@ module.exports = Object.freeze({
   recordReturn, consumeReturn, foldJournals, validateJournal, currentGateAccepted, completionAccepted, applyPatch, refuseNewLegacy, legacyMigrationPatch, orderTies,
   evaluateChecks, renderParentBlockBody, renderChildBlockBody, renderTraceBlockBody, renderCurrentBlockBody, renderBlock, blockDigest, findStateBlock, upsertStateBlock, upsertTraceBlock,
   orderMoves, intentId, describeEffect, resolveExecutable, isGitHubHost, originSlug, bindRepository,
-  SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
+  SECRET_SHAPES, screenSecrets, referencedIssues, FINDING_CODES, ATTENTION_KEEP, ATTENTION_LIMIT, findingId, foldAttention, answerFinding, withNextAction, ackOverdue, ACK_DUE_HOURS, ACK_DUE_MAX_HOURS, ATTENTION_NOTE_LIMIT, DUE_TIME, attentionCounts, attentionLine, openFindings, findingText, attentionDigest, bodySizeDiagnostics,
   RefreshBudget, REFRESH_BUDGET_MS, PASS_BUDGETS, PAGE_RESERVE_MS, END_RESERVE_MS, AGAIN_RESERVE_MS, validatePassDiagnostics,
   ProgrammeInventory, INVENTORY_CLASSES, INVENTORY_DEADLINE_MS, registeredParents,
   STATE_BRANCH, STATE_PATH, STATE_SCHEMA, SIDECAR_KEEP, BranchStateStore, STATE_BACKENDS, openStore, publicView, validatePublic, documentName,

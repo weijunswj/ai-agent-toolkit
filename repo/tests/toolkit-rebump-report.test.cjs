@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { MARKER, commentBody, report, parseArgs } = require('../scripts/toolkit-rebump-report.cjs');
+const { MARKER, STALE_DAYS, commentBody, report, parseArgs, staleLine } = require('../scripts/toolkit-rebump-report.cjs');
 
 const MAIN = 'a'.repeat(40);
 // A fake GitHub: comments per pull request, every call recorded.
@@ -26,7 +26,10 @@ function fakeGitHub(existing = {}) {
   };
   return { github, calls, comments, writes: () => calls.filter(call => call.args.includes('POST') || call.args.includes('PATCH')) };
 }
-const run = (results, fake) => report({ report: { mode: 'apply', repository: 'example/toolkit', results }, main: MAIN }, { github: fake.github });
+// Runs pin the clock, so the hold age never depends on today's date.
+const NOW = Date.parse('2026-11-14T12:00:00Z');
+const DAY = 86400000;
+const run = (results, fake, now = NOW) => report({ report: { mode: 'apply', repository: 'example/toolkit', results }, main: MAIN }, { github: fake.github, now });
 
 test('a held pull request gets one comment, and the next run edits that same comment', () => {
   const fake = fakeGitHub();
@@ -89,4 +92,32 @@ test('the summary lists every pull request with its result', () => {
   assert.match(summary, /\| 7 \| held \| source conflict: a \|/);
   assert.match(summary, /\| 9 \| verified \| 3\.2\.0 at bbbbbbb \|/);
   assert.match(summary, /\| 10 \| skipped \| author not listed \|/);
+});
+
+test('a hold keeps the day it began; over seven days it is named as stale, and a clear ends it', () => {
+  const fake = fakeGitHub();
+  const held = [{ number: 7, status: 'held', reason: 'source conflict: repo/scripts/a.cjs' }];
+  const first = run(held, fake);
+  assert.deepEqual(first.stale, []);
+  assert.match(fake.comments.get(7)[0].body, /^- \*\*Held since:\*\* 2026-11-14 /m);
+  const before = fake.writes().length;
+  assert.deepEqual(run(held, fake, NOW + 7 * DAY).stale, [], 'seven days is still within its time');
+  assert.equal(fake.writes().length, before, 'the same hold writes nothing');
+  const late = run(held, fake, NOW + 8 * DAY);
+  assert.deepEqual(late.stale, [{ number: 7, since: '2026-11-14' }]);
+  assert.match(staleLine(late.stale), /^Re-bump held over 7 days: pull request 7 \(since 2026-11-14\)\. Merging agent: .+toolkit-rebump-prs\.cjs --apply/);
+  // A new reason keeps the day the hold began.
+  run([{ ...held[0], reason: 'unfolded fragments' }], fake, NOW + 9 * DAY);
+  assert.match(fake.comments.get(7)[0].body, /Held since:\*\* 2026-11-14 /);
+  assert.deepEqual(run([{ number: 7, status: 'verified', version: '3.2.0', head: 'b'.repeat(40) }], fake, NOW + 10 * DAY).stale, []);
+  assert.deepEqual(run(held, fake, NOW + 11 * DAY).stale, [], 'a hold after a clear starts again');
+  assert.match(fake.comments.get(7)[0].body, /Held since:\*\* 2026-11-25 /);
+  assert.equal(STALE_DAYS, 7);
+});
+
+test('a held comment from before this change gains its start day once, then stays unchanged', () => {
+  const fake = fakeGitHub({ 7: [{ id: 5, body: commentBody({ status: 'held', reason: 'x' }, MAIN), user: { login: 'github-actions[bot]' } }] });
+  assert.deepEqual(run([{ number: 7, status: 'held', reason: 'x' }], fake).actions, [{ number: 7, action: 'edited' }]);
+  assert.match(fake.comments.get(7)[0].body, /Held since:\*\* 2026-11-14 /);
+  assert.deepEqual(run([{ number: 7, status: 'held', reason: 'x' }], fake, NOW + DAY).actions, [{ number: 7, action: 'unchanged' }]);
 });

@@ -276,7 +276,7 @@ for (const row of [
       doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: false, now: oldTime,
         seen: [{ code: 'PASS_STOPPED', issue: 421, diagnostics: oldDiagnostics }] });
       if (row.prior === 'resolved') doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: true, now: oldTime });
-      else doc = state.answerFinding(doc, { id: doc.attention.find(entry => entry.code === 'PASS_STOPPED').id,
+      else doc = state.answerFinding(doc, { next: 'Fixture next step', id: doc.attention.find(entry => entry.code === 'PASS_STOPPED').id,
         state: row.prior, reason: 'Fixture previous stop answered', now: oldTime });
       return doc;
     } });
@@ -322,7 +322,7 @@ for (const row of [
       seen: [{ code: 'PASS_STOPPED', issue: 421, diagnostics: { ...expected } }] };
     assert.equal(state.foldAttention(parent.attention, repeat), parent.attention, 'an identical open report causes no churn');
     if (row.prior !== 'resolved') {
-      const answered = state.answerFinding(parent, { id: entry.id, state: row.prior, reason: 'Fixture repeated report answered', now: NOW });
+      const answered = state.answerFinding(parent, { next: 'Fixture next step', id: entry.id, state: row.prior, reason: 'Fixture repeated report answered', now: NOW });
       assert.equal(state.foldAttention(answered.attention, repeat), answered.attention, 'an identical report does not reopen an answered event');
     } else {
       const resolved = state.foldAttention(parent.attention, { source: 'reconcile', complete: true, now: NOW });
@@ -380,7 +380,7 @@ for (const scoped of [false, true]) for (const row of [
     assert.equal(openStop(f).state, 'new');
     assert.deepEqual(openStop(f).diagnostics, interrupted);
     assert.equal(fs.existsSync(`${lockFile}.progress`), true, 'landed commit alone cannot acknowledge a lost reply or crash');
-    f.store.mutate('parent', 421, { writer, change: doc => state.answerFinding(doc, {
+    f.store.mutate('parent', 421, { writer, change: doc => state.answerFinding(doc, { next: 'Fixture next step',
       id: doc.attention.find(entry => entry.code === 'PASS_STOPPED').id, state: row.answer, reason: 'Fixture saved stop answered', now: oldTime,
     }) });
     // An independent redraw after disposal leaves no page work to accidentally trigger recovery.
@@ -474,7 +474,7 @@ for (const prior of ['acknowledged', 'disposed', 'resolved']) test(`N3: a days-o
       doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: false, now: oldTime,
         seen: [{ code: 'PASS_STOPPED', issue: 421, diagnostics: { cause: 'time_limit', phase: 'planning', done: 0, total: 0, started_at: oldTime } }] });
       if (prior === 'resolved') doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: true, now: oldTime });
-      else doc = state.answerFinding(doc, { id: doc.attention[0].id, state: prior, reason: 'Fixture old stop answered', now: oldTime });
+      else doc = state.answerFinding(doc, { next: 'Fixture next step', id: doc.attention[0].id, state: prior, reason: 'Fixture old stop answered', now: oldTime });
       return doc;
     } });
     const expected = { cause: 'interrupted', phase: 'task_pages', done: 7, total: 30, started_at: NOW };

@@ -2,7 +2,8 @@
 
 // `toolkit governance check`: a read-only conformance report for one repository. It never
 // writes anything. Exit codes: 0 conformant, 1 drift, incomplete materials or a decision still
-// pending, 2 the state could not be read.
+// pending, 2 the state could not be read, 3 unverified (no drift, but an online GitHub read could not
+// confirm a setting; the report names the repository admin's step).
 //
 // It reports the governance state, the governed block (missing, legacy, edited by hand or older
 // than this Toolkit's source), the programme binding, the no-force-push branch ruleset an ENABLED
@@ -158,7 +159,10 @@ function checkConformance(cwd, options = {}) {
   if (state.state === 'ENABLED' && state.materials.binding) findings.push(...appFindings(state, options));
   if (state.state === 'ENABLED' && state.materials.binding) findings.push(...cloudWorkflowFindings(state, toolkitRoot, options));
   const drift = findings.some(entry => entry.severity === 'drift');
-  return report(drift ? 1 : 0, state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot));
+  // An online run whose GitHub reads could not confirm a setting is not conformant: it is unverified
+  // (exit 3) until a repository admin re-runs the check signed in. An offline or test run chose not to
+  // read, so its unverified items keep exit 0.
+  return report(drift ? 1 : unverifiedExit(findings, options), state, findings, toolkitRoot, rulesetResult, protectionResult, securityResult, cloudJobsGuide(state, toolkitRoot));
 }
 
 // The governance GitHub App: set up while governance is on, nothing left behind once it is off. Read
@@ -341,6 +345,13 @@ function cloudJobsGuide(state, toolkitRoot) {
   return require('./toolkit-cloud-jobs.cjs').buildCloudJobsGuide({ root: toolkitRoot });
 }
 
+function unverifiedExit(findings, options = {}, environment = process.env) {
+  const offline = options.offline === true || options.testOnly === true || environment.TOOLKIT_GOVERNANCE_OFFLINE === '1';
+  return !offline && findings.some(entry => entry.severity === 'unverified') ? 3 : 0;
+}
+
+const UNVERIFIED_STEP = 'A repository admin signs in with `gh auth login` and runs `toolkit governance check` again; until then nothing here counts as conformant.';
+
 function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null, cloudJobs = null) {
   let catalogueProblems = [];
   try { catalogueProblems = catalogue.catalogueProblems(toolkitRoot); } catch { catalogueProblems = ['the skill catalogue could not be checked']; }
@@ -349,7 +360,8 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
   return Object.freeze({
     schema: 'toolkit.governance-conformance.v1',
     exit_code: code,
-    status: code === 0 ? 'conformant' : code === 1 ? 'drift' : 'error',
+    status: code === 0 ? 'conformant' : code === 1 ? 'drift' : code === 3 ? 'unverified' : 'error',
+    ...(code === 3 ? { next_step: UNVERIFIED_STEP } : {}),
     state,
     findings: Object.freeze(all),
     no_force_push_ruleset: rulesetResult,
@@ -360,4 +372,4 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
   });
 }
 
-module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, enforcementStatus, expectedGovernedBlock, PROMPT_HOLD_HOOK });
+module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, enforcementStatus, expectedGovernedBlock, unverifiedExit, report, PROMPT_HOLD_HOOK });

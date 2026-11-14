@@ -168,6 +168,25 @@ test('J: a refresh that holds is recorded and the footer sweep still runs', (t) 
   assert.ok(log.some(entry => path.basename(entry[1] || '') === 'toolkit-github-footer-sweep.cjs'));
 });
 
+test('J: an incomplete inventory holds, held runs are counted and an ok run clears them', t => {
+  const held = { 'programme refresh': { status: 0, stdout: JSON.stringify({ outcome: 'DONE', holds: [], inventory: { complete: false } }) } };
+  const first = runSweep(t, held, undefined, '2026-10-29T09:00:00.000Z');
+  assert.equal(first.record.programme_status, 'held');
+  assert.ok(first.record.summary.includes('Programme refresh held: the inventory is incomplete; the next run reads it again.'));
+  assert.deepEqual([first.record.held_streak, first.record.held_since], [1, '2026-10-29T09:00:00.000Z']);
+  const home = first.home;
+  runSweep(t, held, home, '2026-10-29T10:00:00.000Z');
+  const third = runSweep(t, held, home, '2026-10-29T11:00:00.000Z');
+  assert.deepEqual([third.record.held_streak, third.record.held_since], [3, '2026-10-29T09:00:00.000Z']);
+  const now = new Date('2026-10-29T11:30:00.000Z'), wanted = desired(t);
+  windowsTasks.applyTasks(wanted, { scheduler: fakeScheduler(), home });
+  assert.match(tasks.sweepLine(wanted.repository, { home, now }), /held at \d\d:\d\dZ, 3 runs in a row since \d\d:\d\dZ; see toolkit tasks\./);
+  const cleared = runSweep(t, { 'programme refresh': { status: 0, stdout: '{"outcome":"DONE","holds":[]}' } }, home, '2026-10-29T12:00:00.000Z');
+  assert.equal(cleared.record.status, 'ok');
+  assert.equal(cleared.record.held_streak, undefined);
+  assert.ok(cleared.record.summary.includes('Cleared after 3 held runs since 2026-10-29 09:00 UTC.'));
+});
+
 test('J: an exit-zero queued refresh is recorded as held and attention still runs', t => {
   const report = { outcome: 'QUEUED', reason: 'another pass is running on this computer' };
   const { record, home } = runSweep(t, { 'programme refresh': { status: 0, stdout: JSON.stringify(report) } });

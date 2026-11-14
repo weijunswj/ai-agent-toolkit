@@ -797,12 +797,12 @@ test('M1: one-time findings stay open across passes until answered or their cond
   assert.equal(fx.child().gate.state, 'SUBMITTED');
   // An acknowledged one-time finding resolves on the next complete pass; nobody needs to see it again.
   const journalError = fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR');
-  fx.ctrl(['ack', '--finding', journalError.id]);
+  fx.ctrl(['ack', '--finding', journalError.id, '--next', 'Check the hook.']);
   fx.reconcile();
   assert.deepEqual(open(), ['JOURNAL_ERROR resolved', 'RETURN_CAPTURED new']);
   // Acknowledging the waiting return does not close it while the return is unconsumed.
   const captured = fx.parentDoc().attention.find(entry => entry.code === 'RETURN_CAPTURED');
-  fx.ctrl(['ack', '--finding', captured.id]);
+  fx.ctrl(['ack', '--finding', captured.id, '--next', 'Give the verdict.']);
   fx.reconcile();
   assert.deepEqual(open(), ['JOURNAL_ERROR resolved', 'RETURN_CAPTURED acknowledged']);
   // The verdict consumes the return: the condition is gone.
@@ -883,7 +883,7 @@ test('N2: a fresh report of a one-time code reopens an acknowledged or disposed 
     const fx = fixture();
     submitted(fx);
     const id = fx.parentDoc().attention.find(entry => entry.code === 'RETURN_CAPTURED').id;
-    fx.ctrl(answer === 'ack' ? ['ack', '--finding', id] : ['dispose', '--finding', id, '--reason', 'handled in chat']);
+    fx.ctrl(answer === 'ack' ? ['ack', '--finding', id, '--next', 'Give the verdict.'] : ['dispose', '--finding', id, '--reason', 'handled in chat']);
     assert.deepEqual(oneTime(fx, 'RETURN_CAPTURED'), [answer === 'ack' ? 'acknowledged' : 'disposed']);
     // A new assignment's return arrives before the next pass: a fresh report of the same code.
     fx.ctrl(['assign', '--issue', '423', '--role', 'G1', '--assignment', 'g1-a2', '--supersede', '--reason', 'restart']);
@@ -905,7 +905,7 @@ test('N2: a fresh report of a one-time code reopens an acknowledged or disposed 
   fx.reconcile();
   assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['new']);
   fx.github.tick();
-  fx.ctrl(['ack', '--finding', fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR').id]);
+  fx.ctrl(['ack', '--finding', fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR').id, '--next', 'Check the hook.']);
   // Another turn rewrites the journal with the old error still on it.
   fx.head = SHA_B;
   fx.turnEnd('exec-a');
@@ -938,7 +938,7 @@ test('F2: a newer checkpoint error reopens a JOURNAL_ERROR that is still acknowl
   fx.turnEnd('exec-a');
   fx.reconcile();
   fx.github.tick();
-  fx.ctrl(['ack', '--finding', fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR').id]);
+  fx.ctrl(['ack', '--finding', fx.parentDoc().attention.find(entry => entry.code === 'JOURNAL_ERROR').id, '--next', 'Check the hook.']);
   assert.deepEqual(oneTime(fx, 'JOURNAL_ERROR'), ['acknowledged']);
   // A newer error lands before any pass resolves the acknowledged entry.
   for (let n = 0; n < 5; n += 1) fx.github.tick();

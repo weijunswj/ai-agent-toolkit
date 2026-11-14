@@ -137,7 +137,8 @@ function switchWorld(t, { realLocations = false } = {}) {
   const real = require('../../scripts/toolkit-governance-state.cjs'), cache = require('../../scripts/toolkit-governance-binding.cjs');
   const { ToolkitGovernanceCli } = require('../../scripts/toolkit-governance.cjs');
   const registryPath = path.join(tasks.userStateDir(home), 'repository-governance.v1.json');
-  let tick = Date.now(), revision = 0, status;
+  // Fixed midday UTC start: the real clock near midnight made same-day checks roll over.
+  let tick = Date.UTC(2026, 0, 15, 12, 0, 0), revision = 0, status;
   t.mock.timers.enable({ apis: ['Date'], now: tick });
   const now = () => { tick += 1000; t.mock.timers.setTime(tick); return new Date(tick); };
   // The physical layout is immutable between explicit fixture moves. Cache only fixed Git
