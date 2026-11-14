@@ -90,6 +90,7 @@ All development aims at these; repository rules may add, never relax:
 - **Slim:** no dead code or unneeded compatibility (Change-local hygiene); no scraps.
 - **Platform first:** use built-in host features; custom guards only for real risks.
 - **Never silently wrong:** fail loudly and heal missed steps; must-hold rules live in hooks, scripts or CI.
+- **Generic:** shared rules and tools name no project, issue or record unless needed.
 
 ## Engineering Defaults
 
