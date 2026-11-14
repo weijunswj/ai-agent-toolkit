@@ -74,4 +74,4 @@ The script compares each head version with its merge-base version to prove exact
 
 On a hold, the builder reconciles the reported problem before a new report. Read the remote before retrying an uncertain push. Re-run CI and route the complete delta for fresh G2 review; keep the previous review on its old head and record retained or affected UAT separately. The script never merges, approves or accepts a pull request.
 
-CI also accepts a branch that holds its base's version with the base's `##` headings (plus at most one `## Unreleased` on top), or one that sets exactly the next patch, minor or major version with that heading on top, the base's headings below it and no fragment left.
+CI accepts a branch that holds its base's version with the base's `##` headings (plus at most one `## Unreleased` on top), or one that sets exactly the next patch, minor or major version with that heading on top, the base's headings below it and no fragment left.
