@@ -63,7 +63,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller;
+  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #agentHost;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -74,7 +74,7 @@ class ToolkitGovernanceCli {
   // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
   // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
   // ticket is bound to) are for tests too.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null } = {}) {
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, agentHost = detectAgentHost } = {}) {
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
     this.#stdout = stdout;
     this.#stderr = stderr;
@@ -96,6 +96,7 @@ class ToolkitGovernanceCli {
     this.#appReader = appReader;
     this.#switchTransport = switchTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
     this.#permissionsChecker = permissionsChecker || defaultPermissionsChecker;
+    this.#agentHost = agentHost;
     this.#environment = environment || {};
     this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());
     this.#plainTextInstaller = plainTextInstaller;
@@ -390,6 +391,9 @@ class ToolkitGovernanceCli {
   // A cloud session skips the reply check, so the owner's chat answer there can never be recorded.
   #cloud() { return this.#environment.CLAUDE_CODE_REMOTE === 'true'; }
 
+  // Whether this app shows Toolkit's question cards (Claude Code, not Codex).
+  #cardHost() { return this.#agentHost() !== 'codex'; }
+
   #hostSession() {
     const id = this.#environment.TOOLKIT_HOST_SESSION || this.#environment.CODEX_THREAD_ID;
     return typeof id === 'string' && id !== '' ? id : null;
@@ -404,13 +408,15 @@ class ToolkitGovernanceCli {
     const sessionId = this.#hostSession();
     const epochs = new gate.SessionEpochs({ registryOptions: this.#registryOptions });
     const epoch = sessionId ? epochs.get(sessionId) : null;
+    // Claude Code answers on its own question card; Codex reads a typed reply.
+    const card = this.#cardHost() ? governanceBank.bankCardInput(specs) : null;
     let noted = false;
     try {
       noted = Boolean(sessionId) && new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).shown(sessionId, {
-        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: governanceBank.bankReference(specs),
+        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: governanceBank.bankReference(specs), card,
       });
     } catch { noted = false; }
-    this.#stdout.write(`${governanceBank.renderGovernanceBank(specs)}\n`);
+    this.#stdout.write(`${governanceBank.renderGovernanceBank(specs, { card: noted && card !== null })}\n`);
     if (!noted) this.#stdout.write(`\nToolkit could not note this bank for this session (its session-start hook did not mark it, or its user-state folder could not be written), so a reply in chat cannot be recorded. Start a new session and say toolkit governance there, or run ${CMD('setup')} in your own terminal.\n`);
     return BANK_SHOWN;
   }

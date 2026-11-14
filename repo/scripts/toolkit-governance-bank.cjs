@@ -143,7 +143,8 @@ function governanceBankSpecs({ state, task = 'unset', merged = null, permissions
 function bankReference(specs) { return specs[0]?.presentation.bank_reference || ''; }
 
 // The bank as the owner reads it, with the one reply line.
-function renderGovernanceBank(specs) {
+// `card`: the host shows the bank as Claude Code's question card (cardInstruction) instead of a typed reply.
+function renderGovernanceBank(specs, { card = false } = {}) {
   const reference = bankReference(specs);
   const governed = specs.find(entry => entry.id === 'governance')?.folded_value === 'on';
   const example = bank.changedOnlyExample(specs, governed ? ['governance', 'task-auto-merge'] : ['governance']);
@@ -161,7 +162,8 @@ function renderGovernanceBank(specs) {
     'Anything you do not list takes its recommendation. Every change to governance or task auto-merge is one pull request that applies only after you merge it.',
     'The permissions row covers only this app. Any other app you use needs toolkit governance run there too.',
     '',
-    `Agents: show this bank to the owner exactly, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them.`,
+    card ? cardInstruction(specs)
+      : `Agents: show this bank to the owner exactly, as plain text and never in a code block, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them.`,
   ].join('\n');
 }
 
@@ -187,6 +189,78 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
     throw new Error('Task auto-merge can be on only while governance is on: turn governance on in the same answer, or leave task auto-merge as it is.');
   }
   return chosen;
+}
+
+// ---- the card (Claude Code) ----------------------------------------------------------------------
+
+// In Claude Code the owner answers on the app's own question card (AskUserQuestion) instead of typing.
+// The card carries every answerable row, its options lettered as in the bank; the tool gate lets only
+// this exact card through for the bank shown last, and the owner's taps come back as one bank answer
+// with a one-use ticket (toolkit-governance-gate.cjs PromptHold.bankPicked).
+const CARD_HEADERS = Object.freeze({ governance: 'Governance', 'task-auto-merge': 'Auto-merge', 'evidence-store': 'Store', 'permission-blocks': 'Permissions' });
+const CARD_KEYS = Object.freeze(['questions', 'metadata']);
+const CARD_QUESTION = /^(\d+\.\d+) /;
+const CARD_OPTION = /^([A-D])\. /;
+
+function bankCardInput(specs) {
+  return {
+    questions: specs.filter(spec => !spec.report_only).map(spec => ({
+      question: `${spec.presentation.question_ref} ${spec.title} (now: ${spec.current})`,
+      header: CARD_HEADERS[spec.id] || 'Governance',
+      multiSelect: false,
+      options: spec.choices.map(choice => ({
+        label: `${choice.presentation_ref}. ${choice.label}${choice.value === spec.recommended ? ' (Recommended)' : ''}`,
+        description: choice.consequence,
+      })),
+    })),
+  };
+}
+
+// The card's questions in one fixed form, or null when the input carries anything else (an answer
+// filled in by the caller, a multi-select, an extra field).
+function cardShape(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !CARD_KEYS.includes(key))) return null;
+  const { questions } = input;
+  if (!Array.isArray(questions) || questions.length === 0) return null;
+  const shaped = [];
+  for (const question of questions) {
+    if (!question || typeof question !== 'object' || Object.keys(question).some(key => !['question', 'header', 'multiSelect', 'options'].includes(key))) return null;
+    if (question.multiSelect !== undefined && question.multiSelect !== false) return null;
+    if (!Array.isArray(question.options) || question.options.some(option => !option || typeof option !== 'object' || Object.keys(option).some(key => !['label', 'description'].includes(key)))) return null;
+    shaped.push({ question: question.question, header: question.header, options: question.options.map(option => ({ label: option.label, description: option.description })) });
+  }
+  return shaped;
+}
+
+function cardHash(input) {
+  const shaped = cardShape(input);
+  return shaped ? crypto.createHash('sha256').update(JSON.stringify(shaped)).digest('hex') : null;
+}
+
+// The owner's taps as a bank answer ("1.1=A, 1.2=A, 2.1=B"), or null unless every question was
+// answered with one of its own options (a typed "Other" answer is not a tap).
+function cardAnswer(questions, answers) {
+  if (!Array.isArray(questions) || !answers || typeof answers !== 'object') return null;
+  const parts = [];
+  for (const question of questions) {
+    const ref = CARD_QUESTION.exec(String(question && question.question || ''));
+    const label = Object.hasOwn(answers, question.question) ? answers[question.question] : null;
+    const option = ref && typeof label === 'string' && Array.isArray(question.options) ? question.options.find(entry => entry && entry.label === label) : null;
+    const letter = option ? CARD_OPTION.exec(option.label) : null;
+    if (!letter) return null;
+    parts.push(`${ref[1]}=${letter[1]}`);
+  }
+  return parts.join(', ');
+}
+
+// What the agent is told after the bank in Claude Code.
+function cardInstruction(specs) {
+  const status = specs.some(spec => spec.report_only);
+  return [
+    `Agents (Claude Code): do not repeat this table${status ? '; tell the owner the Status lines above in one plain sentence each' : ''}, then call AskUserQuestion once with exactly this input, adding no answers field, and stop:`,
+    JSON.stringify(bankCardInput(specs)),
+    'Their taps come back to you with the exact command to send. If the card cannot be shown, show the table above instead, as plain text and never in a code block.',
+  ].join('\n');
 }
 
 // ---- bank tickets -------------------------------------------------------------------------------
@@ -238,10 +312,14 @@ class BankTickets {
 
   // Notes that this run of the session was shown this bank. A newer bank replaces an older one and
   // drops any live ticket of the session, so a ticket always answers the bank shown last.
-  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference }) {
+  // `card` is the bank's card input where the host shows one (bankCardInput).
+  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, card = null }) {
     if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch))) return false;
     const data = this.#read();
-    data.shown[sessionId] = { epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, at: this.#now().toISOString() };
+    data.shown[sessionId] = {
+      epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, at: this.#now().toISOString(),
+      ...(card ? { card: cardHash(card), card_questions: card.questions.map(question => question.question) } : {}),
+    };
     delete data.tickets[sessionId];
     this.#save(data);
     return true;
@@ -315,6 +393,16 @@ function bankTicketContext(entry, ticket) {
   ].join('\n');
 }
 
+// What the agent is told after the owner tapped every row on the bank's card.
+function bankCardContext(entry, ticket, answer) {
+  return [
+    `Toolkit governance: the owner answered governance bank ${entry.bank_reference} on the card: ${answer}.`,
+    'Run exactly this once, on its own, then tell the owner in plain words what it prepared:',
+    `node "${SCRIPT}" setup --answers "${entry.bank_reference}: ${answer}" --ticket ${ticket}`,
+    'The ticket works once, only in this session, and only for this bank. Never act as the user: never change their answer.',
+  ].join('\n');
+}
+
 // Whether a shell command is exactly the bank answer command with a live ticket of this session.
 // The script must be Toolkit's own path as written, and the line holds nothing a shell expands.
 const BANK_COMMAND = /^[ \t]*(?:&[ \t]*)?node(?:\.exe)?[ \t]+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))[ \t]+setup[ \t]+--answers[ \t]+"([^"\r\n]{1,400})"[ \t]+--ticket[ \t]+([0-9a-f]{32})[ \t]*$/;
@@ -334,5 +422,5 @@ function bankTicketCommand(text, sessionId, tickets) {
 
 module.exports = Object.freeze({
   APP_NAMES, BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
-  bankTicketContext, bankTicketCommand,
+  bankTicketContext, bankTicketCommand, bankCardInput, bankCardContext, cardAnswer, cardHash, cardInstruction,
 });
