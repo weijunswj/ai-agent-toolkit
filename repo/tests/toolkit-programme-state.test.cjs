@@ -57,8 +57,8 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
   const normalized = state.validateBinding(binding);
   assert.deepEqual([normalized.parent_issue, normalized.record_prefix, normalized.writer_prefix], [binding.parents[0].issue, binding.parents[0].record_prefix, binding.parents[0].writer_prefix]);
   // Version 1 is still read, as enabled with one parent.
-  // schedule_folder is a version 2 field.
-  const { governance: _governance, parents: _parents, schedule_folder: _folder, parent_lifecycle: _lifecycle, ...rest } = binding;
+  // schedule_folder, parent_lifecycle and detach_finished_children are version 2 fields.
+  const { governance: _governance, parents: _parents, schedule_folder: _folder, parent_lifecycle: _lifecycle, detach_finished_children: _detach, ...rest } = binding;
   const v1 = { ...rest, schema: state.SCHEMA.binding, parent_issue: 421, record_prefix: 'INT-TK421-', writer_prefix: 'INT-TK421-' };
   assert.equal(validateBindingV1(v1), true, JSON.stringify(validateBindingV1.errors));
   assert.equal(state.validateBinding(v1), v1);
