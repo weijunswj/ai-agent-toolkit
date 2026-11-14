@@ -622,9 +622,14 @@ function body(manifest) {
     // A Closes line would close its issue before the owner's test, which the issue-closure guard
     // refuses; on such a train it becomes Refs, and the member's own Closes line closes the issue
     // when the train lands, since GitHub treats the member as merged.
-    ...members.flatMap(member => (member.links || []).map(line => line.trim()).map(line => (tests.length && !/^Refs /.test(line)
-      ? `Refs ${line.replace(/^\S+ /, '')} (closed by #${member.pr}'s own closing line when the train lands)`
-      : line))),
+    // Each link line names its member and that member's own UAT state, so the issue-closure guard
+    // and a reader can tell which member answers for the issue.
+    ...members.flatMap(member => {
+      const note = `member #${member.pr}, UAT: ${UAT_LINE.exec(member.uat.trim())[1]}`;
+      return (member.links || []).map(line => line.trim()).map(line => (tests.length && !/^Refs /.test(line)
+        ? `Refs ${line.replace(/^\S+ /, '')} (${note}; closed by #${member.pr}'s own closing line when the train lands)`
+        : `${line} (${note})`));
+    }),
   ];
   // Members that left after boarding have their own Ejected: line above; this table is for those that never boarded.
   const ejected = ejectedRows({ ejected: (manifest.ejected || []).filter(row => !(row && row.merge)) });

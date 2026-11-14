@@ -315,16 +315,38 @@ test('body lists every member with one Bump line, the strictest UAT line and eve
   assert.match(text, /^Bump: minor$/m);
   assert.match(text, /^UAT: OWNER_TEST_NEEDED \(each member's own test after the merge: #2\)$/m);
   assert.equal(text.match(/^UAT: /gm).length, 1);
-  assert.match(text, /^Refs #101$/m);
+  assert.match(text, /^Refs #101 \(member #1, UAT: NOT_REQUIRED\)$/m, 'each link line names its member and that member\'s own UAT state');
   assert.doesNotMatch(text, /^(Closes|Fixes|Resolves) /m, 'no closing line on a train that waits on an owner test');
-  assert.match(text, /^Refs #7 \(closed by #2's own closing line when the train lands\)$/m);
+  assert.match(text, /^Refs #7 \(member #2, UAT: OWNER_TEST_NEEDED; closed by #2's own closing line when the train lands\)$/m);
   assert.doesNotMatch(text, /Generated with|Co-Authored-By/);
   assert.doesNotMatch(text, /Ejected/, 'no section when nothing was ejected');
   const quiet = train.body(train.checkManifest({ members: [f.member(3, '3'.repeat(40), { bump: 'none', uat: 'UAT: PASSED (owner OK)' })] }));
   assert.match(quiet, /^Bump: none$/m);
   assert.match(quiet, /^UAT: NOT_REQUIRED \(no member needs an owner test: #3\)$/m);
   const closing = train.body(train.checkManifest({ members: [f.member(4, '4'.repeat(40), { links: ['Closes #8'] })] }));
-  assert.match(closing, /^Closes #8$/m, 'a train with no owner test keeps its closing lines');
+  assert.match(closing, /^Closes #8 \(member #4, UAT: NOT_REQUIRED\)$/m, 'a train with no owner test keeps its closing lines');
+  const { closingReferences } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  assert.deepEqual(closingReferences(closing, 'o/r').map(ref => ref.number), [8], 'the annotation keeps the closing line readable');
+  const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
+  assert.equal(uatVerdict(text).state, 'OWNER_TEST_NEEDED', 'member UAT notes never read as a second UAT line');
+  const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+  assert.deepEqual(mergeTrainMembers(text), [1, 2], 'the body is recognised as a merge train carrying its members');
+});
+
+test('body keeps each member\'s Pack changes lines readable by the hook pack check', t => {
+  const f = fixture(t);
+  const manifest = train.checkManifest({ members: [
+    f.member(1, '1'.repeat(40)),
+    f.member(2, '2'.repeat(40), { pack_changes: ['CLOSURE.cloud-merge-clean: the merge hold now allows a clean cloud merge', '- `CLOSURE.cloud-merge-unknown` - unknown now holds'] }),
+  ] });
+  const text = train.body(manifest);
+  const { explainedRows } = require('../scripts/toolkit-hook-pack.cjs');
+  assert.deepEqual([...explainedRows(text).keys()].sort(), ['CLOSURE.cloud-merge-clean', 'CLOSURE.cloud-merge-unknown']);
+  assert.equal(text.match(/^## Pack changes$/gm).length, 1);
+  assert.doesNotMatch(train.body(train.checkManifest({ members: [f.member(3, '3'.repeat(40))] })), /Pack changes/, 'no section when no member changed a row');
+  for (const bad of ['A1: two\nlines', '', 7]) {
+    assert.throws(() => train.checkManifest({ members: [f.member(4, '4'.repeat(40), { pack_changes: [bad] })] }), /"pack_changes"/);
+  }
 });
 
 test('split halves a red train for a bisect, and a train of one names its culprit', t => {
