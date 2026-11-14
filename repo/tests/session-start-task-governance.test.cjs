@@ -1,7 +1,8 @@
 'use strict';
 
 // Runtime companion to the unchanged setup-intent graph test. Actual host entry processes must
-// deliver the task line without loading the scheduler, programme CLI or interactive setup.
+// start without loading the scheduler, programme CLI or interactive setup, and never print the
+// retired Windows task line, even when an old task registry no longer matches governance.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -12,9 +13,9 @@ const support = require('./toolkit-governed-fixture-support.cjs');
 const tasks = require('../scripts/toolkit-tasks.cjs');
 const pack = require('../scripts/toolkit-hook-pack.cjs');
 const ROOT = path.resolve(__dirname, '../..');
-const LINE = 'Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers.';
+const RETIRED = /Toolkit tasks:|toolkit-windows-tasks|see toolkit tasks/;
 
-test('both SessionStart entries retain advisory context with runtime load denials across all start sources', t => {
+test('both SessionStart entries keep advisory context without the retired task line, with runtime load denials across all start sources', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-load-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const home = path.join(dir, 'home'), work = path.join(dir, 'work'), plugin = path.join(dir, 'plugin');
@@ -57,7 +58,7 @@ Module._load = function(request, parent, main) {
     const result = spawnSync(file,args,{ input, env, encoding: 'utf8', windowsHide: true, timeout: 15000 });
     assert.equal(result.status, 0, `${host}/${source}: ${result.stderr}`);
     const context = pack.hookContext(host,'SessionStart',result);
-    assert.equal(context.split(LINE).length, 2, `${host}/${source}: ${context}`);
+    assert.doesNotMatch(context, RETIRED, `${host}/${source}: ${context}`);
     assert.match(context, /Toolkit governance: DISABLED for this repository/);
     assert.equal(fs.existsSync(denied), false, 'no forbidden module was even attempted');
   }

@@ -849,6 +849,8 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     '- Local sessions sharing one checkout must not clash', '**Remote Control wake.**', '4. Check the result: `--check` reads `current`', '5. Post one short note in project chat: block version',
     '- On undo, restore the saved copy and record `declined project-instructions', '**Dedupe in the same change.**', '**Evidence before "done":**',
     'start a bounded G0 to create or refresh it before you plan anything',
+    // The cloud Programme Sweep is a GitHub workflow, not a project task: these lines say no computer task is set up.
+    '**Programme pages refresh themselves in the cloud.**', '**Programme sweep in the cloud.**',
     // The reconciler's `refresh` command brings programme pages up to date; it touches no task.
     '**Programme pages refresh themselves, without tokens.**', '5b. Programme sweep',
     // The attention check reads the programme with `attention --refresh`; it touches no task.
@@ -1061,9 +1063,9 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
 test('the check-in turns stuck work into prefixes the coordinator must act on, and the controller owns every finding', () => {
   const text = rendered('daily-check-in');
   // A failing or missed task is no longer advice only.
-  assert.match(text, /never in the prefix, except an enabled task not stopped by the owner whose last run is read as failed, or as missing its last scheduled run: start the first line with "TASK FAILING: <names> \| "\. Device tasks report through the evidence store[^]*A task whose status cannot be read is "<name>: unverified" under \*\*Tasks:\*\*, and a disabled one stays advice\./);
-  // Device task-health flags in the store are read, not left for a local session line.
-  assert.match(text, /read its `task-health\/computer-\*\.json` files[^]*Each flag on a example-owner\/example-repo row joins TASK FAILING as "<computer>: <flag>", and a file over 2 days old as "<computer>: health file stale"; no store or an unreadable one is "task-health: unverified" under \*\*Tasks:\*\*\./);
+  assert.match(text, /never in the prefix, except an enabled task not stopped by the owner whose last run is read as failed, or as missing its last scheduled run: start the first line with "TASK FAILING: <names> \| "\. A task whose status cannot be read is "<name>: unverified" under \*\*Tasks:\*\*, and a disabled one stays advice\./);
+  // Toolkit runs no computer tasks any more, so the check-in reads no task-health files.
+  assert.doesNotMatch(text, /task-health/);
   // An open PR that needs a step gets a prefix, review-notification PRs included.
   assert.match(text, /An open PR with a failing check, a ready PR missing its UAT verdict, or an open PR with no update for 3 days \(review-notification PRs included\), unless the PR or its task records a wait with its blocker and the date it is due: start the first line with "PR ATTENTION: <n> \| "/);
   // A missing set reported before is not silenced forever: after 3 days it returns for the owner.

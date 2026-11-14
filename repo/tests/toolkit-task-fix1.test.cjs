@@ -109,13 +109,6 @@ test('Low 5: newer peer job kinds are accepted, local schema remains closed', t 
   const store = new health.HealthStore({ transport, store: { repository: 'example/evidence', branch: 'main' } });
   assert.equal(store.list().length, 1); assert.throws(() => health.assertHealth(doc), /Invalid health repository/);
 });
-test('M3: setup completes both independent Codex maintenance steps before reporting a task hold', () => {
-  const text = fs.readFileSync(require.resolve('../scripts/setup-toolkit-core.cjs'), 'utf8');
-  const section = text.slice(text.indexOf('const scheduledTaskUpdate = applyScheduledTasks(args);'), text.indexOf('async function execute(args)'));
-  assert.ok(section.indexOf('runCodexGlobalRules(args)') < section.indexOf('return '));
-  assert.ok(section.indexOf('runCodexHelperAgents(args)') < section.indexOf('return '));
-  assert.match(section, /return scheduledTaskUpdate\?\.held/);
-});
 test('M4: concurrent third misses persist both independent disabled snapshots', async t => {
   const w = world(t), managed = path.join(w.home, 'missing');
   const entries = [w.entry, { ...w.entry, id: 'beta-footer-sweep', name: 'BETA - FOOTER SWEEP', folder: 'BETA', repository: 'example/beta' }].map(e => ({ ...e, toolkit_root: managed }));

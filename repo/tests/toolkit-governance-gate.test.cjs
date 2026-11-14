@@ -27,12 +27,12 @@ require('node:test')('cloud connector merges are held: closing text and a missin
   assert.equal(hook.respond('PreToolUse',both,{environment:{CLAUDE_CODE_REMOTE:'true'},guard}).hookSpecificOutput.permissionDecision,'deny','a clean alias cannot mask closing text in another supplied alias');
 });
 
-test('task advisory preserves every verdictLine branch, evaluates once and shares one registry read', t => {
+test('every verdictLine branch evaluates once, reads no task registry and prints no task advisory', t => {
   const ctx = scratch(t);
   const tasks = require('../scripts/toolkit-tasks.cjs');
   const Module = require('node:module');
   const originalEvaluate = gate.GovernanceGate.prototype.evaluate;
-  const originalRead = tasks.readRegistry, originalAdvisory = tasks.taskGovernanceLine, load = Module._load;
+  const originalRead = tasks.readRegistry, load = Module._load;
   const registry = { status: 'ok', tasks: [{ id: 'fixture-p', job: 'programme-sweep', repository: 'example/widget', host: 'windows' }] };
   const state = { state: 'UNDECIDED', repository: 'example/widget', repository_id: 'fixture', merged: { fresh: true, status: 'none' }, root: ctx.root };
   const options = { registryOptions: ctx.options, programmeDeps: { home: ctx.options.home, environment: {}, platform: 'win32' } };
@@ -47,43 +47,30 @@ test('task advisory preserves every verdictLine branch, evaluates once and share
       const verdict = { state: s, reason: branch, open: ['asked', 'undecided'].includes(branch), ...(branch === 'pending' ? { pending: { text: 'Original pending line.' } } : {}) };
       gate.GovernanceGate.prototype.evaluate = () => { count++; return verdict; };
       tasks.readRegistry = () => { reads++; return registry; };
-      tasks.taskGovernanceLine = () => null;
       const programmeDeps = { ...options.programmeDeps, mergedBinding: () => ({ repository: state.repository }), now: () => new Date() };
       const call = () => gate.sessionLine(ctx.root, { ...options, programmeDeps });
-      const before = call();
-      tasks.taskGovernanceLine = originalAdvisory;
-      count = reads = 0;
-      const after = call();
-      const line = originalAdvisory(s, { ...programmeDeps, registry });
-      assert.equal(after, line ? `${before} ${line}` : before, branch);
+      const line = call();
       assert.equal(count, 1, branch);
-      assert.equal(reads, 1, branch);
+      assert.equal(reads, 0, `${branch}: no task registry read`);
+      assert.doesNotMatch(line || '', /Toolkit tasks:|Task health|see toolkit tasks/, branch);
       assert.deepEqual(verdict.state, s, 'no decision changes');
-      tasks.taskGovernanceLine = () => { throw new Error('format/read denied'); };
-      assert.equal(call(), before, branch);
-      tasks.taskGovernanceLine = originalAdvisory;
-      tasks.readRegistry = () => ({ status: 'unreadable' });
-      // The baseline health context may differ only if its own registry read changes.
-      tasks.taskGovernanceLine = () => null;
-      const unreadableBefore = call();
-      tasks.taskGovernanceLine = originalAdvisory;
-      assert.equal(call(), unreadableBefore, branch);
+      // Nothing about the old task code can change or break the session line.
       tasks.readRegistry = () => { throw new Error('registry read denied'); };
-      assert.equal(call(), unreadableBefore, branch);
+      assert.equal(call(), line, branch);
       Module._load = function(request, ...args) {
-        if (request === './toolkit-tasks.cjs') throw new Error('advisory load denied');
+        if (request === './toolkit-tasks.cjs') throw new Error('task module load denied');
         return load.call(this, request, ...args);
       };
-      assert.equal(call(), unreadableBefore, branch);
+      assert.equal(call(), line, branch);
       Module._load = load;
     }
   } finally {
     gate.GovernanceGate.prototype.evaluate = originalEvaluate;
-    tasks.readRegistry = originalRead; tasks.taskGovernanceLine = originalAdvisory; Module._load = load;
+    tasks.readRegistry = originalRead; Module._load = load;
   }
 });
 
-test('task advisory uses this start observation: refresh success, failure, stale and clear/compact', t => {
+test('session start never prints a task advisory, whatever the start observation: refresh success, failure, stale and clear/compact', t => {
   const ctx = scratch(t), repo = gitRepo(ctx, 'advisory-refresh');
   const tasks = require('../scripts/toolkit-tasks.cjs');
   const cache = require('../scripts/toolkit-governance-binding.cjs');
@@ -99,7 +86,7 @@ test('task advisory uses this start observation: refresh success, failure, stale
     let refreshed = 0;
     gate.startSession({ cwd: repo, session_id: source, source }, { ...options, refreshBinding() { refreshed++; seed(new Date()); return { refreshed: true }; } });
     assert.equal(refreshed, ['startup','resume'].includes(source) ? 1 : 0);
-    assert.equal(line().includes('Toolkit tasks:'), refreshed === 1);
+    assert.equal(line().includes('Toolkit tasks:'), false, 'a recorded task never brings the retired line back');
   }
   seed(new Date());
   const identity = governance.readIdentity(repo), dir = path.dirname(ctx.registryPath);

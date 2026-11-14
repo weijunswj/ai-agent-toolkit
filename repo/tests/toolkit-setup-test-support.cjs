@@ -101,9 +101,6 @@ function createFakeCodexAppServer(root) {
 // Setup tests written before the Codex instruction limit question answer it with keep (nothing
 // recorded, so config.toml is left alone); tests of that question pass codexDocLimitQuestion: true.
 function withDocLimitAnswer(args, options) {
-  // Older journeys resolve the independent Windows task permission explicitly.
-  // Its own question/approval tests opt in to the unresolved row.
-  if (!options.scheduledTaskQuestion && !options.codexDocLimitQuestion && args.some(arg => arg === '--execute' || arg === '--plan') && !args.includes('--scheduled-task-update')) args = [...args, '--scheduled-task-update', 'no'];
   if (options.codexDocLimitQuestion || !args.some((arg) => arg === '--execute' || arg === '--plan')
     || args.some((arg) => /^--(enable|disable|keep)-codex-doc-limit$/.test(arg))) return args;
   return [...args, '--keep-codex-doc-limit'];

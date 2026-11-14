@@ -77,8 +77,10 @@ test('Windows prints Bash and PowerShell twins with the path in forward slashes 
   const exists = { ...fs, existsSync: () => true };
   const plain = new permissions.PermissionBlocks({ ...computer(t, { managed: 'C:\\Users\\dev\\.ai-agent-toolkit\\checkout', claude: false, platform: 'win32' }), fs: exists }).build({ scope: 'computer' });
   assert.ok(plain.blocks[0].allow.includes('Bash(node "C:/Users/dev/.ai-agent-toolkit/checkout/skills/github-program-reconciler/scripts/programme.cjs" refresh *)'));
-  assert.ok(plain.blocks[0].allow.includes('PowerShell(node "C:/Users/dev/.ai-agent-toolkit/checkout/repo/scripts/toolkit-windows-tasks.cjs" start *)'));
-  assert.ok(plain.blocks[0].ask.includes('PowerShell(node "C:/Users/dev/.ai-agent-toolkit/checkout/repo/scripts/toolkit-windows-tasks.cjs" apply *--repair-owned*)'));
+  assert.ok(plain.blocks[0].allow.includes('PowerShell(node "C:/Users/dev/.ai-agent-toolkit/checkout/repo/scripts/toolkit-windows-tasks.cjs" plan *)'));
+  // Toolkit no longer creates or starts tasks on a computer: those forms are not allowed, so the host asks.
+  assert.ok(!plain.blocks[0].allow.some(line => / (?:apply|start)\b/.test(line) && line.includes('toolkit-windows-tasks')));
+  assert.ok(!plain.blocks[0].allow.some(line => line.includes('toolkit-update-scheduled-task')));
   const spaced = new permissions.PermissionBlocks({ ...computer(t, { managed: 'C:\\Users\\A Dev\\tk', claude: false, platform: 'win32' }), fs: exists }).build({ scope: 'computer' });
   assert.ok(spaced.blocks[0].allow.includes('Bash(node "C:/Users/A Dev/tk/skills/github-program-reconciler/scripts/programme.cjs" refresh *)'));
   const linux = new permissions.PermissionBlocks(computer(t)).build({ scope: 'computer' });
@@ -231,14 +233,11 @@ test('script lines allow only what their guard text says; approval-bearing flags
     [`${node('toolkit-tasks.cjs')}`, 'allow'], [`${node('toolkit-tasks.cjs')} --json`, 'allow'],
     [`${node('toolkit-tasks.cjs')} --forget demo-footer-sweep`, 'prompt'], [`${node('toolkit-tasks.cjs')} --json --forget demo-footer-sweep`, 'prompt'],
     [`${node('toolkit-tasks.cjs')} --record --host codex --id x --name X --schedule daily --purpose p`, 'prompt'],
-    [`${node('toolkit-update-scheduled-task.cjs')}`, 'allow'], [`${node('toolkit-update-scheduled-task.cjs')} --apply`, 'allow'], [`${node('toolkit-update-scheduled-task.cjs')} --apply --json`, 'allow'],
-    [`${node('toolkit-update-scheduled-task.cjs')} --apply --answers C:/x/answers.json`, 'prompt'], [`${node('toolkit-update-scheduled-task.cjs')} --answers C:/x/answers.json --apply`, 'prompt'],
-    [`${node('toolkit-windows-tasks.cjs')} apply --repo-root C:/repo`, 'allow'], [`${node('toolkit-windows-tasks.cjs')} apply`, 'allow'],
-    [`${node('toolkit-windows-tasks.cjs')} apply --repo-root C:/repo --folder OTHER`, 'ask'], [`${node('toolkit-windows-tasks.cjs')} apply --no-first-run`, 'ask'],
-    [`${node('toolkit-windows-tasks.cjs')} apply --repair-owned`, 'ask'],
-    [`${node('toolkit-windows-tasks.cjs')} apply --task-choice replace --task demo --observed ${'a'.repeat(64)} --answer-ref chat-1`, 'ask'],
+    [`${node('toolkit-update-scheduled-task.cjs')}`, 'prompt'], [`${node('toolkit-update-scheduled-task.cjs')} --apply`, 'prompt'],
+    [`${node('toolkit-windows-tasks.cjs')} apply --repo-root C:/repo`, 'prompt'], [`${node('toolkit-windows-tasks.cjs')} apply`, 'prompt'],
+    [`${node('toolkit-windows-tasks.cjs')} plan --repo-root C:/repo`, 'allow'],
     [`${node('toolkit-windows-tasks.cjs')} remove --repo-root C:/repo`, 'prompt'], [`${node('toolkit-windows-tasks.cjs')} adopt --folder F --task T --id t --purpose p`, 'prompt'],
-    [`${node('toolkit-windows-tasks.cjs')} start --task demo-footer-sweep`, 'allow'],
+    [`${node('toolkit-windows-tasks.cjs')} start --task demo-footer-sweep`, 'prompt'],
     ['gh pr comment 12 --body-file note.md', 'allow'], ['gh pr comment 12 --delete-last', 'ask'], ['gh issue comment 12 --delete-last --yes', 'ask'],
     // The scheduled sweep's flags only set how long one refresh pass may run (10 to 50 minutes).
     [`node "C:/tk/skills/github-program-reconciler/scripts/programme.cjs" refresh --scheduled`, 'allow'],
@@ -303,7 +302,8 @@ test('Codex gets no allow rule for a command that needs an exact form or an ask 
   assert.equal(decide([...tk('toolkit-store.cjs'), 'save', '--store', 'C:/store', '--path', 'archives/x', '--message', 'x']), 'allow');
   assert.equal(decide([...tk('toolkit-store.cjs'), 'delete-merged-branch', '--store', 'C:/store', '--branch', 'done']), 'allow');
   assert.ok(rules.filter(([, decision]) => decision === 'prompt').every(([pattern]) => !pattern.some(token => /store|^push$/.test(token))), 'no store prompt rule');
-  assert.equal(decide([...tk('toolkit-windows-tasks.cjs'), 'start', '--task', 'x']), 'allow');
+  assert.equal(decide([...tk('toolkit-windows-tasks.cjs'), 'start', '--task', 'x']), 'prompt');
+  assert.equal(decide([...tk('toolkit-windows-tasks.cjs'), 'plan']), 'allow');
   assert.equal(decide(['node', 'C:/tk/skills/github-program-reconciler/scripts/programme.cjs', 'refresh', '--apply']), 'allow');
   assert.ok(codex.blocks.every(block => block.excluded.length > 0));
   // Each example is the pattern's own token list, so a Toolkit folder with a space still matches itself.

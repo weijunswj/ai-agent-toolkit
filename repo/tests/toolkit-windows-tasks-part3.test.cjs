@@ -68,7 +68,7 @@ test('G: setup prints no per-repository task plan, and --remove-toolkit-tasks re
   assert.equal(core.printWindowsTasks, undefined, 'setup prints no task plan for one repository');
   const source = fs.readFileSync(require.resolve('../scripts/setup-toolkit-core.cjs'), 'utf8');
   assert.equal(source.includes('## Windows scheduled tasks'), false, 'setup has no per-repository task section');
-  assert.ok(source.includes('const scheduledTaskUpdate = applyScheduledTasks(args);'), 'the computer-wide task update stays');
+  assert.equal(source.includes('applyScheduledTasks'), false, 'setup runs no computer-wide task update either');
   // The remove flag runs on its own and goes to remove, never apply.
   windowsTasks.applyTasks(desired(t, { root }), { scheduler, home });
   scheduler.folders.get('TOOLKIT').push(unmarked('Mine'));

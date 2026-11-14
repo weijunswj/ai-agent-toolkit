@@ -23,7 +23,6 @@ function settledState(host, overrides = {}) {
   const base = core.documentationFixtureState();
   const state = {
     ...base,
-    scheduledTaskApproval: { decision: 'no' },
     ...(host === 'claude-code' ? {
       agentProfile: { supported: true, topology: 'root-only' },
       claudeSubagentDepth: { state: 'default' },
@@ -216,13 +215,15 @@ test('--refresh refuses every other answer source before any write', () => {
     ['--yes-recommended'], ['--approve-codex-config-proposal'], ['--approve-high-helper-capacity'],
     ['--keep-repo-auto-update'], ['--codex-helper-count', '1'],
     ['--update-report-retention-days', '3'], ['--repo-root', os.tmpdir()], ['--claude-settings', 'keep'],
-    ['--scheduled-task-update', 'standing'], ['--codex-plugin-behavior', 'install'],
+    ['--codex-plugin-behavior', 'install'],
   ]) {
     assert.throws(() => core.parseArgs([...base, ...extra]), /--refresh keeps every current answer/, extra.join(' '));
   }
   assert.throws(() => core.parseArgs(['--plan', '--refresh']), /--refresh keeps every current answer/);
   assert.throws(() => core.parseArgs(['--refresh']), /--refresh runs with --execute/);
   assert.equal(core.parseArgs(base).refresh, true);
+  // The retired task flag is no answer source: refresh accepts it and ignores it.
+  assert.equal(core.parseArgs([...base, '--scheduled-task-update', 'standing']).retiredScheduledTaskFlag, true);
 });
 
 test('the saved record holds question shapes only, per app, and is rewritten only when it changes', (t) => {

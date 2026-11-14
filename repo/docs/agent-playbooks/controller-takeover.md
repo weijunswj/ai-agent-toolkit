@@ -38,7 +38,7 @@ One denied command does not prove a missing ability. Before recording a probe as
 | (d) | GitHub writes as the owner: read the signed-in account and repository permissions first. | Own tool or connector, executor, then relay. Authorised writes need id, URL, author and read-back. An evidence-store write can carry an ungoverned record instead. |
 | (e) | Start a fresh gate with model and effort pinned and a readable launch record. | Own launch route, qualified executor launcher, then a Gate pack. Required before the first gate; no pasted brief alone qualifies. |
 | (f) | Wake the controller later: inspect supported wake facilities. | Use what is proven; otherwise the owner's next message. Check-ins and nudges remain Projects-only. An executor cannot promise to wake a chat. |
-| (g) | Read the owner's scheduled tasks through the plan command on the actual device. | Own device shell, device executor, then Read pack; only after the governance guard. Otherwise report "not checked here". |
+| (g) | Read the latest Programme Sweep workflow run on the default branch (GitHub connector, or `gh run list --workflow toolkit-programme-sweep.yml --limit 1`). | Any route with GitHub read; only after the governance guard. Otherwise report "not checked here". |
 | (h) | Host question UI: inspect the native picker or card tools. | Questions stay in the controller's chat; typed answers are the final fallback. |
 | (i) | Toolkit hooks loaded: inspect the actual host's hook-state evidence and Toolkit version. | Inspect each effect host, including executor or relay. A report is not hook qualification. The Codex gate hold still applies. |
 
@@ -56,13 +56,13 @@ Run steps 1-10 in order. Each step's own checks wait for the step before it; ind
 
 Show the checklist once. Each step is verified with evidence, supplied by user with its pack id, incomplete, or skipped with a specific applicability reason. Unknown is incomplete: unknown is incomplete even if a harness says it succeeded. Evidence before done; continue independent work while dependent effects hold. Resume verified progress after interruption; never replay an uncertain write before reconciliation.
 
-No controller actions until the journey and harness extras are verified done: no gates, merges, closes or programme writes except step 7's record and immediately following claim, and step 9b's standing-approval task apply. Complete, consistent user-supplied evidence is visibly labelled; it never becomes independent verification or gate/merge authority.
+No controller actions until the journey and harness extras are verified done: no gates, merges, closes or programme writes except step 7's record and immediately following claim. Complete, consistent user-supplied evidence is visibly labelled; it never becomes independent verification or gate/merge authority.
 
 Questions use the host's native question UI with plain option labels and "(my pick)" on the recommended one. Explain the problem, fix and consequence first; put the question card last, below the explanation. If that UI leaves no conversation trail, immediately write one short question and "You picked: <chosen option>"; no other options. A card that leaves its own trail needs no extra line. A relayed tap never supplies an owner-only decision or typed merge approval.
 
 ### 1. The capability check
 
-Run probes (a)-(i) using Capability routes. Report the Surface line, the required abilities reached and every dependent hold. Do not create a record when a required ability is unreachable. Task probe (g) waits for the fresh governance guard at step 9.
+Run probes (a)-(i) using Capability routes. Report the Surface line, the required abilities reached and every dependent hold. Do not create a record when a required ability is unreachable. Probe (g) waits for the fresh governance guard at step 9.
 
 ### 2. Mode and repository
 
@@ -118,10 +118,10 @@ Read the repository map and its recorded commit, open pull requests and checks, 
 Only with a fresh merged ENABLED binding, on the bound repository:
 
 - **9a Programme graph:** read the parent's CURRENT before done. This is the read-only option; inspect every new finding and preserve every hold. Queue each finding's fix, acknowledgement or dispose as the holder's first controlling action, before any gate or finality; a work-queue finding (`TASK_IDLE`, `TASK_MERGED_OPEN`) takes an action or a dispose, never an acknowledgement. The usual `node <Toolkit>/skills/github-program-reconciler/scripts/programme.cjs attention --refresh --repo-root <target checkout> --json` writes derived programme state and a local cache, so it runs only after done under normal Controller authority, never inside a read-only pre-completion pack. Ask the owner for actual decisions; never invent an acknowledgement on their behalf.
-- **9b Scheduled tasks:** on the owner's device, run `node <recorded managed Toolkit>/repo/scripts/toolkit-windows-tasks.cjs plan --repo-root <main checkout>`. Apply only a verified mismatch covered by the global Toolkit task standing approval, same main checkout and task folder, never a worktree or different Toolkit copy. Preserve owner stops and ask keep-or-replace for modified tasks. Re-run the plan and read installed tasks, enrolments and first sweep result. Use own tools, device executor or Task pack. Otherwise report "not checked here" and who can check it. Native denials stop.
-- **9c Sharding:** confirm SHARD TIMINGS enrolment from the plan and known manifest state; "no shards yet" is acceptable. Queue an open shard-refresh pull request. No new task is created merely because a manifest exists.
+- **9b Cloud sweep:** read the latest Programme Sweep workflow run on the default branch and the cloud sweep lines of `toolkit governance check`. Report a failed, skipped or missing run with its reason and fix. Toolkit runs no scheduled tasks on a computer; old Toolkit tasks left on one are for the owner's `remove toolkit`.
+- **9c Sharding:** where the repository has a test-shard manifest, confirm its Shard Timings workflow and the manifest state; "no shards yet" is acceptable. Queue an open shard-refresh pull request.
 
-For other states: "governance off: no programme, sharding or task checks" (say unreadable or undecided when applicable). Every other generic step still runs; no footer-sweep addition to this journey.
+For other states: "governance off: no programme, sharding or cloud sweep checks" (say unreadable or undecided when applicable). Every other generic step still runs; no footer-sweep addition to this journey.
 
 ### 10. Goal and done line
 
@@ -133,13 +133,12 @@ These formats carry prepared steps, not authority. Fill every placeholder and ex
 
 ### Step groups
 
-- **Read pack:** version, hooks, checkout, git/node, signed-in gh account (and its match to the connector account), fresh governance status (declare its local observation-cache writes), outgoing activity, map revision, open pull requests/checks, latest decision ID and epoch. Guard all programme/task/shard reads with fresh ENABLED. Read CURRENT before completion, not an attention refresh that writes programme state.
+- **Read pack:** version, hooks, checkout, git/node, signed-in gh account (and its match to the connector account), fresh governance status (declare its local observation-cache writes), outgoing activity, map revision, open pull requests/checks, latest decision ID and epoch. Guard all programme, cloud sweep and shard reads with fresh ENABLED. Read CURRENT before completion, not an attention refresh that writes programme state.
 - **Custody pack:** re-read outgoing activity, compare with the Read pack, copy named evidence to the verified store, push, fetch once and show paths. Only on takeover/recovery.
 - **Record pack:** use the controller's exact record and claim. Post and read back the prepared record, then claim immediately, on one account; never post the record ahead on another route. Check freshness again just before posting. If a record is already posted, relay only the claim; a parent write since it returns TAKEOVER_UNVERIFIED, and step 7's new-record rule applies. An ungoverned takeover needs no claim and can finish through its proven connector and evidence-store routes.
-- **Task pack:** apply only the exact verified plan mismatch under standing approval, then re-plan and read back. Never broaden a denied operation.
 - **Gate pack:** after takeover, ask a qualified gatekeeper to launch the gate with pinned model/effort and return its actual launch record and report verbatim. A pasted ordinary brief is never itself a gate. No gate or merge from a paste alone; merge stays in a route-proven session with the owner's merge OK. A relayed tap never counts.
 
-Pack ids use the lower-case group word: `read`, `custody`, `record`, `task` or `gate`, in the order above.
+Pack ids use the lower-case group word: `read`, `custody`, `record` or `gate`, in the order above.
 
 Take the pack id time, in UTC, from host evidence or a tool read of the clock, else from the newest timestamp you read (a comment's created_at or a commit date). A date alone is not enough. Failing those, write `time-unknown` in its place; never guess or fill with zeros.
 
@@ -283,7 +282,7 @@ Not checked: Toolkit, hooks and example-org/example-repo permissions
 
 Non-binding illustration: the owner starts a ChatGPT web takeover with the start line. The controller inspects its actual tool inventory and runs the probes; the product name supplies no abilities. Suppose those probes prove a GitHub connector and an owner-named relay shell. It reports those observed routes, issues a Read pack for the remaining shell, account and hook proofs, and independently checks everything it can read. Unchecked complete evidence stays supplied by user. If the shell is needed only for governed effects, an ungoverned journey has no claim requirement.
 
-On takeover, a Custody pack compares outgoing activity and preserves evidence. The controller prepares the record and claim. For a governed parent the claim needs the relay shell, so one Record pack posts the record and claims straight after it on the proven account; the controller then reads the comment's id, URL, created_at, author and body back through the connector. Any parent race returns TAKEOVER_UNVERIFIED and requires fresh state and a superseding record. A task mismatch uses a separate Task pack under standing approval. The done line carries each route, status and pack id. Subsequent gates use qualified launchers with route proof; a paste never supplies merge OK.
+On takeover, a Custody pack compares outgoing activity and preserves evidence. The controller prepares the record and claim. For a governed parent the claim needs the relay shell, so one Record pack posts the record and claims straight after it on the proven account; the controller then reads the comment's id, URL, created_at, author and body back through the connector. Any parent race returns TAKEOVER_UNVERIFIED and requires fresh state and a superseding record. The done line carries each route, status and pack id. Subsequent gates use qualified launchers with route proof; a paste never supplies merge OK.
 
 ## State and governance closure
 
@@ -293,12 +292,11 @@ States: appointed before record; missing required ability (hold, returning to ap
 |---|---|---|---|---|---|
 | Read state | yes | yes | yes | yes | yes |
 | Ask the owner | yes | missing ability only | yes | yes | report only |
-| Issue relay pack | Read pack, Custody pack, Record pack | no | Read pack or Task pack | per Controller | no; stale open packs |
+| Issue relay pack | Read pack, Custody pack, Record pack | no | Read pack | per Controller | no; stale open packs |
 | Accept paste-back | open and current | none open | open and current | open and current | read effects for successor |
 | Refresh Toolkit or guidebook | step 3 approvals | no | no | existing rules | no |
 | Post record | step 7 after complete 1-6 | no | no duplicate | new journey only | no |
 | Claim parent | no | no | once; fresh ENABLED; same account | no | no |
-| Apply tasks | no | no | 9b standing approval | standing approval | no |
 | Projects extras writes | setup-step briefs | no | after step 10 | yes | no |
 | Gates, merges, closes, programme writes | no | no | no | per Controller; no paste alone | stop and report |
 
@@ -313,6 +311,6 @@ Before the journey, a qualifying coordinator bootstraps the guidebook, including
 - **P3 The project instructions block, project lines and lanes line.** Render the bound block, preserve all owner text, apply with saved-copy and read-back safeguards, record the version. Default one lane; an owner-set number wins.
 - **P4 Daily check-in and hourly nudge.** Follow the recurring-task reference, preserve owner stops, save and read back SCHEDULED TASKS. These AI check-ins stay Projects-only.
 - **P5 Confirm it works: a thread result relayed, a card answered, a test check-in and test nudge.** Verify all results now rather than waiting for a scheduled wake.
-- **P6 The done line with the Projects fields (skill version, guidebook VERSION, check-in time, nudge on), then the first post in board format.** Include device/folder, recurring-task home, programme sweep when armed and next work item, following the skill's current post format.
+- **P6 The done line with the Projects fields (skill version, guidebook VERSION, check-in time, nudge on), then the first post in board format.** Include device/folder, recurring-task home, latest cloud sweep result when ENABLED and next work item, following the skill's current post format.
 
 Detailed Projects actions live in [setup](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/claude-projects/web-controller-projects/reference/setup.md). The weekly audit is not part of this journey or its Projects extras.

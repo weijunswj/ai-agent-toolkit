@@ -698,4 +698,8 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 module.exports = { JOBS, SCRIPT, SWEEP_OK, WORK_BUDGET_MS, computerRefreshBudget, parseArgs, runJob, main, lastJson, localRepository, footerCursor, footerLockPath, HISTORY_NOTE };
 
-if (require.main === module) process.exitCode = main();
+// Retired: Toolkit no longer runs scheduled tasks on a computer (the cloud runs these jobs). A
+// task an older setup registered still starts this file; it prints one line and exits 0, with no
+// writes, no GitHub request and no window. `remove toolkit` lists and removes such tasks.
+const RETIRED_LINE = 'This Toolkit scheduled task is retired: the cloud runs this job now. Say "remove toolkit" to list and remove old Toolkit tasks on this computer.';
+if (require.main === module) { process.stdout.write(`${RETIRED_LINE}\n`); process.exitCode = 0; }

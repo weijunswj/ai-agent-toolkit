@@ -6,7 +6,8 @@
 // pick any branch or tag) gets one warning and no store, so no token is minted. Otherwise it reads the binding this run checked out and names the
 // evidence store for the store token. It ends with a notice and nothing else (exit 0) when the
 // repository is not governed, the store has another owner, or the state lives on a public branch,
-// which this cloud sweep does not run yet: the computer's sweep stays for such a repository.
+// which this cloud sweep does not run. Toolkit no longer sweeps from a computer, so the warning's fix
+// says how to run the pass by hand until the state moves.
 //
 // `refresh` runs `programme.cjs refresh` with the two installation tokens the workflow minted. With
 // no App configured it prints a notice and exits 0. A failed sign-in fails the job with a fixed
@@ -67,8 +68,8 @@ const SKIPS = Object.freeze({
   too_large: Object.freeze({ reason: `the programme file is larger than ${BINDING_LIMIT} bytes`, fix: `${CHECK} and repair the programme file it names` }),
   invalid: Object.freeze({ reason: 'the programme file is not a valid programme file', fix: `${CHECK} and repair what it names` }),
   disabled: Object.freeze({ reason: 'the merged programme file turns governance off', fix: 'turn governance on with toolkit governance enable, or remove the Toolkit Programme Sweep workflows' }),
-  foreign_store: Object.freeze({ reason: 'the evidence store belongs to another owner, so one governance App cannot reach it', fix: 'move the evidence store under this repository\'s owner; until then the computer\'s sweep keeps running' }),
-  public_state: Object.freeze({ reason: 'this repository keeps its state on a public branch; the cloud sweep does not run it yet', fix: 'none needed now: the computer\'s sweep stays until the cloud sweep supports it' }),
+  foreign_store: Object.freeze({ reason: 'the evidence store belongs to another owner, so one governance App cannot reach it', fix: 'move the evidence store under this repository\'s owner; until then nothing sweeps this repository, so run programme.cjs refresh by hand' }),
+  public_state: Object.freeze({ reason: 'this repository keeps its state on a public branch, which the cloud sweep does not run', fix: 'move the state to a private evidence store (say toolkit store); until then nothing sweeps this repository, so run programme.cjs refresh by hand' }),
   no_app: Object.freeze({ reason: `the governance GitHub App is not set up here (repository variable ${CLIENT_ID_VARIABLE}, secret ${PRIVATE_KEY_SECRET})`, fix: 'set both from this repository\'s own App; toolkit governance check lists what the App needs' }),
 });
 function skipWarning(repository, status, detail = {}) {
