@@ -914,7 +914,7 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
         "Reuse step 4's current Remote Control findings", 'Do not count it as working because a coordinator message was sent to it',
         '"UNRELAYED ASK: <n> | "', '**Unrelayed:**', '**Waiting on owner:**',
         'A lane whose device is confirmed not reachable also goes under **Waiting on owner:**', 'the step "bring Claude on that device back online"',
-        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | ", "ROTATE DUE: <n> | ", "LANES UNDER CAP:', '"WORK QUEUE: <n> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes',
+        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | ", "ROTATE DUE: <n> | ", "LANES UNDER CAP:', '"WORK QUEUE: <n> | ", "PROGRAMME FINDINGS: <n> new | ", "CLOUD SWEEP: <why> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes',
         'the programme graph is the queue', 'it needs the coordinator\'s step this turn even when lanes are full', 'A failed status read is "could not be checked", never offline',
         'An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']) {
         assert.ok(text.includes(phrase), `${repo}/${session}: ${phrase}`);
@@ -1055,7 +1055,25 @@ test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pendi
         assert.ok(step.includes(phrase), `${repo}/${session}: ${phrase}`);
       }
       assert.ok(text.includes('plus steps 2a, 2b, 4, 5 and 7 to 11 (and 5b when it applies)'));
-      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "PR UNOWNED: <n> | ", "WORK QUEUE: <n> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
+      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "PR UNOWNED: <n> | ", "WORK QUEUE: <n> | ", "PROGRAMME FINDINGS: <n> new | ", "CLOUD SWEEP: <why> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
+    }
+  }
+});
+
+// The programme findings and cloud sweep prefixes belong to the report's first-line list, never to a step's own text.
+test('rendered hourly nudges list PROGRAMME FINDINGS and CLOUD SWEEP only in the first-line prefix list', () => {
+  for (const repo of ['example-owner/example-repo', 'none']) {
+    for (const session of ['bound', 'fresh']) {
+      const text = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], repo, session }));
+      const lines = text.split('\n');
+      const first = lines.find(line => line.startsWith('- First line:'));
+      assert.ok(first, `${repo}/${session}: first-line list`);
+      for (const prefix of ['"PROGRAMME FINDINGS: <n> new | "', '"CLOUD SWEEP: <why> | "']) {
+        assert.ok(first.indexOf(prefix) > first.indexOf('"WORK QUEUE: <n> | "'), `${repo}/${session}: ${prefix} after WORK QUEUE`);
+        assert.ok(first.indexOf(prefix) < first.indexOf('"NEEDS SETUP:'), `${repo}/${session}: ${prefix} before NEEDS SETUP`);
+      }
+      const lanes = lines.find(line => line.startsWith('11. Lanes'));
+      assert.ok(lanes && !lanes.includes('PROGRAMME FINDINGS'), `${repo}/${session}: step 11 has no findings prefix`);
     }
   }
 });
