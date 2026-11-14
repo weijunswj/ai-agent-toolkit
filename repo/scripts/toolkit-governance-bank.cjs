@@ -36,6 +36,9 @@ const TICKET = /^[0-9a-f]{32}$/;
 const EPOCH = /^[0-9a-f]{32}$/;
 const SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 
+// The app each permission row belongs to; every app keeps its own permission lines.
+const APP_NAMES = Object.freeze({ claude: 'Claude Code', codex: 'Codex' });
+
 const STATE_LABEL = Object.freeze({ ENABLED: 'On', DISABLED: 'Off', UNDECIDED: 'Not decided' });
 
 // ---- the rows -----------------------------------------------------------------------------------
@@ -73,17 +76,23 @@ function governanceBankSpecs({ state, task = 'unset', merged = null, permissions
       bank.wizardChoice('off', 'Turn off', 'Toolkit prepares one pull request that turns governance off. It applies only after you merge it.'),
     ],
   }));
+  // Every option under governance can be On only while governance is On, or in the same answer that
+  // turns it on; otherwise it reads Off (needs governance) and On says what it needs.
   const on = task === 'after-gates';
+  const governed = state.state === 'ENABLED';
   specs.push(bank.resolvedQuestion({
     id: 'task-auto-merge', key: 'taskAutoMerge', section, title: 'Task auto-merge',
     whatThisControls: 'Whether finished task pull requests merge once their review, checks and testing pass. It applies only while governance is on.',
-    current: on ? 'On' : 'Off',
-    currentChoice: on ? 'on' : 'off',
+    current: governed ? (on ? 'On' : 'Off') : 'Off (needs governance)',
+    currentChoice: governed ? (on ? 'on' : 'off') : '',
     recommendation: { value: 'keep', outcome: 'Task auto-merge stays as it is.', reason: 'Nothing needs to change.' },
-    choices: [
+    choices: governed ? [
       bank.wizardChoice('keep', 'Keep current', 'Task auto-merge stays as it is.'),
       bank.wizardChoice('on', 'On', 'Finished task pull requests merge once their gates pass.'),
       bank.wizardChoice('off', 'Off', 'Every pull request waits for your typed merge.'),
+    ] : [
+      bank.wizardChoice('keep', 'Keep current', 'Task auto-merge stays off.'),
+      bank.wizardChoice('on', 'On (needs governance on)', 'Only together with turning governance on in the same answer; the same pull request sets it.'),
     ],
   }));
   if (adoption && adoption.blocked) {
@@ -110,18 +119,22 @@ function governanceBankSpecs({ state, task = 'unset', merged = null, permissions
     specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository, text: 'Bound in the merged programme file' }));
     specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: merged.required_checks.length ? merged.required_checks.join(', ') : 'none listed', text: 'Bound in the merged programme file' }));
   }
+  const app = APP_NAMES[permissions.host] || 'this app';
   const missing = permissions.checked ? permissions.missing : null;
+  const stale = permissions.checked ? permissions.stale || 0 : 0;
+  const outdated = missing !== null && (missing > 0 || stale > 0);
   specs.push(bank.resolvedQuestion({
-    id: 'permission-blocks', key: 'permissionBlocks', section: 'This computer', title: 'Toolkit permission blocks',
-    whatThisControls: "The paste-once permission lines that let an agent run Toolkit's own commands without asking each time.",
-    current: missing === null ? 'Not checked' : missing === 0 ? 'In place' : `${missing} line${missing === 1 ? '' : 's'} missing`,
-    recommendation: missing > 0
-      ? { value: 'add', outcome: 'The agent adds the missing lines for you, backs the file up first and reads it back.', reason: 'Without them every Toolkit command asks again.' }
-      : { value: 'keep', outcome: 'Nothing changes.', reason: missing === 0 ? 'Every line is already in place.' : 'The lines could not be checked here.' },
+    id: 'permission-blocks', key: 'permissionBlocks', section: 'This computer', title: `Toolkit permissions (${app})`,
+    whatThisControls: `The Toolkit permission lines that let ${app} run Toolkit's own commands without asking each time. Other apps keep their own.`,
+    current: missing === null ? 'Not checked' : outdated ? `Outdated: ${[missing ? `${missing} missing` : '', stale ? `${stale} old` : ''].filter(Boolean).join(', ')}` : 'Up to date',
+    currentChoice: missing !== null && !outdated ? 'update' : '',
+    recommendation: outdated
+      ? { value: 'update', outcome: 'You get one command to run in your own PowerShell or terminal that brings them up to date.', reason: 'Without them every Toolkit command asks again.' }
+      : { value: 'keep', outcome: 'Nothing changes.', reason: missing === 0 ? 'They are already up to date.' : 'They could not be checked here.' },
     choices: [
       bank.wizardChoice('keep', 'Keep current', 'Nothing changes.'),
-      bank.wizardChoice('add', 'Add them for me', 'The agent adds exactly the printed lines, backs the file up first and reads it back.'),
-      bank.wizardChoice('show', 'Show me the command', 'Toolkit prints the blocks and one command you paste into your own terminal.'),
+      bank.wizardChoice('update', 'Update', 'You get one command to run yourself: it shows what changes, backs the file up and waits for you to type apply.'),
+      bank.wizardChoice('remove', 'Remove', 'You get one command to run yourself that takes every Toolkit permission line out, the same way.'),
     ],
   }));
   return bank.withPresentationMetadata(specs, BANK_HOST);
@@ -132,7 +145,8 @@ function bankReference(specs) { return specs[0]?.presentation.bank_reference || 
 // The bank as the owner reads it, with the one reply line.
 function renderGovernanceBank(specs) {
   const reference = bankReference(specs);
-  const example = bank.changedOnlyExample(specs, ['governance', 'task-auto-merge']);
+  const governed = specs.find(entry => entry.id === 'governance')?.folded_value === 'on';
+  const example = bank.changedOnlyExample(specs, governed ? ['governance', 'task-auto-merge'] : ['governance']);
   return [
     ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
     ...bank.renderCompactQuestionTable(specs, true),
@@ -145,6 +159,7 @@ function renderGovernanceBank(specs) {
     `- only your changes, for example: \`${example}\``,
     '',
     'Anything you do not list takes its recommendation. Every change to governance or task auto-merge is one pull request that applies only after you merge it.',
+    'The permissions row covers only this app. Any other app you use needs toolkit governance run there too.',
     '',
     `Agents: show this bank to the owner exactly, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them.`,
   ].join('\n');
@@ -166,7 +181,12 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
   const parsed = bank.parseConciseQuestionBankAnswer(text, specs, { requireBankReference, label: 'Governance' });
   if (!parsed) throw new Error('Governance question bank answer was not read: reply with all recommended or only your changes, such as 1.2=B.');
   bank.assertQuestionBankAnswerBinding(parsed, specs, 'Governance');
-  return selectionsOf(parsed, specs);
+  const chosen = selectionsOf(parsed, specs);
+  const governed = specs.find(entry => entry.id === 'governance')?.folded_value === 'on';
+  if (chosen.taskAutoMerge === 'on' && (chosen.governance === 'off' || (!governed && chosen.governance !== 'on'))) {
+    throw new Error('Task auto-merge can be on only while governance is on: turn governance on in the same answer, or leave task auto-merge as it is.');
+  }
+  return chosen;
 }
 
 // ---- bank tickets -------------------------------------------------------------------------------
@@ -313,6 +333,6 @@ function bankTicketCommand(text, sessionId, tickets) {
 }
 
 module.exports = Object.freeze({
-  BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
+  APP_NAMES, BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
   bankTicketContext, bankTicketCommand,
 });

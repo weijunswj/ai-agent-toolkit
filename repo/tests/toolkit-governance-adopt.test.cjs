@@ -83,7 +83,7 @@ async function run(ctx, argv, github, { answers = [], interactive = false } = {}
     cwd: ctx.repo, interactive, registryOptions: ctx.registryOptions,
     ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
-    permissionsPrinter: () => 'blocks', permissionsChecker: () => ({ checked: true, missing: 0 }), environment: { TOOLKIT_HOST_SESSION: 'session-adopt' },
+    permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }), environment: { TOOLKIT_HOST_SESSION: 'session-adopt' },
     discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => plainText.push(root),
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [proposal]; return proposal; }, read: () => proposal },
     cloudWorkflows: () => ({ files: {}, warning: null }),

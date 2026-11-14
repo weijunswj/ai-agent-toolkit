@@ -35,7 +35,8 @@ const PROPOSAL_ERRORS = Object.freeze({
 
 const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'check', 'publish', 'security', 'migrate', 'setup', 'refresh']);
 // The exit code that means "the bank is shown; stop and wait for the owner's reply", as in setup toolkit.
-const BANK_SHOWN = 23;
+// A shown bank is a finished step, not a failure: the app would label any other exit Failed.
+const BANK_SHOWN = 0;
 const CLOUD_BANK = `This is a cloud session, where Toolkit cannot check that a reply is the owner's own, so an answer in this chat cannot be recorded. Answer this bank from a Remote Control session on your computer, or run ${CMD('setup')} in your own terminal.`;
 const ALIASES = Object.freeze({ decline: 'disable' });
 const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|disable|publish|security> [--json]')}\n`
@@ -62,7 +63,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsPrinter; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller;
+  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -73,7 +74,7 @@ class ToolkitGovernanceCli {
   // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
   // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
   // ticket is bound to) are for tests too.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsPrinter = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null } = {}) {
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null } = {}) {
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
     this.#stdout = stdout;
     this.#stderr = stderr;
@@ -94,7 +95,6 @@ class ToolkitGovernanceCli {
     this.#hookReader = hookReader || (() => hookCapability.hookCapability());
     this.#appReader = appReader;
     this.#switchTransport = switchTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
-    this.#permissionsPrinter = permissionsPrinter || defaultPermissionsPrinter;
     this.#permissionsChecker = permissionsChecker || defaultPermissionsChecker;
     this.#environment = environment || {};
     this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());
@@ -361,7 +361,7 @@ class ToolkitGovernanceCli {
         let chosen;
         try { chosen = governanceBank.parseBankAnswer(String(await this.#ask('Your answer: ')), specs, { requireBankReference: false }); }
         catch (error) { this.#print(false, {}, [`${error.message} Nothing was written.`]); return 1; }
-        return this.#applyBank(state, task, chosen, found);
+        return this.#applyBank(state, task, chosen, found, permissions);
       }
       return this.#showBank(specs, state);
     }
@@ -384,7 +384,7 @@ class ToolkitGovernanceCli {
       this.#stdout.write(`${error.message} Nothing was written. Show the owner this bank again:\n\n`);
       return this.#showBank(specs, state);
     }
-    return this.#applyBank(state, task, chosen, found);
+    return this.#applyBank(state, task, chosen, found, permissions);
   }
 
   // A cloud session skips the reply check, so the owner's chat answer there can never be recorded.
@@ -416,7 +416,7 @@ class ToolkitGovernanceCli {
   }
 
   // The owner's answer: at most one governance pull request, then the permission blocks.
-  #applyBank(state, task, chosen, found = null) {
+  #applyBank(state, task, chosen, found = null, permissions = { checked: false }) {
     let code = 0;
     let acted = false;
     const switchTo = chosen.taskAutoMerge === 'on' ? 'after-gates' : chosen.taskAutoMerge === 'off' ? 'off' : null;
@@ -433,11 +433,11 @@ class ToolkitGovernanceCli {
       acted = true;
     }
     if (chosen.permissionBlocks !== 'keep') {
-      let blocks = null;
-      try { blocks = this.#permissionsPrinter(state.root); } catch { blocks = null; }
-      const lines = ['', ...(blocks ? blocks.split('\n') : ['Permission blocks: could not be printed here; run toolkit permissions.']), ''];
-      if (blocks) lines.push(chosen.permissionBlocks === 'add' ? PERMISSIONS_ADD : PERMISSIONS_RELAY);
-      this.#print(false, {}, lines);
+      const command = permissions.checked ? permissions[chosen.permissionBlocks] : null;
+      const app = governanceBank.APP_NAMES[permissions.host] || 'this app';
+      this.#print(false, {}, command
+        ? ['', `Toolkit permissions (${app}): run this once in your own PowerShell or terminal, outside any agent. It shows what changes, backs up the settings file and waits for you to type apply.`, '', command, '', PERMISSIONS_RELAY]
+        : ['', 'Toolkit permissions: Toolkit could not read where this app keeps them, so there is no command to give. Run setup toolkit, then toolkit governance again.']);
       acted = true;
     }
     if (!acted) this.#print(false, {}, ['Nothing changed: every answer keeps things as they are.']);
@@ -537,33 +537,37 @@ function switchText(mergedText, parsed, switchTo) {
   return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
 }
 
-// Command output can sit folded away in the app, so the agent repeats the block in its reply.
-// The owner picked "Add them for me" on the bank: that answer is their own ask to write the blocks.
-const PERMISSIONS_ADD = 'Agents: show the owner the permission table and blocks above once, in full and as printed; never summarise or repeat them. The owner chose "Add them for me" in the governance bank, which is their own ask to add these blocks. Add exactly the lines shown to each file named above: back the file up first, keep every other line, then read it back with toolkit permissions --check <that file> and tell the owner what changed. Never run --apply.';
-const PERMISSIONS_RELAY = 'Agents: in your reply, show the owner the permission table and blocks above once, in full and as printed (the table, each block, the file it goes in and the one-paste owner command); never summarise, shorten or repeat them. Offer two ways to add them: the owner pastes that command into their own PowerShell or terminal, or you add the blocks for them if they ask. Write it only on the owner\'s own ask (safety-gates playbook), and never run the command yourself.';
+// Command output can sit folded away in the app, so the agent repeats the command in its reply. Only
+// the owner runs it (toolkit-permissions-apply.cjs refuses under an agent).
+const PERMISSIONS_RELAY = 'Agents: show the owner this command once, as printed, never in a code block of your own making; never run it yourself.';
 
-// The permission table and blocks for this app (this computer's and this repository's), as toolkit
-// permissions prints them, so governance setup covers permission setup too.
-function defaultPermissionsPrinter(root) {
-  let text = '';
-  const host = detectAgentHost() === 'codex' ? 'codex' : 'claude';
-  const code = require('./toolkit-permissions.cjs').main(['--scope', 'all', '--host', host, '--repo-root', root], { stdout: chunk => { text += chunk; }, stderr: () => {} });
-  return code === 0 && text.trim() ? text.trimEnd() : null;
-}
-
-// How many of the Claude Code permission lines this computer and repository still miss, read from
-// the settings files the blocks name. Codex rules are not read here, so they count as not checked.
+// This app's Toolkit permission lines, read from the settings files the blocks name: how many are
+// missing or stale, and the owner's one command that brings them up to date or takes them out. Only
+// the app the bank runs in is read; another app keeps its own lines.
 function defaultPermissionsChecker(root) {
-  if (detectAgentHost() === 'codex') return { checked: false, missing: 0 };
-  const { PermissionBlocks } = require('./toolkit-permissions.cjs');
+  const host = detectAgentHost() === 'codex' ? 'codex' : 'claude';
+  const { PermissionBlocks, applyLine } = require('./toolkit-permissions.cjs');
   const owner = new PermissionBlocks();
-  const built = owner.build({ host: 'claude', scope: 'all', repoRoot: root });
+  const built = owner.build({ host, scope: host === 'claude' ? 'all' : 'computer', repoRoot: root });
   let missing = 0;
+  let stale = 0;
   for (const block of built.blocks) {
-    if (!fs.existsSync(block.target)) { missing += block.allow.length + block.ask.length; continue; }
-    missing += owner.check(block.target, { blocks: [block] })[0].missing.length;
+    if (host === 'codex') {
+      const { ruleKeys } = require('./toolkit-permissions-apply.cjs');
+      let text = null;
+      try { text = fs.readFileSync(block.target, 'utf8'); } catch { text = null; }
+      const have = ruleKeys(text);
+      const want = ruleKeys(block.text);
+      missing += want.filter(key => !have.includes(key)).length;
+      stale += have.filter(key => !want.includes(key)).length;
+    } else if (!fs.existsSync(block.target)) missing += block.allow.length + block.ask.length;
+    else {
+      const report = owner.check(block.target, { blocks: [block] })[0];
+      missing += report.missing.length;
+      stale += report.stale.length;
+    }
   }
-  return { checked: true, missing };
+  return { checked: true, host, missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
 }
 
 function label(state) {

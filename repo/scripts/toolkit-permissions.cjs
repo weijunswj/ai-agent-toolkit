@@ -352,9 +352,10 @@ function permissionsTable(built) {
 
 // The owner's one command (--apply, or --remove), with --repo-root when a Claude Code repo block was
 // printed for a repository whose path a command line can carry safely.
-function applyLine(built, flag = '--apply') {
+// `host` limits it to one app (the governance bank asks per app).
+function applyLine(built, flag = '--apply', host = null) {
   const repo = built.blocks.find(block => block.host === 'claude' && block.scope === 'repo');
-  const command = `node ${quoted(`${built.managed}/repo/scripts/toolkit-permissions.cjs`)} ${flag}${repo && repo.root ? ` --repo-root ${quoted(repo.root)}` : ''}`;
+  const command = `node ${quoted(`${built.managed}/repo/scripts/toolkit-permissions.cjs`)} ${flag}${host ? ` --host ${host}` : ''}${repo && repo.root ? ` --repo-root ${quoted(repo.root)}` : ''}`;
   const what = repo ? (repo.root ? 'the computer blocks and this repository\'s Claude Code block' : 'the computer blocks, and this repository\'s Claude Code block when you run it from the repository\'s folder') : 'the computer blocks';
   return { command, what };
 }
