@@ -1049,7 +1049,7 @@
       "event": "UserPromptSubmit",
       "payload": { "prompt": "toolkit governance" },
       "fixture": { "repo": { "governance": "enabled", "branch": "feature" } },
-      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance`. Show the user Toolkit's governance question bank for this repository. Run exactly `node \"", "toolkit-governance.cjs\" setup` in this repository and show the user its output exactly", "Never answer the bank for the user."] },
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit governance`. Show the user Toolkit's governance question bank for this repository. Run exactly `node \"", "toolkit-governance.cjs\" setup` in this repository and show the user its output once, in full and as printed", "Never answer the bank for the user."] },
       "status": "pass"
     },
     {

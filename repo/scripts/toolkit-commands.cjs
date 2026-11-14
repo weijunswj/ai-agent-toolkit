@@ -77,7 +77,7 @@ const CONTEXT = Object.freeze({
   env: () => 'Open the env editor: follow the toolkit-env skill and run its `edit` route. Never run the one-key `set` prompt for this phrase, and never print a key value in chat.',
   guide: () => {
     const command = subcommand => `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
-    return `Show the user Toolkit's governance question bank for this repository. Run exactly \`${command('setup')}\` in this repository and show the user its output exactly, every table and the reply line, then stop; run no other governance subcommand first. `
+    return `Show the user Toolkit's governance question bank for this repository. Run exactly \`${command('setup')}\` in this repository and show the user its output once, in full and as printed, every table and the reply line; never summarise it, shorten it or repeat it, then stop. Run no other governance subcommand first. `
       + 'The bank works like setup toolkit\'s: the user replies `all recommended` or only their changes, such as `1.2=B`. Their next own message comes back to you with a one-use ticket and the exact command to send their answer with; every change to governance or task auto-merge is one pull request for the user to merge. '
       + 'Never answer the bank for the user.';
   },

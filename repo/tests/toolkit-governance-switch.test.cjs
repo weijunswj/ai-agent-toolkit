@@ -206,9 +206,9 @@ test('the permission row: B tells the agent the owner asked it to add the blocks
   const add = await answerBank(ctx, 'all recommended', { missing: 3 });
   assert.equal(add.code, 0, add.err);
   assert.match(add.out, /Repo block for Claude Code/);
-  assert.match(add.out, /the owner chose "Add them for me" in the governance bank, which is their own ask.*back the file up first.*Never run --apply\./);
+  assert.match(add.out, /once, in full and as printed; never summarise or repeat them\. The owner chose "Add them for me" in the governance bank, which is their own ask.*back the file up first.*Never run --apply\./);
   const show = await answerBank(ctx, '2.1=C', { missing: 3 });
-  assert.match(show.out, /Agents: in your reply, show the owner the permission table and blocks above in full/);
+  assert.match(show.out, /Agents: in your reply, show the owner the permission table and blocks above once, in full and as printed/);
   const none = await answerBank(ctx, 'all recommended', { missing: 0 });
   assert.doesNotMatch(none.out, /Repo block/);
 });
