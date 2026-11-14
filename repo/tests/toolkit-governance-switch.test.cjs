@@ -201,6 +201,22 @@ test('a ticket answers only the bank it was given for: a changed state shows the
   assert.equal(other.code, 2, 'another session cannot spend it either');
 });
 
+test('a cloud session shows the bank but says a chat answer cannot be recorded there, and refuses an answer', async t => {
+  const ctx = fixture(t);
+  startOwnerSession(ctx);
+  const cloud = { TOOLKIT_HOST_SESSION: SESSION, CLAUDE_CODE_REMOTE: 'true' };
+  const shown = await run(ctx, ['setup'], { environment: cloud });
+  assert.equal(shown.code, 23, shown.err);
+  assert.match(shown.out, /\| 1\.2 \| Task auto-merge \|/);
+  assert.match(shown.out, /This is a cloud session, .* an answer in this chat cannot be recorded\. Answer this bank from a Remote Control session on your computer, or run .* in your own terminal\./);
+  const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
+  assert.equal(new BankTickets({ registryOptions: ctx.registryOptions }).pendingFor(SESSION, epoch), null, 'the bank is not noted for a reply');
+  const reference = /Bank reference: (\S+)/.exec(shown.out)[1];
+  const answered = await run(ctx, ['setup', '--answers', `${reference}: 1.2=B`, '--ticket', 'a'.repeat(32)], { environment: cloud });
+  assert.notEqual(answered.code, 0);
+  assert.match(answered.err, /This is a cloud session.*Nothing was written\./);
+});
+
 test('the permission row: B tells the agent the owner asked it to add the blocks, C prints them for the owner to paste', async t => {
   const ctx = fixture(t);
   const add = await answerBank(ctx, 'all recommended', { missing: 3 });

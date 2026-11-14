@@ -36,6 +36,7 @@ const PROPOSAL_ERRORS = Object.freeze({
 const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'reopen', 'check', 'catalogue', 'publish', 'security', 'migrate', 'setup', 'refresh']);
 // The exit code that means "the bank is shown; stop and wait for the owner's reply", as in setup toolkit.
 const BANK_SHOWN = 23;
+const CLOUD_BANK = `This is a cloud session, where Toolkit cannot check that a reply is the owner's own, so an answer in this chat cannot be recorded. Answer this bank from a Remote Control session on your computer, or run ${CMD('setup')} in your own terminal.`;
 const ALIASES = Object.freeze({ decline: 'disable' });
 const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|disable|reopen|catalogue|publish|security> [--json]')}\n`
   + `       ${governance.governanceCommand('check [--json] [--offline]')}\n`
@@ -384,6 +385,7 @@ class ToolkitGovernanceCli {
       }
       return this.#showBank(specs, state);
     }
+    if (this.#cloud()) throw new GovernanceCliError(`${CLOUD_BANK} Nothing was written.`);
     const sessionId = this.#hostSession();
     const epochs = new gate.SessionEpochs({ registryOptions: this.#registryOptions });
     const epoch = sessionId ? epochs.get(sessionId) : null;
@@ -405,6 +407,9 @@ class ToolkitGovernanceCli {
     return this.#applyBank(state, task, chosen);
   }
 
+  // A cloud session skips the reply check, so the owner's chat answer there can never be recorded.
+  #cloud() { return this.#environment.CLAUDE_CODE_REMOTE === 'true'; }
+
   #hostSession() {
     const id = this.#environment.TOOLKIT_HOST_SESSION || this.#environment.CODEX_THREAD_ID;
     return typeof id === 'string' && id !== '' ? id : null;
@@ -412,6 +417,10 @@ class ToolkitGovernanceCli {
 
   // Prints the bank and notes it for this run, so the owner's next own message can answer it.
   #showBank(specs, state) {
+    if (this.#cloud()) {
+      this.#stdout.write(`${governanceBank.renderGovernanceBank(specs)}\n\n${CLOUD_BANK}\n`);
+      return BANK_SHOWN;
+    }
     const sessionId = this.#hostSession();
     const epochs = new gate.SessionEpochs({ registryOptions: this.#registryOptions });
     const epoch = sessionId ? epochs.get(sessionId) : null;
