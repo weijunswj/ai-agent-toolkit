@@ -47,7 +47,8 @@ test('each block stays inside its own budget', () => {
   // The global cap rose to 20,800 for the Development Principles section: the owner asked on
   // 14 November for principles that steer all development in every repository, so they load every session.
   assert.ok(crlfBytes(GLOBAL) <= 20800, `global block ${crlfBytes(GLOBAL)} bytes`);
-  assert.ok(crlfBytes(GOVERNED) <= 4250, `governed rules ${crlfBytes(GOVERNED)} bytes`);
+  // The governed cap rose to 4,850 for the Governance Principles section (owner, 14 November).
+  assert.ok(crlfBytes(GOVERNED) <= 4850, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
   // CONTROLLER.md loads only for controllers, not every session. It was one file capped at 18,500
   // bytes until its step-by-step sections moved, word for word, into the pages under
