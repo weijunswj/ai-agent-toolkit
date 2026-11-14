@@ -39,7 +39,7 @@ This repository is the canonical AI Agent Toolkit, and this file applies to it o
 
 - Toolkit source changes go through a non-main branch and PR. Evidence custody follows the governed block above.
 - Never commit secrets, private values, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, runtime-only files, product code, customer data or business workflow JSON.
-- Live systems, Docker, n8n runtime, import/export, sync, activation, credentials, SSH to real servers, deployment, firewall or production config, and destructive or external-service actions need explicit current-turn approval naming the target and operation, except the global Toolkit task standing approval.
+- Live systems, Docker, n8n runtime, import/export, sync, activation, credentials, SSH to real servers, deployment, firewall or production config, and destructive or external-service actions need explicit current-turn approval naming the target and operation.
 - Never weaken tests, validation, schemas, guardrails, attribution, generated-output ownership or approval gates to pass a check, and never claim CI passed without checking it.
 
 ## Sources, Markers And Packaging

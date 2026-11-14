@@ -8,7 +8,6 @@ const tasks = require('../scripts/toolkit-tasks.cjs');
 const job = require('../scripts/toolkit-scheduled-job.cjs');
 const health = require('../scripts/toolkit-task-health.cjs');
 const update = require('../scripts/toolkit-update-scheduled-task.cjs');
-const core = require('../scripts/setup-toolkit-core.cjs');
 const { world, memoryStore } = require('./support/task-health-world.cjs');
 const s = require('./support/windows-task-switch-world.cjs');
 for (const state of ['owner stop', 'disabled', 'permission denied', 'unreadable registry']) test(`update authority matrix: ${state} stops effects`, t => {
@@ -76,16 +75,6 @@ test('loud failure is present in tasks, the single session task line and the hea
   assert.match(tasks.sweepLine('example/widget', { home: w.home, now: w.at }), /last run failed/);
   assert.ok(saved.document.repos[0].flags.some(flag => flag.includes('last run failed')));
 });
-test('setup uses the same saved approval and stops on pending host questions', t => {
-  const w = world(t); let runs = 0;
-  const updater = { recentCheck: () => null, saveCheck: () => assert.fail('a held update saves no stamp'), run: options => { runs++; assert.equal(options.apply, true); return { plans: [], questions: [update.approvalQuestion()] }; } };
-  assert.equal(core.applyScheduledTasks({ repoRoot: w.root }, { home: w.home, platform: 'win32', updater, log() {} }), null);
-  update.saveApproval(w.home, { decision: 'standing', answer_ref: 'host/setup-answer' }, '3.52.0');
-  assert.deepEqual(core.applyScheduledTasks({ repoRoot: w.root }, { home: w.home, platform: 'win32', updater, log() {} }), { held: true }); assert.equal(runs, 1);
-  const rows = core.setupQuestionDocumentationSpecs(), approval = rows.find(row => row.id === 'scheduled-task-update');
-  assert.equal(approval.recommended, 'no'); assert.match(approval.whatThisControls, /TASK HEALTH/);
-});
-
 test('failed health job has its own visible receipt and foreign ownership stops sharing', t => {
   const w = world(t); update.saveApproval(w.home, { decision: 'standing', answer_ref: 'host/standing' }, '3.52.0');
   w.updater().run({ apply: true });

@@ -157,7 +157,7 @@ function checkConformance(cwd, options = {}) {
   }
   if (state.state === 'ENABLED' && state.materials.binding && state.merged && state.merged.status === 'enabled') findings.push(taskMergeSettingFinding(state.root, options));
   if (state.state === 'ENABLED' && state.materials.binding) findings.push(...appFindings(state, options));
-  if (state.state === 'ENABLED' && state.materials.binding) findings.push(...cloudWorkflowFindings(state, toolkitRoot, options));
+  if (state.state === 'ENABLED' && state.materials.binding) findings.push(...cloudWorkflowFindings(state, toolkitRoot, options), ...cloudSweepReachFindings(state, options));
   const drift = findings.some(entry => entry.severity === 'drift');
   // An online run whose GitHub reads could not confirm a setting is not conformant: it is unverified
   // (exit 3) until a repository admin re-runs the check signed in. An offline or test run chose not to
@@ -328,6 +328,20 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   return out;
 }
 
+// Record 808: a governed repository the cloud sweep skips gets one line here. Toolkit no longer sweeps
+// from a computer, so nothing else runs its pass: state on a public branch, or an evidence store under
+// another owner (one governance App cannot reach it). Reported as info with the fix; never a drift.
+function cloudSweepReachFindings(state, options = {}) {
+  const binding = (options.mergedBinding || governance.mergedBinding)(state.root, options);
+  if (!binding) return [];
+  const handRun = 'until then nothing sweeps this repository, so run programme.cjs refresh by hand';
+  if (binding.state) return [finding('CLOUD_SWEEP_PUBLIC_STATE', 'info', `The cloud sweep skips this repository: its programme state is on a public branch. Move the state to a private evidence store (say toolkit store); ${handRun}.`)];
+  const owner = String(binding.repository || '').split('/')[0].toLowerCase();
+  const store = String(binding.store?.repository || '');
+  if (owner && store && store.split('/')[0].toLowerCase() !== owner) return [finding('CLOUD_SWEEP_FOREIGN_STORE', 'info', `The cloud sweep skips this repository: its evidence store ${store} belongs to another owner, so one governance App cannot reach it. Move the store under this repository's owner; ${handRun}.`)];
+  return [];
+}
+
 // Cloud sweep copies left in a repository whose merged binding turns governance off. The pull request
 // that turns governance off removes them; a copy still here means it was made before that, or by hand.
 // Only a file carrying the Toolkit's rendered-copy marker counts. Report only, never a drift.
@@ -373,4 +387,4 @@ function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, pr
   });
 }
 
-module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, enforcementStatus, expectedGovernedBlock, unverifiedExit, report, QUESTION_HOOK });
+module.exports = Object.freeze({ checkConformance, cloudWorkflowFindings, cloudSweepReachFindings, enforcementStatus, expectedGovernedBlock, unverifiedExit, report, QUESTION_HOOK });

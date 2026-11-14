@@ -71,7 +71,6 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 - `setup toolkit` or `toolkit setup`: set up Toolkit on this computer, or change your setup answers.
 - `refresh toolkit` or `toolkit refresh`: update Toolkit on this computer to the newest version.
 - `toolkit show env`: open your keys in your editor. Values stay on this computer and never pass through chat.
-- `toolkit update scheduled task`: review and update Toolkit's scheduled tasks on this computer.
 - `toolkit governance enable` or `toolkit governance disable`: turn Toolkit's GitHub governance on or off for this repository. It prepares a pull request for you to merge.
 - `setup governance` or `toolkit setup governance`: turn Toolkit's GitHub governance on for this repository and set its task auto-merge switch in the same pull request. In a governed repository it is `refresh governance`.
 - `refresh governance` or `toolkit refresh governance`: show this repository's merged governance answers (task auto-merge switch, evidence store, checks) and the permission table and blocks for this computer and this repository. The reply shows them in full, with the one command you paste into your own PowerShell or terminal to add them. Ask to turn task auto-merge on or off and Toolkit prepares one pull request for you to merge; it applies only after your merge.

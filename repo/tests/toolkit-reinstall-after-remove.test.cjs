@@ -11,7 +11,7 @@ const note = require('../scripts/toolkit-reinstall-note.cjs');
 const { ClaudeHelperDefinitions, ClaudeHelperAgentRenderer, AgentDirectoryInstaller } = require('../scripts/toolkit-claude-helper-agents.cjs');
 const { CodexHelperDefinitions } = require('../scripts/toolkit-codex-helper-agents.cjs');
 const { parseTomlDocument } = require('../scripts/codex-delegation-common.cjs');
-const { offerRemovedTasks } = require('../scripts/setup-toolkit-core.cjs');
+const { leftoverTaskLines } = require('../scripts/setup-toolkit-core.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const PLUGIN = 'ai-agent-toolkit@ai-agent-toolkit-local';
@@ -167,35 +167,46 @@ test('setup never installs helpers without a note, and leaves helpers the owner 
   assert.equal(note.readNote(h.dir), null);
 });
 
-test('removed scheduled tasks are offered with their exact lines, never created, and drop off once back', (t) => {
+test('a task list an older removal noted is never offered: it reads as empty and the next write drops it', (t) => {
   const h = home(t);
-  const checkout = path.join(h.dir, 'repo');
-  fs.mkdirSync(checkout);
-  note.saveNote(h.dir, { tasks: [{ checkout, folder: 'AI-AGENT-TOOLKIT', repository: 'example/ai-agent-toolkit' }, { checkout: path.join(h.dir, 'gone'), folder: 'GONE' }] });
-  const lines = [];
-  const offers = offerRemovedTasks({ repoRoot: '/toolkit' }, { home: h.dir, platform: 'win32', log: line => lines.push(line) });
-  assert.equal(offers.length, 1);
-  assert.match(lines[0], /Setup does not create them; ask the owner/);
-  assert.ok(lines.some(line => line.includes(`apply --repo-root "${checkout.replace(/\\/g, '/')}"`)));
-  assert.deepEqual(note.readNote(h.dir).tasks.map(task => task.folder), ['AI-AGENT-TOOLKIT']);
-  assert.deepEqual(offerRemovedTasks({ repoRoot: '/toolkit' }, { home: h.dir, platform: 'linux', log: () => {} }), []);
-  const back = { readRegistry: () => ({ status: 'ok', tasks: [{ host: 'windows', checkout, folder: 'AI-AGENT-TOOLKIT' }] }) };
-  assert.deepEqual(note.taskOffers({ home: h.dir, registry: back }), []);
+  const file = note.notePath(h.dir);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ schema: note.SCHEMA, saved_at: '2026-11-01T00:00:00.000Z', helpers: { codex: 'owner-gpt' },
+    tasks: [{ checkout: path.join(h.dir, 'repo'), folder: 'AI-AGENT-TOOLKIT', repository: 'example/ai-agent-toolkit' }] }));
+  assert.deepEqual(note.readNote(h.dir), { helpers: { codex: 'owner-gpt' }, saved_at: '2026-11-01T00:00:00.000Z' });
+  assert.equal(note.taskOffers, undefined, 'the task offer is gone');
+  note.saveNote(h.dir, { helpers: { 'claude-code': 'owner-claude' } });
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal('tasks' in written, false);
+  assert.deepEqual(written.helpers, { codex: 'owner-gpt', 'claude-code': 'owner-claude' });
+  // A note holding only an old task list is no note at all.
+  fs.writeFileSync(file, JSON.stringify({ schema: note.SCHEMA, tasks: [{ checkout: 'C:\\repo', folder: 'REPO' }] }));
   assert.equal(note.readNote(h.dir), null);
 });
 
-test('the removal note records the checkouts of recorded Toolkit tasks, not adopted ones', (t) => {
+test('the removal note never records scheduled tasks, even when Toolkit tasks are still recorded', (t) => {
   const h = home(t);
-  const registry = { readRegistry: () => ({ status: 'ok', tasks: [
-    { host: 'windows', checkout: 'C:\\Users\\me\\GitHub\\repo', folder: 'REPO', repository: 'me/repo' },
-    { host: 'windows', checkout: 'C:\\Users\\me\\GitHub\\repo', folder: 'REPO', repository: 'me/repo' },
-    { host: 'windows', adopted: true, checkout: 'C:\\mine', folder: 'MINE' }] }) };
-  const part = new parts.ReinstallNotePart({ home: h.dir, registry, helpers: () => ({ 'claude-code': null, codex: null }) });
+  const registry = { readRegistry: () => ({ status: 'ok', tasks: [{ host: 'windows', checkout: 'C:\\Users\\me\\GitHub\\repo', folder: 'REPO', repository: 'me/repo' }] }) };
+  assert.deepEqual(new parts.ReinstallNotePart({ home: h.dir, registry, helpers: () => ({ 'claude-code': null, codex: null }) }).plan(), []);
+  const part = new parts.ReinstallNotePart({ home: h.dir, registry, helpers: () => ({ 'claude-code': null, codex: 'owner-gpt' }) });
   const [item] = part.plan();
-  assert.match(item.detail, /scheduled tasks of 1 repository \(offered, not created\); no keys/);
+  assert.doesNotMatch(item.detail, /scheduled task/);
   assert.deepEqual(part.apply([item]), [{ what: item.what, result: 'saved' }]);
-  assert.deepEqual(note.readNote(h.dir).tasks, [{ checkout: 'C:\\Users\\me\\GitHub\\repo', folder: 'REPO', repository: 'me/repo' }]);
-  assert.deepEqual(new parts.ReinstallNotePart({ home: h.dir, registry: { readRegistry: () => ({ status: 'ok', tasks: [] }) }, helpers: () => ({}) }).plan(), []);
+  assert.equal('tasks' in JSON.parse(fs.readFileSync(note.notePath(h.dir), 'utf8')), false);
+});
+
+test('setup names leftover Toolkit tasks once and points to remove toolkit, without touching them', () => {
+  const calls = [];
+  const registry = (tasks) => ({ readRegistry: home => { calls.push(home); return { status: 'ok', tasks }; } });
+  const recorded = [{ host: 'windows', id: 'a' }, { host: 'windows', id: 'b' }, { host: 'windows', adopted: true, id: 'mine' }];
+  const [line, ...rest] = leftoverTaskLines({ home: 'H', platform: 'win32', registry: registry(recorded) });
+  assert.equal(rest.length, 0);
+  assert.match(line, /2 old Toolkit tasks are still recorded[^]*Say "remove toolkit"/);
+  assert.deepEqual(leftoverTaskLines({ home: 'H', platform: 'win32', registry: registry([{ host: 'windows', adopted: true }]) }), []);
+  assert.deepEqual(leftoverTaskLines({ home: 'H', platform: 'linux', registry: registry(recorded) }), []);
+  assert.deepEqual(leftoverTaskLines({ home: 'H', platform: 'win32', registry: { readRegistry: () => { throw new Error('locked'); } } }), []);
+  assert.deepEqual(leftoverTaskLines({ home: 'H', platform: 'win32', registry: { readRegistry: () => ({ status: 'unreadable' }) } }), []);
+  assert.deepEqual(calls, ['H', 'H']);
 });
 
 test('the removal plan and result show the reinstall note as saved, not kept', (t) => {

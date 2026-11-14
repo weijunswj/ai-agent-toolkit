@@ -25,7 +25,6 @@ const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Setup', type: ['setup toolkit', 'toolkit setup'], does: 'Set up Toolkit on this computer, or change your setup answers.' }),
   Object.freeze({ group: 'Setup', type: ['refresh toolkit', 'toolkit refresh'], does: 'Update Toolkit on this computer to the newest version.' }),
   Object.freeze({ group: 'Keys', type: ['toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
-  Object.freeze({ group: 'Setup', type: ['toolkit update scheduled task'], does: "Review and update Toolkit's scheduled tasks on this computer." }),
   Object.freeze({ group: 'Governance', type: ['toolkit governance enable', 'toolkit governance disable'], does: "Turn Toolkit's GitHub governance on or off for this repository. It prepares a pull request for you to merge." }),
   Object.freeze({ group: 'Governance', type: ['setup governance', 'toolkit setup governance'], does: "Turn governance on here and set the repository's task auto-merge switch in the same pull request; in a governed repository it is refresh governance." }),
   Object.freeze({ group: 'Governance', type: ['refresh governance', 'toolkit refresh governance'], does: "Show this repository's merged governance answers (task auto-merge switch, evidence store, checks) and its permission block; a change to the switch is one pull request for you to merge." }),
