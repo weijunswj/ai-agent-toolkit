@@ -214,10 +214,10 @@ test('holder answers and concurrent unrelated findings survive the redraw fold',
   fx.reconciler.run({ apply: true });
   const id = fx.entry().id;
   for (const command of ['ack', 'dispose']) {
-    const args = [command, '--finding', id, '--session', 'executor', '--controller', ...(command === 'dispose' ? ['--reason', 'approved deferral'] : [])];
+    const args = [command, '--finding', id, '--session', 'executor', '--controller', ...(command === 'dispose' ? ['--reason', 'approved deferral'] : ['--next', 'Shorten the page.'])];
     assert.throws(() => fx.run(args), error => error.code === 'ROLE_REFUSED' || error.code === 'STALE_WRITER');
   }
-  fx.run(['ack', '--finding', id, '--session', writer.session, '--controller']);
+  fx.run(['ack', '--finding', id, '--next', 'Shorten the page.', '--session', writer.session, '--controller']);
   const plan = fx.reconciler.plan();
   fx.store.mutate('parent', 12, { writer, change: doc => {
     doc.attention = state.foldAttention(doc.attention, { source: 'inventory', seen: [{ code: 'NEEDS_PLACEMENT', issue: 99 }], complete: false, now: new Date(fx.github.clock).toISOString() });

@@ -9,6 +9,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const pack = require('../scripts/toolkit-hook-pack.cjs');
+// Runner tests pin the clock, so the 30-day known-bad check never depends on today's date.
+const PINNED = { now: Date.parse('2026-11-14T00:00:00Z') };
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const hooksOf = host => JSON.parse(fs.readFileSync(path.join(ROOT, host === 'claude' ? '.claude-plugin' : '.codex-plugin', 'hooks', 'hooks.json'), 'utf8'));
@@ -49,6 +51,31 @@ test('the corpus loads with unique ids, and every known-bad row names its lane a
   for (const kind of ['benign', 'hostile', 'fault', 'update', 'parity']) assert.ok(corpus.rows.some(item => item.kind === kind), kind);
 });
 
+test('a known-bad row over 30 days old fails the run unless it names its tracking issue', () => {
+  const day = 86400000, added = Date.parse('2026-10-30T00:00:00Z');
+  const bad = row({ id: 'K1', status: 'known-bad', lane: 'Some lane', added: '2026-10-30' });
+  assert.deepEqual(pack.agedKnownBad([bad], added + 30 * day), [], 'thirty days is still within its time');
+  assert.deepEqual(pack.agedKnownBad([bad], added + 31 * day), ['row K1 has been known-bad since 2026-10-30 (over 30 days; lane: Some lane): fix it, or name the issue that tracks it in "issue"']);
+  const tracked = row({ id: 'K2', status: 'known-bad', lane: 'Some lane', added: '2026-10-30', issue: 944 });
+  assert.deepEqual(pack.rowErrors(tracked), []);
+  assert.deepEqual(pack.agedKnownBad([tracked, row({ id: 'K3' })], added + 400 * day), []);
+  assert.match(pack.rowErrors(row({ issue: 944 })).join('\n'), /only a known-bad row has known_bad_on, lane, added or issue/);
+  assert.match(pack.rowErrors({ ...tracked, issue: 'soon' }).join('\n'), /issue is the number/);
+});
+
+test('the runner applies the known-bad age check with the clock it is given, after the options', async () => {
+  const late = { now: Date.parse('2026-10-30T00:00:00Z') + 400 * 86400000 };
+  const known = pack.loadCorpus().rows.filter(entry => entry.status === 'known-bad' && entry.issue === undefined && entry.added <= '2026-11-14');
+  if (!known.length) return;
+  let text = '';
+  const out = { write(chunk) { text += chunk; } };
+  assert.equal(await pack.main(['run', '--rows', 'NO-SUCH-ROW'], out, late), 2, 'a usage error still exits 2');
+  text = '';
+  assert.equal(await pack.main(['run', '--rows', 'ATTR.co-author-trailer', '--host', 'claude'], out, late), 1);
+  assert.match(text, /Hook pack known-bad rows past their time:/);
+  assert.ok(text.includes(`row ${known[0].id} has been known-bad since ${known[0].added}`), text);
+});
+
 test('evidence merge fixtures accept only isolated binding and metadata cases', () => {
   const fixture = { repo: { governance: 'undecided', name: 'evidence' }, evidence_merge: { from: 'store' } };
   assert.deepEqual(pack.rowErrors(row({ fixture })), []);
@@ -86,7 +113,7 @@ test('closure fixtures are bounded native-state cases and cover both hosts', () 
 
 test('end to end: verified evidence merges pass both host entry points without real GitHub or user state', async () => {
   const lines = [];
-  const code = await pack.main(['run', '--rows', 'MERGE.bound-evidence-gh,MERGE.bound-evidence-connector,MERGE.bound-evidence-explicit-target,MERGE.bound-evidence-launched-session'], { write: text => lines.push(text) });
+  const code = await pack.main(['run', '--rows', 'MERGE.bound-evidence-gh,MERGE.bound-evidence-connector,MERGE.bound-evidence-explicit-target,MERGE.bound-evidence-launched-session'], { write: text => lines.push(text) }, PINNED);
   assert.equal(code, 0, lines.join(''));
   assert.match(lines.join(''), /merge\s+8\s+8\s+0/);
 });
@@ -143,7 +170,7 @@ test('bounded sequences validate every preceding event and its expectation', () 
 
 test('end to end: a recorded date-name approval reaches the final allowed merge through preceding hook events', async () => {
   let text = '';
-  const code = await pack.main(['run', '--rows', 'MERGE.date-name-lines', '--host', 'claude'], { write(chunk) { text += chunk; } });
+  const code = await pack.main(['run', '--rows', 'MERGE.date-name-lines', '--host', 'claude'], { write(chunk) { text += chunk; } }, PINNED);
   assert.equal(code, 0, text);
   assert.match(text, /1 case\(s\)/);
 });
@@ -236,10 +263,10 @@ test('command-line options are checked before anything runs', async () => {
   const lines = [];
   const out = { write: text => lines.push(text) };
   assert.equal(await pack.main(['nope'], out), 2);
-  assert.equal(await pack.main(['run', '--suite', 'odd'], out), 2);
-  assert.equal(await pack.main(['run', '--rows', 'NO-SUCH-ROW'], out), 2);
+  assert.equal(await pack.main(['run', '--suite', 'odd'], out, PINNED), 2);
+  assert.equal(await pack.main(['run', '--rows', 'NO-SUCH-ROW'], out, PINNED), 2);
   for (const value of ['-x', '--output=/tmp/x', '--exec=evil']) {
-    assert.equal(await pack.main(['run', '--against', value], out), 2, value);
+    assert.equal(await pack.main(['run', '--against', value], out, PINNED), 2, value);
     assert.equal(await pack.main(['check-expectations', '--base', value], out), 2, value);
   }
   assert.equal(await pack.main(['run', '--family', 'push,no-such-family'], out), 2);
@@ -251,7 +278,7 @@ test('command-line options are checked before anything runs', async () => {
 
 test('end to end: a real row runs through the Claude Code hooks as Claude Code starts them', async () => {
   const lines = [];
-  const code = await pack.main(['run', '--rows', 'ATTR.co-author-trailer', '--host', 'claude'], { write: text => lines.push(text) });
+  const code = await pack.main(['run', '--rows', 'ATTR.co-author-trailer', '--host', 'claude'], { write: text => lines.push(text) }, PINNED);
   assert.equal(code, 0, lines.join(''));
   assert.match(lines.join(''), /attribution\s+1\s+1\s+0/);
 });
