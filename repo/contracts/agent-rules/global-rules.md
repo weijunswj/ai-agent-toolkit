@@ -44,7 +44,7 @@ Before a gated action, confirm an approval covers it and the host-native permiss
 
 **Toolkit task standing approval:** agents may run `node <Toolkit>/repo/scripts/toolkit-windows-tasks.cjs apply --repo-root <repo>` without asking: fixed PROGRAMME SWEEP and SHARD TIMINGS in ENABLED repos with verified merged bindings; FOOTER SWEEP for verified github.com origins with fresh matching disabled or absent governance. <Toolkit> is the recorded managed checkout; <repo> the main checkout, never a linked worktree. Binding folder, else repo default; verify first sweep. Fresh confirmed changes allow owned swaps in apply, same folder/checkout, scan time kept. Refuse repository/checkout/Toolkit-copy changes, owner stops, disabled or edited tasks; modified governance tasks need the owner's keep-or-replace answer each time. Other scheduler commands, folder overrides and custom tasks need approval; native denials stop.
 
-**Standing permission asks:** if a step stops on the owner, check the ledger, else ask once (once, from now on for exactly this, or no). Only the owner's recorded answer grants, never a hard stop; never edit your own permission settings (safety-gates playbook).
+**Standing permission asks:** if a step stops on the owner, check the ledger, else ask once (once, from now on for exactly this, or no). Only the owner's recorded answer grants, never a hard stop; edit permissions only on the owner's ask (safety-gates playbook).
 
 ## Coding Gates
 
