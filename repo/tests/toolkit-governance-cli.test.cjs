@@ -64,7 +64,7 @@ const PROTECTED = () => ({ ok: true, rulesets: [{ enforcement: 'active', target:
 
 // Every dependency and security setting on, on a public repository.
 const SECURE = () => ({
-  ok: true, visibility: 'public', allow_auto_merge: false, alerts: 'enabled', security_updates: 'enabled',
+  ok: true, visibility: 'public', allow_auto_merge: false, delete_branch_on_merge: 'enabled', alerts: 'enabled', security_updates: 'enabled',
   secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled',
   binding: { status: 'missing' },
 });

@@ -17,6 +17,8 @@
 //      default-branch protection (toolkit-governance-protection.cjs) is conformant with at least one
 //      required check. With "off" (the default) nothing more is needed: the workflow, if present,
 //      does nothing.
+//   S8 GitHub deletes a pull request's head branch once it merges ("Automatically delete head
+//      branches"), so merged branches never pile up. A free setting on every repository.
 //
 // Toolkit never asks about, turns on or reports as drift a GitHub feature that needs billing. A
 // binding's deprecated `paid_security` key is accepted and ignored when it is "off" or "on"; any
@@ -570,6 +572,7 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
     ok: true,
     visibility,
     allow_auto_merge: typeof value.allow_auto_merge === 'boolean' ? value.allow_auto_merge : 'unreadable',
+    delete_branch_on_merge: value.delete_branch_on_merge === true ? 'enabled' : value.delete_branch_on_merge === false ? 'disabled' : 'unreadable',
     alerts,
     security_updates: securityUpdates,
     secret_scanning: fromAnalysis('secret_scanning'),
@@ -584,7 +587,7 @@ function ghSecurityReader(slug, { spawn = childProcess.spawnSync, now = Date.now
 }
 
 // The settings writes for the fixes `plan` lists ({ alerts, security_updates, secret_scanning,
-// code_scanning, private_reporting, allow_auto_merge }: true for each to turn on). Only free settings
+// code_scanning, private_reporting, allow_auto_merge, delete_branch_on_merge }: true for each to turn on). Only free settings
 // are written: never GitHub Secret Protection or Code Security. Returns [{ setting, ok, reason }];
 // each write is tried once, never retried.
 function ghSecurityWriter(slug, plan, { spawn = childProcess.spawnSync } = {}) {
@@ -600,6 +603,7 @@ function ghSecurityWriter(slug, plan, { spawn = childProcess.spawnSync } = {}) {
     write('secret_scanning', ['-X', 'PATCH', `repos/${slug}`, '--input', '-'], JSON.stringify(body));
   }
   if (plan.allow_auto_merge) write('allow_auto_merge', ['-X', 'PATCH', `repos/${slug}`, '--input', '-'], JSON.stringify({ allow_auto_merge: true }));
+  if (plan.delete_branch_on_merge) write('delete_branch_on_merge', ['-X', 'PATCH', `repos/${slug}`, '--input', '-'], JSON.stringify({ delete_branch_on_merge: true }));
   if (plan.code_scanning) write('code_scanning', ['-X', 'PATCH', `repos/${slug}/code-scanning/default-setup`, '--input', '-'], JSON.stringify({ state: 'configured' }));
   if (plan.private_reporting) write('private_reporting', ['-X', 'PUT', `repos/${slug}/private-vulnerability-reporting`, '--silent']);
   return results;
@@ -678,12 +682,13 @@ function applySecurity(root, result, { writer = ghSecurityWriter, fileWriter = w
 const READ_BACK = Object.freeze({
   alerts: ['alerts'], security_updates: ['security_updates'], secret_scanning: ['secret_scanning', 'push_protection'],
   code_scanning: ['code_scanning'], private_reporting: ['private_reporting'], allow_auto_merge: ['allow_auto_merge'],
+  delete_branch_on_merge: ['delete_branch_on_merge'],
 });
 
 const SETTING_LABELS = Object.freeze({
   alerts: 'Dependabot alerts', security_updates: 'Dependabot security updates', secret_scanning: 'secret scanning and push protection',
   code_scanning: 'CodeQL code scanning', private_reporting: 'private vulnerability reporting',
-  allow_auto_merge: 'allow auto-merge', all: 'the settings',
+  allow_auto_merge: 'allow auto-merge', delete_branch_on_merge: 'automatically delete head branches', all: 'the settings',
 });
 
 // Plain lines saying what `applySecurity` did, what could not be checked, and what is left to do by
@@ -731,13 +736,13 @@ function verdict(status, reason, checks = {}, extra = {}) {
   return Object.freeze({ status, reason, checks: Object.freeze(checks), ...extra });
 }
 
-const SNAPSHOT_KEYS = Object.freeze(['visibility', 'allow_auto_merge', 'alerts', 'security_updates', 'secret_scanning', 'push_protection', 'code_scanning', 'private_reporting']);
+const SNAPSHOT_KEYS = Object.freeze(['visibility', 'allow_auto_merge', 'delete_branch_on_merge', 'alerts', 'security_updates', 'secret_scanning', 'push_protection', 'code_scanning', 'private_reporting']);
 
 function sameValues(a, b) {
   return Object.keys(a).every(key => a[key] === b[key]);
 }
 
-// { status: conformant | drift | unverified | not-applicable, reason, checks: { S1..S7 }, policy,
+// { status: conformant | drift | unverified | not-applicable, reason, checks: { S1..S8 }, policy,
 // policy_source, pending_policy, settings, missing_ecosystems, fixes, files } for the repository at
 // `root`. Options: `offline`, `reader(slug)` (tests), `protectionResult` (the default-branch
 // verdict, for S7), `toolkitRoot`.
@@ -819,6 +824,7 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     details: s7.length ? s7 : s7Status === 'not-checked' ? ['offline']
       : s7Status === 'unverified' ? [online && !known ? 'the programme binding on the default branch could not be read, so the auto-merge policy is unknown and auto-merge stays off' : s7Unverified || 'the repository settings or default-branch protection could not be read'] : [],
   };
+  checks.S8 = settingCheck(value('delete_branch_on_merge'), 'Automatically delete head branches');
   const statuses = Object.values(checks).map(entry => entry.status);
   const status = statuses.includes('drift') ? 'drift'
     : statuses.every(item => ['ok', 'not-on-plan', 'not-applicable'].includes(item)) ? 'conformant' : 'unverified';
@@ -831,6 +837,7 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     code_scanning: Boolean(wanted) && read.code_scanning === 'disabled' && advanced === null,
     private_reporting: read.visibility === 'public' && read.private_reporting === 'disabled',
     allow_auto_merge: policy.auto_merge === 'patch-minor' && read.allow_auto_merge === false && protectedForAutoMerge,
+    delete_branch_on_merge: read.delete_branch_on_merge === 'disabled',
   } : null;
   const files = {
     dependabot: dependabotFile(root) === null && detected.size > 0,
