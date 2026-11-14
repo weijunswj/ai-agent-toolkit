@@ -31,13 +31,14 @@
       "hosts": ["claude", "codex"],
       "steps": [
         {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"Prepare this work."},"expect":{"decision":"deny"},"expect_by_host":{"claude":{"decision":"allow"}},"note":"Claude displays the governance card; Codex holds the prompt as text."},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Prepare this work."},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}},
         {"event":"SessionStart","payload":{"source":"resume"},"host_session":"matching","expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"yes"},"expect":{"decision":"deny"},"expect_by_host":{"claude":{"decision":"allow"}},"note":"Claude displays a renewed question; tools remain held and no answer is recorded."}
+        {"event":"UserPromptSubmit","payload":{"prompt":"yes"},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."],"context_excludes":["toolkit-governance-answer"]},"note":"The resumed run is a new run: it is asked again, and its yes gets no reply ticket, so nothing is recorded."}
       ],
       "payload": {"tool_name":"Bash","tool_input":{"command":"git status"}},
       "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
-      "expect": {"decision":"deny"},
+      "expect": {"decision":"allow"},
+      "postcondition": "no-local-decision-write",
       "status": "pass"
     },
     {
@@ -47,13 +48,14 @@
       "hosts": ["claude", "codex"],
       "steps": [
         {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"Prepare this work."},"expect":{"decision":"deny"},"expect_by_host":{"claude":{"decision":"allow"}},"note":"Claude lets the first turn display its governance card; Codex holds the prompt as text."},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Prepare this work."},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}},
         {"event":"SessionStart","payload":{"source":"resume"},"expect":{"decision":"allow"}},
-        {"event":"UserPromptSubmit","payload":{"prompt":"yes"},"expect":{"decision":"deny"},"expect_by_host":{"claude":{"decision":"allow"}},"note":"Claude lets the renewed question display as a card; its tools remain held and no answer is recorded."}
+        {"event":"UserPromptSubmit","payload":{"prompt":"yes"},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."],"context_excludes":["toolkit-governance-answer"]},"note":"The resumed run is a new run: it is asked again, and its yes gets no reply ticket, so nothing is recorded."}
       ],
       "payload": {"tool_name":"Bash","tool_input":{"command":"git status"}},
       "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
-      "expect": {"decision":"deny"},
+      "expect": {"decision":"allow"},
+      "postcondition": "no-local-decision-write",
       "status": "pass"
     },
     {
@@ -106,28 +108,6 @@
       "status": "pass"
     },
     {
-      "id": "GOV.prompt-held-in-undecided-repo",
-      "source": "governance prompt hold",
-      "kind": "hostile",
-      "hosts": [
-        "claude",
-        "codex"
-      ],
-      "event": "UserPromptSubmit",
-      "payload": {
-        "prompt": "Fix the failing test."
-      },
-      "fixture": {
-        "repo": {
-          "governance": "undecided"
-        }
-      },
-      "expect": {
-        "decision": "deny"
-      },
-      "status": "pass"
-    },
-    {
       "id": "G1",
       "source": "hooks reliability G0, seed G1: edits in an evidence store are held by the governance question",
       "kind": "benign",
@@ -158,7 +138,7 @@
     {
       "id": "G1.other-owner-store-name",
       "source": "hooks reliability G0, seed G1: the exemption must not reach a TRANSPORT-* repository no cached binding vouches for",
-      "kind": "hostile",
+      "kind": "benign",
       "hosts": [
         "claude",
         "codex"
@@ -178,11 +158,9 @@
           "cached_binding_store": true
         }
       },
-      "expect": {
-        "decision": "deny"
-      },
+      "expect": { "decision": "allow" },
       "status": "pass",
-      "note": "The cached binding names toolkit-test-fixture/TRANSPORT-ai-agent-toolkit; this repository is the same name under another owner, so the governance question still holds it."
+      "note": "The cached binding names toolkit-test-fixture/TRANSPORT-ai-agent-toolkit; this repository is the same name under another owner. It is undecided, and an undecided repository holds no tool, so the write passes as it would in any undecided repository."
     },
     {
       "id": "D4.claude-explore-outside-gate-run",
@@ -747,15 +725,12 @@
           "legacy_answer": "no"
         }
       },
-      "payload": {
-        "tool_name": "Bash",
-        "tool_input": {
-          "command": "git status"
-        }
-      },
-      "expect": {
-        "decision": "deny"
-      },
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"prompt":"Prepare this work."},
+      "expect": {"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]},
       "status": "pass"
     },
     {
@@ -773,15 +748,12 @@
           "legacy_answer": "yes"
         }
       },
-      "payload": {
-        "tool_name": "Bash",
-        "tool_input": {
-          "command": "git status"
-        }
-      },
-      "expect": {
-        "decision": "deny"
-      },
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"prompt":"Prepare this work."},
+      "expect": {"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]},
       "status": "pass"
     },
     {
@@ -850,15 +822,7 @@
           "payload": {
             "prompt": "Prepare this work."
           },
-          "expect": {
-            "decision": "deny"
-          },
-          "expect_by_host": {
-            "claude": {
-              "decision": "allow"
-            }
-          },
-          "note": "Claude displays its governance card while Codex holds the prompt as text."
+          "expect": {"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}
         },
         {
           "event": "UserPromptSubmit",
@@ -911,15 +875,7 @@
           "payload": {
             "prompt": "Prepare this work."
           },
-          "expect": {
-            "decision": "deny"
-          },
-          "expect_by_host": {
-            "claude": {
-              "decision": "allow"
-            }
-          },
-          "note": "Claude displays its governance card while Codex holds the prompt as text."
+          "expect": {"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}
         },
         {
           "event": "UserPromptSubmit",
@@ -1061,16 +1017,144 @@
       "note": "Only the user's own typed message is a command; a relayed one is data."
     },
     {
-      "id": "CMD.phrase-in-undecided-repo-is-still-held",
-      "source": "record 323: the prompt hooks recognise five typed Toolkit commands",
+      "id": "GOV.first-prompt-passes-with-question",
+      "source": "ask once, never freeze: the first message of a run carries the question and is not held",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"prompt":"Fix the failing test."},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.later-prompts-pass-without-question",
+      "source": "ask once, never freeze: one question per run, and later messages are ordinary work",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Fix the failing test."},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Run the tests too."},"expect":{"decision":"allow","context_excludes":["Toolkit asks the user once per session, and nothing waits on the answer."]}}
+      ],
+      "payload": {"prompt":"Now tidy the imports."},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow","context_excludes":["Toolkit asks the user once per session, and nothing waits on the answer.","toolkit-governance-answer"]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.tools-run-while-undecided",
+      "source": "ask once, never freeze: no tool waits on the governance question",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Fix the failing test."},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}},
+        {"payload":{"tool_name":"Edit","tool_input":{"file_path":"{work}/README.md","old_string":"a","new_string":"b"}},"expect":{"decision":"allow"}},
+        {"payload":{"tool_name":"Bash","tool_input":{"command":"npm test"}},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"tool_name":"Write","tool_input":{"file_path":"{work}/notes.md","content":"notes\n"}},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.new-session-asks-again",
+      "source": "ask once, never freeze: an unanswered question is asked again in the next session",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Fix the failing test."},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Carry on."},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"And the docs."},"expect":{"decision":"allow","context_excludes":["Toolkit asks the user once per session, and nothing waits on the answer."]}},
+        {"event":"SessionStart","payload":{"source":"startup","session_id":"hook-pack-next"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"prompt":"Pick up where we left off.","session_id":"hook-pack-next"},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.automation-session-is-not-asked",
+      "source": "ask once, never freeze: a session another session started is never asked",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"host_session":"mismatching","expect":{"decision":"allow"}}
+      ],
+      "host_session": "mismatching",
+      "payload": {"prompt":"Run the nightly check."},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow","context_excludes":["Toolkit asks the user once per session, and nothing waits on the answer."]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.automation-session-cannot-answer",
+      "source": "ask once, never freeze: a session another session started cannot send the answer phrase",
       "kind": "hostile",
       "hosts": ["claude", "codex"],
       "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"host_session":"mismatching","expect":{"decision":"allow"}}
+      ],
+      "host_session": "mismatching",
+      "payload": {"prompt":"toolkit governance enable"},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "postcondition": "no-local-decision-write",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.answer-script-outside-its-ticket-command",
+      "source": "ask once, never freeze: the answer script runs only as the exact command given with the reply",
+      "kind": "hostile",
+      "hosts": ["claude", "codex"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Fix the failing test."},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}}
+      ],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"node \"{work}/repo/scripts/toolkit-governance-answer.cjs\" yes 0123456789abcdef0123456789abcdef; echo done"}},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "postcondition": "no-local-decision-write",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.schedule-while-reply-awaited",
+      "source": "ask once, never freeze: a scheduled message cannot stand in for the awaited reply",
+      "kind": "hostile",
+      "hosts": ["claude"],
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"Fix the failing test."},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."]}}
+      ],
+      "payload": {"tool_name":"CronCreate","tool_input":{"prompt":"yes","cron":"* * * * *"}},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"deny"},
+      "status": "pass",
+      "note": "Codex has no schedule tool that reaches its hooks."
+    },
+    {
+      "id": "CMD.phrase-in-undecided-repo-passes",
+      "source": "record 323: a typed Toolkit command is never held for the governance question",
+      "kind": "benign",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}},
+        {"event":"UserPromptSubmit","payload":{"prompt":"toolkit cmd"},"expect":{"decision":"allow","context_contains":["Toolkit asks the user once per session, and nothing waits on the answer."],"context_excludes":["Toolkit command: the user typed"]},"note":"The question comes first: the turn that carries it gets no command line."}
+      ],
       "payload": { "prompt": "toolkit cmd" },
       "fixture": { "repo": { "governance": "undecided" } },
-      "expect": { "decision": "deny" },
-      "status": "pass",
-      "note": "The governance hold decides first; the typed command adds nothing to it."
+      "expect": { "decision": "allow", "context_contains": ["Toolkit command: the user typed `toolkit cmd`."], "context_excludes": ["Toolkit asks the user once per session, and nothing waits on the answer."] },
+      "status": "pass"
     }
   ]
 }
