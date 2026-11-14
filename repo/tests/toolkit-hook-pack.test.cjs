@@ -49,6 +49,18 @@ test('the corpus loads with unique ids, and every known-bad row names its lane a
   for (const kind of ['benign', 'hostile', 'fault', 'update', 'parity']) assert.ok(corpus.rows.some(item => item.kind === kind), kind);
 });
 
+test('a known-bad row over 30 days old fails the run unless it names its tracking issue', () => {
+  const day = 86400000, added = Date.parse('2026-10-30T00:00:00Z');
+  const bad = row({ id: 'K1', status: 'known-bad', lane: 'Some lane', added: '2026-10-30' });
+  assert.deepEqual(pack.agedKnownBad([bad], added + 30 * day), [], 'thirty days is still within its time');
+  assert.deepEqual(pack.agedKnownBad([bad], added + 31 * day), ['row K1 has been known-bad since 2026-10-30 (over 30 days; lane: Some lane): fix it, or name the issue that tracks it in "issue"']);
+  const tracked = row({ id: 'K2', status: 'known-bad', lane: 'Some lane', added: '2026-10-30', issue: 944 });
+  assert.deepEqual(pack.rowErrors(tracked), []);
+  assert.deepEqual(pack.agedKnownBad([tracked, row({ id: 'K3' })], added + 400 * day), []);
+  assert.match(pack.rowErrors(row({ issue: 944 })).join('\n'), /only a known-bad row has known_bad_on, lane, added or issue/);
+  assert.match(pack.rowErrors({ ...tracked, issue: 'soon' }).join('\n'), /issue is the number/);
+});
+
 test('evidence merge fixtures accept only isolated binding and metadata cases', () => {
   const fixture = { repo: { governance: 'undecided', name: 'evidence' }, evidence_merge: { from: 'store' } };
   assert.deepEqual(pack.rowErrors(row({ fixture })), []);
