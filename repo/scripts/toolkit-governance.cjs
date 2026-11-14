@@ -22,10 +22,11 @@ const security = require('./toolkit-governance-security.cjs');
 const hookCapability = require('./toolkit-hook-capability.cjs');
 const governanceApp = require('./toolkit-governance-app.cjs');
 const governanceBank = require('./toolkit-governance-bank.cjs');
+const adopt = require('./toolkit-governance-adopt.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
-const ADOPTION_NOT_READY = 'The adoption proposal is not ready. Run toolkit governance discover, resolve missing parent, separate private evidence store or checks, then use repository-agent-rules to prepare the binding and governed rules. Publish them together in one setup pull request.';
+const ADOPTION_NOT_READY = 'The adoption proposal is not ready. Run toolkit governance where GitHub can be read: its bank makes a missing parent issue and private evidence store and renders the governed rules into one setup pull request. Or prepare the binding and governed rules with repository-agent-rules and publish them together.';
 const PROPOSAL_ERRORS = Object.freeze({
   PROPOSAL_WRITE_REQUIRED: 'This GitHub account cannot write to this repository. Continue with global rules, without governance effects or standing task auto-merge. An owner with write access can publish the proposal.',
   PROPOSAL_CONFLICT: 'Conflicting governance proposals are open. Show their links and ask the owner which to keep before publishing again. None decides governance.',
@@ -61,7 +62,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsPrinter; #permissionsChecker; #environment;
+  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsPrinter; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -72,7 +73,7 @@ class ToolkitGovernanceCli {
   // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
   // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
   // ticket is bound to) are for tests too.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsPrinter = null, permissionsChecker = null, environment = process.env } = {}) {
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsPrinter = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null } = {}) {
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
     this.#stdout = stdout;
     this.#stderr = stderr;
@@ -96,6 +97,8 @@ class ToolkitGovernanceCli {
     this.#permissionsPrinter = permissionsPrinter || defaultPermissionsPrinter;
     this.#permissionsChecker = permissionsChecker || defaultPermissionsChecker;
     this.#environment = environment || {};
+    this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());
+    this.#plainTextInstaller = plainTextInstaller;
     this.#queueReader = queueReader || (root => require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').queueSummary(root));
   }
 
@@ -265,16 +268,16 @@ class ToolkitGovernanceCli {
   }
 
   // Publication uses only a live receipt from an accepted owner answer.
-  #publish(json, suppliedRun = null, switchTo = null) {
+  #publish(json, suppliedRun = null, switchTo = null, adopted = null) {
     const pending = this.#proposals.pending(this.#cwd, { sessionId: process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID,
       epoch: new gate.SessionEpochs({ registryOptions: this.#registryOptions }).get(process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID) });
     const run = suppliedRun || (pending?.kind === 'preparing' ? pending.run : null);
     if (!run) throw new GovernanceCliError(pending?.text || 'No pending owner answer for this run. Ask the owner in this chat; an agent cannot answer for them.');
-    let binding = null;
-    try { binding = JSON.parse(fs.readFileSync(path.join(this.#cwd, governance.BINDING_FILE), 'utf8')); } catch { /* prepare explains missing adoption */ }
+    let binding = adopted ? adopted.binding : null;
+    if (!adopted) try { binding = JSON.parse(fs.readFileSync(path.join(this.#cwd, governance.BINDING_FILE), 'utf8')); } catch { /* prepare explains missing adoption */ }
     // setup governance asks the switch with yes; it joins the same proposal, never a local file.
     if (switchTo && binding && typeof binding === 'object') binding = { ...binding, task_prs: { auto_merge: switchTo } };
-    const result = this.#proposals.publish(this.#cwd, run, binding);
+    const result = this.#proposals.publish(this.#cwd, run, binding, adopted ? adopted.files : null);
     this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...(switchTo ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding)]);
     return 0;
   }
@@ -343,7 +346,13 @@ class ToolkitGovernanceCli {
     const task = state.state === 'ENABLED' && state.root ? this.#taskSwitch(state.root) : null;
     let permissions = { checked: false, missing: 0 };
     try { permissions = this.#permissionsChecker(state.root) || permissions; } catch { /* shown as not checked */ }
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', merged, permissions });
+    // A repository that is not on and not prepared: what turning on would make (store, parent, checks).
+    let found = null;
+    if (state.state !== 'ENABLED' && state.root && !adopt.adoptionPrepared(state.root)) {
+      try { found = this.#discovery().discover(this.#cwd); } catch { found = { status: 'unavailable', reason: 'the search failed' }; }
+    }
+    const adoption = found ? adopt.adoptionPlan(found) : null;
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', merged, permissions, adoption });
     const reference = governanceBank.bankReference(specs);
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
@@ -352,7 +361,7 @@ class ToolkitGovernanceCli {
         let chosen;
         try { chosen = governanceBank.parseBankAnswer(String(await this.#ask('Your answer: ')), specs, { requireBankReference: false }); }
         catch (error) { this.#print(false, {}, [`${error.message} Nothing was written.`]); return 1; }
-        return this.#applyBank(state, task, chosen);
+        return this.#applyBank(state, task, chosen, found);
       }
       return this.#showBank(specs, state);
     }
@@ -375,7 +384,7 @@ class ToolkitGovernanceCli {
       this.#stdout.write(`${error.message} Nothing was written. Show the owner this bank again:\n\n`);
       return this.#showBank(specs, state);
     }
-    return this.#applyBank(state, task, chosen);
+    return this.#applyBank(state, task, chosen, found);
   }
 
   // A cloud session skips the reply check, so the owner's chat answer there can never be recorded.
@@ -407,12 +416,13 @@ class ToolkitGovernanceCli {
   }
 
   // The owner's answer: at most one governance pull request, then the permission blocks.
-  #applyBank(state, task, chosen) {
+  #applyBank(state, task, chosen, found = null) {
     let code = 0;
     let acted = false;
     const switchTo = chosen.taskAutoMerge === 'on' ? 'after-gates' : chosen.taskAutoMerge === 'off' ? 'off' : null;
     if (chosen.governance === 'on' && state.state !== 'ENABLED') {
-      code = this.#prepareDecision('yes', switchTo || 'off');
+      const plan = found ? adopt.adoptionPlan(found, { newStore: chosen.evidenceStore === 'new' }) : null;
+      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, switchTo || 'off') : this.#prepareDecision('yes', switchTo || 'off');
       acted = true;
     } else if (chosen.governance === 'off' && state.state !== 'DISABLED') {
       code = this.#prepareDecision('no', null);
@@ -434,9 +444,33 @@ class ToolkitGovernanceCli {
     return code;
   }
 
+  // A fresh repository: make the store and parent issue that are missing, render the governed rules,
+  // then the one turn-on pull request (toolkit-governance-adopt.cjs).
+  #adoptAndPropose(state, plan, switchTo) {
+    if (!this.#adoptionWriter) {
+      this.#print(false, {}, ['GitHub cannot be written from here, so nothing was made. Run toolkit governance again where gh is signed in.']);
+      return 2;
+    }
+    let adopted;
+    try {
+      adopted = adopt.adopt({ root: state.root, plan, writer: this.#adoptionWriter, switchTo, ...(this.#plainTextInstaller ? { plainText: () => this.#plainTextInstaller(state.root) } : {}) });
+    } catch (error) {
+      if (!(error instanceof adopt.AdoptError)) throw error;
+      this.#print(false, {}, [`${error.message} No pull request was prepared.`,
+        error.made.length ? `Already made, and reused when you answer again: ${error.made.join(', ')}.` : 'Nothing was made on GitHub.',
+        'Show the bank again with toolkit governance and answer it once the cause is fixed.']);
+      return 2;
+    }
+    const lines = [...adopted.lines];
+    if (adopted.made.length) lines.push(`Made on GitHub: ${adopted.made.join(', ')}.`);
+    if (lines.length) this.#print(false, {}, lines);
+    return this.#prepareDecision('yes', switchTo, adopted);
+  }
+
   // One governance decision pull request from the owner's bank answer (the ticket or the owner's own
-  // terminal is the proof); it applies only after the owner merges it.
-  #prepareDecision(answer, switchTo) {
+  // terminal is the proof); it applies only after the owner merges it. `adopted` carries the binding
+  // and rendered rules for a fresh repository.
+  #prepareDecision(answer, switchTo, adopted = null) {
     const before = this.#state();
     if (before.merged?.fresh && (before.rule === 'M1' && answer === 'yes' || before.rule === 'M2' && answer === 'no')) {
       this.#print(false, {}, ['Already ' + before.state.toLowerCase() + ' on the default branch. Nothing was written.']);
@@ -444,7 +478,7 @@ class ToolkitGovernanceCli {
     }
     const sessionId = 'bank-' + crypto.randomBytes(16).toString('hex'), epoch = crypto.randomBytes(16).toString('hex');
     const request = this.#proposals.request(this.#cwd, answer, { sessionId, epoch });
-    try { return this.#publish(false, request.run, switchTo); }
+    try { return this.#publish(false, request.run, switchTo, adopted); }
     catch (error) {
       this.#print(false, {}, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
         PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);

@@ -74,11 +74,11 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   assert.match(table, /\| 2\.1 \| Toolkit permission blocks \| In place \| A\. Keep current \| B\. Add them for me<br>C\. Show me the command \|/);
   for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
   const reference = bank.bankReference(undecided);
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: all recommended`, undecided), { governance: 'on', taskAutoMerge: 'keep', permissionBlocks: 'keep' });
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 2.1=C`, undecided), { governance: 'keep', taskAutoMerge: 'keep', permissionBlocks: 'show' });
+  assert.deepEqual(bank.parseBankAnswer(`${reference}: all recommended`, undecided), { governance: 'on', taskAutoMerge: 'keep', permissionBlocks: 'keep', evidenceStore: 'keep' });
+  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=A, 2.1=C`, undecided), { governance: 'keep', taskAutoMerge: 'keep', permissionBlocks: 'show', evidenceStore: 'keep' });
   assert.throws(() => bank.parseBankAnswer('AAAA-AAAA-AAAA-AAAA: all recommended', undecided), /Governance question bank reference is stale/);
   assert.throws(() => bank.parseBankAnswer(`${reference}: 1.9=B`, undecided), /unavailable question 1\.9/);
   const enabled = bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'after-gates', merged: { store: { repository: 'owner/store' }, required_checks: [] } });
   assert.notEqual(bank.bankReference(enabled), reference, 'a different state is a different bank');
-  assert.deepEqual(bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B`, enabled), { governance: 'off', taskAutoMerge: 'keep', permissionBlocks: 'keep' });
+  assert.deepEqual(bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B`, enabled), { governance: 'off', taskAutoMerge: 'keep', permissionBlocks: 'keep', evidenceStore: 'keep' });
 });
