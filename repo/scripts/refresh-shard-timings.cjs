@@ -23,6 +23,13 @@
 // open for over 7 days fails the run naming it: merge or close it.
 // --fail-if-due makes a report run fail when a refresh trigger crossed, for a run that cannot
 // publish (no governance App), so the drift does not repeat as a green report forever.
+//
+// A governed repository's shard list (.github/toolkit-test-shards.json, schema v2, see
+// governed-test-shards.cjs) is refreshed the same way when --repo-root names a checkout that has one:
+// the run summaries come from the workflow the list names (`workflow`, default
+// toolkit-test-shards.yml), each system the list names gets its own discovered files, and the
+// durations and the named shards are written back to that list. Without a v2 list the Toolkit's own
+// v1 manifest and its Validate runs are used, exactly as before.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -30,6 +37,7 @@ const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const shards = require('./ci-test-shards.cjs');
+const governed = require('./governed-test-shards.cjs');
 
 const WORKFLOW_FILE = 'validate.yml';
 const ARTIFACT_PATTERN = 'test-summary-*';
@@ -37,6 +45,67 @@ const UNTIMED_SHARE = 0.1;
 const IMBALANCE_RATIO = Object.freeze({ linux: 1.5, windows: 1.3 });
 const CONCURRENCY = 3; // run-tests.cjs default; node --test runs three files at a time per shard
 const STALE_PR_DAYS = 7;
+// What the refresh reads and writes: the Toolkit's v1 manifest and its Validate runs, or a governed
+// repository's v2 list and the workflow it names. `discover` gives the discovered files, which
+// `filesFor` splits by system (v1 discovers one list for both systems).
+const V1 = Object.freeze({
+  kind: 'v1',
+  manifestRel: shards.MANIFEST_REL,
+  workflowFile: WORKFLOW_FILE,
+  workflowName: 'Validate',
+  load: (root) => shards.loadManifest(root),
+  discover: (root) => shards.discoverTestFiles(root),
+  systems: () => shards.SYSTEMS,
+  filesFor: (discovered) => discovered,
+  systemShards: (manifest, system, discovered) => shards.systemShards(manifest, system, discovered),
+  assert: (manifest, discovered) => shards.assertManifest(manifest, discovered),
+  budget: (budgets, system, file) => {
+    const limit = (budgets.seconds_per_file || {})[system];
+    if (limit === undefined) return undefined;
+    const raise = (budgets.raised || {})[`${system}:${file}`];
+    return raise ? raise.seconds : limit;
+  },
+});
+
+// The name: line of a workflow file, or null.
+function workflowNameOf(text) {
+  const match = /^name:\s*(['"]?)([^'"\n]{1,80})\1\s*$/m.exec(String(text).replace(/\r\n/g, '\n'));
+  return match ? match[2].trim() : null;
+}
+
+function v2Profile(root) {
+  const manifest = governed.loadManifest(root);
+  const workflowFile = typeof manifest.workflow === 'string' ? manifest.workflow : governed.DEFAULT_WORKFLOW;
+  let text = null;
+  try { text = fs.readFileSync(path.join(root, '.github', 'workflows', workflowFile), 'utf8'); } catch { /* reported below */ }
+  const workflowName = text === null ? null : workflowNameOf(text);
+  if (!workflowName) throw new Error(`.github/workflows/${workflowFile}, the workflow the shard list names, is missing or has no name: line`);
+  return Object.freeze({
+    kind: 'v2',
+    manifestRel: governed.MANIFEST_REL,
+    workflowFile,
+    workflowName,
+    load: (dir) => governed.loadManifest(dir),
+    discover: (dir) => governed.discoverAll(dir, governed.loadManifest(dir)),
+    systems: (list) => Object.keys(list.systems),
+    filesFor: (discovered, system) => discovered[system] || [],
+    systemShards: (list, system, discovered) => list.systems[system].shards.map((shard) => ({ id: shard.id, files: governed.resolveShard(list, system, shard.id, discovered) })),
+    assert: (list, discovered) => governed.assertManifest(list, discovered),
+    // A v2 list keeps budgets by system: { linux: { seconds_per_file, raised: { <file>: { seconds } } } }.
+    budget: (budgets, system, file) => {
+      const table = budgets[system] || {};
+      if (typeof table.seconds_per_file !== 'number') return undefined;
+      const raise = (table.raised || {})[file];
+      return raise && typeof raise.seconds === 'number' ? raise.seconds : table.seconds_per_file;
+    },
+  });
+}
+
+// The v2 profile when `root` has a governed shard list, otherwise the Toolkit's own v1.
+function profileFor(root) {
+  return fs.existsSync(path.join(root, ...governed.MANIFEST_REL.split('/'))) ? v2Profile(root) : V1;
+}
+
 const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--run <id>] [--write | --open-pr | --fail-if-due]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
 
 class UsageError extends Error {}
@@ -66,14 +135,17 @@ function parseArgs(argv) {
 
 // Per-file seconds by system from run-tests.cjs summaries, keeping only discovered test files. A
 // failed shard also uploads its summary; its times come from a failing run, so they are left out.
+// `discovered` is one list (v1) or a list per system (v2). Command mode summaries (a governed
+// repository's shards, one test per file) carry per-file seconds the same way.
 function timingsFromSummaries(summaries, discovered) {
-  const known = new Set(discovered);
+  const knownBySystem = Object.fromEntries(shards.SYSTEMS.map((system) => [system, new Set(Array.isArray(discovered) ? discovered : (discovered[system] || []))]));
   const result = Object.fromEntries(shards.SYSTEMS.map((system) => [system, {}]));
   for (const summary of summaries) {
     if (!summary || summary.schema !== shards.SUMMARY_SCHEMA || !shards.SYSTEMS.includes(summary.system) || !Array.isArray(summary.files)) {
       throw new Error(`a downloaded summary is not a ${shards.SUMMARY_SCHEMA} file`);
     }
     if (summary.exit_code !== 0) continue;
+    const known = knownBySystem[summary.system];
     for (const entry of summary.files) {
       if (known.has(entry.file) && typeof entry.seconds === 'number' && Number.isFinite(entry.seconds) && entry.seconds >= 0) {
         result[summary.system][entry.file] = Math.round(entry.seconds * 10) / 10;
@@ -83,8 +155,8 @@ function timingsFromSummaries(summaries, discovered) {
   return result;
 }
 
-function shardEstimates(manifest, system, discovered, durations) {
-  return shards.systemShards(manifest, system, discovered)
+function shardEstimates(manifest, system, discovered, durations, profile = V1) {
+  return profile.systemShards(manifest, system, discovered)
     .map(({ id, files }) => ({ id, seconds: Math.round(shards.estimateShardSeconds(files, durations, CONCURRENCY) * 10) / 10 }));
 }
 
@@ -96,10 +168,10 @@ function imbalance(estimates) {
 
 // Moves files between a system's shards so their estimated times are close: longest files first,
 // each to the shard that would finish soonest with it. Shard ids and the rest shard stay.
-function rebalance(manifest, system, discovered, durations) {
+function rebalance(manifest, system, discovered, durations, profile = V1) {
   const list = manifest.systems[system].shards;
   const buckets = list.map(() => []);
-  const ordered = shards.runOrder(discovered, durations);
+  const ordered = shards.runOrder(profile.filesFor(discovered, system), durations);
   for (const file of ordered) {
     let best = 0;
     let bestSeconds = Infinity;
@@ -113,48 +185,47 @@ function rebalance(manifest, system, discovered, durations) {
 }
 
 // The report and, when a refresh trigger fired, the refreshed manifest. Never touches the file system.
-function planRefresh(manifest, discovered, fresh) {
+function planRefresh(manifest, discovered, fresh, profile = V1) {
   const findings = [];
   const lines = [];
   const next = JSON.parse(JSON.stringify(manifest));
   const budgets = manifest.budgets || {};
   let refresh = false;
-  for (const system of shards.SYSTEMS) {
+  for (const system of profile.systems(manifest)) {
     const recorded = (manifest.durations_seconds || {})[system] || {};
     const measured = fresh[system] || {};
-    const untimed = discovered.filter((file) => typeof recorded[file] !== 'number');
-    if (untimed.length > discovered.length * UNTIMED_SHARE) {
+    const files = profile.filesFor(discovered, system);
+    const untimed = files.filter((file) => typeof recorded[file] !== 'number');
+    if (untimed.length > files.length * UNTIMED_SHARE) {
       refresh = true;
-      findings.push(`${system}: ${untimed.length} of ${discovered.length} test files have no recorded time`);
+      findings.push(`${system}: ${untimed.length} of ${files.length} test files have no recorded time`);
     }
-    const missing = discovered.filter((file) => typeof measured[file] !== 'number');
+    const missing = files.filter((file) => typeof measured[file] !== 'number');
     if (missing.length) lines.push(`${system}: the run has no time for ${missing.length} file(s); a recorded time is kept where there is one`);
     const merged = {};
-    for (const file of discovered) {
+    for (const file of files) {
       if (typeof measured[file] === 'number') merged[file] = measured[file];
       else if (typeof recorded[file] === 'number') merged[file] = recorded[file];
     }
     next.durations_seconds = next.durations_seconds || {};
     next.durations_seconds[system] = merged;
-    const estimates = shardEstimates(manifest, system, discovered, merged);
+    const estimates = shardEstimates(manifest, system, discovered, merged, profile);
     const ratio = imbalance(estimates);
     lines.push(`${system}: estimated shard seconds ${estimates.map((item) => `${item.id} ${item.seconds}`).join(', ')}`);
     if (ratio > IMBALANCE_RATIO[system]) {
       refresh = true;
-      next.systems[system].shards = rebalance(manifest, system, discovered, merged);
-      const after = shardEstimates(next, system, discovered, merged);
+      next.systems[system].shards = rebalance(manifest, system, discovered, merged, profile);
+      const after = shardEstimates(next, system, discovered, merged, profile);
       findings.push(`${system}: slowest shard is ${ratio.toFixed(2)}x the fastest (over ${IMBALANCE_RATIO[system]}x); rebalanced to ${after.map((item) => `${item.id} ${item.seconds}`).join(', ')}`);
     }
-    const limit = (budgets.seconds_per_file || {})[system];
-    if (limit !== undefined) {
-      for (const [file, seconds] of Object.entries(measured)) {
-        const raise = (budgets.raised || {})[`${system}:${file}`];
-        const allowed = raise ? raise.seconds : limit;
+    for (const [file, seconds] of Object.entries(measured)) {
+      const allowed = profile.budget(budgets, system, file);
+      if (allowed !== undefined) {
         if (seconds > allowed) findings.push(`${system}: ${file} took ${seconds} s, over its ${allowed} s budget; split it by area or make it faster (refreshing does not fix this)`);
       }
     }
   }
-  if (refresh) shards.assertManifest(next, discovered);
+  if (refresh) profile.assert(next, discovered);
   return { refresh, findings, lines, manifest: refresh ? next : manifest };
 }
 
@@ -180,17 +251,17 @@ function gitCommand(root, args) {
   }
 }
 
-function latestGreenRun(root, run) {
+function latestGreenRun(root, run, profile = V1) {
   const fields = 'databaseId,headSha,conclusion,headBranch,workflowName';
   if (run) {
     // A named run may have failed, for example on a file over its budget or a failed shard. Only the
     // summaries of shards whose tests passed are read (timingsFromSummaries), so every time is from a passing run.
     const value = JSON.parse(command('gh', ['run', 'view', run, '--json', fields], { cwd: root }));
-    if (!value.conclusion || value.workflowName !== 'Validate') throw new Error(`run ${run} is not a finished Validate run`);
+    if (!value.conclusion || value.workflowName !== profile.workflowName) throw new Error(`run ${run} is not a finished ${profile.workflowName} run`);
     return value;
   }
-  const list = JSON.parse(command('gh', ['run', 'list', '--workflow', WORKFLOW_FILE, '--branch', 'main', '--event', 'push', '--status', 'success', '--limit', '1', '--json', fields], { cwd: root }));
-  if (!list.length) throw new Error(`no successful ${WORKFLOW_FILE} run on main was found`);
+  const list = JSON.parse(command('gh', ['run', 'list', '--workflow', profile.workflowFile, '--branch', 'main', '--event', 'push', '--status', 'success', '--limit', '1', '--json', fields], { cwd: root }));
+  if (!list.length) throw new Error(`no successful ${profile.workflowFile} run on main was found`);
   return list[0];
 }
 
@@ -212,9 +283,9 @@ function downloadSummaries(root, runId) {
   }
 }
 
-function prBody(run, plan) {
+function prBody(run, plan, profile = V1) {
   return [
-    `Refreshes the measured test times in \`${shards.MANIFEST_REL}\` from the test summaries of Validate run ${run.databaseId} on main (${run.headSha.slice(0, 7)}).`,
+    `Refreshes the measured test times in \`${profile.manifestRel}\` from the test summaries of ${profile.workflowName} run ${run.databaseId} on main (${run.headSha.slice(0, 7)}).`,
     '',
     'Triggers crossed:',
     ...plan.findings.map((finding) => `- ${finding}`),
@@ -254,7 +325,7 @@ function publishEnv(env = process.env) {
   return out;
 }
 
-function openPr(root, run, out) {
+function openPr(root, run, out, profile = V1) {
   const branch = `toolkit/shard-timings-${run.headSha.slice(0, 7)}`;
   if (command('git', ['ls-remote', '--heads', 'origin', branch], { cwd: root }).trim()) {
     out.write(`Branch ${branch} already exists on origin; no new pull request.\n`);
@@ -269,8 +340,8 @@ function openPr(root, run, out) {
     parent = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-timings-wt-'));
     tree = path.join(parent, 'tree');
     command('git', ['worktree', 'add', '--quiet', '-b', branch, tree, fetchedCommit], { cwd: root });
-    const discovered = shards.discoverTestFiles(tree);
-    const plan = planRefresh(shards.loadManifest(tree), discovered, timingsFromSummaries(downloadSummaries(root, run.databaseId), discovered));
+    const discovered = profile.discover(tree);
+    const plan = planRefresh(profile.load(tree), discovered, timingsFromSummaries(downloadSummaries(root, run.databaseId), discovered), profile);
     for (const finding of plan.findings) out.write(`- ${finding}\n`);
     if (!plan.refresh) {
       out.write('No refresh trigger crossed on origin/main; no pull request.\n');
@@ -278,12 +349,12 @@ function openPr(root, run, out) {
       command('git', ['branch', '-D', branch], { cwd: root });
       return 0;
     }
-    fs.writeFileSync(path.join(tree, ...shards.MANIFEST_REL.split('/')), manifestText(plan.manifest));
-    command('git', ['add', shards.MANIFEST_REL], { cwd: tree });
+    fs.writeFileSync(path.join(tree, ...profile.manifestRel.split('/')), manifestText(plan.manifest));
+    command('git', ['add', profile.manifestRel], { cwd: tree });
     command('git', ['commit', '--quiet', '-m', `Refresh test shard timings from main run ${run.databaseId}`], { cwd: tree });
     const env = publishEnv();
     command('git', ['push', '--quiet', '-u', 'origin', branch], { cwd: tree, ...(env ? { env } : {}) });
-    const url = command('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', 'Refresh test shard timings', '--body', prBody(run, plan)], { cwd: tree, ...(env ? { env } : {}) }).trim();
+    const url = command('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', 'Refresh test shard timings', '--body', prBody(run, plan, profile)], { cwd: tree, ...(env ? { env } : {}) }).trim();
     out.write(`Opened ${url}\n`);
     command('git', ['worktree', 'remove', '--force', tree], { cwd: root });
     return 0;
@@ -310,8 +381,9 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
   if (options.help) { out.write(`${USAGE}\n`); return 0; }
   root = options.root || root;
   try {
-    const run = readRun(root, options.run);
-    out.write(`Validate run ${run.databaseId} on ${run.headBranch} (${run.headSha.slice(0, 7)})\n`);
+    const profile = profileFor(root);
+    const run = readRun(root, options.run, profile);
+    out.write(`${profile.workflowName} run ${run.databaseId} on ${run.headBranch} (${run.headSha.slice(0, 7)})\n`);
     if (options.openPr) {
       if (run.headBranch !== 'main') throw new Error('--open-pr reads main runs only');
       const open = findOpen(root);
@@ -324,18 +396,18 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
         }
         return 0;
       }
-      return publish(root, run, out);
+      return publish(root, run, out, profile);
     }
-    const discovered = shards.discoverTestFiles(root);
-    const plan = planRefresh(shards.loadManifest(root), discovered, timingsFromSummaries(readSummaries(root, run.databaseId), discovered));
+    const discovered = profile.discover(root);
+    const plan = planRefresh(profile.load(root), discovered, timingsFromSummaries(readSummaries(root, run.databaseId), discovered), profile);
     for (const line of plan.lines) out.write(`${line}\n`);
     for (const finding of plan.findings) out.write(`- ${finding}\n`);
     if (!plan.refresh) out.write('No refresh trigger crossed.\n');
     else if (options.write) {
-      fs.writeFileSync(path.join(root, ...shards.MANIFEST_REL.split('/')), manifestText(plan.manifest));
-      out.write(`Updated ${shards.MANIFEST_REL}.\n`);
+      fs.writeFileSync(path.join(root, ...profile.manifestRel.split('/')), manifestText(plan.manifest));
+      out.write(`Updated ${profile.manifestRel}.\n`);
     } else if (options.failIfDue) {
-      err.write('A refresh trigger crossed and this run cannot publish. Owner: set up the governance App (TOOLKIT_GOVERNANCE_APP_CLIENT_ID and TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY) so the daily run opens the pull request, or run node repo/scripts/refresh-shard-timings.cjs --write and open the pull request by hand.\n');
+      err.write(`A refresh trigger crossed and this run cannot publish. Owner: set up the governance App (TOOLKIT_GOVERNANCE_APP_CLIENT_ID and TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY) so the daily run opens the pull request, or run node ${profile.kind === 'v1' ? 'repo/scripts/refresh-shard-timings.cjs --write' : '<Toolkit>/repo/scripts/refresh-shard-timings.cjs --repo-root <checkout> --write'} and open the pull request by hand.\n`);
       return 1;
     } else out.write('A refresh trigger crossed; run again with --write or --open-pr to apply it.\n');
     return 0;
@@ -347,4 +419,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ STALE_PR_DAYS, IMBALANCE_RATIO, UNTIMED_SHARE, REFRESH_BRANCH_PREFIX, main, manifestText, parseArgs, planRefresh, publishEnv, rebalance, timingsFromSummaries });
+module.exports = Object.freeze({ V1, profileFor, STALE_PR_DAYS, IMBALANCE_RATIO, UNTIMED_SHARE, REFRESH_BRANCH_PREFIX, main, manifestText, parseArgs, planRefresh, publishEnv, rebalance, timingsFromSummaries });

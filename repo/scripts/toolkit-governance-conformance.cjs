@@ -305,9 +305,11 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   return out;
 }
 
-// The cloud sweep copies a governed repository carries (toolkit-cloud-workflows.cjs). A missing or
-// hand-edited copy is drift; one rendered from an older Toolkit commit is only noted, since every
-// rules refresh updates it. The Toolkit's own checkout runs its own files and is skipped.
+// The cloud workflow copies a governed repository carries (toolkit-cloud-workflows.cjs): the sweep and
+// its gate, plus the test shards workflow and Shard Timings where the repository has a usable shard
+// list. A missing or hand-edited copy is drift; one rendered from an older Toolkit commit or an older
+// shard list is only noted, since every rules refresh updates it. The Toolkit's own checkout runs its
+// own files and is skipped.
 function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   const workflows = require('./toolkit-cloud-workflows.cjs');
   if (workflows.isToolkitCheckout(state.root)) return [];
@@ -321,8 +323,8 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   const out = [];
   for (const row of result.rows) {
     if (row.state === 'current') continue;
-    if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin or the CI workflow it follows); the next rules refresh updates it.`));
-    else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so this repository's programme board gets no cloud sweep. Refresh the repository rules to fix it.`));
+    if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin, the CI workflow it follows or the shard list's shards); the next rules refresh updates it.`));
+    else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence || 'this repository\'s programme board gets no cloud sweep'}. Refresh the repository rules to fix it.`));
   }
   return out;
 }

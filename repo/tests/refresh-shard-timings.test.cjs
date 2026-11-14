@@ -328,3 +328,109 @@ for (const mode of ['after-fetch', 'before-worktree', 'fetch-failure', 'resoluti
     }
   });
 }
+
+// A governed repository with a v2 shard list: Linux only, its own test layout and workflow name.
+const governed = require('../scripts/governed-test-shards.cjs');
+const GOVERNED_FILES = ['tests/a_test.py', 'tests/b_test.py', 'tests/deep/c_test.py', 'tests/d_test.py'];
+
+function governedCheckout(t, extra = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-refresh-v2-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const file of GOVERNED_FILES) {
+    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    fs.writeFileSync(path.join(root, file), '# fixture\n');
+  }
+  fs.mkdirSync(path.join(root, '.github', 'workflows'), { recursive: true });
+  const list = {
+    schema: governed.MANIFEST_SCHEMA,
+    systems: { linux: { command: ['python', '-m', 'pytest', '{files}'], discover: 'tests/**/*_test.py', shards: [{ id: 'linux-1', files: [GOVERNED_FILES[0]] }, { id: 'linux-2', rest: true }] } },
+    ...extra,
+  };
+  fs.writeFileSync(path.join(root, ...governed.MANIFEST_REL.split('/')), refresh.manifestText(list));
+  fs.writeFileSync(path.join(root, '.github', 'workflows', extra.workflow || governed.DEFAULT_WORKFLOW), 'name: Toolkit Test Shards\non: push\n');
+  return root;
+}
+
+// What a governed shard writes: command mode, one test per file.
+function commandSummary(times, exitCode = 0) {
+  return { schema: shards.SUMMARY_SCHEMA, system: 'linux', shard: 'linux-1', exit_code: exitCode, command_mode: true, files: Object.entries(times).map(([file, seconds]) => ({ file, tests: 1, passed: exitCode ? 0 : 1, failed: exitCode ? 1 : 0, skipped: 0, todo: 0, cancelled: 0, seconds })), missing: [] };
+}
+
+test('v2: a governed list reads the workflow it names, takes command mode summaries and writes durations and rebalanced shards back', (t) => {
+  const root = governedCheckout(t);
+  const target = path.join(root, ...governed.MANIFEST_REL.split('/'));
+  const seen = [];
+  const out = [];
+  const times = { [GOVERNED_FILES[0]]: 2, [GOVERNED_FILES[1]]: 40, [GOVERNED_FILES[2]]: 50, [GOVERNED_FILES[3]]: 60 };
+  const deps = {
+    readRun(dir, run, profile) { seen.push([dir, run, profile.kind, profile.workflowFile, profile.workflowName]); return { databaseId: 9, headBranch: 'main', headSha: 'b'.repeat(40) }; },
+    readSummaries: () => [commandSummary(times), commandSummary({ [GOVERNED_FILES[0]]: 999 }, 1)],
+    publish() { assert.fail('a write never publishes'); },
+    out: { write(text) { out.push(text); } }, err: { write(text) { assert.fail(text); } },
+  };
+  assert.equal(refresh.main(['--repo-root', root, '--write'], deps), 0);
+  assert.deepEqual(seen, [[root, null, 'v2', 'toolkit-test-shards.yml', 'Toolkit Test Shards']]);
+  assert.match(out.join(''), /^Toolkit Test Shards run 9 on main/);
+  assert.match(out.join(''), /Updated \.github\/toolkit-test-shards\.json\./);
+  const updated = JSON.parse(fs.readFileSync(target, 'utf8'));
+  assert.deepEqual(updated.durations_seconds, { linux: times }, 'only the systems the list names, and never a failed shard\'s times');
+  assert.equal(updated.systems.linux.command.join(' '), 'python -m pytest {files}', 'the command and glob stay');
+  assert.deepEqual(updated.systems.linux.shards.map((shard) => shard.id), ['linux-1', 'linux-2'], 'the same shard ids and rest shard');
+  assert.equal(updated.systems.linux.shards[1].rest, true);
+  assert.notDeepEqual(updated.systems.linux.shards[0].files, [GOVERNED_FILES[0]], 'the named shard was rebalanced');
+  const discovered = governed.discoverAll(root, updated);
+  assert.deepEqual(governed.manifestErrors(updated, discovered), [], 'the written list is still usable');
+  assert.ok(!fs.existsSync(path.join(root, 'repo')), 'no v1 manifest is written');
+});
+
+test('v2: the list\'s workflow field picks the run; a missing workflow file or a named run of another workflow is refused', (t) => {
+  const root = governedCheckout(t, { workflow: 'shards.yml' });
+  const profile = refresh.profileFor(root);
+  assert.equal(profile.workflowFile, 'shards.yml');
+  assert.equal(profile.manifestRel, governed.MANIFEST_REL);
+  const { latestGreenRun } = loadWithCommands('refresh-shard-timings.cjs', ['latestGreenRun'], (program, args) => {
+    if (args[1] === 'list') return { status: 0, stdout: JSON.stringify([{ databaseId: 1, workflowName: 'Toolkit Test Shards' }]) };
+    return { status: 0, stdout: JSON.stringify({ databaseId: 2, conclusion: 'success', workflowName: 'Validate' }) };
+  }, os.tmpdir());
+  assert.equal(latestGreenRun(root, null, profile).databaseId, 1);
+  assert.throws(() => latestGreenRun(root, '2', profile), /run 2 is not a finished Toolkit Test Shards run/);
+  fs.rmSync(path.join(root, '.github', 'workflows', 'shards.yml'));
+  const errors = [];
+  assert.equal(refresh.main(['--repo-root', root], { readRun() { assert.fail('no run is read'); }, out: { write() {} }, err: { write(text) { errors.push(text); } } }), 2);
+  assert.match(errors.join(''), /\.github\/workflows\/shards\.yml, the workflow the shard list names, is missing/);
+});
+
+test('v2: per-system budgets are reported, and --fail-if-due names the governed command', (t) => {
+  const root = governedCheckout(t, { budgets: { linux: { seconds_per_file: 30, raised: { [GOVERNED_FILES[3]]: { seconds: 90 } } } } });
+  const errors = [];
+  const out = [];
+  const deps = {
+    readRun: () => ({ databaseId: 9, headBranch: 'main', headSha: 'b'.repeat(40) }),
+    readSummaries: () => [commandSummary({ [GOVERNED_FILES[0]]: 2, [GOVERNED_FILES[1]]: 40, [GOVERNED_FILES[2]]: 5, [GOVERNED_FILES[3]]: 60 })],
+    out: { write(text) { out.push(text); } }, err: { write(text) { errors.push(text); } },
+  };
+  assert.equal(refresh.main(['--repo-root', root, '--fail-if-due'], deps), 1);
+  assert.match(out.join(''), /linux: tests\/b_test\.py took 40 s, over its 30 s budget/);
+  assert.doesNotMatch(out.join(''), /d_test\.py took/, 'a raised budget holds');
+  assert.match(errors.join(''), /node <Toolkit>\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root <checkout> --write/);
+});
+
+test('v1 stays as it was: the Toolkit root reads validate.yml and Validate runs and writes the v1 manifest', () => {
+  assert.equal(refresh.profileFor(shards.ROOT), refresh.V1);
+  assert.equal(refresh.V1.workflowFile, 'validate.yml');
+  assert.equal(refresh.V1.workflowName, 'Validate');
+  assert.equal(refresh.V1.manifestRel, 'repo/contracts/ci/test-shards.json');
+  const calls = [];
+  const { latestGreenRun, prBody } = loadWithCommands('refresh-shard-timings.cjs', ['latestGreenRun', 'prBody'], (program, args) => {
+    calls.push([program, ...args]);
+    if (args[1] === 'list') return { status: 0, stdout: JSON.stringify([{ databaseId: 1 }]) };
+    return { status: 0, stdout: JSON.stringify({ databaseId: 2, conclusion: 'success', workflowName: 'Toolkit Test Shards' }) };
+  }, os.tmpdir());
+  latestGreenRun(shards.ROOT, null);
+  assert.deepEqual(calls[0], ['gh', 'run', 'list', '--workflow', 'validate.yml', '--branch', 'main', '--event', 'push', '--status', 'success', '--limit', '1', '--json', 'databaseId,headSha,conclusion,headBranch,workflowName']);
+  assert.throws(() => latestGreenRun(shards.ROOT, '2'), /^Error: run 2 is not a finished Validate run$/);
+  assert.equal(prBody({ databaseId: 123, headSha: 'a'.repeat(40) }, { findings: [] }).split('\n')[0], 'Refreshes the measured test times in `repo/contracts/ci/test-shards.json` from the test summaries of Validate run 123 on main (aaaaaaa).');
+  // The v1 plan is the same with the default profile and with V1 named.
+  const current = manifest(even);
+  assert.deepEqual(refresh.planRefresh(current, FILES, { linux: even, windows: even }), refresh.planRefresh(current, FILES, { linux: even, windows: even }, refresh.V1));
+});
