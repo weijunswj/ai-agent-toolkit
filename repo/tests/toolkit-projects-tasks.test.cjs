@@ -159,6 +159,16 @@ test('the stored prompt is a pointer and every run loads the current instruction
   const result = run(['--expand', 'hourly-nudge', '--params', file(t, 'old.json', JSON.stringify(old))]);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /set_effort_level with medium/);
+  // Main's script reads params any older release stored: a key it no longer knows is dropped, not a
+  // load failure, while every known value is still checked.
+  const retired = run(['--expand', 'hourly-nudge', '--params', file(t, 'retired.json', JSON.stringify({ ...PARAMS['hourly-nudge'], retired_key: 'x', constructor: 'y' }))]);
+  assert.equal(retired.status, 0, retired.stderr);
+  assert.equal(retired.stdout, tasks().expand('hourly-nudge', params('hourly-nudge')));
+  assert.equal(run(['--expand', 'hourly-nudge', '--params', file(t, 'bad.json', JSON.stringify({ ...PARAMS['hourly-nudge'], report_dir: '/tmp/x' }))]).status, 2);
+  assert.equal(run(['--expand', 'hourly-nudge', '--params', file(t, 'list.json', '[]')]).status, 2);
+  // Every param a stored prompt may lack has a fallback, so an older pointer still loads (readers before writers).
+  const optional = Object.keys(validateParams('hourly-nudge', PARAMS['hourly-nudge'])).filter(key => !(key in PARAMS['hourly-nudge']));
+  assert.deepEqual(optional.sort(), ['model', 'parent_issue', 'toolkit_repo']);
 });
 
 // Closure matrix: input state -> check result.

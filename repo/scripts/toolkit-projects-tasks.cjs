@@ -415,12 +415,18 @@ function parseArgs(args) {
   throw new TaskInputError('TASK_ARGUMENTS');
 }
 
-// A run's params file is copied from its stored prompt, which may predate tiers: --expand migrates
-// it the way a refresh would, so an old pointer still loads.
-function readParamsFile(kind, file, { migrate = false } = {}) {
+// A run's params file is copied from its stored prompt, which any older release may have written,
+// while --expand always runs main's script. So --expand reads tolerantly: it migrates pre-tier params
+// the way a refresh would and drops keys it no longer knows, then validates the rest as strictly as
+// ever. Readers before writers: a new or renamed param must stay optional here (with a fallback) for
+// as long as stored prompts may lack it, or every unswapped task fails to load.
+function readParamsFile(kind, file, { tolerant = false } = {}) {
   let raw;
   try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { throw new TaskInputError('TASK_PARAMS'); }
-  return validateParams(kind, migrate ? migrateLegacy(raw).raw : raw);
+  if (!tolerant) return validateParams(kind, raw);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TaskInputError('TASK_PARAMS');
+  const known = Object.fromEntries(Object.entries(raw).filter(([key]) => Object.hasOwn(PARAMS, key)));
+  return validateParams(kind, migrateLegacy(known).raw);
 }
 
 function main(args = process.argv.slice(2)) {
@@ -431,7 +437,7 @@ function main(args = process.argv.slice(2)) {
     let output;
     let exitCode = 0;
     if (options.mode === 'render') output = tasks.render(options.kind, readParamsFile(options.kind, options.params), read(options.projectText));
-    else if (options.mode === 'expand') output = tasks.expand(options.kind, readParamsFile(options.kind, options.params, { migrate: true }));
+    else if (options.mode === 'expand') output = tasks.expand(options.kind, readParamsFile(options.kind, options.params, { tolerant: true }));
     else if (options.mode === 'name') output = `${taskName(options.kind, readParamsFile(options.kind, options.params))}\n`;
     else if (options.mode === 'check') {
       const result = tasks.check(options.kind, read(options.file));
