@@ -29,7 +29,7 @@ const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Keys', type: ['toolkit env', 'toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
   Object.freeze({ group: 'Governance', type: ['toolkit governance', 'governance setup'], does: "Guide Toolkit's GitHub governance for this repository: see whether it is on, turn it on, change task auto-merge or turn it off. Each change is one pull request for you to merge." }),
   Object.freeze({ group: 'Merge', type: ['merge N'], does: 'Approve the merge of pull request N.' }),
-])
+]);
 
 const ACTIONS = {
   'toolkit cmd': 'list',
@@ -87,7 +87,7 @@ const CONTEXT = Object.freeze({
     const command = subcommand => `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
     return `Guide the user through Toolkit's GitHub governance for this repository. Run exactly \`${command('setup')}\` in this repository and show the user its output; run no other governance subcommand first. `
       + `If governance is on, it shows the merged answers: offer to change task auto-merge with \`${command('refresh')} --set on\` or \`${command('refresh')} --set off\` (it only prepares a pull request for the user to merge), or to turn governance off, which the user does by running \`${command('disable')}\` in their own terminal. `
-      + `If governance is off or not decided, tell the user they turn it on by running \`${command('setup')}\` in their own terminal, which also asks for task auto-merge, or, while Toolkit's governance question is open here, by sending \`toolkit governance enable\` as their own message. Every change is a pull request for the user to merge. Never answer the governance question for the user.`;
+      + `If governance is off or not decided, tell the user they turn it on by running \`${command('setup')}\` in their own terminal: it asks two questions there, governance on and then task auto-merge on or off, and prepares one pull request with both. Every change is a pull request for the user to merge. Never answer the governance question for the user.`;
   },
   governance: subcommand => {
     const command = `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;

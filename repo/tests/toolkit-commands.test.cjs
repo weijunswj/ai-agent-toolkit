@@ -64,7 +64,8 @@ test('the governance guide runs setup, then offers the next step without answeri
     const context = commands.phraseContext(phrase);
     assert.ok(context.includes(`Run exactly \`node "${script}" setup\``), phrase);
     assert.ok(context.includes(`\`node "${script}" refresh --set on\``) && context.includes(`refresh --set off`), phrase);
-    assert.match(context, /sending `toolkit governance enable` as their own message/);
+    assert.match(context, /it asks two questions there, governance on and then task auto-merge on or off, and prepares one pull request with both/);
+    assert.doesNotMatch(context, /toolkit governance enable/, 'the guide always asks the task auto-merge question');
     assert.ok(context.includes(`turn governance off, which the user does by running \`node "${script}" disable\` in their own terminal`), phrase);
     assert.match(context, /Never answer the governance question for the user\.$/);
     for (const other of ['status', 'check', 'discover', 'catalogue', 'security', 'migrate', 'enable']) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${phrase} runs ${other}`);

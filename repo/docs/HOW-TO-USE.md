@@ -72,7 +72,7 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 - `refresh toolkit` or `toolkit refresh`: update Toolkit on this computer to the newest version.
 - `remove toolkit`: choose this app only or every app, see what Toolkit put there, then remove it after your OK, plugin included. See [Remove Toolkit from this computer](TOOLKIT-LOCAL-BRIDGE.md#remove-toolkit-from-this-computer).
 - `toolkit env` or `toolkit show env`: open your keys in your editor. Values stay on this computer and never pass through chat.
-- `toolkit governance` or `governance setup`: a guide to Toolkit's GitHub governance for this repository. It shows whether governance is on and its merged answers, then offers the next step: turn it on, change task auto-merge or turn it off. Each change is one pull request for you to merge.
+- `toolkit governance` or `governance setup`: a guide to Toolkit's GitHub governance for this repository. It shows whether governance is on and its merged answers, then offers the next step: turn it on, change task auto-merge or turn it off. Turning it on asks two questions in your own terminal, governance on and then task auto-merge on or off. Each change is one pull request for you to merge.
 - `merge N`: approve the merge of pull request N.
 
 `node repo/scripts/toolkit-commands.cjs` prints the same list.
