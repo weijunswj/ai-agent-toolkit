@@ -14,7 +14,7 @@ const { controllerFiles, controllerText } = require('./support/controller-text.c
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const SCRIPT = path.join(ROOT, 'repo', 'scripts', 'sync-controller-pages.cjs');
-const PAGE_FILES = ['evidence-and-finish.md', 'gates.md', 'roles-and-routes.md'];
+const PAGE_FILES = ['evidence-and-finish.md', 'gates.md', 'principles.md', 'roles-and-routes.md'];
 
 // A throwaway copy of the core, its pages and the files they link to.
 function copyOfControllerSet(t) {
@@ -45,7 +45,7 @@ const run = (root, ...flags) => spawnSync(process.execPath, [SCRIPT, '--root', r
 test('the core lists exactly the pages that exist, and their hashes are current', () => {
   assert.deepEqual(pages.check(ROOT), []);
   assert.deepEqual(fs.readdirSync(path.join(ROOT, 'repo', 'controller')).sort(), PAGE_FILES);
-  assert.deepEqual(controllerFiles(), ['repo/CONTROLLER.md', 'repo/controller/roles-and-routes.md',
+  assert.deepEqual(controllerFiles(), ['repo/CONTROLLER.md', 'repo/controller/principles.md', 'repo/controller/roles-and-routes.md',
     'repo/controller/gates.md', 'repo/controller/evidence-and-finish.md']);
 });
 
@@ -151,6 +151,7 @@ test('every relative link in the core and the pages resolves, and a broken one f
 test('the whole rule set is the core plus every page, each section in exactly one file', () => {
   const homes = {
     'repo/CONTROLLER.md': ['## Scope, fence and revisions', '## Takeover', '## Instructions and returns', '## Authority and effects', '## Pages'],
+    'repo/controller/principles.md': ['## Design principles'],
     'repo/controller/roles-and-routes.md': ['## Roles and routes'],
     'repo/controller/gates.md': ['## Gate lifecycle and acceptance', '### Human-readable product and operational text'],
     'repo/controller/evidence-and-finish.md': ['## Evidence, progress and finish'],
@@ -161,4 +162,13 @@ test('the whole rule set is the core plus every page, each section in exactly on
   }
   const all = controllerText();
   for (const heading of Object.values(homes).flat()) assert.equal(all.split('\n').filter(line => line === heading).length, 1, heading);
+});
+
+test('the design principles page binds above every skill, project line and brief', () => {
+  const core = fs.readFileSync(path.join(ROOT, 'repo', 'CONTROLLER.md'), 'utf8').replace(/\r\n/g, '\n');
+  const page = fs.readFileSync(path.join(ROOT, 'repo', 'controller', 'principles.md'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(core, /The \[design principles\]\(controller\/principles\.md\) bind above every skill, project line and brief: they add, never relax\./);
+  assert.match(core.split('\n## Pages\n')[1], /^These pages[^\n]*\n- \[Design principles\]\(controller\/principles\.md\) `[0-9a-f]{12}`: /);
+  assert.match(page, /^- \*\*Binding:\*\* [^\n]*never relax them;[^\n]*A clash goes to the owner as a decision; a new principle needs an owner record/m);
+  for (const label of ['Development base', 'Owner-only acts', 'Git hygiene', 'Cloud first']) assert.match(page, new RegExp(`^- \\*\\*${label}:\\*\\* `, 'm'), label);
 });

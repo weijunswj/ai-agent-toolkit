@@ -212,6 +212,107 @@
       ]
     },
     {
+      "file": "repo/CONTROLLER.md",
+      "rule": "- [Design principles](controller/principles.md)",
+      "covers": "The pages check fails when this page is missing or its hash is stale.",
+      "enforced_by": [
+        {
+          "kind": "ci",
+          "path": "repo/scripts/sync-controller-pages.cjs",
+          "test": "repo/tests/controller-pages.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Binding:**",
+      "instruction_only": "Ranking the principles above skills and briefs is a reading order; no check can tell when a brief relaxes one."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Development base:**",
+      "instruction_only": "A pointer to the global Development Principles, which the controller applies by judgement in plans, reviews and merges."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Plug and play:**",
+      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; whether a repository file is needed is a design call."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Owner-only acts:**",
+      "covers": "The merge hold and the auto-merge check stop merges without the owner's OK or a passing check. Deletes, keys, irreversible acts and permission edits are instruction-only.",
+      "enforced_by": [
+        {
+          "kind": "hook",
+          "path": "repo/scripts/toolkit-merge-hold.cjs",
+          "test": "repo/tests/toolkit-merge-hold.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-auto-merge-eligible.cjs",
+          "test": "repo/tests/toolkit-auto-merge-eligible.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Git hygiene:**",
+      "covers": "The attribution guard refuses AI attribution in commits and pull requests. Merge-commit-only, no force-push and commit identity are instruction-only here.",
+      "enforced_by": [
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-attribution-guard.cjs",
+          "test": "repo/tests/toolkit-attribution-guard.test.cjs"
+        }
+      ]
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Controller is the brain:**",
+      "instruction_only": "How the controller gets a capability it lacks is a per-harness judgement."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Local base:**",
+      "instruction_only": "Spotting a clash between a harness skill and the local rules is a reading judgement."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Cloud first:**",
+      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; whether work needs the owner's computer is a routing call."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Owner reads and clicks:**",
+      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; the reconciler posts closing comments, but who does a page move is a working rule."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Finish fast:**",
+      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; batch size and lane use are controller calls."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Plain owner posts:**",
+      "instruction_only": "Wording and recommendations are judged per post; no check can tell the best option."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Free first:**",
+      "instruction_only": "Choosing plans and review routes is an owner-set limit, not something code can check."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Host-local talk:**",
+      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; what counts as an unasked mention is a wording call."
+    },
+    {
+      "file": "repo/controller/principles.md",
+      "rule": "**Per-repo governance:**",
+      "instruction_only": "The governance state rules in the core enforce the switch; this line states the principle behind them."
+    },
+    {
       "file": "repo/controller/roles-and-routes.md",
       "rule": "Resolve DISCOVERY, DISCOVERY_HELPER, BUILDER",
       "covers": "Stack selection resolves each role and the reviewer set only from the pinned registry, with no default or fallback.",
