@@ -1,0 +1,144 @@
+# Toolkit Test Shards: this repository's tests, split into parallel shards by its shard list.
+#
+# The shard list (.github/toolkit-test-shards.json) says how to find the test files on each system
+# and the command that runs one. Each shard job runs its files through the pinned Toolkit runner,
+# once per file and with no shell, and uploads its summary even when a test fails. The gate job,
+# "Toolkit test shards", then checks from those summaries that every discovered test file ran
+# exactly once on each system on this run's commit and passed, naming any file that did not. It
+# adds to the repository's own CI and replaces none of it. Toolkit Shard Timings reads these
+# summaries to rebalance the shards.
+#
+# The token only reads the repository, no secret is used and no checkout keeps credentials. The
+# Toolkit copy of this file sets the shard ids from the shard list; a change to the list's shards
+# needs a rules refresh, which rewrites this copy.
+name: Toolkit Test Shards
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolkit-test-shards-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Test shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: TOOLKIT_SHARDS_LINUX
+    steps:
+      - name: Check out this run's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out the Toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: weijunswj/ai-agent-toolkit
+          ref: TOOLKIT_COMMIT
+          path: .toolkit
+          persist-credentials: false
+          sparse-checkout: repo/scripts
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Run test shard
+        run: node .toolkit/repo/scripts/run-tests.cjs --repo-root . --shard ${{ matrix.shard }} --os linux --summary "${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json"
+
+      - name: Upload test summary
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Test shard ${{ matrix.shard }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: TOOLKIT_SHARDS_WINDOWS
+    steps:
+      - name: Check out this run's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out the Toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: weijunswj/ai-agent-toolkit
+          ref: TOOLKIT_COMMIT
+          path: .toolkit
+          persist-credentials: false
+          sparse-checkout: repo/scripts
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Run test shard
+        run: node .toolkit/repo/scripts/run-tests.cjs --repo-root . --shard ${{ matrix.shard }} --os windows --summary "${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json"
+
+      - name: Upload test summary
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ runner.temp }}/summary/test-summary-${{ matrix.shard }}-attempt-${{ github.run_attempt }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  gate:
+    name: Toolkit test shards
+    needs: [linux, windows]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out this run's commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out the Toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: weijunswj/ai-agent-toolkit
+          ref: TOOLKIT_COMMIT
+          path: .toolkit
+          persist-credentials: false
+          sparse-checkout: repo/scripts
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Download test summaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: test-summary-*-${{ github.sha }}
+          path: ${{ runner.temp }}/test-summaries
+          merge-multiple: true
+
+      - name: Check every test file ran once and passed
+        run: node .toolkit/repo/scripts/run-tests.cjs --repo-root . --verify "$RUNNER_TEMP/test-summaries"

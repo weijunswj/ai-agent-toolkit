@@ -298,19 +298,111 @@ async function runShard({ root, manifest, system, shardId, concurrency = DEFAULT
   return { exitCode, summary: { schema: SUMMARY_SCHEMA, system, shard: shardId, exit_code: exitCode, node: process.version, command_mode: true, files: entries, missing: [] } };
 }
 
-const USAGE = 'Usage: node repo/scripts/run-tests.cjs --repo-root <dir> (--check | --plan | --shard <id> --os <linux|windows> [--summary <file>] [--concurrency <n>])';
+// The gate check of a run's shard summaries: for each system the list names, every shard reported
+// (the newest run attempt counts), passed, and ran exactly the files the list gives it, on `commit`
+// when one is named. Together the shards must run every discovered file exactly once; anything else
+// is an error naming the file or shard. Returns { errors, totals }.
+function verifySummaries({ manifest, discovered, summaries, commit = null }) {
+  const errors = [];
+  const totals = {};
+  try { assertManifest(manifest, discovered); } catch (error) { return { errors: [error.message], totals }; }
+  const systems = Object.keys(manifest.systems);
+  const bySystem = new Map(systems.map((system) => [system, new Map()]));
+  for (const summary of summaries) {
+    if (!isObject(summary) || summary.schema !== SUMMARY_SCHEMA) { errors.push(`a summary does not use ${SUMMARY_SCHEMA}`); continue; }
+    if (summary.command_mode !== true) { errors.push(`a ${summary.system} summary of shard ${summary.shard} was not written by the shard list's command`); continue; }
+    if (commit && summary.commit !== commit) {
+      errors.push(`a ${summary.system} summary of shard ${summary.shard} tested commit ${String(summary.commit || 'unknown').slice(0, 12)}, not ${commit.slice(0, 12)}`);
+      continue;
+    }
+    const legs = bySystem.get(summary.system);
+    if (!legs) { errors.push(`a summary names ${summary.system}, a system the shard list does not name`); continue; }
+    // A re-run adds a summary with a higher run attempt, which replaces the older one.
+    const earlier = legs.get(summary.shard);
+    if (earlier) {
+      const [was, now] = [earlier.run_attempt, summary.run_attempt];
+      if (!(Number.isInteger(was) && Number.isInteger(now) && was !== now)) errors.push(`${summary.system} shard ${summary.shard} reported twice`);
+      else if (now > was) legs.set(summary.shard, summary);
+      continue;
+    }
+    legs.set(summary.shard, summary);
+  }
+  for (const system of systems) {
+    const legs = bySystem.get(system);
+    const shards = manifest.systems[system].shards.map((shard) => ({ id: shard.id, files: resolveShard(manifest, system, shard.id, discovered) }));
+    const seen = new Map();
+    const total = { files: 0, passed: 0, failed: 0 };
+    for (const id of legs.keys()) if (!shards.some((shard) => shard.id === id)) errors.push(`${system} shard ${id} is not in the shard list`);
+    for (const shard of shards) {
+      const summary = legs.get(shard.id);
+      if (!summary) { errors.push(`${system} shard ${shard.id} has no summary (it failed to start, was cancelled or did not upload)`); continue; }
+      if (summary.exit_code !== 0) errors.push(`${system} shard ${shard.id} exited with ${summary.exit_code}`);
+      const entries = Array.isArray(summary.files) ? summary.files : [];
+      const counted = new Map();
+      for (const entry of entries) counted.set(entry?.file, (counted.get(entry?.file) || 0) + 1);
+      for (const [file, count] of counted) {
+        if (!shard.files.includes(file)) errors.push(`${system} shard ${shard.id} ran ${file}, which the shard list does not give it`);
+        else if (count > 1) errors.push(`${system}: ${file} ran ${count} times in ${shard.id}`);
+      }
+      for (const file of shard.files) {
+        const entry = entries.find((item) => item?.file === file);
+        if (!entry) { errors.push(`${system}: ${file} has no result in ${shard.id}`); continue; }
+        if (seen.has(file)) errors.push(`${system}: ${file} ran in both ${seen.get(file)} and ${shard.id}`);
+        seen.set(file, shard.id);
+        total.files += 1;
+        if (entry.passed === 1 && !(entry.failed > 0)) total.passed += 1;
+        else { total.failed += 1; errors.push(`${system}: ${file} failed${entry.error ? ` (${entry.error})` : ''}`); }
+      }
+    }
+    for (const file of discovered[system] || []) if (!seen.has(file)) errors.push(`${system}: ${file} was not run by any shard`);
+    totals[system] = total;
+  }
+  return { errors, totals };
+}
+
+// Every .json file under `dir`, parsed; an unreadable one is an error summary, never skipped.
+function readSummaries(dir) {
+  const found = [];
+  const walk = (folder) => {
+    for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+      const full = path.join(folder, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.endsWith('.json')) {
+        try { found.push(JSON.parse(fs.readFileSync(full, 'utf8'))); } catch { found.push({ schema: 'unreadable' }); }
+      }
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  return found;
+}
+
+// The shard ids per system, for the workflow copy's matrix: { linux: [...], windows: [...] }.
+function shardIds(manifest) {
+  return Object.fromEntries(SYSTEMS.filter((system) => Object.hasOwn(manifest.systems, system)).map((system) => [system, manifest.systems[system].shards.map((shard) => shard.id)]));
+}
+
+// Whether `root` has a usable shard list: { state: 'missing' | 'invalid' | 'valid', manifest, errors }.
+function listState(root) {
+  if (!fs.existsSync(path.join(root, ...MANIFEST_REL.split('/')))) return { state: 'missing', manifest: null, errors: [] };
+  let manifest;
+  try { manifest = loadManifest(root); } catch (error) { return { state: 'invalid', manifest: null, errors: [error.message] }; }
+  const errors = manifestErrors(manifest, discoverAll(root, manifest));
+  return { state: errors.length ? 'invalid' : 'valid', manifest, errors };
+}
+
+const USAGE = 'Usage: node repo/scripts/run-tests.cjs --repo-root <dir> (--check | --plan | --verify <summaries dir> | --shard <id> --os <linux|windows> [--summary <file>] [--concurrency <n>])';
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
   const options = { mode: null, concurrency: DEFAULT_CONCURRENCY };
   const setMode = (mode) => {
-    if (options.mode && options.mode !== mode) throw new UsageError(`Choose one of --check, --plan or --shard (got ${options.mode} and ${mode}).`);
+    if (options.mode && options.mode !== mode) throw new UsageError(`Choose one of --check, --plan, --verify or --shard (got ${options.mode} and ${mode}).`);
     options.mode = mode;
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (['--repo-root', '--shard', '--os', '--summary', '--concurrency'].includes(arg)) {
+    if (['--repo-root', '--shard', '--os', '--summary', '--concurrency', '--verify'].includes(arg)) {
       const value = argv[index + 1];
       if (value === undefined || value.startsWith('--')) throw new UsageError(`${arg} needs a value.`);
       index += 1;
@@ -318,6 +410,7 @@ function parseArgs(argv) {
       else if (arg === '--shard') { setMode('shard'); options.shard = value; }
       else if (arg === '--os') options.os = value;
       else if (arg === '--summary') options.summary = value;
+      else if (arg === '--verify') { setMode('verify'); options.verifyDir = value; }
       else {
         if (!/^[1-9][0-9]?$/.test(value)) throw new UsageError('--concurrency takes a whole number from 1 to 99.');
         options.concurrency = Number(value);
@@ -327,7 +420,7 @@ function parseArgs(argv) {
     else throw new UsageError(`${arg} does not go with --repo-root.`);
   }
   if (!options.root) throw new UsageError('--repo-root needs a value.');
-  if (!options.mode) throw new UsageError('Choose --check, --plan or --shard.');
+  if (!options.mode) throw new UsageError('Choose --check, --plan, --verify or --shard.');
   if (options.mode === 'shard' && !SYSTEMS.includes(options.os)) throw new UsageError('--shard needs --os linux or --os windows.');
   if (options.os && options.mode !== 'shard') throw new UsageError('--os goes with --shard.');
   if (options.summary && options.mode !== 'shard') throw new UsageError('--summary goes with --shard.');
@@ -355,6 +448,16 @@ async function main(argv, { out = process.stdout, err = process.stderr, env = pr
     if (errors.length) {
       err.write(`The shard list ${MANIFEST_REL} is not usable:\n- ${errors.join('\n- ')}\n`);
       return 1;
+    }
+    if (options.mode === 'verify') {
+      const { errors: problems, totals } = verifySummaries({ manifest, discovered, summaries: readSummaries(path.resolve(options.verifyDir)), commit: testedCommit(env) });
+      for (const [system, total] of Object.entries(totals)) out.write(`${system}: ${total.files} file(s): ${total.passed} passed, ${total.failed} failed\n`);
+      if (problems.length) {
+        err.write(`The test shards do not prove every test file passed:\n- ${problems.join('\n- ')}\n`);
+        return 1;
+      }
+      out.write(`Every shard passed and together they ran each discovered test file exactly once on ${Object.keys(totals).join(' and ')}.\n`);
+      return 0;
     }
     if (options.mode === 'check' || options.mode === 'plan') {
       for (const system of Object.keys(manifest.systems)) {
@@ -389,12 +492,28 @@ async function main(argv, { out = process.stdout, err = process.stderr, env = pr
   }
 }
 
+// The test programs the copied shard jobs can run: they set up Node only, so a list whose command
+// needs another runtime (python, pytest, npx and the like) would fail on every file there. The
+// installer refuses such a list by name until the jobs set that runtime up.
+const SUPPORTED_PROGRAMS = Object.freeze(['node']);
+function unsupportedPrograms(manifest) {
+  const found = new Set();
+  for (const entry of Object.values(isObject(manifest?.systems) ? manifest.systems : {})) {
+    const program = Array.isArray(entry?.command) && typeof entry.command[0] === 'string' ? programName(entry.command[0]) : null;
+    if (program && !SUPPORTED_PROGRAMS.includes(program)) found.add(program);
+  }
+  return [...found].sort();
+}
+
 module.exports = Object.freeze({
+  SUPPORTED_PROGRAMS,
+  unsupportedPrograms,
   DEFAULT_FILE_TIMEOUT_SECONDS,
   DEFAULT_WORKFLOW,
   FILES_ARG,
   MANIFEST_REL,
   MANIFEST_SCHEMA,
+  SHARD_ID,
   SYSTEMS,
   argvFor,
   assertManifest,
@@ -404,6 +523,7 @@ module.exports = Object.freeze({
   estimateShardSeconds,
   globError,
   globRegExp,
+  listState,
   loadManifest,
   main,
   manifestErrors,
@@ -411,4 +531,6 @@ module.exports = Object.freeze({
   resolveShard,
   runOrder,
   runShard,
+  shardIds,
+  verifySummaries,
 });

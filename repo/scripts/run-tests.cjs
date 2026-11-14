@@ -14,7 +14,9 @@
 //   node repo/scripts/run-tests.cjs --repo-root <dir> --shard <id> --os <system>   one shard of a governed
 //                                                      repository's own shard list (.github/toolkit-test-shards.json,
 //                                                      any language; see governed-test-shards.cjs), or
-//                                                      --repo-root <dir> --check | --plan
+//                                                      --repo-root <dir> --check | --plan, or
+//                                                      --repo-root <dir> --verify <dir>: the gate check that
+//                                                      the shard summaries ran every file once on each system
 //   node repo/scripts/run-tests.cjs --clock-ahead      the test files that pin a calendar date, with
 //                                                      Node's clock moved 400 days ahead
 //

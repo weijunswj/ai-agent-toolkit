@@ -559,6 +559,7 @@ test('no removes the marked cloud sweep copies in the same pull request, and onl
   const [sweep, gate] = workflows.WORKFLOWS.map(row => row.file);
   const off = { schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' };
   const marked = Buffer.from(`# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`).toString('base64');
+  const shardsCopy = Buffer.from(`# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED test-shards toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`).toString('base64');
   const calls = [];
   const transport = new GitHubProposalTransport({ run(args, input) {
     calls.push({ args, input }); const endpoint = args[1];
@@ -567,6 +568,11 @@ test('no removes the marked cloud sweep copies in the same pull request, and onl
     if (endpoint === `repos/${repository}`) return JSON.stringify({ default_branch: 'main' });
     if (endpoint.includes('/git/ref/heads/toolkit/')) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
     if (endpoint.endsWith('/git/ref/heads/main')) return JSON.stringify({ object: { sha: 'a'.repeat(40) } });
+    // The folder listing finds the test shards copy at the name its shard list chose.
+    if (endpoint.includes('/contents/.github/workflows?ref=')) return JSON.stringify(['ci.yml', 'shards.yml', 'toolkit-programme-sweep.yml', 'notes.txt'].map(name => ({ type: 'file', name })));
+    if (endpoint.includes('/contents/.github/workflows/shards.yml')) return JSON.stringify({ type: 'file', encoding: 'base64', content: shardsCopy });
+    if (endpoint.includes('/contents/.github/workflows/ci.yml')) return JSON.stringify({ type: 'file', encoding: 'base64', content: Buffer.from('name: CI\n').toString('base64') });
+    if (endpoint.includes('/contents/.github/workflows/toolkit-shard-timings.yml') || endpoint.includes('/contents/.github/workflows/toolkit-test-shards.yml')) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
     if (endpoint.includes(`/contents/${sweep}`)) return JSON.stringify({ type: 'file', encoding: 'base64', content: marked });
     // The gate here is someone's own file with the same name: never removed.
     if (endpoint.includes(`/contents/${gate}`)) return JSON.stringify({ type: 'file', encoding: 'base64', content: Buffer.from('name: mine\n').toString('base64') });
@@ -581,10 +587,11 @@ test('no removes the marked cloud sweep copies in the same pull request, and onl
   } });
   assert.deepEqual(transport.publish(repository, off), { number: 1, head: 'c'.repeat(40) });
   const tree = calls.find(item => item.args[1].endsWith('/git/trees') && item.input).input.tree;
-  assert.deepEqual(tree.map(entry => [entry.path, entry.sha === null ? 'removed' : 'written']), [['.github/toolkit-programme.json', 'written'], [sweep, 'removed']]);
+  assert.deepEqual(tree.map(entry => [entry.path, entry.sha === null ? 'removed' : 'written']), [['.github/toolkit-programme.json', 'written'], [sweep, 'removed'], ['.github/workflows/shards.yml', 'removed']]);
   const body = calls.find(item => item.args[1].endsWith('/pulls') && item.input).input.body;
   const removed = body.slice(body.indexOf('Removed files'));
-  assert.ok(body.includes('Removed files') && removed.split('\n')[1] === `- ${sweep}`, body);
+  assert.ok(body.includes('Removed files') && removed.split('\n')[1] === `- ${sweep}` && removed.split('\n')[2] === '- .github/workflows/shards.yml', body);
+  assert.ok(!body.includes('ci.yml'), 'a workflow without the marker is never removed');
   assert.ok(!body.includes(gate), 'the unmarked gate file is never listed');
 });
 
@@ -593,7 +600,10 @@ test('an off pull request may remove the marked cloud sweep copies, and nothing 
   const [sweep, gate] = require('../scripts/toolkit-cloud-workflows.cjs').WORKFLOWS.map(row => row.file);
   const text = JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository, governance: 'disabled' });
   const marker = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: x\n`;
-  const read = (files, atBase = { [sweep]: marker, [gate]: marker }) => new GitHubProposalTransport({ run(args) {
+  const shards = '.github/workflows/shards.yml', other = '.github/workflows/other.yml';
+  const shardsMarker = marker.replace('programme-sweep', 'test-shards');
+  // Each copy carries its own id: a marker for another copy at that path is not a Toolkit copy.
+  const read = (files, atBase = { [sweep]: marker, [gate]: marker.replace('programme-sweep', 'programme-sweep-gate'), [shards]: shardsMarker, [other]: 'name: mine\n' }) => new GitHubProposalTransport({ run(args) {
     const endpoint = args[1];
     const json = value => JSON.stringify(value);
     if (endpoint.endsWith('/pulls/1')) return json({ number: 1, html_url: `https://github.com/${repository}/pull/1`, state: 'open', changed_files: files.length, body: '<!-- toolkit-governance-decision -->', head: { repo: { full_name: repository }, sha: 'a'.repeat(40) }, base: { ref: 'main', sha: '9'.repeat(40) } });
@@ -603,7 +613,8 @@ test('an off pull request may remove the marked cloud sweep copies, and nothing 
     if (endpoint.endsWith(`/git/trees/${'d'.repeat(40)}`)) return json({ truncated: false, tree: [{ path: 'toolkit-programme.json', type: 'blob', mode: '100644', sha: 'c'.repeat(40) }] });
     if (endpoint.includes('/contents/.github/toolkit-programme.json')) return json({ type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: Buffer.byteLength(text), content: Buffer.from(text).toString('base64') });
     if (endpoint.includes('/pulls/1/files')) return json(files);
-    for (const name of [sweep, gate]) if (endpoint.includes(`/contents/${name}?ref=${'9'.repeat(40)}`)) {
+    if (endpoint.includes(`/contents/.github/workflows?ref=${'9'.repeat(40)}`)) return json(Object.keys(atBase).map(name => ({ type: 'file', name: name.split('/').pop() })));
+    for (const name of [sweep, gate, shards, other, ...require('../scripts/toolkit-cloud-workflows.cjs').SHARD_WORKFLOWS.map(row => row.file)]) if (endpoint.includes(`/contents/${name}?ref=${'9'.repeat(40)}`)) {
       if (atBase[name] === undefined) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
       return json({ type: 'file', encoding: 'base64', content: Buffer.from(atBase[name]).toString('base64') });
     }
@@ -612,6 +623,9 @@ test('an off pull request may remove the marked cloud sweep copies, and nothing 
   const binding = { filename: '.github/toolkit-programme.json', status: 'modified' };
   assert.equal(read([binding, { filename: sweep, status: 'removed' }, { filename: gate, status: 'removed' }]).answer, 'no');
   assert.equal(read([binding]).answer, 'no');
+  assert.equal(read([binding, { filename: shards, status: 'removed' }]).answer, 'no', 'a marked test shards copy at its list\'s own name');
+  // A sweep marker at another path is not a copy that may sit there.
+  assert.throws(() => read([binding, { filename: shards, status: 'removed' }], { [sweep]: marker, [shards]: marker }), /SCOPE_INVALID/);
   assert.throws(() => read([binding, { filename: sweep, status: 'modified' }]), /SCOPE_INVALID/);
   assert.throws(() => read([binding, { filename: '.github/workflows/other.yml', status: 'removed' }]), /SCOPE_INVALID/);
   assert.throws(() => read([{ filename: sweep, status: 'removed' }]), /SCOPE_INVALID/);
@@ -636,6 +650,8 @@ test('recovering an interrupted off branch needs every listed removal done, and 
       if (endpoint.includes('/git/ref/heads/toolkit/')) return JSON.stringify({ object: { sha: 'c'.repeat(40) } });
       if (endpoint.includes(`/contents/${sweep}?ref=`)) return JSON.stringify({ type: 'file', encoding: 'base64', content: marked });
       if (endpoint.includes(`/contents/${gate}?ref=`)) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
+      if (endpoint.includes('/contents/.github/workflows?ref=')) return JSON.stringify([{ type: 'file', name: sweep.split('/').pop() }]);
+      if (/\/contents\/\.github\/workflows\/toolkit-(test-shards|shard-timings)\.yml\?ref=/.test(endpoint)) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
       if (endpoint.includes('/git/commits/')) return JSON.stringify({ tree: { sha: 'b'.repeat(40) } });
       if (endpoint.includes('/git/trees/')) return JSON.stringify({ truncated: false, tree: [] });
       if (endpoint.includes('/compare/')) return JSON.stringify({ total_commits: 1, merge_base_commit: { sha: 'a'.repeat(40) }, files: diffFiles });

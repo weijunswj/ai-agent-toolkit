@@ -284,12 +284,16 @@ class GitHubProposalTransport {
     try { return this.#api(endpoint); }
     catch (error) { if (error.code === 'PROPOSAL_NOT_FOUND') return null; throw error; }
   }
-  // The cloud sweep copies on the default branch at `ref` that carry the Toolkit's rendered-copy marker.
+  // The Toolkit's cloud workflow copies on the default branch at `ref`: each workflow file that starts
+  // with the rendered-copy marker of a copy that may sit at its path (the sweep, its gate, Shard Timings,
+  // and the test shards copy at whatever name its shard list chose).
   #cloudCopies(repository, ref) {
-    const { MARKER: COPY } = require('./toolkit-cloud-workflows-render.cjs');
-    return cloudFiles().filter(name => {
+    const workflows = require('./toolkit-cloud-workflows.cjs');
+    const listing = this.#optional(`repos/${repository}/contents/.github/workflows?ref=${ref}`);
+    const names = Array.isArray(listing) ? listing.filter(entry => entry && entry.type === 'file' && typeof entry.name === 'string').map(entry => entry.name) : null;
+    return workflows.copyCandidates(names).filter(name => {
       const file = this.#optional(`repos/${repository}/contents/${name}?ref=${ref}`);
-      return Boolean(file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' && COPY.test(Buffer.from(file.content, 'base64').toString('utf8').replace(/\r\n/g, '\n')));
+      return Boolean(file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' && workflows.copyIdAt(name, Buffer.from(file.content, 'base64').toString('utf8')));
     });
   }
   #auth() {
@@ -339,10 +343,10 @@ class GitHubProposalTransport {
     // need the owner's merge approval.
     if (binding.governance === 'disabled') {
       const files = this.#api(`repos/${repository}/pulls/${number}/files?per_page=100`);
-      const cloud = cloudFiles();
+      // Removals are workflow files only; each must also be a marked copy where the PR started (below).
       const valid = Array.isArray(files) && pr.changed_files === files.length
         && files.filter(file => file.filename === cache.BINDING_PATH && ['added', 'modified'].includes(file.status)).length === 1
-        && files.every(file => file.filename === cache.BINDING_PATH || (cloud.includes(file.filename) && file.status === 'removed'));
+        && files.every(file => file.filename === cache.BINDING_PATH || (/^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(file.filename) && file.status === 'removed'));
       if (!valid) fail('PROPOSAL_SCOPE_INVALID');
       // A removed sweep path must have been the Toolkit's own marked copy where the PR started.
       const removed = files.filter(file => file.status === 'removed').map(file => file.filename);
@@ -428,7 +432,7 @@ class GitHubProposalTransport {
       }
       if (!SHA.test(headSha)) fail('PROPOSAL_COMMIT_INVALID');
     }
-    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud sweep copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
+    const pr = this.#api(`repos/${repository}/pulls`, { title: `Set repository governance ${binding.governance === 'disabled' ? 'off' : 'on'}`, head, base: branch, body: `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled with the prepared governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.` });
     return { number: pr.number, head: headSha };
   }
 }

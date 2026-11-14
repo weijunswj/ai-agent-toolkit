@@ -305,9 +305,11 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   return out;
 }
 
-// The cloud sweep copies a governed repository carries (toolkit-cloud-workflows.cjs). A missing or
-// hand-edited copy is drift; one rendered from an older Toolkit commit is only noted, since every
-// rules refresh updates it. The Toolkit's own checkout runs its own files and is skipped.
+// The cloud workflow copies a governed repository carries (toolkit-cloud-workflows.cjs): the sweep and
+// its gate, plus the test shards workflow and Shard Timings where the repository has a usable shard
+// list. A missing or hand-edited copy is drift; one rendered from an older Toolkit commit or an older
+// shard list is only noted, since every rules refresh updates it. The Toolkit's own checkout runs its
+// own files and is skipped.
 function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   const workflows = require('./toolkit-cloud-workflows.cjs');
   if (workflows.isToolkitCheckout(state.root)) return [];
@@ -321,8 +323,8 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   const out = [];
   for (const row of result.rows) {
     if (row.state === 'current') continue;
-    if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin or the CI workflow it follows); the next rules refresh updates it.`));
-    else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so this repository's programme board gets no cloud sweep. Refresh the repository rules to fix it.`));
+    if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin, the CI workflow it follows or the shard list's shards); the next rules refresh updates it.`));
+    else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence || 'this repository\'s programme board gets no cloud sweep'}. Refresh the repository rules to fix it.`));
   }
   return out;
 }
@@ -346,16 +348,16 @@ function cloudSweepReachFindings(state, options = {}) {
   return [finding(reason.code, 'info', `The cloud sweep skips this repository: ${reason.why}. ${reason.fix}; until then nothing sweeps this repository, so run programme.cjs refresh by hand.`)];
 }
 
-// Cloud sweep copies left in a repository whose merged binding turns governance off. The pull request
-// that turns governance off removes them; a copy still here means it was made before that, or by hand.
-// Only a file carrying the Toolkit's rendered-copy marker counts. Report only, never a drift.
+// Toolkit workflow copies left in a repository whose merged binding turns governance off: the sweep
+// and its gate, and the test shards and Shard Timings copies. The pull request that turns governance
+// off removes them; a copy still here means it was made before that, or by hand. Only a file starting
+// with the Toolkit's rendered-copy marker counts, found by that marker wherever the test shards copy's
+// list put it. Report only, never a drift.
 function cloudWorkflowLeftovers(state) {
   const workflows = require('./toolkit-cloud-workflows.cjs');
   if (workflows.isToolkitCheckout(state.root)) return [];
-  const left = workflows.WORKFLOWS.map(row => row.file).filter(file => {
-    try { return workflows.MARKER.test(fs.readFileSync(path.join(state.root, ...file.split('/')), 'utf8').replace(/\r\n/g, '\n')); } catch { return false; }
-  });
-  return left.length ? [finding('CLOUD_WORKFLOW_LEFT_OVER', 'info', `Governance is off, but the cloud sweep copies are still here: ${left.join(', ')}. Remove them in a pull request; they do nothing while governance is off.`)] : [];
+  const left = workflows.markedCopies(state.root).map(row => row.file);
+  return left.length ? [finding('CLOUD_WORKFLOW_LEFT_OVER', 'info', `Governance is off, but the Toolkit's cloud workflow copies are still here: ${left.join(', ')}. Remove them in a pull request; they do nothing for governance while it is off.`)] : [];
 }
 
 // The cloud jobs guide from the contract: each job and the tokens it mints from the governance App.
