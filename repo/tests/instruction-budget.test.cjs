@@ -44,8 +44,11 @@ test('each block stays inside its own budget', () => {
   // limit above stays the hard cap.
   // Owner record 335 (5 November) confirms 19,400 and 44,900, overriding the 4 November
   // cap decision, preserving wording and allowing Windows CRLF. The combined limit still applies.
-  assert.ok(crlfBytes(GLOBAL) <= 19400, `global block ${crlfBytes(GLOBAL)} bytes`);
-  assert.ok(crlfBytes(GOVERNED) <= 4250, `governed rules ${crlfBytes(GOVERNED)} bytes`);
+  // The global cap rose to 21,800 for the Development Principles section: the owner asked on
+  // 14 November for principles that steer all development in every repository, so they load every session.
+  assert.ok(crlfBytes(GLOBAL) <= 21800, `global block ${crlfBytes(GLOBAL)} bytes`);
+  // The governed cap rose to 4,850 for the Governance Principles section (owner, 14 November).
+  assert.ok(crlfBytes(GOVERNED) <= 4850, `governed rules ${crlfBytes(GOVERNED)} bytes`);
   assert.ok(crlfBytes(ROOT_AGENTS) <= 15000, `root AGENTS.md ${crlfBytes(ROOT_AGENTS)} bytes`);
   // CONTROLLER.md loads only for controllers, not every session. It was one file capped at 18,500
   // bytes until its step-by-step sections moved, word for word, into the pages under
@@ -53,7 +56,7 @@ test('each block stays inside its own budget', () => {
   // page loads at its step and holds at most 5,000. A new rule goes on the page for its step.
   assert.ok(crlfBytes(read('repo/CONTROLLER.md')) <= 9500, `CONTROLLER.md ${crlfBytes(read('repo/CONTROLLER.md'))} bytes`);
   const pages = controllerFiles().slice(1);
-  assert.equal(pages.length, 3);
+  assert.equal(pages.length, 4);
   for (const rel of pages) assert.ok(crlfBytes(read(rel)) <= 5000, `${rel} ${crlfBytes(read(rel))} bytes`);
   // The gate rules load on demand for gate sessions only, but stay compact. The cap rose from
   // 10,500 to hold the review-round rules (self-check, finding severities, narrow rechecks), then to

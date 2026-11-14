@@ -323,13 +323,16 @@ test('Projects delta correction: the entire entry section rejects exceptions bef
   }
 });
 
-test('Projects delta correction: the skill keeps its precedence over Controller instructions', () => {
-  const check = text => assert.ok(text.includes('In Projects this skill wins over `CONTROLLER.md`.'));
+test('Projects delta correction: the skill keeps its precedence over Controller instructions, never over the design principles', () => {
+  const check = text => assert.ok(text.includes('In Projects this skill wins over `CONTROLLER.md`, never its design principles.'));
   const text = read(SKILL_REL);
   check(text);
   const replacement = text.replace('wins over', 'replaces');
   assert.notEqual(replacement, text);
   assert.throws(() => check(replacement), { code: 'ERR_ASSERTION' });
+  const noException = text.replace(', never its design principles.', '.');
+  assert.notEqual(noException, text);
+  assert.throws(() => check(noException), { code: 'ERR_ASSERTION' });
 });
 
 test('Projects correction: generic step 7 is an explicit exception on every route, without transferring identity', () => {
@@ -574,7 +577,7 @@ test('Projects re-checks the bound CONTROLLER.md blob before launches and on eve
   assert.match(text, /\*\*Binding check\*\* \(each daily check-in, read-only; the hourly nudge leaves it out\)/);
   assert.doesNotMatch(text, /^  1\. the \*\*Binding check\*\*/m);
   // Running projects pick up changed task behaviour.
-  assert.match(text, /When a skill update changes what the daily check-in or hourly nudge does, update those tasks' prompts in the same turn/);
+  assert.match(text, /The check-in and nudge load their instructions from `main` each run, so a skill update needs no swap\. Swap only on TASKS OUTDATED, in place/);
   // Threads at start: briefs carry the blob and a mismatch is reported first.
   assert.match(body, /bound by commit and blob SHA/);
   assert.match(body, /a thread that finds `main`'s blob different says so to the coordinator in its first reply, then continues on its brief/);
@@ -729,9 +732,10 @@ test('Projects keeps its Toolkit base layer current without touching the project
     'say undo instructions sync', '`--declined-dedupe <version>`', 'overlaps: <n>', '`misplaced` when the block is not at the top']) {
     assert.ok(text.includes(required), required);
   }
-  // Toolkit-made tasks: rendered, named, swapped by recreate; project and local tasks report-only.
+  // Toolkit-made tasks: rendered as pointers, named, swapped in place; project and local tasks report-only.
   for (const required of ['toolkit-projects-tasks.cjs --render <daily-check-in|hourly-nudge> --params <file>',
-    '`<PROJECT>: Daily check-in`, `<PROJECT>: Hourly nudge`', '**Change = recreate.**', 'only then delete the old task',
+    '`<PROJECT>: Daily check-in`, `<PROJECT>: Hourly nudge`', '**Swap = update in place, recreate only to change the session.**', '**Stored prompts are pointers.**',
+    '`--expand <kind> --params <file>`', 'call `update_trigger` with only the new prompt', 'put the saved prompt back with `update_trigger` and report', '**Other projects\' Toolkit tasks.**', 'only then delete the old task',
     'If the read-back fails, delete the new one, keep the old one and report', 'Read it back with `get_trigger` (enabled, the right next run time, bound to its new home thread; never `fire_trigger` it, the first scheduled run is the proof); only then delete the old task', 'say undo task sync <name>',
     'A `malformed` prompt holds and is reported', '**The project\'s own tasks** are never changed without the owner',
     'never recreated or moved to the cloud', 'Trigger ids live only on this line, never in a prompt', '--check-memory <file>',
@@ -748,7 +752,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
     assert.ok(text.includes(required), required);
   }
   // The coordinator acts on every check-in prefix, in dependency order.
-  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PLUGIN BEHIND`', '`TASK FAILING`', '`PR ATTENTION`'];
+  const prefixes = ['`GUIDEBOOK MISSING`', '`SKILL UPDATE`', '`BLOCK OUTDATED`', '`BINDING STALE`', '`TOOLKIT CHANGED`', '`MEMORY FORMAT`', '`TASKS OUTDATED`', '`NUDGE NOT ARMED`', '`PROJECT TASKS MISSING`', '`PROJECT TASKS OUTDATED`', '`PLUGIN BEHIND`', '`TASK FAILING`', '`PR ATTENTION`'];
   // The prefix list moved word for word from the skill's Daily check-in section into reference/periodic-runs.md.
   const section = text.slice(text.indexOf('## Acting on the check-in report'), text.indexOf('## Hourly nudge home thread'));
   const at = prefixes.map(prefix => section.indexOf(`  - ${prefix}`));

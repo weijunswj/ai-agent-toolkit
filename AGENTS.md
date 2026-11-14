@@ -1,9 +1,17 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.111.0 sha256=782cbb876f30 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=3.112.0 sha256=370346d2ded5 -->
 # Toolkit-Governed Repository Rules
 
 On github.com, only the valid `.github/toolkit-programme.json` merged on origin's default branch decides on/off on every computer. Enabled binds this block: programme records, decision traces and evidence custody. Pending proposals and local answers decide nothing. Unreadable GitHub permits ordinary work with a note, without governance effects or standing task auto-merge. Coding gates and delegation always apply from the user-level global rules and gate rules. If missing, read https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/agent-rules/global-rules.md before planning, and load the `n8n-safety-router` skill before any n8n work; if it is unavailable, stop and report that. Outside rules win on conventions; only the floor's named evidence-store line can relax it.
+
+## Governance Principles
+
+- **Only needed files:** the repository holds only the Toolkit files it needs (its binding and CI checks).
+- **Reuse first:** extend or reopen an existing issue, task or job before adding a new one.
+- **Checks, not memory:** merge-commit-only, pinned required checks, grouped dependency updates and security settings are checked by governance.
+- **Owner reads and clicks:** agents do all linking, moving and archiving; everything that closes gets a closing comment.
+- **Per repository:** governance and its auto-merge switch are set per repository, never globally.
 
 ## Delivery
 
