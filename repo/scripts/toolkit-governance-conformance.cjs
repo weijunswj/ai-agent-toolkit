@@ -326,6 +326,11 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
     if (row.state === 'outdated') out.push(finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a rules refresh writes now (an older Toolkit commit, an action pin, the CI workflow it follows or the shard list's shards); the next rules refresh updates it.`));
     else out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence || 'this repository\'s programme board gets no cloud sweep'}. Refresh the repository rules to fix it.`));
   }
+  // A shard copy an earlier list brought, while the list is now missing, not usable or not supported:
+  // nothing refreshes it, and the test shards copy runs a list it no longer matches.
+  for (const row of result.not_copied || []) {
+    for (const file of row.left || []) out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${file} is a Toolkit ${row.id === 'test-shards' ? 'test shards' : 'Shard Timings'} copy, but the shard copies are no longer copied: ${row.reason}. Repair the shard list and refresh the repository rules, or remove the shard copies in a pull request.`));
+  }
   return out;
 }
 

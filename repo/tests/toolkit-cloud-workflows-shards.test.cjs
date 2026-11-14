@@ -111,8 +111,8 @@ test('shard timings copy: the Toolkit\'s own workflow, checking the Toolkit out 
   const original = source(TIMINGS.source);
   const text = workflows.render('shard-timings', original, COMMIT);
   assert.match(text, /- name: Check out this run's commit\n[^\n]+\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          persist-credentials: false\n\n      - name: Check out the Toolkit\n[^\n]+\n        with:\n          repository: weijunswj\/ai-agent-toolkit\n          ref: [0-9a-f]{40}\n          path: \.toolkit\n          persist-credentials: false\n/);
-  assert.match(text, /node \.toolkit\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --fail-if-due\n/);
-  assert.match(text, /node \.toolkit\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --open-pr\n/);
+  assert.match(text, /node \.toolkit\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --branch main --fail-if-due\n/);
+  assert.match(text, /node \.toolkit\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --branch main --open-pr\n/);
   assert.doesNotMatch(text, /node repo\/scripts\/|Validate run on main|^# shard manifest\./m, 'nothing that only holds in the Toolkit');
   assert.match(text, /\.github\/toolkit-test-shards\.json/);
   assert.equal((text.match(/secrets\./g) || []).length, (original.match(/secrets\./g) || []).length, 'no new secret use');
@@ -167,7 +167,11 @@ test('cloud workflows: the shard copies go only to a repository with a usable sh
   fs.rmSync(path.join(good, governed.MANIFEST_REL));
   const after = workflows.plan({ repo: good, root: ROOT, commit: COMMIT });
   assert.equal(after.rows.length, 2);
-  assert.match(after.not_copied.find(row => row.id === 'test-shards').reason, /the Toolkit copy at \.github\/workflows\/toolkit-test-shards\.yml is left as it was$/);
+  assert.deepEqual(after.not_copied.find(row => row.id === 'test-shards').left, ['.github/workflows/toolkit-test-shards.yml']);
+  assert.deepEqual(after.not_copied.find(row => row.id === 'shard-timings').left, ['.github/workflows/toolkit-shard-timings.yml']);
+  out.length = 0;
+  assert.equal(run(good, ['--check']), 0);
+  assert.match(out.join(''), /- test-shards: not copied, the repository has no shard list at \.github\/toolkit-test-shards\.json; the Toolkit copy at \.github\/workflows\/toolkit-test-shards\.yml is left as it was\./);
 });
 
 test('cloud workflows: a change to the list\'s shards makes the test shards copy outdated, a hand edit makes it edited', t => {
@@ -246,4 +250,67 @@ test('governance enable proposal carries the shard copies only where the list ex
   assert.deepEqual(Object.keys(withList.files).sort(), [...workflows.WORKFLOWS.map(row => row.file), SHARDS.file, TIMINGS.file].sort());
   const without = proposal.cloudWorkflowFiles(governedRepo(t, null), { root: ROOT, commit: COMMIT });
   assert.deepEqual(Object.keys(without.files).sort(), workflows.WORKFLOWS.map(row => row.file).sort());
+});
+
+test('L2: the shard copies are rendered for the default branch, and a branch change makes them outdated, never edited', t => {
+  for (const id of ['test-shards', 'shard-timings']) {
+    const row = workflows.SHARD_WORKFLOWS.find(item => item.id === id);
+    const input = branch => (id === 'test-shards' ? { ...BOTH, branch } : { branch });
+    const trunk = workflows.render(id, source(row.source), COMMIT, input('trunk'));
+    assert.match(trunk, /^  push:\n    branches: \[trunk\]$/m, `${id} pushes on trunk`);
+    assert.doesNotMatch(trunk, /branches: \[main\]/);
+    assert.equal(workflows.render(id, source(row.source), COMMIT, input(undefined)), workflows.render(id, source(row.source), COMMIT, input('main')), 'main by default');
+    for (const bad of ['', 'a b', '-x', 'a..b', 'x]']) assert.throws(() => workflows.render(id, source(row.source), COMMIT, input(bad)), /plain default branch/);
+  }
+  const timings = workflows.render('shard-timings', source(TIMINGS.source), COMMIT, { branch: 'trunk' });
+  assert.equal((timings.match(/refresh-shard-timings\.cjs --repo-root "\$GITHUB_WORKSPACE" --branch trunk /g) || []).length, 2, 'the refresh reads trunk runs and opens pull requests against trunk');
+  assert.match(timings, /# A push to the default branch also starts it/);
+  assert.doesNotMatch(timings, /# A push to main also starts it|Validate run on main/);
+  // A copy rendered for another branch is behind, not tampered with; a hand-made branch mismatch is an edit.
+  const repo = governedRepo(t);
+  workflows.apply(workflows.plan({ repo, root: ROOT, commit: COMMIT }));
+  put(repo, TIMINGS.file, timings);
+  put(repo, SHARDS.file, workflows.render('test-shards', source(SHARDS.source), COMMIT, { systems: { linux: ['linux-1', 'linux-2'] }, branch: 'trunk' }));
+  assert.equal(rowState(repo, 'shard-timings'), 'outdated');
+  assert.equal(rowState(repo, 'test-shards'), 'outdated');
+  put(repo, TIMINGS.file, forge(timings, body => body.replace('--branch trunk --open-pr', '--branch main --open-pr')));
+  assert.equal(rowState(repo, 'shard-timings'), 'edited');
+});
+
+test('L2: the sweep still refuses a default branch other than main, so no copy is written there', t => {
+  // Chosen: keep the install-wide refusal (the sweep runs only on main); the shard copies take the
+  // branch read from origin/HEAD, so they are ready once the sweep allows another branch.
+  const repo = governedRepo(t);
+  git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk']);
+  assert.throws(() => workflows.plan({ repo, root: ROOT, commit: COMMIT }), /default branch is trunk/);
+  git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+  const rows = workflows.plan({ repo, root: ROOT, commit: COMMIT }).rows;
+  for (const id of ['test-shards', 'shard-timings']) assert.match(rows.find(row => row.id === id).expected, /^  push:\n    branches: \[main\]$/m);
+});
+
+test('L3: a shard copy left after the list turned missing, invalid or unsupported is drift, with the reason and the fix', t => {
+  const repo = governedRepo(t, list(undefined, { workflow: 'shards.yml' }));
+  workflows.apply(workflows.plan({ repo, root: ROOT, commit: COMMIT }));
+  const drift = () => conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT }).filter(entry => entry.severity === 'drift').map(entry => entry.message);
+  assert.deepEqual(drift(), []);
+  const broken = list([{ id: 'linux-1', files: ['tests/missing.test.js'] }, { id: 'linux-2', rest: true }], { workflow: 'shards.yml' });
+  const python = list(undefined, { workflow: 'shards.yml' });
+  python.systems.linux.command = ['python', '-m', 'pytest', '{files}'];
+  for (const [label, manifest, reason] of [['invalid', broken, /is not usable/], ['unsupported', python, /set up Node only/], ['missing', null, /has no shard list/]]) {
+    if (manifest) put(repo, governed.MANIFEST_REL, JSON.stringify(manifest));
+    else fs.rmSync(path.join(repo, governed.MANIFEST_REL));
+    const found = drift();
+    assert.equal(found.length, 2, label);
+    // A missing list no longer names the workflow, so the test shards copy is found by its marker.
+    assert.match(found[0], /^\.github\/workflows\/shards\.yml is a Toolkit test shards copy, but the shard copies are no longer copied: /, label);
+    assert.match(found[1], /^\.github\/workflows\/toolkit-shard-timings\.yml is a Toolkit Shard Timings copy/, label);
+    for (const message of found) {
+      assert.match(message, reason, label);
+      assert.match(message, /Repair the shard list and refresh the repository rules, or remove the shard copies in a pull request\.$/, label);
+    }
+  }
+  // Once the copies are removed, nothing is reported.
+  fs.rmSync(path.join(repo, '.github/workflows/shards.yml'));
+  fs.rmSync(path.join(repo, TIMINGS.file));
+  assert.deepEqual(drift(), []);
 });

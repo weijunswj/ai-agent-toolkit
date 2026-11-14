@@ -368,7 +368,7 @@ test('v2: a governed list reads the workflow it names, takes command mode summar
     publish() { assert.fail('a write never publishes'); },
     out: { write(text) { out.push(text); } }, err: { write(text) { assert.fail(text); } },
   };
-  assert.equal(refresh.main(['--repo-root', root, '--write'], deps), 0);
+  assert.equal(refresh.main(['--repo-root', root, '--branch', 'main', '--write'], deps), 0);
   assert.deepEqual(seen, [[root, null, 'v2', 'toolkit-test-shards.yml', 'Toolkit Test Shards']]);
   assert.match(out.join(''), /^Toolkit Test Shards run 9 on main/);
   assert.match(out.join(''), /Updated \.github\/toolkit-test-shards\.json\./);
@@ -385,7 +385,7 @@ test('v2: a governed list reads the workflow it names, takes command mode summar
 
 test('v2: the list\'s workflow field picks the run; a missing workflow file or a named run of another workflow is refused', (t) => {
   const root = governedCheckout(t, { workflow: 'shards.yml' });
-  const profile = refresh.profileFor(root);
+  const profile = refresh.profileFor(root, 'main');
   assert.equal(profile.workflowFile, 'shards.yml');
   assert.equal(profile.manifestRel, governed.MANIFEST_REL);
   const { latestGreenRun } = loadWithCommands('refresh-shard-timings.cjs', ['latestGreenRun'], (program, args) => {
@@ -396,7 +396,7 @@ test('v2: the list\'s workflow field picks the run; a missing workflow file or a
   assert.throws(() => latestGreenRun(root, '2', profile), /run 2 is not a finished Toolkit Test Shards run/);
   fs.rmSync(path.join(root, '.github', 'workflows', 'shards.yml'));
   const errors = [];
-  assert.equal(refresh.main(['--repo-root', root], { readRun() { assert.fail('no run is read'); }, out: { write() {} }, err: { write(text) { errors.push(text); } } }), 2);
+  assert.equal(refresh.main(['--repo-root', root, '--branch', 'main'], { readRun() { assert.fail('no run is read'); }, out: { write() {} }, err: { write(text) { errors.push(text); } } }), 2);
   assert.match(errors.join(''), /\.github\/workflows\/shards\.yml, the workflow the shard list names, is missing/);
 });
 
@@ -409,7 +409,7 @@ test('v2: per-system budgets are reported, and --fail-if-due names the governed 
     readSummaries: () => [commandSummary({ [GOVERNED_FILES[0]]: 2, [GOVERNED_FILES[1]]: 40, [GOVERNED_FILES[2]]: 5, [GOVERNED_FILES[3]]: 60 })],
     out: { write(text) { out.push(text); } }, err: { write(text) { errors.push(text); } },
   };
-  assert.equal(refresh.main(['--repo-root', root, '--fail-if-due'], deps), 1);
+  assert.equal(refresh.main(['--repo-root', root, '--branch', 'main', '--fail-if-due'], deps), 1);
   assert.match(out.join(''), /linux: tests\/b_test\.py took 40 s, over its 30 s budget/);
   assert.doesNotMatch(out.join(''), /d_test\.py took/, 'a raised budget holds');
   assert.match(errors.join(''), /node <Toolkit>\/repo\/scripts\/refresh-shard-timings\.cjs --repo-root <checkout> --write/);
@@ -433,4 +433,37 @@ test('v1 stays as it was: the Toolkit root reads validate.yml and Validate runs 
   // The v1 plan is the same with the default profile and with V1 named.
   const current = manifest(even);
   assert.deepEqual(refresh.planRefresh(current, FILES, { linux: even, windows: even }), refresh.planRefresh(current, FILES, { linux: even, windows: even }, refresh.V1));
+});
+
+test('v2: runs, pull requests and the run guard use the governed repository\'s default branch; v1 keeps main', (t) => {
+  const root = governedCheckout(t);
+  const calls = [];
+  const { latestGreenRun, prBody } = loadWithCommands('refresh-shard-timings.cjs', ['latestGreenRun', 'prBody'], (program, args) => {
+    calls.push(args);
+    return { status: 0, stdout: JSON.stringify([{ databaseId: 1 }]) };
+  }, os.tmpdir());
+  const trunk = refresh.profileFor(root, 'trunk');
+  assert.equal(trunk.branch, 'trunk');
+  latestGreenRun(root, null, trunk);
+  assert.deepEqual(calls[0].slice(0, 6), ['run', 'list', '--workflow', 'toolkit-test-shards.yml', '--branch', 'trunk']);
+  assert.match(prBody({ databaseId: 5, headSha: 'a'.repeat(40) }, { findings: [] }, trunk), /run 5 on trunk \(aaaaaaa\)/);
+  // Without --branch, the default branch comes from GitHub.
+  const asked = [];
+  assert.equal(refresh.profileFor(root, null, (dir) => { asked.push(dir); return 'develop'; }).branch, 'develop');
+  assert.deepEqual(asked, [root]);
+  // --open-pr reads only that branch's runs and looks for refresh pull requests against it.
+  const run = { databaseId: 9, headBranch: 'trunk', headSha: 'b'.repeat(40) };
+  const found = [];
+  const published = [];
+  const deps = { readRun: () => run, findOpen: (dir, profile) => { found.push(profile.branch); return []; }, publish: (dir, actual, out, profile) => { published.push(profile.branch); return 0; }, readBranch: () => 'trunk', out: { write() {} }, err: { write() {} } };
+  assert.equal(refresh.main(['--repo-root', root, '--open-pr'], deps), 0);
+  assert.deepEqual([found, published], [['trunk'], ['trunk']]);
+  const errors = [];
+  assert.equal(refresh.main(['--repo-root', root, '--branch', 'main', '--open-pr'], { ...deps, err: { write(text) { errors.push(text); } } }), 2);
+  assert.match(errors.join(''), /--open-pr reads main runs only/);
+  // The Toolkit's own v1 manifest always refreshes from main and refuses --branch.
+  assert.equal(refresh.profileFor(shards.ROOT, null, () => assert.fail('v1 never asks GitHub')).branch, 'main');
+  assert.throws(() => refresh.profileFor(shards.ROOT, 'trunk'), /--branch goes with a governed shard list/);
+  for (const bad of [['--branch'], ['--branch', '-x'], ['--branch', 'a..b'], ['--branch', 'a b']]) assert.throws(() => refresh.parseArgs(bad), /--branch needs a branch name/, bad.join(' '));
+  assert.equal(refresh.parseArgs(['--branch', 'release/2.x']).branch, 'release/2.x');
 });

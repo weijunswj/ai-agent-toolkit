@@ -15,8 +15,10 @@
 //   - for the test shards copy (rendered from repo/contracts/ci/governed-test-shards.yml, which runs
 //     nowhere in the Toolkit), the shard ids of each system the repository's shard list names, and
 //     the job of a system it does not name, which is left out,
-//   - for the Shard Timings copy, the header lines that name the Toolkit's own manifest, and the
-//     refresh, which runs against the repository's own shard list (--repo-root).
+//   - for the Shard Timings copy, the header lines that name the Toolkit's own manifest and main, and
+//     the refresh, which runs against the repository's own shard list (--repo-root),
+//   - for both shard copies, the push branch (and the refresh's --branch): the repository's default
+//     branch, main unless the input names another.
 // A source file that no longer matches what the render expects stops it, so a change to the
 // workflows breaks the tests instead of producing a wrong copy.
 const crypto = require('node:crypto');
@@ -28,6 +30,15 @@ const MARKER = /^# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ([a-z-]+) toolkit=(
 const SHA = /^[0-9a-f]{40}$/;
 const SHARD_ID = /^[a-z]+-[1-9][0-9]*$/;
 const SYSTEMS = Object.freeze(['linux', 'windows']);
+const BRANCH = /^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/;
+const PUSH_MAIN = '  push:\n    branches: [main]\n';
+
+// The default branch a shard copy runs on: main unless the input names another plain branch name.
+function shardBranch(input) {
+  const branch = input && typeof input === 'object' && input.branch !== undefined ? input.branch : 'main';
+  if (typeof branch !== 'string' || !BRANCH.test(branch) || branch.includes('..')) throw new InstallError('the shard copies need a plain default branch name.');
+  return branch;
+}
 const NOTE = '# A copy of the Toolkit\'s own workflow, pinned to the Toolkit commit above. Do not edit it here: refresh the repository rules to update it.';
 
 class InstallError extends Error {
@@ -60,7 +71,7 @@ function shardSystems(input) {
 
 function renderTestShards(source, commit, input) {
   const systems = shardSystems(input);
-  let text = source;
+  let text = replaceOnce(source, PUSH_MAIN, `  push:\n    branches: [${shardBranch(input)}]\n`, 'test shards push branch');
   for (const system of SYSTEMS) {
     const placeholder = `        shard: TOOLKIT_SHARDS_${system.toUpperCase()}\n`;
     if (systems[system]) { text = replaceOnce(text, placeholder, `        shard: ${JSON.stringify(systems[system])}\n`, `${system} shards`); continue; }
@@ -86,12 +97,15 @@ function renderBody(id, source, commit, ci) {
   const toolkitCheckout = '      - name: Check out the Toolkit\n        uses: ' + CHECKOUT + '\n' + toolkitScript + '          persist-credentials: false\n';
   let text = source;
   if (id === 'shard-timings') {
+    const branch = shardBranch(ci);
     text = replaceOnce(text, '# Validate run on main and, when the shards have drifted, opens one pull request that updates the\n# shard manifest.',
-      '# run on main of the workflow this repository\'s shard list names (.github/toolkit-test-shards.json)\n# and, when the shards have drifted, opens one pull request that updates that list.', 'shard timings header');
+      '# run on the default branch of the workflow this repository\'s shard list names\n# (.github/toolkit-test-shards.json) and, when the shards have drifted, opens one pull request that\n# updates that list.', 'shard timings header');
+    text = replaceOnce(text, '# A push to main also starts it,', '# A push to the default branch also starts it,', 'shard timings push note');
+    text = replaceOnce(text, PUSH_MAIN, `  push:\n    branches: [${branch}]\n`, 'shard timings push branch');
     text = replaceOnce(text, RUN_COMMIT_CHECKOUT, `${RUN_COMMIT_CHECKOUT}\n${toolkitCheckout}`, 'shard timings checkout');
     const refreshes = (text.match(/node repo\/scripts\/refresh-shard-timings\.cjs /g) || []).length;
     if (refreshes !== 2) throw new InstallError('the Toolkit\'s workflow changed shape (shard timings refresh); the render needs an update.');
-    text = text.replace(/node repo\/scripts\/refresh-shard-timings\.cjs /g, 'node repo/scripts/refresh-shard-timings.cjs --repo-root "$GITHUB_WORKSPACE" ');
+    text = text.replace(/node repo\/scripts\/refresh-shard-timings\.cjs /g, `node repo/scripts/refresh-shard-timings.cjs --repo-root "$GITHUB_WORKSPACE" --branch ${branch} `);
   } else if (id === 'programme-sweep') {
     text = replaceOnce(text, RUN_COMMIT_CHECKOUT, `${RUN_COMMIT_CHECKOUT}\n${toolkitCheckout}`, 'sweep checkout');
     text = replaceOnce(text, '      - name: Check out the follow-up script\n        uses: ' + CHECKOUT + '\n        with:\n          ref: ${{ github.sha }}\n',
@@ -114,7 +128,8 @@ function renderBody(id, source, commit, ci) {
 }
 
 // The rendered copy: one managed header line, then the body. `input` is what the copy follows: the
-// gate's CI workflow ({ file, name } or null), or the test shards copy's shard ids ({ systems }).
+// gate's CI workflow ({ file, name } or null), the test shards copy's shard ids and default branch
+// ({ systems, branch }), or the Shard Timings copy's default branch ({ branch }).
 function render(id, source, commit, input = null) {
   if (!SHA.test(commit)) throw new InstallError('the Toolkit commit must be a full 40-character SHA.');
   const body = `${NOTE}\n${renderBody(id, normalise(source), commit, input)}`;

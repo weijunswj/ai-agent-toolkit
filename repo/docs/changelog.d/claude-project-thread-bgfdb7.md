@@ -10,6 +10,8 @@ Title: sharded test workflow copies for governed repositories
 
 - The installer copies neither workflow into a repository without a usable shard list and says why. A change to the list's shards makes the test shards copy outdated, not edited, and `toolkit governance check` reports the new copies' drift with what it costs the repository.
 - Turning governance off removes the test shards and Shard Timings copies too, and the left-over reports name them. The Toolkit copies are now found by their rendered-copy marker, so the test shards copy is found at whatever name its shard list chose, and a marker for another copy at a path does not count.
+- A test shards or Shard Timings copy left after the shard list went missing, stopped validating or names an unsupported program is drift in `toolkit governance check`, with the fix: repair the list, or remove the shard copies in a pull request.
+- The shard copies run on the repository's default branch: the installer renders it into their push trigger, and `refresh-shard-timings.cjs` takes `--branch <name>` for a governed list (or asks GitHub), using it for runs, refresh pull requests and their base. The Toolkit's own refresh stays on main.
 
 ### Known limits
 

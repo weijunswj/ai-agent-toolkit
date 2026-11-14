@@ -28,8 +28,10 @@
 // governed-test-shards.cjs) is refreshed the same way when --repo-root names a checkout that has one:
 // the run summaries come from the workflow the list names (`workflow`, default
 // toolkit-test-shards.yml), each system the list names gets its own discovered files, and the
-// durations and the named shards are written back to that list. Without a v2 list the Toolkit's own
-// v1 manifest and its Validate runs are used, exactly as before.
+// durations and the named shards are written back to that list. Its runs, pull requests and refresh
+// branch base are on the repository's default branch: --branch <name> (the copied workflow passes it),
+// else the one `gh repo view` names. Without a v2 list the Toolkit's own v1 manifest, its Validate runs
+// and main are used, exactly as before.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -50,6 +52,7 @@ const STALE_PR_DAYS = 7;
 // `filesFor` splits by system (v1 discovers one list for both systems).
 const V1 = Object.freeze({
   kind: 'v1',
+  branch: 'main',
   manifestRel: shards.MANIFEST_REL,
   workflowFile: WORKFLOW_FILE,
   workflowName: 'Validate',
@@ -73,7 +76,16 @@ function workflowNameOf(text) {
   return match ? match[2].trim() : null;
 }
 
-function v2Profile(root) {
+const BRANCH = /^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/;
+
+// The repository's default branch, from GitHub, for a v2 run that was not given --branch.
+function defaultBranch(root) {
+  const name = command('gh', ['repo', 'view', '--json', 'defaultBranchRef', '--jq', '.defaultBranchRef.name'], { cwd: root }).trim();
+  if (!BRANCH.test(name)) throw new Error('the repository\'s default branch could not be read; pass --branch <name>');
+  return name;
+}
+
+function v2Profile(root, branch) {
   const manifest = governed.loadManifest(root);
   const workflowFile = typeof manifest.workflow === 'string' ? manifest.workflow : governed.DEFAULT_WORKFLOW;
   let text = null;
@@ -82,6 +94,7 @@ function v2Profile(root) {
   if (!workflowName) throw new Error(`.github/workflows/${workflowFile}, the workflow the shard list names, is missing or has no name: line`);
   return Object.freeze({
     kind: 'v2',
+    branch,
     manifestRel: governed.MANIFEST_REL,
     workflowFile,
     workflowName,
@@ -101,17 +114,23 @@ function v2Profile(root) {
   });
 }
 
-// The v2 profile when `root` has a governed shard list, otherwise the Toolkit's own v1.
-function profileFor(root) {
-  return fs.existsSync(path.join(root, ...governed.MANIFEST_REL.split('/'))) ? v2Profile(root) : V1;
+// The v2 profile when `root` has a governed shard list, otherwise the Toolkit's own v1 (on main).
+// `branch` is the governed repository's default branch, or a function that reads it.
+function profileFor(root, branch = null, readBranch = defaultBranch) {
+  if (!fs.existsSync(path.join(root, ...governed.MANIFEST_REL.split('/')))) {
+    if (branch) throw new Error('--branch goes with a governed shard list (.github/toolkit-test-shards.json); the Toolkit\'s own manifest refreshes from main');
+    return V1;
+  }
+  return v2Profile(root, branch || readBranch(root));
 }
 
-const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--run <id>] [--write | --open-pr | --fail-if-due]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
+const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--branch <default branch>] [--run <id>] [--write | --open-pr | --fail-if-due]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
   const options = { run: null, write: false, openPr: false, failIfDue: false };
+  const BRANCH_ARG = /^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--write') options.write = true;
@@ -121,6 +140,11 @@ function parseArgs(argv) {
       const value = argv[index += 1];
       if (!value || !path.isAbsolute(value)) throw new UsageError('--repo-root needs an absolute checkout path');
       options.root = value;
+    }
+    else if (arg === '--branch') {
+      const value = argv[index += 1];
+      if (!BRANCH_ARG.test(value || '') || value.includes('..')) throw new UsageError('--branch needs a branch name');
+      options.branch = value;
     }
     else if (arg === '--run') {
       const value = argv[index += 1];
@@ -260,8 +284,8 @@ function latestGreenRun(root, run, profile = V1) {
     if (!value.conclusion || value.workflowName !== profile.workflowName) throw new Error(`run ${run} is not a finished ${profile.workflowName} run`);
     return value;
   }
-  const list = JSON.parse(command('gh', ['run', 'list', '--workflow', profile.workflowFile, '--branch', 'main', '--event', 'push', '--status', 'success', '--limit', '1', '--json', fields], { cwd: root }));
-  if (!list.length) throw new Error(`no successful ${profile.workflowFile} run on main was found`);
+  const list = JSON.parse(command('gh', ['run', 'list', '--workflow', profile.workflowFile, '--branch', profile.branch, '--event', 'push', '--status', 'success', '--limit', '1', '--json', fields], { cwd: root }));
+  if (!list.length) throw new Error(`no successful ${profile.workflowFile} run on ${profile.branch} was found`);
   return list[0];
 }
 
@@ -285,7 +309,7 @@ function downloadSummaries(root, runId) {
 
 function prBody(run, plan, profile = V1) {
   return [
-    `Refreshes the measured test times in \`${profile.manifestRel}\` from the test summaries of ${profile.workflowName} run ${run.databaseId} on main (${run.headSha.slice(0, 7)}).`,
+    `Refreshes the measured test times in \`${profile.manifestRel}\` from the test summaries of ${profile.workflowName} run ${run.databaseId} on ${profile.branch} (${run.headSha.slice(0, 7)}).`,
     '',
     'Triggers crossed:',
     ...plan.findings.map((finding) => `- ${finding}`),
@@ -305,8 +329,8 @@ function prBody(run, plan, profile = V1) {
 // The open pull requests a previous refresh made (branch toolkit/shard-timings-<sha>): while one is
 // open, a scheduled run opens no second one.
 const REFRESH_BRANCH_PREFIX = 'toolkit/shard-timings-';
-function openRefreshPrs(root) {
-  const open = JSON.parse(command('gh', ['pr', 'list', '--state', 'open', '--base', 'main', '--limit', '100', '--json', 'number,headRefName,createdAt'], { cwd: root }));
+function openRefreshPrs(root, profile = V1) {
+  const open = JSON.parse(command('gh', ['pr', 'list', '--state', 'open', '--base', profile.branch, '--limit', '100', '--json', 'number,headRefName,createdAt'], { cwd: root }));
   return open.filter(pr => typeof pr.headRefName === 'string' && pr.headRefName.startsWith(REFRESH_BRANCH_PREFIX));
 }
 
@@ -335,7 +359,7 @@ function openPr(root, run, out, profile = V1) {
   let parent;
   let tree;
   try {
-    command('git', ['fetch', '--quiet', '--no-tags', 'origin', `main:${fetchRef}`], { cwd: root });
+    command('git', ['fetch', '--quiet', '--no-tags', 'origin', `${profile.branch}:${fetchRef}`], { cwd: root });
     const fetchedCommit = command('git', ['rev-parse', `${fetchRef}^{commit}`], { cwd: root }).trim();
     parent = fs.mkdtempSync(path.join(os.tmpdir(), 'shard-timings-wt-'));
     tree = path.join(parent, 'tree');
@@ -344,17 +368,17 @@ function openPr(root, run, out, profile = V1) {
     const plan = planRefresh(profile.load(tree), discovered, timingsFromSummaries(downloadSummaries(root, run.databaseId), discovered), profile);
     for (const finding of plan.findings) out.write(`- ${finding}\n`);
     if (!plan.refresh) {
-      out.write('No refresh trigger crossed on origin/main; no pull request.\n');
+      out.write(`No refresh trigger crossed on origin/${profile.branch}; no pull request.\n`);
       command('git', ['worktree', 'remove', '--force', tree], { cwd: root });
       command('git', ['branch', '-D', branch], { cwd: root });
       return 0;
     }
     fs.writeFileSync(path.join(tree, ...profile.manifestRel.split('/')), manifestText(plan.manifest));
     command('git', ['add', profile.manifestRel], { cwd: tree });
-    command('git', ['commit', '--quiet', '-m', `Refresh test shard timings from main run ${run.databaseId}`], { cwd: tree });
+    command('git', ['commit', '--quiet', '-m', `Refresh test shard timings from ${profile.branch} run ${run.databaseId}`], { cwd: tree });
     const env = publishEnv();
     command('git', ['push', '--quiet', '-u', 'origin', branch], { cwd: tree, ...(env ? { env } : {}) });
-    const url = command('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', 'Refresh test shard timings', '--body', prBody(run, plan, profile)], { cwd: tree, ...(env ? { env } : {}) }).trim();
+    const url = command('gh', ['pr', 'create', '--base', profile.branch, '--head', branch, '--title', 'Refresh test shard timings', '--body', prBody(run, plan, profile)], { cwd: tree, ...(env ? { env } : {}) }).trim();
     out.write(`Opened ${url}\n`);
     command('git', ['worktree', 'remove', '--force', tree], { cwd: root });
     return 0;
@@ -369,7 +393,7 @@ function openPr(root, run, out, profile = V1) {
   }
 }
 
-function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, readRun = latestGreenRun, readSummaries = downloadSummaries, publish = openPr, findOpen = openRefreshPrs, now = Date.now() } = {}) {
+function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, readRun = latestGreenRun, readSummaries = downloadSummaries, publish = openPr, findOpen = openRefreshPrs, readBranch = defaultBranch, now = Date.now() } = {}) {
   let options;
   try {
     options = parseArgs(argv);
@@ -381,12 +405,12 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
   if (options.help) { out.write(`${USAGE}\n`); return 0; }
   root = options.root || root;
   try {
-    const profile = profileFor(root);
+    const profile = profileFor(root, options.branch || null, readBranch);
     const run = readRun(root, options.run, profile);
     out.write(`${profile.workflowName} run ${run.databaseId} on ${run.headBranch} (${run.headSha.slice(0, 7)})\n`);
     if (options.openPr) {
-      if (run.headBranch !== 'main') throw new Error('--open-pr reads main runs only');
-      const open = findOpen(root);
+      if (run.headBranch !== profile.branch) throw new Error(`--open-pr reads ${profile.branch} runs only`);
+      const open = findOpen(root, profile);
       if (open.length) {
         out.write(`A shard timing pull request is already open (#${open.map(pr => pr.number).join(', #')}); no new pull request.\n`);
         const stale = open.filter(pr => now - Date.parse(pr.createdAt || '') > STALE_PR_DAYS * 86400000);
