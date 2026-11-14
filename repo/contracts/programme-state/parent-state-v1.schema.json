@@ -40,11 +40,12 @@
           "label": { "type": "string", "minLength": 1 },
           "class": { "enum": ["COMMITTED", "OPTIONAL", "COMPLETED", "RETIRED", "CORE", "HARDENING", "LATER"], "description": "What the owner decided: committed, optional, completed or retired. Now and Later are worked out from the task's PR and gate, never stored. CORE, HARDENING and LATER are older names kept only for migration: read as COMMITTED and sorted like any other task, reported as CLASS_LEGACY with a migration patch, and never added by a write." },
           "parent": { "type": ["integer", "null"], "minimum": 1, "description": "Expected native parent: the programme parent or another outcome. Null means no native parent is expected." },
-          "order": { "type": "integer", "minimum": 0, "description": "The priority: the Programme Graph and native sub-issue order sort open outcomes by group (Now, Later, Optional), then order, lowest first, then issue number, so the top Later outcome starts next. Finished outcomes sort by completion time." },
+          "order": { "type": "integer", "minimum": 0, "description": "The priority: the Programme Graph and native sub-issue order sort open outcomes by group (Now, Later, Optional), then order, lowest first, then issue number, so the top Later outcome starts next. Outcomes pinned with last follow every other open outcome. Finished outcomes sort by completion time." },
           "lane": { "type": "string", "minLength": 1 },
           "owner_prefix": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,40}$" },
           "name": { "type": "string", "minLength": 1, "description": "The task name shown in the Task column. Without it, the issue title is shown without a leading code or release." },
-          "description": { "type": "string", "minLength": 1, "description": "One short line saying what the task is supposed to achieve. Shown in the Task Description column." }
+          "description": { "type": "string", "minLength": 1, "description": "One short line saying what the task is supposed to achieve. Shown in the Task Description column." },
+          "last": { "const": true, "description": "Pins an open outcome after every unpinned open outcome in the Programme Graph and native sub-issue order, whatever its order, so outcomes added later still sort before it. Pinned outcomes sort among themselves by group, then order, then issue number. Leave it out for an ordinary outcome." }
         }
       }
     },

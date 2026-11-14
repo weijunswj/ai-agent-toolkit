@@ -1,5 +1,31 @@
 # Toolkit Changelog
 
+## 3.110.0 (cloud sweep runs queued holder orders)
+
+### Removed
+
+- `toolkit governance reopen` and `toolkit governance catalogue` are gone. Nothing called them: reopen only printed "Nothing changed", and the catalogue was a list nobody read once `toolkit cmd` stopped offering it.
+- The per-state skill catalogue code and its skill tier file go with it, and `toolkit governance check` no longer reports catalogue drift. The skill routing test still checks that every routed skill exists.
+- The governance guard no longer lists `reopen` or `repair` as decision words, since neither is a governance command.
+
+### Added
+
+- The cloud Programme Sweep now runs holder orders the controller queues in the private evidence store (`orders/pending/<order_id>.json`, or `.dry-run.json` for a rehearsal). Each runs at the start of the pass, inside the sweep lease, with `run-order`'s own rules, and is filed under `orders/done/` or `orders/refused/` with its result, so a controller with no shell no longer needs a session on a computer for its board writes. The run summary shows only counts and warns when an order was refused.
+
+## 3.109.0
+
+### Changed
+
+- Programme catalogue entries can be pinned last with `last: true`. A pinned open task sorts after every other open task in the Programme Graph, the Start next pick and the native sub-issue order, so a final clean-up task stays last however many tasks the sweep adds later. Pinned tasks tie only with each other, and the graph's order line names them while one is open. Set the pin only once every copy that reads the parent runs this release: older copies refuse `last` as an unknown field.
+
+## 3.108.0 (shorter command list)
+
+### Changed
+
+- **`toolkit cmd` lists only what you would type:** setup, refresh and remove Toolkit; `toolkit env` (or `toolkit show env`); `toolkit governance` (or `governance setup`); and `merge N`. `setup governance` and `refresh governance` open the same governance guide. The typed shortcuts for the governance tools (`toolkit governance status`, `check`, `discover`, `catalogue`, `security` and `migrate`) are gone: agents, setup and CI run those tools directly. `toolkit permissions` and `toolkit update scheduled task` are off the list.
+- **`toolkit governance` is now a guide:** typed as a whole message (or `governance setup`), it runs governance setup, which in a governed repository shows the merged answers, and then offers the next step: turn governance on, change task auto-merge or turn it off. Each change is one pull request for you to merge.
+- **`toolkit env` is a typed command:** it opens the keys editor, the same as `toolkit show env`.
+
 ## 3.107.0 (permission blocks shown in full, added on the owner's ask)
 
 ### Changed

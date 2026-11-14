@@ -24,7 +24,6 @@ const path = require('node:path');
 
 const managedBlock = require('./toolkit-managed-block.cjs');
 const governance = require('./toolkit-governance-state.cjs');
-const catalogue = require('./toolkit-governance-catalogue.cjs');
 const ruleset = require('./toolkit-governance-ruleset.cjs');
 const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
@@ -368,17 +367,14 @@ function unverifiedExit(findings, options = {}, environment = process.env) {
 const UNVERIFIED_STEP = 'A repository admin signs in with `gh auth login` and runs `toolkit governance check` again; until then nothing here counts as conformant.';
 
 function report(exitCode, state, findings, toolkitRoot, rulesetResult = null, protectionResult = null, securityResult = null, cloudJobs = null) {
-  let catalogueProblems = [];
-  try { catalogueProblems = catalogue.catalogueProblems(toolkitRoot); } catch { catalogueProblems = ['the skill catalogue could not be checked']; }
-  const all = [...findings, ...catalogueProblems.map(message => finding('CATALOGUE_DRIFT', 'drift', message))];
-  const code = exitCode === 2 ? 2 : (all.some(entry => entry.severity === 'drift') ? 1 : exitCode);
+  const code = exitCode === 2 ? 2 : (findings.some(entry => entry.severity === 'drift') ? 1 : exitCode);
   return Object.freeze({
     schema: 'toolkit.governance-conformance.v1',
     exit_code: code,
     status: code === 0 ? 'conformant' : code === 1 ? 'drift' : code === 3 ? 'unverified' : 'error',
     ...(code === 3 ? { next_step: UNVERIFIED_STEP } : {}),
     state,
-    findings: Object.freeze(all),
+    findings: Object.freeze([...findings]),
     no_force_push_ruleset: rulesetResult,
     default_branch_protection: protectionResult,
     dependency_security: securityResult,
