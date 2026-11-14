@@ -40,6 +40,7 @@ const path = require('node:path');
 const governance = require('./toolkit-governance-state.cjs');
 const { normaliseHost } = governance;
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
+const { BankTickets, bankTicketContext, bankTicketCommand } = require('./toolkit-governance-bank.cjs');
 
 // Earlier versions kept held messages in this file. Nothing is held now; the session-start hook
 // removes the file, which is Toolkit's own, because its text is never delivered again.
@@ -188,7 +189,8 @@ function answerCommand(text) {
 }
 // The governance CLI given a decision word anywhere after it in the same command, so options before
 // the decision (`--json enable`, `--repo . disable`) count too. Read word by word, in linear time.
-const DECISION_WORDS = new Set(['enable', 'disable', 'decline', 'reopen', 'migrate', 'repair']);
+// `--answers` and `--ticket` answer the governance bank; only the exact ticketed command passes (ToolGate).
+const DECISION_WORDS = new Set(['enable', 'disable', 'decline', 'reopen', 'migrate', 'repair', '--answers', '--ticket']);
 function decisionAfterScript(text) {
   const pattern = /toolkit-governance\.cjs/gi;
   for (let found = pattern.exec(text); found; found = pattern.exec(text)) {
@@ -935,6 +937,8 @@ const REASK_LINE = 'Toolkit: your reply could not be matched to the confirmation
 const REPLY_LOST = 'Toolkit: the local reply state could not be read, so nothing can be recorded from this message. Restore its read/write access or an intact local copy and keep spent delivery receipts; `toolkit governance enable` or `toolkit governance disable` as a message still works.';
 // The note that this run was asked could not be saved, so no answer in chat can be matched to it.
 const UNSAVED_LINE = `Toolkit could not note that it asked (its user-state folder could not be written), so an answer in chat cannot be recorded and this question comes with each message until that works. To decide now, run ${terminalCommand('enable')} or ${terminalCommand('disable')} in your own terminal.`;
+const BANK_MOVED = 'Toolkit: this repository\'s session mark changed since the governance bank was shown, so this message cannot answer it. If it was meant as the answer, show the bank again (toolkit governance) and have the user reply to that one.';
+const BANK_LOST = 'Toolkit: the reply to the governance bank could not be kept (its local state could not be written), so nothing can be recorded from this message. Show the bank again once that works.';
 const MOVED_LINE = 'Toolkit: another session started in this repository since Toolkit asked, so nothing was recorded and Toolkit asks again.';
 const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card. Carry on with what the user asked; they can still send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
 // A session the session-start hook never marked cannot be asked once or answer in chat.
@@ -1016,7 +1020,7 @@ class PickerNotes {
 // The host-neutral UserPromptSubmit decision: { action: 'pass' } | { action: 'pass', context } |
 // { action: 'block', reason }.
 class PromptHold {
-  #gate; #asked; #epochs; #notes; #tickets; #registryOptions; #environment; #now; #picker;
+  #gate; #asked; #epochs; #notes; #tickets; #bank; #registryOptions; #environment; #now; #picker;
 
   // The UserPromptSubmit core. It never holds a message for the question: the first own message of
   // a run in an undecided repository is let through with the question attached once, and the run is
@@ -1030,6 +1034,7 @@ class PromptHold {
     this.#epochs = new SessionEpochs({ registryOptions, now });
     this.#notes = new PickerNotes({ registryOptions, now });
     this.#tickets = new ReplyTickets({ registryOptions, now, gate: this.#gate });
+    this.#bank = new BankTickets({ registryOptions, now });
     this.#environment = environment || {};
     this.#now = now;
     this.#picker = picker === true;
@@ -1075,6 +1080,9 @@ class PromptHold {
   }
 
   #decide({ cwd, prompt, sessionId = null }) {
+    // The owner's reply to a governance bank shown in this run comes first, in any repository state.
+    const banked = this.#bankReply(prompt, sessionId);
+    if (banked) return banked;
     const verdict = this.#gate.evaluate(cwd, { sessionId, refreshPending: true });
     if (!verdict.open) {
       if (verdict.pending) return { action: 'pass', context: verdict.pending.text };
@@ -1134,6 +1142,37 @@ class PromptHold {
       if (confirmed) return confirmed.unmatched ? PromptHold.#unclaimed({ reason: PromptHold.reask(confirmed) }) : confirmed;
     }
     return this.#ticket(sessionId, marks.session, [{ id, root: verdict.state.root, mark: marks.repository || null }]) || { action: 'pass' };
+  }
+
+  // The first own message after this run was shown a governance bank (toolkit-governance-bank.cjs)
+  // gets a one-use bank ticket; null when no bank waits in this run. A launched session, a message
+  // that is not the user's own, a repeated Projects delivery or a reply after the repository's session
+  // mark changed gets none, and the bank must be shown again.
+  #bankReply(prompt, sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '') return null;
+    const epoch = this.#epochs.get(sessionId);
+    if (!EPOCH.test(String(epoch))) return null;
+    let shown = null;
+    try { shown = this.#bank.pendingFor(sessionId, epoch); } catch { return null; }
+    if (!shown) return null;
+    const message = ownerMessage(String(prompt || ''));
+    const drop = () => { try { this.#bank.drop(sessionId); } catch { /* the note lapses in half an hour */ } };
+    if (this.#launched(sessionId)) { drop(); return { action: 'pass' }; }
+    if (!ownTyped(message)) return null;
+    if (this.#epochs.repository(shown.repository_id) !== shown.repository_mark) {
+      drop();
+      return { action: 'pass', context: `${BANK_MOVED}
+${NEVER_OWNER}` };
+    }
+    if (message.wrapped) {
+      let accepted = false;
+      try { accepted = this.#tickets.acceptDelivery(message, Date.parse(shown.at)); } catch { accepted = false; }
+      if (!accepted) { drop(); return PromptHold.#unclaimed({ reason: REPEAT_TEXT }); }
+    }
+    let ticket = null;
+    try { ticket = this.#bank.issue(sessionId, epoch); } catch { ticket = null; }
+    return { action: 'pass', context: ticket ? bankTicketContext(shown, ticket) : `${BANK_LOST}
+${NEVER_OWNER}` };
   }
 
   // A Projects delivery that cannot count is still let through as ordinary work; the agent is told
@@ -1331,7 +1370,7 @@ function sessionIdOf(input) {
 const SCHEDULED_ANSWER = /toolkit\s+governance\s+(?:enable|disable|decline)/i;
 
 class ToolGate {
-  #gate; #epochs; #notes; #tickets; #asked;
+  #gate; #epochs; #notes; #tickets; #asked; #bank;
 
   // The PreToolUse core. No tool is refused because a repository is undecided: it counts as off and
   // work carries on. What stays are the checks that stop an agent answering the question for the
@@ -1344,6 +1383,7 @@ class ToolGate {
     this.#notes = new PickerNotes({ registryOptions, now });
     this.#tickets = new ReplyTickets({ registryOptions, now, gate: this.#gate });
     this.#asked = new AskedRuns({ registryOptions, now });
+    this.#bank = new BankTickets({ registryOptions, now });
   }
 
   // AskUserQuestion is free for any other question. A call that carries Toolkit's own governance
@@ -1371,6 +1411,9 @@ class ToolGate {
       // Recording the answer the agent read from the user's own reply, with this session's live
       // ticket; the script checks the ticket again as it records.
       if (tool !== 'Monitor' && ticketCommand(text, sessionId, this.#tickets)) return null;
+      // Sending the user's reply to a governance bank, with this session's live bank ticket; the
+      // command spends the ticket again as it runs. Any other bank answer is refused below.
+      if (tool !== 'Monitor' && bankTicketCommand(text, sessionId, this.#bank)) return null;
       // Any other run of the answer script with an answer and a ticket (joined to another command,
       // from another session, through another script path) is refused, so a ticket is spent only
       // by the session it was given to, on its own.
@@ -1412,7 +1455,7 @@ class ToolGate {
     if (typeof sessionId !== 'string' || sessionId === '') return null;
     try {
       const epoch = this.#epochs.get(sessionId);
-      if (this.#tickets.live(sessionId, epoch) || this.#asked.windowFor(sessionId, epoch)) return 'reply';
+      if (this.#tickets.live(sessionId, epoch) || this.#asked.windowFor(sessionId, epoch) || this.#bank.live(sessionId, epoch)) return 'reply';
       return this.#asked.anyFor(sessionId, epoch) ? 'asked' : null;
     } catch { return 'reply'; }
   }

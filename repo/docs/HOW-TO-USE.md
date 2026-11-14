@@ -77,10 +77,9 @@ Type one of these as your whole message in Codex or Claude Code. `toolkit cmd`, 
 
 `node repo/scripts/toolkit-commands.cjs` prints the same list.
 
-`setup governance` and `refresh governance` (also with `toolkit` in front), which Toolkit's own messages ask you to say, open the same governance guide:
+Governance has one entry:
 
-- `setup governance` or `toolkit setup governance`: turn Toolkit's GitHub governance on for this repository and set its task auto-merge switch in the same pull request. In a governed repository it is `refresh governance`.
-- `refresh governance` or `toolkit refresh governance`: show this repository's merged governance answers (task auto-merge switch, evidence store, checks) and the permission table and blocks for this computer and this repository. The reply shows them in full, with the one command you paste into your own PowerShell or terminal to add them. Ask to turn task auto-merge on or off and Toolkit prepares one pull request for you to merge; it applies only after your merge.
+- `toolkit governance`, `setup governance` or `refresh governance` (with or without `toolkit` in front): show this repository's governance question bank, in the same format as `setup toolkit`. It asks whether GitHub governance is on, whether task auto-merge is on, and whether to add Toolkit's permission blocks for you, and shows the evidence store and required checks as status lines. Reply `all recommended` or only your changes, such as `1.2=B`, in chat; no terminal step. Toolkit checks that the reply is your own message before it acts. Every change to governance or task auto-merge is one pull request for you to merge, and applies only after your merge.
 
 `toolkit governance enable` and `toolkit governance disable` are your answers to Toolkit's governance question. Each prepares a pull request for you to merge, and counts only while that question is open for this repository.
 
