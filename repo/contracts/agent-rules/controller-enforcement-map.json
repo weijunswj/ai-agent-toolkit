@@ -235,8 +235,8 @@
     },
     {
       "file": "repo/controller/principles.md",
-      "rule": "**Plug and play:**",
-      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; whether a repository file is needed is a design call."
+      "rule": "**Governance owns its part:**",
+      "instruction_only": "A pointer that keeps governance-owned principles out of this page; the governance checks enforce those themselves."
     },
     {
       "file": "repo/controller/principles.md",
@@ -258,7 +258,7 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Git hygiene:**",
-      "covers": "The attribution guard refuses AI attribution in commits and pull requests. Merge-commit-only, no force-push and commit identity are instruction-only here.",
+      "covers": "The attribution guard refuses AI attribution in commits and pull requests. No force-push and commit identity are instruction-only here; merge-commit-only is a governance check.",
       "enforced_by": [
         {
           "kind": "script",
@@ -284,11 +284,6 @@
     },
     {
       "file": "repo/controller/principles.md",
-      "rule": "**Owner reads and clicks:**",
-      "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; the reconciler posts closing comments, but who does a page move is a working rule."
-    },
-    {
-      "file": "repo/controller/principles.md",
       "rule": "**Finish fast:**",
       "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; batch size and lane use are controller calls."
     },
@@ -306,11 +301,6 @@
       "file": "repo/controller/principles.md",
       "rule": "**Host-local talk:**",
       "instruction_only": "A design principle the controller applies by judgement in plans, reviews and merges; what counts as an unasked mention is a wording call."
-    },
-    {
-      "file": "repo/controller/principles.md",
-      "rule": "**Per-repo governance:**",
-      "instruction_only": "The governance state rules in the core enforce the switch; this line states the principle behind them."
     },
     {
       "file": "repo/controller/roles-and-routes.md",
