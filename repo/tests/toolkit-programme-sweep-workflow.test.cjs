@@ -981,6 +981,53 @@ test('refreshed: only a pass that ran says so; every skip and failure leaves foo
   }
 });
 
+// saqg review: near the App limit a pass that cannot read its large state documents stops before any
+// write, and its stop reason names the documents, not the limit. It must not count as refreshed.
+test('App limit and no-write stops: never refreshed, so footer cleaning never runs; a no-write pass is held', () => {
+  const { RESET_WAIT_MS } = gateScript();
+  const stop = { code: 'PASS_STOPPED', target: '#421', detail: 'the last refresh stopped at planning' };
+  const truncatedAtLimit = { status: 1, code: null, report: { metrics: 'Sweep: requests=4400', holds: [stop],
+    sweep: { read: 0, left: 12, noWrite: true, reason: 'State documents too large for GraphQL', limit: 'GitHub rate limit' } } };
+  const busy = { status: 1, code: null, report: { metrics: 'Sweep: requests=90', holds: [stop],
+    sweep: { read: 4, left: 0, noWrite: true, reason: 'state branch busy', limit: null } } };
+  const unheldNoWrite = { status: 0, code: null, report: { metrics: 'Sweep: requests=30', holds: [], sweep: { read: 0, left: 3, noWrite: true, reason: 'time limit', limit: null } } };
+  const midPassLimit = { status: 0, code: null, report: { metrics: 'Sweep: requests=4500', holds: [], sweep: { read: 5, left: 10, reason: 'GitHub rate limit', limit: 'GitHub rate limit' } } };
+  const paused = { status: 0, code: null, report: { outcome: 'PAUSED', reason: 'GitHub rate limit' } };
+  const has = (result, name) => result.outputs.some(([key, value]) => key === name && value === 'true');
+  for (const [label, refresh, limited] of [['truncated documents at the App limit', truncatedAtLimit, true], ['busy state branch', busy, false],
+    ['no-write pass without a hold', unheldNoWrite, false], ['mid-pass App limit', midPassLimit, true], ['PAUSED', paused, true]]) {
+    const result = runAction('run', { env: minted, refresh: () => refresh });
+    assert.equal(result.code, 0, label);
+    assert.equal(has(result, 'refreshed'), false, `${label}: not refreshed`);
+    assert.equal(has(result, 'at_limit'), limited, `${label}: at_limit`);
+  }
+  // The stop reason alone names the documents; the limit that bound it makes it an App-limit stop.
+  assert.equal(action().atAppLimit(truncatedAtLimit.report), true);
+  assert.equal(action().atAppLimit({ sweep: { ...truncatedAtLimit.report.sweep, limit: 'request cap' } }), false);
+  assert.equal(action().wroteNothing(truncatedAtLimit.report), true);
+  assert.equal(action().wroteNothing(midPassLimit.report), false);
+  // Held: titled, so the gate counts it; a no-write pass without a hold is held too, under NO_WRITE.
+  const held = runAction('run', { env: minted, refresh: () => truncatedAtLimit });
+  assert.deepEqual(held.tags, [{ title: action().HELD_TITLE, code: 'PASS_STOPPED' }]);
+  const unsaved = runAction('run', { env: minted, refresh: () => unheldNoWrite });
+  assert.deepEqual(unsaved.warnings, [action().NOTICES.unsaved]);
+  assert.deepEqual(unsaved.tags, [{ title: action().HELD_TITLE, code: 'NO_WRITE' }]);
+  assert.deepEqual(runAction('run', { env: minted, refresh: () => paused }).tags, [], 'PAUSED stays calm');
+  // It read and saved nothing, so it follows up once the limit resets, on a private repository too
+  // (it leaves no board note for the hourly gate to resume from).
+  for (const env of [minted, { ...minted, REPOSITORY_PRIVATE: 'true' }]) {
+    const before = Date.now();
+    const result = runAction('run', { env, refresh: () => truncatedAtLimit });
+    const at = Number(result.outputs.find(([name]) => name === 'follow_up_at')?.[1]);
+    assert.ok(at >= before + RESET_WAIT_MS && at <= Date.now() + RESET_WAIT_MS, JSON.stringify(result.outputs));
+    assert.deepEqual(result.notices, []);
+  }
+  assert.equal(action().followUpAt(truncatedAtLimit.report, 1000, 5000), 1000 + RESET_WAIT_MS);
+  assert.equal(action().followUpAt(busy.report, 1000, 5000), 0, 'a busy branch below the limit needs no wait');
+  // The footer step runs only on refreshed == 'true', so none of these edits a post.
+  assert.match(step('Clean the cloud footer from the owner\'s posts'), /steps\.refresh\.outputs\.refreshed == 'true'/);
+});
+
 test('footers: without a refresh that ran this commit, nothing is edited and one warning says so', () => {
   for (const REFRESHED of ['', 'false', undefined]) {
     const result = runFooters({ env: { REFRESHED } });

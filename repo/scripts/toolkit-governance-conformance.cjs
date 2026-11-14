@@ -182,12 +182,13 @@ function appFindings(state, options) {
   return found ? [found] : [];
 }
 
-// Report the effective app-local setting; governance never asks or drafts an answer.
+// Report the repository's own switch; governance never asks or drafts an answer here.
 function taskMergeSettingFinding(root, options) {
   const answer = governance.taskAutoMerge(root, options);
   const on = answer.auto_merge === 'after-gates';
+  if (answer.reason === 'no-switch-set') return finding('TASK_AUTO_MERGE_UNSET', 'info', governance.TASK_SWITCH_UPGRADE_LINE);
   return finding(on ? 'TASK_AUTO_MERGE_ON' : 'TASK_AUTO_MERGE_OFF', 'info',
-    `Task auto-merge: ${on ? 'on' : 'off'}. Source: ${answer.source}; ${answer.reason}. Change this app's answer with setup toolkit. Governance, hooks, setup and merge-rule changes still wait for the owner's typed merge.`);
+    `Task auto-merge: ${on ? 'on' : 'off'} (${answer.reason}). It is this repository's task_prs.auto_merge in the merged binding; say refresh governance to see or change it. Governance, hooks, setup and merge-rule changes still wait for the owner's typed merge.`);
 }
 
 function rulesetFindings(result) {
