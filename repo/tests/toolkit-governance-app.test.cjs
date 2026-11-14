@@ -369,3 +369,17 @@ test('ownerType reads only the repository, with GET, and anything unreadable is 
   app.ownerType(SLUG, { reader: args => app.ghReader(args, { spawn: (command, list) => { seen.push(list); return { status: 0, stdout: '{"owner":{"type":"User"}}' }; } }) });
   assert.deepEqual(seen, [['api', `repos/${SLUG}`]]);
 });
+
+test('an online check that could not confirm a setting is unverified (exit 3) with the admin step, never conformant', () => {
+  const unverified = [{ id: 'RULESET_UNVERIFIED', severity: 'unverified', message: 'x' }];
+  assert.equal(conformance.unverifiedExit(unverified, {}, {}), 3);
+  assert.equal(conformance.unverifiedExit(unverified, { offline: true }, {}), 0, 'an offline run chose not to read');
+  assert.equal(conformance.unverifiedExit(unverified, { testOnly: true }, {}), 0);
+  assert.equal(conformance.unverifiedExit(unverified, {}, { TOOLKIT_GOVERNANCE_OFFLINE: '1' }), 0);
+  assert.equal(conformance.unverifiedExit([{ id: 'X', severity: 'info', message: 'x' }], {}, {}), 0);
+  const result = conformance.report(3, null, unverified, path.resolve(__dirname, '..', '..'));
+  assert.deepEqual([result.exit_code, result.status], [3, 'unverified']);
+  assert.match(result.next_step, /repository admin signs in with `gh auth login` and runs `toolkit governance check` again/);
+  const drift = conformance.report(1, null, [...unverified, { id: 'D', severity: 'drift', message: 'd' }], path.resolve(__dirname, '..', '..'));
+  assert.deepEqual([drift.exit_code, drift.status, drift.next_step], [1, 'drift', undefined], 'drift still wins');
+});

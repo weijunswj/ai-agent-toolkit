@@ -151,6 +151,11 @@ test('a member that conflicts is ejected, never hand-fixed, and the rest still l
   assert.equal(result.ejected.length, 1);
   assert.equal(result.ejected[0].pr, 2);
   assert.match(result.ejected[0].reason, /conflicts with the train/);
+  // The ejection is owed work: the build names the step, and the train body lists it.
+  assert.equal(result.next.length, 1);
+  assert.match(result.next[0], /^#2: land it on its own, or rejoin the next train once its review passes the head it boards at \(conflicts with the train/);
+  assert.match(train.body(boarded), /^### Ejected$/m);
+  assert.match(train.body(boarded), new RegExp(`^\\| #2 \\| \`${two}\` \\| conflicts with the train[^|]* \\| land it on its own, or rejoin the next train once its review passes the head it boards at \\|$`, 'm'));
   assert.deepEqual(boarded.members.map(member => member.pr), [1, 3]);
   assert.equal(f.git('status', '--porcelain'), '', 'the aborted merge leaves a clean tree');
   assert.equal(train.run(['verify', '--manifest', out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo).ok, true);
@@ -371,6 +376,7 @@ test('body lists every member with one Bump line, the strictest UAT line and eve
   assert.doesNotMatch(text, /^(Closes|Fixes|Resolves) /m, 'no closing line on a train that waits on an owner test');
   assert.match(text, /^Refs #7 \(closed by #2's own closing line when the train lands\)$/m);
   assert.doesNotMatch(text, /Generated with|Co-Authored-By/);
+  assert.doesNotMatch(text, /Ejected/, 'no section when nothing was ejected');
   const quiet = train.body(train.checkManifest({ members: [f.member(3, '3'.repeat(40), { bump: 'none', uat: 'UAT: PASSED (owner OK)' })] }));
   assert.match(quiet, /^Bump: none$/m);
   assert.match(quiet, /^UAT: NOT_REQUIRED \(no member needs an owner test: #3\)$/m);

@@ -107,3 +107,27 @@ test('GitHub checkout without a cleaner is flagged; health rejects paths and sec
     assert.throws(() => health.assertHealth(unsafe), /Invalid health repository/);
   }
 });
+test('health flags three held runs in a row, ages each flag in days and names peers\' flags at session start', t => {
+  const a = world(t), b = world(t), store = memoryStore();
+  const attach = w => { w.owner.checkout = () => ({ certain: true, governanceState: 'ENABLED', repository: 'example/widget', binding: s.fixtureBinding('example/widget') }); w.owner.storeFactory = () => store; };
+  attach(a); attach(b);
+  tasks.writeLastRun(a.entry.id, { status: 'held', held_streak: 2, held_since: a.at.toISOString(), started: a.at.toISOString() }, a.home);
+  assert.ok(!a.owner.collect().repos[0].flags.some(flag => flag.includes('held')), 'two held runs are not yet a flag');
+  tasks.writeLastRun(a.entry.id, { status: 'held', held_streak: 3, held_since: a.at.toISOString(), started: a.at.toISOString() }, a.home);
+  const day = 86400000, start = a.owner.now();
+  a.owner.run();
+  assert.ok(health.assertHealth(a.owner.collect()).repos[0].flags.includes('footer-sweep: held 3 runs in a row'));
+  // Two days later the same flag still stands; it keeps its first time and shows its age.
+  a.owner.now = () => new Date(start.getTime() + 2 * day + 60000);
+  a.owner.run();
+  const line = health.sessionHealth('example/widget', a.home);
+  assert.match(line, /Task health: footer-sweep: held 3 runs in a row \(2 days\)/);
+  // Another computer's flag for the same repository shows on this computer's line.
+  tasks.writeLastRun(b.entry.id, { status: 'failed', started: b.at.toISOString() }, b.home);
+  b.owner.now = a.owner.now; b.owner.run(); a.owner.run();
+  assert.match(health.sessionHealth('example/widget', a.home), new RegExp(`Task health on other computers: ${health.computerLabel(b.home)}: footer-sweep: last run failed`));
+  // A cleared flag drops out and starts again from now if it comes back.
+  tasks.writeLastRun(a.entry.id, { status: 'ok', finished: a.owner.now().toISOString() }, a.home);
+  a.owner.run();
+  assert.equal(health.flagSince(a.owner.collect(), JSON.parse(fs.readFileSync(health.localFile(a.home), 'utf8')).flag_since)['example/widget']?.['footer-sweep: held 3 runs in a row'], undefined);
+});
