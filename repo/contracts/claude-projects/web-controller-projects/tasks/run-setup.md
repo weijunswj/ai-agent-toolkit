@@ -3,7 +3,7 @@ RUN SETUP ({{project}} project, Toolkit base layer)
 - This prompt has a Toolkit base (the text inside the Toolkit markers) and a project layer (the params block and everything outside the markers). Project additions in this prompt override the Toolkit base where they differ.
 [fresh]- Fresh session per run: this firing starts from nothing. Never rely on earlier runs or threads.
 [bound]- This task fires into its own home thread. Every firing is self-contained: re-read project memory and files each time and never rely on earlier turns in this thread.
-[bound]- Keep this thread small: no visible reply beyond what delivery needs. If this session shows that earlier context was summarised or compacted, start the report's first line with "CONTEXT RESET DUE | " so the coordinator rebuilds this home thread.
+[bound]- Keep this thread small: no visible reply beyond what delivery needs. If this session shows that earlier context was summarised or compacted, or a step could not finish for lack of context, write {{report_dir}}/handoff.md (the state file, last report and every open warning the new home needs) and start the report's first line with "CONTEXT RESET DUE | " so the coordinator rebuilds this home thread from it.
 - Model tier for this task: {{model}} (agent-cost-control ladder; on Claude, small is Haiku, mid Sonnet, top Opus), effort {{effort}}.
 [raised]- Raised above the cheapest fitting step because: {{raise_reason}}
 [bound]- This task runs on its home thread's model and effort, which the coordinator starts on this tier and effort. In the report's Run line, write "TIER GAP: served <model>/<effort>, want {{model}}/{{effort}}" when the served model is outside this tier or the effort differs.
@@ -14,4 +14,5 @@ RUN SETUP ({{project}} project, Toolkit base layer)
 [bound]- Never resolve this home thread, and never list it as a resolve candidate. Resolving it stops this task.
 - No attribution lines in anything you write.
 - Never end any message with a question to the owner. Owner asks are listed as statements for the coordinator to relay.
+- A check that needs an id, memory line or file it cannot find never reports a bare "unknown": add "NEEDS SETUP: <check>: <what to add, and where> | " after any other first-line prefixes, so the coordinator adds it or asks the owner.
 - Scratch goes in your scratchpad; delete clones and scratch files at the end.

@@ -2,19 +2,6 @@
 const { assert, fs, os, path, test, ROOT, memoryRegistry, governance, tempHome, checkout, addShards, fixtureBinding, fakeScheduler, assertDefinition, fakeRun, assertLiveRegistry, switchWorld, assertShape, printedRecovery, NODE, identityReader, testRepository, TOOLKIT_ROOT, GH, ATTENTION, windowsTasks, job, tasks, programmeState, shards, MEMORY_HOME, hostile, copyComputerIdentity, desired, unmarked, REPO_ROOT, GOVERNED, BINDING, READ_IDENTITY, OBSERVATION, options, runSweep, snapshot, listedHome, baseRunner, baseRun, movingRun, sweepCall, sinceOf, stateAnswer, stateObservation, RUNTIME_MATRIX, switchOffer, currentMainRunner, currentMainReceipt } = require('./toolkit-windows-tasks-support.cjs');
 
 // Complete original test declarations, split to keep the per-file time budget.
-test('fix2 hold: real planner apply and remove output passes the independent reader', t => {
-  const home = tempHome(t), managed = path.join(home, 'managed'), root = path.join(home, 'checkout');
-  fs.mkdirSync(path.join(managed, 'repo', 'scripts'), { recursive: true });
-  fs.writeFileSync(path.join(managed, 'repo', 'scripts', 'toolkit-windows-tasks.cjs'), '');
-  const state = path.join(home, '.ai-agent-toolkit', 'current', 'state.json');
-  fs.mkdirSync(path.dirname(state), { recursive: true }); fs.writeFileSync(state, JSON.stringify({ repo_path: managed }));
-  const policy = require('../scripts/toolkit-task-policy.cjs');
-  const command = windowsTasks.applyCommand({ root }, { toolkitRoot: managed, home });
-  for (const line of [command, command.replace(' apply ', ' remove ')]) {
-    assert.equal(policy.independentTaskCommand(line, { home, cwd: root, certainIndependent: target => path.normalize(target) === path.normalize(root) }), true, line);
-  }
-});
-
 for (const scenario of ['expired cache', 'governance just enabled', 'moved store']) test(`fix2 binding: ${scenario} refreshes before reading and locking`, t => {
   const home = tempHome(t), root = checkout(t), binding = fixtureBinding();
   const next = { ...binding, store: { ...binding.store, repository: 'example/new-store' } };

@@ -17,9 +17,9 @@ const codexSessionStartScript = require(path.join(scripts, 'toolkit-codex-sessio
 const codexSetup = require(path.join(scripts, 'setup-codex-toolkit-plugin.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
-const QUESTION_LINE = 'Toolkit: message held. Turn on GitHub governance (issues, records, evidence store) for this repository?';
+const QUESTION_LINE = 'Toolkit: this repository has no GitHub governance decision yet, so it counts as off. Turn on GitHub governance (issues, records, evidence store) for this repository?';
 const AGENT_LINE = `For agents: ${gate.NEVER_OWNER_SHORT}`;
-const noticeOf = context => (/word for word:\n([\s\S]*?)\n2\. Then call AskUserQuestion/.exec(context) || [])[1];
+const noticeOf = context => (/word for word(?:, and ask nothing else in that reply)?:\n([\s\S]*?)\n(?:For agents|Their next message)/.exec(context) || [])[1];
 function git(cwd, args) {
   return childProcess.execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim();
 }
@@ -27,7 +27,7 @@ function scratch(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-governance-gate-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const registryPath = path.join(root, 'home', '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
-  return { root, registryPath, options: { registryPath, testOnly: true, home: path.join(root, 'home') }, heldPath: path.join(path.dirname(registryPath), gate.HELD_BASENAME) };
+  return { root, registryPath, options: { registryPath, testOnly: true, home: path.join(root, 'home') }, heldPath: path.join(path.dirname(registryPath), gate.RETIRED_HELD_BASENAME) };
 }
 function gitRepo(ctx, name, { remote = REMOTE, block = false, binding = false } = {}) {
   const repo = path.join(ctx.root, name);
@@ -82,8 +82,11 @@ function answerFixture(t, { remote = REMOTE } = {}) {
   const start = (session = 'owner', source = 'startup', folder = cwd) => gate.startSession({ session_id: session, cwd: folder, source }, options);
   const prompts = environment => new gate.PromptHold({ ...options, environment: environment || {} });
   const say = (prompt, sessionId = 'owner', environment) => prompts(environment).decide({ cwd, prompt, sessionId });
+  // The first message of a run: let through with the question, and the run is noted as asked.
   const ask = (session = 'owner') => {
-    assert.equal(say('', session).action, 'block');
+    const first = say('first message', session);
+    assert.equal(first.action, 'pass');
+    assert.ok(first.context.includes(QUESTION_LINE));
     clock = new Date(clock.getTime() + 1);
   };
   start();

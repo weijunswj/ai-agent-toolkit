@@ -262,6 +262,16 @@ class FakeGitHub {
       this.link(parent.number, child.number);
       return ok(201, this.issueJson(parent));
     }
+    if ((match = /^issues\/(\d+)\/sub_issue$/.exec(rest)) && method === 'DELETE') {
+      const parent = this.issues.get(Number(match[1]));
+      const child = this.byId(body.sub_issue_id);
+      if (!parent || !child || child.parent !== parent.number) return ok(404, { message: 'Not Found' });
+      parent.subs = parent.subs.filter(n => n !== child.number);
+      child.parent = null;
+      child.updated_at = this.tick();
+      parent.updated_at = this.tick();
+      return ok(200, this.issueJson(parent));
+    }
     if ((match = /^issues\/(\d+)\/sub_issues\/priority$/.exec(rest)) && method === 'PATCH') {
       const parent = this.issues.get(Number(match[1]));
       const child = this.byId(body.sub_issue_id);
@@ -288,7 +298,7 @@ class FakeGitHub {
       else if (closed) listed.sort((a, b) => b.number - a.number);
       return ok(200, listed.slice((page - 1) * 100, page * 100).map(pr => ({ number: pr.number, title: pr.title || '', body: pr.body, draft: pr.isDraft,
         state: pr.merged || pr.state === 'CLOSED' ? 'closed' : 'open', closed_at: pr.mergedAt || pr.closedAt || '2026-11-08T00:00:00Z',
-        updated_at: updated(pr), head: {ref: pr.branch || ''},
+        updated_at: updated(pr), head: {ref: pr.branch || '', sha: pr.head},
         user: { login: pr.author || 'fixture-owner' }, merge_commit_sha: pr.merged ? pr.head : null,
         merged_at: pr.mergedAt, base: { repo: { full_name: this.repository } } })));
     }
@@ -390,7 +400,7 @@ class FakeGitHub {
       const repository = {};
       const node = value => typeof value === 'object' ? value : (() => {
         const pr = this.prs.get(value);
-        return { __typename: 'PullRequest', number: value, state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
+        return { __typename: 'PullRequest', number: value, body: pr?.body || '', state: pr?.state || 'OPEN', merged: pr?.merged || false, mergedAt: pr?.mergedAt || null,
           mergeCommit: pr?.merged ? {oid:pr.head} : null, repository: { nameWithOwner: this.repository } };
       })();
       const includeClosed=/includeClosedPrs:\s*true/.test(body.query) || body.variables?.includeClosedPrs===true;
@@ -408,7 +418,7 @@ class FakeGitHub {
     const pr = this.prs.get(body.variables.number);
     if (!pr) return ok(200, { data: { repository: { pullRequest: null } } });
     return ok(200, { data: { repository: { defaultBranchRef: { name: 'main' }, pullRequest: {
-      number: pr.number, state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: pr.base || 'main', mergeable: 'MERGEABLE',
+      number: pr.number, body: pr.body || '', state: pr.merged ? 'MERGED' : pr.state, isDraft: pr.isDraft, merged: pr.merged, headRefOid: pr.head, baseRefName: pr.base || 'main', mergeable: 'MERGEABLE',
       mergedAt: pr.mergedAt, mergeCommit: pr.merged ? {oid:pr.head} : null,
       commits: { nodes: [{ commit: { oid: pr.rollupOid, statusCheckRollup: { state: 'SUCCESS', contexts: { pageInfo: { hasNextPage: pr.hasNextPage }, nodes: pr.contexts } } } }] },
     } } } });
