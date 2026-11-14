@@ -2,14 +2,15 @@
 'use strict';
 
 // `toolkit permissions`: prints the paste-once permission blocks. It only reads and prints. It
-// never writes, creates or edits a settings or rules file: the owner pastes a block, no agent does.
+// never writes, creates or edits a settings or rules file: the owner pastes a block or runs --apply,
+// and an agent writes one only when the owner asks it to (safety-gates playbook).
 // `--apply` (first argument only) hands over to toolkit-permissions-apply.cjs, the owner's own
 // one-command merge, typed in their own terminal; agents never run it, and every block asks for it.
 //
 //   node repo/scripts/toolkit-permissions.cjs [--host claude|codex] [--scope computer|repo|all]
 //                                             [--repo-root <checkout>] [--format text|allowed-tools] [--json]
 //   node repo/scripts/toolkit-permissions.cjs --check <settings file> [--scope computer|repo]
-//   node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex]    (the owner only)
+//   node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex] [--repo-root <checkout>]    (the owner only)
 //
 // Two blocks:
 //   computer  pasted once per computer into the app's user settings. Toolkit's own reversible
@@ -118,6 +119,21 @@ const ASK_NETS = Object.freeze({
   'gh-issue-comment': [{ after: '*--delete-last*', why: 'Deleting a comment is a delete.' }],
 });
 
+// The plain-English table `toolkit permissions` prints first: one row per Toolkit command a block
+// allows, what it lets an agent do, what still asks and what still checks it. Every allowed row
+// belongs to one group here; a test holds that, so a new row needs its explanation.
+const TABLE_GROUPS = Object.freeze([
+  { key: 'programme', ids: PROGRAMME_ALLOW.map(sub => `programme-${sub}`), name: 'Programme pages (`programme.cjs`)', does: 'Keep the programme issue pages, records and attention list in step on GitHub.', asks: Object.keys(PROGRAMME_ASK), checked: 'Controller check, programme lock and the merged binding.' },
+  { key: 'windows-tasks', ids: TASKS_ALLOW.map(sub => `tasks-${sub}`), name: 'Windows tasks (`toolkit-windows-tasks.cjs`)', does: "Plan, set up, list and start Toolkit's own Windows scheduled tasks.", asks: [...Object.keys(TASKS_ASK), ...ASK_NETS['tasks-apply'].map(net => net.after.replace(/\*/g, ''))], checked: "Only Toolkit's own recorded tasks; a hand-edited task goes back to you." },
+  { key: 'tasks-list', ids: ['tasks-list-all'], name: 'Task list (`toolkit-tasks.cjs`)', does: 'List the scheduled tasks Toolkit knows about.', asks: ['recording or forgetting a task'], checked: 'Read-only.' },
+  { key: 'task-update', ids: ['task-update'], name: 'Update task (`toolkit-update-scheduled-task.cjs`)', does: 'Plan and set up the Toolkit update scheduled task.', asks: ['a run with an answers file'], checked: 'Its saved approval; a new or hand-edited task goes back to you.' },
+  { key: 'permissions', ids: ['permissions-print'], name: 'Permissions (`toolkit-permissions.cjs`)', does: 'Print these blocks and check a settings file.', asks: ['--apply'], checked: 'Read-only.' },
+  { key: 'cleanup', ids: ['cleanup-plan', 'cleanup-apply'], name: 'Cleanup (`toolkit-cleanup.cjs`)', does: "List and remove Toolkit's rebuildable scratch.", asks: [], checked: 'Checks every path; never removes unpushed or unsaved work.' },
+  { key: 'store', ids: ['store'], name: 'Evidence store (`toolkit-store.cjs`)', does: 'Save evidence to the bound evidence store.', asks: [], checked: 'Bound store only, secret scan, plain push, no file deletes.' },
+  { key: 'pr-comment', ids: ['gh-pr-comment'], name: '`gh pr comment`', does: "Comment on this repository's pull requests.", asks: ['--delete-last'], checked: 'Footer checks only; the repository rules on what to post.' },
+  { key: 'issue-comment', ids: ['gh-issue-comment'], name: '`gh issue comment`', does: "Comment on this repository's issues.", asks: ['--delete-last'], checked: 'Footer checks only; the repository rules on what to post.' },
+]);
+
 // What no block may ever hold. Each entry is checked against every printed line (tests and print).
 const START = String.raw`^(?:Bash|PowerShell)\(\s*`;
 const NEVER = Object.freeze([
@@ -210,6 +226,7 @@ class PermissionBlocks {
     const stops = [];
     const blocks = [];
     const coverage = [];
+    const tableIds = new Set();
     const commandOf = row => (row.kind === 'script' ? `node ${quoted(`${managed.safe}/${row.script}`)}${row.sub ? ` ${row.sub}` : ''}` : row.command);
     const emit = rows => {
       const allow = [], ask = [], entries = [], prompts = [];
@@ -220,6 +237,7 @@ class PermissionBlocks {
         const tokens = row.kind === 'script' ? ['node', `${managed.safe}/${row.script}`, ...(row.sub ? [row.sub] : [])] : command.split(' ');
         if (host === 'codex' && row.codex === false) { prompts.push({ command, tokens, why: CODEX_OPEN }); continue; }
         entries.push({ id: row.id, command, tokens, guard: row.guard });
+        tableIds.add(row.id);
         for (const form of forms) coverage.push({ line: `${command}${form}`, guard: row.guard });
         for (const tool of tools) {
           if (tool === 'codex') continue;
@@ -247,7 +265,7 @@ class PermissionBlocks {
       if (!repo.ok) stops.push({ scope: 'repo', stopped: `no repo block: ${repo.reason}`, next: 'run toolkit permissions inside a repository with Toolkit governance on.' });
       else {
         const made = emit(ROWS.filter(row => row.scope === 'repo'));
-        blocks.push(this.#block({ host, scope: 'repo', made, excluded: made.prompts,
+        blocks.push(this.#block({ host, scope: 'repo', made, excluded: made.prompts, root: safePath(repo.root, this.#platform),
           target: host === 'claude' ? this.#path.join(repo.root, '.claude', 'settings.local.json') : this.#path.join(repo.root, '.codex', 'rules', 'toolkit.rules') }));
       }
     }
@@ -256,14 +274,16 @@ class PermissionBlocks {
       const hit = NEVER.find(([, pattern]) => pattern.test(line));
       if (hit) throw new PermissionsError(`a line would hold ${hit[0]}, which no block may carry.`, 'report this as a Toolkit bug; nothing was printed.');
     }
-    return { managed: managed.safe, blocks, stops, coverage };
+    const table = TABLE_GROUPS.filter(group => group.ids.some(id => tableIds.has(id)))
+      .map(group => ({ name: group.name, does: group.does, asks: group.asks, checked: group.checked, scope: ROWS.find(row => row.id === group.ids[0]).scope }));
+    return { managed: managed.safe, blocks, stops, coverage, table };
   }
 
-  #block({ host, scope, made, excluded, target }) {
+  #block({ host, scope, made, excluded, target, root = null }) {
     if (host === 'claude') {
       const ask = [...made.ask];
       const settings = { permissions: { allow: made.allow, ...(ask.length ? { ask } : {}) } };
-      return { host, scope, target, allow: made.allow, ask, excluded, text: JSON.stringify(settings, null, 2) };
+      return { host, scope, target, ...(scope === 'repo' ? { root } : {}), allow: made.allow, ask, excluded, text: JSON.stringify(settings, null, 2) };
     }
     const rule = (tokens, decision, why) => `prefix_rule(\n    pattern = ${JSON.stringify(tokens)},\n    decision = "${decision}",\n    justification = ${JSON.stringify(why)},\n    match = [${JSON.stringify(tokens)}],\n)`;
     const rules = [
@@ -294,14 +314,14 @@ class PermissionBlocks {
 
 const USAGE = 'Usage: node repo/scripts/toolkit-permissions.cjs [--host claude|codex] [--scope computer|repo|all] [--repo-root <checkout>] [--format text|allowed-tools] [--json]\n'
   + '       node repo/scripts/toolkit-permissions.cjs --check <settings file> [--scope computer|repo]\n'
-  + '       node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex]   (the owner, in their own terminal)\n';
+  + '       node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex] [--repo-root <checkout>]   (the owner, in their own terminal)\n';
 
 function parseArgs(argv) {
   const options = { host: 'claude', scope: 'all', format: 'text', json: false, repoRoot: null, check: null };
   const values = { '--host': ['host', ['claude', 'codex']], '--scope': ['scope', ['computer', 'repo', 'all']], '--format': ['format', ['text', 'allowed-tools']], '--repo-root': ['repoRoot'], '--check': ['check'] };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--apply') throw new PermissionsError('--apply goes first, on its own or with --host only.', 'see the usage line.', 2);
+    if (arg === '--apply') throw new PermissionsError('--apply goes first, on its own or with --host and --repo-root only.', 'see the usage line.', 2);
     if (arg === '--json') { options.json = true; continue; }
     const spec = values[arg];
     const value = spec ? argv[index += 1] : undefined;
@@ -313,7 +333,8 @@ function parseArgs(argv) {
 }
 
 function describe(built, options) {
-  const lines = ['Toolkit permission blocks. Toolkit only prints these: you paste them once, and no agent writes the file.', ''];
+  const lines = ['Toolkit permission blocks. Toolkit only prints these: you add them once, with the one command at the end or by pasting, and an agent writes them only when you ask it to.', ''];
+  lines.push(...permissionsTable(built), '');
   for (const block of built.blocks) {
     const app = block.host === 'claude' ? 'Claude Code' : 'Codex';
     lines.push(`== ${block.scope === 'computer' ? 'Computer block' : 'Repo block'} for ${app} ==`);
@@ -326,12 +347,37 @@ function describe(built, options) {
   }
   for (const stop of built.stops) lines.push(`Stopped: ${stop.stopped} Next: ${stop.next}`);
   if (built.stops.length) lines.push('');
-  lines.push('What still checks each line:', ...built.coverage.map(row => `- ${row.line}: ${row.guard}`), '');
+  lines.push('What still checks each line, in full:', ...built.coverage.map(row => `- ${row.line}: ${row.guard}`), '');
   lines.push('Never in a block: merges, closes, deletes outside the cleanup and store commands, raw git pushes, history rewrites, settings edits, secrets and real keys. Those keep asking. Evidence store work goes through the store command, which pushes only the bound store branch and never forces; the shell hook refuses a raw push to a store bound on this computer.');
   lines.push(`Agents: write each command exactly as its line shows (node, then the full path in forward slashes inside double quotes), one command per call, so the line matches. A line with no * matches only that exact command.`);
   if (options.host === 'claude') lines.push('To remove a block, delete its lines from the file. Run toolkit permissions again after the Toolkit folder moves.');
-  lines.push(`Owner shortcut: type node ${quoted(`${built.managed}/repo/scripts/toolkit-permissions.cjs`)} --apply in your own PowerShell or terminal. It shows the changes, waits for you to type apply, backs up each file and merges the computer blocks. Agents never run it.`);
+  const shortcut = applyLine(built);
+  lines.push(`Owner shortcut: paste this one command into your own PowerShell or terminal, then type apply. It shows the changes first, backs up each file and merges ${shortcut.what}. Agents never run it.`, '', `    ${shortcut.command}`);
   return lines;
+}
+
+// The plain-English table of what the blocks allow. Only Toolkit's own commands and this
+// repository's comments: nothing else is ever in a block.
+function permissionsTable(built) {
+  const cell = text => String(text).replace(/[\\|]/g, match => `\\${match}`);
+  return [
+    'What these blocks let an agent do without asking (Toolkit\'s own commands only):',
+    '',
+    '| Command | Lets the agent | Still asks for | Still checked by |',
+    '| --- | --- | --- | --- |',
+    ...built.table.map(row => `| ${cell(row.name)}${row.scope === 'repo' ? ' (this repository)' : ''} | ${cell(row.does)} | ${cell(row.asks.length ? row.asks.map(item => (/^--/.test(item) ? `\`${item}\`` : item)).join(', ') : 'nothing extra')} | ${cell(row.checked)} |`),
+    '',
+    'Never in any block: merges, closes, deletes outside cleanup and the store, force-pushes, history rewrites, settings edits, secrets and keys.',
+  ];
+}
+
+// The owner's one command, with --repo-root when a Claude Code repo block was printed for a
+// repository whose path a command line can carry safely.
+function applyLine(built) {
+  const repo = built.blocks.find(block => block.host === 'claude' && block.scope === 'repo');
+  const command = `node ${quoted(`${built.managed}/repo/scripts/toolkit-permissions.cjs`)} --apply${repo && repo.root ? ` --repo-root ${quoted(repo.root)}` : ''}`;
+  const what = repo ? (repo.root ? 'the computer blocks and this repository\'s Claude Code block' : 'the computer blocks, and this repository\'s Claude Code block when you run it from the repository\'s folder') : 'the computer blocks';
+  return { command, what };
 }
 
 function main(argv = process.argv.slice(2), deps = {}) {
@@ -365,6 +411,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
 }
 
 // Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.
-module.exports = Object.freeze({ PermissionBlocks, PermissionsError, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, TASKS_ALLOW, TASKS_ASK, safePath, parseArgs, main });
+module.exports = Object.freeze({ PermissionBlocks, PermissionsError, applyLine, permissionsTable, TABLE_GROUPS, ROWS, ASK_NETS, NEVER, GUARDS, githubSlug, PROGRAMME_ALLOW, PROGRAMME_ASK, TASKS_ALLOW, TASKS_ASK, safePath, parseArgs, main });
 
 if (require.main === module) Promise.resolve(main()).then((code) => { process.exitCode = code; });

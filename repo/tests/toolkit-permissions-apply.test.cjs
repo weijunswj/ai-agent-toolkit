@@ -273,3 +273,100 @@ test('H1 and H2: the real script in a terminal takes the typed apply and writes 
   assert.equal(after.model, 'm');
   assert.ok(after.permissions.ask.some(line => /toolkit-permissions\.cjs" \*--apply\*/.test(line)));
 });
+
+// ---- the repo block: --apply also merges the Claude Code repo block of a governed repository ----
+
+const ENABLED_BINDING = { schema: 'toolkit.programme-binding.v2', repository: 'Owner/Repo', governance: 'enabled', parents: [{ issue: 7, record_prefix: 'TEST-' }], store: { kind: 'github', repository: 'Owner/Store', branch: 'main', path: 'state/' }, required_checks: [] };
+// The repository lives at the POSIX path /work/repo, as the Linux computer() sees it; every file call
+// under that path goes to a real temporary folder, so the test runs the same on Windows.
+const VROOT = '/work/repo';
+function governedRepo(t, pc, { binding = ENABLED_BINDING } = {}) {
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-perm-repo-'));
+  t.after(() => fs.rmSync(real, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(real, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(real, '.github', 'toolkit-programme.json'), JSON.stringify(binding));
+  const map = arg => {
+    if (typeof arg !== 'string') return arg;
+    // On Windows, path.resolve gives the POSIX path a drive letter; it is still the same folder.
+    const text = slashed(arg).replace(/^[A-Za-z]:(?=\/)/, '');
+    return text === VROOT || text.startsWith(`${VROOT}/`) ? path.join(real, text.slice(VROOT.length)) : arg;
+  };
+  const repoFs = new Proxy(hostFs, { get: (target, name) => (typeof target[name] === 'function' ? (...args) => target[name](...args.map(map)) : target[name]) });
+  const run = (cmd, args) => (slashed(args[1]) === VROOT && args.slice(2).join(' ') === 'rev-parse --path-format=absolute --git-common-dir' ? { status: 0, stdout: `${VROOT}/.git\n` } : { status: 1, stdout: '' });
+  return { root: VROOT, local: path.join(real, '.claude', 'settings.local.json'), realRoot: real, deps: { ...pc.deps, fs: repoFs, run } };
+}
+
+test('run from a governed repository, --apply also merges its Claude Code repo block and reads it back', async t => {
+  const pc = computer(t, { codex: false });
+  const repo = governedRepo(t, pc);
+  fs.mkdirSync(path.dirname(repo.local), { recursive: true });
+  fs.writeFileSync(repo.local, JSON.stringify({ permissions: { allow: ['Bash(npm test)'] } }, null, 2));
+  const deps = { ...repo.deps, cwd: repo.root };
+  assert.equal(await permissions.main(['--apply', '--host', 'claude'], deps), 0, pc.err.join(''));
+  const built = new permissions.PermissionBlocks(deps).build({ host: 'claude', scope: 'repo' });
+  const local = JSON.parse(fs.readFileSync(repo.local, 'utf8'));
+  assert.deepEqual(local.permissions.allow, ['Bash(npm test)', ...built.blocks[0].allow]);
+  assert.ok(local.permissions.allow.includes('Bash(gh pr comment *)'));
+  assert.ok(fs.readdirSync(path.dirname(repo.local)).some(name => /^settings\.local\.json\.toolkit-backup-/.test(name)), 'backed up first');
+  assert.ok(fs.existsSync(pc.settings), 'the computer block is merged too');
+  const out = pc.out.join('');
+  assert.match(out, /Claude Code repo block: .*settings\.local\.json/);
+  assert.match(out, /Claude Code repo block: added \d+ allow and \d+ ask lines/);
+  assert.equal(pc.asked.length, 1, 'one typed apply covers both files');
+  assert.equal(permissions.main(['--check', repo.local, '--scope', 'repo'], { ...deps, stdout: () => {} }), 0);
+});
+
+test('--repo-root names the repository; one that is not governed stops with nothing written or asked', async t => {
+  const pc = computer(t, { codex: false });
+  const repo = governedRepo(t, pc);
+  assert.equal(await permissions.main(['--apply', '--host', 'claude', '--repo-root', repo.root], repo.deps), 0, pc.err.join(''));
+  assert.ok(fs.existsSync(repo.local), 'a new local settings file is made for the repo block');
+
+  const other = computer(t, { codex: false });
+  const off = governedRepo(t, other, { binding: { ...ENABLED_BINDING, governance: 'disabled' } });
+  assert.equal(await permissions.main(['--apply', '--repo-root', off.root], off.deps), 1);
+  assert.match(other.err.join(''), /Stopped: no repo block: .*Nothing was written\./);
+  assert.deepEqual(other.asked, []);
+  assert.equal(fs.existsSync(other.settings), false);
+  assert.equal(fs.existsSync(off.local), false);
+});
+
+test('outside a governed repository --apply says so and merges the computer blocks only', async t => {
+  const pc = computer(t, { codex: false });
+  assert.equal(await permissions.main(['--apply'], pc.deps), 0, pc.err.join(''));
+  assert.match(pc.out.join(''), /Repo block: none here \(.*\)\. Run it from a governed repository, or add --repo-root <checkout>/);
+  assert.ok(fs.existsSync(pc.settings));
+});
+
+test('--repo-root takes one folder once', async t => {
+  const pc = computer(t);
+  const quiet = { ...pc.deps, stdout: () => {}, stderr: () => {} };
+  for (const args of [['--repo-root'], ['--repo-root', '--host'], ['--repo-root', 'a', '--repo-root', 'b']]) assert.equal(await permissions.main(['--apply', ...args], quiet), 2, args.join(' '));
+  assert.deepEqual(pc.asked, []);
+});
+
+test('the printed shortcut is one pasteable command that carries --repo-root when a repo block was printed', t => {
+  const pc = computer(t, { codex: false });
+  const repo = governedRepo(t, pc);
+  const out = [];
+  assert.equal(permissions.main(['--scope', 'repo', '--repo-root', repo.root], { ...repo.deps, stdout: text => out.push(text) }), 0);
+  const text = out.join('');
+  assert.match(text, /Owner shortcut: paste this one command into your own PowerShell or terminal, then type apply\..*this repository's Claude Code block\. Agents never run it\./);
+  assert.ok(text.includes(`\n    node "${TK}/repo/scripts/toolkit-permissions.cjs" --apply --repo-root "${repo.root}"\n`), text);
+  assert.doesNotMatch(text, /no agent writes/);
+});
+
+test('the print opens with a plain table of every Toolkit command a block allows, and every allowed row has its explanation', t => {
+  const grouped = permissions.TABLE_GROUPS.flatMap(group => group.ids);
+  for (const row of permissions.ROWS) assert.ok(grouped.includes(row.id), `${row.id} has a table row`);
+  assert.equal(new Set(grouped).size, grouped.length, 'each row is explained once');
+  const pc = computer(t, { codex: false });
+  const repo = governedRepo(t, pc);
+  const out = [];
+  assert.equal(permissions.main(['--repo-root', repo.root], { ...repo.deps, stdout: text => out.push(text) }), 0);
+  const text = out.join('');
+  assert.ok(text.indexOf('| Command | Lets the agent | Still asks for | Still checked by |') < text.indexOf('== Computer block'), 'the table comes before the blocks');
+  assert.match(text, /\| `gh pr comment` \(this repository\) \| Comment on this repository's pull requests\. \| `--delete-last` \|/);
+  assert.match(text, /\| Evidence store \(`toolkit-store\.cjs`\) \|/);
+  assert.doesNotMatch(text, /Windows tasks/, 'Windows-only rows are left out on Linux');
+});
