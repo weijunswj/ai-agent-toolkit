@@ -1,8 +1,7 @@
 'use strict';
 
 // `toolkit governance`: accepted answers prepare repository proposals and read them back;
-// `check` is read-only with exit codes 0, 1 and 2; the skill catalogue is computed
-// per state and fails on drift. Closure rows H-06 and H-07 (unit parts), K-01, C-01, C-02, S-10
+// `check` is read-only with exit codes 0, 1 and 2. Closure rows H-06 and H-07 (unit parts), K-01, S-10
 // (for the new modules).
 
 const assert = require('node:assert/strict');
@@ -19,7 +18,6 @@ const scripts = path.join(repoRoot, 'repo', 'scripts');
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
 const conformance = require(path.join(scripts, 'toolkit-governance-conformance.cjs'));
 const plainTextInstaller = require(path.join(scripts, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'install-plain-text-check.cjs'));
-const catalogue = require(path.join(scripts, 'toolkit-governance-catalogue.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const migration = require(path.join(scripts, 'toolkit-governance-migration.cjs'));
@@ -475,53 +473,8 @@ test('I-12: enforcement is reported as shipped, never as active, and Codex names
   assert.equal(status.cloud_and_projects.status, 'unsupported');
 });
 
-test('C-01: the catalogue sources agree (every skill has a tier, routed skills exist)', (t) => {
-  assert.deepEqual(catalogue.catalogueProblems(), []);
-  const ctx = scratch(t);
-  const fixture = path.join(ctx.root, 'toolkit');
-  fs.mkdirSync(path.join(fixture, 'repo', 'contracts', 'agent-rules'), { recursive: true });
-  for (const name of ['alpha', 'beta']) {
-    fs.mkdirSync(path.join(fixture, 'skills', name), { recursive: true });
-    fs.writeFileSync(path.join(fixture, 'skills', name, 'SKILL.md'), `# ${name}\n`);
-  }
-  fs.writeFileSync(path.join(fixture, ...catalogue.TIERS_REL.split('/')), JSON.stringify({
-    schema: catalogue.TIERS_SCHEMA, tiers: catalogue.TIERS, skills: { alpha: 'portable', gamma: 'governed' },
-  }));
-  fs.writeFileSync(path.join(fixture, 'repo', 'contracts', 'agent-rules', 'toolkit-skill-routing.md'), '| Skill | Use |\n|---|---|\n| `alpha` | a |\n| `delta` | d |\n');
-  const problems = catalogue.catalogueProblems(fixture);
-  assert.ok(problems.some(line => line.includes('skill beta has no governance tier')), problems.join('\n'));
-  assert.ok(problems.some(line => line.includes('names gamma')), problems.join('\n'));
-  assert.ok(problems.some(line => line.includes('routes delta')), problems.join('\n'));
-});
-
-test('C-02: governed-only skills are offered only in a complete ENABLED repository, portable ones everywhere', async (t) => {
-  const governedOnly = Object.entries(catalogue.loadTiers().skills).filter(([, tier]) => tier === 'governed').map(([name]) => name);
-  assert.ok(governedOnly.includes('github-program-reconciler'));
-  const names = (state, materialsComplete) => catalogue.catalogueFor(state, { materialsComplete }).map(entry => entry.skill);
-  for (const name of governedOnly) {
-    assert.ok(names('ENABLED', true).includes(name));
-    for (const [state, complete] of [['ENABLED', false], ['DISABLED', false], ['UNDECIDED', false]]) {
-      assert.equal(names(state, complete).includes(name), false, `${name} in ${state}`);
-    }
-  }
-  // Portable skills come with the plugin: every state offers them, an undecided repository included.
-  const portable = Object.entries(catalogue.loadTiers().skills).filter(([, tier]) => tier === 'portable').map(([name]) => name).sort();
-  for (const state of ['UNDECIDED', 'DISABLED']) assert.deepEqual(names(state, false).sort(), portable, state);
-  assert.ok(portable.includes('repository-agent-rules'));
-  assert.ok(portable.includes('controller-bootstrap'));
-  assert.ok(names('ENABLED', true).includes('controller-bootstrap'));
-  const ctx = scratch(t);
-  const repo = gitRepo(ctx, 'repo');
-  writeGoverned(repo);
-  assert.equal(JSON.parse((await run(ctx, repo, ['catalogue', '--json'])).stdout).state, 'UNDECIDED', 'the block and binding alone are not an answer');
-  enable(ctx, repo);
-  const listed = JSON.parse((await run(ctx, repo, ['catalogue', '--json'])).stdout);
-  assert.equal(listed.state, 'ENABLED');
-  assert.ok(listed.skills.some(entry => entry.skill === 'github-program-reconciler'));
-});
-
 test('S-10: governance consumers delegate authority reads and have no retired decision reader', () => {
-  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-catalogue.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-protection.cjs', 'toolkit-governance-migration.cjs', 'toolkit-governance-security.cjs']) {
+  for (const file of ['toolkit-governance.cjs', 'toolkit-governance-conformance.cjs', 'toolkit-governance-ruleset.cjs', 'toolkit-governance-protection.cjs', 'toolkit-governance-migration.cjs', 'toolkit-governance-security.cjs']) {
     const text = fs.readFileSync(path.join(scripts, file), 'utf8');
     assert.equal(/repository-governance\.v1\.json|['"]AGENTS\.md['"]|toolkit-programme\.json['"]|parseRegistryBytes/.test(text.replace(/^\s*\/\/.*$/gm, '')), false, file);
   }
@@ -550,10 +503,10 @@ test('the reconciler runs no programme command unless GitHub governance is ENABL
   }
 });
 
-test('retired repair and automatic migration routes cannot read, write or move old answers', async t => {
+test('retired repair, reopen, catalogue and automatic migration routes cannot read, write or move old answers', async t => {
   const ctx = scratch(t), repo = gitRepo(ctx, 'repo');
   fs.writeFileSync(ctx.registryPath, '{damaged');
-  for (const command of ['repair']) {
+  for (const command of ['repair', 'reopen', 'catalogue']) {
     const result = await run(ctx, repo, [command]);
     assert.equal(result.code, 2); assert.equal(result.asked.length, 0);
     assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), '{damaged');

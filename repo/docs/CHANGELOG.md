@@ -1,5 +1,25 @@
 # Toolkit Changelog
 
+## 3.110.1
+
+### Changed
+
+- `setup toolkit` and `refresh toolkit` now install, refresh and report the Toolkit global rules only for the app they run in (plus Antigravity when managed). Claude Code setup no longer writes or reports `~/.codex/AGENTS.md`, Codex's instruction limit or a hand-written section in Codex's file, and Codex setup no longer touches Claude Code's file; each app keeps its own file current at its own session start. `remove toolkit` for every app and `toolkit-global-rules.cjs` without `--harness` still cover both apps.
+- An update report names only the plugin version of the app that triggered it.
+- Setup's checklist and PR-branch warning, the final audit step title, two merge-hold refusals and the attribution repair message no longer name Claude or Codex.
+
+## 3.110.0 (cloud sweep runs queued holder orders)
+
+### Removed
+
+- `toolkit governance reopen` and `toolkit governance catalogue` are gone. Nothing called them: reopen only printed "Nothing changed", and the catalogue was a list nobody read once `toolkit cmd` stopped offering it.
+- The per-state skill catalogue code and its skill tier file go with it, and `toolkit governance check` no longer reports catalogue drift. The skill routing test still checks that every routed skill exists.
+- The governance guard no longer lists `reopen` or `repair` as decision words, since neither is a governance command.
+
+### Added
+
+- The cloud Programme Sweep now runs holder orders the controller queues in the private evidence store (`orders/pending/<order_id>.json`, or `.dry-run.json` for a rehearsal). Each runs at the start of the pass, inside the sweep lease, with `run-order`'s own rules, and is filed under `orders/done/` or `orders/refused/` with its result, so a controller with no shell no longer needs a session on a computer for its board writes. The run summary shows only counts and warns when an order was refused.
+
 ## 3.109.0
 
 ### Changed
