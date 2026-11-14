@@ -5,7 +5,7 @@ Part of the [Toolkit Controller](../CONTROLLER.md); it binds like that file.
 - **Development base:** the global rules' Development Principles bind every controller too; this page adds only the controller's own.
 - **Governance owns its part:** governed repositories follow the governed rules' Governance Principles and governance's own checks; this page never restates them.
 - **Owner-only acts:** the global floor and Owner-only deletes apply; the repository's task auto-merge switch On counts (Standing approvals in the core); a permission change comes as a one-paste command.
-- **Git hygiene:** never force-push; commit as the owner's identity.
+- **Git hygiene:** never force-push or rewrite history; commit as the owner's identity.
 - **Controller is the brain:** it does the whole job, gets what it cannot reach through an executor or a paste-back prompt, and says what its harness cannot do (core).
 - **Local base:** the local rules are the base every harness inherits; a harness adds only its own mechanics, and a clash goes to the owner.
 - **Cloud first:** work runs in the cloud unless it needs the owner's computer; no computer scheduled tasks; new scheduled work joins an existing task first and stays a short prod.

@@ -241,7 +241,7 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Owner-only acts:**",
-      "covers": "The merge hold and the auto-merge check stop merges without the owner's OK or a passing check. Deletes, keys, irreversible acts and permission edits are instruction-only.",
+      "covers": "The merge hold and the auto-merge check stop merges without the owner's OK or a passing check. Branch deletes and permission edits sit in the global rules and are instruction-only.",
       "enforced_by": [
         {
           "kind": "hook",
@@ -258,14 +258,7 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Git hygiene:**",
-      "covers": "The attribution guard refuses AI attribution in commits and pull requests. No force-push and commit identity are instruction-only here; merge-commit-only is a governance check.",
-      "enforced_by": [
-        {
-          "kind": "script",
-          "path": "repo/scripts/toolkit-attribution-guard.cjs",
-          "test": "repo/tests/toolkit-attribution-guard.test.cjs"
-        }
-      ]
+      "instruction_only": "No force-push, no history rewrite and the owner's commit identity are applied by judgement; the global floor's attribution ban has its own guard."
     },
     {
       "file": "repo/controller/principles.md",

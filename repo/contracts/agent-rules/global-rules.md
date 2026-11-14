@@ -101,7 +101,7 @@ All development aims at these; repository rules may add, never relax:
 - **Check by risk, not size:** review and testing follow what a change touches.
 - **Private by default:** logs and errors carry no secrets or personal data.
 - **Plain words:** human-facing text uses plain names and describes current behaviour.
-- **Written, not remembered:** progress and decisions live in the branch, PR and records, never chat or memory.
+- **Written, not remembered:** progress and decisions live in the branch, PR and records, never only in chat or memory.
 - **Feedback is input, not spec:** check it against current code first.
 - **Readers before writers:** new keys or formats reach every reader before anything writes them.
 - **Owner-only deletes:** merged branches are left to the host's auto-delete setting where on; any other branch delete, a closed pull request's included, needs the owner's OK. Permission settings change only on the owner's explicit ask.
