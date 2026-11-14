@@ -36,7 +36,9 @@
 //   interrupt --issue <n> --reason <text>
 //   update --issue <n> --patch <file>
 //   return --issue <n> (--record <return-id> --assignment <id> [--at-head <sha>] | --consume <return-id> --verdict ACCEPT|REOPEN|WAITING_OWNER)
-//   ack --finding <id>                                 acknowledge an attention finding (it stays listed; never a work-queue one)
+//   ack --finding <id> --next <step> [--due <time>]   acknowledge an attention finding: the step you will take and when
+//                                                      (24 hours ahead unless given, at most 72); past due it is new again and
+//                                                      waiting on the owner; never a work-queue one
 //   dispose --finding <id> --reason <text>             dispose of one; the reason stays in the private part
 //
 // A controller that cannot run commands itself hands a session a holder order: the exact writes
@@ -79,7 +81,7 @@ const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent'
   'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order'];
 const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -159,7 +161,8 @@ function parseArgs(argv) {
     needs(!args['route-read-back'] || (args.model && args.effort), '--route-read-back needs --model and --effort.');
   }
   if (command === 'checkpoint') needs(args.session, 'checkpoint needs --session <this session\'s own id>.');
-  if (command === 'ack') needs(args.finding && !args.reason, 'ack needs --finding <id> (and no --reason; dispose takes one).');
+  if (command === 'ack') needs(args.finding && args.next && !args.reason, 'ack needs --finding <id> and --next <the step you will take> (and no --reason; dispose takes one); --due <time> is optional.');
+  needs(command === 'ack' || (args.next === undefined && args.due === undefined), '--next and --due go with ack.');
   if (command === 'dispose') needs(args.finding && args.reason, 'dispose needs --finding <id> and --reason <text>.');
   if (command === 'migrate-state') {
     needs(Boolean(args['dry-run']) !== Boolean(args.apply), 'migrate-state needs --dry-run or --apply.');
@@ -464,12 +467,67 @@ function answer(args, context, deps, answerState) {
     throw new ProgrammeError('ROLE_REFUSED', `Only the session holding the parent document of #${context.binding.parent_issue} answers an attention finding; ${state.parentRefusal(parentDoc)}`);
   }
   const result = context.store.mutate('parent', context.binding.parent_issue, { writer,
-    change: doc => state.answerFinding(doc, { id: args.finding, state: answerState, reason: args.reason || null, now: nowText(deps) }) });
-  cacheAttention(context, result.doc, true, deps);
-  return { ...writeResult('parent', context.binding.parent_issue, result, writer), finding: args.finding, state: answerState, attention: state.attentionLine(result.doc.attention) };
+    change: doc => state.answerFinding(doc, { id: args.finding, state: answerState, reason: args.reason || null, next: args.next || null, due: args.due || null, now: nowText(deps) }) });
+  if (!deps.rehearsal) cacheAttention(context, result.doc, true, deps);
+  const entry = (result.doc?.attention || []).find(item => item.id === args.finding);
+  const kept = result.outcome === 'NOOP' && answerState === 'acknowledged' && entry?.due
+    ? { note: `Already acknowledged until ${entry.due}; nothing changed. It can be answered again once that time passes.` } : {};
+  return { ...writeResult('parent', context.binding.parent_issue, result, writer), finding: args.finding, state: answerState, ...(entry?.due && answerState === 'acknowledged' ? { due: entry.due } : {}), ...kept,
+    attention: state.attentionLine(result.doc.attention, nowText(deps)) };
 }
 
 const STATE_BLOCK = Object.freeze({ kind: 'branch', branch: state.STATE_BRANCH, path: state.STATE_PATH });
+
+// A store that runs every write's content checks and keeps the result in memory: the same fence,
+// finding state, field limits and document validation as a real write, and nothing reaches GitHub.
+// It does not check the store's version token, privacy or branch, and logs no order run.
+function rehearsalStore(store) {
+  const staged = new Map();
+  const rehearsal = Object.create(store);
+  rehearsal.read = (kind, number) => {
+    const key = `${kind}:${number}`;
+    if (staged.has(key)) return { doc: JSON.parse(JSON.stringify(staged.get(key))), sha: store.read(kind, number).sha };
+    return store.read(kind, number);
+  };
+  rehearsal.write = (kind, number, next, { previous }) => {
+    if (previous && state.sameState(previous, next)) return { outcome: 'NOOP', doc: previous };
+    const doc = JSON.parse(JSON.stringify(next));
+    if (kind === 'child' && doc.schema === state.SCHEMA.child) { doc.schema = state.SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
+    doc.revision = previous ? previous.revision + (state.contentDigest(previous) === state.contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
+    state.assertValid(kind, doc);
+    // The text the store would write, so a document a public branch refuses is refused here too.
+    store.storedText(kind, doc);
+    staged.set(`${kind}:${number}`, doc);
+    return { outcome: 'WOULD_WRITE', doc };
+  };
+  return rehearsal;
+}
+
+// The dry run of a holder order: each write not yet done runs against a rehearsal store, so a write
+// the apply would refuse is refused here with its code. Every write is tried; the apply stops at the first.
+function rehearseOrder(order, done, planned, holder, context, deps) {
+  const real = context.store;
+  const quiet = { ...deps, rehearsal: true, stderr: { write() { return true; } } };
+  context.store = rehearsalStore(real);
+  const ops = [];
+  try {
+    for (const [at, op] of order.ops.entries()) {
+      if (done.has(at)) { ops.push(planned[at]); continue; }
+      context.writer = holder;
+      try {
+        commands[op.command](holderOrder.opArgs(op, holder.session, context.binding.writer_prefix), context, quiet);
+        ops.push({ ...planned[at], status: 'WOULD_RUN' });
+      } catch (error) {
+        if (!error.code) throw error;
+        ops.push({ ...planned[at], status: 'REFUSED', code: error.code, detail: String(error.message).slice(0, 300) });
+      }
+    }
+  } finally { context.store = real; }
+  const refused = ops.filter(op => op.status === 'REFUSED');
+  return { ops, outcome: refused.length ? 'WOULD_STOP' : 'READY',
+    next_action: refused.length ? `The apply would stop at write ${refused[0].at} (${refused[0].code}). Ask the controller for a corrected order; nothing was written.`
+      : 'Every write passed its checks; run the same order without --dry-run.' };
+}
 
 // What migrate-state would write: the parent and every catalogued child the private store holds, each
 // as its public view, digest and sidecar. Any document that is not public-safe, or has an intent not
@@ -668,6 +726,8 @@ const commands = {
     const listed = [...state.workQueue(parentDoc.attention), ...state.openFindings(parentDoc.attention).filter(entry => !state.WORK_QUEUE_CODES.has(entry.code))];
     const open = listed.map(entry => ({ id: entry.id, state: entry.state, source: entry.source, code: entry.code, issue: entry.issue, head: entry.head,
       first_seen: entry.first_seen, changed_at: entry.changed_at, next_action: state.FINDING_CODES[entry.code].next_action,
+      ...(entry.due ? { due: entry.due, overdue: state.ackOverdue(entry, Date.parse(nowText(deps))) } : {}),
+      ...(entry.due && parentDoc.private?.attention_notes?.[entry.id] ? { promised: parentDoc.private.attention_notes[entry.id] } : {}),
       ...(entry.diagnostics ? { diagnostics: entry.diagnostics } : {}) }));
     return { repository: context.repository, parent_issue: parentDoc.parent_issue, ...storedAttention(parentDoc, deps), findings: open };
   },
@@ -726,9 +786,9 @@ const commands = {
     const done = new Set(logged?.done || []);
     const planned = order.ops.map((op, at) => ({ at: at + 1, command: op.command, ...(op.issue ? { issue: op.issue } : {}), ...(op.finding ? { finding: op.finding } : {}), status: done.has(at) ? 'DONE_EARLIER' : 'PLANNED' }));
     const summary = { order_id: order.order_id, digest, record: order.record, parent_issue: order.parent_issue, epoch: order.epoch, expires_at: order.expires_at };
-    if (args['dry-run']) return { mode: 'dry-run', ...summary, ops: planned };
-    const by = checkpoint.sessionHash(args.session);
     const holder = { session: order.holder_session, prefix };
+    if (args['dry-run']) return { mode: 'dry-run', ...summary, ...rehearseOrder(order, done, planned, holder, context, deps) };
+    const by = checkpoint.sessionHash(args.session);
     let entry = logged || { order_id: order.order_id, digest, record: order.record, by, started_at: nowText(deps), done: [], results: [] };
     const log = next => {
       entry = next;
@@ -1038,9 +1098,10 @@ function formatAttention(result) {
   if (queue.length) lines.push('', 'Work queue (act on each now: a lane, a state change or a close; never ack)', ...queue.map(entry => `- ${entry.id}${entry.state === 'acknowledged' ? ' acknowledged' : ''} ${entry.code} #${entry.issue}: ${entry.next_action}`), '');
   for (const entry of result.findings.filter(item => !state.WORK_QUEUE_CODES.has(item.code))) {
     lines.push(`- ${entry.id} ${entry.state} ${entry.code}${entry.kind ? ` ${entry.kind === 'pr' ? 'PR' : 'issue'}` : ''}${entry.issue ? ` #${entry.issue}` : ''}${entry.head ? ` at ${entry.head.slice(0, 7)}` : ''}: ${entry.next_action}`);
+    if (entry.due) lines.push(`  ${entry.overdue ? 'OVERDUE: the step promised by' : 'Promised by'} ${entry.due}${entry.promised ? `: ${entry.promised}` : ''}`);
     lines.push(...formatBodyDiagnostics(entry.diagnostics));
   }
-  if (result.findings.length) lines.push('', 'The controller answers each new finding in this turn: fix it, or ack --finding <id>, or dispose --finding <id> --reason <text>.');
+  if (result.findings.length) lines.push('', 'The controller answers each new finding in this turn: fix it, or ack --finding <id> --next <step> [--due <time>], or dispose --finding <id> --reason <text>. An overdue promise goes to the owner once, with the exact step.');
   return `${lines.join('\n')}\n`;
 }
 

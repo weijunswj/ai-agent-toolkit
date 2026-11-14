@@ -1,10 +1,16 @@
 # Toolkit Changelog
 
-## 3.93.2
+## 3.94.0
 
-### Fixed
+### Changed
 
-- **Evidence-store merges in cloud sessions:** a cloud session can now merge its evidence store's pull requests under the standing custody permission, as a computer session already could. A cloud session starts in the folder that holds the project's clones, so it had no cached parent binding and the merge hold refused every store merge for want of the user's approval. The hold now reads the parent's merged binding on demand in cloud sessions, with the same bounded read session start uses, and accepts an explicitly named store merge from that folder when the parent's clone sits in it. Every other check stays: a fresh merged binding that names the exact store, a private writable store, its default branch as the base, the full head SHA and a plain merge commit. Other repositories stay gated as before.
+- An acknowledged programme finding is now a promise: `ack` needs `--next <step>` and sets a due time (24 hours ahead unless `--due` gives one, at most 72). Past due the finding is new again, counts as waiting on the owner at once, and `attention` prints it as OVERDUE with the promised step. Acknowledgements made before this change fall due 24 hours after their last change.
+- A holder order's dry run now runs every write against an in-memory copy with the real run's content checks (fence, finding state, field limits, document validation), and reports each write as `WOULD_RUN` or `REFUSED` with its code. An order whose `ack` step or `dispose` reason is over 200 characters is refused whole.
+- Every reported finding prints its next step; findings that printed "undefined" now print their code's next action.
+- The board's "Sweep stuck" warning is also a `SWEEP_STUCK` finding, so it reaches the Attention line. Only a sweep pass resolves it.
+- Session-start lines for programme attention, a failing hourly sweep and a failed checkpoint now end with who acts and when.
+- The Projects daily check-in reads device task-health files from the evidence store and adds their flags to `TASK FAILING`.
+- A merge record names the G2 report's evidence-store path and PASS head, and the report is archived before the record. A cloud session that cannot write the state store hands holder orders to a computer session with the order's expiry as the deadline.
 
 ## 3.93.1 (PR edits no longer cancel CI checks; Work queue named at session start)
 

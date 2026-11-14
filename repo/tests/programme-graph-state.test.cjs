@@ -86,20 +86,24 @@ test('fix1 M1: reconcile apply holds all three acknowledged refresh-owned findin
   const codes=['CLOSED_WITHOUT_ACCEPTANCE','CHILD_STATE_CONFLICT','PR_WITHOUT_TASK'];
   assert.deepEqual(openCodes(f),codes.slice().sort());
   for(const entry of f.parent().attention.filter(e=>codes.includes(e.code))) {
-    f.store.mutate('parent',1,{writer:holder,change:doc=>state.answerFinding(doc,{id:entry.id,state:'acknowledged',now:new Date(epoch).toISOString()})});
+    f.store.mutate('parent',1,{writer:holder,change:doc=>state.answerFinding(doc,{next: 'Fixture next step', due:new Date(epoch+72*3600000).toISOString(), id:entry.id,state:'acknowledged',now:new Date(epoch).toISOString()})});
   }
   const before=f.parent().attention.filter(e=>codes.includes(e.code));
   f.time(epoch+25*3600000); f.pass(false).run({apply:true});
   assert.deepEqual(f.parent().attention.filter(e=>codes.includes(e.code)),before);
   f.run(); assert.deepEqual(f.parent().attention.filter(e=>codes.includes(e.code)),before);
   assert.doesNotMatch(state.attentionLine(f.parent().attention,new Date(epoch+25*3600000).toISOString()),/waiting on you/);
+  // Past the promised time the acknowledgement no longer silences them: new again, and waiting at once.
+  assert.match(state.attentionLine(f.parent().attention,new Date(epoch+73*3600000).toISOString()),/3 waiting on you/);
+  f.time(epoch+73*3600000); f.run();
+  assert.deepEqual(f.parent().attention.filter(e=>codes.includes(e.code)).map(e=>e.state),['new','new','new']);
 });
 
 test('fix1 M1 M2: a controller-close conflict stays acknowledged through ordinary reconciliation',()=>{
   const f=fixture(); f.store.mutate('child',2,{writer:holder,parentDoc:f.parent(),change:doc=>({...doc,lifecycle:'RETIRED'})});
   f.close(2); f.run();
   const entry=(f.parent().attention || []).find(e=>e.code==='CHILD_STATE_CONFLICT'); assert.ok(entry);
-  f.store.mutate('parent',1,{writer:holder,change:doc=>state.answerFinding(doc,{id:entry.id,state:'acknowledged',now:new Date(epoch).toISOString()})});
+  f.store.mutate('parent',1,{writer:holder,change:doc=>state.answerFinding(doc,{next: 'Fixture next step', id:entry.id,state:'acknowledged',now:new Date(epoch).toISOString()})});
   f.pass(false).run({apply:true});
   assert.equal(f.parent().attention.find(e=>e.id===entry.id).state,'acknowledged');
   f.run(); assert.equal(f.parent().attention.find(e=>e.id===entry.id).state,'acknowledged');
@@ -258,7 +262,7 @@ test('A2-4: PR history includes closing refs, text refs and timeline; unrelated 
   assert.deepEqual(f.child(2).prs.map(p => p.number),[21,20,22]);
   assert.deepEqual(f.parent().attention.filter(e => e.code === 'PR_WITHOUT_TASK').map(e => e.issue).sort((a,b)=>a-b),[23,25]);
   const finding = f.parent().attention.find(e => e.issue===23);
-  f.store.mutate('parent',1,{writer:holder,change:doc => state.answerFinding(doc,{id:finding.id,state:'disposed',reason:'Owner confirmed standalone maintenance',now:new Date(epoch).toISOString()})});
+  f.store.mutate('parent',1,{writer:holder,change:doc => state.answerFinding(doc,{next: 'Fixture next step', id:finding.id,state:'disposed',reason:'Owner confirmed standalone maintenance',now:new Date(epoch).toISOString()})});
   f.run(); assert.equal(f.parent().attention.find(e=>e.id===finding.id).state,'disposed');
 });
 
@@ -271,7 +275,7 @@ test('A2-5: 24-hour waiting threshold redraws only changed text; acknowledgement
   assert.match(f.github.issues.get(1).body,/\*\*Waiting on you\*\*/);
   const count = writes(f); f.time(epoch+25*3600000); f.run(); assert.equal(writes(f),count);
   const id=f.parent().attention[0].id;
-  f.store.mutate('parent',1,{writer:holder,change:doc=>state.answerFinding(doc,{id,state:'acknowledged',now:new Date(epoch+25*3600000).toISOString()})});
+  f.store.mutate('parent',1,{writer:holder,change:doc=>state.answerFinding(doc,{next: 'Fixture next step', id,state:'acknowledged',now:new Date(epoch+25*3600000).toISOString()})});
   f.run(); assert.doesNotMatch(f.github.issues.get(1).body,/\*\*Waiting on you\*\*/);
 });
 
