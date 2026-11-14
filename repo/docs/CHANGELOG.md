@@ -1,5 +1,31 @@
 # Toolkit Changelog
 
+## 3.112.0 (Projects tasks load their instructions every run; design principles; governance question bank)
+
+### Changed
+
+- The daily check-in and hourly nudge now store only a short pointer, their params block and the project additions. Each run clones Toolkit main and prints its instructions with `toolkit-projects-tasks.cjs --expand <kind> --params <file>`, so a Toolkit release reaches every project's tasks on their next run with no rebuild.
+- `--check` compares the pointer's text, not its version stamp, so a release alone no longer marks tasks outdated. A prompt that still stores the full instructions checks `outdated`, and `--refresh` turns it into the pointer, keeping its params and project text byte for byte.
+- An outdated task is now swapped in place with `update_trigger`, keeping its id, run history, schedule and home thread. A task is recreated only to move it between bound and fresh.
+- The Toolkit project's daily check-in reports `PROJECT TASKS OUTDATED` for another project's enabled check-in or nudge that is not a current pointer, and its coordinator swaps those in place, prompt only. Disabled tasks are listed and left alone.
+- A run that cannot load its instructions posts `TASK LOAD FAILED` in its home thread instead of running from memory.
+- `--expand` reads params tolerantly: it drops keys it no longer knows and migrates pre-tier values, so a pointer stored by an older release still loads.
+- `toolkit governance`, `setup governance` and `refresh governance` now show a question bank in the same format as `setup toolkit`: GitHub governance on or off, task auto-merge on or off, and Toolkit's permission blocks, each with at most three lettered choices and `A. Keep current` first, plus the evidence store and required checks as status lines. The owner replies `all recommended` or only their changes, such as `1.2=B`, in chat. Turning governance on or off no longer needs the owner's own terminal.
+- Only the owner answers the bank: the prompt hook gives the owner's next own message after the bank a one-use ticket bound to the session, its run, the repository and the bank shown, and the bank acts only with that ticket. A launched session, a relayed or scheduled prompt, a repeated Projects delivery, another session or a changed bank gets none. Every change is still one pull request the owner merges.
+- Picking "Add them for me" on the permission row is the owner's own ask for the agent to add the printed blocks (backed up first and read back); "Show me the command" prints them with the one command the owner pastes.
+- The question bank format (table, choice letters, Keep current folding, bank reference and reply reading) now lives in one shared module used by both setup and governance; setup's output is unchanged.
+
+### Added
+
+- The global rules gain a Development Principles section that steers all development in every repository: tests first, fast CI that improves itself, grouped changes, slim code, platform features first, never silently wrong, generic shared rules, one source of truth, lean always-on text, checks over judgement, vetted outside material, the cheapest capable route, root-cause fixes, ship then improve, risk-based checking, privacy by default, plain words, written not remembered, feedback as input, readers before writers and owner-only branch deletes.
+- The governed rules gain a Governance Principles section for governed repositories: only needed files, reuse first, checks not memory, the owner reads and clicks, and per-repository settings.
+- A new controller page, design principles, collects the owner's standing principles for controllers, with no project-specific references. It binds above every skill, project line and brief, and the Projects skill no longer outranks it.
+- The controller core now points to the global change-local hygiene rule and the governed transport-store rule instead of restating them, and the controller principles drop lines the global rules already cover.
+
+### Removed
+
+- `refresh governance --set on|off` and the terminal-only `setup governance` questions; the bank replaces both.
+
 ## 3.111.0 (setup stops all scheduled task work)
 
 ### Changed
