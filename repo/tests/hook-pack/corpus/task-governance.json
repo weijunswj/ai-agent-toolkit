@@ -4,7 +4,7 @@
   "rows": [
     {
       "id": "TasksGovernanceOffProgrammeShard",
-      "source": "Owner session-start task advisory",
+      "source": "Owner session-start task advisory; retired: Toolkit runs no computer tasks, so session start prints no task line",
       "kind": "state",
       "hosts": [
         "claude",
@@ -25,7 +25,7 @@
       },
       "expect": {
         "decision": "allow",
-        "context_contains": [
+        "context_excludes": [
           "Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers."
         ]
       },
@@ -33,7 +33,7 @@
     },
     {
       "id": "TasksGovernanceOnFooter",
-      "source": "Owner session-start task advisory",
+      "source": "Owner session-start task advisory; retired: Toolkit runs no computer tasks, so session start prints no task line",
       "kind": "state",
       "hosts": [
         "claude",
@@ -53,7 +53,7 @@
       },
       "expect": {
         "decision": "allow",
-        "context_contains": [
+        "context_excludes": [
           "Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers."
         ]
       },
@@ -61,7 +61,7 @@
     },
     {
       "id": "TasksGovernanceOnMissingShard",
-      "source": "Owner session-start task advisory",
+      "source": "Owner session-start task advisory; retired: Toolkit runs no computer tasks, so session start prints no task line",
       "kind": "state",
       "hosts": [
         "claude",
@@ -81,7 +81,7 @@
       },
       "expect": {
         "decision": "allow",
-        "context_contains": [
+        "context_excludes": [
           "Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers."
         ]
       },
@@ -89,7 +89,7 @@
     },
     {
       "id": "TasksGovernanceAbsentProgramme",
-      "source": "Owner session-start task advisory",
+      "source": "Owner session-start task advisory; retired: Toolkit runs no computer tasks, so session start prints no task line",
       "kind": "state",
       "hosts": [
         "claude",
@@ -109,7 +109,7 @@
       },
       "expect": {
         "decision": "allow",
-        "context_contains": [
+        "context_excludes": [
           "Toolkit tasks: recorded Windows tasks do not match confirmed governance. Read fresh governance status, then run toolkit-windows-tasks.cjs plan --repo-root <repo> from the managed Toolkit checkout. Apply only when existing approval covers that plan; otherwise ask the owner. Preserve owner stops and held keep answers."
         ]
       },
@@ -424,7 +424,7 @@
     },
     {
       "id": "TasksHealthLocalOnlyUsesExistingLine",
-      "source": "Scheduled task health and independent-policy regression",
+      "source": "Scheduled task health and independent-policy regression; retired: Toolkit runs no computer tasks, so session start prints no task line",
       "kind": "state",
       "hosts": [
         "claude",
@@ -446,7 +446,7 @@
       },
       "expect": {
         "decision": "allow",
-        "context_contains": [
+        "context_excludes": [
           "health file not shared: no verified evidence store"
         ]
       },
@@ -454,7 +454,7 @@
     },
     {
       "id": "TasksHealthFailedUsesExistingLine",
-      "source": "Scheduled task health and independent-policy regression",
+      "source": "Scheduled task health and independent-policy regression; retired: Toolkit runs no computer tasks, so session start prints no task line",
       "kind": "state",
       "hosts": [
         "claude",
@@ -477,7 +477,7 @@
       },
       "expect": {
         "decision": "allow",
-        "context_contains": [
+        "context_excludes": [
           "Task health: footer-sweep: last run failed"
         ]
       },
@@ -516,7 +516,7 @@
     },
     {
       "id": "TasksUncertainAuthDeferredShardLine",
-      "source": "Weekly authentication failure must stay visible without a cleaner",
+      "source": "Weekly authentication failure must stay visible without a cleaner; retired: Toolkit runs no computer tasks, so session start prints no task line",
       "kind": "state",
       "hosts": [
         "claude",
@@ -537,7 +537,7 @@
       },
       "expect": {
         "decision": "allow",
-        "context_contains": [
+        "context_excludes": [
           "GitHub authentication status could not be read"
         ]
       },
@@ -579,10 +579,25 @@
       "id": "TasksUndecidedRepoHoldsNoTaskCommand",
       "source": "ask once, never freeze: an undecided repository holds no command; the task script checks governance itself before any effect",
       "kind": "benign",
-      "hosts": ["claude", "codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\" --task programme-sweep"}},
-      "fixture": {"repo":{"governance":"undecided"},"managed_tasks":true},
-      "expect": {"decision":"allow"},
+      "hosts": [
+        "claude",
+        "codex"
+      ],
+      "payload": {
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "node \"{work}/repo/scripts/toolkit-windows-tasks.cjs\" apply --repo-root \"{work}\" --task programme-sweep"
+        }
+      },
+      "fixture": {
+        "repo": {
+          "governance": "undecided"
+        },
+        "managed_tasks": true
+      },
+      "expect": {
+        "decision": "allow"
+      },
       "status": "pass"
     }
   ]
