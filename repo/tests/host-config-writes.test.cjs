@@ -302,7 +302,11 @@ function configFake(t, spec = {}) {
   });
   return { ...f, log };
 }
-const quickProbe = { timeoutMs: 500, closeTimeoutMs: 100, forceExitTimeoutMs: 100 };
+// The request deadline starts before the fake app-server starts, and a slow Windows runner can take
+// over a second just to start Node. A case that expects an answer, an error reply or an exit must
+// never race that deadline, so it gets a window it cannot reach; only the timeout case, which is
+// about the deadline, keeps it short. Shutdown budgets stay quick: the fake answers at once.
+const quickProbe = { timeoutMs: 10000, closeTimeoutMs: 100, forceExitTimeoutMs: 100 };
 
 for (const [label, spec, reason, hostText, step] of [
   ['exit', { mode: 'exit', stderr: 'TOML parse error at line 3' }, 'exit', 'TOML parse error at line 3'],
@@ -315,7 +319,7 @@ for (const [label, spec, reason, hostText, step] of [
   const f = configFake(t, spec);
   const { runAppServerRequest } = require('../scripts/codex-app-server.cjs');
   await assert.rejects(runAppServerRequest(CONFIG_FAKE, f.codexHome, { method: 'config/read', params: {} },
-    { ...quickProbe, settleWithoutExit: reason !== 'stuck' }), error => {
+    { ...quickProbe, ...(reason === 'timeout' && { timeoutMs: 500 }), settleWithoutExit: reason !== 'stuck' }), error => {
     assert.equal(error.reason, reason);
     assert.equal(error.hostText, hostText);
     if (step) assert.equal(error.step, step);
@@ -355,10 +359,9 @@ test('hostText: unavailable command and native spawn errors keep precise start d
 
 test('runtime: an answer survives failed shutdown; repair probes still require exit', async t => {
   const f = configFake(t, { mode: 'answer-orphan' });
-  // The fake answers at once; only its shutdown is held. A slow Windows runner can take longer than
-  // quickProbe's 500ms just to start the fake, so the answer gets a wider window here. The shutdown
-  // budgets stay quick, and they are what the repair probe's refusal measures.
-  const options = { ...quickProbe, timeoutMs: 10000, codexHome: f.codexHome, codexCommand: CONFIG_FAKE };
+  // The fake answers at once; only its shutdown is held. The quick shutdown budgets are what the
+  // repair probe's refusal measures.
+  const options = { ...quickProbe, codexHome: f.codexHome, codexCommand: CONFIG_FAKE };
   const saved = { ...process.env };
   const env = isolatedEnv(f.codexHome, f.root);
   for (const key of Object.keys(process.env)) delete process.env[key];
@@ -377,9 +380,9 @@ for (const action of ['runtime', 'config/read', 'batchWrite', 'setup']) test('np
   const shim = npmShim(f.root, CONFIG_FAKE);
   const env = isolatedEnv(f.codexHome, path.dirname(shim));
   const harness = action === 'runtime'
-    ? `require(${JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs'))}).inspectCodexMultiAgentRuntime({codexHome:process.env.CODEX_HOME,codexCommand:'codex',timeoutMs:1000}).then(r=>console.log(JSON.stringify(r)))`
+    ? `require(${JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs'))}).inspectCodexMultiAgentRuntime({codexHome:process.env.CODEX_HOME,codexCommand:'codex',timeoutMs:10000}).then(r=>console.log(JSON.stringify(r)))`
     : action === 'batchWrite'
-    ? `require(${JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs'))}).editWithCodexAppServer(Buffer.from('# original\\n'),{codexHome:process.env.CODEX_HOME,codexCommand:'codex',runtime:'MultiAgentV1',helperCount:1,timeoutMs:1000}).then(r=>console.log(JSON.stringify({text:r.bytes.toString(),cleanup:r.temporary_cleanup})))`
+    ? `require(${JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs'))}).editWithCodexAppServer(Buffer.from('# original\\n'),{codexHome:process.env.CODEX_HOME,codexCommand:'codex',runtime:'MultiAgentV1',helperCount:1,timeoutMs:10000}).then(r=>console.log(JSON.stringify({text:r.bytes.toString(),cleanup:r.temporary_cleanup})))`
     : action === 'setup'
     ? `console.log(JSON.stringify(require(${JSON.stringify(require.resolve('../scripts/setup-codex-toolkit-plugin.cjs'))}).inspectCodexPluginList()))`
     : `console.log(JSON.stringify(new (require(${JSON.stringify(require.resolve('../scripts/codex-config-load-check.cjs'))}).CodexConfigLoadCheck)({codexCommand:require('node:path').join(process.env.CODEX_HOME,'absent.exe')}).probe(require('node:path').join(process.env.CODEX_HOME,'config.toml'))))`;
@@ -439,7 +442,7 @@ test('batchWrite refuses an answer whose orphan keeps the editor pipes open', as
   const f = configFake(t, { mode: 'answer-orphan' });
   const harness = 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ')' +
     '.editWithCodexAppServer(Buffer.from("# original\\n"),{codexHome:process.env.CODEX_HOME,codexCommand:' +
-    JSON.stringify(CONFIG_FAKE) + ',runtime:"MultiAgentV1",helperCount:1,timeoutMs:1000,closeTimeoutMs:100,forceExitTimeoutMs:100})' +
+    JSON.stringify(CONFIG_FAKE) + ',runtime:"MultiAgentV1",helperCount:1,timeoutMs:10000,closeTimeoutMs:100,forceExitTimeoutMs:100})' +
     '.then(()=>({succeeded:true}),e=>({error:e.message})).then(answer=>process.stdout.write(JSON.stringify(answer),()=>process.exit(0)))';
   const env = isolatedEnv(f.codexHome, f.root);
   env.FAKE_CONFIG_HOME = f.codexHome;
@@ -499,9 +502,9 @@ if (require('node:path').basename(process.execPath).toLowerCase() === 'codex.exe
     : action === 'setup spawn'
     ? 'console.log(JSON.stringify(require(' + JSON.stringify(require.resolve('../scripts/setup-codex-toolkit-plugin.cjs')) + ').runCodexJson("codex",["plugin","list","--json"])))'
     : action === 'runtime'
-    ? 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ').inspectCodexMultiAgentRuntime({codexHome:process.env.CODEX_HOME,cwd:process.env.CODEX_HOME,timeoutMs:1000}).then(r=>console.log(JSON.stringify(r)))'
+    ? 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ').inspectCodexMultiAgentRuntime({codexHome:process.env.CODEX_HOME,cwd:process.env.CODEX_HOME,timeoutMs:10000}).then(r=>console.log(JSON.stringify(r)))'
     : action === 'batchWrite'
-    ? 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ').editWithCodexAppServer(Buffer.from("# original\\n"),{codexHome:process.env.CODEX_HOME,runtime:"MultiAgentV1",helperCount:1,timeoutMs:1000}).then(r=>console.log(JSON.stringify({text:r.bytes.toString(),cleanup:r.temporary_cleanup})))'
+    ? 'require(' + JSON.stringify(require.resolve('../scripts/codex-delegation-config.cjs')) + ').editWithCodexAppServer(Buffer.from("# original\\n"),{codexHome:process.env.CODEX_HOME,runtime:"MultiAgentV1",helperCount:1,timeoutMs:10000}).then(r=>console.log(JSON.stringify({text:r.bytes.toString(),cleanup:r.temporary_cleanup})))'
     : 'console.log(JSON.stringify(new (require(' + JSON.stringify(require.resolve('../scripts/codex-config-load-check.cjs')) + ').CodexConfigLoadCheck)().verify({configPath:' + JSON.stringify(path.join(f.codexHome, 'config.toml')) + '})))';
   const result = require('node:child_process').spawnSync(process.execPath, ['-e', harness], {
     env, cwd: f.root, encoding: 'utf8', timeout: 15000, windowsHide: true,
