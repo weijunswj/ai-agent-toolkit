@@ -169,7 +169,7 @@ const SHAPES = {
   finding: { all: ['id', 'source', 'code', 'issue', 'head', 'state', 'first_seen', 'changed_at', 'diagnostics', 'kind', 'due'], optional: ['diagnostics', 'kind', 'due'] },
   fence: { all: ['epoch', 'holder_prefix', 'holder_session'] },
   effect: { all: ['intent_id', 'kind', 'target', 'state'] },
-  outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix'] },
+  outcome: { all: ['issue', 'label', 'name', 'description', 'class', 'parent', 'order', 'lane', 'owner_prefix', 'last'], optional: ['label', 'name', 'description', 'lane', 'owner_prefix', 'last'] },
   release_plan: { all: ['record', 'comment_id'], optional: ['record', 'comment_id'] },
   gate: { all: ['role', 'state', 'session_id', 'assignment', 'route', 'returns'], optional: ['assignment'] },
   assignment: { all: ['id', 'role'] },
@@ -318,6 +318,7 @@ function validateParent(doc) {
       check(errors, optional(outcome.owner_prefix, value => PREFIX.test(value)), `${at}.owner_prefix must be a record prefix`);
       check(errors, optional(outcome.name, isText), `${at}.name must be text`);
       check(errors, optional(outcome.description, isText), `${at}.description must be text`);
+      check(errors, optional(outcome.last, value => value === true), `${at}.last must be true or left out`);
     }
     // Expected parents must be the programme parent or another outcome, and the tree must have no loop.
     const outcomes = new Map((Array.isArray(doc.outcomes) ? doc.outcomes : []).filter(isObject).map(entry => [entry.issue, entry]));
@@ -1698,13 +1699,17 @@ function lastUpdated(outcome, child, issue, comments) {
 }
 
 // Active rows by class (NOW, LATER, OPTIONAL), each by priority (`order`, lowest first) and then
-// child issue number, so the top LATER row starts next; then every finished row, oldest completion
-// first and the most recent last (unknown times last). Nested children sort like any other row.
+// child issue number, so the top LATER row starts next; then the active rows pinned last (`last`),
+// in the same class and priority order, so tasks added later still sort before them; then every
+// finished row, oldest completion first and the most recent last (unknown times last). Nested
+// children sort like any other row.
+const pinnedLast = outcome => outcome.last === true;
 function graphOrder(parent, children, issues) {
   const finished = parent.outcomes.filter(outcome => isFinished(outcome, children.get(outcome.issue)));
   const active = parent.outcomes.filter(outcome => !finished.includes(outcome));
   const byPriority = (a, b) => a.order - b.order || a.issue - b.issue;
-  const groups = GRAPH_GROUPS.map(cls => active.filter(outcome => graphClass(outcome, children.get(outcome.issue)) === cls).sort(byPriority));
+  const grouped = rows => GRAPH_GROUPS.map(cls => rows.filter(outcome => graphClass(outcome, children.get(outcome.issue)) === cls).sort(byPriority));
+  const groups = [...grouped(active.filter(outcome => !pinnedLast(outcome))), ...grouped(active.filter(pinnedLast))];
   const when = outcome => completedAt(children.get(outcome.issue), issues.get(outcome.issue));
   const byCompletion = (a, b) => {
     const left = when(a);
@@ -1720,12 +1725,13 @@ function graphOrder(parent, children, issues) {
 
 // Queued rows (LATER or OPTIONAL) in the same group that share an `order`, the priority: each list
 // is one tie, lowest order first. Work in progress is left out, since NOW is not picked by priority.
+// Rows pinned last tie only with each other, since they never sort among the rest.
 function orderTies(parent, children) {
   const ties = new Map();
   for (const outcome of parent.outcomes) {
     const cls = graphClass(outcome, children.get(outcome.issue));
     if (cls !== 'LATER' && cls !== 'OPTIONAL') continue;
-    const key = `${cls} ${outcome.order}`;
+    const key = `${cls}${pinnedLast(outcome) ? ' last' : ''} ${outcome.order}`;
     ties.set(key, [...(ties.get(key) || []), outcome]);
   }
   return [...ties.values()].filter(list => list.length > 1).map(list => list.sort((a, b) => a.issue - b.issue))
@@ -1749,7 +1755,7 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: the latest opened, whatever its state (merged or closed said on an open task; none for a retired task); history on the task page.`,
+    `State revision ${parent.revision}; edit state documents and task comments. Order: NOW, LATER by priority, OPTIONAL, ${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? 'tasks pinned last, ' : ''}COMPLETED (latest last), RETIRED. Updated: completion, latest active state/comment (excluding generated indexes), or dash if queued. PR: the latest opened, whatever its state (merged or closed said on an open task; none for a retired task); history on the task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
