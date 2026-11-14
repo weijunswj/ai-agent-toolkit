@@ -1166,3 +1166,22 @@ test('threads waiting on CI arm their own check-in, and the coordinator pings qu
   assert.ok(periodic.includes('- `CI WAIT QUIET`: message each listed thread that turn to check its CI and carry on, and to confirm it armed its own check-in'));
   assert.ok(periodic.includes('the same thread listed again on the next run goes to the owner'));
 });
+
+// Two hourly runs arrived during busy merge work; the coordinator did a partial pass and wrote `.done`
+// for both. A task run now outranks other in-flight work except answering the owner, every step runs
+// that turn, and an unfinished step leaves `.done` missing with the open step on the promise list.
+test('task runs come first, and a partial pass never writes .done', () => {
+  const skillLine = read(SKILL_REL).split('\n').find(line => line.startsWith('- **Every task run reaches'));
+  assert.ok(skillLine.endsWith('A run outranks all in-flight work but answering the owner (**Task runs come first**).'));
+  const recurring = read(`${REFERENCE_DIR}/recurring-tasks.md`).split('**Task run relay.**\n')[1];
+  const rule = recurring.split('\n')[0];
+  assert.ok(rule.startsWith('- **Task runs come first.**'), 'first bullet under Task run relay');
+  for (const phrase of ['outranks all other in-flight work except answering the owner',
+    'In the turn it arrives, before relaying thread updates, merge work or anything queued',
+    'act on every prefix and every step its report or its task\'s own checklist names',
+    'A partial pass is never done: never write `.done` while any step is unfinished, however busy the turn',
+    'leave `.done` missing (the stamp stays unchanged), add the run UTC and the open step to the promise list',
+    'finish that step first next turn']) {
+    assert.ok(rule.includes(phrase), phrase);
+  }
+});
