@@ -190,7 +190,7 @@ function answerCommand(text) {
 // The governance CLI given a decision word anywhere after it in the same command, so options before
 // the decision (`--json enable`, `--repo . disable`) count too. Read word by word, in linear time.
 // `--answers` and `--ticket` answer the governance bank; only the exact ticketed command passes (ToolGate).
-const DECISION_WORDS = new Set(['enable', 'disable', 'decline', 'reopen', 'migrate', 'repair', '--answers', '--ticket']);
+const DECISION_WORDS = new Set(['enable', 'disable', 'decline', 'migrate', '--answers', '--ticket']);
 function decisionAfterScript(text) {
   const pattern = /toolkit-governance\.cjs/gi;
   for (let found = pattern.exec(text); found; found = pattern.exec(text)) {

@@ -14,7 +14,6 @@ const util = require('node:util');
 const { GovernanceProposals, GitHubProposalTransport } = require('./toolkit-governance-proposal.cjs');
 const governance = require('./toolkit-governance-state.cjs');
 const conformance = require('./toolkit-governance-conformance.cjs');
-const catalogue = require('./toolkit-governance-catalogue.cjs');
 const gate = require('./toolkit-governance-gate.cjs');
 const discovery = require('./toolkit-governance-discovery.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
@@ -33,12 +32,12 @@ const PROPOSAL_ERRORS = Object.freeze({
   PROPOSAL_RECEIPT_REQUIRED: 'No live pending owner answer remains for this run. Check the existing decision pull request; if it closed, ask the owner again in this chat before preparing another.',
 });
 
-const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'reopen', 'check', 'catalogue', 'publish', 'security', 'migrate', 'setup', 'refresh']);
+const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'check', 'publish', 'security', 'migrate', 'setup', 'refresh']);
 // The exit code that means "the bank is shown; stop and wait for the owner's reply", as in setup toolkit.
 const BANK_SHOWN = 23;
 const CLOUD_BANK = `This is a cloud session, where Toolkit cannot check that a reply is the owner's own, so an answer in this chat cannot be recorded. Answer this bank from a Remote Control session on your computer, or run ${CMD('setup')} in your own terminal.`;
 const ALIASES = Object.freeze({ decline: 'disable' });
-const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|disable|reopen|catalogue|publish|security> [--json]')}\n`
+const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|disable|publish|security> [--json]')}\n`
   + `       ${governance.governanceCommand('check [--json] [--offline]')}\n`
   + `       ${governance.governanceCommand('publish --run <pending receipt>')}\n`
   + `       ${governance.governanceCommand('<setup|refresh> [--json]')} (the governance question bank; refresh is the same)\n`
@@ -139,9 +138,7 @@ class ToolkitGovernanceCli {
       if (command === 'status') return this.#status(json);
       if (command === 'discover') return this.#discover(json);
       if (command === 'check') return this.#check(json, offline);
-      if (command === 'catalogue') return this.#catalogue(json);
       if (command === 'security') return this.#security(json);
-      if (command === 'reopen') return this.#reopen(json);
       if (command === 'publish') return this.#publish(json, requestedRun);
       if (command === 'setup' || command === 'refresh') return await this.#bank(json, answers, ticket);
       return await this.#decide(command, json);
@@ -226,16 +223,6 @@ class ToolkitGovernanceCli {
     return result.exit_code;
   }
 
-  #catalogue(json) {
-    const state = this.#state();
-    const skills = catalogue.catalogueForState(state);
-    const lines = [`Skills offered in this repository (${label(state)}):`];
-    if (skills.length === 0) lines.push(`- none until you answer Toolkit's question in chat, or run ${CMD('enable')} or ${CMD('disable')} in your own terminal`);
-    for (const entry of skills) lines.push(`- ${entry.skill}${entry.tier === 'governed' ? ' (governed)' : ''}`);
-    this.#print(json, { state: state.state, materials_complete: state.materials_complete, skills }, lines);
-    return 0;
-  }
-
   // The free settings are on by default for a governed repository, so this asks nothing; nothing
   // that needs billing is turned on. Auto-merge follows the binding merged on the default branch,
   // never the working tree.
@@ -275,22 +262,6 @@ class ToolkitGovernanceCli {
     }
     this.#print(json, { status: before.status, outcome }, lines);
     return ['failed', 'unverified'].includes(outcome.result) || before.status === 'unverified' ? 2 : 0;
-  }
-
-  #reopen(json) {
-    const state = this.#state();
-    if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}).`);
-    if (['M0', 'M1', 'M2'].includes(state.rule)) {
-      this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. This repository is ${label(state)} by the programme binding merged on its default branch, on every computer.`, 'To change it, merge a pull request that changes .github/toolkit-programme.json.']);
-      return 0;
-    }
-    const lines = state.state === 'DISABLED'
-      ? ['Nothing changed. You disabled Toolkit governance for this repository, so Toolkit does not ask about it.', `To turn it on, run ${CMD('enable')}. To keep it off, do nothing.`]
-      : [`Nothing changed. This repository is ${label(state)}, so there is no disabled decision to reopen.`, state.state === 'ENABLED'
-        ? `To turn governance off, run ${CMD('disable')}.`
-        : `To decide, answer Toolkit's question in chat, or run ${CMD('enable')} or ${CMD('disable')} in your own terminal.`];
-    this.#print(json, { state: state.state, writes: 0 }, lines);
-    return 0;
   }
 
   // Publication uses only a live receipt from an accepted owner answer.
