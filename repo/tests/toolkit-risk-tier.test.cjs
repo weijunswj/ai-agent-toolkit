@@ -69,7 +69,7 @@ test('the controller takeover playbook is RISKY while other playbooks stay NORMA
 test('tests and other scripts are NORMAL, docs are LIGHT, skills are NORMAL', () => {
   assert.equal(tierOf('repo/tests/toolkit-risk-tier.test.cjs'), 'NORMAL');
   assert.equal(tierOf('repo/tests/qualification/claude-helper-matrix.live.cjs'), 'NORMAL');
-  assert.equal(tierOf('skills/github-program-reconciler/scripts/decision-history.cjs'), 'NORMAL');
+  assert.equal(tierOf('skills/github-program-reconciler/scripts/decision-history.cjs'), 'RISKY', 'programme.cjs trace loads the decision history');
   assert.equal(tierOf('skills/github-program-reconciler/scripts/programme-state.cjs'), 'RISKY', 'programme state is authority');
   for (const glob of TOOLKIT.risky.filter(entry => entry.startsWith('!'))) assert.equal(tierOf(glob.slice(1)), 'NORMAL', glob);
   assert.equal(tierOf('repo/scripts/a-new-tool.cjs'), 'RISKY', 'a new script is RISKY until it is shown not to be');

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// Decision history for one programme child: the read G0 does before planning it. Reads the
-// parent's comment trace and the child's comment trace separately (they never mix), groups each by
+// Decision history for one programme child: the read G0 does before planning it, also run as
+// `programme.cjs trace <n>`. Reads the parent's and the child's comments separately (they never mix), groups each by
 // comment tag, takes the latest comment per tag as live (an explicit SUPERSEDES= naming a record
 // replaces it outright), and prints a short live-scope summary for the owner to confirm. Untagged
 // comments are listed as "Other comments" for G0 to read; nothing is skipped silently.
@@ -255,23 +255,49 @@ function toJson(value) {
   return JSON.stringify(value, (key, item) => (key === 'text' ? undefined : item), 2);
 }
 
-function gh(args) {
+function runGh(args) {
   const result = spawnSync(resolveExecutable('gh'), args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, windowsHide: true });
   if (result.status !== 0) throw new Error(`gh ${args.join(' ')} failed: ${String(result.stderr || result.error?.message || '').trim()}`);
   return result.stdout;
 }
+
+// The gh runner: `main` swaps in a test double and puts the real one back when it ends.
+let gh = runGh;
 
 function readBinding(repo) {
   const file = JSON.parse(gh(['api', `repos/${repo}/contents/.github/toolkit-programme.json`]));
   return JSON.parse(Buffer.from(String(file.content || ''), 'base64').toString('utf8'));
 }
 
+// The parent and record prefix a binding names: a version 2 binding lists parents (the first is the
+// programme parent, as the reconciler reads it), a version 1 binding names one parent_issue.
+function bindingParent(binding) {
+  const first = Array.isArray(binding?.parents) ? binding.parents[0] : null;
+  const issue = Number(first ? first.issue : binding?.parent_issue);
+  const prefix = first ? first.record_prefix : binding?.record_prefix;
+  return { parent: Number.isInteger(issue) && issue > 0 ? issue : null, recordPrefix: typeof prefix === 'string' && prefix ? prefix : null };
+}
+
+// Every item of a GitHub list, page by page with explicit page numbers. GitHub's own next-page
+// links name the repository by numeric ID, which the cloud proxy refuses, so they are never followed.
+const MAX_PAGES = 100;
+function readAll(path) {
+  const items = [];
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const batch = JSON.parse(gh(['api', `${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`]));
+    if (!Array.isArray(batch)) throw new Error(`gh api ${path} did not return a list`);
+    items.push(...batch);
+    if (batch.length < 100) return items;
+  }
+  throw new Error(`gh api ${path} has more than ${MAX_PAGES * 100} items; not read`);
+}
+
 function readComments(repo, issue) {
-  return JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/comments?per_page=100`])).flat();
+  return readAll(`repos/${repo}/issues/${issue}/comments`);
 }
 
 function readSubIssues(repo, issue, seen = new Set([issue])) {
-  const found = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/issues/${issue}/sub_issues?per_page=100`])).flat();
+  const found = readAll(`repos/${repo}/issues/${issue}/sub_issues`);
   for (const sub of found) {
     if (seen.has(sub.number)) continue;
     seen.add(sub.number);
@@ -323,13 +349,19 @@ function parseArgs(argv) {
   return args;
 }
 
-function main(argv = process.argv.slice(2)) {
+function main(argv = process.argv.slice(2), out = process.stdout, deps = {}) {
+  gh = deps.gh || runGh;
+  try { return run(argv, out); } finally { gh = runGh; }
+}
+
+function run(argv, out) {
   const args = parseArgs(argv);
   const ledger = args.ledger ? JSON.parse(fs.readFileSync(args.ledger, 'utf8')) : null;
   if ((args.parent === null || args.recordPrefix === null) && args.repo) {
-    const binding = readBinding(args.repo);
-    if (args.parent === null) args.parent = Number(binding.parent_issue);
-    if (args.recordPrefix === null && binding.record_prefix) args.recordPrefix = binding.record_prefix;
+    const bound = bindingParent(readBinding(args.repo));
+    if (args.parent === null) args.parent = bound.parent;
+    if (args.recordPrefix === null && bound.recordPrefix) args.recordPrefix = bound.recordPrefix;
+    if (args.parent === null) throw new Error('.github/toolkit-programme.json names no parent issue; pass --parent <n>');
   }
   const read = issue => (ledger ? entriesFromLedger(ledger, issue) : entriesFromComments(issue, readComments(args.repo, issue), { repo: args.repo, prefix: args.recordPrefix }));
   if (args.programme) {
@@ -337,12 +369,12 @@ function main(argv = process.argv.slice(2)) {
     const reads = numbers.map(number => ({ number, ...read(number) }));
     const explicit = explicitSet(...reads.map(item => item.entries));
     const traces = reads.map(({ number, entries, counts }) => ({ number, trace: { ...analyseTrace(entries, explicit), counts } }));
-    process.stdout.write(`${args.json ? toJson({ parent: args.parent, traces }) : renderProgramme(args.parent, traces, args)}\n`);
+    out.write(`${args.json ? toJson({ parent: args.parent, traces }) : renderProgramme(args.parent, traces, args)}\n`);
     return 0;
   }
   const history = childHistory({ child: args.child, parent: args.parent, childEntries: read(args.child), parentEntries: args.parent !== args.child ? read(args.parent) : null });
   if (args.edits) history.body_edits = readBodyEdits(args.repo, args.child);
-  process.stdout.write(`${args.json ? toJson(history) : renderSummary(history, args)}\n`);
+  out.write(`${args.json ? toJson(history) : renderSummary(history, args)}\n`);
   return 0;
 }
 
@@ -352,5 +384,5 @@ if (require.main === module) {
 }
 
 module.exports = Object.freeze({
-  CONFIRMATION_TAG, entriesFromComments, entriesFromLedger, analyseTrace, childHistory, renderSummary, renderProgramme, summaryOf, parseArgs
+  CONFIRMATION_TAG, entriesFromComments, entriesFromLedger, analyseTrace, childHistory, renderSummary, renderProgramme, summaryOf, parseArgs, main, bindingParent
 });

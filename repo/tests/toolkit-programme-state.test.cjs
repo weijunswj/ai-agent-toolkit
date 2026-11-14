@@ -409,7 +409,7 @@ test('the generated CURRENT summary lists work in progress, saying what waits on
   assert.equal(body, [
     '# CURRENT',
     '<!-- programme-current -->',
-    '_Generated from the programme state (revision 0). PROGRAMME GRAPH, AGENT CONTEXT and COMMENT TRACE follow._',
+    '_Generated from the programme state (revision 0). PROGRAMME GRAPH, AGENT CONTEXT and DECISIONS follow._',
     '',
     '**In progress**',
     '- Task 1 (#1): G1, PR #541; next: Finish the sweep',

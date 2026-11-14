@@ -18,7 +18,7 @@ const START = Date.parse('2026-11-01T00:00:00Z');
 const GENERATED = [
   ['NAV', state.renderNavBlockBody([421, 806], null)],
   ['STATE', '<!-- programme-state child=806@1 -->\n# STATUS\n\nStatus lines.'],
-  ['TRACE', '# COMMENT TRACE\n<!-- programme-trace issue=806 -->\n- No comments yet.'],
+  ['TRACE', '# DECISIONS\n<!-- programme-trace issue=806 -->\n- No comments yet.'],
 ];
 const lay = source => layout.layoutTaskPage(source, GENERATED, VERSION);
 const afterBlocks = body => body.slice(body.indexOf('-->', body.lastIndexOf(':END TRACE')) + 3);
@@ -58,7 +58,7 @@ function setup({ outcomes = [{ issue: 806, class: 'COMMITTED', order: 1 }], bodi
   return { github, store, binding, reconciler, time, copies, bodyWrites };
 }
 
-test('a task page is laid out as PATH, STATUS, COMMENT TRACE, the capital sections in their fixed order, then More', () => {
+test('a task page is laid out as PATH, STATUS, DECISIONS, the capital sections in their fixed order, then More', () => {
   const result = lay(OLD_PAGE);
   assert.deepEqual([...result.body.matchAll(/programme-state:BEGIN (\w+)/g)].map(match => match[1]), ['NAV', 'STATE', 'TRACE']);
   assert.equal(afterBlocks(result.body), [
@@ -181,7 +181,7 @@ test('an open task is re-laid only after a copy of its page is saved and read ba
   assert.equal(f.reconciler().run().summary, 'No changes');
 
   // Later passes update blocks in place and need no further copy.
-  f.github.addComment(806, { body: 'A new comment' });
+  f.github.addComment(806, { body: 'Scope\n---\nA new decision' });
   assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
   assert.equal(f.copies().length, 1, 'a page already in order is never copied again');
   assert.equal(afterBlocks(f.github.issues.get(806).body), afterBlocks(body));
@@ -301,7 +301,7 @@ test('a PR page written by a newer Toolkit is held, so two computers never flip 
   f.reconciler('9.0.0').run({ apply: true });
   const newer = f.github.prs.get(900).body;
   assert.match(newer, /toolkit=9\.0\.0/);
-  f.github.addComment(806, { body: 'A new comment' });
+  f.github.addComment(806, { body: 'Scope\n---\nA new decision' });
   f.reconciler(VERSION).run({ apply: true });
   assert.equal(f.github.prs.get(900).body, newer);
 });
@@ -500,7 +500,7 @@ for (const [name, options, relaid] of [
   assert.deepEqual(again.effects.filter(effect => effect.target.issue === 806), [], 'the page is not rewritten every pass');
   assert.equal(again.findings.some(finding => finding.code === 'MANAGED_BLOCK_BROKEN'), false);
   // A later change updates the real blocks only.
-  f.github.addComment(806, { body: 'A new comment' });
+  f.github.addComment(806, { body: 'Scope\n---\nA new decision' });
   assert.deepEqual(f.reconciler().run({ apply: true }).holds.filter(hold => hold.code !== 'CLOSED_WITHOUT_ACCEPTANCE'), []);
   assert.ok(f.github.issues.get(806).body.includes(QUOTED));
   assert.equal(f.reconciler().run().findings.some(finding => finding.code === 'MANAGED_BLOCK_BROKEN'), false);
@@ -538,7 +538,7 @@ test('a page that will be laid out says so in the plan, and its result names the
   const f = setup({ bodies: { 806: OLD_PAGE } });
   const dry = f.reconciler().run();
   const planned = dry.effects.find(effect => effect.kind === 'replace_block' && effect.target.issue === 806);
-  assert.equal(planned.text, "Lay out #806's page in the fixed order (PATH, STATUS, COMMENT TRACE, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first");
+  assert.equal(planned.text, "Lay out #806's page in the fixed order (PATH, STATUS, DECISIONS, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first");
   assert.ok(dry.findings.some(finding => finding.code === 'PROJECTION_STALE' && finding.issue === 806 && finding.detail === 'the page is not in the fixed section order'), 'the finding names the order on first contact too');
   const report = f.reconciler().run({ apply: true });
   const result = report.results.find(entry => entry.kind === 'replace_block' && entry.target.issue === 806);
@@ -548,7 +548,7 @@ test('a page that will be laid out says so in the plan, and its result names the
   assert.equal(result.detail, `the page was laid out in the fixed order; the page as it was is saved at ${copy} in the state store`);
 
   // A page already in order is an ordinary block update: no lay-out wording, no copy named.
-  f.github.addComment(806, { body: 'A new comment' });
+  f.github.addComment(806, { body: 'Scope\n---\nA new decision' });
   const later = f.reconciler().run({ apply: true });
   const update = later.results.find(entry => entry.kind === 'replace_block' && entry.target.issue === 806);
   assert.doesNotMatch(update.text, /Lay out/);
@@ -741,7 +741,7 @@ test('generated pages settle after one write with one block of each name', () =>
     '    # not a heading\n    code', '```\n# not a heading\ncode\n```', '<details><summary>More</summary>\n\nHidden words.\n\n</details>', '<details><summary>Plan</summary>\n\n# Plan title\n\nText.\n\n</details>',
     '<pre>\n# install first\nnpm ci\n</pre>', '<!-- a note -->', '<!--\nhidden\n# not a heading\n-->', '<div align="center">Logo</div>', '| a | b |\n|---|---|\n| 1 | 2 |', '<textarea>\n# Draft\n</textarea>'];
   const openPieces = ['```\nnever closed', '<details>\nnever closed', '<pre>\nnever closed', '<!-- never closed'];
-  const blocks = [['NAV', state.renderNavBlockBody([421, 806], null)], ['STATE', '<!-- programme-state child=806@1 -->\n# STATUS\n\nStatus lines.'], ['TRACE', '# COMMENT TRACE\n<!-- programme-trace issue=806 -->\n- No comments yet.']];
+  const blocks = [['NAV', state.renderNavBlockBody([421, 806], null)], ['STATE', '<!-- programme-state child=806@1 -->\n# STATUS\n\nStatus lines.'], ['TRACE', '# DECISIONS\n<!-- programme-trace issue=806 -->\n- No comments yet.']];
   const inPlace = source => {
     const withState = state.upsertStateBlock(source, state.renderBlock(blocks[1][1], VERSION), {}).body;
     const withNav = state.upsertNavBlock(withState, state.renderBlock(blocks[0][1], VERSION, 'NAV'));

@@ -1756,65 +1756,27 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
   ].join('\n');
 }
 
-// The group a trace item belongs to: its topic, except that on a task page the task's own name and
-// no topic are one group (null). `topic` is the task's name as written, not escaped.
-function topicKey(item, topic) {
-  const key = item.tag || null;
-  return key && topic && key === String(topic).replace(/\s+/g, ' ').trim().toUpperCase() ? null : key;
+// The DECISIONS block an issue body carries in place of the old comment trace: the decision records
+// stay as tagged comments on the issue, listed by `programme.cjs trace <n>`, and the body keeps one
+// link, to the newest tagged comment (or none). Index and directory pages an older Toolkit posted,
+// archive comments and bot comments are never that link, nor on the parent an Agent context comment
+// (its AGENT CONTEXT block lists those).
+function latestDecisionComment(comments, parentPage = false) {
+  const { commentTag, isArchiveComment } = require('./decision-tags.cjs');
+  const { isBot } = require('./decision-trace-audit.cjs');
+  const tagged = (comments || []).filter(comment => !isBot(comment) && commentTag(comment.body) && !(parentPage && commentTag(comment.body) === CONTEXT_TAG) && !isArchiveComment(comment.body)
+    && ![INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER].some(marker => String(comment.body || '').includes(marker))
+    && !String(comment.body || '').includes('programme-trace intent='));
+  return tagged.reduce((latest, comment) => (!latest || String(comment.created_at || '') >= String(latest.created_at || '') ? comment : latest), null);
 }
 
-// A trace's groups, one per topic in first-seen order and the untopiced group last. Topics never mix.
-function traceGroups(trace, topic = null) {
-  const groups = new Map();
-  const add = (item, kind) => {
-    const key = topicKey(item, topic);
-    if (!groups.has(key)) groups.set(key, { tag: key, label: null, indexes: [], entries: [], marks: [] });
-    const group = groups.get(key);
-    if (!group.label && key) group.label = item.tag_label || item.tag;
-    group[kind].push(item);
-  };
-  for (const index of trace.indexes) add(index, 'indexes');
-  for (const entry of trace.entries) add(entry, 'entries');
-  for (const mark of trace.marks) add(mark, 'marks');
-  const other = groups.get(null);
-  groups.delete(null);
-  return [...groups.values(), ...(other ? [other] : [])];
-}
-
-// A line's label, escaped once: its topic as written; for the untopiced line, a task page's own
-// task name, else "Other comments".
-function groupLabel(group, topic) {
-  return publicText(group.tag ? group.label || group.tag : topic || OTHER_COMMENTS);
-}
-
-// One link per comment with its comment ID as the text, followed by "(replaced by <ID>)" when a
-// later comment replaced its record. Index comments come first, as "list 1", "list 2" and so on.
-function traceTokens(group, base) {
-  const replaced = item => (item.superseded_by_id ? ` (replaced by [${item.superseded_by_id}](${commentLink(base, item.superseded_by_id)}))`
-    : item.superseded_by ? ` (replaced by ${publicText(item.superseded_by)})` : '');
+function renderTraceBlockBody(number, comments = [], repository = '', parentPage = false) {
+  const latest = latestDecisionComment(comments, parentPage);
   return [
-    ...group.indexes.map((index, at) => `[list ${at + 1}](${commentLink(base, index.id)})`),
-    ...group.entries.map(entry => `[${entry.id}](${commentLink(base, entry.id)})${replaced(entry)}`),
-    ...group.marks.map(mark => `[${mark.id}](${commentLink(base, mark.id)})${replaced(mark)}`),
-  ];
-}
-
-// The comment trace an issue body carries: one line per topic, listing that topic's index comments
-// and then every comment none of them lists, each as a link that opens the comment. With
-// `repository`, every link is a full URL; `topic` is a task page's own task name, as written.
-function renderTraceBlockBody(number, trace, repository = '', topic = null, parentPage = false) {
-  const base = issueUrl(repository, number);
-  const lines = [
-    '# COMMENT TRACE',
+    '# DECISIONS',
     `<!-- programme-trace issue=${number} -->`,
-    '**Comment trace** (generated from every comment on this issue). One line per topic; each number is a comment and opens it. Read the body first; within a topic, where comments disagree, the latest one wins. To put a comment under a topic, make its first line the topic (the task\'s name, or a short subject for a programme-wide comment) and its second line `---`.',
-    '',
-  ];
-  const groups = traceGroups(trace, topic);
-  for (const [at, directory] of (trace.directories || []).entries()) lines.push(`- [topic directory ${at + 1}](${commentLink(base, directory.id)})`);
-  for (const group of groups) lines.push(`- **${groupLabel(group, topic)}:** ${traceTokens(group, base).join(' · ')}`);
-  if (!groups.length && !trace.directories?.length) lines.push('- No comments yet.');
-  return lines.join('\n');
+    `Decision records are this issue's tagged comments (topic on line 1, \`---\` on line 2; the latest per topic wins). List them with \`programme.cjs trace ${number}\`. ${latest ? `Newest: [${latest.id}](${commentLink(issueUrl(repository, number), latest.id)}).` : 'None yet.'}`,
+  ].join('\n');
 }
 
 // What waits on the owner for one task, or null: an owner decision, a UAT, or a blocker.
@@ -1842,7 +1804,7 @@ function renderCurrentBlockBody(parent, children, issues = new Map(), now = new 
     '# CURRENT',
     '<!-- programme-current -->',
     ...(board ? [board] : []),
-    `_Generated from the programme state (revision ${parent.revision}). PROGRAMME GRAPH, AGENT CONTEXT and COMMENT TRACE follow._`,
+    `_Generated from the programme state (revision ${parent.revision}). PROGRAMME GRAPH, AGENT CONTEXT and DECISIONS follow._`,
     '',
     '**In progress**',
     ...(working.length ? working : ['- None.']),
@@ -2128,20 +2090,14 @@ function contextCommentIds(comments) {
     && ![INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER].some(marker => String(comment.body).includes(marker))).map(comment => String(comment.id));
 }
 
-// The comment AGENT CONTEXT lists and COMMENT TRACE leaves out: the only match, else none.
+// The comment AGENT CONTEXT lists: the only match, else none.
 function contextCommentId(comments) {
   const ids = contextCommentIds(comments);
   return ids.length === 1 ? ids[0] : null;
 }
 
-// A trace without the comment AGENT CONTEXT lists. A comment an index page already lists is not in
-// `entries`, so that page keeps its line.
-function withoutContextComment(trace, id) {
-  return id ? { ...trace, entries: trace.entries.filter(entry => entry.id !== id) } : trace;
-}
-
 // The AGENT CONTEXT block. With one Agent context comment it links that comment; with more than one
-// it holds, names them (the first five) and leaves them in COMMENT TRACE; with none it is the two
+// it holds, names them (the first five) and leaves them in the comments; with none it is the two
 // fixed lines alone. `notes` are the archived note comments to list after it: [{ title, link }],
 // oldest first.
 const CONTEXT_NAMED = 5;
@@ -2153,7 +2109,7 @@ function renderContextBlockBody(number = null, comments = [], repository = '', n
     // The same length as the line it replaced, so size-tuned pages keep their headroom.
     'Toolkit moves only notes under one `## Archive` heading: unchanged, to linked comments shown here.',
     ...(ids.length === 1 ? ['', `- [Agent context](${commentLink(issueUrl(repository, number), ids[0])})`] : []),
-    ...(ids.length > 1 ? ['', `- Held: ${ids.length} comments have "Agent context" as their topic, so none is listed here: ${ids.slice(0, CONTEXT_NAMED).map(link).join(' · ')}${ids.length > CONTEXT_NAMED ? ` and ${ids.length - CONTEXT_NAMED} more` : ''}. They stay in COMMENT TRACE. Keep that topic on one comment and the next redraw lists it here.`] : []),
+    ...(ids.length > 1 ? ['', `- Held: ${ids.length} comments have "Agent context" as their topic, so none is listed here: ${ids.slice(0, CONTEXT_NAMED).map(link).join(' · ')}${ids.length > CONTEXT_NAMED ? ` and ${ids.length - CONTEXT_NAMED} more` : ''}. They stay in the comments. Keep that topic on one comment and the next redraw lists it here.`] : []),
     ...(notes.length ? ['', ...notes.map(note => `- [${note.title}](${note.link})`)] : []),
   ].join('\n');
 }
@@ -2316,13 +2272,13 @@ function headings(text) {
 function blockTarget(text, placement = {}) {
   const anchor = placement.after_block ? findStateBlock(text, placement.after_block).block : null;
   if (anchor) return { start: anchor.end, end: anchor.end, replaces: false };
-  // A heading a generated block prints (PATH, STATUS, COMMENT TRACE) is not a page title.
+  // A heading a generated block prints (PATH, STATUS, DECISIONS) is not a page title.
   const real = withoutShownMarkers(text);
   const spans = [...real.matchAll(new RegExp(`^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:BEGIN ([A-Z]+) [^\\n]*-->\\r?\\n[\\s\\S]*?^<!-- AI-AGENT-TOOLKIT:${BLOCK_SOURCE}:END \\1 -->`, 'gm'))]
     .map(match => [match.index, match.index + match[0].length]);
   const all = headings(text).filter(entry => !spans.some(([from, to]) => entry.start > from && entry.start < to));
   // A section ends at the next heading of its level or higher, or at the next managed block, so a
-  // last section never runs into the comment trace or the text after it.
+  // last section never runs into the DECISIONS block or the text after it.
   const markers = [...real.matchAll(/^<!-- AI-AGENT-TOOLKIT:/gm)].map(match => match.index);
   const sectionEnd = heading => {
     const next = all.find(entry => entry.start > heading.start && entry.level <= heading.level);
@@ -3873,7 +3829,7 @@ class ProgrammeGraphReader {
     throw new ProgrammeError('GH_FAILED', `Issue ${number} has more sub-issues than this reader pages through.`);
   }
 
-  // Every comment on an issue, for the comment trace and its audit.
+  // Every comment on an issue, for the DECISIONS link, AGENT CONTEXT and archive checks.
   comments(number) { return this.commentsChanged(number).comments; }
 
   // The comments last changed at or after `since` (all of them without it), oldest first, with the
@@ -4457,7 +4413,7 @@ const EFFECT_TEXT = {
   detach: effect => `Detach finished #${effect.target.issue} from under #${effect.target.parent} (the task stays in the catalogue)`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
-  replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, STATUS, COMMENT TRACE, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first`
+  replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, STATUS, DECISIONS, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first`
     : effect.state === false ? `Update the ${staleParts(effect)} in #${effect.target.issue}'s body` : `${effect.insert ? 'Add' : effect.move ? 'Move' : 'Update'} the state block in #${effect.target.issue}'s body`),
   replace_pr_nav: effect => `Write the PATH and STATUS blocks at the top of PR #${effect.target.pr}`,
   update_attention: effect => `Update the attention findings on #${effect.target.issue} (${effect.line} after this pass)`,
@@ -4468,8 +4424,8 @@ const EFFECT_TEXT = {
 
 // The parts of a body a block effect rewrites when its state block is already current.
 function staleParts(effect) {
-  const names = [['trace', 'comment trace'], ['nav', 'parent and task links'], ['current', 'CURRENT summary']].filter(([key]) => effect.stale?.[key]).map(([, name]) => name);
-  if (!names.length) return 'comment trace';
+  const names = [['trace', 'DECISIONS block'], ['nav', 'parent and task links'], ['current', 'CURRENT summary']].filter(([key]) => effect.stale?.[key]).map(([, name]) => name);
+  if (!names.length) return 'DECISIONS block';
   return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
@@ -5258,30 +5214,13 @@ class Reconciler {
     return blocks;
   }
 
-  // The decision-trace audit on the parent and each catalogued issue whose body this pass does not
-  // rewrite with a fresh comment trace. Report only.
-  auditTraces(parent, observed, only, findings, effects) {
-    const numbers = (only ? [only, parent.parent_issue] : [parent.parent_issue, ...parent.outcomes.map(outcome => outcome.issue)]).filter(number => !this.scope || number === parent.parent_issue || this.scope.has(number));
-    const traced = new Set(effects.filter(effect => effect.kind === 'replace_block').map(effect => effect.target.issue));
-    for (const number of numbers) {
-      const issue = observed.issues.get(number);
-      if (!issue || traced.has(number)) continue;
-      const result = auditDecisionTraces({ body: issue.body, comments: observed.comments.get(number) || [], recordPrefix: this.binding.record_prefix, threshold: this.threshold, repository: this.binding.repository, issue: number });
-      if (result.index_errors.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: indexErrorText(result.index_errors) });
-      if (result.unlinked_decisions.length) findings.push({ code: 'TRACE_UNLINKED', issue: number, detail: `${result.unlinked_decisions.length} decision comment(s) are not linked from the body or an index comment it links; write the lines from decision-trace-audit --repair` });
-      for (const entry of result.superseded_unmarked) findings.push({ code: 'TRACE_SUPERSEDED_UNMARKED', issue: number, detail: `${entry.record} is superseded by ${entry.superseded_by} but not marked "superseded by"` });
-    }
-  }
-
   // The parent page puts the Programme Graph right under the CURRENT summary (the binding's
   // projection places the summary); task pages put their status block right under the title.
   placementFor(number) {
     return number === this.binding.parent_issue ? { ...(this.binding.projection || {}), after_block: CURRENT_BLOCK_NAME } : {};
   }
 
-  // The body with the state block and the comment trace written. When it would reach the threshold,
-  // the trace's own lines move to a new index comment: `overflow` lists them, and the body is
-  // measured with a link to that comment in their place.
+  // The body with the state block and the DECISIONS block written (see projectTrace).
   projectBody(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, page = null) {
     if (number === this.binding.parent_issue) return this.projectParentPage(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget, page);
     return this.projectTrace(number, source, stateBody, comments, version, navBody, currentBody, topic, topicCommentBudget, { relay: page?.relay === true });
@@ -5412,11 +5351,12 @@ class Reconciler {
     return { ...(feasible || projected), refused: true };
   }
 
+  // The body with the state block and the DECISIONS block written. The decisions block is a fixed
+  // line and one link, so nothing pages into index comments: `overflow` is always empty. A body still
+  // at the threshold is the caller's to report (BODY_TOO_LARGE).
   projectTrace(number, source, stateBody, comments, version, navBody = null, currentBody = null, topic = null, topicCommentBudget = MAX_TOPIC_COMMENTS_PER_PASS, layout = {}) {
-    const threshold = layout.threshold ?? this.threshold;
-    const trace = withoutContextComment(traceEntries(comments, this.binding.record_prefix, this.binding.repository, number), layout.contextId);
-    const build = entries => {
-      const traceBody = renderTraceBlockBody(number, entries, this.binding.repository, topic, number === this.binding.parent_issue);
+    const build = () => {
+      const traceBody = renderTraceBlockBody(number, comments, this.binding.repository, number === this.binding.parent_issue);
       let layoutHold = null;
       if (layout.relay) {
         // A task page: generated blocks first, then the spec sections, then everything else.
@@ -5438,53 +5378,8 @@ class Reconciler {
         [[CURRENT_BLOCK_NAME, currentBody], [BLOCK_NAME, stateBody], [NAV_BLOCK_NAME, navBody], [CONTEXT_BLOCK_NAME, layout.context], [TRACE_BLOCK_NAME, traceBody]], `#${number}`);
       return { body, traceBody, moved: withState.moved, ...(layoutHold ? { layoutHold } : {}) };
     };
-    const full = build(trace);
-    if (full.body.length < threshold) return { ...full, overflow: [] };
-    // Try the largest topic lists first within the notification budget. If that cannot fit, discard
-    // all speculative topic moves and page the original topic lines together, one line per topic.
-    const base = issueUrl(this.binding.repository, number);
-    const links = group => traceTokens({ ...group, indexes: [] }, base);
-    const size = group => links(group).join(' · ').length;
-    const movable = traceGroups(trace, topic).filter(group => group.entries.length || group.marks.length).sort((a, b) => size(b) - size(a));
-    let current = trace;
-    let projected = full;
-    const overflow = [];
-    let topicComments = 0;
-    for (const group of movable) {
-      const part = { tag: group.tag, label: group.tag ? group.label : topic, lines: links(group) };
-      const pages = indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label);
-      if (topicComments + pages.length > topicCommentBudget) break;
-      topicComments += pages.length;
-      current = {
-        directories: current.directories,
-        indexes: [...current.indexes, ...pages.map(() => ({ id: '9'.repeat(19), tag: group.tag, tag_label: group.label, date: '0000-00-00' }))],
-        entries: current.entries.filter(entry => topicKey(entry, topic) !== group.tag),
-        marks: current.marks.filter(mark => topicKey(mark, topic) !== group.tag),
-      };
-      overflow.push(part);
-      projected = build(current);
-      if (projected.body.length < threshold) break;
-    }
-    if (projected.body.length >= threshold) {
-      // Topic links can themselves fill the page. Page that directory, preserving every topic
-      // line and leaving only root links. Existing directories are never nested in new ones.
-      overflow.length = 0;
-      const lines = traceGroups(trace, topic).map(group => `- **${groupLabel(group, topic)}:** ${traceTokens(group, base).join(' · ')}`);
-      if (lines.length) {
-        const pages = indexCommentBodies(number, lines, '9'.repeat(16), null, null, true);
-        projected = build({ directories: [...(trace.directories || []), ...pages.map(() => ({ id: '9'.repeat(19) }))], indexes: [], entries: [], marks: [] });
-        const nested = trace.indexes.find(index => index.nested);
-        if (projected.body.length < threshold && nested) throw new ProgrammeError('TRACE_INDEX_INVALID', `Paging this comment directory would exceed two index hops (index ${nested.id}). ${indexRecoveryText(['INDEX_DEPTH'])}`);
-        overflow.push({ directory: true, tag: null, lines });
-      }
-    }
-    const pageCount = trace.strict_count
-      + overflow.reduce((count, part) => count + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0);
-    if (overflow.reduce((count, part) => count + indexCommentBodies(number, part.lines, '0'.repeat(16), part.tag, part.label, part.directory).length, 0) > MAX_TOPIC_COMMENTS_PER_PASS) {
-      return { ...full, overflow: [], refused: full.body.length >= this.threshold };
-    }
-    if (projected.body.length < threshold && pageCount > MAX_INDEX_COMMENTS) throw new ProgrammeError('TRACE_INDEX_INVALID', `The comment trace would exceed ${MAX_INDEX_COMMENTS} index pages. ${indexRecoveryText(['INDEX_LIMIT'])}`);
-    return { ...projected, overflow };
+    const full = build();
+    return { ...full, overflow: [] };
   }
 
   // Every open or draft PR that names a catalogued task (the task's tracked PR, or a PR whose text
@@ -5560,12 +5455,7 @@ class Reconciler {
       const relay = this.taskRelay(number, issue);
       const move = !relay.relay && Boolean(block) && upsertStateBlock(issue.body, renderBlock(block.body, block.version), placement).moved;
       const topic = this.topicFor(parent, number, observed.issues);
-      let traceBody;
-      try {
-        const trace = traceEntries(comments, this.binding.record_prefix, this.binding.repository, number);
-        traceBody = renderTraceBlockBody(number, number === this.binding.parent_issue ? withoutContextComment(trace, contextCommentId(comments)) : trace, this.binding.repository, topic, number === this.binding.parent_issue);
-      }
-      catch (error) { if (!error.code) throw error; holds.push({ code: error.code, target: `#${number}`, detail: error.message, scope: 'body' }); continue; }
+      const traceBody = renderTraceBlockBody(number, comments, this.binding.repository, number === this.binding.parent_issue);
       const traceCurrent = Boolean(traced.block) && normalizeBlockBody(traced.block.body) === normalizeBlockBody(traceBody) && !traced.block.tampered;
       // Dry runs include the time change on the document that holds each effect's intent.
       const timeWillChange = number === parent.parent_issue && parent.outcomes.some(outcome => graphClass(outcome, children.get(outcome.issue)) === 'NOW'
@@ -5586,7 +5476,7 @@ class Reconciler {
       if (number !== parent.parent_issue && current && !move && ordered && traceCurrent && navCurrent && currentCurrent && !timeWillChange && issue.body.length < this.threshold) continue;
       if (!ordered) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: 'the page is not in the fixed section order' });
       if (!current || move) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: !block ? 'no state block yet' : block.tampered ? 'the block was edited by hand' : current ? 'the block is not in its place on the page' : 'the block differs from the state documents' });
-      if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no comment trace yet' : traced.block.tampered ? 'the comment trace was edited by hand' : 'the comment trace differs from the comments' });
+      if (!traceCurrent) findings.push({ code: 'TRACE_STALE', issue: number, detail: !traced.block ? 'no DECISIONS block yet' : traced.block.tampered ? 'the DECISIONS block was edited by hand' : 'the DECISIONS block differs from the comments (an old comment trace is replaced here)' });
       if (!navCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: nav.block ? 'the parent and task links differ from the state' : 'no parent and task links yet' });
       if (!currentCurrent) findings.push({ code: 'PROJECTION_STALE', issue: number, detail: summary.block ? 'the CURRENT summary differs from the state documents' : 'no CURRENT summary yet' });
       let projected;
@@ -5601,7 +5491,7 @@ class Reconciler {
         const finding = { code: 'BODY_TOO_LARGE', issue: number, diagnostics, detail: 'The projected page reaches the redraw threshold' };
         const previous = findings.find(entry => entry.code === finding.code && entry.issue === number);
         if (previous) Object.assign(previous, finding); else findings.push(finding);
-        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}) even with its comment trace in an index comment; shorten it first`, scope: 'body', diagnostics });
+        holds.push({ code: 'BODY_TOO_LARGE', target: `#${number}`, detail: `Controller: the body would reach ${projected.body.length} characters (threshold ${this.threshold}); shorten it first`, scope: 'body', diagnostics });
         continue;
       }
       if (projected.nearLimit) findings.push({ code: 'BODY_NEAR_LIMIT', issue: number, diagnostics: bodySizeDiagnostics(projected.body, Math.min(SAFE_LIMIT, this.threshold)), detail: 'The projected page fits the hard limit but has lost its safe headroom' });
@@ -5918,7 +5808,6 @@ class Reconciler {
     const blockHoldStart = holds.length;
     this.diffBlocks(parent, projected, observed, only, effects, findings, holds, null, resolutions);
     const blockHolds = new Set(holds.slice(blockHoldStart));
-    this.auditTraces(parent, observed, only, findings, effects);
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     this.diffIdle(parent, desiredDocs, observed, only, findings);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
