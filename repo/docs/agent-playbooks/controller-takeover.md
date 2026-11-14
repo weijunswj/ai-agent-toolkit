@@ -62,7 +62,7 @@ Questions use the host's native question UI with plain option labels and "(my pi
 
 ### 1. The capability check
 
-Run probes (a)-(i) using Capability routes. Report the Surface line, the required abilities reached and every dependent hold. Do not create a record when a required ability is unreachable. Task probe (g) waits for the fresh governance guard at step 9.
+Run probes (a)-(i) using Capability routes. Report the Surface line, the required abilities reached and every dependent hold. Do not create a record when a required ability is unreachable. Probe (g) waits for the fresh governance guard at step 9.
 
 ### 2. Mode and repository
 
@@ -133,12 +133,12 @@ These formats carry prepared steps, not authority. Fill every placeholder and ex
 
 ### Step groups
 
-- **Read pack:** version, hooks, checkout, git/node, signed-in gh account (and its match to the connector account), fresh governance status (declare its local observation-cache writes), outgoing activity, map revision, open pull requests/checks, latest decision ID and epoch. Guard all programme/task/shard reads with fresh ENABLED. Read CURRENT before completion, not an attention refresh that writes programme state.
+- **Read pack:** version, hooks, checkout, git/node, signed-in gh account (and its match to the connector account), fresh governance status (declare its local observation-cache writes), outgoing activity, map revision, open pull requests/checks, latest decision ID and epoch. Guard all programme, cloud sweep and shard reads with fresh ENABLED. Read CURRENT before completion, not an attention refresh that writes programme state.
 - **Custody pack:** re-read outgoing activity, compare with the Read pack, copy named evidence to the verified store, push, fetch once and show paths. Only on takeover/recovery.
 - **Record pack:** use the controller's exact record and claim. Post and read back the prepared record, then claim immediately, on one account; never post the record ahead on another route. Check freshness again just before posting. If a record is already posted, relay only the claim; a parent write since it returns TAKEOVER_UNVERIFIED, and step 7's new-record rule applies. An ungoverned takeover needs no claim and can finish through its proven connector and evidence-store routes.
 - **Gate pack:** after takeover, ask a qualified gatekeeper to launch the gate with pinned model/effort and return its actual launch record and report verbatim. A pasted ordinary brief is never itself a gate. No gate or merge from a paste alone; merge stays in a route-proven session with the owner's merge OK. A relayed tap never counts.
 
-Pack ids use the lower-case group word: `read`, `custody`, `record`, `task` or `gate`, in the order above.
+Pack ids use the lower-case group word: `read`, `custody`, `record` or `gate`, in the order above.
 
 Take the pack id time, in UTC, from host evidence or a tool read of the clock, else from the newest timestamp you read (a comment's created_at or a commit date). A date alone is not enough. Failing those, write `time-unknown` in its place; never guess or fill with zeros.
 
@@ -311,6 +311,6 @@ Before the journey, a qualifying coordinator bootstraps the guidebook, including
 - **P3 The project instructions block, project lines and lanes line.** Render the bound block, preserve all owner text, apply with saved-copy and read-back safeguards, record the version. Default one lane; an owner-set number wins.
 - **P4 Daily check-in and hourly nudge.** Follow the recurring-task reference, preserve owner stops, save and read back SCHEDULED TASKS. These AI check-ins stay Projects-only.
 - **P5 Confirm it works: a thread result relayed, a card answered, a test check-in and test nudge.** Verify all results now rather than waiting for a scheduled wake.
-- **P6 The done line with the Projects fields (skill version, guidebook VERSION, check-in time, nudge on), then the first post in board format.** Include device/folder, recurring-task home, programme sweep when armed and next work item, following the skill's current post format.
+- **P6 The done line with the Projects fields (skill version, guidebook VERSION, check-in time, nudge on), then the first post in board format.** Include device/folder, recurring-task home, latest cloud sweep result when ENABLED and next work item, following the skill's current post format.
 
 Detailed Projects actions live in [setup](https://github.com/weijunswj/ai-agent-toolkit/blob/main/repo/contracts/claude-projects/web-controller-projects/reference/setup.md). The weekly audit is not part of this journey or its Projects extras.
