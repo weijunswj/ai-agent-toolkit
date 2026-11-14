@@ -18,8 +18,8 @@
 // repository instead of crashing; hooks.json also sets onFailure: "block" for prompts and for the
 // state-changing tools (STATE_CHANGING_TOOLS below).
 //
-// Cloud sessions (CLAUDE_CODE_REMOTE=true) run the merge hold too, but not the undecided-repository
-// hold. Proven unsafe issue closures are refused everywhere; an unknown closure check is advisory in
+// Cloud sessions (CLAUDE_CODE_REMOTE=true) run the merge hold too, but are not asked the governance
+// question. Proven unsafe issue closures are refused everywhere; an unknown closure check is advisory in
 // the cloud. Governance still comes from
 // the repository default branch.
 
@@ -67,8 +67,8 @@ function respond(event, input, options = {}) {
   // Cloud sessions run the merge hold as local ones do (local Toolkit is the base). Differences: a
   // Claude Projects thread's task auto-merge switch is read from the host's session context at the
   // start of its first prompt (toolkit-projects-cloud.cjs); an issue closure the cloud check cannot
-  // prove unsafe is advisory, since gh there may not be signed in; and the undecided-repository
-  // hold stays off, since a cloud container cannot keep the owner's answer (a Projects override).
+  // prove unsafe is advisory, since gh there may not be signed in; and the governance question is
+  // not asked, since a cloud container cannot keep the owner's answer (a Projects override).
   const cloud = cloudSession(options.environment || process.env);
   if (cloud) {
     options = { ...options, cloud: true };

@@ -116,7 +116,7 @@ test('A: the merged binding decides on every computer; historical laptop files n
   const row = (name, setup) => { const repo = fakeRepo(ctx, name, setup.repo || {}); setup.before && setup.before(repo); return stateAt(ctx, repo); };
 
   const enabled = row('v2-enabled', { before: repo => cache(ctx, repo) });
-  assert.deepEqual([enabled.state, enabled.rule, enabled.hold, enabled.governed_rules_bind, enabled.programme_records_bind], ['ENABLED', 'M1', false, true, true]);
+  assert.deepEqual([enabled.state, enabled.rule, enabled.governed_rules_bind, enabled.programme_records_bind], ['ENABLED', 'M1', true, true]);
 
   const localNo = row('v2-enabled-local-no', { before: (repo) => { decide(ctx, repo, 'decline'); cache(ctx, repo, { binding: v2({ repository: SLUG }) }); } });
   assert.deepEqual([localNo.state, localNo.rule], ['ENABLED', 'M1']);
@@ -127,16 +127,16 @@ test('A: the merged binding decides on every computer; historical laptop files n
   assert.ok(old.notes.includes('binding-v2-migration-offered'));
 
   const disabled = row('v2-disabled-local-yes', { before: (repo) => { decide(ctx, repo, 'enable'); cache(ctx, repo, { binding: { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' } }); } });
-  assert.deepEqual([disabled.state, disabled.rule, disabled.hold], ['DISABLED', 'M2', false]);
+  assert.deepEqual([disabled.state, disabled.rule], ['DISABLED', 'M2']);
 
   const none = row('none', { before: repo => cache(ctx, repo, { status: 'absent' }) });
-  assert.deepEqual([none.state, none.rule, none.hold], ['UNDECIDED', 'R7', true], 'never set up: pause and block until the owner\'s own reply');
+  assert.deepEqual([none.state, none.rule, none.governed_effects_hold], ['UNDECIDED', 'R7', true], 'never set up: counts as off, with no governed effects until a decision merges');
 
   const ownerNo = row('none-owner-no', { before: (repo) => { decide(ctx, repo, 'decline'); cache(ctx, repo, { status: 'absent' }); } });
-  assert.deepEqual([ownerNo.state, ownerNo.rule, ownerNo.hold], ['UNDECIDED', 'R7', true]);
+  assert.deepEqual([ownerNo.state, ownerNo.rule, ownerNo.governed_effects_hold], ['UNDECIDED', 'R7', true]);
 
   const ownerYes = row('none-owner-yes', { before: (repo) => { decide(ctx, repo, 'enable'); cache(ctx, repo, { status: 'absent' }); } });
-  assert.deepEqual([ownerYes.state, ownerYes.rule, ownerYes.hold, ownerYes.programme_records_bind], ['UNDECIDED', 'R7', true, false], 'records bind only once the binding merges');
+  assert.deepEqual([ownerYes.state, ownerYes.rule, ownerYes.governed_effects_hold, ownerYes.programme_records_bind], ['UNDECIDED', 'R7', true, false], 'records bind only once the binding merges');
   assert.equal(ownerYes.governed_rules_bind, false);
 
   const pending = row('none-working-tree', { repo: { workingBinding: v2() }, before: repo => cache(ctx, repo, { status: 'absent' }) });
@@ -145,7 +145,7 @@ test('A: the merged binding decides on every computer; historical laptop files n
 
   for (const [name, text] of [['bad-json', '{oops'], ['unknown-schema', JSON.stringify({ ...v2(), schema: 'toolkit.programme-binding.v9' })], ['bad-field', JSON.stringify(v2({ required_checks: 'validate' }))]]) {
     const error = row(name, { before: repo => cache(ctx, repo, { text }) });
-    assert.deepEqual([error.state, error.rule, error.hold, error.governed_rules_bind, error.programme_records_bind, error.governed_effects_hold], ['ERROR', 'M0', false, false, false, true], `${name}: ERROR is never ON and never quietly OFF (A2)`);
+    assert.deepEqual([error.state, error.rule, error.governed_rules_bind, error.programme_records_bind, error.governed_effects_hold], ['ERROR', 'M0', false, false, true], `${name}: ERROR is never ON and never quietly OFF (A2)`);
   }
 
   const fork = row('fork', { before: repo => cache(ctx, repo, { binding: v2({ repository: 'example-owner/upstream-repo' }) }) });
@@ -155,7 +155,7 @@ test('A: the merged binding decides on every computer; historical laptop files n
   const fresh = row('cached-23h', { before: repo => cache(ctx, repo, { ageMs: 23 * HOUR }) });
   assert.deepEqual([fresh.state, fresh.governed_rules_bind, fresh.programme_records_bind], ['ENABLED', true, true]);
   const stale = row('cached-25h', { before: repo => cache(ctx, repo, { ageMs: 25 * HOUR }) });
-  assert.deepEqual([stale.state, stale.hold, stale.governed_rules_bind, stale.programme_records_bind, stale.governed_effects_hold], ['ENABLED', false, true, false, true], 'stale: routine work on, admission, finality and writes hold (A4)');
+  assert.deepEqual([stale.state, stale.governed_rules_bind, stale.programme_records_bind, stale.governed_effects_hold], ['ENABLED', true, false, true], 'stale: routine work on, admission, finality and writes hold (A4)');
   assert.ok(stale.notes.includes('merged-binding-stale'));
 
   const unread = row('never-read', { before: repo => decide(ctx, repo, 'enable') });

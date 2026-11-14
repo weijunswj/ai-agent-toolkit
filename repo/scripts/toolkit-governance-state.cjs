@@ -403,7 +403,6 @@ function result(fields) {
     state,
     rule: fields.rule,
     reason: fields.reason,
-    hold: state === 'UNDECIDED' && fields.hold !== false,
     materials_complete: state === 'ENABLED' ? complete : null,
     governed_rules_bind: complete,
     // Gate admission, finality and governed writes (programme records): only on a fresh read of

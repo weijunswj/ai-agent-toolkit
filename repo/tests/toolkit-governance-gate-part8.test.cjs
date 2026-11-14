@@ -98,7 +98,7 @@ for (const decision of ['disable', 'enable']) {
         }
       }
       const decided = require('./support/governance-observations.cjs').seedMerged(repo, decision, { registryOptions: ctx.options });
-      assert.deepEqual([decided.hold, decided.reason], [false, 'decided']);
+      assert.equal(decided.reason, 'decided');
       for (let round = 0; round < 2; round += 1) {
         assert.equal(hold(ctx).decide({ cwd: repo, prompt: `request ${round}` }).action, 'pass');
         assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);

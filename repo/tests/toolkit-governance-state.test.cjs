@@ -78,7 +78,7 @@ test('an off observation reports failed refresh and staleness without enabling e
       merged: { status: 'disabled', fresh: false, unavailable } });
     assert.equal(current.state, 'DISABLED');
     assert.equal(current.programme_records_bind, false);
-    assert.equal(current.hold, false);
+    assert.equal(current.governed_effects_hold, false);
     assert.ok(current.notes.includes(unavailable ? 'could-not-check-governance' : 'merged-binding-stale'));
     const line = require('../scripts/toolkit-governance-gate.cjs').sessionLine(cwd, { registryOptions: opts(ctx), stateReader: () => current });
     assert.match(line, /disabled/);
@@ -121,7 +121,6 @@ test('derive: the rule table, first match wins', () => {
       const result = governance.GovernanceState.derive({ identity, materials: materials(block, binding), decision: { state: decision, decision_kind: null }, merged });
       assert.equal(result.state, expectedState, `${decision}/${merged.status}`);
       assert.equal(result.rule, rule, `${decision}/${merged.status}`);
-      assert.equal(result.hold, expectedState === 'UNDECIDED');
       assert.equal(result.governed_rules_bind, binds);
       assert.equal(result.programme_records_bind, binds);
       assert.equal(result.governed_effects_hold, ['ERROR', 'UNDECIDED', 'UNAVAILABLE'].includes(expectedState));
@@ -138,7 +137,7 @@ test('derive: the rule table, first match wins', () => {
   ];
   for (const identity of identities) for (const decision of ['enabled', 'disabled', 'unresolved']) {
     const result = governance.GovernanceState.derive({ identity, materials: materials(true, true), decision: { state: decision }, merged: fresh('enabled') });
-    assert.deepEqual([result.state, result.rule, result.governed_rules_bind, result.hold], ['DISABLED', 'R8', false, false]);
+    assert.deepEqual([result.state, result.rule, result.governed_rules_bind, result.governed_effects_hold], ['DISABLED', 'R8', false, false]);
   }
 });
 
@@ -150,7 +149,7 @@ test('S-01, S-02: no git root is DISABLED automatically; a git repository not on
   // The scratch folder may sit inside some git checkout on a developer machine; only check the
   // no-root case when that is not so.
   if (governance.findGitRoot(plain) === null) {
-    assert.deepEqual([outside.state, outside.rule, outside.reason, outside.hold], ['DISABLED', 'R1', 'no-git', false]);
+    assert.deepEqual([outside.state, outside.rule, outside.reason, outside.governed_effects_hold], ['DISABLED', 'R1', 'no-git', false]);
     assert.equal(outside.folder, plain);
     assert.equal(outside.repository_id, null);
     assert.equal(outside.root, null);
@@ -168,7 +167,7 @@ test('S-01, S-02: no git root is DISABLED automatically; a git repository not on
   ]) {
     const repo = fakeRepo(ctx.root, name, { remote, block: true, binding: true });
     const result = state(ctx, repo);
-    assert.deepEqual([result.state, result.rule, result.reason, result.hold, result.host], ['DISABLED', 'R8', reason, false, host], name);
+    assert.deepEqual([result.state, result.rule, result.reason, result.governed_effects_hold, result.host], ['DISABLED', 'R8', reason, false, host], name);
     assert.equal(result.governed_rules_bind, false, `${name}: a governed block never binds off github.com`);
     assert.ok(result.repository_id, name);
   }
@@ -201,12 +200,12 @@ test('S-03, S-06, S-07: materials without a decision', (t) => {
   const ctx = scratch(t);
   const optIn = state(ctx, fakeRepo(ctx.root, 'opt-in', { block: true, binding: true }));
   // A working-tree binding is not merged, so it never decides: it is shown as pending.
-  assert.deepEqual([optIn.state, optIn.rule, optIn.reason, optIn.governed_rules_bind, optIn.hold], ['UNDECIDED', 'R7', 'no-decision', false, true]);
+  assert.deepEqual([optIn.state, optIn.rule, optIn.reason, optIn.governed_rules_bind, optIn.governed_effects_hold], ['UNDECIDED', 'R7', 'no-decision', false, true]);
   assert.ok(optIn.notes.includes('pending-binding-merge'));
   const blockOnly = state(ctx, fakeRepo(ctx.root, 'block-only', { block: true }));
-  assert.deepEqual([blockOnly.state, blockOnly.rule, blockOnly.hold], ['UNDECIDED', 'R7', true]);
+  assert.deepEqual([blockOnly.state, blockOnly.rule, blockOnly.governed_effects_hold], ['UNDECIDED', 'R7', true]);
   const plain = state(ctx, fakeRepo(ctx.root, 'plain'));
-  assert.deepEqual([plain.state, plain.rule, plain.hold], ['UNDECIDED', 'R7', true]);
+  assert.deepEqual([plain.state, plain.rule, plain.governed_effects_hold], ['UNDECIDED', 'R7', true]);
   const bindingOnly = state(ctx, fakeRepo(ctx.root, 'binding-only', { binding: true }));
   assert.deepEqual([bindingOnly.state, bindingOnly.rule], ['UNDECIDED', 'R7']);
   const legacy = fakeRepo(ctx.root, 'legacy', { binding: true });
@@ -221,7 +220,7 @@ test('historical laptop answers are inert, even with confirmed GitHub absence', 
   for (const name of ['yes', 'no']) {
     fs.copyFileSync(path.join(__dirname, 'fixtures', 'governance-legacy-' + name + '.json'), ctx.registryPath);
     const before = fs.readFileSync(ctx.registryPath);
-    assert.deepEqual([state(ctx, repo).state, state(ctx, repo).hold], ['UNDECIDED', true]);
+    assert.deepEqual([state(ctx, repo).state, state(ctx, repo).governed_effects_hold], ['UNDECIDED', true]);
     assert.deepEqual(fs.readFileSync(ctx.registryPath), before);
   }
 });
@@ -310,7 +309,7 @@ test('unreadable identity continues ordinary work; damaged historical records ca
   const dangling = path.join(ctx.root, 'dangling'); fs.mkdirSync(dangling);
   fs.writeFileSync(path.join(dangling, '.git'), 'not a gitdir pointer');
   const result = state(ctx, dangling);
-  assert.deepEqual([result.state, result.reason, result.hold], ['UNAVAILABLE', 'identity-unreadable', false]);
+  assert.deepEqual([result.state, result.reason], ['UNAVAILABLE', 'identity-unreadable']);
   assert.throws(() => governance.userStateDirectory({ registryPath: ctx.registryPath }), /STATE_PATH_OVERRIDE_FORBIDDEN/);
   assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), '{damaged');
 });
