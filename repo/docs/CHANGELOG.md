@@ -1,11 +1,20 @@
 # Toolkit Changelog
 
-## 3.95.0
+## 3.95.0 (rolling merge trains)
+
+### Changed
+
+- Controllers now run rolling merge trains on their own. While a landing is in flight, ready pull requests board the open train; when main frees, boarding closes, the train catches up with main, bumps once and merges after one CI run, and the next train opens at once. A lone ready pull request merges alone, and no pull request waits on a train. The Controller routes its merge step to the page that holds the train rule, the Claude Projects skill points there, and the hourly nudge flags ready pull requests that no train holds.
+- Running a merge train needs no planning or build gate and runs on the small model tier. The lane never fixes a conflict: it ejects the member and that member's builder fixes it. A train needs no review of its own once `verify` passes and CI is green; only files two or more members change get a short delta review.
+- The Claude Projects coordinator never resolves its own project-chat post or the reply thread under it, since that hides the chat message; quiet reply threads no longer close after six hours. It resolves a thread only when the thread has its own session, is no task home, every pull request it lists is merged or closed, nothing is owed by the owner and its last report is final. The hourly nudge sweeps blocked, review-ready and done threads against that checklist.
 
 ### Added
 
-- **Speed-first CI in `secure-ci-cd`:** a new guide, `templates/cicd/ci-speed.md`, aims CI at the shortest wait from push to a trusted green check without dropping a security gate or a test. It says what to measure first (runs per commit, cancel causes, jobs per run, queue versus run time, peak jobs against the account's concurrent job cap, setup times) and ranks the fixes cheapest first: light runs for title and body edits, concurrency that cancels only stale runs, fewer and fuller jobs, docs-only skips that keep required checks reporting, shard balancing, caching only where setup is slow, and flake hunting. Free fixes come first; a paid plan raising the cap stays the owner's call. The Toolkit's own measured CI is the worked example. The skill and the setup prompt point to it.
-- **New CI check-up rows:** `speed.edits` (an edit reruns heavy jobs), `speed.concurrency` (no group, a pull request group keyed on the commit SHA so stale runs are never cancelled, an edit cancelling the run on the same commit, or pushes sharing one group in a pull request and push workflow, so a burst of merges loses a waiting run) and `speed.slots` (a measured run that starts more than half the account's concurrent jobs). The settings file takes `concurrent_jobs` (default 20, the GitHub Free cap). All three are CHECK rows for the agent to judge.
+- `toolkit-merge-train.cjs catchup` merges main into a stacked train after the earlier landing and adds the one bump, with no rebuild or force-push.
+- A merge train holds at most six members (`build` refuses a seventh), and its body carries every member's `Pack changes` lines (`pack_changes` in the manifest). A member that fails CI or its delta review is ejected at once and the rest carry on; nobody edits a train or member body while its CI runs.
+- A stacked train's pull request targets the running train's branch until that train lands, so the version check does not report its waiting fragments as unfolded; it then targets main before `catchup`.
+- In Claude Projects the train's merge card goes up in the train thread, which runs `land` and the merge itself, because a relayed tap does not count there; the fallback is the owner typing `merge PR N at <full SHA> as a merge commit` in that thread.
+- `toolkit-merge-train.cjs verify` lists the files two or more members change (`overlap`) and the review the train needs (`review`).
 
 ## 3.94.0
 

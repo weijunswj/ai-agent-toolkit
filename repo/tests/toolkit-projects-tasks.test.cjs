@@ -280,13 +280,15 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   assert.match(checkIn, /each model or effort gap reported or still open \(task, served, wanted\)/);
   assert.match(checkIn, /listed under \*\*Tasks:\*\* as "effort kept from before tiers: confirm or lower"/);
   assert.ok(checkIn.includes(`reads "${LEGACY_RAISE}"`), 'the check-in names the exact migration reason');
-  assert.match(nudge0(), /the earliest future time an open post reply thread without an unanswered owner question or decision reaches 6 hours with no new message; this run's next scheduled time while a QUIET-6H candidate listed by this run is still unresolved/);
-  // The nudge closes quiet chat reply threads and lists threads due for rotation.
+  // The nudge never resolves a coordinator post or its reply thread (no session of its own: resolving
+  // it hides the chat message), and lists threads due for rotation.
   const nudge = fs.readFileSync(path.join(TASKS, 'hourly-nudge.md'), 'utf8');
-  assert.match(nudge, /reason QUIET-6H, unresolved post reply threads with no new message for 6 hours or more/);
+  assert.doesNotMatch(nudge, /QUIET-6H|6 hours with no new message/);
+  assert.match(nudge, /Never list a post or its reply thread as a resolve candidate: it has no Claude session of its own, and resolving it hides the chat message\./);
+  assert.match(nudge, /Never list a task home thread, or a thread rooted in a coordinator project-chat post/);
+  assert.match(nudge, /Backlog sweep \(every run\): page list_threads for the states blocked, review_ready and done, with each thread's pull requests/);
+  assert.match(nudge, /A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done\./);
   assert.match(nudge, /Rotate: long-lived non-gate worker threads \(integrator, review runner, record keeper; never gate sessions/);
-  assert.match(nudge, /the QUIET-6H due time in the state file has not passed/);
-  assert.match(nudge, /no answer; never a task home thread\./);
   assert.match(nudge, /\*\*Rotate:\*\*/);
 });
 
@@ -432,7 +434,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.match(nudge, /Each run posts one line in its home thread \(DELIVERY\), and the coordinator relays it to the project chat\./);
   assert.doesNotMatch(nudge, /It runs silently|read_project_chat \(limit 1\)|its only thread-resolve pass|with the three conditions or QUIET-6H/);
   for (const required of ['list a thread when (1) and (3) hold', 'the state file says the last thread scan was complete', '`scan: complete` or `scan: <read> of <total>`', 'and its backstop thread-resolve pass.',
-    'with conditions (1) and (3), the relay state, or QUIET-6H', 'relay unverified', 'RESOLVE DUE: <n> | ', 'THREAD SCAN INCOMPLETE: <read> of <total> | ',
+    '**Resolve:** (threads with their own session, with conditions (1) and (3) and the relay state)', 'relay unverified', 'RESOLVE DUE: <n> | ', 'THREAD SCAN INCOMPLETE: <read> of <total> | ',
     'never report "none" for **Resolve:** from a partial scan', "the state file's resolve candidates that list_threads still shows unresolved", 'Idleness is never a reason', 'Never list a task home thread', 'Unrelayed', 'Hidden reply',
     'state done', '"EXAMPLE: Daily check-in"', 'CHECK-IN NOT ARMED', 'limit 10', 'list all of them every run']) {
     assert.ok(nudge.includes(required), required);
