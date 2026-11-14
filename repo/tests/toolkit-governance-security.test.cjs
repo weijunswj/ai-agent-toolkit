@@ -624,7 +624,7 @@ test('SE-09b: no run ever writes GitHub Secret Protection or Code Security (I2)'
 const TEMPLATE = fs.readFileSync(path.join(ROOT, ...security.WORKFLOW_TEMPLATE_REL.split('/')), 'utf8').replace(/\r\n/g, '\n');
 
 test('SE-10: the auto-merge workflow stays guarded, and this repository carries the current copy', () => {
-  assert.ok(TEMPLATE.startsWith('# Toolkit dependency auto-merge v3.'));
+  assert.ok(TEMPLATE.startsWith('# Toolkit dependency auto-merge v4.'));
   assert.match(TEMPLATE, /^on:\n {2}pull_request:\n {4}types: \[opened, reopened, synchronize, edited\]\n/m, 'never pull_request_target');
   assert.doesNotMatch(TEMPLATE, /pull_request_target|actions\/checkout|secrets\./, 'no PR code checkout and no secrets');
   assert.doesNotMatch(TEMPLATE.split('\njobs:\n')[0], /^permissions:/m, 'no workflow-wide permissions');
@@ -774,10 +774,10 @@ const BASE_ENV = Object.freeze({
 const WORKFLOW = [
   { id: 'W01 patch, everything allowed: auto-merge on, pinned to the head', env: {}, expect: { armed: true, commented: false } },
   { id: 'W02 minor from 1.x: auto-merge on', env: { UPDATE_TYPE: 'version-update:semver-minor', UPDATED_DEPENDENCIES: patch('1.2.3', 'version-update:semver-minor') }, expect: { armed: true } },
-  { id: 'W03 binding off on the default branch, armed before: turned off', env: { FAKE_BINDING: binding(), FAKE_ARMED: 'true' }, expect: { armed: false, disarmed: true, commented: false, armedAfter: false } },
-  { id: 'W04 binding unreadable: treated as off', env: { FAKE_BINDING_FAIL: '1' }, expect: { armed: false, commented: false } },
-  { id: 'W05 rules unreadable: no auto-merge', env: { FAKE_RULES_FAIL: '1' }, expect: { armed: false } },
-  { id: 'W06 no required check: no auto-merge', env: { FAKE_REQUIRED: '0' }, expect: { armed: false } },
+  { id: 'W03 binding off on the default branch, armed before: turned off and flagged for the owner', env: { FAKE_BINDING: binding(), FAKE_ARMED: 'true' }, expect: { armed: false, disarmed: true, commented: true, armedAfter: false } },
+  { id: 'W04 binding unreadable: flagged for the owner, never armed', env: { FAKE_BINDING_FAIL: '1' }, expect: { armed: false, commented: true } },
+  { id: 'W05 rules unreadable: no auto-merge, flagged for the owner', env: { FAKE_RULES_FAIL: '1' }, expect: { armed: false, commented: true } },
+  { id: 'W06 no required check: no auto-merge, flagged for the owner', env: { FAKE_REQUIRED: '0' }, expect: { armed: false, commented: true } },
   { id: 'W07 major: flagged', env: { UPDATE_TYPE: 'version-update:semver-major' }, expect: { armed: false, commented: true } },
   { id: 'W08 unknown update type: flagged', env: { UPDATE_TYPE: '' }, expect: { armed: false, commented: true } },
   { id: 'W09 maintainers changed: flagged', env: { MAINTAINER_CHANGES: 'true' }, expect: { armed: false, commented: true } },

@@ -73,6 +73,15 @@ function skipWarning(repository, status, detail = {}) {
       : SKIPS[status] || SKIPS.invalid;
   return `Programme Sweep skipped on ${repository || 'this repository'}: ${skip.reason}. Fix: ${skip.fix}.`;
 }
+// The titles the gate reads back from this run's annotations (toolkit-programme-sweep-gate.cjs
+// TITLES): three runs in a row held, or skipped with the same code, turn the hourly gate red.
+const HELD_TITLE = 'Programme Sweep held';
+const SKIP_TITLE = 'Programme Sweep skipped';
+// The hold codes a held pass names: the reconciler's own codes, never free text.
+function holdCodes(report) {
+  const codes = [...new Set((Array.isArray(report?.holds) ? report.holds : []).map(hold => hold?.code).filter(code => /^[A-Z][A-Z0-9_]{0,63}$/.test(code || '')))];
+  return codes.length ? codes.sort().join(', ') : 'unnamed';
+}
 const NOTICES = Object.freeze({
   main_moved: 'Programme Sweep skipped: the default branch moved while this run was starting; the next run picks it up.',
   queued: 'Programme Sweep queued: another sweep is running; the next hourly run will retry.',
@@ -204,7 +213,7 @@ class ProgrammeSweepAction {
     refresh = input => runRefresh(input), notice = message => process.stdout.write(`::notice::${message}\n`),
     failure = message => process.stderr.write(`${message}\n`), output = (name, value) => fs.appendFileSync(env.GITHUB_OUTPUT, `${name}=${value}\n`),
     summary = line => fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `${line}\n`), footers = input => runFooterSweep(input),
-    warning = message => process.stdout.write(`::warning::${message}\n`), nowMs = Date.now } = {}) {
+    warning = (message, tag) => process.stdout.write(tag ? `::warning title=${tag.title}::(${tag.code}) ${message}\n` : `::warning::${message}\n`), nowMs = Date.now } = {}) {
     Object.assign(this, { env, root, readFile, validateBinding, refresh, notice, failure, output, summary, footers, warning, nowMs });
   }
 
@@ -244,7 +253,11 @@ class ProgrammeSweepAction {
       this.output('store', ''); return 0;
     }
     const binding = readCheckedOutBinding({ root: this.root, env: this.env, readFile: this.readFile, validateBinding: this.validateBinding });
-    if (binding.status !== 'enabled') { this.warning(skipWarning(this.env.GITHUB_REPOSITORY, binding.reason || binding.status, binding)); this.output('store', ''); return 0; }
+    if (binding.status !== 'enabled') {
+      const code = binding.reason || binding.status;
+      this.warning(skipWarning(this.env.GITHUB_REPOSITORY, code, binding), { title: SKIP_TITLE, code: /^[a-z_]{1,40}$/.test(code || '') ? code : 'invalid' });
+      this.output('store', ''); return 0;
+    }
     this.output('store', binding.store.split('/')[1]);
     this.output('store_repository', binding.store);
     return 0;
@@ -254,7 +267,7 @@ class ProgrammeSweepAction {
   run() {
     const env = this.env;
     if (!env.STORE_REPOSITORY) return 0;
-    if (!env.APP_CLIENT_ID_SET || env.APP_CLIENT_ID_SET === 'false') { this.warning(skipWarning(env.GITHUB_REPOSITORY, 'no_app')); return 0; }
+    if (!env.APP_CLIENT_ID_SET || env.APP_CLIENT_ID_SET === 'false') { this.warning(skipWarning(env.GITHUB_REPOSITORY, 'no_app'), { title: SKIP_TITLE, code: 'no_app' }); return 0; }
     if (env.MINT_OUTCOME !== 'success/success' || !env.GOVERNED_TOKEN || !env.STORE_TOKEN || !BOT_LOGIN.test(env.SWEEP_LOGIN || '')) {
       this.failure(SIGN_IN_FAILURE); return 1;
     }
@@ -263,13 +276,15 @@ class ProgrammeSweepAction {
     try { result = this.refresh({ root: this.root, env }); } catch { this.failure(GENERAL_FAILURE); return 1; }
     if (result.code === 'GH_AUTH') { this.failure(SIGN_IN_FAILURE); return 1; }
     if (result.code === 'MAIN_MOVED') { this.notice(NOTICES.main_moved); return 0; }
-    if (result.code === 'CLOUD_PUBLIC_STATE') { this.warning(skipWarning(env.GITHUB_REPOSITORY, 'public_state')); return 0; }
+    if (result.code === 'CLOUD_PUBLIC_STATE') { this.warning(skipWarning(env.GITHUB_REPOSITORY, 'public_state'), { title: SKIP_TITLE, code: 'public_state' }); return 0; }
     const held = result.status === 1 && Array.isArray(result.report?.holds) && result.report.holds.length > 0;
     if (result.status !== 0 && !held) { this.failure(failureLine(result)); return 1; }
     const line = summaryLine(result.report);
     // A line that could carry a token is never written.
     if (!line || [env.GOVERNED_TOKEN, env.STORE_TOKEN].some(token => line.includes(token))) { this.failure(SUMMARY_FAILURE); return 1; }
     try { this.summary(line); } catch { this.failure(SUMMARY_FAILURE); return 1; }
+    // A held pass is green (the next run retries) but titled, so the hourly gate can count a streak.
+    if (held) this.warning('Programme Sweep held: this pass held and the next run retries; three held runs in a row turn the hourly gate red.', { title: HELD_TITLE, code: holdCodes(result.report) });
     // A run queued behind another sweep did not run a pass and holds no lease: footer cleaning skips
     // it, and the sweep that is running needs no follow-up from it.
     if (result.report?.outcome === 'QUEUED') return 0;
@@ -295,4 +310,4 @@ if (require.main === module) {
   catch { process.stderr.write(`${GENERAL_FAILURE}\n`); process.exitCode = 1; }
 }
 
-module.exports = Object.freeze({ TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, atAppLimit, followUpAt, ProgrammeSweepAction });
+module.exports = Object.freeze({ HELD_TITLE, SKIP_TITLE, holdCodes, TOOLKIT_ROOT, CLIENT_ID_VARIABLE, PRIVATE_KEY_SECRET, RUN_TIMEOUT_MS, NOTICES, SKIPS, skipWarning, SIGN_IN_FAILURE, GENERAL_FAILURE, FOOTER_FAILURE, FOOTER_SKIPPED, FOOTER_REVIEW_WARNING, FOOTER_WINDOW_HOURS, readCheckedOutBinding, runFooterSweep, footerCounts, lastReport, runRefresh, failureLine, summaryLine, atAppLimit, followUpAt, ProgrammeSweepAction });
