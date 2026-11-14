@@ -31,6 +31,11 @@ test('a held task update still reaches global rules and helper refresh in real s
   assert.match(result.stdout, /Scheduled task update needs an owner answer/);
   assert.match(result.stdout, /## Global rules/);
   assert.match(result.stdout, /## Toolkit helpers/);
+  // Setup in Codex manages and reports only Codex's rules file; Claude Code refreshes its own.
+  const globalRules = result.stdout.slice(result.stdout.indexOf('## Global rules'), result.stdout.indexOf('## Toolkit helpers'));
+  assert.match(globalRules, /Codex \(~\/\.codex\/AGENTS\.md\)/);
+  assert.doesNotMatch(globalRules, /Claude|CLAUDE\.md/);
+  assert.equal(fs.existsSync(path.join(root, '.claude', 'CLAUDE.md')), false, 'Codex setup leaves the Claude Code rules file alone');
 });
 test('real setup fixture includes the updater complete local module closure', () => {
   const root = tmpRoot(), { setupRepo } = createGitBackedRealSetupRepo(root);
