@@ -262,6 +262,16 @@ class FakeGitHub {
       this.link(parent.number, child.number);
       return ok(201, this.issueJson(parent));
     }
+    if ((match = /^issues\/(\d+)\/sub_issue$/.exec(rest)) && method === 'DELETE') {
+      const parent = this.issues.get(Number(match[1]));
+      const child = this.byId(body.sub_issue_id);
+      if (!parent || !child || child.parent !== parent.number) return ok(404, { message: 'Not Found' });
+      parent.subs = parent.subs.filter(n => n !== child.number);
+      child.parent = null;
+      child.updated_at = this.tick();
+      parent.updated_at = this.tick();
+      return ok(200, this.issueJson(parent));
+    }
     if ((match = /^issues\/(\d+)\/sub_issues\/priority$/.exec(rest)) && method === 'PATCH') {
       const parent = this.issues.get(Number(match[1]));
       const child = this.byId(body.sub_issue_id);

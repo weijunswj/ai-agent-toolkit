@@ -80,7 +80,7 @@ const CHECK_STATES = ['GREEN', 'PENDING', 'RED', 'UNKNOWN'];
 const UAT_STATES = ['NOT_REQUIRED', 'PENDING', 'PASSED', 'UAT_RETAINED', 'UAT_PARTIAL_REQUIRED', 'UAT_FULL_REQUIRED'];
 const REVIEW_STATES = ['NOT_STARTED', 'IN_REVIEW', 'PASSED', 'NOT_PASSED'];
 const REVIEW_VERDICTS = ['PASSED', 'NOT_PASSED'];
-const EFFECT_KINDS = ['attach', 'reparent', 'reorder', 'replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment', 'replace_pr_nav', 'set_parent_state', 'post_parent_repair', 'post_closing_backstop'];
+const EFFECT_KINDS = ['attach', 'reparent', 'detach', 'reorder', 'replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment', 'replace_pr_nav', 'set_parent_state', 'post_parent_repair', 'post_closing_backstop'];
 const EFFECT_STATES = ['IN_FLIGHT', 'DONE', 'UNKNOWN'];
 // Fields that never count towards a document's content digest or revision: the revision itself,
 // observation timestamps, pending effects (an intent write must not make the rendered state stale),
@@ -975,6 +975,7 @@ function validateBinding(binding) {
         const policy = binding.parent_lifecycle;
         check(errors, isObject(policy) && Object.keys(policy).length === 2 && ['reopen_incomplete', 'complete_when_children_closed'].every(key => typeof policy[key] === 'boolean'), 'parent_lifecycle must explicitly name reopen_incomplete and complete_when_children_closed booleans');
       }
+      check(errors, binding.detach_finished_children === undefined || typeof binding.detach_finished_children === 'boolean', 'detach_finished_children must be true or false');
       const unknown = Object.keys(binding).filter(key => !BINDING_V2_KEYS.includes(key));
       check(errors, unknown.length === 0, `${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a version 2 binding key`);
       if (binding.state !== undefined) validateStateBlock(errors, binding);
@@ -995,6 +996,7 @@ function validateBinding(binding) {
     } else {
       check(errors, binding.governance === undefined && binding.parents === undefined, 'governance and parents belong to v2');
       check(errors, binding.parent_lifecycle === undefined, 'parent_lifecycle belongs to v2');
+      check(errors, binding.detach_finished_children === undefined, 'detach_finished_children belongs to v2');
       check(errors, isInt(binding.parent_issue, 1), 'parent_issue must be an issue number');
       check(errors, PREFIX.test(String(binding.record_prefix || '')), 'record_prefix must be a record prefix');
       check(errors, PREFIX.test(String(binding.writer_prefix || '')), 'writer_prefix must be a record prefix');
@@ -1033,7 +1035,7 @@ function validateBinding(binding) {
 }
 
 // The keys a version 2 binding may carry (binding-v2.schema.json); anything else makes it invalid.
-const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection', 'schedule_folder', 'state', 'parent_lifecycle']);
+const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
 
 // The public state branch of a version 2 binding: always this branch and folder on the bound
 // repository itself, and only beside a private store, which keeps the journals, the private sidecars
@@ -4223,6 +4225,22 @@ function lifecycleSnapshot(tree) {
   return JSON.stringify([tree.issue.state, tree.descendants.map(child => [child.repository, child.number, child.state]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]);
 }
 
+// The binding's standing permission to unlink finished tasks from their native parent. Removing a
+// sub-issue is `DELETE /issues/{parent}/sub_issue` with the same `sub_issue_id`; the issue itself is
+// untouched, both timelines show the removal, and attaching it again undoes it.
+function detachPermitted(binding) {
+  return binding?.schema === SCHEMA.bindingV2 && binding.governance === 'enabled' && binding.detach_finished_children === true;
+}
+// Every task the reconciler detached stays on record in the parent's private sidecar (newest last),
+// beside the catalogue entry that keeps it on the graph and in the decision history.
+function recordDetached(doc, targets, at) {
+  if (!targets.length) return;
+  const list = Array.isArray(doc.private.detached_children) ? doc.private.detached_children : [];
+  doc.private = { ...doc.private, detached_children: [...list, ...targets.map(target => ({ issue: target.issue, parent: target.parent, at }))] };
+}
+// Detaches per pass, so a first run over a long backlog spreads its writes over several passes.
+const DETACH_PER_PASS = 25;
+
 class GitHubMutator {
   setIssueState(number, state, { binding, expected, fence }) {
     const policy = binding.parent_lifecycle;
@@ -4247,6 +4265,14 @@ class GitHubMutator {
   attach(parent, childId, replaceParent) {
     this.mutations += 1;
     return this.transport.request('POST', `repos/${this.repository}/issues/${parent}/sub_issues`, { sub_issue_id: childId, ...(replaceParent ? { replace_parent: true } : {}) });
+  }
+
+  // Unlink a finished task from its native parent. Only an enabled v2 binding that sets
+  // detach_finished_children permits it; the issue itself is never closed, edited or deleted.
+  detach(parent, childId, { binding }) {
+    if (!detachPermitted(binding) || binding.repository.toLowerCase() !== this.repository.toLowerCase()) throw new ProgrammeError('DETACH_REFUSED', 'No bound permission to detach finished tasks.');
+    this.mutations += 1;
+    return this.transport.request('DELETE', `repos/${this.repository}/issues/${parent}/sub_issue`, { sub_issue_id: childId });
   }
 
   // Exactly one anchor: { before_id } or { after_id } (GitHub answers 422 otherwise).
@@ -4418,6 +4444,7 @@ const EFFECT_TEXT = {
   advance_closing_scan: effect => `Record closing scan progress on #${effect.target.issue}`,
   post_closing_backstop: effect => `Append closing facts to ${effect.target.kind} #${effect.target.issue}`,
   attach: effect => `Attach #${effect.target.issue} under #${effect.target.parent}`,
+  detach: effect => `Detach finished #${effect.target.issue} from under #${effect.target.parent} (the task stays in the catalogue)`,
   reparent: effect => `Move #${effect.target.issue} from under ${typeof effect.from === 'number' ? `#${effect.from}` : effect.from} to under #${effect.target.parent}`,
   reorder: effect => `Move #${effect.target.issue} ${effect.target.before !== undefined ? `before #${effect.target.before}` : `after #${effect.target.after}`} under #${effect.target.parent}`,
   replace_block: effect => (effect.relay ? `Lay out #${effect.target.issue}'s page in the fixed order (PATH, STATUS, COMMENT TRACE, the capital sections, then More); its hand-written text moves, and a copy of the page is saved first`
@@ -4447,7 +4474,7 @@ function holdScope(kind) {
   if (kind === 'set_parent_state' || kind === 'post_parent_repair') return 'lifecycle';
   if (['replace_block', 'post_index_comment', 'post_archive_comment', 'edit_archive_comment'].includes(kind)) return 'body';
   if (kind === 'replace_pr_nav') return 'pr';
-  if (kind === 'attach' || kind === 'reparent' || kind === 'reorder') return 'links';
+  if (kind === 'attach' || kind === 'reparent' || kind === 'detach' || kind === 'reorder') return 'links';
   return 'all';
 }
 
@@ -5112,6 +5139,15 @@ class Reconciler {
         findings.push({ code: 'NATIVE_PARENT_WRONG', issue: issueNumber, detail: `under ${typeof issue.parent === 'number' ? `#${issue.parent}` : issue.parent}, expected #${outcome.parent}` });
         effects.push({ kind: 'reparent', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id, from: issue.parent });
       }
+    } else if (outcome.parent && issue.parent === outcome.parent && detachPermitted(this.binding)) {
+      // A finished task still under its parent leaves it once nothing can still need it there: no
+      // open or draft PR tracks or names it, and the open PR list was read in full.
+      const pr = observed.prs.get(issueNumber);
+      const openPr = (pr && ['OPEN', 'DRAFT'].includes(pr.state)) || (observed.references.get(issueNumber) || []).length > 0;
+      if (!openPr && observed.prGraph?.openComplete !== false) {
+        findings.push({ code: 'NATIVE_DETACH_FINISHED', issue: issueNumber, detail: `closed and finished with no open work or PR; detached from #${outcome.parent} to keep room under GitHub's sub-issue cap` });
+        effects.push({ kind: 'detach', target: { issue: issueNumber, parent: outcome.parent }, childId: issue.id });
+      }
     } else if (!outcome.parent && issue.parent !== null) {
       findings.push({ code: 'NATIVE_PARENT_UNEXPECTED', issue: issueNumber, detail: `natively under #${issue.parent} but the catalogue names no parent; not changed` });
     }
@@ -5612,6 +5648,11 @@ class Reconciler {
         } else if (effect.kind === 'attach' || effect.kind === 'reparent') {
           const issue = observed.issues.has(target.issue) ? observed.issues.get(target.issue) : this.reader.issue(target.issue);
           done = issue ? issue.parent === target.parent : null;
+        } else if (effect.kind === 'detach') {
+          const issue = observed.issues.has(target.issue) ? observed.issues.get(target.issue) : this.reader.issue(target.issue);
+          // Off every parent is done; still under the same one is not; moved elsewhere by someone else
+          // is neither, so it stays UNKNOWN and holds rather than being recorded as a detach.
+          done = issue ? (issue.parent === null ? true : issue.parent === target.parent ? false : null) : null;
         } else if (effect.kind === 'reorder') {
           const list = observed.subIssues.get(target.parent) || null;
           if (list) done = moveDone(list, target);
@@ -5661,6 +5702,7 @@ class Reconciler {
         resolutions.push({ kind, number, intent_id: effect.intent_id, outcome: done === null ? 'UNKNOWN' : done ? 'DONE' : 'NOT_DONE',
           ...(untrusted ? { untrusted: { key: target.key, reason: untrusted } } : {}),
           ...(rejectedArchive ? { rejectedArchive } : {}),
+          ...(effect.kind === 'detach' && done ? { detached: target } : {}),
           ...(['post_archive_comment', 'edit_archive_comment'].includes(effect.kind) && done ? { archive: { key: target.key, comment_id: recoveredId || target.comment_id, login: target.login, digest: target.digest } } : {}) });
       }
     }
@@ -5854,7 +5896,7 @@ class Reconciler {
       this.diffChild(outcome, existing, desired, checks, observed, findings, effects, journals);
       desiredDocs.set(outcome.issue, desired);
     }
-    const plannedParents = new Map(effects.filter(effect => effect.kind === 'attach' || effect.kind === 'reparent').map(effect => [effect.target.issue, effect.target.parent]));
+    const plannedParents = new Map(effects.filter(effect => ['attach', 'reparent', 'detach'].includes(effect.kind)).map(effect => [effect.target.issue, effect.kind === 'detach' ? null : effect.target.parent]));
     if (!only) this.diffOrder(parent, observed, effects, findings, plannedParents, desiredDocs);
     // Blocks are rendered from the revisions the documents will have after this pass.
     const projected = new Map([...desiredDocs].map(([number, doc]) => {
@@ -6070,6 +6112,7 @@ class Reconciler {
           const kept = doc.pending_effects.filter(effect => !resolutions.some(entry => entry.intent_id === effect.intent_id));
           if (kept.length === doc.pending_effects.length) return null;
           doc.pending_effects = kept;
+          recordDetached(doc, resolutions.filter(entry => entry.detached).map(entry => entry.detached), this.now());
           return doc;
         },
       });
@@ -6101,6 +6144,7 @@ class Reconciler {
         if (outcome !== 'UNKNOWN') this.pass.tick();
       }
       mutateDoc('parent', parentNumber, { change: doc => {
+        recordDetached(doc, doc.pending_effects.filter(entry => entry.kind === 'detach' && settled.get(entry.intent_id) === 'DONE').map(entry => entry.target), this.now());
         doc.pending_effects = doc.pending_effects.filter(entry => {
           const outcome = settled.get(entry.intent_id);
           if (outcome === 'UNKNOWN') entry.state = 'UNKNOWN';
@@ -6727,7 +6771,7 @@ class Reconciler {
     renderPages(true);
     redrawing = false;
 
-    phase('links', plan.effects.filter(entry => ['attach', 'reparent'].includes(entry.kind)).length);
+    phase('links', plan.effects.filter(entry => ['attach', 'reparent'].includes(entry.kind)).length + Math.min(DETACH_PER_PASS, plan.effects.filter(entry => entry.kind === 'detach').length));
     // 2. Native parent links, read back on both sides.
     for (const effect of plan.effects.filter(entry => entry.kind === 'attach' || entry.kind === 'reparent')) {
       if (this.pass.stop()) break;
@@ -6739,6 +6783,44 @@ class Reconciler {
         const listed = this.reader.subIssues(effect.target.parent).some(sub => sub.number === effect.target.issue);
         if (issue?.parent === effect.target.parent && listed) return { outcome: 'DONE' };
         if (issue && issue.parent !== effect.target.parent && !listed) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}: ${response.json?.message || ''}`.trim() };
+        return { outcome: 'UNKNOWN', detail: 'the child and parent disagree after the change' };
+      });
+    }
+    // Finished tasks leave their native parent, a few per pass. Each is read again just before the
+    // write: a reopened task, a moved link, open sub-issues or an open PR that now tracks or names it
+    // cancel it. The open PR list is read once, just before the first detach write.
+    let openNow = null;
+    const openPrsNow = () => {
+      if (!openNow) {
+        const list = this.reader.openPullRequests();
+        openNow = { references: referencedIssues(list), numbers: new Set(list.map(pr => pr.number)) };
+      }
+      return openNow;
+    };
+    for (const effect of plan.effects.filter(entry => entry.kind === 'detach').slice(0, DETACH_PER_PASS)) {
+      if (this.pass.stop()) break;
+      if (isHeld(`#${effect.target.issue}`, 'links')) { record(effect, 'SKIPPED', 'held earlier in this pass'); continue; }
+      withIntent(effect, () => {
+        const latest = this.reader.issue(effect.target.issue);
+        if (!latest || latest.state !== 'closed' || latest.parent !== effect.target.parent || latest.open_sub_issues > 0) {
+          return { outcome: 'NOT_DONE', code: 'DETACH_MOVED', detail: 'the task changed since planning; the next pass re-plans it' };
+        }
+        let open;
+        try { open = openPrsNow(); }
+        catch (error) {
+          if (STOPS_PASS.has(error.code)) throw error;
+          return { outcome: 'NOT_DONE', code: 'DETACH_PRS_UNREAD', detail: `the open PR list could not be read again before the write: ${error.message}` };
+        }
+        const tracked = plan.observed.prs.get(effect.target.issue);
+        if ((open.references.get(effect.target.issue) || []).length || (tracked && open.numbers.has(tracked.number))) {
+          return { outcome: 'NOT_DONE', code: 'DETACH_MOVED', detail: 'an open PR now tracks or names the task; the next pass re-plans it' };
+        }
+        guard();
+        const response = this.mutator.detach(effect.target.parent, effect.childId, { binding: this.binding });
+        const issue = this.reader.issue(effect.target.issue);
+        const listed = this.reader.subIssues(effect.target.parent).some(sub => sub.number === effect.target.issue);
+        if (issue && issue.parent !== effect.target.parent && !listed) return { outcome: 'DONE' };
+        if (issue?.parent === effect.target.parent && listed) return { outcome: 'NOT_DONE', detail: `GitHub answered ${response.status}: ${response.json?.message || ''}`.trim() };
         return { outcome: 'UNKNOWN', detail: 'the child and parent disagree after the change' };
       });
     }
