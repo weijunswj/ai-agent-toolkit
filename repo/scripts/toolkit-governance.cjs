@@ -428,6 +428,7 @@ class ToolkitGovernanceCli {
     const switchTo = chosen.taskAutoMerge === 'on' ? 'after-gates' : chosen.taskAutoMerge === 'off' ? 'off' : null;
     if (chosen.governance === 'on' && state.state !== 'ENABLED') {
       const plan = found ? adopt.adoptionPlan(found, { newStore: chosen.evidenceStore === 'new' }) : null;
+      if (plan && plan.blocked) this.#print(false, {}, [`GitHub could not be read (${plan.blocked}), so the evidence store and parent issue could not be found or made.`]);
       code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, switchTo || 'off') : this.#prepareDecision('yes', switchTo || 'off');
       acted = true;
     } else if (chosen.governance === 'off' && state.state !== 'DISABLED') {

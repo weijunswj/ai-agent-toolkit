@@ -179,6 +179,10 @@ function ensurePlainText(root, installer = null) {
 // governance pull request, which decides nothing until the owner merges it.
 function adopt({ root, plan, writer, switchTo = 'off', plainText = null }) {
   const made = [];
+  // The local, pure steps first, so a render that fails leaves nothing made on GitHub.
+  let lines;
+  let files;
+  try { lines = ensurePlainText(root, plainText); files = renderedRules(root); } catch (error) { error.made = made; throw error; }
   const store = ensureStore(plan, writer, made);
   const issue = ensureParent(plan, writer, made);
   const [owner, name] = plan.repository.split('/');
@@ -188,10 +192,6 @@ function adopt({ root, plan, writer, switchTo = 'off', plainText = null }) {
     store: { kind: 'github', repository: store, branch: 'main', path: `state/${owner}/${name}/` },
     task_prs: { auto_merge: switchTo },
   };
-  let lines;
-  try { lines = ensurePlainText(root, plainText); } catch (error) { error.made = made; throw error; }
-  let files;
-  try { files = renderedRules(root); } catch (error) { error.made = made; throw error; }
   return { binding, files, made, lines };
 }
 

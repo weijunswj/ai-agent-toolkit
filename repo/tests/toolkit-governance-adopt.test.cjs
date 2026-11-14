@@ -72,7 +72,7 @@ function fakeGitHub({ repos = {}, issues = [], failIssue = false } = {}) {
   return { calls, world, discoveryGh: args => get(args[0]), writer };
 }
 
-async function run(ctx, argv, github, { answers = [], interactive = false } = {}) {
+async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false } = {}) {
   let out = ''; let err = '';
   const published = [];
   let open = [];
@@ -84,7 +84,7 @@ async function run(ctx, argv, github, { answers = [], interactive = false } = {}
     ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }), environment: { TOOLKIT_HOST_SESSION: 'session-adopt' },
-    discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => plainText.push(root),
+    discoveryGh: github.discoveryGh, adoptionWriter: github.writer, plainTextInstaller: root => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); },
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [proposal]; return proposal; }, read: () => proposal },
     cloudWorkflows: () => ({ files: {}, warning: null }),
   });
@@ -144,6 +144,15 @@ test('a failed step stops with what was made, and answering again reuses it inst
   assert.equal(done.published[0].binding.store.repository, STORE);
 });
 
+test('a render that fails stops before anything is made on GitHub', async t => {
+  const ctx = fixture(t);
+  const github = fakeGitHub();
+  const result = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'], plainTextFails: true });
+  assert.notEqual(result.code, 0);
+  assert.deepEqual(github.calls, [], 'no store or issue is made when the local render fails');
+  assert.equal(result.published.length, 0);
+});
+
 test('a found store is a question: keep it, or create a new private one', async t => {
   const ctx = fixture(t);
   const found = `${OWNER}/fresh-evidence`;
@@ -174,6 +183,7 @@ test('when GitHub cannot be searched, turning on makes nothing and says why', as
   assert.match(shown.out, /Store and parent issue: Could not be checked\. GitHub could not be read/);
   const answered = await run(ctx, ['setup'], offline, { interactive: true, answers: ['all recommended'] });
   assert.notEqual(answered.code, 0);
+  assert.match(answered.out, /GitHub could not be read \(.+\), so the evidence store and parent issue could not be found or made\./, 'the answer says why');
   assert.deepEqual(github.calls, [], 'no store or issue is made on a guess');
   assert.equal(answered.published.length, 0);
 });
