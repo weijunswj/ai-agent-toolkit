@@ -106,7 +106,7 @@ function checkConformance(cwd, options = {}) {
     const pending = new (require('./toolkit-governance-proposal.cjs').GovernanceProposals)({ registryOptions: options }).pending(cwd);
     if (['read-only', 'unavailable'].includes(pending?.kind)) return report(pending.kind === 'read-only' ? 0 : 2, state,
       [finding(pending.kind === 'read-only' ? 'READ_ONLY_ACCOUNT' : 'GOVERNANCE_UNAVAILABLE', pending.kind === 'read-only' ? 'info' : 'unverified', pending.text)], toolkitRoot);
-    findings.push(finding('DECISION_PENDING', 'drift', pending?.text || `No governance decision is merged on the default branch. Answer Toolkit's question in chat (yes, no or later), or run \`${governance.governanceCommand('enable')}\` or \`${governance.governanceCommand('disable')}\` in your own terminal.`));
+    findings.push(finding('DECISION_PENDING', 'drift', pending?.text || 'No governance decision is merged on the default branch. Say toolkit governance and answer its question bank in chat; the pull request it prepares decides once you merge it.'));
   }
   if (state.state === 'DISABLED') {
     if (state.rule === 'M2') findings.push(finding('REPOSITORY_DISABLED', 'info', 'The binding merged on the default branch sets governance to disabled; only an owner-merged pull request turns it back on.'));

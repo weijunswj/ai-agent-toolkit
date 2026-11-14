@@ -140,19 +140,22 @@ test('a file that changes after the preview stops before writing', async t => {
   assert.ok(files(pc.home).every(file => !/toolkit-backup-|toolkit-tmp-/.test(file)));
 });
 
-test('stale Toolkit lines are reported and kept; a symlinked settings file is written through', async t => {
+test('--apply takes out stale Toolkit lines and keeps the owner\'s own; a symlinked settings file is written through', async t => {
   const pc = computer(t, { codex: false });
   const realDir = path.join(pc.home, 'dotfiles');
   fs.mkdirSync(realDir, { recursive: true });
   fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
   const stale = 'Bash(node "/old/place/repo/scripts/toolkit-tasks.cjs" *)';
-  fs.writeFileSync(path.join(realDir, 'settings.json'), JSON.stringify({ permissions: { allow: [stale] } }));
+  const own = 'Bash(npm test)';
+  fs.writeFileSync(path.join(realDir, 'settings.json'), JSON.stringify({ permissions: { allow: [own, stale] } }));
   try { fs.symlinkSync(path.join(realDir, 'settings.json'), pc.settings); } catch { t.skip('this computer cannot make a symlink'); return; }
   assert.equal(await permissions.main(['--apply'], pc.deps), 0, pc.err.join(''));
-  assert.match(pc.out.join(''), /! stale, kept: Bash\(node "\/old\/place/);
+  assert.match(pc.out.join(''), /- allow Bash\(node "\/old\/place/);
   assert.match(pc.out.join(''), /Codex: skipped\. Codex has no settings folder/);
   assert.ok(fs.lstatSync(pc.settings).isSymbolicLink(), 'the link stays a link');
-  assert.ok(JSON.parse(fs.readFileSync(path.join(realDir, 'settings.json'), 'utf8')).permissions.allow.includes(stale));
+  const allow = JSON.parse(fs.readFileSync(path.join(realDir, 'settings.json'), 'utf8')).permissions.allow;
+  assert.ok(!allow.includes(stale), 'the stale Toolkit line is taken out');
+  assert.equal(allow[0], own, 'the owner\'s own line stays first');
   assert.equal(fs.existsSync(pc.rules), false, 'no Codex file without a Codex folder');
 });
 
@@ -200,7 +203,7 @@ test('H1: run as a script, the --apply handoff gets the blocks class without req
   assert.ok(text.indexOf('module.exports =') < text.indexOf('if (require.main === module)'), 'exports come before the entry point');
   // Node throws "not extensible" on a require of a still-loading module with frozen exports, so the
   // class travels in the deps. The terminal test below runs the real script end to end.
-  assert.match(text, /toolkit-permissions-apply\.cjs'\)\.main\(argv\.slice\(1\), \{ \.\.\.deps, PermissionBlocks \}\)/);
+  assert.match(text, /toolkit-permissions-apply\.cjs'\)\.main\(argv\.slice\(1\), \{ \.\.\.deps, PermissionBlocks, mode: argv\[0\]\.slice\(2\) \}\)/);
   let seen = null;
   const pc = computer(t);
   return Promise.resolve(permissions.main(['--apply'], { ...pc.deps, ask: () => 'no', tty: () => { seen = 'reached'; return { stdin: true, stdout: true }; } })).then(code => {
@@ -268,7 +271,7 @@ test('H1 and H2: the real script in a terminal takes the typed apply and writes 
   clearTimeout(timer);
   child.stdin.destroy();
   assert.equal(code, 0, output);
-  assert.match(output, /Claude Code: added \d+ allow and \d+ ask lines/);
+  assert.match(output, /Claude Code: added \d+ and removed \d+ lines in/);
   const after = JSON.parse(fs.readFileSync(pc.settings, 'utf8'));
   assert.equal(after.model, 'm');
   assert.ok(after.permissions.ask.some(line => /toolkit-permissions\.cjs" \*--apply\*/.test(line)));
@@ -311,7 +314,7 @@ test('run from a governed repository, --apply also merges its Claude Code repo b
   assert.ok(fs.existsSync(pc.settings), 'the computer block is merged too');
   const out = pc.out.join('');
   assert.match(out, /Claude Code repo block: .*settings\.local\.json/);
-  assert.match(out, /Claude Code repo block: added \d+ allow and \d+ ask lines/);
+  assert.match(out, /Claude Code repo block: added \d+ and removed \d+ lines in/);
   assert.equal(pc.asked.length, 1, 'one typed apply covers both files');
   assert.equal(permissions.main(['--check', repo.local, '--scope', 'repo'], { ...deps, stdout: () => {} }), 0);
 });
@@ -369,4 +372,31 @@ test('the print opens with a plain table of every Toolkit command a block allows
   assert.match(text, /\| `gh pr comment` \(this repository\) \| Comment on this repository's pull requests\. \| `--delete-last` \|/);
   assert.match(text, /\| Evidence store \(`toolkit-store\.cjs`\) \|/);
   assert.doesNotMatch(text, /Windows tasks/, 'Windows-only rows are left out on Linux');
+});
+
+test('--remove takes every Toolkit line out, keeps the owner\'s own, and deletes Toolkit\'s Codex rules file with a backup', async t => {
+  const pc = computer(t);
+  assert.equal(await permissions.main(['--apply'], pc.deps), 0, pc.err.join(''));
+  const own = 'Bash(npm test)';
+  const settings = JSON.parse(fs.readFileSync(pc.settings, 'utf8'));
+  settings.permissions.allow.unshift(own);
+  settings.permissions.allow.push('Bash(node "/old/place/repo/scripts/toolkit-tasks.cjs" *)');
+  settings.permissions.ask.push('Bash(node "/old/place/repo/scripts/toolkit-windows-tasks.cjs" apply *)', 'Bash(rm *)');
+  fs.writeFileSync(pc.settings, JSON.stringify(settings, null, 2));
+  pc.out.length = 0;
+  assert.equal(await permissions.main(['--remove'], pc.deps), 0, pc.err.join(''));
+  assert.match(pc.out.join(''), /^Toolkit permissions --remove: takes Toolkit's permission lines out/);
+  assert.match(pc.out.join(''), /Codex: .*toolkit\.rules \(Toolkit's own rules file, deleted\)/);
+  const after = JSON.parse(fs.readFileSync(pc.settings, 'utf8')).permissions;
+  assert.deepEqual(after.allow, [own], 'only the owner\'s own line is left, the stale Toolkit line went too');
+  assert.deepEqual(after.ask, ['Bash(rm *)'], 'an old Toolkit ask line goes too; the owner\'s own ask stays');
+  assert.equal(fs.existsSync(pc.rules), false);
+  assert.ok(fs.readdirSync(path.dirname(pc.rules)).some(name => name.startsWith('toolkit.rules.toolkit-backup-')), 'the deleted rules file keeps a backup');
+  pc.out.length = 0;
+  assert.equal(await permissions.main(['--remove'], pc.deps), 0);
+  assert.match(pc.out.join(''), /Nothing to change\. Nothing was written\./, 'a second run finds nothing to take out');
+  const quiet = { ...pc.deps, environment: { CLAUDECODE: '1' }, stdout: () => {}, stderr: text => pc.err.push(text) };
+  assert.equal(await permissions.main(['--remove'], quiet), 1);
+  assert.match(pc.err.join(''), /Agents never run --remove/);
+  assert.equal(permissions.main(['--json', '--remove'], { ...pc.deps, stdout: () => {}, stderr: () => {} }), 2, '--remove goes first');
 });
