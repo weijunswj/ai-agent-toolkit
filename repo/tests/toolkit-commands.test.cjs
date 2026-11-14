@@ -44,6 +44,7 @@ test('the governance guide runs setup, then offers the next step without answeri
     assert.doesNotMatch(context, /toolkit governance enable/, 'the guide always asks the task auto-merge question');
     assert.ok(context.includes(`turn governance off, which the user does by running \`node "${script}" disable\` in their own terminal`), phrase);
     assert.match(context, /Never answer the governance question for the user\.$/);
+    assert.match(context, /Show the user its output once, in full and as printed, the permission table and every permission block included; never summarise it, shorten it or repeat it\. After it, add the next step once\./);
     for (const other of ['status', 'check', 'discover', 'security', 'migrate', 'enable']) assert.ok(!context.includes(`toolkit-governance.cjs" ${other}`), `${phrase} runs ${other}`);
   }
   // The gate's answer phrases stay the gate's.
