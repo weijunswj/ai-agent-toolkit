@@ -21,7 +21,8 @@
 //     "members": [ { "pr": 12, "head": "<40-hex SHA the review passed>", "g2": "<report link>",
 //                    "tier": "LIGHT|NORMAL|RISKY", "bump": "patch|minor|major|none",
 //                    "uat": "UAT: NOT_REQUIRED (...)", "links": ["Closes #34"],
-//                    "owner_ok": "<link to the owner's typed merge OK; RISKY members only>" } ] }
+//                    "owner_ok": "<link to the owner's typed merge OK; RISKY members only>",
+//                    "pack_changes": ["<row id>: <why>", ...] } ] }   (optional: the member's own Pack changes lines)
 // With no bump_command, a repository holding repo/scripts/bump-version.cjs uses the line above and
 // any other repository takes no bump commit; "none" turns the bump off. The command runs without a
 // shell, with {level} as the highest member level and {base} as the main commit.
@@ -55,6 +56,8 @@ const TIERS = Object.freeze(['LIGHT', 'NORMAL', 'RISKY']);
 const TOOLKIT_BUMP = 'node repo/scripts/bump-version.cjs --next {level} --base {base}';
 const UAT_LINE = /^UAT: (NOT_REQUIRED|OWNER_TEST_NEEDED|PASSED)\b/;
 const LINK_LINE = /^(Closes|Fixes|Resolves|Refs) #\d+$/;
+// One "## Pack changes" line, as the hook pack's check reads it: a row id, then its reason.
+const PACK_LINE = /^\s*[-*]?\s*`?([A-Z][A-Za-z0-9._-]*)`?\s*[:\u2013-]\s*(\S.*)$/;
 const COMMANDS = Object.freeze(['build', 'verify', 'body', 'split', 'land']);
 
 class TrainError extends Error {
@@ -131,6 +134,9 @@ function checkManifest(value) {
     }
     if (member.links !== undefined && (!Array.isArray(member.links) || !member.links.every(line => typeof line === 'string' && LINK_LINE.test(line.trim())))) {
       throw new TrainError(`${where}: "links" lines must each be "Closes #n", "Fixes #n", "Resolves #n" or "Refs #n"`);
+    }
+    if (member.pack_changes !== undefined && (!Array.isArray(member.pack_changes) || !member.pack_changes.every(line => typeof line === 'string' && !/[\r\n]/.test(line) && PACK_LINE.test(line)))) {
+      throw new TrainError(`${where}: "pack_changes" lines must each be one "<row id>: <why it changed>" line from its own Pack changes section`);
     }
     if (member.owner_ok !== undefined && (typeof member.owner_ok !== 'string' || !member.owner_ok.trim())) {
       throw new TrainError(`${where}: "owner_ok" must link the owner's typed merge OK`);
@@ -309,9 +315,21 @@ function body(manifest) {
     // A Closes line would close its issue before the owner's test, which the issue-closure guard
     // refuses; on such a train it becomes Refs, and the member's own Closes line closes the issue
     // when the train lands, since GitHub treats the member as merged.
-    ...members.flatMap(member => (member.links || []).map(line => line.trim()).map(line => (tests.length && !/^Refs /.test(line)
-      ? `Refs ${line.replace(/^\S+ /, '')} (closed by #${member.pr}'s own closing line when the train lands)`
-      : line))),
+    // Each link line names its member and that member's own UAT state, so the issue-closure guard
+    // and a reader can tell which member answers for the issue.
+    ...members.flatMap(member => {
+      const note = `member #${member.pr}, UAT: ${UAT_LINE.exec(member.uat.trim())[1]}`;
+      return (member.links || []).map(line => line.trim()).map(line => (tests.length && !/^Refs /.test(line)
+        ? `Refs ${line.replace(/^\S+ /, '')} (${note}; closed by #${member.pr}'s own closing line when the train lands)`
+        : `${line} (${note})`));
+    }),
+    // The hook pack's check reads only the train body, so each row a member explained in its own
+    // Pack changes section is carried here, tagged with that member.
+    ...(members.some(member => member.pack_changes?.length) ? ['', '## Pack changes', '',
+      ...members.flatMap(member => (member.pack_changes || []).map(line => {
+        const [, row, why] = PACK_LINE.exec(line);
+        return `- ${row}: ${why.trim()} (#${member.pr})`;
+      }))] : []),
   ];
   while (lines[lines.length - 1] === '') lines.pop();
   return `${lines.join('\n')}\n`;
