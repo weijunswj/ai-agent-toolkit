@@ -2,11 +2,14 @@
 
 // Shared fixture for the merge-train tests: a scratch repository with a toy bump script, member
 // branches and manifest helpers. Split across files so each stays inside its CI time budget.
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const train = require('../../scripts/toolkit-merge-train.cjs');
+const governance = require('../../scripts/toolkit-governance-state.cjs');
+const bindingCache = require('../../scripts/toolkit-governance-binding.cjs');
 
 const SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'toolkit-merge-train.cjs');
 const BUMP_SCRIPT = [
@@ -32,6 +35,7 @@ function fixture(t) {
   };
   const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true }); fs.writeFileSync(path.join(repo, rel), text); };
   git('init', '--quiet', '--initial-branch=main');
+  git('remote', 'add', 'origin', 'https://github.com/example/repo.git');
   git('config', 'user.name', 'Train test');
   git('config', 'user.email', 'train@example.com');
   git('config', 'commit.gpgsign', 'false');
@@ -56,13 +60,39 @@ function fixture(t) {
     fs.writeFileSync(file, JSON.stringify({ repository: 'example/repo', bump_command: 'node scripts/bump.cjs {level} {base}', ...value }));
     return file;
   };
-  const cli = (...args) => spawnSync(process.execPath, [SCRIPT, ...args, '--json'], { cwd: repo, encoding: 'utf8' });
-  return { root, repo, git, write, main, branch, member, manifestFile, cli };
+  // An isolated Toolkit home whose fresh read of the merged binding has governance enabled, so
+  // merge trains are on unless a test calls governed() with other values.
+  const home = path.join(root, 'home');
+  const opts = { registryOptions: { userHome: home, testOnly: true } };
+  const governed = (taskPrs = null, extra = {}) => mergedBinding(repo, main, opts.registryOptions, {
+    schema: 'toolkit.programme-binding.v2', repository: 'example/repo', governance: 'enabled',
+    parents: [{ issue: 1, record_prefix: 'INT-EX-' }],
+    store: { kind: 'github', repository: 'example/TRANSPORT-repo', branch: 'main', path: 'state/example/repo/' },
+    required_checks: ['validate'], ...(taskPrs ? { task_prs: taskPrs } : {}), ...extra,
+  });
+  governed();
+  const cli = (...args) => spawnSync(process.execPath, [SCRIPT, ...args, '--json'], { cwd: repo, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } });
+  return { root, repo, git, write, main, branch, member, manifestFile, cli, opts, governed };
+}
+
+// Writes this computer's fresh read of the binding merged on the default branch (null: none merged).
+function mergedBinding(repo, main, registryOptions, value) {
+  const identity = governance.readIdentity(repo);
+  const text = value === null ? null : JSON.stringify(value);
+  const file = bindingCache.cacheFileFor(governance.userStateDirectory(registryOptions), identity.repository_id);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    schema: bindingCache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical,
+    default_branch: 'main', commit: main, fetched_at: new Date().toISOString(),
+    status: text === null ? 'absent' : 'present',
+    bytes_sha256: text === null ? null : crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+    text, problem: null,
+  }));
 }
 
 function built(f, members, extra = {}) {
   const out = path.join(f.root, 'boarded.json');
-  const result = train.run(['build', '--manifest', f.manifestFile({ members, ...extra }), '--branch', 'toolkit-train/one', '--main', 'main', '--out', out], f.repo);
+  const result = train.run(['build', '--manifest', f.manifestFile({ members, ...extra }), '--branch', 'toolkit-train/one', '--main', 'main', '--out', out], f.repo, f.opts);
   return { result, out, boarded: JSON.parse(fs.readFileSync(out, 'utf8')) };
 }
 
