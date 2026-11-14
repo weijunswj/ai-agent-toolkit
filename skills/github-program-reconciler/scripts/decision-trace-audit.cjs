@@ -325,6 +325,8 @@ function repairedBody(body, unlinked, supersededUnmarked = [], topics = new Map(
   return `${text.replace(/\s*$/, '')}\n\n<details><summary>Decision index</summary>\n\n${INDEX_BEGIN}\n${lines.join('\n')}\n${INDEX_END}\n\n</details>\n`;
 }
 
+const MAX_COMMENT_PAGES = 100;
+
 function gh(args) {
   const result = spawnSync(resolveExecutable('gh'), args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
   if (result.status !== 0) throw new Error(`gh ${args.join(' ')} failed: ${String(result.stderr || result.error?.message || '').trim()}`);
@@ -336,7 +338,9 @@ function fetchIssue(repo, issue) {
   // Numbered pages instead of --paginate, which some proxies refuse (it follows numeric-id links).
   const comments = [];
   for (let page = 1; ; page += 1) {
+    if (page > MAX_COMMENT_PAGES) throw new Error(`issue #${issue} has more than ${MAX_COMMENT_PAGES * 100} comments; the audit stops rather than read a partial trace.`);
     const rows = JSON.parse(gh(['api', `repos/${repo}/issues/${issue}/comments?per_page=100&page=${page}`]));
+    if (!Array.isArray(rows)) throw new Error(`comment page ${page} of #${issue} was not a list.`);
     comments.push(...rows);
     if (rows.length < 100) break;
   }
