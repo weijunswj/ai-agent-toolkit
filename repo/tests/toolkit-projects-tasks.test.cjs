@@ -288,7 +288,7 @@ test('model tier and effort: cheapest by default, medium floor, every raise carr
   assert.match(nudge, /Never list a task home thread, or a thread rooted in a coordinator project-chat post/);
   assert.match(nudge, /Backlog sweep \(every run\): page list_threads for the states blocked, review_ready and done, with each thread's pull requests/);
   assert.match(nudge, /A "waiting on you" thread whose PRs all merged and whose UAT is recorded counts as done\./);
-  assert.match(nudge, /Rotate: long-lived non-gate worker threads \(integrator, review runner, record keeper; never gate sessions/);
+  assert.match(nudge, /Rotate: standing non-gate threads \(integrator, review runner, record keeper, any long-lived lane, Remote Control lanes included; never gate sessions/);
   assert.match(nudge, /\*\*Rotate:\*\*/);
 });
 
@@ -427,7 +427,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'run it again with `--out` in place of `--check`', '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "']) assert.ok(guidebook.includes(required), required);
   assert.match(nudge, /report BLOCK CHANGED only when this run printed it/);
   assert.match(nudge, /plus steps 2a, 2b, 4 and 7 to 11 \(and 5b when it applies\)/);
-  assert.match(nudge, /CONTEXT RESET DUE \(weekly\)/);
+  assert.match(nudge, /CONTEXT RESET DUE \(age\)/);
   // Each task reports the other missing, so the coordinator recreates a deleted one.
   assert.ok(nudge.includes('is missing (no such trigger in list_triggers'), 'nudge sees a deleted check-in');
   assert.ok(rendered('daily-check-in').includes('is missing (no such trigger in list_triggers'), 'check-in sees a deleted nudge');
@@ -592,7 +592,7 @@ test('old mutable delivery checks as outdated at the same version and refreshes 
 
 test('nudge and check-in watch every pending run, ignore stopped tasks and use the complete lane rule', () => {
   const nudge = rendered('hourly-nudge');
-  for (const required of ['10. Task runs (runs every time', 'every run more than 15 minutes old whose .relayed is missing',
+  for (const required of ['10. Task runs (runs every time', 'up to 5 runs more than 15 minutes old whose .relayed is missing', 'then "and <n> more" for the rest',
     '"UNRELAYED TASK RUNS: <n> | "', '11. Lanes (runs every time', '"LANES UNDER CAP: <working> of <cap>, queue <n> | "', '**Lanes:**',
     'no thread in list_threads other than this home thread has activity', 'page read_project_chat with limit 10 to its last page']) {
     assert.ok(nudge.includes(required), required);
@@ -602,7 +602,7 @@ test('nudge and check-in watch every pending run, ignore stopped tasks and use t
   assert.ok(checkIn.includes('advice: no home-thread line or run stamp; opt into the Toolkit shell (custom) to get both'));
   assert.ok(checkIn.includes('TASKS OUTDATED, RELAY GAP, NUDGE NOT ARMED'));
   assert.match(checkIn, /including tasks whose older runs are still unrelayed even if their latest run was relayed/);
-  assert.match(nudge, /Also list runs more than 15 minutes old with \.relayed but no \.done as "relayed, actions not confirmed"/);
+  assert.match(nudge, /Also list up to 5 runs more than 15 minutes old with \.relayed but no \.done as "relayed, actions not confirmed"/);
   assert.match(nudge, /originating thread link from its stamp, never memory's current home/);
   assert.match(nudge, /with that same origin link/);
   assert.match(nudge, /Old custom shells without a stamp have no catch-up or relay gap check until their owner-approved shell update/);
@@ -750,7 +750,7 @@ test('every line that re-arms, updates, swaps, rebuilds, recreates or sets up a 
     'Swap both from the template on main.', 'Start a new home thread for it.', 'The coordinator creates it again from main.']) assert.match(line, acts, line);
   const notPaths = [
     'Whenever the user asks for anything recurring', "**The project's own tasks**", 'Reference for the `web-controller-projects` skill',
-    'A cloud thread creates, recreates and deletes tasks', '3. Create the replacement', '4. Rewrite the `SCHEDULED TASKS:` line', '7. Weekly rebuild:', '**It is bound to its own home thread,**',
+    'A cloud thread creates, recreates and deletes tasks', '3. Create the replacement', '4. Rewrite the `SCHEDULED TASKS:` line', '7. Age rebuild:', '**It is bound to its own home thread,**',
     'Every Toolkit scheduled task is bound to its own home thread (`<PROJECT>: <task name>`): start', '**Toolkit-made tasks** (the daily check-in and the hourly nudge) are rendered', 'Resolve candidates:',
     'When a recurring task replaces an older one, delete the older one',
     'Toolkit-made task swaps under their safeguards', 'so the coordinator rebuilds this home thread', '2. Render the new prompt',
@@ -912,7 +912,7 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
         "Reuse step 4's current Remote Control findings", 'Do not count it as working because a coordinator message was sent to it',
         '"UNRELAYED ASK: <n> | "', '**Unrelayed:**', '**Waiting on owner:**',
         'A lane whose device is confirmed not reachable also goes under **Waiting on owner:**', 'the step "bring Claude on that device back online"',
-        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | ", "LANES UNDER CAP:', 'and "WORK QUEUE: <n> | " prefixes',
+        '"UNRELAYED ASK: <n> | ", "DEVICE OFFLINE: <n> | ", "ROTATE DUE: <n> | ", "LANES UNDER CAP:', '"WORK QUEUE: <n> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes',
         'the programme graph is the queue', 'it needs the coordinator\'s step this turn even when lanes are full', 'A failed status read is "could not be checked", never offline',
         'An action request remains outstanding until its required action occurs; a reaction alone acknowledges it']) {
         assert.ok(text.includes(phrase), `${repo}/${session}: ${phrase}`);
@@ -920,6 +920,61 @@ test('rendered hourly nudges always reconcile owner asks and recovery, including
       assert.doesNotMatch(text, /type `continue`|skip the other steps from 2 to 6/);
     }
   }
+});
+
+test('coordinators act on task warnings: backlog, rotation and missing set-up are explicit, never noise', () => {
+  const nudge = rendered('hourly-nudge');
+  const runs = nudge.split('\n').find(line => line.startsWith('10. Task runs'));
+  for (const required of ["this task's own two previous runs are both more than 15 minutes old and neither has a .done",
+    '"COORDINATOR BEHIND: <n> runs | "', 'tell it in project chat to clear the nudge backlog']) assert.ok(runs.includes(required), required);
+  const age = nudge.split('\n').find(line => line.startsWith('7. Age rebuild'));
+  for (const required of ['Three or more days ago', 'handoff.md', '"CONTEXT RESET DUE (age) | "']) assert.ok(age.includes(required), required);
+  const first = nudge.split('\n').find(line => line.startsWith('- First line:'));
+  assert.ok(first.startsWith('- First line: any "COORDINATOR BEHIND: <n> runs | "'), 'the backlog prefix leads');
+  assert.ok(first.includes('"NEEDS SETUP: <check>: <what to add, and where> | "'));
+  for (const kind of ['hourly-nudge', 'daily-check-in']) {
+    const text = rendered(kind);
+    assert.match(text, /or a step could not finish for lack of context, write \S+\/handoff\.md/, kind);
+    assert.match(text, /never reports a bare "unknown": add "NEEDS SETUP: <check>: <what to add, and where> \| "/, kind);
+  }
+  const dir = path.join(ROOT, 'repo', 'contracts', 'claude-projects', 'web-controller-projects');
+  const periodic = fs.readFileSync(path.join(dir, 'reference', 'periodic-runs.md'), 'utf8');
+  const acting = periodic.slice(periodic.indexOf('## Acting on the nudge report'));
+  for (const required of ['- **Task lines are work.**', 'never ends your turn with `no_reply_needed`', 'The same prefix on two runs in a row that you already handled also goes to the owner once',
+    '- `COORDINATOR BEHIND`:', "then write each run's own `.relayed` and `.done`", '- `NEEDS SETUP`:', "briefing the new home with the run's `handoff.md`"]) assert.ok(acting.includes(required), required);
+  assert.ok(periodic.includes('- **Task lines are work** (as in **Acting on the nudge report**).'), 'the check-in follows the same rule');
+  assert.ok(acting.includes("that confirmed ping completes the prefix's action, so write `.done`"), 'a blocked prefix still closes its run');
+  assert.ok(periodic.includes('  - `NEEDS SETUP`: as under **Acting on the nudge report**.'), 'the check-in acts on NEEDS SETUP');
+  const rotation = periodic.split('\n').find(line => line.includes('asks for a rebuild of that task the same turn'));
+  for (const required of ["A task's home thread cannot be moved", 'never ask the owner to repoint it', 'does every step itself',
+    'creates a new task bound to itself with that prompt and the same name, schedule and model', 'reads it back with `get_trigger` (enabled, the right next run time, bound to this thread; never `fire_trigger` it, the first scheduled run is the proof)',
+    "then deletes the outdated task (its record saved to the shared folder and read back first, as in the swap's step 1)", 'with the new id and today\'s "since" date',
+    "the first rotation needs the owner's go; record it in project memory, and later rotations proceed on it", '`stopped by owner`']) assert.ok(rotation.includes(required), required);
+  assert.ok(rotation.indexOf('reads it back with `get_trigger`') < rotation.indexOf('then deletes the outdated task'), 'the outdated task goes only after the new one reads back');
+  assert.doesNotMatch(rotation, /disables the old task/, 'a rotation leaves no disabled copy behind');
+  assert.doesNotMatch(rotation, /test-fires/, 'a rotation never fires the new task');
+  const rotate = nudge.split('\n').find(line => line.startsWith('   Rotate:'));
+  for (const required of ['any long-lived lane, Remote Control lanes included', 'that still take new work and have handled 15 or more PRs, records or review rounds, started over a day ago, or show summarised context',
+    'never one only waiting on the owner (a test, a decision card, an open ask or a watched PR) until that clears',
+    'any thread the coordinator reused for a new task after its own finished', '"ROTATE DUE: <n> | "']) assert.ok(rotate.includes(required), required);
+  assert.ok(first.includes('"ROTATE DUE: <n> | "'), 'ROTATE DUE is a first-line prefix');
+  assert.ok(acting.includes('- `ROTATE DUE`: rotate each listed thread this turn'), 'the coordinator acts on ROTATE DUE');
+  const device = fs.readFileSync(path.join(dir, 'reference', 'device-work.md'), 'utf8');
+  // Never fire_trigger: setup, the nudge home thread and Both gone read the new task back instead.
+  const recurring = fs.readFileSync(path.join(dir, 'reference', 'recurring-tasks.md'), 'utf8');
+  assert.ok(recurring.includes('4. Read it back with `get_trigger` (enabled, a future next run, bound to its home thread); never `fire_trigger` it: the first scheduled run is the proof.'));
+  assert.ok(recurring.includes('a fresh-session task is never fired (no `fire_trigger`), so its next scheduled run covers the gap.'));
+  assert.ok(periodic.includes('reads it back with `get_trigger` (never `fire_trigger`; its first scheduled run is the proof) and updates the `SCHEDULED TASKS:` line'));
+  for (const [name, text] of [['SKILL.md', fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8')], ['recurring-tasks.md', recurring], ['periodic-runs.md', periodic]]) {
+    assert.doesNotMatch(text, /fires it once|Fire it once|Test one run now|caught up by firing it/, name);
+  }
+  assert.ok(device.includes('- **Rotate long Remote Control lanes too.**') && device.includes('you end its session with `stop_remote_control` once the handoff is read back'), 'Remote Control lanes rotate too');
+  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
+  const freshAge = tasks().render('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
+  assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
+  const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+  assert.match(skill, /\*\*Every task run reaches the project chat\.\*\*[^\n]*a prefixed line is work, never `no_reply_needed`\./);
+  assert.match(skill, /each new task gets a fresh thread, linking the old one\. Rotate every standing non-gate thread \(integrator, review runner, record keeper, any long-lived lane\) per `agent-cost-control`, and at the latest at 15 PRs, records or review rounds, a day old or summarised context:/);
 });
 
 test('the check-in turns stuck work into prefixes the coordinator must act on, and the controller owns every finding', () => {
@@ -970,7 +1025,7 @@ test('rendered hourly nudges flag threads quiet 20 minutes or more with CI pendi
         assert.ok(step.includes(phrase), `${repo}/${session}: ${phrase}`);
       }
       assert.ok(text.includes('plus steps 2a, 2b, 4 and 7 to 11 (and 5b when it applies)'));
-      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | " and "WORK QUEUE: <n> | " prefixes'));
+      assert.ok(text.includes('"LANES UNDER CAP: <working> of <cap>, queue <n> | ", "CI WAIT QUIET: <n> | ", "WORK QUEUE: <n> | " and "NEEDS SETUP: <check>: <what to add, and where> | " prefixes'));
     }
   }
 });

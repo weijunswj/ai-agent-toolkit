@@ -17,6 +17,10 @@
       },
       "description": "Explicit authority for the fenced refresh to repair and complete only the bound parent using every native descendant. Absence grants no lifecycle writes."
     },
+    "detach_finished_children": {
+      "type": "boolean",
+      "description": "Standing owner permission for the controller's reconcile and sweep to unlink a closed COMPLETED or RETIRED task from its native parent once no open sub-issue, unfinished catalogued task or open PR needs it there. Nothing is closed or deleted, the catalogue keeps the task and the parent's private sidecar records each detach. Absent or false grants no detach."
+    },
     "schema": { "const": "toolkit.programme-binding.v2" },
     "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
     "governance": { "enum": ["enabled", "disabled"], "description": "enabled turns Toolkit's GitHub governance on for this repository; disabled keeps it off, and only an owner-merged pull request changes it." },

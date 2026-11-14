@@ -1,5 +1,30 @@
 # Toolkit Changelog
 
+## 3.101.0 (governance question without the freeze)
+
+### Changed
+
+- **The governance question no longer freezes a repository:** a github.com repository with no merged decision now counts as off. Work carries on under the global rules, Toolkit asks yes, no or later once per session, and no message or tool waits on the answer. The first message of a session goes through with the question (a card in Claude Code, text at the end of the reply in Codex) and Toolkit asks again next session until a decision is merged.
+- **Answering:** `toolkit governance enable` or `toolkit governance disable`, sent as the whole message, is recorded at any point in a session that was asked. Any other reply, a bare `yes` or `no` included, now goes through the agent with a one-use reply ticket on your next message after the question, because without a hold a bare `yes` may be answering something else. A card tap is recorded as before.
+- **Typed commands:** a typed Toolkit command now gets its line on every message except the one that carries the question.
+- **Kept refusals:** an agent still cannot run the governance CLI with a decision, edit Toolkit's user-state files, show Toolkit's card with an answer filled in, schedule a prompt for itself while your reply is awaited, or run the answer script in any form other than the exact command given with your reply. Automation sessions are never asked and cannot answer. A hook that fails still holds inside a repository, as before.
+- Projects coordinators now treat every scheduled-task line that carries a warning as work for that turn, never a quiet no-reply. A warning they cannot clear, or the same warning on two handled runs in a row, goes to the owner once with the exact step.
+- The hourly nudge reports `COORDINATOR BEHIND: <n> runs` when its own earlier runs were never handled, and tells the owner how to unblock it. Its unrelayed-run lists show the 5 oldest plus a count, so a backlog no longer floods the report.
+- The hourly nudge rotates its home thread after 3 days instead of 7, and any bound task that loses context writes a `handoff.md` for its new home thread. A rotation never moves a task: the new home thread creates its own copy of the task, reads it back (never firing it), deletes the outdated one after saving its record and updates the task id in project memory, after the owner's one-time go.
+- Every new task gets a fresh thread. Standing threads (record keeper, review runner, integrator, any long-lived lane) rotate with a handoff file after each milestone and at the latest at 15 PRs, records or review rounds, a day old or summarised context, and the hourly nudge reports `ROTATE DUE` so the coordinator acts on it. Remote Control lanes rotate the same way, and a thread only waiting on the owner is never flagged until that clears.
+- No Toolkit task is ever fired by hand: setup, template swaps, the nudge home thread and the Both gone recovery read the new task back with `get_trigger`, and its first scheduled run is the proof. A missed fresh-session run is covered by its next scheduled run.
+- A task check that needs an id, memory line or file it cannot find now reports `NEEDS SETUP` with what to add and where, never a bare "unknown".
+
+### Removed
+
+- **Held messages:** nothing is stored or replayed. The file of messages an earlier version held is deleted at session start.
+- **Tool holds for the question:** the refusal of every tool in an undecided repository, of commands that reach into one from another folder, and the scheduled-task exception that existed only to pass that hold.
+- **Task-command exception code:** the unused helper behind that exception is deleted, and `toolkit governance check` now names its last section "Governance question hook" instead of "Prompt-hold enforcement".
+
+### Added
+
+- **Finished tasks leave the programme parent on their own:** GitHub caps a parent issue at 100 sub-issues. With the new version 2 binding switch `detach_finished_children: true`, the controller's reconcile and sweep unlink a closed `COMPLETED` or `RETIRED` task from its native parent once no open sub-issue, unfinished task or open PR still needs it there. Nothing is closed or deleted, at most 25 tasks leave per pass, each is checked again just before the write, and every detach is recorded on the parent's state. The task stays in the catalogue and on the graph, and a reopened task is attached again. Without the switch nothing changes.
+
 ## 3.100.1
 
 ### Fixed

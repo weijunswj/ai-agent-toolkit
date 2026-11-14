@@ -89,7 +89,7 @@ test('the exact absolute shell check passes existing merge and governance decisi
   }
 });
 
-test('the absolute shell check in a separate installed repository respects its governance decision', t => {
+test('the absolute shell check in a separate installed repository runs whether that repository is enabled or undecided', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-installed-shell-check-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
@@ -108,8 +108,7 @@ test('the absolute shell check in a separate installed repository respects its g
       const input = { cwd, session_id: 'fixture-session', tool_name, tool_input: { command } };
       assert.equal(hold.decide(input, { registryOptions, environment, host }), null, `${host} ${tool_name}: merge hold`);
       const result = new gate.ToolGate({ registryOptions }).decide(input);
-      if (enabled) assert.equal(result, null, `${host} ${tool_name}: enabled installed repository`);
-      else assert.match(result.deny, /waiting for the user's governance answer/, `${host} ${tool_name}: undecided installed repository`);
+      assert.equal(result, null, `${host} ${tool_name}: ${enabled ? 'enabled' : 'undecided'} installed repository`);
     }
   }
 });
