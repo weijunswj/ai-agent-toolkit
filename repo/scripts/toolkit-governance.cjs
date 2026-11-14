@@ -21,6 +21,7 @@ const protection = require('./toolkit-governance-protection.cjs');
 const security = require('./toolkit-governance-security.cjs');
 const hookCapability = require('./toolkit-hook-capability.cjs');
 const governanceApp = require('./toolkit-governance-app.cjs');
+const governanceBank = require('./toolkit-governance-bank.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
@@ -32,12 +33,15 @@ const PROPOSAL_ERRORS = Object.freeze({
 });
 
 const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'check', 'publish', 'security', 'migrate', 'setup', 'refresh']);
-const SWITCH_VALUES = Object.freeze({ on: 'after-gates', 'after-gates': 'after-gates', off: 'off' });
+// The exit code that means "the bank is shown; stop and wait for the owner's reply", as in setup toolkit.
+const BANK_SHOWN = 23;
+const CLOUD_BANK = `This is a cloud session, where Toolkit cannot check that a reply is the owner's own, so an answer in this chat cannot be recorded. Answer this bank from a Remote Control session on your computer, or run ${CMD('setup')} in your own terminal.`;
 const ALIASES = Object.freeze({ decline: 'disable' });
 const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|disable|publish|security> [--json]')}\n`
   + `       ${governance.governanceCommand('check [--json] [--offline]')}\n`
   + `       ${governance.governanceCommand('publish --run <pending receipt>')}\n`
-  + `       ${governance.governanceCommand('<setup|refresh> [--set on|off] [--json]')} (the repository's task auto-merge switch)\n`
+  + `       ${governance.governanceCommand('<setup|refresh> [--json]')} (the governance question bank; refresh is the same)\n`
+  + `       ${governance.governanceCommand('setup --answers "<bank reference>: <answer>" --ticket <owner reply ticket>')}\n`
   + `       ${governance.governanceCommand('migrate [--root <folder>]...')} (protection/security maintenance only; no local decisions)\n`;
 
 const RULES_TEXT = Object.freeze({
@@ -45,7 +49,7 @@ const RULES_TEXT = Object.freeze({
   UNAVAILABLE: "Couldn't check governance. Continue with global rules and coding gates; no governance effects or standing task auto-merge until it can be checked.",
   ERROR: 'Global rules and coding gates. The binding merged on the default branch cannot be used, so governed records, gate admission and finality hold until a pull request fixes it.',
   DISABLED: 'Global rules and coding gates, without GitHub governance. A governed block in AGENTS.md is not followed.',
-  UNDECIDED: `GitHub governance is not decided yet, so it counts as off: work continues under the global rules, without governance effects or standing task auto-merge, and nothing waits on the answer. Toolkit asks once per session. An account that can write decides by sending \`toolkit governance enable\` or \`toolkit governance disable\` as a message, or by running ${CMD('enable')} or ${CMD('disable')} in its own terminal.`,
+  UNDECIDED: `GitHub governance is not decided yet, so it counts as off: work continues under the global rules, without governance effects or standing task auto-merge, and nothing waits on the answer. Toolkit asks once per session. An account that can write decides by saying \`toolkit governance\` and answering its question bank, by sending \`toolkit governance enable\` or \`toolkit governance disable\` as a message, or by running ${CMD('enable')} or ${CMD('disable')} in its own terminal.`,
 });
 
 class GovernanceCliError extends Error {
@@ -57,7 +61,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsPrinter;
+  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsPrinter; #permissionsChecker; #environment;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -66,7 +70,9 @@ class ToolkitGovernanceCli {
   // `refresh` (the merged-binding refresh `status` runs first), `hookReader` (the Hooks: lines) and
   // `queueReader` (the offline queue count for a repository root) and `appReader` (the governance App
   // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsPrinter = null} = {}) {
+  // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
+  // ticket is bound to) are for tests too.
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsPrinter = null, permissionsChecker = null, environment = process.env } = {}) {
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
     this.#stdout = stdout;
     this.#stderr = stderr;
@@ -88,6 +94,8 @@ class ToolkitGovernanceCli {
     this.#appReader = appReader;
     this.#switchTransport = switchTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
     this.#permissionsPrinter = permissionsPrinter || defaultPermissionsPrinter;
+    this.#permissionsChecker = permissionsChecker || defaultPermissionsChecker;
+    this.#environment = environment || {};
     this.#queueReader = queueReader || (root => require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').queueSummary(root));
   }
 
@@ -97,10 +105,12 @@ class ToolkitGovernanceCli {
     const offline = args.includes('--offline');
     let rest = args.filter(arg => arg !== '--json' && arg !== '--offline');
     let requestedRun = null;
-    let switchTo = null;
-    if (['setup', 'refresh'].includes(rest[0]) && rest.length === 3 && rest[1] === '--set') {
-      switchTo = SWITCH_VALUES[String(rest[2]).toLowerCase()] || null;
-      if (!switchTo) { this.#stderr.write(USAGE); return 2; }
+    let answers = null;
+    let ticket = null;
+    if (['setup', 'refresh'].includes(rest[0]) && rest.length === 5 && rest[1] === '--answers' && rest[3] === '--ticket') {
+      answers = String(rest[2]);
+      ticket = String(rest[4]);
+      if (!/^[a-f0-9]{32}$/.test(ticket) || json) { this.#stderr.write(USAGE); return 2; }
       rest = [rest[0]];
     }
     if (rest[0] === 'publish' && rest.length === 3 && rest[1] === '--run' && /^[a-f0-9]{32}$/.test(rest[2])) {
@@ -130,8 +140,7 @@ class ToolkitGovernanceCli {
       if (command === 'check') return this.#check(json, offline);
       if (command === 'security') return this.#security(json);
       if (command === 'publish') return this.#publish(json, requestedRun);
-      if (command === 'refresh') return this.#refreshGovernance(json, switchTo);
-      if (command === 'setup') return await this.#setupGovernance(json, switchTo);
+      if (command === 'setup' || command === 'refresh') return await this.#bank(json, answers, ticket);
       return await this.#decide(command, json);
     } catch (error) {
       if (PROPOSAL_ERRORS[error.code]) {
@@ -294,48 +303,6 @@ class ToolkitGovernanceCli {
     return { value: answer.answered ? answer.auto_merge : 'unset', answer, removed, lines };
   }
 
-  // `refresh governance`: the merged answers (governance, switch, store, checks), the permission
-  // table and blocks (this computer's and the repository's), and, with --set, one binding pull request that changes only the switch.
-  // It never writes the binding itself; only the owner's merge changes it.
-  #refreshGovernance(json, switchTo) {
-    const refresh = this.#refresh(this.#cwd) || {};
-    const state = this.#state();
-    if (state.rule === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code}).`);
-    if (state.state !== 'ENABLED') {
-      this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. Governance is ${label(state)} here, so this repository has no task auto-merge switch yet. Say setup governance to turn governance on and set it in the same pull request.`]);
-      return 1;
-    }
-    if (!state.programme_records_bind) {
-      const reason = refresh.refreshed === false ? bindingCache.refreshReason(refresh.error) : null;
-      this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. The binding merged on the default branch could not be read again just now${reason ? ` (${reason})` : ''}; run ${CMD('status')} online first.`]);
-      return 1;
-    }
-    const merged = governance.mergedBinding(state.root, this.#registryOptions);
-    const task = this.#taskSwitch(state.root);
-    const lines = ['Governance: enabled (the binding merged on the default branch).', ...task.lines];
-    if (merged) lines.push(`Evidence store: ${merged.store.repository}`, `Required checks: ${merged.required_checks.length ? merged.required_checks.join(', ') : 'none listed'}`);
-    let permissions = null;
-    try { permissions = this.#permissionsPrinter(state.root); } catch { permissions = null; }
-    lines.push('', ...(permissions ? permissions.split('\n') : ['Permission blocks: could not be printed here; run toolkit permissions.']), '');
-    if (permissions) lines.push(PERMISSIONS_RELAY, '');
-    const value = { state: state.state, task_auto_merge: task.value, removed_legacy_answers: task.removed, store: merged?.store.repository || null, required_checks: merged ? [...merged.required_checks] : null };
-    if (!switchTo) {
-      lines.push('To change task auto-merge, say refresh governance with on or off. Toolkit prepares one binding pull request; it applies only after you merge it.');
-      this.#print(json, value, lines);
-      return 0;
-    }
-    if (task.value === switchTo) {
-      lines.push(`Task auto-merge is already ${switchTo === 'after-gates' ? 'on' : 'off'} in the merged binding. Nothing was prepared.`);
-      this.#print(json, { ...value, writes: 0 }, lines);
-      return 0;
-    }
-    const prepared = this.#prepareSwitch(state.root, switchTo);
-    lines.push(`Prepared ${prepared.url}: it sets task auto-merge ${switchTo === 'after-gates' ? 'on' : 'off'} and changes nothing else. It applies only after you merge it; refresh governance then reads it back and removes the old per-app answers.`);
-    lines.push(governance.taskSwitchVersionLine());
-    this.#print(json, { ...value, pull_request: prepared }, lines);
-    return 0;
-  }
-
   // One binding pull request that changes only task_prs.auto_merge, built from the exact merged text.
   #prepareSwitch(root, switchTo) {
     if (!this.#switchTransport) throw new GovernanceCliError('GitHub cannot be reached from here, so no pull request was prepared. Nothing was written.');
@@ -355,22 +322,134 @@ class ToolkitGovernanceCli {
     }
   }
 
-  // `setup governance`: in a governed repository it is refresh governance; otherwise it is the enable
-  // journey in the owner's own terminal, with the switch asked together with yes, in one proposal.
-  async #setupGovernance(json, switchTo) {
-    const before = this.#state();
-    if (before.state === 'ENABLED') return this.#refreshGovernance(json, switchTo);
-    if (!this.#interactive) throw new GovernanceCliError(`No answer was recorded. Setting up governance asks two questions in your own terminal: run ${CMD('setup')} there. An agent cannot answer for you.`);
-    let chosen = switchTo;
-    if (!chosen) {
-      const typed = String(await this.#ask('Task auto-merge for this repository: may finished task pull requests merge once their review, checks and testing pass? Type on or off: ')).trim().toLowerCase();
-      chosen = SWITCH_VALUES[typed] || null;
-      if (!chosen) {
-        this.#print(json, { state: before.state, writes: 0 }, ['Not answered. Nothing was written.']);
-        return 1;
-      }
+  // `toolkit governance` (`setup governance`, `refresh governance`): the question bank, in the same
+  // format as setup toolkit. Shown, it notes the bank for this run so the owner's next own message
+  // gets a one-use ticket (toolkit-governance-bank.cjs), and exits BANK_SHOWN. With --answers and that
+  // ticket it applies the owner's answer: at most one governance pull request, and the permission
+  // blocks. In the owner's own terminal it shows the bank and reads the reply there.
+  async #bank(json, answers, ticket) {
+    this.#refresh(this.#cwd);
+    const state = this.#state();
+    if (state.rule === 'ERROR' || state.state === 'ERROR') throw new GovernanceCliError(`The governance state could not be read (${state.error_code || 'ERROR'}). Nothing was written.`);
+    if (['R1', 'R8', 'S1', 'R1s'].includes(state.rule)) {
+      this.#print(json, { state: state.state, writes: 0 }, ['GitHub governance is off automatically here; there is nothing to set up.', ...describe(state).slice(2)]);
+      return 0;
     }
-    return this.#decide('enable', json, chosen);
+    if (state.state === 'ENABLED' && !state.programme_records_bind) {
+      this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. The binding merged on the default branch could not be read again just now; run ${CMD('status')} online first.`]);
+      return 1;
+    }
+    const merged = state.state === 'ENABLED' ? governance.mergedBinding(state.root, this.#registryOptions) : null;
+    const task = state.state === 'ENABLED' && state.root ? this.#taskSwitch(state.root) : null;
+    let permissions = { checked: false, missing: 0 };
+    try { permissions = this.#permissionsChecker(state.root) || permissions; } catch { /* shown as not checked */ }
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', merged, permissions });
+    const reference = governanceBank.bankReference(specs);
+    if (answers === null) {
+      if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
+      if (this.#interactive) {
+        this.#stdout.write(`${governanceBank.renderGovernanceBank(specs)}\n`);
+        let chosen;
+        try { chosen = governanceBank.parseBankAnswer(String(await this.#ask('Your answer: ')), specs, { requireBankReference: false }); }
+        catch (error) { this.#print(false, {}, [`${error.message} Nothing was written.`]); return 1; }
+        return this.#applyBank(state, task, chosen);
+      }
+      return this.#showBank(specs, state);
+    }
+    if (this.#cloud()) throw new GovernanceCliError(`${CLOUD_BANK} Nothing was written.`);
+    const sessionId = this.#hostSession();
+    const epochs = new gate.SessionEpochs({ registryOptions: this.#registryOptions });
+    const epoch = sessionId ? epochs.get(sessionId) : null;
+    let entry = null;
+    try { entry = sessionId ? new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).take(ticket, sessionId, epoch) : null; } catch { entry = null; }
+    if (!entry || entry.repository_id !== state.repository_id) {
+      throw new GovernanceCliError("No live reply ticket from the owner for this session and repository, so nothing was written. Show the bank (toolkit governance) and send the owner's next reply with the ticket Toolkit gives you. An agent cannot answer for the owner.");
+    }
+    if (entry.bank_reference !== reference) {
+      this.#stdout.write('The governance state changed since that bank was shown, so the answer was not used and nothing was written. Show the owner this bank instead:\n\n');
+      return this.#showBank(specs, state);
+    }
+    let chosen;
+    try { chosen = governanceBank.parseBankAnswer(answers, specs); }
+    catch (error) {
+      this.#stdout.write(`${error.message} Nothing was written. Show the owner this bank again:\n\n`);
+      return this.#showBank(specs, state);
+    }
+    return this.#applyBank(state, task, chosen);
+  }
+
+  // A cloud session skips the reply check, so the owner's chat answer there can never be recorded.
+  #cloud() { return this.#environment.CLAUDE_CODE_REMOTE === 'true'; }
+
+  #hostSession() {
+    const id = this.#environment.TOOLKIT_HOST_SESSION || this.#environment.CODEX_THREAD_ID;
+    return typeof id === 'string' && id !== '' ? id : null;
+  }
+
+  // Prints the bank and notes it for this run, so the owner's next own message can answer it.
+  #showBank(specs, state) {
+    if (this.#cloud()) {
+      this.#stdout.write(`${governanceBank.renderGovernanceBank(specs)}\n\n${CLOUD_BANK}\n`);
+      return BANK_SHOWN;
+    }
+    const sessionId = this.#hostSession();
+    const epochs = new gate.SessionEpochs({ registryOptions: this.#registryOptions });
+    const epoch = sessionId ? epochs.get(sessionId) : null;
+    let noted = false;
+    try {
+      noted = Boolean(sessionId) && new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).shown(sessionId, {
+        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: governanceBank.bankReference(specs),
+      });
+    } catch { noted = false; }
+    this.#stdout.write(`${governanceBank.renderGovernanceBank(specs)}\n`);
+    if (!noted) this.#stdout.write(`\nToolkit could not note this bank for this session (its session-start hook did not mark it, or its user-state folder could not be written), so a reply in chat cannot be recorded. Start a new session and say toolkit governance there, or run ${CMD('setup')} in your own terminal.\n`);
+    return BANK_SHOWN;
+  }
+
+  // The owner's answer: at most one governance pull request, then the permission blocks.
+  #applyBank(state, task, chosen) {
+    let code = 0;
+    let acted = false;
+    const switchTo = chosen.taskAutoMerge === 'on' ? 'after-gates' : chosen.taskAutoMerge === 'off' ? 'off' : null;
+    if (chosen.governance === 'on' && state.state !== 'ENABLED') {
+      code = this.#prepareDecision('yes', switchTo || 'off');
+      acted = true;
+    } else if (chosen.governance === 'off' && state.state !== 'DISABLED') {
+      code = this.#prepareDecision('no', null);
+      acted = true;
+    } else if (state.state === 'ENABLED' && switchTo && task && switchTo !== task.value) {
+      const prepared = this.#prepareSwitch(state.root, switchTo);
+      this.#print(false, {}, [`Prepared ${prepared.url}: it sets task auto-merge ${switchTo === 'after-gates' ? 'on' : 'off'} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine()]);
+      acted = true;
+    }
+    if (chosen.permissionBlocks !== 'keep') {
+      let blocks = null;
+      try { blocks = this.#permissionsPrinter(state.root); } catch { blocks = null; }
+      const lines = ['', ...(blocks ? blocks.split('\n') : ['Permission blocks: could not be printed here; run toolkit permissions.']), ''];
+      if (blocks) lines.push(chosen.permissionBlocks === 'add' ? PERMISSIONS_ADD : PERMISSIONS_RELAY);
+      this.#print(false, {}, lines);
+      acted = true;
+    }
+    if (!acted) this.#print(false, {}, ['Nothing changed: every answer keeps things as they are.']);
+    return code;
+  }
+
+  // One governance decision pull request from the owner's bank answer (the ticket or the owner's own
+  // terminal is the proof); it applies only after the owner merges it.
+  #prepareDecision(answer, switchTo) {
+    const before = this.#state();
+    if (before.merged?.fresh && (before.rule === 'M1' && answer === 'yes' || before.rule === 'M2' && answer === 'no')) {
+      this.#print(false, {}, ['Already ' + before.state.toLowerCase() + ' on the default branch. Nothing was written.']);
+      return 0;
+    }
+    const sessionId = 'bank-' + crypto.randomBytes(16).toString('hex'), epoch = crypto.randomBytes(16).toString('hex');
+    const request = this.#proposals.request(this.#cwd, answer, { sessionId, epoch });
+    try { return this.#publish(false, request.run, switchTo); }
+    catch (error) {
+      this.#print(false, {}, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
+        PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);
+      return 2;
+    }
   }
 
   async #decide(command, json, switchTo = null) {
@@ -425,7 +504,9 @@ function switchText(mergedText, parsed, switchTo) {
 }
 
 // Command output can sit folded away in the app, so the agent repeats the block in its reply.
-const PERMISSIONS_RELAY = 'Agents: in your reply, show the owner the permission table and blocks above in full (the table, each block, the file it goes in and the one-paste owner command), not a summary of it. Offer two ways to add them: the owner pastes that command into their own PowerShell or terminal, or you add the blocks for them if they ask. Write it only on the owner\'s own ask (safety-gates playbook), and never run the command yourself.';
+// The owner picked "Add them for me" on the bank: that answer is their own ask to write the blocks.
+const PERMISSIONS_ADD = 'Agents: show the owner the permission table and blocks above once, in full and as printed; never summarise or repeat them. The owner chose "Add them for me" in the governance bank, which is their own ask to add these blocks. Add exactly the lines shown to each file named above: back the file up first, keep every other line, then read it back with toolkit permissions --check <that file> and tell the owner what changed. Never run --apply.';
+const PERMISSIONS_RELAY = 'Agents: in your reply, show the owner the permission table and blocks above once, in full and as printed (the table, each block, the file it goes in and the one-paste owner command); never summarise, shorten or repeat them. Offer two ways to add them: the owner pastes that command into their own PowerShell or terminal, or you add the blocks for them if they ask. Write it only on the owner\'s own ask (safety-gates playbook), and never run the command yourself.';
 
 // The permission table and blocks for this app (this computer's and this repository's), as toolkit
 // permissions prints them, so governance setup covers permission setup too.
@@ -434,6 +515,21 @@ function defaultPermissionsPrinter(root) {
   const host = detectAgentHost() === 'codex' ? 'codex' : 'claude';
   const code = require('./toolkit-permissions.cjs').main(['--scope', 'all', '--host', host, '--repo-root', root], { stdout: chunk => { text += chunk; }, stderr: () => {} });
   return code === 0 && text.trim() ? text.trimEnd() : null;
+}
+
+// How many of the Claude Code permission lines this computer and repository still miss, read from
+// the settings files the blocks name. Codex rules are not read here, so they count as not checked.
+function defaultPermissionsChecker(root) {
+  if (detectAgentHost() === 'codex') return { checked: false, missing: 0 };
+  const { PermissionBlocks } = require('./toolkit-permissions.cjs');
+  const owner = new PermissionBlocks();
+  const built = owner.build({ host: 'claude', scope: 'all', repoRoot: root });
+  let missing = 0;
+  for (const block of built.blocks) {
+    if (!fs.existsSync(block.target)) { missing += block.allow.length + block.ask.length; continue; }
+    missing += owner.check(block.target, { blocks: [block] })[0].missing.length;
+  }
+  return { checked: true, missing };
 }
 
 function label(state) {
@@ -481,4 +577,4 @@ if (require.main === module) {
   new ToolkitGovernanceCli().main(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }
 
-module.exports = Object.freeze({ ToolkitGovernanceCli, COMMANDS });
+module.exports = Object.freeze({ ToolkitGovernanceCli, COMMANDS, BANK_SHOWN });
