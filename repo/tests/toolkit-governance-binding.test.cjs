@@ -233,6 +233,27 @@ test('prompt refresh shares one remaining deadline across every git read', () =>
   } finally { Date.now = original; }
 });
 
+// A deadline that is not a whole millisecond (one worked out from performance.now(), as the merge
+// hold's cloud read does) still gives git a whole-millisecond timeout: spawnSync throws on a
+// fractional one, which made every such read fail as if GitHub were unreachable.
+test('reader: a fractional deadline gives every git read a whole-millisecond timeout', () => {
+  const timeouts = [];
+  const real = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, deadline: Date.now() + 4499.75, runGit(args, { timeout }) {
+    timeouts.push(timeout);
+    return fakeGit({ 'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`), fetch: ok(''), 'rev-parse': ok(`${SHA}\n`), 'ls-tree': ok('') })(args);
+  } });
+  assert.equal(real.status, 'absent');
+  assert.ok(timeouts.length >= 5);
+  for (const timeout of timeouts) assert.ok(Number.isInteger(timeout) && timeout > 0, `timeout ${timeout}`);
+  // The real spawnSync runner refuses a fractional timeout; a whole one runs.
+  assert.throws(() => childProcess.spawnSync(process.execPath, ['--version'], { timeout: 10.5 }), /ERR_OUT_OF_RANGE|timeout/);
+  // Under one millisecond left is no budget at all: nothing starts.
+  let calls = 0;
+  const spent = bindingCache.readDefaultBranchBinding('/r', { ...GUARDED, deadline: Date.now() + 0.5, runGit() { calls++; return ok(REMOTE); } });
+  assert.equal(spent.status, 'unknown');
+  assert.equal(calls, 0);
+});
+
 test('reader: default branch from the symref, then the binding at its tip; hostile answers never become a binding', () => {
   const base = { 'ls-remote': ok(`ref: refs/heads/main\tHEAD\n${SHA}\tHEAD\n`), fetch: ok(''), 'rev-parse': ok(`${SHA}\n`) };
   const text = JSON.stringify(v2());

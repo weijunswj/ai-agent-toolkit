@@ -72,7 +72,8 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // clones, so session start caches no parent binding: there, when no fresh cached binding names the
 // store, the hold reads the clones' merged bindings on demand (the same bounded read session start
 // uses), and an explicitly named store merge from that folder counts as from the parent when the
-// parent's clone is one of its subfolders.
+// parent's clone is one of its subfolders. A session working inside the store's own clone reads the
+// clones beside it in that shared folder the same way.
 //
 // The merge card (Claude Code on this computer): a tap in place of the typed line. When a merge that
 // names its repository, number and full head SHA is refused for want of an approval, in a session
@@ -1300,16 +1301,27 @@ class EvidenceStoreMerges {
   // Cloud only: the GitHub repositories this session can read a parent binding from, as
   // [{ folder, slug }]. The session folder's own repository, or, when the session folder is not
   // inside a repository (a cloud container clones each project repository into its own subfolder),
-  // up to eight of its immediate subfolders. The store itself is never a candidate.
+  // up to eight of its immediate subfolders. When the session folder is inside the store's own clone
+  // (a thread archiving evidence works there), the clones beside it in the same shared folder, with
+  // the same cap. The store itself is never a candidate.
   cloudCandidates(target) {
     if (!this.cloud || !this.cwd) return [];
     const own = repositoryOf(this.cwd);
-    if (own) return own.toLowerCase() === target ? [] : [{ folder: this.cwd, slug: own.toLowerCase(), child: false }];
+    if (!own) return this.clonesIn(this.cwd, target);
+    if (own.toLowerCase() !== target) return [{ folder: this.cwd, slug: own.toLowerCase(), child: false }];
+    let root;
+    try { root = governance.findGitRoot(this.cwd); } catch { root = null; }
+    return root ? this.clonesIn(path.dirname(root), target).filter(entry => path.resolve(entry.folder) !== path.resolve(root)) : [];
+  }
+
+  // Up to eight immediate subfolders of `folder` that are real git clones (not symlinks or
+  // worktrees) of a GitHub repository other than `target`.
+  clonesIn(folder, target) {
     let names;
-    try { names = fs.readdirSync(this.cwd, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).map(entry => entry.name).sort().slice(0, 8); } catch { return []; }
-    return names.map(name => path.join(this.cwd, name))
-      .filter(folder => { try { return fs.lstatSync(path.join(folder, '.git')).isDirectory(); } catch { return false; } })
-      .map(folder => ({ folder, slug: (repositoryOf(folder) || '').toLowerCase(), child: true }))
+    try { names = fs.readdirSync(folder, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).map(entry => entry.name).sort().slice(0, 8); } catch { return []; }
+    return names.map(name => path.join(folder, name))
+      .filter(clone => { try { return fs.lstatSync(path.join(clone, '.git')).isDirectory(); } catch { return false; } })
+      .map(clone => ({ folder: clone, slug: (repositoryOf(clone) || '').toLowerCase(), child: true }))
       .filter(entry => entry.slug && entry.slug !== target);
   }
 
@@ -1326,7 +1338,8 @@ class EvidenceStoreMerges {
   refreshCloudParents(target, candidates) {
     const budgetMs = Math.min(this.shared - 2500, globalThis.performance.now() + 4500) - globalThis.performance.now();
     if (candidates.length === 0 || !(budgetMs > 0)) return false;
-    const deadline = Date.now() + budgetMs;
+    // A whole-millisecond deadline: the git read hands what is left of it to spawnSync as a timeout.
+    const deadline = Date.now() + Math.floor(budgetMs);
     let refreshed = false;
     for (const candidate of candidates) {
       if (Date.now() >= deadline) break;

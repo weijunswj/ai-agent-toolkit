@@ -1,5 +1,12 @@
 # Toolkit Changelog
 
+## 3.105.1
+
+### Fixed
+
+- **Evidence-store merges in cloud sessions:** cloud store merges were still refused for want of the user's approval, from the clones folder and from the store's own clone alike. The on-demand read of the parent's merged binding handed git a timeout that was not a whole number of milliseconds, which Node refuses, so every read failed as if GitHub were unreachable. The binding read now always gives git a whole-millisecond timeout.
+- **Evidence-store merges from the store's own clone in cloud sessions:** a cloud thread that archives evidence works inside the store's clone, where the merge hold looked for a parent binding only in that clone and found none. From inside the store's clone, a cloud session now also reads the merged bindings of the clones beside it in the same shared folder, with the same bounded read and eight-folder cap. Every other check stays: a fresh merged binding that names the exact store, a private writable store, its default branch as the base, the full head SHA and a plain merge commit. Outside cloud sessions nothing changes.
+
 ## 3.105.0 (decision records out of page bodies)
 
 ### Changed
