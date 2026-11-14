@@ -391,3 +391,32 @@ test('the sweep --author edits only that login\'s posts and never asks who is si
   assert.match(err, /--author needs a GitHub login/);
   assert.match(err, /use --author or --any-author, not both/);
 });
+
+test('the pull request list stops paging at the first page that reaches pulls older than the window', () => {
+  const pull = (n, updated) => JSON.stringify({ id: n, number: n, body: '', user: 'me', html_url: `https://github.com/acme/app/pull/${n}`, updated_at: updated });
+  const asked = [];
+  const gh = (args) => {
+    if (!/[?&]page=\d+$/.test(args[1])) return '[]';
+    asked.push(args[1]);
+    if (/\/pulls\?.*page=1$/.test(args[1])) return Array.from({ length: 100 }, (_, i) => pull(i + 1, i < 99 ? '2026-11-14T00:00:00Z' : '2026-10-01T00:00:00Z')).join('\n');
+    if (/\/pulls\?/.test(args[1])) throw new Error('read past the window');
+    return '';
+  };
+  sweep.findFooted(gh, 'acme/app', '2026-11-13T00:00:00Z');
+  assert.equal(asked.filter(endpoint => /\/pulls\?/.test(endpoint)).length, 1);
+  assert.equal(asked.filter(endpoint => /\/reviews\?/.test(endpoint)).length, 99);
+});
+
+test('the sweep reads numbered pages until a short page and stops at the page cap', () => {
+  const row = id => JSON.stringify({ id, number: id, body: 'plain', user: 'me', html_url: `https://github.com/acme/app/issues/${id}`, updated_at: '2026-11-14T00:00:00Z' });
+  const full = () => Array.from({ length: 100 }, (_, i) => row(i + 1)).join('\n');
+  const pages = [];
+  sweep.findFooted((args) => {
+    if (!/[?&]page=\d+$/.test(args[1])) return '[]';
+    pages.push(args[1]);
+    return /issues\/comments\?.*page=1$/.test(args[1]) ? full() : '';
+  }, 'acme/app', null);
+  assert.ok(pages.includes('repos/acme/app/issues/comments?per_page=100&page=2'), 'a full page asks for the next one');
+  assert.ok(!pages.includes('repos/acme/app/issues/comments?per_page=100&page=3'), 'a short page ends the list');
+  assert.throws(() => sweep.findFooted((args) => (/[?&]page=\d+$/.test(args[1]) ? full() : '[]'), 'acme/app', null), /more than 10000 items/);
+});

@@ -13,6 +13,7 @@ const CLEAN = {
   [SCRIPTS.traces]: { status: 0, stdout: JSON.stringify({ ok: true }) },
   [SCRIPTS.ci]: { status: 0, stdout: JSON.stringify({ items: [{ level: 'CHECK', check: 'speed.jobs', path: '', message: 'judge' }] }) },
   [SCRIPTS.footer]: { status: 0, stdout: 'GitHub footer sweep (report only) of acme/app: no posts with the footer\n' },
+  [SCRIPTS.refs]: { status: 0, stdout: 'SCRIPT REFERENCES: clear\n' },
 };
 
 // A fake child-process runner: canned results per script, and every call recorded.
@@ -37,7 +38,7 @@ const ALL = ['--checkout', '/repo', '--instructions', 'i.md', '--memory', 'm.md'
 test('a clean run prints one line and exits 0', () => {
   const { code, text } = run(ALL);
   assert.equal(code, 0);
-  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks programme traces ci footer)\n');
+  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks programme traces ci footer refs)\n');
 });
 
 test('checks are segregated by host and governance, and skip cleanly with the reason', () => {
@@ -46,7 +47,7 @@ test('checks are segregated by host and governance, and skip cleanly with the re
   for (const name of ['guidebook', 'instructions', 'memory', 'tasks']) {
     assert.deepEqual(chat.checks.find(check => check.name === name), { name, state: 'skipped', lines: ['Claude Projects only'] });
   }
-  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['programme', 'traces', 'ci', 'footer']);
+  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['programme', 'traces', 'ci', 'footer', 'refs']);
   const off = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: { ...GOVERNED, governance: 'disabled' } }).deps);
   assert.deepEqual(off.checks.filter(check => check.state === 'skipped').map(check => `${check.name}: ${check.lines[0]}`).slice(-2), ['programme: governance off', 'traces: governance off']);
   const none = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: null }).deps);
@@ -70,7 +71,7 @@ test('findings print compactly: counts by code and the top items, full detail be
   const compact = run(ALL, { results });
   assert.equal(compact.code, 1);
   assert.deepEqual(compact.text.trimEnd().split('\n'), [
-    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks traces ci footer)',
+    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks traces ci footer refs)',
     'ATTENTION programme: Attention: 6 new, 0 acknowledged (CLOSING_STORY 4, STALE_PR 2)',
     `  ${findings[0]}`, `  ${findings[1]}`, `  ${findings[2]}`,
     '  ... 3 more (--expand, or programme.cjs attention)',
@@ -89,6 +90,7 @@ test('each checker maps its own exit codes and output to attention or could-not-
     [SCRIPTS.traces]: { status: 1, stdout: JSON.stringify({ ok: false, unlinked: ['1', '2', '3'], unlinked_decisions: ['1', '2'], unknown_supersedes: [], superseded_unmarked: [{ id: '3' }], index_errors: [] }) },
     [SCRIPTS.ci]: { status: 0, stdout: JSON.stringify({ items: [{ level: 'GAP', check: 'parts.docker', path: 'Dockerfile', message: 'no CI step builds this Dockerfile' }] }) },
     [SCRIPTS.footer]: { status: 3, stdout: 'FOUND pull_request https://github.com/acme/app/pull/9 (me)\nGitHub footer sweep (report only) of acme/app: 1 FOUND\n' },
+    [SCRIPTS.refs]: { status: 1, stdout: 'SCRIPT REFERENCES: 1 found\nRETIRED permission row tasks-plan runs repo/scripts/old.cjs\n' },
   };
   const report = controllerCheck(parseArgs(ALL), world({ results }).deps);
   const byName = Object.fromEntries(report.checks.map(check => [check.name, check]));
@@ -101,7 +103,8 @@ test('each checker maps its own exit codes and output to attention or could-not-
   assert.match(byName.traces.lines[0], /^#7: 2 unlinked decision comments, 1 superseded records not marked \(/);
   assert.deepEqual(byName.ci.lines, ['1 GAP, 0 CHECK (CHECK needs judgement: ci-checkup.cjs lists them)', 'parts.docker Dockerfile: no CI step builds this Dockerfile']);
   assert.equal(byName.footer.state, 'attention');
-  assert.equal(report.attention, 6);
+  assert.deepEqual(byName.refs.lines, ['SCRIPT REFERENCES: 1 found', 'RETIRED permission row tasks-plan runs repo/scripts/old.cjs']);
+  assert.equal(report.attention, 7);
   assert.equal(report.failed, 2);
   const unreadable = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ results: { [SCRIPTS.traces]: { status: 2, stdout: '', stderr: 'FAIL: gh api failed\n' }, [SCRIPTS.footer]: { status: 1, stdout: 'FAILED scan acme/app: HTTP 403\n' } } }).deps);
   assert.deepEqual(unreadable.checks.find(check => check.name === 'traces').lines, ['#7: could not run: FAIL: gh api failed']);
@@ -119,6 +122,7 @@ test('every child runs in its read-only mode with the inputs given', () => {
   assert.deepEqual(args[`${SCRIPTS.traces} --repo`], ['--repo', 'acme/other', '--issue', '7', '--record-prefix', 'INT-7-']);
   assert.deepEqual(args[`${SCRIPTS.ci} --repo`], ['--repo', '/repo', '--json']);
   assert.deepEqual(args[`${SCRIPTS.footer} --repo`], ['--repo', 'acme/other', '--since', '2026-11-13T00:00:00Z']);
+  assert.deepEqual(calls.find(call => call.script === SCRIPTS.refs).args, []);
   for (const call of calls) for (const flag of ['--apply', '--out', '--refresh', '--repair', '--write']) assert.equal(call.args.includes(flag), false);
   const defaults = run(['--host', 'chat', '--checkout', '/repo']).calls.find(call => call.script === SCRIPTS.footer);
   assert.deepEqual(defaults.args, ['--repo', 'acme/app', '--since', '2026-11-13T10:00:00.000Z']);
@@ -137,6 +141,16 @@ test('--json prints the report as data', () => {
   const report = JSON.parse(text);
   assert.equal(report.host, 'projects');
   assert.equal(report.governed, true);
-  assert.equal(report.checks.length, 8);
+  assert.equal(report.checks.length, 9);
   assert.equal(format(report).split('\n')[0].startsWith('CONTROLLER CHECK: clear'), true);
+});
+
+test('a run where every check is skipped says nothing ran and exits 1, never clear', () => {
+  const { code, text } = run(['--host', 'chat', '--skip', 'refs']);
+  assert.equal(code, 1);
+  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: guidebook instructions memory tasks programme traces ci footer refs\): pass the inputs each skipped check names/);
+  // With no inputs at all, the Toolkit's own script-reference check still runs.
+  const bare = run(['--host', 'chat']);
+  assert.equal(bare.code, 0);
+  assert.match(bare.text, /^CONTROLLER CHECK: clear \(ok: refs; skipped:/);
 });

@@ -507,7 +507,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   const guidebook = nudge.split('\n').find(line => line.startsWith('9. Guidebook and controller check'));
   for (const required of ['runs every time, even when step 1 found no change', 'the library folder can change while main is quiet',
     '`git clone --depth 1 https://github.com/weijunswj/ai-agent-toolkit TK` in your scratchpad (a fresh clone)',
-    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme`', 'adding `--checkout R` when step 9a made one',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme`', 'adding `--checkout R --repo example-owner/example-repo` when step 9a ran',
     '`CONTROLLER CHECK: clear ...`: write "**Guidebook:** current" and "**Controller check:** clear", and read no further',
     '`node TK/repo/scripts/toolkit-projects-guidebook.cjs --out /mnt/project-files/toolkit/web-controller-projects`', 'the same with `--check` in place of `--out`',
     '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "', '"CONTROLLER CHECK: <n> | "']) assert.ok(guidebook.includes(required), required);

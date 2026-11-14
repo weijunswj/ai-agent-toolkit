@@ -2,8 +2,9 @@
 
 - `repo/scripts/toolkit-controller-check.cjs`: one read-only call runs every Toolkit checker that fits where it runs (the Projects guidebook, instructions, memory and task checks only in Claude Projects; programme attention and decision traces only where governance is on; CI drift and leftover footers for any controller) and prints one line when nothing needs action. Findings come compact, counted by code with the top items; `--expand` prints everything.
 - The Projects hourly nudge runs it in its guidebook step, so each run also covers decision traces, CI drift and leftover footers, and a new `CONTROLLER CHECK` first-line prefix names what needs action.
+- `repo/scripts/check-script-references.cjs` and the registry `repo/contracts/retired-scripts.json`: flag any permission row or document that names a retired or missing script. The controller check runs it as its `refs` row.
 - `CONTROLLER.md`: a controller runs it at session start and on each periodic run instead of recalling state from memory.
 
 ### Fixed
 
-- The footer sweep reads GitHub lists by numbered pages (at most 100), so it also runs in cloud sessions, whose proxy refuses the numeric-ID next-page links that `gh api --paginate` follows.
+- The footer sweep reads GitHub lists by numbered pages (at most 100), so it also runs in cloud sessions, whose proxy refuses the numeric-ID next-page links that `gh api --paginate` follows. It stops reading pull requests at the first page older than its window.

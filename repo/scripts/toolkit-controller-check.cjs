@@ -10,7 +10,9 @@
 //   guidebook, instructions, memory, tasks   Claude Projects only
 //   programme, traces                        only where the checkout's programme binding says
 //                                            governance is enabled
-//   ci, footer                               any controller
+//   ci, footer, refs                         any controller (refs checks this Toolkit copy: no
+//                                            permission row or document names a retired or missing
+//                                            script)
 // The host is `projects` when the Projects library folder exists (only Claude Projects has
 // /mnt/project-files), else `chat`; --host overrides it. A check outside its context, or missing its
 // input, prints one SKIPPED line saying why or what to pass.
@@ -31,7 +33,7 @@
 //                    line when clear; otherwise each check that needs attention or could not run,
 //                    with up to 3 detail lines and a count of the rest; programme findings are
 //                    counted by code)
-// Exit 0 clear, 1 something needs attention or could not run, 2 bad arguments.
+// Exit 0 clear, 1 something needs attention, could not run, or nothing ran at all, 2 bad arguments.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -40,7 +42,7 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const LIBRARY = '/mnt/project-files/toolkit/web-controller-projects';
 const BINDING_REL = '.github/toolkit-programme.json';
-const CHECKS = ['guidebook', 'instructions', 'memory', 'tasks', 'programme', 'traces', 'ci', 'footer'];
+const CHECKS = ['guidebook', 'instructions', 'memory', 'tasks', 'programme', 'traces', 'ci', 'footer', 'refs'];
 const PROJECTS_ONLY = new Set(['guidebook', 'instructions', 'memory', 'tasks']);
 const TASK_KINDS = new Set(['daily-check-in', 'hourly-nudge']);
 // At most this many detail lines per check unless --expand, then a count and the command for the rest.
@@ -53,6 +55,7 @@ const SCRIPTS = {
   traces: 'skills/github-program-reconciler/scripts/decision-trace-audit.cjs',
   ci: 'skills/secure-ci-cd/scripts/ci-checkup.cjs',
   footer: 'repo/scripts/toolkit-github-footer-sweep.cjs',
+  refs: 'repo/scripts/check-script-references.cjs',
 };
 const USAGE = 'Usage: toolkit-controller-check.cjs [--host projects|chat] [--expand] [--checkout <dir>] [--repo <owner/name>] [--guidebook <folder>] [--instructions <file>] [--memory <file>] [--task <kind>=<file>]... [--since <ISO time>] [--skip <name,...>] [--json]';
 
@@ -105,8 +108,9 @@ function readBinding(checkout) {
   try { return JSON.parse(fs.readFileSync(path.join(checkout, BINDING_REL), 'utf8').replace(/^﻿/, '')); } catch { return null; }
 }
 
-// Exit 0 current, 1 needs a change, anything else could not run: the shape the Projects checkers share.
-function projectsCheck(run, script, args, command) {
+// Exit 0 current, 1 needs a change, anything else could not run: the shape the Projects checkers and
+// the script-reference check share.
+function statusCheck(run, script, args, command) {
   const result = run(script, args);
   const lines = linesOf(result.stdout);
   if (result.status === 0) return { state: 'ok', lines: lines.length ? lines : ['current'] };
@@ -115,7 +119,7 @@ function projectsCheck(run, script, args, command) {
 }
 
 function checkTasks(run, tasks) {
-  const results = tasks.map(task => ({ task, outcome: projectsCheck(run, SCRIPTS.tasks, ['--check', task.kind, task.file], `toolkit-projects-tasks.cjs --check ${task.kind}`) }));
+  const results = tasks.map(task => ({ task, outcome: statusCheck(run, SCRIPTS.tasks, ['--check', task.kind, task.file], `toolkit-projects-tasks.cjs --check ${task.kind}`) }));
   const lines = results.map(({ task, outcome }) => `${task.kind}: ${outcome.lines.join('; ')}`);
   const state = results.some(row => row.outcome.state === 'failed') ? 'failed' : results.some(row => row.outcome.state === 'attention') ? 'attention' : 'ok';
   return { state, lines, command: 'toolkit-projects-tasks.cjs --check <kind> <file>' };
@@ -194,13 +198,13 @@ function controllerCheck(options, deps = {}) {
     if (options.skip.has(name)) { skip(name, 'run elsewhere by the caller'); continue; }
     if (PROJECTS_ONLY.has(name) && host !== 'projects') { skip(name, 'Claude Projects only'); continue; }
     let outcome;
-    if (name === 'guidebook') outcome = projectsCheck(run, SCRIPTS.guidebook, ['--check', guidebook], 'toolkit-projects-guidebook.cjs --check');
+    if (name === 'guidebook') outcome = statusCheck(run, SCRIPTS.guidebook, ['--check', guidebook], 'toolkit-projects-guidebook.cjs --check');
     else if (name === 'instructions') {
       if (!options.instructions) { skip(name, 'pass --instructions <file> (the project instructions, saved)'); continue; }
-      outcome = projectsCheck(run, SCRIPTS.instructions, ['--check', options.instructions], 'toolkit-projects-instructions.cjs --check');
+      outcome = statusCheck(run, SCRIPTS.instructions, ['--check', options.instructions], 'toolkit-projects-instructions.cjs --check');
     } else if (name === 'memory') {
       if (!options.memory) { skip(name, 'pass --memory <file> (MEMORY.md, saved)'); continue; }
-      outcome = projectsCheck(run, SCRIPTS.tasks, ['--check-memory', options.memory], 'toolkit-projects-tasks.cjs --check-memory');
+      outcome = statusCheck(run, SCRIPTS.tasks, ['--check-memory', options.memory], 'toolkit-projects-tasks.cjs --check-memory');
     } else if (name === 'tasks') {
       if (!options.tasks.length) { skip(name, 'pass --task <kind>=<file> (each stored task prompt)'); continue; }
       outcome = checkTasks(run, options.tasks);
@@ -213,10 +217,10 @@ function controllerCheck(options, deps = {}) {
     } else if (name === 'ci') {
       if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
       outcome = checkCi(run, options.checkout);
-    } else {
+    } else if (name === 'footer') {
       if (!repo) { skip(name, 'pass --repo <owner/name>'); continue; }
       outcome = checkFooter(run, repo, since);
-    }
+    } else outcome = statusCheck(run, SCRIPTS.refs, [], 'check-script-references.cjs');
     checks.push({ name, ...outcome });
   }
   const count = state => checks.filter(check => check.state === state).length;
@@ -231,7 +235,7 @@ function format(report, { expand = false } = {}) {
   const tail = `${passed ? `ok: ${passed}` : ''}${passed && skipped ? '; ' : ''}${skipped ? `skipped: ${skipped}` : ''}`;
   const lines = [report.attention || report.failed
     ? `CONTROLLER CHECK: ${report.attention} need attention, ${report.failed} could not run${tail ? ` (${tail})` : ''}`
-    : `CONTROLLER CHECK: clear${tail ? ` (${tail})` : ''}`];
+    : passed ? `CONTROLLER CHECK: clear (${tail})` : `CONTROLLER CHECK: nothing ran (${tail}): pass the inputs each skipped check names (--expand lists them)`];
   const label = { attention: 'ATTENTION', failed: 'FAILED', ok: 'OK', skipped: 'SKIPPED' };
   // Attention first, then what could not run, so the list reads in the order it needs action.
   for (const state of expand ? ['attention', 'failed', 'ok', 'skipped'] : ['attention', 'failed']) {
@@ -252,7 +256,8 @@ function main(argv = process.argv.slice(2), deps = {}) {
   try { options = parseArgs(argv); } catch (error) { err(`${error.message}\n${USAGE}\n`); return 2; }
   const report = controllerCheck(options, deps);
   out(options.json ? `${JSON.stringify(report, null, 2)}\n` : format(report, options));
-  return report.attention || report.failed ? 1 : 0;
+  // Nothing run is never clear: a caller with no inputs must not read silence as health.
+  return report.attention || report.failed || !report.checks.some(check => check.state === 'ok') ? 1 : 0;
 }
 
 module.exports = { parseArgs, controllerCheck, format, main, CHECKS, SCRIPTS };
