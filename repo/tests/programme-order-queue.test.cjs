@@ -285,3 +285,25 @@ test('a pass runs at most 10 orders, oldest name first; the rest wait for the ne
   assert.equal(result.retrying, 0, 'waiting behind the cap is not a failure');
   assert.deepEqual(b.pending().map(name => name.slice(PENDING.length)), ['order-10.json', 'order-11.json']);
 });
+
+// Delta G2 L2: run-order reports a code-less error inside a write as FAIL; the order waits, never refused.
+test('a code-less error inside a write keeps the order queued through the real run-order', t => {
+  const f = fixture(t);
+  f.enqueue('ack-500-1.json', f.order());
+  const request = f.github.request.bind(f.github);
+  let thrown = false;
+  f.github.request = (method, endpoint, body, options) => {
+    if (!thrown && method === 'PUT' && endpoint.endsWith('/state/issue-500.json')) { thrown = true; throw new TypeError('a bug'); }
+    return request(method, endpoint, body, options);
+  };
+  const first = f.run();
+  assert.equal(first.error, null, first.error?.message);
+  assert.equal(first.report.orders.results[0].outcome, 'PENDING');
+  assert.equal(first.report.orders.results[0].code, 'FAIL');
+  assert.equal(first.report.orders.retrying, 1);
+  assert.ok(f.file('pending/ack-500-1.json'));
+  assert.equal(f.file('refused/ack-500-1.json'), null);
+  const second = f.run();
+  assert.equal(second.error, null, second.error?.message);
+  assert.equal(f.file('done/ack-500-1.json').outcome, 'DONE');
+});

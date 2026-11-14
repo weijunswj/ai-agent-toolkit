@@ -120,7 +120,9 @@ class OrderQueue {
     }
     if (report.outcome === 'STOPPED') {
       const code = report.results?.at(-1)?.code || 'FAIL';
-      if (RETRY(code) || code === 'PASS_LOCK_LOST') return { ...base, outcome: 'PENDING', code };
+      // run-order turns a code-less error inside a write into FAIL: a bug, never the order's fault, so
+      // the order waits (and warns) instead of being refused.
+      if (RETRY(code) || RAISE.has(code) || code === 'FAIL') return { ...base, outcome: 'PENDING', code };
       return refuse(code, report.next_action || 'A write was refused.', report, order);
     }
     return this.settle(entry, 'done', { ...base, outcome: report.outcome, digest: report.digest, results: report.results, order });
