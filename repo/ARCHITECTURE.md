@@ -42,7 +42,7 @@ Last reviewed against `main` `51c6bbe`.
 | Claude helper agents | `repo/scripts/toolkit-claude-helper-agents.cjs`, `repo/scripts/toolkit-claude-helper-spec.cjs`, `repo/scripts/toolkit-claude-task-session.cjs` |
 | Version bump | `repo/scripts/bump-version.cjs` (`--next patch\|minor\|major`, run by the merging agent at merge time; folds notes from `repo/docs/changelog.d/`) |
 | Reconcile older open PRs that already carry a bump after main moves | `repo/scripts/toolkit-rebump-prs.cjs` (re-bump workflow, merging agent or requested computer lane; report by default, `--apply` prepares and fast-forwards eligible branches) |
-| Land several reviewed PRs with one bump and one CI run (merge train) | `repo/scripts/toolkit-merge-train.cjs` (`build`, `catchup`, `verify`, `body`, `split`, `land`; never merges; rules in `repo/controller/evidence-and-finish.md` and `repo/docs/changelog.d/README.md`) |
+| Land several reviewed PRs with one bump and one CI run (merge train) | `repo/scripts/toolkit-merge-train.cjs` (`build`, `catchup`, `verify`, `body`, `split`, `land`, `eject`; never merges; rules in `repo/controller/evidence-and-finish.md` and `repo/docs/changelog.d/README.md`) |
 | Risk tier of a change | `repo/scripts/toolkit-risk-tier.cjs`, this repository's list `.github/toolkit-risk-tiers.json` |
 | Shell session check (two booleans, no authority) | `repo/scripts/toolkit-session-shell-check.cjs`; meaning and installed-shell qualification in the [host contract](docs/HOST-CONTRACT.md#check-what-a-shell-received) |
 | Leftover worktrees and merged branches (read-only list) | `repo/scripts/workspace-residue-report.cjs` |
