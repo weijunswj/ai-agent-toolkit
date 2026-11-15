@@ -11,19 +11,21 @@
 //   node repo/scripts/toolkit-projects-stuck.cjs --input <file> [--ledger <file>]
 //
 // Input: { "now", "pages": [{ "threads", "next_cursor" }], "previous": { "run_at", "stalled": [id] },
-// "threads": [{ "id", "title", "state", "last_activity_at", "owes_work", "waiting_on",
-// "fresh_output_at"?, "expected_minutes"?, "rc"?: { "status", "connected", "served",
+// "threads": [{ "id", "title", "state", "last_activity_at", "last_own_activity_at"?, "owes_work",
+// "waiting_on", "fresh_output_at"?, "expected_minutes"?, "rc"?: { "status", "connected", "served",
 // "last_activity_at", "device_reachable" } }] }. Leave out task home threads, the coordinator's own
 // thread and post reply threads. The ledger is a JSON array of { "lane", "old", "new", "at" }, one
 // entry per successor the coordinator started; a missing ledger file is an empty one.
 //
 // Busy is never stuck: a working thread, or one whose run left output in the last 45 minutes, is
 // never stuck, because a long run reads no messages until its turn ends. A working thread quiet
-// past twice its expected time goes to the owner instead. Stuck: failed or stopped while it owes
-// work; a Remote Control session that ended, or lost contact for 10 minutes or more while its device
-// is reachable; or idle and owing work, listed stalled by the previous run (so the coordinator
-// pinged it) and quiet since. At most one successor per lane in 2 hours: a second stall goes to
-// the owner. Exit 0 nothing to act on, 1 something to act on, 2 bad input or arguments.
+// past twice its expected time goes to the owner instead. A recorded wait (an owner card, CI, a
+// gate, review) is never stuck. Stuck: a Remote Control session that ended, or is not connected or
+// served with its session quiet 10 minutes or more while its device is reachable; or a failed,
+// stopped or idle thread owing work that the previous run listed stalled (so the coordinator sent
+// it a continue message or ping) and that has done nothing of its own since. At most one successor
+// per lane in 2 hours: a second stall goes to the owner.
+// Exit 0 nothing to act on, 1 something to act on, 2 bad input or arguments.
 
 const fs = require('node:fs');
 
@@ -68,11 +70,15 @@ function readThread(raw) {
     title: text(raw.title, 'thread title', 300),
     state: raw.state,
     lastActivity: time(raw.last_activity_at, 'last_activity_at'),
+    // The thread's own latest message, post or push. A coordinator ping can move last_activity_at,
+    // and it must never count as the thread answering that ping.
+    ownActivity: raw.last_own_activity_at === undefined || raw.last_own_activity_at === null ? null : time(raw.last_own_activity_at, 'last_own_activity_at'),
     owesWork: raw.owes_work,
     waitingOn: raw.waiting_on === null || raw.waiting_on === undefined ? null : text(raw.waiting_on, 'waiting_on'),
     freshOutput: raw.fresh_output_at === undefined || raw.fresh_output_at === null ? null : time(raw.fresh_output_at, 'fresh_output_at'),
     expected: raw.expected_minutes === undefined ? EXPECTED_MINUTES : raw.expected_minutes
   };
+  if (thread.ownActivity === null) thread.ownActivity = thread.lastActivity;
   if (!STATES.includes(thread.state)) fail('thread state');
   if (typeof thread.owesWork !== 'boolean') fail('owes_work');
   if (!Number.isInteger(thread.expected) || thread.expected < 1) fail('expected_minutes');
@@ -106,30 +112,37 @@ function scanProblem(pages) {
   return null;
 }
 
-// What one thread needs, before the successor limit: { kind, reason }.
-function judge(thread, now, stalledBefore) {
-  const quiet = minutesSince(now, thread.lastActivity);
+// What one thread needs, before the successor limit: { kind, reason }. `pingedBefore`: the previous
+// run listed it stalled (so the coordinator pinged it) and it has done nothing of its own since.
+function judge(thread, now, pingedBefore) {
+  const quiet = minutesSince(now, thread.ownActivity);
   if (thread.freshOutput !== null && minutesSince(now, thread.freshOutput) < FRESH_OUTPUT_MINUTES) return { kind: 'BUSY', reason: 'its run left output in the last 45 minutes' };
   const rc = thread.rc;
-  if (rc) {
-    if (!rc.deviceReachable) return { kind: 'OFFLINE', reason: 'its device is not reachable' };
-    if (rc.status !== 'active' && rc.status !== 'ended') return { kind: 'OWNER', reason: `Remote Control ${rc.status.replace(/_/g, ' ')}` };
-    if (thread.owesWork && rc.status === 'ended') return { kind: 'STUCK', reason: 'its Remote Control session ended' };
-    const lost = minutesSince(now, rc.lastActivity);
-    if (thread.owesWork && rc.status === 'active' && (!rc.connected || !rc.served) && lost >= LOST_CONTACT_MINUTES) {
-      return { kind: 'STUCK', reason: `Remote Control lost contact ${lost} min` };
+  if (rc && !rc.deviceReachable) return { kind: 'OFFLINE', reason: 'its device is not reachable' };
+  if (rc && rc.status !== 'active' && rc.status !== 'ended') return { kind: 'OWNER', reason: `Remote Control ${rc.status.replace(/_/g, ' ')}` };
+  // A recorded wait (an open owner card, CI, a gate or review) comes before any dead check: a
+  // successor would supersede a thread whose open ask still waits in it.
+  if (thread.waitingOn) return { kind: 'WAITING', reason: `waits on ${thread.waitingOn}` };
+  if (rc && thread.owesWork) {
+    if (rc.status === 'ended') return { kind: 'STUCK', reason: 'its Remote Control session ended' };
+    const idle = minutesSince(now, rc.lastActivity);
+    if ((!rc.connected || !rc.served) && idle >= LOST_CONTACT_MINUTES) {
+      return { kind: 'STUCK', reason: `Remote Control not connected or served, session quiet ${idle} min` };
     }
   }
+  // Failed or stopped is also what a usage-limit or API-error cut-off leaves, and such a thread
+  // continues on one message: it gets a continue message first, and a successor only if it stays quiet.
   if (thread.state === 'failed' || thread.state === 'stopped') {
-    return thread.owesWork ? { kind: 'STUCK', reason: `${thread.state} while it owes work` } : { kind: 'OK', reason: thread.state };
+    if (!thread.owesWork) return { kind: 'OK', reason: thread.state };
+    if (pingedBefore) return { kind: 'STUCK', reason: `${thread.state}, no answer to the last run's continue message` };
+    return { kind: 'STALLED', reason: `${thread.state} while it owes work, send a continue message` };
   }
   if (thread.state === 'working') {
     if (quiet >= 2 * thread.expected) return { kind: 'OWNER', reason: `long run, working but quiet ${quiet} min` };
     return { kind: 'BUSY', reason: 'working' };
   }
-  if (thread.waitingOn) return { kind: 'WAITING', reason: `waits on ${thread.waitingOn}` };
   if (thread.owesWork && quiet >= QUIET_MINUTES) {
-    if (stalledBefore) return { kind: 'STUCK', reason: `missed the last run's ping, quiet ${quiet} min` };
+    if (pingedBefore) return { kind: 'STUCK', reason: `missed the last run's ping, quiet ${quiet} min` };
     return { kind: 'STALLED', reason: `quiet ${quiet} min, ping it` };
   }
   return { kind: 'OK', reason: thread.state };
@@ -157,7 +170,7 @@ function classify(input, ledgerRaw = []) {
     const lane = laneOf.get(thread.id) || thread.id;
     if (supersededBy.has(thread.id)) return { thread, lane, kind: 'SUPERSEDED', reason: `by ${supersededBy.get(thread.id)}` };
     // Stalled last run and no activity since that run: the coordinator's ping went unanswered.
-    const ignoredPing = previousRun !== null && stalledBefore.has(thread.id) && thread.lastActivity <= previousRun;
+    const ignoredPing = previousRun !== null && stalledBefore.has(thread.id) && thread.ownActivity <= previousRun;
     const verdict = judge(thread, now, ignoredPing);
     if (verdict.kind === 'STUCK') {
       const recent = ledger.find(entry => entry.lane === lane && minutesSince(now, entry.at) < SUCCESSOR_WINDOW_MINUTES);
