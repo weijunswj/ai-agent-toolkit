@@ -269,7 +269,9 @@ function validatePageArchive(errors, archive) {
     // A note part is one verified, never-edited comment holding marked hand-written text; `copy`
     // is the SHA-256 of the whole page saved to the private store before that text could move.
     if (note) check(errors, entry.group === null && typeof entry.copy === 'string' && /^[0-9a-f]{64}$/.test(entry.copy), 'page_archive note must have no group and name its saved page copy');
-    else check(errors, entry.kind === 'graph' && archiveTools().GROUPS.includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`), 'page_archive kind and group must match its key');
+    // OPTIONAL is a legacy group: optional rows now show and archive as LATER, and an OPTIONAL part a
+    // parent still lists is kept and redrawn empty.
+    else check(errors, entry.kind === 'graph' && [...archiveTools().GROUPS, 'OPTIONAL'].includes(entry.group) && entry.key.startsWith(`graph-${String(entry.group).toLowerCase()}-`), 'page_archive kind and group must match its key');
     check(errors, isText(entry.title) && entry.title.length <= 200, 'page_archive title must be bounded text');
     check(errors, ['pending', 'moved', ...(note ? ['withdrawn'] : [])].includes(entry.state), 'page_archive state must be pending or moved, or withdrawn for a note');
     check(errors, entry.comment_id === null ? entry.login === null && entry.state === 'pending' : isInt(entry.comment_id, 1) && isText(entry.login) && !ids.has(entry.comment_id), 'page_archive id must be unique with verified login');

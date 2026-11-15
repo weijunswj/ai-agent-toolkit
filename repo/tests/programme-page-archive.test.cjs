@@ -528,6 +528,25 @@ test('H2: graph replacements share five posts with the owed repair notice', () =
 });
 
 
+test('a parent that still lists a legacy OPTIONAL graph part stays valid, and a pass redraws that part empty', () => {
+  const f = pageFixture(state, { count: 84, groups: SIZE_GROUPS, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  const tools = require(path.join(ROOT, 'skills/github-program-reconciler/scripts/programme-page-archive.cjs'));
+  const body = `${tools.marker('graph-optional-1')}\n# Programme graph: OPTIONAL\n\n| Task | PRs | Status | Waiting on | Updated (SGT) |\n|---|---|---|---|---|\n|#100 Task 0|-|OPTIONAL · QUEUED|-|-|\n`;
+  const id = f.github.addComment(12, { body });
+  const read = f.store.read('parent', 12);
+  const doc = structuredClone(read.doc);
+  doc.page_archive.push({ comment_id: id, digest: tools.digest(body), group: 'OPTIONAL', key: 'graph-optional-1', kind: 'graph', login: f.github.login, state: 'moved', title: 'OPTIONAL' });
+  assert.deepEqual(state.validateParent(doc), [], 'the legacy group still reads');
+  f.store.write('parent', 12, doc, { sha: read.sha, previous: read.doc });
+  assert.deepEqual(f.make().run({ apply: true }).holds, []);
+  const entry = f.parent().page_archive.find(item => item.key === 'graph-optional-1');
+  assert.ok(entry, 'the part stays registered');
+  assert.match(f.github.comments.get(entry.comment_id).body, /No rows are archived in this part\./, 'its rows now show, or archive, as LATER');
+  assert.doesNotMatch(f.page(), /OPTIONAL/);
+  assert.deepEqual(state.validateParent(f.parent()), []);
+});
+
 for (const several of [false, true]) test(`N1: six alternating logins retain verified read-only parts, several=${several}`, () => {
   const padding = 'Notes. '.repeat(several ? 6500 : 5700);
   const f = pageFixture(state, { count: 84, groups: SIZE_GROUPS, hand: '# Programme\n\n' + padding });
