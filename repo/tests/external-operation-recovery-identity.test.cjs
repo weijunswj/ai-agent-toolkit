@@ -9,7 +9,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const scriptPath = path.join(repoRoot, 'skills', 'external-operation-preflight', 'scripts', 'recovery-identity.cjs');
-const { REASONS, RECORD_SCHEMA, parseArgs, run } = require(scriptPath);
+const { IDENTITY_FIELDS, REASONS, RECORD_SCHEMA, parseArgs, run } = require(scriptPath);
 
 const NOW = Date.parse('2026-11-15T00:00:00Z');
 const IDENTITY = Object.freeze({
@@ -125,6 +125,17 @@ const MATRIX = [
   ['damaged', 'dispose', GONE, 'HOLD', REASONS.RECOVERY_IDENTITY_UNREADABLE, 'damaged']
 ];
 
+// Every identity field on its own: a read-back that differs only there holds, and nothing changes.
+for (const field of IDENTITY_FIELDS) {
+  const differ = (readBack) => ({ ...readBack, [field]: `${readBack[field]}-other` });
+  MATRIX.push(
+    ['claimed', 'record', differ(FOUND), 'HOLD', REASONS.RECOVERY_IDENTITY_MISMATCH, 'claimed'],
+    ['confirmed', 'check', differ(FOUND), 'HOLD', REASONS.RECOVERY_IDENTITY_MISMATCH, 'confirmed'],
+    ['confirmed', 'dispose', differ(GONE), 'HOLD', REASONS.RECOVERY_IDENTITY_MISMATCH, 'confirmed'],
+    ['claimed', 'dispose', differ(GONE_NO_HANDLE), 'HOLD', REASONS.RECOVERY_IDENTITY_MISMATCH, 'claimed']
+  );
+}
+
 test('closure matrix: each record state and command gives its expected verdict and leaves the expected state', () => {
   for (const [state, command, input, verdict, reason, after] of MATRIX) {
     const label = `${state} + ${command}${input && input !== IDENTITY ? ` (${JSON.stringify(input)})` : ''}`;
@@ -155,7 +166,8 @@ test('a record that is valid JSON but the wrong shape is unreadable, never trust
     { schema: RECORD_SCHEMA, key: 'uat', state: 'confirmed', identity: IDENTITY },
     { schema: RECORD_SCHEMA, key: 'uat', state: 'pending', identity: IDENTITY },
     { schema: RECORD_SCHEMA, key: 'uat', state: 'claimed', identity: { ...IDENTITY, scope: '' } },
-    { schema: 'other', key: 'uat', state: 'claimed', identity: IDENTITY }
+    { schema: 'other', key: 'uat', state: 'claimed', identity: IDENTITY },
+    { schema: RECORD_SCHEMA, key: 'uat', state: 'confirmed', identity: IDENTITY, handle: `ghp_${'f'.repeat(36)}` }
   ];
   for (const record of damaged) {
     const { stateDir } = seed('absent');
@@ -173,6 +185,7 @@ test('invalid or secret-bearing inputs hold without writing or echoing the value
     ['absent', 'claim', { ...IDENTITY, token: 'raw-value' }, REASONS.SECRET_IN_INPUT],
     ['absent', 'claim', { ...IDENTITY, cleanup_owner: '' }, REASONS.INPUT_INVALID],
     ['absent', 'claim', { ...IDENTITY, end_date: '2026-02-30' }, REASONS.INPUT_INVALID],
+    ['absent', 'claim', { ...IDENTITY, end_date: '2026-11-14' }, REASONS.INPUT_INVALID],
     ['absent', 'claim', [IDENTITY], REASONS.INPUT_INVALID],
     ['claimed', 'record', { ...FOUND, handle: secret }, REASONS.SECRET_IN_INPUT],
     ['claimed', 'record', { ...FOUND, handle: '' }, REASONS.INPUT_INVALID],
@@ -185,6 +198,51 @@ test('invalid or secret-bearing inputs hold without writing or echoing the value
     assert.equal(outcome.result.reason, reason, `${state} ${command} ${JSON.stringify(input)}`);
     assert.equal(outcome.after, state);
     assert.ok(!JSON.stringify(outcome.result).includes(secret));
+  }
+});
+
+// One record per resource: rows of [another key's record, command on key uat, its input, verdict, reason
+// or null, uat's state after]. Same resource means same provider, scope, kind and name, ignoring case and
+// the environment label. The other key's record never changes.
+function otherRecord(state, identity, handle) {
+  const record = { schema: RECORD_SCHEMA, key: 'other', state, identity: { ...IDENTITY, ...identity }, claimed_at: '2026-11-14T00:00:00.000Z' };
+  if (state === 'confirmed') record.handle = handle;
+  return JSON.stringify(record);
+}
+
+const OTHER_NAME = { name: 'scratch/another-branch' };
+const ONE_RECORD_PER_RESOURCE = [
+  [otherRecord('claimed', {}), 'absent', 'claim', IDENTITY, 'HOLD', REASONS.RECOVERY_IDENTITY_EXISTS, 'absent'],
+  [otherRecord('confirmed', {}, HANDLE), 'absent', 'claim', IDENTITY, 'HOLD', REASONS.RECOVERY_IDENTITY_EXISTS, 'absent'],
+  [otherRecord('confirmed', { name: IDENTITY.name.toUpperCase() }, HANDLE), 'absent', 'claim', IDENTITY, 'HOLD', REASONS.RECOVERY_IDENTITY_EXISTS, 'absent'],
+  [otherRecord('confirmed', { environment: 'other-label' }, HANDLE), 'absent', 'claim', IDENTITY, 'HOLD', REASONS.RECOVERY_IDENTITY_EXISTS, 'absent'],
+  [otherRecord('confirmed', { scope: 'owner/other-repo' }, HANDLE), 'absent', 'claim', IDENTITY, 'OK', null, 'claimed'],
+  [otherRecord('confirmed', { kind: 'tag' }, HANDLE), 'absent', 'claim', IDENTITY, 'OK', null, 'claimed'],
+  [otherRecord('confirmed', { provider: 'gitlab' }, HANDLE), 'absent', 'claim', IDENTITY, 'OK', null, 'claimed'],
+  [otherRecord('confirmed', OTHER_NAME, 'refs/heads/scratch/another-branch'), 'absent', 'claim', IDENTITY, 'OK', null, 'claimed'],
+  ['{"schema":', 'absent', 'claim', IDENTITY, 'HOLD', REASONS.RECOVERY_IDENTITY_UNREADABLE, 'absent'],
+  [otherRecord('confirmed', OTHER_NAME, HANDLE), 'claimed', 'record', FOUND, 'HOLD', REASONS.RECOVERY_IDENTITY_EXISTS, 'claimed'],
+  [otherRecord('confirmed', OTHER_NAME, HANDLE.toUpperCase()), 'claimed', 'record', FOUND, 'HOLD', REASONS.RECOVERY_IDENTITY_EXISTS, 'claimed'],
+  [otherRecord('confirmed', { ...OTHER_NAME, scope: 'owner/other-repo' }, HANDLE), 'claimed', 'record', FOUND, 'OK', null, 'confirmed'],
+  [otherRecord('claimed', OTHER_NAME), 'claimed', 'record', FOUND, 'OK', null, 'confirmed'],
+  ['{"schema":', 'claimed', 'record', FOUND, 'HOLD', REASONS.RECOVERY_IDENTITY_UNREADABLE, 'claimed']
+];
+
+test('one record per resource: a resource another key holds is never claimed or recorded again', () => {
+  for (const [other, state, command, input, verdict, reason, after] of ONE_RECORD_PER_RESOURCE) {
+    const { root, stateDir } = seed(state);
+    fs.mkdirSync(stateDir, { recursive: true });
+    const otherFile = path.join(stateDir, 'other.json');
+    fs.writeFileSync(otherFile, other);
+    const argv = [command, '--key', 'uat', '--state-dir', stateDir];
+    argv.push(command === 'claim' ? '--identity' : '--read-back', writeJson(root, 'input.json', input));
+    const result = run(parseArgs(argv), NOW);
+    const label = `${other} + ${state} ${command}`;
+    assert.equal(result.verdict, verdict, label);
+    assert.equal(result.reason, reason === null ? undefined : reason, label);
+    assert.equal(stateAfter(stateDir), after, label);
+    assert.equal(fs.readFileSync(otherFile, 'utf8'), other, label);
+    if (reason === REASONS.RECOVERY_IDENTITY_EXISTS) assert.equal(result.record.key, 'other', label);
   }
 });
 

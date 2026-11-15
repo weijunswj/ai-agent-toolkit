@@ -33,6 +33,9 @@ const RESULT_SCHEMA = 'toolkit.recovery-identity-result.v1';
 const COMMANDS = Object.freeze(['claim', 'record', 'resolve', 'check', 'dispose']);
 // The fields that pin one resource: a read-back must agree on every one of them.
 const IDENTITY_FIELDS = Object.freeze(['provider', 'scope', 'environment', 'kind', 'name']);
+// The fields that make two records the same outside resource. The environment label is left out on
+// purpose: one name in one scope is one resource, whatever it is labelled.
+const RESOURCE_FIELDS = Object.freeze(['provider', 'scope', 'kind', 'name']);
 const KEY = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 
 const REASONS = Object.freeze({
@@ -84,10 +87,11 @@ function inputProblem(value, label, required) {
   return null;
 }
 
-function identityProblem(identity) {
+function identityProblem(identity, now) {
   const problem = inputProblem(identity, 'identity', [...IDENTITY_FIELDS, 'cleanup_owner', 'end_date']);
   if (problem) return problem;
-  if (parseDate(identity.end_date) === null) return hold(REASONS.INPUT_INVALID, 'the identity needs end_date as a real date (YYYY-MM-DD)');
+  const end = parseDate(identity.end_date);
+  if (end === null || end < now) return hold(REASONS.INPUT_INVALID, 'the identity needs end_date as a real date (YYYY-MM-DD) that has not passed');
   return null;
 }
 
@@ -117,7 +121,8 @@ function loadRecord(stateDir, key) {
   const valid = isObject(record) && record.schema === RECORD_SCHEMA && record.key === key &&
     ['claimed', 'confirmed'].includes(record.state) && isObject(record.identity) &&
     IDENTITY_FIELDS.every((field) => text(record.identity[field])) &&
-    (record.state === 'claimed' || text(record.handle));
+    (record.state === 'claimed' || text(record.handle)) &&
+    findSecrets(record, '', []).length === 0;
   if (!valid) {
     return { hold: hold(REASONS.RECOVERY_IDENTITY_UNREADABLE, `the record for ${key} is damaged; do not guess or create a replacement, ask the owner`) };
   }
@@ -129,6 +134,34 @@ function writeRecord(stateDir, record) {
   const temp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temp, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(temp, file);
+}
+
+// Equal ignoring case and surrounding space, so a provider that ignores case cannot hide a second record.
+function same(a, b) {
+  return text(a).toLowerCase() === text(b).toLowerCase();
+}
+
+// Another key's record that `holds` matches: { record }, a HOLD when another record cannot be read (it
+// might hold the resource), or null.
+function otherHolder(stateDir, key, holds) {
+  let files;
+  try {
+    files = fs.readdirSync(stateDir).sort();
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    return { hold: hold(REASONS.RECOVERY_IDENTITY_UNREADABLE, `the record folder could not be read (${error.code || 'read error'})`) };
+  }
+  for (const file of files) {
+    const other = file.endsWith('.json') ? file.slice(0, -'.json'.length) : '';
+    if (!KEY.test(other) || other === key) continue;
+    const loaded = loadRecord(stateDir, other);
+    if (loaded.hold) {
+      return { hold: hold(REASONS.RECOVERY_IDENTITY_UNREADABLE,
+        `the record for ${other} cannot be read, so it may already hold this resource; do not claim it, ask the owner`) };
+    }
+    if (loaded.found && holds(loaded.record)) return { record: loaded.record };
+  }
+  return null;
 }
 
 // Fields where the provider's read-back differs from the record.
@@ -152,7 +185,7 @@ function unclear(record) {
 }
 
 function claim(stateDir, key, identity, now) {
-  const problem = identityProblem(identity);
+  const problem = identityProblem(identity, now);
   if (problem) return problem;
   const existing = loadRecord(stateDir, key);
   if (existing.hold) return existing.hold;
@@ -175,6 +208,16 @@ function claim(stateDir, key, identity, now) {
     if (error.code === 'EEXIST') return hold(REASONS.RECOVERY_IDENTITY_EXISTS, `${key} was claimed by another session just now; resolve it instead`);
     throw error;
   }
+  // One record per resource. Checked after this claim is written, so of two sessions claiming the same
+  // resource under different keys at once, at least one sees the other and backs off; both may back off,
+  // and neither creates anything.
+  const other = otherHolder(stateDir, key, (held) => RESOURCE_FIELDS.every((field) => same(held.identity[field], record.identity[field])));
+  if (other) {
+    fs.rmSync(recordPath(stateDir, key));
+    return other.hold || hold(REASONS.RECOVERY_IDENTITY_EXISTS,
+      `${other.record.key} already holds ${record.identity.name} in ${record.identity.scope}; resolve that key instead of creating another`,
+      { record: other.record });
+  }
   return ok(`claimed ${key}: create exactly ${record.identity.name} in ${record.identity.scope}, then record it from the provider's read-back`, { record });
 }
 
@@ -195,6 +238,13 @@ function recordIdentity(stateDir, key, readBack, now) {
   }
   if (!readBack.exists) {
     return hold(REASONS.RECOVERY_RESOURCE_GONE, `the provider says ${record.identity.name} does not exist; nothing to record`, { record });
+  }
+  // One record per resource: a handle another key already holds is not recorded twice.
+  const other = otherHolder(stateDir, key, (held) => held.state === 'confirmed' && same(held.handle, readBack.handle) &&
+    same(held.identity.provider, record.identity.provider) && same(held.identity.scope, record.identity.scope));
+  if (other) {
+    return other.hold || hold(REASONS.RECOVERY_IDENTITY_EXISTS,
+      `${other.record.key} already holds ${text(readBack.handle)}; resolve that key, and dispose this claim once the owner agrees`, { record: other.record });
   }
   const confirmed = { ...record, state: 'confirmed', handle: text(readBack.handle), confirmed_at: new Date(now).toISOString() };
   writeRecord(stateDir, confirmed);

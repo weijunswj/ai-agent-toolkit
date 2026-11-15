@@ -17,31 +17,32 @@ No new vault or custody service is added.
 
 ## The rules
 
-1. **Claim before creating.** `claim` records the exact name, scope, provider, environment and kind before the resource exists, with a cleanup owner and an end date. A key that already has a record is refused, so a second session can never create a duplicate. Two sessions claiming at once: only one wins.
-2. **Record from the provider.** After creating, read the resource back from the provider by its exact name and run `record` with that read-back. It keeps the provider's exact handle only when every field matches the claim.
-3. **Resolve, then check.** A later session runs `resolve`, reads back that exact handle in that scope, and runs `check` before using it. Never list the provider to find it.
-4. **Stop on anything unclear.** No record, a damaged record, a claim never recorded (the create may have run), a read-back that differs or a resource the provider says is gone all hold the work. Never guess, create a replacement, or rename, delete or move a live resource to fit; the owner decides.
-5. **Dispose from the provider.** After removing the resource, read back its absence by the exact handle and run `dispose`; only then is the record deleted. A claim whose create never ran is disposed the same way, by its exact name.
+1. **Claim before creating.** `claim` records the exact name, scope, provider, environment and kind before the resource exists, with a cleanup owner and an end date that has not passed.
+2. **One record per resource.** A claim is refused when its key already has a record, or when another key's record already holds the same resource: the same provider, scope, kind and name, ignoring case and the environment label. `record` likewise refuses a handle another key already holds in that provider and scope. Of two sessions claiming one resource at once, at most one wins and the other backs off; both may back off, and neither creates anything. A record in the folder that cannot be read blocks new claims until the owner deals with it. These checks cover one record folder: a session that keeps its records elsewhere is not seen.
+3. **Record from the provider.** After creating, read the resource back from the provider by its exact name and run `record` with that read-back. It keeps the provider's exact handle only when every field matches the claim.
+4. **Resolve, then check.** A later session runs `resolve`, reads back that exact handle in that scope, and runs `check` before using it. Never list the provider to find it.
+5. **Stop on anything unclear.** No record, a damaged record, a claim never recorded (the create may have run), a read-back that differs or a resource the provider says is gone all hold the work. Never guess, create a replacement, or rename, delete or move a live resource to fit; the owner decides.
+6. **Dispose from the provider.** After removing the resource, read back its absence by the exact handle and run `dispose`; only then is the record deleted. A claim whose create never ran is disposed the same way, by its exact name.
 
 ## States
 
 | State | `claim` | `record` | `resolve` | `check` | `dispose` |
 |---|---|---|---|---|---|
-| No record | Claimed | Hold: missing | Hold: missing | Hold: missing | Hold: missing |
-| Claimed | Hold: exists | Recorded when the read-back matches and exists | Hold: unclear | Hold: unclear | Deleted when the read-back says gone |
+| No record | Claimed, unless another record holds the resource (hold: exists) or cannot be read (hold: unreadable) | Hold: missing | Hold: missing | Hold: missing | Hold: missing |
+| Claimed | Hold: exists | Recorded when the read-back matches, exists and no other record holds its handle | Hold: unclear | Hold: unclear | Deleted when the read-back says gone |
 | Recorded | Hold: exists | Hold: exists | Handle and scope | OK when the read-back matches by handle | Deleted when the read-back says gone, by handle |
 | Damaged | Hold: unreadable | Hold: unreadable | Hold: unreadable | Hold: unreadable | Hold: unreadable |
 
-A hold never changes the record. Inputs carry names and handles only: a secret value refuses the input.
+A hold never changes any record. Inputs and stored records carry names and handles only: a secret-shaped value refuses the input, and a stored one makes the record unreadable.
 
 ## Reasons
 
 | Reason | What to do |
 |---|---|
 | `RECOVERY_IDENTITY_MISSING` | No record: never guess, search the provider or create a replacement. Ask the owner. |
-| `RECOVERY_IDENTITY_EXISTS` | Use the record it shows; never create a second resource. |
+| `RECOVERY_IDENTITY_EXISTS` | The key, or the record it shows, already holds this resource: resolve that key; never create a second resource. |
 | `RECOVERY_IDENTITY_UNCLEAR` | A claim was never recorded. Read back the exact name, then `record` it if it exists or `dispose` the claim if it does not. |
-| `RECOVERY_IDENTITY_UNREADABLE` | The record is damaged. Stop and ask the owner; never rebuild it from a listing. |
+| `RECOVERY_IDENTITY_UNREADABLE` | A record in the folder is damaged. Stop and ask the owner; never rebuild it from a listing. |
 | `RECOVERY_IDENTITY_MISMATCH` | The provider differs from the record. Never rename, delete or move anything to fit; the owner decides. |
 | `RECOVERY_RESOURCE_GONE` | The provider says the resource is gone. A replacement needs the owner's approval. |
 | `RECOVERY_RESOURCE_STILL_PRESENT` | Remove the resource first, then dispose with a read-back that says it is gone. |
