@@ -372,6 +372,47 @@ test('App limit during large-document recovery: no write, the limit is carried t
   assert.equal(next.report.sweep.noWrite, false);
 });
 
+// saqg report: a cloud worker older than the Toolkit that last drew the board holds the page
+// (BLOCK_NEWER_TOOLKIT), and once its stale changes are saved it saves nothing more, yet reports
+// noWrite false. The sweep action must not count it as refreshed, so footer cleaning never runs.
+test('a worker older than the board in a real cloud pass: held, never refreshed, so footer cleaning is skipped', t => {
+  const f = fixture(t, { count: 6 });
+  f.run({ cloud: true });
+  f.stale();
+  const older = f.run({ cloud: true, toolkitVersion: '3.67.0' });
+  assert.ok(older.report.holds.some(hold => hold.code === 'BLOCK_NEWER_TOOLKIT' && hold.target === '#421'), JSON.stringify(older.report.holds));
+  const before = f.page();
+  const revision = f.parent().revision;
+  const result = f.run({ cloud: true, toolkitVersion: '3.67.0' });
+  assert.ok(result.report.holds.some(hold => hold.code === 'BLOCK_NEWER_TOOLKIT' && hold.target === '#421'), JSON.stringify(result.report.holds));
+  assert.equal(result.report.writes.state, 0, 'no state write');
+  assert.equal(result.report.sweep.noWrite, false, 'the reconciler does not call it noWrite');
+  assert.equal(f.page(), before, 'the page is left as the newer copy drew it');
+  assert.equal(f.parent().revision, revision, 'the graph keeps its revision');
+  const action = require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-action.cjs'));
+  for (const report of [older.report, result.report]) {
+    const outputs = [], tags = [];
+    const runner = new action.ProgrammeSweepAction({
+      env: { GITHUB_REPOSITORY: 'example.test/app', STORE_REPOSITORY: 'example.test/store', APP_CLIENT_ID_SET: 'true', MINT_OUTCOME: 'success/success',
+        GOVERNED_TOKEN: 'example-governed', STORE_TOKEN: 'example-store', SWEEP_LOGIN: 'example[bot]' },
+      root: ROOT, refresh: () => ({ status: 1, code: null, report }), notice: () => {}, failure: message => assert.fail(message),
+      output: (name, value) => outputs.push([name, value]), summary: () => {}, warning: (message, tag) => tags.push(tag || null) });
+    assert.equal(runner.run(), 0);
+    assert.equal(outputs.some(([name]) => name === 'refreshed'), false, `not refreshed: ${JSON.stringify(outputs)}`);
+    assert.deepEqual(tags, [{ title: action.HELD_TITLE, code: action.holdCodes(report) }]);
+    let called = 0;
+    const footers = new action.ProgrammeSweepAction({ env: { GITHUB_REPOSITORY: 'example.test/app', STORE_REPOSITORY: 'example.test/store', REFRESHED: outputs.find(([name]) => name === 'refreshed')?.[1] || '',
+      GOVERNED_TOKEN: 'example-governed', STORE_TOKEN: 'example-store' }, root: ROOT, footers: () => { called += 1; return { status: 0, results: [] }; },
+      warning: () => {}, notice: () => {}, failure: message => assert.fail(message), summary: () => {}, output: () => {} });
+    assert.equal(footers.cleanFooters(), 0);
+    assert.equal(called, 0, 'no post is read or edited');
+  }
+  // The same version saves and refreshes again.
+  const current = f.run({ cloud: true });
+  assert.equal(current.code, 0, JSON.stringify(current.report.holds));
+  assert.ok(current.report.writes.state > 0);
+});
+
 // saqg review: a cloud pass whose state commit does not read back as written holds with
 // STATE_READBACK_MISMATCH and counts no state effect, yet reports noWrite false (the commit may
 // stand). The sweep action must not count it as refreshed, so footer cleaning never runs.
