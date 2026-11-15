@@ -9,6 +9,7 @@
 // merges, pushes or writes to GitHub: `land` only checks, then names the train pull request and the
 // exact head the merging agent may merge, by the repository's normal merge route.
 //
+//   node repo/scripts/toolkit-merge-train.cjs find   --out <file> [--live <file>] [--json]   (toolkit-merge-train-finder.cjs)
 //   node repo/scripts/toolkit-merge-train.cjs build  --manifest <file> --branch <name> [--main <ref>] [--onto <ref>] [--out <file>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs catchup --manifest <file> [--main <ref>] [--out <file>] [--json]
 //   node repo/scripts/toolkit-merge-train.cjs verify --manifest <file> --head <ref> [--main <ref>] [--json]
@@ -68,7 +69,7 @@
 // It also lists every file two or more members change ("overlap") and the review the train needs:
 // none when there is no overlap, else a delta review of the shared files.
 // Trains run only where governance is ENABLED and the merged binding's merge train switch
-// (`task_prs.merge_train`, no key meaning on) is on: build, catchup and land refuse otherwise, so
+// (`task_prs.merge_train`, no key meaning on) is on: find, build, catchup and land refuse otherwise, so
 // each ready pull request merges alone. verify, body, split and eject still check or unwind a train.
 // land refuses a stacked train, re-runs verify, requires main to be inside the train (else main moved: rebuild), every
 // member's pull request open at its boarded head, the train pull request at --head and an owner OK
@@ -86,6 +87,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const governance = require('./toolkit-governance-state.cjs');
 const autoMerge = require('./toolkit-auto-merge-eligible.cjs');
+const finder = require('./toolkit-merge-train-finder.cjs');
 
 const SHA = /^[0-9a-f]{40}$/;
 const LEVELS = Object.freeze(['patch', 'minor', 'major']);
@@ -99,9 +101,9 @@ const EJECT_TRAILER = 'Train-Eject-Head';
 const EJECT_PR_TRAILER = 'Train-Eject-PR';
 // A train holds at most this many members; the next ready PRs board the next train.
 const MAX_MEMBERS = 6;
-const COMMANDS = Object.freeze(['build', 'catchup', 'verify', 'body', 'split', 'land', 'eject']);
+const COMMANDS = Object.freeze(['find', 'build', 'catchup', 'verify', 'body', 'split', 'land', 'eject']);
 // The commands that start, grow or land a train; the others only check or unwind one.
-const SWITCHED = Object.freeze(['build', 'catchup', 'land']);
+const SWITCHED = Object.freeze(['find', 'build', 'catchup', 'land']);
 
 class TrainError extends Error {
   constructor(message, code = 2) { super(message); this.code = code; }
@@ -755,7 +757,7 @@ function parseArgs(argv) {
     const key = arg.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
     options[key] = rest[++index];
   }
-  if (!options.manifest) throw new TrainError('--manifest is required');
+  if (!options.manifest && command !== 'find') throw new TrainError('--manifest is required');
   if (options.pr !== undefined) options.pr = /^\d+$/.test(options.pr) ? Number(options.pr) : -1;
   return options;
 }
@@ -763,8 +765,11 @@ function parseArgs(argv) {
 // `registryOptions` is only for tests (an isolated Toolkit user-state folder).
 function run(argv, cwd = process.cwd(), { registryOptions } = {}) {
   const options = { ...parseArgs(argv), ...(registryOptions ? { registryOptions } : {}) };
-  const manifest = readManifest(options.manifest);
   if (SWITCHED.includes(options.command)) requireTrains(cwd, options);
+  if (options.command === 'find') {
+    try { return finder.find(cwd, options, MAX_MEMBERS); } catch (error) { throw new TrainError(error.message); }
+  }
+  const manifest = readManifest(options.manifest);
   if (options.command === 'build') return build(cwd, manifest, options);
   if (options.command === 'catchup') return catchup(cwd, manifest, options);
   if (options.command === 'verify') return verify(cwd, manifest, options);

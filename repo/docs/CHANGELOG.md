@@ -1,5 +1,34 @@
 # Toolkit Changelog
 
+## 3.117.0
+
+### Fixed
+
+- The decision-trace audit and `programme.cjs trace` no longer read the record a comment replaces as its own record ID when its text starts with `SUPERSEDES=`. A record ID inside a `SUPERSEDES=` token now only names the replaced record, wherever the token sits, so a record written `SUPERSEDES=` first no longer shows as a false "superseded by itself" finding.
+
+### Changed
+
+- The governance question bank has a Merge trains row (1.3) for the repository's `task_prs.merge_train` switch. Like task auto-merge, it can be on only while governance is on, or in the same answer that turns it on; otherwise it reads "Off (needs governance)". Turning governance on writes both switches into the programme file, off unless the answer turns them on, so a repository that turns governance on from now on gets merge trains off unless the owner picks On; governed repositories with no `merge_train` key still read as on. A later change opens one pull request that sets only the switches that change, adding a missing switch in place.
+- In Claude Code a bank with more than four rows, such as a new repository with a found evidence store, is now shown as several question cards tapped in order instead of a typed table. Only the next card runs, and the last card's taps return the whole answer with a one-use ticket.
+
+## 3.116.0 (merge train finder)
+
+### Added
+
+- `repo/scripts/toolkit-controller-check.cjs`: one read-only call runs every Toolkit checker that fits where it runs (the Projects guidebook, instructions, memory and task checks only in Claude Projects; programme attention and decision traces only where governance is on; CI drift and leftover footers for any controller) and prints one line when nothing needs action. Findings come compact, counted by code with the top items; `--expand` prints everything.
+- The Projects hourly nudge runs it in its guidebook step, so each run also covers decision traces, CI drift and leftover footers, and a new `CONTROLLER CHECK` first-line prefix names what needs action.
+- `repo/scripts/check-script-references.cjs` and the registry `repo/contracts/retired-scripts.json`: flag any permission row or document that names a retired or missing script. The controller check runs it as its `refs` row.
+- `CONTROLLER.md`: a controller runs it at session start and on each periodic run instead of recalling state from memory.
+- **Merge train finder:** `toolkit-merge-train.cjs find --out <file>` picks the pull requests ready to board a train and writes the manifest `build` takes. Ready means open, not a draft, on the default branch, a passing review verdict comment for the current head, green required checks, one `Bump:` line, an accepted `UAT:` line, no version bump of its own and no open train holding it. Each member's tier is the higher of its verdict's tier and the risk-tier list's tier for its changed files. It takes at most six, oldest first, and with fewer than two it says to merge the one alone. It reads only, never fills the owner's OK for a RISKY member, and refuses where merge trains are off.
+- **Review verdict comments:** each G2 pass or fail also goes on the pull request as one comment whose first line is `Toolkit-G2: PASS|FAIL <full head SHA> tier=<tier>`. The finder reads only that line, and only from accounts that can write to the repository. The hourly run's `train due` flag uses the finder.
+- **Merge-authority list:** the finder joins the files whose changes wait for the owner's typed merge, because it sets the member tiers the train's no-card route reads.
+
+### Fixed
+
+- The Projects daily check-in reads each PR check by name from its newest run on the head only, because a re-run supersedes older runs.
+
+- The footer sweep reads GitHub lists by numbered pages (at most 100), so it also runs in cloud sessions, whose proxy refuses the numeric-ID next-page links that `gh api --paginate` follows. It stops reading pull requests at the first page older than its window.
+
 ## 3.115.0 (sharded test workflow copies for governed repositories; governance turns on in a new repository)
 
 ### Added

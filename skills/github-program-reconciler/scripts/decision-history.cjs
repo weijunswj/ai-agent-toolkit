@@ -24,7 +24,7 @@ const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const { resolveExecutable } = require('./resolve-executable.cjs');
 const { OTHER_COMMENTS, splitTag, groupByTag, isArchiveComment } = require('./decision-tags.cjs');
-const { INDEX_COMMENT_MARKER } = require('./decision-trace-audit.cjs');
+const { INDEX_COMMENT_MARKER, recordId } = require('./decision-trace-audit.cjs');
 
 const CONFIRMATION_TAG = 'SCOPE-CONFIRMED';
 const SUPERSEDES = /SUPERSEDES=([A-Za-z0-9._-]+)/g;
@@ -34,17 +34,6 @@ const DEFAULT_MAX = 10;
 function isBot(comment) {
   const user = comment.user || {};
   return user.type === 'Bot' || /\[bot\]$/i.test(String(user.login || ''));
-}
-
-// The declared literal prefix followed by digits, for example INT-TK421-042; never a regex.
-function recordId(text, prefix) {
-  if (!prefix || isArchiveComment(text)) return null;
-  const source = String(text || '');
-  for (let at = source.indexOf(prefix); at !== -1; at = source.indexOf(prefix, at + 1)) {
-    const digits = /^\d+/.exec(source.slice(at + prefix.length))?.[0];
-    if (digits) return `${prefix}${digits}`;
-  }
-  return null;
 }
 
 function supersededIds(text, prefix) {
