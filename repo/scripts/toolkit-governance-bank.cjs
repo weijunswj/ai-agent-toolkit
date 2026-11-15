@@ -63,8 +63,10 @@ function statusRow({ id, section, title, current, text }) {
 // (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on), `train` the
 // merged merge trains switch ('on' or 'off'), `ciShards` the sharded CI offer ({ estimate: the
 // minutes line, measured: the estimate or null }) where it is offered, or null, and `app` the governance
-// App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read).
-function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null }) {
+// App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read), and
+// `cleanup` the Toolkit instruction copies the cleanup route would remove here ({ files }; null when
+// not offered: governance off, a Toolkit source checkout, or a programme file it cannot update).
+function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, cleanup = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
   const specs = [];
@@ -196,6 +198,22 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       ],
     }));
   }
+  // The cleanup route (toolkit-governance-cleanup.cjs): the installed Toolkit gives a governed
+  // repository its rules and playbooks, so older copies of them here are offered for removal.
+  if (governed && cleanup && cleanup.files === 0) {
+    specs.push(statusRow({ id: 'instruction-copies', section, title: 'Toolkit instruction copies', current: 'None left', text: 'The installed Toolkit gives sessions the governed rules and playbooks' }));
+  } else if (governed && cleanup) {
+    specs.push(bank.resolvedQuestion({
+      id: 'instruction-copies', key: 'instructionCopies', section, title: 'Toolkit instruction copies',
+      whatThisControls: 'Copies of the governed rules and playbooks that older Toolkit setups wrote into this repository. The installed Toolkit now gives every session these, so the copies only drift.',
+      current: `${cleanup.files} left`,
+      recommendation: { value: 'clean', outcome: 'Toolkit removes them in this working tree and sets min_toolkit; you merge one pull request.', reason: 'The copies go stale and every Toolkit change would need a refresh here.' },
+      choices: [
+        bank.wizardChoice('keep', 'Keep current', 'The copies stay; the next refresh offers this again.'),
+        bank.wizardChoice('clean', 'Clean up', 'Toolkit removes them in this working tree, keeping everything of your own, and sets min_toolkit; you merge one pull request.'),
+      ],
+    }));
+  }
   const appName = APP_NAMES[permissions.host] || 'this app';
   const missing = permissions.checked ? permissions.missing : null;
   const stale = permissions.checked ? permissions.stale || 0 : 0;
@@ -259,7 +277,8 @@ function selectionsOf(parsed, specs) {
     return spec && spec.folded_value === chosen ? spec.folded_into : chosen;
   };
   const asked = specs.some(spec => spec.id === 'ci-shards' && !spec.report_only);
-  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}) };
+  const copies = specs.some(spec => spec.id === 'instruction-copies' && !spec.report_only);
+  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}), ...(copies ? { instructionCopies: value('instruction-copies') } : {}) };
 }
 
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {

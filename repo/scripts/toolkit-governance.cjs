@@ -25,6 +25,7 @@ const governanceBank = require('./toolkit-governance-bank.cjs');
 const adopt = require('./toolkit-governance-adopt.cjs');
 const ciOffer = require('./toolkit-ci-shards-offer.cjs');
 const governedShards = require('./governed-test-shards.cjs');
+const cleanupRoute = require('./toolkit-governance-cleanup.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
@@ -392,7 +393,8 @@ class ToolkitGovernanceCli {
     const train = state.state === 'ENABLED' && state.root ? this.#trainSwitch(state.root) : null;
     // The App row reads its variable and secret only where governance is on or can be turned on here.
     const app = state.state !== 'DISABLED' && state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app });
+    const cleanup = state.state === 'ENABLED' && state.root ? this.#cleanupPreview(state.root) : null;
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app, cleanup });
     const reference = governanceBank.bankReference(specs);
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
@@ -428,6 +430,20 @@ class ToolkitGovernanceCli {
   }
 
   #lastCiEstimate = null;
+
+  // The cleanup route on this checkout (toolkit-governance-cleanup.cjs), read with this computer's
+  // governance state. A preview gives { files } (the copies it would remove), or null where it is not
+  // offered (a Toolkit source checkout, or a programme file it cannot update).
+  #cleanup(root, write) {
+    const registryOptions = this.#registryOptions;
+    return cleanupRoute.run({ root, write, governance: { readIdentity: governance.readIdentity, governanceState: dir => governance.governanceState(dir, registryOptions) } });
+  }
+
+  #cleanupPreview(root) {
+    let result;
+    try { result = this.#cleanup(root, false); } catch { return null; }
+    return result.ok ? { files: result.changes.filter(change => change.action !== 'set-min-toolkit').length } : null;
+  }
 
   // One binding pull request for the owner's sharded CI answer, built from the exact merged text: it
   // sets ci_shards (answer, offered_at) and, for yes, adds a first shard list when the repository has
@@ -555,6 +571,20 @@ class ToolkitGovernanceCli {
       acted = true;
     } else if (chosen.ciShards === 'not-now') {
       this.#print(false, {}, ['Parallel CI shards: not now. Nothing was written; the next refresh asks again.']);
+    }
+    // The cleanup route: working-tree changes only. It deletes files, so the pull request always waits
+    // for the owner's typed merge.
+    if (chosen.instructionCopies === 'clean' && state.state === 'ENABLED' && chosen.governance !== 'off') {
+      let result;
+      try { result = this.#cleanup(state.root, true); } catch (error) { result = { ok: false, lines: [`Nothing was changed: ${error.message}.`] }; }
+      this.#print(false, {}, result.ok
+        ? ['', 'Toolkit instruction copies: changed in the working tree only, nothing is committed.', ...result.lines.slice(0, -1),
+          'Agents: commit exactly these files on a new branch and open one pull request for the owner. It deletes files and changes the programme file, so it waits for the owner\'s typed merge, never task auto-merge.']
+        : ['', 'Toolkit instruction copies:', ...result.lines]);
+      if (!result.ok) code = code || 1;
+      acted = true;
+    } else if (chosen.instructionCopies === 'clean') {
+      this.#print(false, {}, ['Toolkit instruction copies: left in place, because governance is not on after this answer.']);
     }
     if (chosen.permissionBlocks !== 'keep') {
       const command = permissions.checked ? permissions[chosen.permissionBlocks] : null;
