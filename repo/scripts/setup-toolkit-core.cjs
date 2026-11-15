@@ -1572,12 +1572,17 @@ function shortCodexHelpers(delegation) {
   return 'Not verified';
 }
 
+// Gate runs admit only the Toolkit's own helpers whatever the choice, and Toolkit repos keep one
+// subagent layer outside them; the choice sets the rule only in other folders. The note names the
+// Claude Code limit only when it is not the one the choice expects.
 function shortClaudeTopology(profile, depth) {
-  const topology = profile?.topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'Broader native' : 'Root only';
-  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) return `${topology}; subagent limit 1`;
-  if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) return `${topology}; subagent limit ${depth.value} (yours)`;
-  if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) return `${topology}; no subagent limit set`;
-  return `${topology}; subagent limit unknown`;
+  const broader = profile?.topology === agentControl.TOPOLOGIES.BROADER_NATIVE;
+  const outsideGates = broader ? 'Toolkit repos: one subagent layer; elsewhere Claude Code\'s own rules' : 'elsewhere one subagent layer';
+  let note = ' (Claude Code limit unknown)';
+  if (depth?.state === SUBAGENT_DEPTH_STATES.TOOLKIT) note = broader ? ' (Toolkit\'s Claude Code limit of 1 still set)' : '';
+  else if (depth?.state === SUBAGENT_DEPTH_STATES.OWNER) note = ` (your Claude Code limit: ${depth.value})`;
+  else if (depth?.state === SUBAGENT_DEPTH_STATES.DEFAULT) note = broader ? '' : ' (Claude Code limit not set yet)';
+  return `Gates: Toolkit helpers only; ${outsideGates}${note}`;
 }
 
 function shortClaudePlugin(current) {
