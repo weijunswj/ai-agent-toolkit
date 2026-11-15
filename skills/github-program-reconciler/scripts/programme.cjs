@@ -792,7 +792,8 @@ const commands = {
   // session the controller handed it to. The dry run checks it against the parent and writes nothing.
   'run-order'(args, context, deps = {}) {
     // The cloud sweep passes an order it read from the evidence store's queue as a value.
-    const order = holderOrder.validateOrder(args.orderValue !== undefined ? args.orderValue : readJsonFile(args.order, 'order'), { nowMs: deps.orderClock || Date.now });
+    const clock = deps.orderClock || Date.now;
+    const order = holderOrder.validateOrder(args.orderValue !== undefined ? args.orderValue : readJsonFile(args.order, 'order'), { nowMs: clock });
     const digest = holderOrder.orderDigest(order);
     const prefix = context.binding.writer_prefix;
     const parentDoc = readParent(context);
@@ -811,10 +812,20 @@ const commands = {
       context.writer = holder;
       context.store.mutate('parent', context.binding.parent_issue, { writer: holder, change: doc => holderOrder.withLog(doc, entry) });
     };
-    if (!logged) log(entry);
+    // The expiry is read again before every write, not only at the start: a run that meets the
+    // deadline makes no further write. Receipts for the writes before it are already in the log.
+    const expired = () => holderOrder.isExpired(order, clock);
+    if (!logged) {
+      if (expired()) throw holderOrder.expiredError(order);
+      log(entry);
+    }
     const results = [];
     for (const [at, op] of order.ops.entries()) {
       if (done.has(at)) { results.push({ at: at + 1, command: op.command, outcome: 'DONE_EARLIER' }); continue; }
+      if (expired()) {
+        results.push({ at: at + 1, command: op.command, outcome: 'EXPIRED', code: 'ORDER_EXPIRED', detail: `The order expired at ${order.expires_at}, before this write.` });
+        return { mode: 'apply', ...summary, outcome: 'STOPPED', results, next_action: `Stopped at write ${at + 1} (${op.command}): the order expired at ${order.expires_at}. The writes before it stand and are logged; ask the controller for a fresh order for the rest.` };
+      }
       // Each write runs as the holder, exactly as the controller would type it.
       context.writer = holder;
       let result;

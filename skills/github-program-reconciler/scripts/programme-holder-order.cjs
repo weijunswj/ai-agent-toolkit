@@ -85,6 +85,16 @@ function checkOp(op, at) {
   return op;
 }
 
+// True once the order's expiry has passed. run-order asks again before every write.
+function isExpired(order, nowMs = Date.now) {
+  const expires = Date.parse(order.expires_at);
+  return !Number.isFinite(expires) || expires <= nowMs();
+}
+
+function expiredError(order) {
+  return new ProgrammeError('ORDER_EXPIRED', `The holder order ${order.order_id} expired at ${order.expires_at}. Nothing was written; ask the controller for a fresh one.`);
+}
+
 // The order itself, against the clock. Fence checks against the parent come later, at run time.
 function validateOrder(order, { nowMs = Date.now } = {}) {
   if (!order || typeof order !== 'object' || Array.isArray(order)) throw refuse('it must be a JSON object');
@@ -101,7 +111,7 @@ function validateOrder(order, { nowMs = Date.now } = {}) {
   if (!text(order.record, 300)) throw refuse('record must name the brief or decision record that issued it');
   const expires = Date.parse(order.expires_at);
   if (!Number.isFinite(expires)) throw refuse('expires_at must be a date and time');
-  if (expires <= nowMs()) throw new ProgrammeError('ORDER_EXPIRED', `The holder order ${order.order_id} expired at ${order.expires_at}. Nothing was written; ask the controller for a fresh one.`);
+  if (expires <= nowMs()) throw expiredError(order);
   if (expires > nowMs() + MAX_HOURS * 3600 * 1000) throw refuse(`expires_at must be within ${MAX_HOURS} hours`);
   if (!Array.isArray(order.ops) || order.ops.length === 0 || order.ops.length > MAX_OPS) throw refuse(`ops must list 1 to ${MAX_OPS} writes`);
   order.ops.forEach(checkOp);
@@ -141,4 +151,4 @@ function opArgs(op, holderSession, prefix) {
   return args;
 }
 
-module.exports = { SCHEMA, OPS, MAX_OPS, MAX_HOURS, LOG_LIMIT, orderDigest, validateOrder, checkFence, logEntry, withLog, opArgs };
+module.exports = { SCHEMA, OPS, MAX_OPS, MAX_HOURS, LOG_LIMIT, orderDigest, validateOrder, isExpired, expiredError, checkFence, logEntry, withLog, opArgs };

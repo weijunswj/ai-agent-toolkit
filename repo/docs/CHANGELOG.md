@@ -1,5 +1,32 @@
 # Toolkit Changelog
 
+## 3.126.0 (leftovers join their area's open child; governance App setup command)
+
+### Changed
+
+- **Leftovers join their area's open child:** the governed rules, the controller's task intake and its findings and review follow-up rules now send review Lows and other leftovers to the open child for the same area (same page, script or feature) instead of a new child per review. A closing child moves its remainder there too. The governed rules stay within their size cap.
+- **Daily fold check:** the Projects daily check-in lists each issue opened under the parent since its last run beside any older open child in the same area, as a `**Fold:**` line. The coordinator copies the text across and asks the owner once to close the new issue.
+
+### Merge scope
+
+- **Permission-line pin test waits for the owner:** a change to `repo/tests/toolkit-permissions.test.cjs`, the test that pins the commands and flags each pasted permission line allows, now needs the owner's typed merge. A new command, subcommand or flag on a pasted line fails that test, so that change now waits for the owner's typed merge; a changed check behind an existing flag still relies on review.
+
+### Added
+
+- `toolkit governance` shows a Governance App row that recommends Set up whenever governance is on or being turned on. Set up prints one command for the owner to run in their own terminal: it makes the repository's App through GitHub's App manifest flow (the owner only clicks Create), saves its Client ID and private key on the repository without the key ever being printed or written to disk, opens the install page and checks the installation. Keep current means not now: governance works without the App.
+
+## 3.125.0
+
+### Changed
+
+- A new top Development Principle, Accuracy first: zero hallucinations and no false data is always the top priority, and every claim, status or done verdict is checked in depth against its sources rather than skimmed.
+- Tests first now says what makes a test worth keeping: it fails on the old code for the right reason or guards a real contract, through the real code path with realistic inputs. Reviews flag data shaped to the assertion, test-only branches, a stubbed unit under test, duplicates and tautologies.
+- The PR review playbook applies both: check each claim against its source and run each new or changed test against the old code.
+
+### Fixed
+
+- **Holder orders stop at their expiry:** `run-order` reads the order's expiry again before every write, not only at the start. A run, including one the cloud sweep takes from the queue, that reaches the expiry makes no further write, keeps the log entries for the writes before it, reports `STOPPED` with `ORDER_EXPIRED` and files the queued order under `orders/refused/` with those results, so a later run never repeats or finishes it.
+
 ## 3.124.0 (governance yes opens the question bank)
 
 ### Added
