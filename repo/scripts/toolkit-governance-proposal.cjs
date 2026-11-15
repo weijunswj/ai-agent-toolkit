@@ -410,6 +410,38 @@ class GitHubProposalTransport {
     const pr = this.#api(`repos/${repository}/pulls`, { title: `Set ${words} for this repository`, head, base: branch, body: `This changes only ${changed} in \`${cache.BINDING_PATH}\`. These are this repository's own switches, read the same way by every app and the Projects controller.\n\n${meaning}\n\nIt applies only after the owner merges it. After the merge, \`refresh governance\` reads it back on each computer.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
+  // The owner's sharded CI answer: one pull request that changes only ci_shards in the binding, from the
+  // exact merged text, and for yes adds a first shard list (`list`) when the default branch has none.
+  publishCiShards(repository, mergedText, text, answer, list = null) {
+    this.#auth();
+    const repo = this.#api(`repos/${repository}`), branch = repo.default_branch;
+    if (!cache.parseSymref(`ref: refs/heads/${branch}\tHEAD`)) fail('PROPOSAL_BASE_INVALID');
+    const base = this.#api(`repos/${repository}/git/ref/heads/${branch}`);
+    if (!SHA.test(base.object?.sha)) fail('PROPOSAL_BASE_INVALID');
+    const current = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}?ref=${base.object.sha}`);
+    if (current.type !== 'file' || current.encoding !== 'base64' || typeof current.content !== 'string') fail('PROPOSAL_BINDING_INVALID');
+    if (Buffer.from(current.content, 'base64').toString('utf8').replace(/\r\n/g, '\n') !== String(mergedText).replace(/\r\n/g, '\n')) fail('SWITCH_BASE_CHANGED');
+    const LIST = '.github/toolkit-test-shards.json';
+    const addList = typeof list === 'string' && !this.#optional(`repos/${repository}/contents/${LIST}?ref=${base.object.sha}`);
+    const head = `toolkit/ci-shards-${answer}-${key(text + (addList ? list : '') + base.object.sha)}`;
+    const owner = repository.split('/')[0];
+    const open = this.#api(`repos/${repository}/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}`);
+    if (Array.isArray(open) && open[0]?.number) return { number: open[0].number, url: open[0].html_url, head: open[0].head?.sha || null };
+    if (this.#optional(`repos/${repository}/git/ref/heads/${head}`)) fail('SWITCH_BRANCH_EXISTS');
+    this.#api(`repos/${repository}/git/refs`, { ref: `refs/heads/${head}`, sha: base.object.sha });
+    const title = answer === 'yes' ? 'Split this repository\'s tests into parallel CI shards' : 'Stop offering parallel CI shards for this repository';
+    let result = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}`, { message: title, content: Buffer.from(text).toString('base64'), branch: head, sha: current.sha }, 'PUT');
+    if (!SHA.test(result.commit?.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
+    if (addList) {
+      result = this.#api(`repos/${repository}/contents/${LIST}`, { message: 'Add a first test shard list', content: Buffer.from(list).toString('base64'), branch: head }, 'PUT');
+      if (!SHA.test(result.commit?.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
+    }
+    const what = answer === 'yes'
+      ? `Yes: the next rules refresh copies the Toolkit test shards workflow (its gate job, \`Toolkit test shards\`, checks every test file ran once on each system) and Shard Timings, while \`${LIST}\` is a usable shard list.${addList ? ` This pull request adds a first \`${LIST}\`: Node tests run with node --test, split across Linux shards; Shard Timings rebalances them from measured times.` : ''}`
+      : 'Never: Toolkit does not offer parallel CI shards here again. Nothing is copied.';
+    const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This sets \`ci_shards\` in \`${cache.BINDING_PATH}\` to \`${answer}\`, the owner's answer to the parallel CI shards question.${addList ? ` It also adds \`${LIST}\`.` : ''} Nothing else changes.\n\n${what}\n\nIt applies only after the owner merges it.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
+    return { number: pr.number, url: pr.html_url, head: result.commit.sha };
+  }
   publish(repository, binding, files = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
     if (binding.governance !== 'disabled' && !files['AGENTS.md']) fail('PROPOSAL_ADOPTION_INCOMPLETE');
     this.#auth();

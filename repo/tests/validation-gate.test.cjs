@@ -30,6 +30,7 @@ test('npm run validate:all runs exactly the CI gate list from validate.yml', () 
     'node repo/scripts/check-diff-whitespace.cjs',
     DURATIONS_COMMAND,
     'node repo/scripts/toolkit-hook-pack.cjs check-expectations',
+    'node repo/scripts/check-script-references.cjs',
   ];
   for (const required of checks) assert.ok(commands.includes(required), required);
   // CI ends by checking the shard summaries; a local run has no shards and runs every test file there.
