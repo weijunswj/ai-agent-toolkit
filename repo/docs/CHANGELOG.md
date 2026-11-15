@@ -1,5 +1,37 @@
 # Toolkit Changelog
 
+## 3.128.0 (the daily check-in offers the saved skill update; pages stay drawn and within budget)
+
+### Claude Projects
+
+- **Added:** the daily check-in reads the Version of the owner's saved claude.ai copy of the Projects controller skill and reports `SKILL CARD OUTDATED: saved <old>, main <new>` when it is older than the guidebook. The coordinator offers the update card the same turn with `propose_skills`, once per Version: a Version already offered, dismissed or refused is never offered again, and a refused card is never routed to hand upload. Threads and new chats load the saved copy, so it now stays current in every project, not only when someone remembers to offer a card.
+- **Changed:** the check-in's purpose line and the skill's Daily check-in section say that where no agent can make an update (the plugin and the saved skill card), the coordinator guides the owner with the exact step.
+
+### Changed
+
+- The governance question bank asks the parallel CI shards question in the first bank too, not only once governance is on. A yes or never needs governance turned on in the same answer and joins the one turn-on pull request: the binding records `ci_shards`, and a yes adds a first `.github/toolkit-test-shards.json` and the two shard workflows to that pull request.
+- The shards question recommends Yes when the last green CI run took 10 minutes or more, and keeps Not now when CI is faster or its time is unknown. Its "More on" line says when Yes is recommended and where Yes puts the list and workflows.
+- In a governed repository, an answer that changes task auto-merge or merge trains and also answers the shards question makes one binding pull request with both, instead of holding the shards answer for the next refresh.
+- The turn-on pull request renders the shard workflows from its own `ci_shards` answer, not from this computer's last read of the merged binding.
+- The turn-on pull request also adds a `.github/dependabot.yml` and the dependency auto-merge workflow where they are missing, so governance does not start with its own security check failing. An existing file is never changed.
+- From an app's plugin copy, which has no git, the cloud workflow copies and the shard readers check use the managed Toolkit checkout the bridge keeps current, so turning governance on from any app carries the copies.
+- The cloud workflows installer reads the merged binding again before it uses the `ci_shards` answer, so a copy step run soon after the answer merged does not act on an older read.
+- Shard Timings without the governance App stays green when a refresh is due and writes a warning naming the owner's step (`--warn-if-due`), because the App is optional.
+- **Parent graph columns:** the graph is `Task | Child # | Status | Waiting on | Last Updated (SGT)`. The task name and its number are separate again, and the parent names no PRs (each task page lists every one). Status is `NOW · IN PROGRESS`, `NOW · QUEUED` for a task in progress whose state lists a blocker, `LATER` for every other open task (optional ones too), or `COMPLETED` and `RETIRED`.
+
+### Fixed
+
+- The minutes line says "1 runner minute", not "1 runner minutes".
+- **Parent page never redrawn on a busy programme:** the sweep refused to write the parent whenever any comment landed on it during the pass, because a comment moves the issue's update time. A busy parent gets decision and merge records every few minutes, so pass after pass held with `BODY_MOVED` and the page kept an old layout. The page is now held only when its body itself changed; the next pass picks up anything a new comment changes.
+- **`BLOCK_BEHIND` false alarms:** a task page drawn by an older Toolkit at the stored revision was reported as showing an older state. The check now compares the page's drawn state revision with the stored one, and only for pages in that pass.
+- **`BODY_OVER_BUDGET` next step:** it now names a step that clears it on each kind of page: a `mark-archive` holder order on the parent or a task page, and the builder trimming the description to the CHANGE shape on a PR page.
+
+### Added
+
+- **Marked notes on task pages:** old notes under one `## Archive` line on an open task page leave it when the page is laid out. The whole page is saved to the private store first, and one `Archived notes: [page copy](...)` line links that copy.
+- **`mark-archive` holder order write:** the only write to a page's hand-written text, so nobody edits a page by hand. It puts one `## Archive` line above a named line, or removes named link lines nothing on the page uses, on the parent or an open task page. It saves a copy of the page first, checks the result with the reader that will move the notes, and refuses on any change.
+- **Handover link:** the parent's AGENT CONTEXT line links its handover file in the private store.
+
 ## 3.127.0 (the plugin delivers the governed rules)
 
 ### Added
