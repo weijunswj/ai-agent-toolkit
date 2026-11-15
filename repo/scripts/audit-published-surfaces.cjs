@@ -249,6 +249,8 @@ function filenamePathSpans(source) {
   const tokenPattern = /[^\s`"'<>()[\]{}]+/gu;
   for (const match of source.matchAll(tokenPattern)) {
     let token = match[0];
+    // A path needs a slash, a dot or a scheme colon; most tokens are plain words and stop here.
+    if (!/[\\/.:]/.test(token)) continue;
     let trimLeft = 0;
     while (/^[,;:!?]/.test(token)) {
       token = token.slice(1);
@@ -268,15 +270,31 @@ function overlaps(span, spans) {
   return spans.some((candidate) => span.start < candidate.end && span.end > candidate.start);
 }
 
+// Blanks every character inside the spans except line breaks, in one pass over the spans in order.
 function maskSpans(source, spans) {
-  const chars = source.split('');
-  for (const span of spans) {
-    for (let index = span.start; index < span.end; index += 1) if (chars[index] !== '\n') chars[index] = ' ';
+  const ordered = [...spans].sort((left, right) => left.start - right.start);
+  let out = '';
+  let cursor = 0;
+  for (const span of ordered) {
+    const start = Math.max(span.start, cursor);
+    const end = Math.min(span.end, source.length);
+    if (end <= start) continue;
+    out += source.slice(cursor, start) + source.slice(start, end).replace(/[^\n]/g, ' ');
+    cursor = end;
   }
-  return chars.join('');
+  return out + source.slice(cursor);
 }
 
+// Every checked text tests the same aliases, so each alias's pattern is built once per process.
+const matcherPatterns = new Map();
+
 function matcherPattern(alias, matcherKind) {
+  const key = `${matcherKind}\u0000${alias}`;
+  if (!matcherPatterns.has(key)) matcherPatterns.set(key, buildMatcherPattern(alias, matcherKind));
+  return matcherPatterns.get(key);
+}
+
+function buildMatcherPattern(alias, matcherKind) {
   if (matcherKind === 'normalized-phrase') {
     const parts = normalizedAlias(alias, matcherKind).split(' ').map(escapeRegex);
     return new RegExp(`(?<![\\p{L}\\p{N}_])${parts.join('[\\s_-]+')}(?![\\p{L}\\p{N}_])`, 'giu');

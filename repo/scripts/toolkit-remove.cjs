@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 
-// Remove Toolkit from this computer: its scheduled tasks and task records, its global rules, the app
-// settings it set, its helper agent files and skill copies, and its own folder.
+// Remove Toolkit from this computer: its old scheduled tasks and task records, its global rules, the
+// app settings it set, its helper agent files and skill copies, and its own folder.
 //
-// `setup toolkit` puts scheduled tasks into Windows Task Scheduler for every repository it serves.
-// Removing the plugin does not remove them. This command finds every task that carries Toolkit's
+// Earlier releases put scheduled tasks into Windows Task Scheduler for every repository they served;
+// Toolkit no longer does, and removing the plugin does not remove them. This command finds every task that carries Toolkit's
 // marker in any Task Scheduler folder (not only the folders this computer has on record), lists what
 // it would remove, and removes exactly that list after the owner's OK.
 //
@@ -36,7 +36,6 @@ const os = require('node:os');
 const path = require('node:path');
 const tasks = require('./toolkit-tasks.cjs');
 const windows = require('./toolkit-windows-tasks.cjs');
-const { DISABLED_DESCRIPTION } = require('./toolkit-task-launcher.cjs');
 const parts = require('./toolkit-remove-parts.cjs');
 const { HOST_LABELS } = require('./agent-host-markers.cjs');
 
@@ -198,9 +197,9 @@ class ToolkitRemoval {
     if (!entry) return null;
     const item = { ...base, id: entry.id, record: entry.id, repository: entry.repository || null };
     if (entry.adopted) return { ...item, kind: 'adopted' };
-    // The launcher rewrote this task's description when it disabled it, so the marker is gone. It is
-    // still Toolkit's own only while it is byte for byte the snapshot the launcher recorded.
-    const snapshot = entry.toolkit_missing === true && live.description === DISABLED_DESCRIPTION && entry.enrolled?.definition_xml;
+    // An old launcher rewrote this task's description when it disabled it, so the marker is gone. It is
+    // still Toolkit's own only while it is byte for byte the snapshot that launcher recorded.
+    const snapshot = entry.toolkit_missing === true && live.description === windows.DISABLED_DESCRIPTION && entry.enrolled?.definition_xml;
     // Otherwise its record names a task that is still there but no longer Toolkit's: it is listed as
     // kept, so its record and the shared runner it may still use stay too.
     // With no marker and no matching snapshot, Toolkit cannot prove the task is its own, so --include
@@ -213,7 +212,7 @@ class ToolkitRemoval {
     const root = tasks.userStateDir(this.#home);
     const display = file => `~/${path.relative(this.#home, file).split(path.sep).join('/')}`;
     const paths = records.map(id => path.join(root, 'tasks', id));
-    if (shared) paths.push(path.dirname(windows.launcherPath(this.#home)), path.join(root, 'scheduled-task-approval.json'));
+    if (shared) paths.push(windows.runnersDir(this.#home), path.join(root, 'scheduled-task-approval.json'));
     return paths.filter(file => fs.existsSync(file)).map(file => ({ file, display: display(file) }));
   }
 

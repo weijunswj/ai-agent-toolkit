@@ -222,8 +222,6 @@ test('--refresh refuses every other answer source before any write', () => {
   assert.throws(() => core.parseArgs(['--plan', '--refresh']), /--refresh keeps every current answer/);
   assert.throws(() => core.parseArgs(['--refresh']), /--refresh runs with --execute/);
   assert.equal(core.parseArgs(base).refresh, true);
-  // The retired task flag is no answer source: refresh accepts it and ignores it.
-  assert.equal(core.parseArgs([...base, '--scheduled-task-update', 'standing']).retiredScheduledTaskFlag, true);
 });
 
 test('the saved record holds question shapes only, per app, and is rewritten only when it changes', (t) => {

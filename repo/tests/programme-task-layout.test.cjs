@@ -673,7 +673,7 @@ test('the status block of a block-holding page never lands inside the PATH block
   assert.equal(state.findStateBlock(body, state.NAV_BLOCK_NAME).block.tampered, false, 'the PATH block is whole');
 });
 
-const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, holder = false, openPr = false, openPrUpdated = null, merged = false, hours = 7, comment = null } = {}) => {
+const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, holder = false, openPr = false, openPrUpdated = null, merged = false, hours = 7, comment = null, keepOpen = null } = {}) => {
   const f = setup({ clock: true });
   f.reconciler().run({ apply: true });
   const parentDoc = f.store.read('parent', 421).doc;
@@ -681,6 +681,7 @@ const idleRun = ({ lifecycle = 'ACTIVE', gate = null, pr = null, prs = null, hol
     const next = { ...doc, lifecycle, ...(pr ? { pr: { ...doc.pr, ...pr } } : {}), ...(prs ? { prs } : {}), ...(lifecycle === 'DONE' ? { completed_at: new Date(START).toISOString() } : {}) };
     if (gate) next.gate = { ...next.gate, ...gate };
     if (holder) next.fence = { ...next.fence, holder_prefix: 'INT-TK421-', holder_session: 'lane-1' };
+    if (keepOpen) next.private = { ...next.private, keep_open: keepOpen };
     return next;
   } });
   if (openPr) f.github.addPr(900, { head: SHA_A, branch: 'feature', body: 'Refs #806' });
@@ -734,6 +735,98 @@ test('a task whose PRs have all merged is on the work queue after one quiet hour
   assert.match(found[0].detail, /every PR merged or closed/);
   assert.deepEqual(idle({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 0.5 }), [], 'under an hour it is still settling');
   assert.deepEqual(idle({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2, lifecycle: 'WAITING_OWNER' }), [], 'owner UAT after merge is the owner\'s');
+});
+
+const KEEP = { reason: 'Kept open for the owner\'s real-host smoke' };
+
+test('a merged task the controller keeps open on purpose leaves the work queue, and its page says why', () => {
+  assert.deepEqual(idle({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 30, keepOpen: KEEP }), []);
+  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 30, keepOpen: KEEP });
+  f.reconciler().run({ apply: true });
+  const child = f.store.read('child', 806).doc;
+  assert.equal(child.private.keep_open.reason, KEEP.reason);
+  assert.ok(Number.isFinite(Date.parse(child.private.keep_open.at)), 'the write stamps when it was kept open');
+  assert.match(state.renderChildBlockBody(child, { issue: 806, class: 'COMMITTED', order: 1 }), /Kept open: Kept open for the owner's real-host smoke \(since \d{4}-\d\d-\d\d \d\d:\d\dZ\)/);
+});
+
+test('keeping a task open settles its TASK_MERGED_OPEN finding, and clearing the mark brings it back', () => {
+  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 30 });
+  f.reconciler().run({ apply: true });
+  const finding = () => f.store.read('parent', 421).doc.attention.find(entry => entry.code === 'TASK_MERGED_OPEN' && entry.issue === 806);
+  assert.equal(finding().state, 'new');
+  const keep = open => f.store.mutate('child', 806, { writer, parentDoc: f.store.read('parent', 421).doc, change: doc => state.applyPatch('child', doc, { private: { keep_open: open } }, { writer, parentDoc: f.store.read('parent', 421).doc }) });
+  keep(KEEP);
+  f.time.now += 2 * HOUR;
+  f.reconciler().run({ apply: true });
+  assert.equal(finding().state, 'resolved', 'an hour after the mark the task is still off the queue (a dismissal comes back here)');
+  keep(null);
+  f.time.now += 2 * HOUR;
+  f.reconciler().run({ apply: true });
+  assert.equal(finding().state, 'new');
+});
+
+test('a keep-open mark covers only the merges it was set over: a later merge brings the task back and drops the stale reason', () => {
+  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 30, keepOpen: KEEP });
+  f.reconciler().run({ apply: true });
+  const queue = () => f.reconciler().run().findings.filter(finding => state.WORK_QUEUE_CODES.has(finding.code)).map(finding => finding.code);
+  const page = () => state.renderChildBlockBody(f.store.read('child', 806).doc, { issue: 806, class: 'COMMITTED', order: 1 });
+  assert.deepEqual(queue(), [], 'control: the mark takes slice 1 off the queue');
+  assert.deepEqual(f.store.read('child', 806).doc.private.keep_open.covers, [900], 'the write records the merges the mark was set over');
+  // Slice 2 merges a day later and the sweep records it in the task's history.
+  f.github.addPr(901, { head: SHA_A, branch: 'slice-2', body: 'Refs #806', merged: true, mergedAt: new Date(f.time.now).toISOString() });
+  const parentDoc = () => f.store.read('parent', 421).doc;
+  f.store.mutate('child', 806, { writer, parentDoc: parentDoc(), change: doc => ({ ...doc, pr: { ...doc.pr, number: 901, state: 'MERGED' },
+    prs: [{ number: 901, state: 'MERGED', merge_sha: SHA_A }, { number: 900, state: 'MERGED', merge_sha: SHA_A }] }) });
+  assert.deepEqual(f.store.read('child', 806).doc.private.keep_open.covers, [900], 'an unchanged reason keeps what it covered');
+  f.time.now += 2 * HOUR;
+  assert.deepEqual(queue(), ['TASK_MERGED_OPEN'], 'a merge after the mark is a new condition');
+  assert.doesNotMatch(page(), /Kept open:/, 'the page no longer shows the reason set before slice 2');
+  // Setting it again with a new reason covers both merges.
+  f.store.mutate('child', 806, { writer, parentDoc: parentDoc(), change: doc => state.applyPatch('child', doc, { private: { keep_open: { reason: 'Slice 3 still to come' } } }, { writer, parentDoc: parentDoc() }) });
+  assert.deepEqual(f.store.read('child', 806).doc.private.keep_open.covers, [900, 901]);
+  f.time.now += 2 * HOUR;
+  assert.deepEqual(queue(), []);
+  assert.match(page(), /Kept open: Slice 3 still to come/);
+});
+
+test('a patch cannot set when a keep-open mark was set or what it covers', () => {
+  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 30 });
+  const patch = keep => f.store.mutate('child', 806, { writer, parentDoc: f.store.read('parent', 421).doc,
+    change: doc => state.applyPatch('child', doc, { private: { keep_open: keep } }, { writer, parentDoc: f.store.read('parent', 421).doc }) });
+  const mark = () => f.store.read('child', 806).doc.private.keep_open;
+  patch({ reason: 'Waiting on a smoke test', at: '2030-01-01T00:00:00.000Z', covers: [900, 999] });
+  const set = mark();
+  assert.equal(set.at, new Date(f.time.now).toISOString(), 'a new mark is stamped with the write time');
+  assert.deepEqual(set.covers, [900], 'a new mark covers the merges the task holds');
+  f.time.now += HOUR;
+  patch({ at: '2030-01-01T00:00:00.000Z', covers: [900, 999] });
+  assert.deepEqual(mark(), set, 'the same reason keeps its stamps');
+});
+
+test('a keep-open reason is drawn on the public page, so it holds no path, address, host or mention', () => {
+  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
+  const doc = f.store.read('child', 806).doc;
+  const errors = reason => state.validateChild({ ...doc, private: { ...doc.private, keep_open: { reason } } }).filter(error => /private\.keep_open/.test(error));
+  assert.deepEqual(errors('Slice 2 still to come'), []);
+  for (const bad of ['see C:\\work\\notes', 'ask @someone', 'see build.example.test', 'see https://example.test']) assert.ok(errors(bad).length, bad);
+});
+
+test('a task kept open still raises TASK_IDLE when an open PR on it stalls', () => {
+  const found = idle({ openPr: true, openPrUpdated: -30, keepOpen: KEEP });
+  assert.deepEqual(found.map(entry => entry.code), ['TASK_IDLE']);
+});
+
+test('a keep-open mark holds a reason of at most 200 characters, its time and the merges it covers, nothing else', () => {
+  const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
+  const doc = f.store.read('child', 806).doc;
+  const errors = keep => state.validateChild({ ...doc, private: { ...doc.private, keep_open: keep } });
+  assert.deepEqual(errors({ reason: 'ok', at: '2026-11-15T12:00:00.000Z' }), []);
+  assert.deepEqual(errors({ reason: 'ok' }), [], 'the write stamps the time');
+  assert.deepEqual(errors({ reason: 'ok', at: '2026-11-15T12:00:00.000Z', covers: [900, 901] }), []);
+  for (const bad of [{ reason: '' }, { reason: 'x'.repeat(201) }, { reason: 'ok', at: 'soon' }, { reason: 'ok', until: 'never' }, 'yes',
+    { reason: 'ok', covers: [0] }, { reason: 'ok', covers: [900, 900] }, { reason: 'ok', covers: '900' }]) {
+    assert.ok(errors(bad).some(error => /private\.keep_open/.test(error)), JSON.stringify(bad));
+  }
 });
 
 test('an open PR whose update time cannot be read counts as moving', () => {

@@ -21,7 +21,12 @@ else if (endpoint === 'repo/pulls?state=open&per_page=100') {
 } else if (endpoint === 'repo/pulls/1' && input) {
   if (!args.includes('PATCH') || !input.body.includes(marker)) throw Error('unsafe pull request update');
   state.pr.body = input.body; result = state.pr;
-} else if (endpoint === 'repo/pulls/1') result = args.includes('--jq') ? state.pr?.state : state.pr;
+} else if (endpoint === 'repo/pulls/1') {
+  // state.lag: GitHub shows the pull request's earlier head for this many reads after its branch moves.
+  const stale = !args.includes('--jq') && state.stale?.reads > 0;
+  if (stale) state.stale.reads -= 1;
+  result = args.includes('--jq') ? state.pr?.state : stale ? { ...state.pr, head: { ...state.pr.head, sha: state.stale.sha } } : state.pr;
+}
 else if (endpoint === 'repo/pulls/1/files?per_page=100') result = Object.keys(state.files).map(filename => ({ filename, status: 'added' }));
 else if (endpoint === 'repo/git/ref/heads/main') result = { object: { sha: base } };
 else if (endpoint?.startsWith('repo/git/ref/heads/toolkit/')) { missing = !state.branch; result = { object: { sha: state.branch?.sha } }; }
@@ -47,6 +52,7 @@ else if (endpoint?.startsWith('repo/contents/') && !input) {
   state.commits = (state.commits || 0) + 1; result = { sha: state.pr ? updated : head };
 } else if (endpoint?.startsWith('repo/git/refs/heads/toolkit/') && input) {
   if (!args.includes('PATCH') || input.force !== false || input.sha !== (state.pr ? updated : head)) throw Error('unsafe branch update');
+  if (state.pr && state.lag) state.stale = { sha: state.pr.head.sha, reads: state.lag };
   state.branch.sha = input.sha;
   if (state.pr) state.pr.head.sha = input.sha;
   for (const entry of state.prepared) { if (entry.sha === null) delete state.files[entry.path]; else state.files[entry.path] = entry.content; }

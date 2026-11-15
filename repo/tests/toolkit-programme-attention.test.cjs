@@ -431,8 +431,10 @@ test('E3: sessionLine never reads the retired Windows task registry, whatever an
   tasks.writeRegistry(home, [{ id: 'app-programme-sweep', name: 'APP - PROGRAMME SWEEP', host: 'windows', folder: 'APP', schedule: 'hourly, 08:00 to 23:59', model: null, effort: null,
     purpose: 'Sweep.', repository: 'acme/app', created: '2026-10-30T00:00:00.000Z', created_by: 'toolkit-windows-tasks apply', job: 'programme-sweep', definition: '0123456789ab' }]);
   const at = new Date(now.getTime() - 50 * 60000).toISOString();
+  const lastRun = path.join(tasks.userStateDir(home), 'tasks', 'app-programme-sweep', 'last-run.json');
+  fs.mkdirSync(path.dirname(lastRun), { recursive: true });
   for (const status of ['skipped', 'held', 'failed']) {
-    tasks.writeLastRun('app-programme-sweep', { started: at, finished: at, exit: status === 'failed' ? 1 : 0, status, reason: 'offline', skipped_streak: 3, summary: [] }, home);
+    fs.writeFileSync(lastRun, JSON.stringify({ started: at, finished: at, exit: status === 'failed' ? 1 : 0, status, reason: 'offline', skipped_streak: 3, summary: [] }));
     const line = evaluate();
     assert.match(line, /Toolkit governance: ENABLED/);
     assert.doesNotMatch(line, /Programme sweep:|Task health|see toolkit tasks/, status);
