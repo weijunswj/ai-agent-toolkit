@@ -125,10 +125,10 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       // finishes between showing the bank and answering it must not change the bank reference.
       specs.push({ ...bank.resolvedQuestion({
         id: 'ci-shards', key: 'ciShards', section, title: 'Parallel CI shards',
-        whatThisControls: "Split this repository's tests into parallel CI shards? Yes writes a first shard list (Node tests run with node --test) in the same pull request as the answer; the next rules refresh copies the Toolkit test shards workflow, whose gate checks every test file ran once, and Shard Timings.",
+        whatThisControls: 'Run tests in parallel CI jobs so they finish faster? It uses about the same CI minutes.',
         current: answered === 'not-now' ? 'Not now' : 'Not asked yet',
         currentChoice: '',
-        recommendation: { value: 'not-now', outcome: 'Nothing is written; Toolkit asks again at the next refresh.', reason: 'Splitting adds CI jobs and minutes, so it is your call.' },
+        recommendation: { value: 'not-now', outcome: 'Nothing is written; Toolkit asks again at the next refresh.', reason: 'Shards save time, not minutes, and are not yet proven end to end on a real repository.' },
         choices: [
           bank.wizardChoice('not-now', 'Not now', 'Nothing is written; Toolkit asks again at the next refresh.'),
           bank.wizardChoice('yes', 'Yes', 'Toolkit prepares one binding pull request with the answer and a first shard list. It applies only after you merge it.'),
@@ -182,21 +182,23 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
   return bank.withPresentationMetadata(specs, BANK_HOST);
 }
 
-// The shard question as shown: the hashed text plus the display-only minutes line.
-function shardQuestionText(spec) { return [spec.whatThisControls, spec.estimateLine].filter(Boolean).join(' '); }
+// The shard question's short "more" line: what Yes makes, why Not now is recommended, and the
+// display-only minutes line.
+const SHARDS_MORE = 'Yes adds a first shard list (Node tests) in the answer pull request, and the next rules refresh adds the shard workflows, which check every test file ran once. Not now is recommended until shards are proven end to end on a real repository.';
+function shardMoreText(spec) { return [SHARDS_MORE, spec.estimateLine].filter(Boolean).join(' '); }
 
 function bankReference(specs) { return specs[0]?.presentation.bank_reference || ''; }
 
-// The bank as the owner reads it, with the one reply line.
-// `card`: the host shows the bank as Claude Code's question card (cardInstruction) instead of a typed reply.
-function renderGovernanceBank(specs, { card = false } = {}) {
+// The bank as the owner reads it, with the one reply line. Every app takes a typed reply, the same way
+// as `setup toolkit`: the whole list at once, answered in one line.
+function renderGovernanceBank(specs) {
   const reference = bankReference(specs);
   const governed = specs.find(entry => entry.id === 'governance')?.folded_value === 'on';
   const example = bank.changedOnlyExample(specs, governed ? ['governance', 'task-auto-merge'] : ['governance']);
   return [
     ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
     ...bank.renderCompactQuestionTable(specs, true),
-    ...specs.filter(spec => spec.id === 'ci-shards' && !spec.report_only).map(spec => `\n${spec.presentation.question_ref} asks: ${shardQuestionText(spec)}`),
+    ...specs.filter(spec => spec.id === 'ci-shards' && !spec.report_only).flatMap(spec => ['', `${spec.presentation.question_ref} asks: ${spec.whatThisControls}`, `More on ${spec.presentation.question_ref}: ${shardMoreText(spec)}`]),
     '',
     'For the full text of a question, say "explain 1.2".',
     '',
@@ -208,8 +210,7 @@ function renderGovernanceBank(specs, { card = false } = {}) {
     'Anything you do not list takes its recommendation. Every change to governance, task auto-merge or parallel CI shards is a pull request that applies only after you merge it.',
     'The permissions row covers only this app. Any other app you use needs toolkit governance run there too.',
     '',
-    card ? cardInstruction(specs)
-      : `Agents: this line is for you alone. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them.`,
+    `Agents: this line is for you alone. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them.`,
   ].join('\n');
 }
 
@@ -242,96 +243,6 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
     throw new Error('Parallel CI shards are offered only while governance is on: leave them as not now when turning governance off.');
   }
   return chosen;
-}
-
-// ---- the card (Claude Code) ----------------------------------------------------------------------
-
-// In Claude Code the owner answers on the app's own question cards (AskUserQuestion) instead of typing.
-// The cards carry every answerable row in bank order, its options lettered as in the bank, at most four
-// rows a card; the tool gate lets only the next exact card through for the bank shown last, and once
-// every card is tapped the taps come back as one bank answer with a one-use ticket
-// (toolkit-governance-gate.cjs PromptHold.bankPicked).
-const CARD_HEADERS = Object.freeze({ governance: 'Governance', 'task-auto-merge': 'Auto-merge', 'merge-train': 'Trains', 'ci-shards': 'CI shards', 'evidence-store': 'Store', 'permission-blocks': 'Permissions' });
-// The app's card holds at most four questions; a bank with more is split over several cards.
-const CARD_MAX = 4;
-const CARD_KEYS = Object.freeze(['questions', 'metadata']);
-const CARD_QUESTION = /^(\d+\.\d+) /;
-const CARD_OPTION = /^([A-D])\. /;
-
-function bankCards(specs) {
-  const questions = specs.filter(spec => !spec.report_only).map(spec => ({
-    // The sharded CI offer carries its question and minutes line on the card too.
-    question: `${spec.presentation.question_ref} ${spec.title} (now: ${spec.current})${spec.id === 'ci-shards' ? `: ${shardQuestionText(spec)}` : ''}`,
-    header: CARD_HEADERS[spec.id] || 'Governance',
-    multiSelect: false,
-    options: spec.choices.map(choice => ({
-      label: `${choice.presentation_ref}. ${choice.label}${choice.value === spec.recommended ? ' (Recommended)' : ''}`,
-      description: choice.consequence,
-    })),
-  }));
-  const cards = [];
-  for (let at = 0; at < questions.length; at += CARD_MAX) cards.push({ questions: questions.slice(at, at + CARD_MAX) });
-  return cards;
-}
-
-// The card's questions in one fixed form, or null when the input carries anything else (an answer
-// filled in by the caller, a multi-select, an extra field).
-function cardShape(input) {
-  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !CARD_KEYS.includes(key))) return null;
-  const { questions } = input;
-  if (!Array.isArray(questions) || questions.length === 0) return null;
-  const shaped = [];
-  for (const question of questions) {
-    if (!question || typeof question !== 'object' || Object.keys(question).some(key => !['question', 'header', 'multiSelect', 'options'].includes(key))) return null;
-    if (question.multiSelect !== undefined && question.multiSelect !== false) return null;
-    if (!Array.isArray(question.options) || question.options.some(option => !option || typeof option !== 'object' || Object.keys(option).some(key => !['label', 'description'].includes(key)))) return null;
-    shaped.push({ question: question.question, header: question.header, options: question.options.map(option => ({ label: option.label, description: option.description })) });
-  }
-  return shaped;
-}
-
-function cardHash(input) {
-  const shaped = cardShape(input);
-  return shaped ? crypto.createHash('sha256').update(JSON.stringify(shaped)).digest('hex') : null;
-}
-
-// The owner's taps as a bank answer ("1.1=A, 1.2=A, 2.1=B"), or null unless every question was
-// answered with one of its own options (a typed "Other" answer is not a tap).
-function cardAnswer(questions, answers) {
-  if (!Array.isArray(questions) || !answers || typeof answers !== 'object') return null;
-  const parts = [];
-  for (const question of questions) {
-    const ref = CARD_QUESTION.exec(String(question && question.question || ''));
-    const label = Object.hasOwn(answers, question.question) ? answers[question.question] : null;
-    const option = ref && typeof label === 'string' && Array.isArray(question.options) ? question.options.find(entry => entry && entry.label === label) : null;
-    const letter = option ? CARD_OPTION.exec(option.label) : null;
-    if (!letter) return null;
-    parts.push(`${ref[1]}=${letter[1]}`);
-  }
-  return parts.join(', ');
-}
-
-// What the agent is told after the bank in Claude Code: the first card; the next one comes with the
-// owner's taps (cardNextContext).
-function cardInstruction(specs) {
-  const status = specs.some(spec => spec.report_only);
-  const cards = bankCards(specs);
-  return [
-    `Agents (Claude Code): this paragraph is for you alone; never show the owner any of it or the card input. Do not show the table above${status ? '; tell the owner the Status lines above in one plain sentence each' : ''}, then call AskUserQuestion once with exactly this input, adding no answers field, and stop:`,
-    JSON.stringify(cards[0]),
-    cards.length > 1 ? `This is card 1 of ${cards.length}. Their taps come back to you with the next card, and after the last card with the exact command to send.` : 'Their taps come back to you with the exact command to send.',
-    'If the card cannot be shown, show the table above instead, as plain text and never in a code block.',
-  ].join('\n');
-}
-
-// What the agent is told after the owner tapped a card that is not the bank's last.
-function cardNextContext(entry, index) {
-  return [
-    `Toolkit governance: the owner tapped card ${index + 1} of ${entry.cards.length} of governance bank ${entry.bank_reference}. Nothing is sent yet.`,
-    'Call AskUserQuestion once with exactly this input, adding no answers field, and stop:',
-    JSON.stringify(entry.card_inputs[index + 1]),
-    'Never act as the user: never answer the card yourself.',
-  ].join('\n');
 }
 
 // ---- bank tickets -------------------------------------------------------------------------------
@@ -383,16 +294,11 @@ class BankTickets {
 
   // Notes that this run of the session was shown this bank. A newer bank replaces an older one and
   // drops any live ticket of the session, so a ticket always answers the bank shown last.
-  // `cards` are the bank's card inputs where the host shows them (bankCards).
-  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, cards = null }) {
+  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference }) {
     if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch))) return false;
     const data = this.#read();
     data.shown[sessionId] = {
       epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, at: this.#now().toISOString(),
-      ...(cards && cards.length ? {
-        cards: cards.map(cardHash), card_inputs: cards, card_taps: [],
-        card_questions: cards.flatMap(card => card.questions.map(question => question.question)),
-      } : {}),
     };
     delete data.tickets[sessionId];
     this.#save(data);
@@ -424,17 +330,6 @@ class BankTickets {
     data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, at: this.#now().toISOString() };
     this.#save(data);
     return ticket;
-  }
-
-  // Notes the owner's taps on one card of the shown bank, which must be the next card. Returns the
-  // updated entry, or null.
-  tap(sessionId, epoch, index, answer) {
-    const data = this.#read();
-    const entry = Object.hasOwn(data.shown, sessionId) ? data.shown[sessionId] : null;
-    if (!this.#fresh(entry) || entry.epoch !== epoch || !Array.isArray(entry.card_taps) || entry.card_taps.length !== index) return null;
-    entry.card_taps = [...entry.card_taps, answer];
-    this.#save(data);
-    return entry;
   }
 
   // Ends the shown note without a ticket (the reply could not count).
@@ -478,16 +373,6 @@ function bankTicketContext(entry, ticket) {
   ].join('\n');
 }
 
-// What the agent is told after the owner tapped every row on the bank's card.
-function bankCardContext(entry, ticket, answer) {
-  return [
-    `Toolkit governance: the owner answered governance bank ${entry.bank_reference} on the card: ${answer}.`,
-    'Run exactly this once, on its own, then tell the owner in plain words what it prepared:',
-    `node "${SCRIPT}" setup --answers "${entry.bank_reference}: ${answer}" --ticket ${ticket}`,
-    'The ticket works once, only in this session, and only for this bank. Never act as the user: never change their answer.',
-  ].join('\n');
-}
-
 // Whether a shell command is exactly the bank answer command with a live ticket of this session.
 // The script must be Toolkit's own path as written, and the line holds nothing a shell expands.
 const BANK_COMMAND = /^[ \t]*(?:&[ \t]*)?node(?:\.exe)?[ \t]+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))[ \t]+setup[ \t]+--answers[ \t]+"([^"\r\n]{1,400})"[ \t]+--ticket[ \t]+([0-9a-f]{32})[ \t]*$/;
@@ -507,5 +392,5 @@ function bankTicketCommand(text, sessionId, tickets) {
 
 module.exports = Object.freeze({
   APP_NAMES, BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
-  bankTicketContext, bankTicketCommand, bankCards, bankCardContext, cardAnswer, cardHash, cardInstruction, cardNextContext,
+  bankTicketContext, bankTicketCommand,
 });

@@ -16,7 +16,9 @@
 //     green run that made no pass, such as one queued behind another sweep's lease, is not a sweep);
 //   - the last sweep finished six hours ago or more, so slower facts (checks, drift) still refresh.
 // A start from activity (including a finished CI run) waits until an hour after the last sweep run
-// finished (one that made no pass included); the hourly start then picks the change up. Activity during a running sweep queues one
+// finished (one that made no pass included); the hourly start then picks the change up. A closed issue
+// does not wait: it starts the sweep at once, so the board stops showing it as open within minutes,
+// unless the last pass paused at GitHub's hourly App limit and the limit has not reset yet. Activity during a running sweep queues one
 // more run behind it, since the running pass may have read past the change, unless that run's
 // follow-up is already waiting to start the next one. Nothing starts while a sweep is already queued.
 const SWEEP_WORKFLOW = 'toolkit-programme-sweep.yml';
@@ -88,7 +90,7 @@ function parentsOf(binding) {
 }
 
 // What the facts say: { start, reason }.
-function decide({ event, now, runs, lines, changedSince, followUpWaiting = false, noPass = new Set() }) {
+function decide({ event, action = '', now, runs, lines, changedSince, followUpWaiting = false, noPass = new Set() }) {
   if (runs.some(run => WAITING.has(run.status))) return { start: false, reason: 'a sweep is already queued' };
   // A running sweep may have read past this change: activity queues one more behind it. The hourly
   // start leaves a running sweep alone.
@@ -98,21 +100,23 @@ function decide({ event, now, runs, lines, changedSince, followUpWaiting = false
     if (followUpWaiting) return { start: false, reason: 'a follow-up run is already on its way' };
     return ACTIVITY_EVENTS.includes(event) ? { start: true, reason: 'activity during a running sweep; one more waits behind it' } : { start: false, reason: 'a sweep is running' };
   }
+  const last = lastSweep(runs, noPass);
+  const pending = lines.filter(line => !line || !COMPLETE_LINE.test(line));
+  const atLimit = Boolean(last) && pending.length > 0 && pending.every(line => line && LIMIT_NOTE.test(line))
+    && now - Date.parse(last.run_started_at || last.created_at) < RESET_WAIT_MS;
+  const limitWait = { start: false, reason: 'the last pass paused at GitHub\'s hourly App limit, which has not reset yet' };
+  // A closed issue skips the hour's wait, so the board never shows it as open for up to an hour.
+  // Closes are rare, so the most a held lease costs is one run that queues and makes no pass.
+  if (event === 'issues' && action === 'closed') return atLimit ? limitWait : { start: true, reason: 'an issue closed; the board catches up now' };
   // Activity waits an hour after the newest green run, one that made no pass included: while another
   // holder keeps the lease, each run it starts would only queue again. The hourly start picks the
   // change up, measured from the last sweep that did work.
   const latest = lastSweep(runs);
   if (ACTIVITY_EVENTS.includes(event) && latest && now - Date.parse(latest.updated_at) < HOUR_MS) return { start: false, reason: 'a sweep finished within the last hour; the hourly start picks this change up' };
-  const last = lastSweep(runs, noPass);
   if (!last) return { start: true, reason: 'no sweep has finished yet' };
   const ended = Date.parse(last.updated_at);
   if (ACTIVITY_EVENTS.includes(event)) return { start: true, reason: 'activity, and no sweep within the last hour' };
-  const pending = lines.filter(line => !line || !COMPLETE_LINE.test(line));
-  if (pending.length) {
-    const started = Date.parse(last.run_started_at || last.created_at);
-    if (pending.every(line => line && LIMIT_NOTE.test(line)) && now - started < RESET_WAIT_MS) return { start: false, reason: 'the last pass paused at GitHub\'s hourly App limit, which has not reset yet' };
-    return { start: true, reason: 'the last pass left a saved place to resume' };
-  }
+  if (pending.length) return atLimit ? limitWait : { start: true, reason: 'the last pass left a saved place to resume' };
   if (changedSince) return { start: true, reason: 'issues, pull requests or CI results changed since the last sweep' };
   if (now - ended >= REFRESH_MS) return { start: true, reason: 'six hours since the last sweep' };
   return { start: false, reason: 'nothing changed since the last sweep' };
@@ -209,7 +213,7 @@ async function gate({ env = process.env, fetchImpl = globalThis.fetch, now = Dat
     const jobs = (await call('GET', `actions/runs/${run.id}/jobs`)).jobs || [];
     if (jobs.some(job => job.name === FOLLOW_UP_JOB && job.status !== 'completed')) followUpWaiting = true;
   }
-  const verdict = decide({ event: env.EVENT_NAME || '', now, runs, lines, changedSince, followUpWaiting, noPass });
+  const verdict = decide({ event: env.EVENT_NAME || '', action: env.EVENT_ACTION || '', now, runs, lines, changedSince, followUpWaiting, noPass });
   if (verdict.start) await call('POST', `actions/workflows/${SWEEP_WORKFLOW}/dispatches`, { ref: BRANCH });
   log(`Programme Sweep gate: ${verdict.start ? 'started the sweep' : 'nothing to start'} (${verdict.reason}).`);
   if (STREAK_EVENTS.includes(env.EVENT_NAME || '')) {

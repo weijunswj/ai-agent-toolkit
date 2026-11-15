@@ -680,6 +680,79 @@ test('speed: an edit that reruns heavy jobs is raised; a light or gated workflow
   assert.deepEqual(hits(report({ '.github/workflows/ci.yml': WORKFLOW('npm test').replace('  pull_request:\n', '  pull_request:\n    types: [edited]\n') }), 'speed.edits'), [], 'one job is already light');
 });
 
+// A route job that reads the event and sets an output; the test legs skip when it says light. The
+// aggregate still runs after skipped legs.
+const ROUTED = ({ legIf = "${{ !cancelled() && needs.route.outputs.mode != 'light' }}", legNeeds = '[route]', aggIf = '${{ !cancelled() }}', blockNeeds = false } = {}) => `name: CI
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+permissions:
+  contents: read
+concurrency:
+  group: ci-\${{ github.ref }}
+  cancel-in-progress: \${{ github.event.action != 'edited' }}
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    outputs:
+      mode: \${{ steps.route.outputs.mode }}
+    steps:
+      - id: route
+        run: node route.js
+  tests:
+${blockNeeds ? '    needs:\n      - route\n' : `    needs: ${legNeeds}\n`}    if: ${legIf}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [a, b]
+    steps:
+      - run: npm test
+  body:
+    runs-on: ubuntu-latest
+    steps:
+      - run: node body.js
+  validate:
+    needs: [tests, body]
+    if: ${aggIf}
+    runs-on: ubuntu-latest
+    steps:
+      - run: node verify.js
+`;
+
+test('speed: a route job that gates the test legs is a light edit run; one that does not is raised', () => {
+  const edits = (text) => hits(report({ '.github/workflows/ci.yml': text, 'route.js': '', 'body.js': '', 'verify.js': '' }), 'speed.edits');
+  assert.deepEqual(edits(ROUTED()), [], 'route output gates the legs');
+  assert.deepEqual(edits(ROUTED({ blockNeeds: true })), [], 'needs as a block list');
+  assert.deepEqual(edits(ROUTED({ legNeeds: 'route' })), [], 'needs as one name');
+  const ungated = edits(ROUTED({ legIf: '${{ !cancelled() }}' }));
+  assert.equal(ungated.length, 1, 'a route job that gates nothing is still raised');
+  assert.match(ungated[0].message, /reruns 4 jobs/);
+  const notNeeded = edits(ROUTED({ legNeeds: '[body]' }));
+  assert.equal(notNeeded.length, 1, 'an output of a job the leg does not need gates nothing');
+  const skipped = edits(ROUTED({ aggIf: 'success()' }));
+  assert.equal(skipped.length, 1, 'an aggregate that skips after the light legs is raised');
+  assert.match(skipped[0].message, /validate.*skipped/);
+  assert.match(skipped[0].fix, /!cancelled\(\)/);
+});
+
+test('speed: a route that gates fewer jobs than it leaves running is raised; a gated job is not called skipped', () => {
+  const edits = (text) => hits(report({ '.github/workflows/ci.yml': text, 'route.js': '', 'body.js': '', 'verify.js': '' }), 'speed.edits');
+  const extra = (jobs) => ROUTED().replace('  validate:\n', `${jobs}  validate:\n`);
+  const plain = (id) => `  ${id}:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm run ${id}\n`;
+  const many = edits(extra(plain('build') + plain('lint')));
+  assert.equal(many.length, 1, 'build, lint and body left running against one gated leg');
+  assert.match(many[0].message, /reruns 3 jobs/);
+  assert.match(edits(extra(plain('build')))[0].message, /reruns 2 jobs/, 'body and build outnumber the one gated leg');
+  assert.deepEqual(edits(ROUTED()), [], 'one light check against one gated leg is fine');
+  const chained = `  more:\n    needs: [route, tests]\n    if: \${{ needs.route.outputs.mode != 'light' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm run more\n`;
+  assert.deepEqual(edits(extra(chained)), [], 'a route-gated job that needs a skipped leg skips on purpose');
+});
+
+test('speed: the Toolkit Validate workflow passes the edit check', () => {
+  const text = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'validate.yml'), 'utf8');
+  assert.deepEqual(hits(report({ '.github/workflows/validate.yml': text }), 'speed.edits'), []);
+});
+
 test('speed: concurrency that keeps stale runs or cancels useful ones is raised', () => {
   const messages = (files) => hits(report(files), 'speed.concurrency').map((e) => e.message);
   assert.deepEqual(messages({ '.github/workflows/ci.yml': TWO_JOBS('  pull_request:') }), ['no concurrency group, so a run for an older commit keeps its job slots after a new push']);

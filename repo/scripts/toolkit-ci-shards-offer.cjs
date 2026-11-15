@@ -32,7 +32,7 @@ const ANSWERS = Object.freeze(['yes', 'not-now', 'never']);
 
 // The question's minutes line. `estimate` is { minutes, workflow } from the last green CI run, or null.
 function estimateText(estimate) {
-  const cost = 'Shards run the same tests in parallel jobs, so they use about the same test minutes plus a minute or two of setup for each shard; a private repository pays for those minutes.';
+  const cost = 'Each shard adds a minute or two of setup, which a private repository pays for.';
   if (!estimate || !Number.isFinite(estimate.minutes)) return `Minutes: unknown, because no green CI run could be read. ${cost}`;
   return `Minutes: the last green ${estimate.workflow || 'CI'} run used about ${Math.max(1, Math.round(estimate.minutes))} runner minutes. ${cost}`;
 }

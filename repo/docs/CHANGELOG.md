@@ -1,5 +1,38 @@
 # Toolkit Changelog
 
+## 3.121.0
+
+### Changed
+
+- `toolkit governance` now shows its choices as one typed question bank in every app, Claude Code included, the same way as `setup toolkit`: the whole list at once, answered in one line such as `all recommended` or `1.4=B`. The governance bank no longer splits its rows over tap cards. The single yes or no governance card and the merge card stay.
+- The parallel CI shards question is now one short line, "Run tests in parallel CI jobs so they finish faster? It uses about the same CI minutes.", with the details, the minutes estimate and why Not now is recommended on one "More on" line under it.
+- **Programme Sweep gate:** a closed issue now starts the cloud sweep at once instead of waiting until an hour after the last sweep, so the programme board stops showing a closed task as open within minutes. A pass paused at GitHub's hourly App limit still waits for the reset, and a queued or running sweep is handled as for any other activity.
+
+## 3.120.2
+
+### Fixed
+
+- The CI check-up's `speed.edits` row, on a workflow with a route job, again flags ungated jobs without a matrix when they outnumber the jobs the route gates (the route and the `!cancelled()` or `always()` aggregates are not counted), and no longer calls a job that the route gates itself "skipped too".
+
+## 3.120.1
+
+### Fixed
+
+- The CI check-up's `speed.edits` row accepts a route job that reads the event and sets an output the test jobs need and skip on, so the Toolkit's own Validate workflow no longer shows a false finding. It still flags a route job that gates no test legs, and now also flags a job that needs a route-skipped job without `!cancelled()` or `always()`, because a required check on it would never pass after an edit.
+
+## 3.120.0
+
+### Fixed
+
+- `toolkit permissions --apply` and `--remove` now name only the apps whose files they wrote in the closing restart line, so `--host claude` no longer tells you to restart Codex.
+
+### Changed
+
+- **Review rounds have limits:** a High or Medium finding blocks only with proof, a failing test or a supported-path trace with the reason. An unproven Medium becomes a Low follow-up, and an unproven High goes to the owner's card instead of blocking on its own.
+- **Rechecks after a FAIL are scope-locked:** they review the fix commits, the earlier findings and what the fixes reach. A new finding on code no fix touched blocks only if it is High and proved; anything else joins the PR's follow-up record.
+- **Round cap:** after two FAIL verdicts on one PR, no further review round starts until the owner answers a card: ship with the open items as follow-ups (when none breaks the shipping floor), one more round, or split the PR. The controller counts the PR's FAIL verdict comments before each recheck, and the Projects coordinator's recheck briefs carry the scope lock and the FAIL count.
+- **Gate rules budget:** the gate rules' byte cap rises from 14,400 to 15,150 to hold these rules.
+
 ## 3.119.1
 
 ### Fixed
