@@ -105,9 +105,11 @@ function governanceBankSpecs({ state, task = 'unset', merged = null, permissions
       specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered === 'yes' ? 'Yes' : 'Never ask',
         text: answered === 'yes' ? 'Bound in the merged programme file; the next rules refresh copies the shard workflows while the shard list is usable' : 'Bound in the merged programme file; Toolkit does not ask again' }));
     } else {
-      specs.push(bank.resolvedQuestion({
+      // The minutes line is display-only and kept out of the hashed question text: a CI run that
+      // finishes between showing the bank and answering it must not change the bank reference.
+      specs.push({ ...bank.resolvedQuestion({
         id: 'ci-shards', key: 'ciShards', section, title: 'Parallel CI shards',
-        whatThisControls: `Split this repository's tests into parallel CI shards? Yes writes a first shard list (Node tests run with node --test) in the same pull request as the answer; the next rules refresh copies the Toolkit test shards workflow, whose gate checks every test file ran once, and Shard Timings. ${ciShards?.estimate || ''}`.trim(),
+        whatThisControls: "Split this repository's tests into parallel CI shards? Yes writes a first shard list (Node tests run with node --test) in the same pull request as the answer; the next rules refresh copies the Toolkit test shards workflow, whose gate checks every test file ran once, and Shard Timings.",
         current: answered === 'not-now' ? 'Not now' : 'Not asked yet',
         currentChoice: '',
         recommendation: { value: 'not-now', outcome: 'Nothing is written; Toolkit asks again at the next refresh.', reason: 'Splitting adds CI jobs and minutes, so it is your call.' },
@@ -116,7 +118,7 @@ function governanceBankSpecs({ state, task = 'unset', merged = null, permissions
           bank.wizardChoice('yes', 'Yes', 'Toolkit prepares one binding pull request with the answer and a first shard list. It applies only after you merge it.'),
           bank.wizardChoice('never', 'Never ask', 'Toolkit prepares one binding pull request recording never; it does not ask again.'),
         ],
-      }));
+      }), estimateLine: ciShards?.estimate || '' });
     }
   }
   if (adoption && adoption.blocked) {
@@ -164,6 +166,9 @@ function governanceBankSpecs({ state, task = 'unset', merged = null, permissions
   return bank.withPresentationMetadata(specs, BANK_HOST);
 }
 
+// The shard question as shown: the hashed text plus the display-only minutes line.
+function shardQuestionText(spec) { return [spec.whatThisControls, spec.estimateLine].filter(Boolean).join(' '); }
+
 function bankReference(specs) { return specs[0]?.presentation.bank_reference || ''; }
 
 // The bank as the owner reads it, with the one reply line.
@@ -175,7 +180,7 @@ function renderGovernanceBank(specs, { card = false } = {}) {
   return [
     ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
     ...bank.renderCompactQuestionTable(specs, true),
-    ...specs.filter(spec => spec.id === 'ci-shards' && !spec.report_only).map(spec => `\n${spec.presentation.question_ref} asks: ${spec.whatThisControls}`),
+    ...specs.filter(spec => spec.id === 'ci-shards' && !spec.report_only).map(spec => `\n${spec.presentation.question_ref} asks: ${shardQuestionText(spec)}`),
     '',
     'For the full text of a question, say "explain 1.2".',
     '',
@@ -235,7 +240,7 @@ function bankCardInput(specs) {
   return {
     questions: specs.filter(spec => !spec.report_only).map(spec => ({
       // The sharded CI offer carries its question and minutes estimate on the card too.
-      question: `${spec.presentation.question_ref} ${spec.title} (now: ${spec.current})${spec.id === 'ci-shards' ? `: ${spec.whatThisControls}` : ''}`,
+      question: `${spec.presentation.question_ref} ${spec.title} (now: ${spec.current})${spec.id === 'ci-shards' ? `: ${shardQuestionText(spec)}` : ''}`,
       header: CARD_HEADERS[spec.id] || 'Governance',
       multiSelect: false,
       options: spec.choices.map(choice => ({

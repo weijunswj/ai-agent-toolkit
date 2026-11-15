@@ -23,7 +23,7 @@ const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const gate = require(path.join(scripts, 'toolkit-governance-gate.cjs'));
 const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.cjs'));
 const { GitHubProposalTransport } = require(path.join(scripts, 'toolkit-governance-proposal.cjs'));
-const { BankTickets } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
+const { BankTickets, bankCardInput, bankReference, governanceBankSpecs: bankSpecs } = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
 
 const SESSION = 'session-owner-shards';
 const SLUG = 'toolkit-test-fixture/shards';
@@ -48,15 +48,25 @@ function nodeRepo(t, count = 5) {
 test('offer: the minutes line shows the last green run, or says the minutes are unknown', () => {
   assert.match(offer.estimateText({ minutes: 23.4, workflow: 'CI' }), /^Minutes: the last green CI run used about 23 runner minutes\. .*a private repository pays for those minutes\.$/);
   assert.match(offer.estimateText(null), /^Minutes: unknown, because no green CI run could be read\./);
-  // The estimate reads the newest green push run that is not a Toolkit copy, and sums its jobs.
+  // The estimate reads the default branch's green push runs, skips Toolkit copies and other branches,
+  // takes the newest run of each workflow and keeps the largest, so a small lint job does not stand in.
   const calls = [];
+  const jobs = minutes => ({ jobs: [{ startedAt: '2026-11-01T10:00:00Z', completedAt: new Date(Date.parse('2026-11-01T10:00:00Z') + minutes * 60000).toISOString() }] });
   const run = (program, args) => {
-    calls.push(args.slice(0, 2).join(' '));
-    if (args[1] === 'list') return { status: 0, stdout: JSON.stringify([{ databaseId: 7, workflowName: 'Toolkit Programme Sweep' }, { databaseId: 8, workflowName: 'Build' }]) };
-    return { status: 0, stdout: JSON.stringify({ jobs: [{ startedAt: '2026-11-01T10:00:00Z', completedAt: '2026-11-01T10:12:00Z' }, { startedAt: '2026-11-01T10:00:00Z', completedAt: '2026-11-01T10:06:00Z' }] }) };
+    calls.push(args.join(' '));
+    if (args[0] === 'api') return { status: 0, stdout: JSON.stringify({ default_branch: 'trunk' }) };
+    if (args[1] === 'list') return { status: 0, stdout: JSON.stringify([
+      { databaseId: 6, workflowName: 'Build', headBranch: 'feature' },
+      { databaseId: 7, workflowName: 'Toolkit Programme Sweep', headBranch: 'trunk' },
+      { databaseId: 9, workflowName: 'Lint', headBranch: 'trunk' },
+      { databaseId: 8, workflowName: 'Build', headBranch: 'trunk' },
+      { databaseId: 5, workflowName: 'Build', headBranch: 'trunk' },
+    ]) };
+    return { status: 0, stdout: JSON.stringify(args[2] === '9' ? jobs(1) : args[2] === '8' ? jobs(18) : jobs(99)) };
   };
   assert.deepEqual(offer.readEstimate('/repo', { run }), { minutes: 18, workflow: 'Build', run: 8 });
-  assert.deepEqual(calls, ['run list', 'run view']);
+  assert.ok(calls.some(call => call.startsWith('run list --branch trunk ')), 'the run list is limited to the default branch');
+  assert.deepEqual(calls.filter(call => call.startsWith('run view')).map(call => call.split(' ')[2]), ['9', '8'], 'only the newest default-branch run of each workflow is read');
   assert.equal(offer.readEstimate('/repo', { run: () => ({ status: 1, stdout: '' }) }), null, 'an unreadable run is unknown, never a guess');
 });
 
@@ -179,6 +189,35 @@ test('bank: a governed repository is asked with the minutes estimate; yes prepar
   assert.match(result.out, /Prepared https:\/\/github\.com\/toolkit-test-fixture\/shards\/pull\/5: it records parallel CI shards as yes/);
   assert.match(result.out, /It adds a first \.github\/toolkit-test-shards\.json with 3 Linux shards running node --test/);
   assert.match(result.out, /Merge only after every computer and cloud copy working on this repository runs Toolkit \d+\.\d+\.\d+ or later/);
+});
+
+test('bank: the minutes line is display-only, so a CI run that finishes before the answer does not change the bank reference', async t => {
+  const specsFor = minutes => bankSpecs({ state: { state: 'ENABLED' }, task: 'off', merged: JSON.parse(bindingText()), ciShards: { estimate: offer.estimateText({ minutes, workflow: 'CI' }) } });
+  const twelve = specsFor(12.2), thirteen = specsFor(13.1);
+  assert.equal(bankReference(twelve), bankReference(thirteen), 'two estimates give the same bank reference');
+  assert.match(bankCardInput(thirteen).questions.find(question => /Parallel CI shards/.test(question.question)).question, /about 13 runner minutes/, 'the card still shows the minutes');
+  // End to end: the bank is shown at 12 minutes and answered after a run that measured 31.
+  const ctx = governedFixture(t);
+  const transport = recorder();
+  new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).start(SESSION, 'startup', governance.governanceState(ctx.repo, ctx.registryOptions).repository_id);
+  const shown = await run(ctx, ['setup'], { estimate: () => ({ minutes: 12, workflow: 'CI' }) });
+  const reference = /Bank reference: (\S+)/.exec(shown.out)[1];
+  const ticket = new BankTickets({ registryOptions: ctx.registryOptions }).issue(SESSION, new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION));
+  const answered = await run(ctx, ['setup', '--answers', `${reference}: 1.3=B`, '--ticket', ticket], { transport, estimate: () => ({ minutes: 31, workflow: 'CI' }) });
+  assert.equal(answered.code, 0, answered.err);
+  assert.equal(transport.calls.length, 1, 'the answer is accepted');
+});
+
+test('bank: one answer that changes task auto-merge holds the shards answer, so two binding pull requests never conflict', async t => {
+  const ctx = governedFixture(t);
+  const transport = recorder();
+  const switches = [];
+  transport.publishSwitch = (...args) => { switches.push(args); return { number: 6, url: `https://github.com/${SLUG}/pull/6`, head: 'b'.repeat(40) }; };
+  const result = await answer(ctx, '1.2=B, 1.3=B', { transport });
+  assert.equal(result.code, 0, result.err);
+  assert.equal(switches.length, 1, 'the task auto-merge pull request is prepared');
+  assert.equal(transport.calls.length, 0, 'no second pull request on the same binding');
+  assert.match(result.out, /Parallel CI shards: held, because the task auto-merge pull request changes the same binding file\./);
 });
 
 test('bank: not now writes nothing and asks again; never records the answer and the question stops', async t => {

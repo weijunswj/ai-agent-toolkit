@@ -37,27 +37,42 @@ function estimateText(estimate) {
   return `Minutes: the last green ${estimate.workflow || 'CI'} run used about ${Math.max(1, Math.round(estimate.minutes))} runner minutes. ${cost}`;
 }
 
-// The last green push run of the repository's own CI on its default branch, read with read-only gh:
-// { minutes (summed job time), workflow, run } or null when none can be read. Toolkit's own copied
-// workflows are not the repository's CI, so they are skipped.
+// The repository's own CI on its default branch, read with read-only gh: for each of its workflows
+// (up to MAX_ESTIMATE_WORKFLOWS) the newest green push run, and the largest of those by summed job
+// time, so a small lint workflow does not stand in for the test run. Returns { minutes, workflow,
+// run } or null when none can be read. Toolkit's own copied workflows are not the repository's CI,
+// so they are skipped.
+const MAX_ESTIMATE_WORKFLOWS = 4;
+
 function readEstimate(root, { run = spawnSync } = {}) {
   const gh = args => {
     const result = run('gh', args, { cwd: root, encoding: 'utf8', windowsHide: true, shell: false, timeout: 20000 });
     if (result.error || result.status !== 0) return null;
     try { return JSON.parse(result.stdout); } catch { return null; }
   };
-  const runs = gh(['run', 'list', '--status', 'success', '--event', 'push', '--limit', '20', '--json', 'databaseId,workflowName,headBranch']);
+  const repo = gh(['api', 'repos/{owner}/{repo}']);
+  const branch = repo && typeof repo.default_branch === 'string' && repo.default_branch ? repo.default_branch : null;
+  if (!branch) return null;
+  const runs = gh(['run', 'list', '--branch', branch, '--status', 'success', '--event', 'push', '--limit', '40', '--json', 'databaseId,workflowName,headBranch']);
   if (!Array.isArray(runs)) return null;
-  const chosen = runs.find(item => item && Number.isInteger(item.databaseId) && typeof item.workflowName === 'string' && !/^Toolkit /.test(item.workflowName));
-  if (!chosen) return null;
-  const view = gh(['run', 'view', String(chosen.databaseId), '--json', 'jobs']);
-  if (!view || !Array.isArray(view.jobs)) return null;
-  let ms = 0;
-  for (const job of view.jobs) {
-    const started = Date.parse(job?.startedAt || ''), finished = Date.parse(job?.completedAt || '');
-    if (Number.isFinite(started) && Number.isFinite(finished) && finished > started) ms += finished - started;
+  const newest = new Map();
+  for (const item of runs) {
+    if (!item || !Number.isInteger(item.databaseId) || typeof item.workflowName !== 'string') continue;
+    if (/^Toolkit /.test(item.workflowName) || item.headBranch !== branch || newest.has(item.workflowName)) continue;
+    newest.set(item.workflowName, item);
   }
-  return ms > 0 ? { minutes: ms / 60000, workflow: chosen.workflowName, run: chosen.databaseId } : null;
+  let best = null;
+  for (const chosen of [...newest.values()].slice(0, MAX_ESTIMATE_WORKFLOWS)) {
+    const view = gh(['run', 'view', String(chosen.databaseId), '--json', 'jobs']);
+    if (!view || !Array.isArray(view.jobs)) continue;
+    let ms = 0;
+    for (const job of view.jobs) {
+      const started = Date.parse(job?.startedAt || ''), finished = Date.parse(job?.completedAt || '');
+      if (Number.isFinite(started) && Number.isFinite(finished) && finished > started) ms += finished - started;
+    }
+    if (ms > 0 && (!best || ms / 60000 > best.minutes)) best = { minutes: ms / 60000, workflow: chosen.workflowName, run: chosen.databaseId };
+  }
+  return best;
 }
 
 function readText(file) {

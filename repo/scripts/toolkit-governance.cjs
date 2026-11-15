@@ -475,6 +475,7 @@ class ToolkitGovernanceCli {
   #applyBank(state, task, chosen, found = null, permissions = { checked: false }) {
     let code = 0;
     let acted = false;
+    let switchPrepared = false;
     const switchTo = chosen.taskAutoMerge === 'on' ? 'after-gates' : chosen.taskAutoMerge === 'off' ? 'off' : null;
     if (chosen.governance === 'on' && state.state !== 'ENABLED') {
       const plan = found ? adopt.adoptionPlan(found, { newStore: chosen.evidenceStore === 'new' }) : null;
@@ -488,10 +489,15 @@ class ToolkitGovernanceCli {
       const prepared = this.#prepareSwitch(state.root, switchTo);
       this.#print(false, {}, [`Prepared ${prepared.url}: it sets task auto-merge ${switchTo === 'after-gates' ? 'on' : 'off'} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine()]);
       acted = true;
+      switchPrepared = true;
     }
     // Parallel CI shards: yes or never is its own binding pull request; not now writes nothing and the
     // question comes back at the next refresh.
-    if (state.state === 'ENABLED' && chosen.governance !== 'off' && ['yes', 'never'].includes(chosen.ciShards)) {
+    // Both pull requests would change the same binding, so the second would conflict once the first
+    // merges: the shards answer waits for the next refresh instead.
+    if (switchPrepared && ['yes', 'never'].includes(chosen.ciShards)) {
+      this.#print(false, {}, ['Parallel CI shards: held, because the task auto-merge pull request changes the same binding file. Merge that one, then answer this question again at the next refresh. Nothing was written for it.']);
+    } else if (state.state === 'ENABLED' && chosen.governance !== 'off' && ['yes', 'never'].includes(chosen.ciShards)) {
       const { prepared, lines } = this.#prepareCiShards(state.root, chosen.ciShards);
       this.#print(false, {}, [`Prepared ${prepared.url}: it records parallel CI shards as ${chosen.ciShards === 'yes' ? 'yes' : 'never ask'} (ci_shards) in the binding. It applies only after you merge it.`, ...lines, governance.taskSwitchVersionLine()]);
       acted = true;
