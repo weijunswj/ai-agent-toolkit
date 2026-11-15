@@ -1895,11 +1895,11 @@ const PR_TITLE_SHOWN = 60;
 // ` · UAT: <state>` segment the closure guard reads (the middle dot); a pipe is escaped for the table.
 // A title that is missing, or looks like a secret, shows `-`. Titles are never saved in state: a
 // pass that did not read a PR's title keeps the cell its page already shows (pageTitles).
-const TITLE_LOOKALIKES = Object.freeze({ '`': "'", '\\': '\uFF3C', '<': '\u2039', '>': '\u203A', '\u00B7': '\u2022' });
+const TITLE_LOOKALIKES = Object.freeze({ '`': "'", '\\': '\uFF3C', '<': '\u2039', '>': '\u203A', '\u00B7': '\u2022', '|': '\\|' });
 function titleCell(title) {
   const line = cutText(title, PR_TITLE_SHOWN);
   if (!line || secretShaped(title) || secretShaped(line)) return '-';
-  return `\`${line.replace(/[`\\<>\u00B7]/g, char => TITLE_LOOKALIKES[char]).replace(/\|/g, '\\|')}\``;
+  return `\`${line.replace(/[`\\<>\u00B7|]/g, char => TITLE_LOOKALIKES[char])}\``;
 }
 // The titles a page's own PR GRAPH shows, by PR number, read back from its STATE block. A block
 // edited by hand (its hash no longer matches) gives none.

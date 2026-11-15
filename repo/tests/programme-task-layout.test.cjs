@@ -245,7 +245,7 @@ test('the tracked PR\'s Status cell says UAT owed while the owner\'s test is owe
 test('a task page\'s AGENT CONTEXT links its handover file when the binding names a GitHub store', () => {
   const { handoverUrl } = require('../../skills/github-program-reconciler/scripts/programme-handover.cjs');
   const link = 'https://github.com/acme/state-store/blob/main/handover.md';
-  assert.match(state.renderTraceBlockBody(806, [], 'acme/app', false, link), new RegExp(`\\nHandover: \\[handover file\\]\\(${link.replace(/[.]/g, '\\.')}\\) · Decisions: \`programme\\.cjs trace 806\` · None yet\\.$`));
+  assert.ok(state.renderTraceBlockBody(806, [], 'acme/app', false, link).endsWith(`\nHandover: [handover file](${link}) · Decisions: \`programme.cjs trace 806\` · None yet.`));
   assert.match(state.renderTraceBlockBody(806, [], 'acme/app'), /\nDecisions: `programme\.cjs trace 806` · None yet\.$/, 'no store, no handover link');
   const f = setup();
   assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
