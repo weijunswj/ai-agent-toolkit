@@ -237,7 +237,8 @@ function buildPage(layout, generated, version, render = null) {
   const under = (heading, body, level = 1) => `${'#'.repeat(level)} ${heading}${eol}${eol}${words(body)}`;
   const labelled = name => {
     const body = words(specs.get(name).text);
-    return /^\S/.test(body) && !BLOCK_START.test(body) ? `**${LABEL_TEXT[name]}:** ${body}` : `**${LABEL_TEXT[name]}:**${eol}${eol}${body}`;
+    const first = body.split(/\r?\n/, 1)[0];
+    return /^\S/.test(first) && !BLOCK_START.test(first) ? `**${LABEL_TEXT[name]}:** ${body}` : `**${LABEL_TEXT[name]}:**${eol}${eol}${body}`;
   };
   const part = (name, labels) => {
     if (![name, ...labels].some(key => specs.has(key))) return '';

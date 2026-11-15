@@ -216,6 +216,22 @@ test('stuck-task / I1 I2: a task that cannot be read goes to the back; three in 
   assert.equal(f.parent().sweep.failures['501'], undefined, 'a successful read clears the count');
 });
 
+test('page queue: a frozen closed page is no drift reason, whatever revision it shows', t => {
+  const f = fixture(t, { count: 4 });
+  f.run();
+  const parent = f.parent();
+  f.store.mutate('child', 502, { writer: controller, parentDoc: parent, change: doc => { doc.lifecycle = 'DONE'; doc.completed_at = '2026-11-01T00:00:00Z'; return doc; } });
+  f.store.mutate('parent', parent.parent_issue, { writer: controller, change: doc => { doc.outcomes.find(outcome => outcome.issue === 502).class = 'COMPLETED'; return doc; } });
+  Object.assign(f.github.issues.get(502), { state: 'closed', state_reason: 'completed', closed_at: f.tick(), updated_at: f.tick() });
+  f.run();
+  const frozen = f.page(502);
+  assert.match(state.findStateBlock(frozen).block.body, /\nCOMPLETED\b/);
+  f.store.mutate('child', 502, { writer: controller, parentDoc: f.parent(), change: doc => { doc.next_action = 'None: closed later'; return doc; } });
+  const result = f.run();
+  assert.equal(result.report.sweep.why.drifted, 0, 'a frozen page drawn at an older revision is not re-read for it');
+  assert.equal(f.page(502), frozen, 'and it is not drawn again');
+});
+
 test('page queue: a changed blob id redraws the task and PR pages', t => {
   const f = fixture(t, { count: 4 });
   f.github.addPr(900, { head: 'b'.repeat(40), body: 'Refs #502' });

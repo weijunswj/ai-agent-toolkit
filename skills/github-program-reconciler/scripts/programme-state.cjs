@@ -4703,9 +4703,10 @@ class Reconciler {
         || [doc?.pr?.number, ...(doc?.prs || []).map(pr => pr.number)].some(pr => pr && prChanged.has(pr));
     };
     // A page drawn from another revision than the stored one: a controller write leaves no trace
-    // on GitHub, so the revision drawn on the page is the evidence.
+    // on GitHub, so the revision drawn on the page is the evidence. A frozen page is never drawn
+    // again, so its revision is no reason to read it.
     const drifted = number => {
-      if (!rows.has(number) || !stored(number)) return false;
+      if (!rows.has(number) || !stored(number) || frozenPage(rows.get(number), findStateBlock(rows.get(number).body || '').block)) return false;
       const match = /State revision (\d+) \(issue-\d+\.json\)/.exec(rows.get(number).body || '');
       return !match || Number(match[1]) !== stored(number).revision;
     };

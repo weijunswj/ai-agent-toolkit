@@ -105,6 +105,12 @@ test('a heading people write inside a TASK part stays in that part when the page
   assert.equal(lay(first.body).moves, false);
 });
 
+test('only the first line decides whether a part\'s words share its label line', () => {
+  const result = lay('# PROBLEM\n\n---\nAfter a rule.\n\n# FIX\n\n1. first\n2. second\n\n**If we skip it:** Plain words\n- then a list\n');
+  assert.match(taskPart(result.body), /\*\*The problem:\*\*\n\n---\nAfter a rule\.\n\n\*\*The fix:\*\*\n\n1\. first\n2\. second\n\n\*\*If we skip it:\*\* Plain words\n- then a list\n/);
+  assert.equal(lay(result.body).body, result.body);
+});
+
 test('text written under the generated blocks of a laid-out page goes to More, never into the last TASK part', () => {
   const first = lay('## Plan\n\nThe plan.\n');
   const second = lay(`${first.body}\nA note added at the bottom.\n`);
