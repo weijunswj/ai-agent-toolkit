@@ -1,0 +1,148 @@
+'use strict';
+
+// The sharded CI offer a governed repository gets from `refresh governance` (the governance bank's
+// "Parallel CI shards" row): the minutes estimate it shows, the first shard list a yes writes, the
+// binding text the answer pull request carries, and the check that every pinned Toolkit copy in the
+// repository already reads the `ci_shards` binding key.
+//
+// The answer lives in the merged binding as `ci_shards` ({ answer: yes | not-now | never, offered_at }).
+// Only yes makes the cloud workflows installer copy the test shards workflow and Shard Timings
+// (toolkit-cloud-workflows.cjs), and only while the shard list is usable. Never stops the question.
+//
+// The first list (design: one rest shard plus one named shard per 10 measured minutes of the last
+// green CI run, else two shards) runs `node --test` once per file: the copied shard jobs set up Node
+// only, so a repository whose tests are not Node tests gets no list and is told so.
+
+const fs = require('node:fs');
+const path = require('node:path');
+const util = require('node:util');
+const { spawnSync } = require('node:child_process');
+
+const governed = require('./governed-test-shards.cjs');
+
+// The Toolkit commit that taught the binding reader `ci_shards` (Toolkit 3.113.0). A pinned copy on an
+// older commit reads a binding carrying the key as invalid, so the answer pull request waits for it.
+const CI_SHARDS_READER = 'd071a34a5ef47fce2da11608f745191f2ea318e0';
+const SWEEP_IDS = Object.freeze(['programme-sweep', 'programme-sweep-gate']);
+const MINUTES_PER_SHARD = 10;
+const MAX_NAMED_SHARDS = 8;
+// Node test file layouts, most specific first; the first that finds files is the list's discover glob.
+const NODE_GLOBS = Object.freeze(['**/*.test.cjs', '**/*.test.mjs', '**/*.test.js', 'test/**/*.js', 'tests/**/*.js']);
+const ANSWERS = Object.freeze(['yes', 'not-now', 'never']);
+
+// The question's minutes line. `estimate` is { minutes, workflow } from the last green CI run, or null.
+function estimateText(estimate) {
+  const cost = 'Shards run the same tests in parallel jobs, so they use about the same test minutes plus a minute or two of setup for each shard; a private repository pays for those minutes.';
+  if (!estimate || !Number.isFinite(estimate.minutes)) return `Minutes: unknown, because no green CI run could be read. ${cost}`;
+  return `Minutes: the last green ${estimate.workflow || 'CI'} run used about ${Math.max(1, Math.round(estimate.minutes))} runner minutes. ${cost}`;
+}
+
+// The last green push run of the repository's own CI on its default branch, read with read-only gh:
+// { minutes (summed job time), workflow, run } or null when none can be read. Toolkit's own copied
+// workflows are not the repository's CI, so they are skipped.
+function readEstimate(root, { run = spawnSync } = {}) {
+  const gh = args => {
+    const result = run('gh', args, { cwd: root, encoding: 'utf8', windowsHide: true, shell: false, timeout: 20000 });
+    if (result.error || result.status !== 0) return null;
+    try { return JSON.parse(result.stdout); } catch { return null; }
+  };
+  const runs = gh(['run', 'list', '--status', 'success', '--event', 'push', '--limit', '20', '--json', 'databaseId,workflowName,headBranch']);
+  if (!Array.isArray(runs)) return null;
+  const chosen = runs.find(item => item && Number.isInteger(item.databaseId) && typeof item.workflowName === 'string' && !/^Toolkit /.test(item.workflowName));
+  if (!chosen) return null;
+  const view = gh(['run', 'view', String(chosen.databaseId), '--json', 'jobs']);
+  if (!view || !Array.isArray(view.jobs)) return null;
+  let ms = 0;
+  for (const job of view.jobs) {
+    const started = Date.parse(job?.startedAt || ''), finished = Date.parse(job?.completedAt || '');
+    if (Number.isFinite(started) && Number.isFinite(finished) && finished > started) ms += finished - started;
+  }
+  return ms > 0 ? { minutes: ms / 60000, workflow: chosen.workflowName, run: chosen.databaseId } : null;
+}
+
+function readText(file) {
+  try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
+}
+
+// The repository's Node tests: { ok: true, discover, files } or { ok: false, reason }. A layout counts
+// when package.json runs `node --test` or every file it finds uses node:test.
+function detectNodeTests(root) {
+  let pkg = null;
+  try { pkg = JSON.parse(readText(path.join(root, 'package.json')) || 'null'); } catch { pkg = null; }
+  const script = pkg && pkg.scripts && typeof pkg.scripts.test === 'string' ? pkg.scripts.test : '';
+  const runsNodeTest = /(^|[\s;&|(])node(\.exe)?\s+(?:[^;&|]*\s)?--test\b/.test(script);
+  for (const glob of NODE_GLOBS) {
+    const files = governed.discoverFiles(root, glob);
+    if (!files.length) continue;
+    const nodeTest = files.every(file => /['"]node:test['"]/.test(readText(path.join(root, ...file.split('/'))) || ''));
+    if (runsNodeTest || nodeTest) return { ok: true, discover: glob, files };
+    return { ok: false, reason: `the test files ${glob} finds do not all use node:test and package.json does not run node --test` };
+  }
+  return { ok: false, reason: 'no Node test files were found (such as *.test.js using node:test)' };
+}
+
+// The first shard list for a yes: Linux only, `node --test` once per file, one rest shard plus one named
+// shard per 10 measured minutes (at least one, so two shards without timings), never more named shards
+// than leave the rest shard a file. Files are dealt round-robin; Shard Timings rebalances them later.
+// { ok: true, manifest, text, shards } or { ok: false, reason }.
+function firstList(root, estimate = null) {
+  const found = detectNodeTests(root);
+  if (!found.ok) return found;
+  if (found.files.length < 2) return { ok: false, reason: 'the repository has fewer than two Node test files, so there is nothing to split' };
+  const wanted = estimate && Number.isFinite(estimate.minutes) ? Math.floor(estimate.minutes / MINUTES_PER_SHARD) : 1;
+  const named = Math.max(1, Math.min(wanted, MAX_NAMED_SHARDS, found.files.length - 1));
+  const buckets = Array.from({ length: named + 1 }, () => []);
+  found.files.forEach((file, index) => buckets[index % (named + 1)].push(file));
+  const shards = [...buckets.slice(0, named).map((files, index) => ({ id: `linux-${index + 1}`, files })), { id: `linux-${named + 1}`, rest: true }];
+  const manifest = {
+    schema: governed.MANIFEST_SCHEMA,
+    description: 'This repository\'s tests split into parallel CI shards (Toolkit). Shard Timings rebalances the named shards from measured times.',
+    systems: { linux: { command: ['node', '--test', '{files}'], discover: found.discover, shards } },
+  };
+  const errors = governed.manifestErrors(manifest, governed.discoverAll(root, manifest));
+  if (errors.length) return { ok: false, reason: `the first shard list would not be usable (${errors[0]})` };
+  return { ok: true, manifest, text: `${JSON.stringify(manifest, null, 2)}\n`, shards: shards.length };
+}
+
+// Whether every pinned Toolkit copy of the sweep in `root` reads ci_shards: { ok } or { ok: false,
+// reason } naming the step. A copy whose commit this Toolkit checkout does not have cannot be checked,
+// so it holds the answer too.
+function readersReady(root, toolkitRoot, { reader = CI_SHARDS_READER } = {}) {
+  const workflows = require('./toolkit-cloud-workflows.cjs');
+  const copies = workflows.markedCopies(root).filter(copy => SWEEP_IDS.includes(copy.id));
+  const old = [];
+  for (const copy of copies) {
+    const text = readText(path.join(root, ...copy.file.split('/'))) || '';
+    const commit = workflows.MARKER.exec(text.replace(/\r\n/g, '\n'))?.[2];
+    const known = commit && spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: toolkitRoot, windowsHide: true, shell: false }).status === 0;
+    const newer = known && spawnSync('git', ['merge-base', '--is-ancestor', reader, commit], { cwd: toolkitRoot, windowsHide: true, shell: false }).status === 0;
+    if (!newer) old.push(copy.file);
+  }
+  if (!old.length) return { ok: true };
+  return { ok: false, reason: `the pinned Toolkit copies ${old.join(', ')} run a Toolkit older than the one that reads ci_shards (3.113.0), and would read the binding as invalid. Refresh the repository rules first (merge their pull request), then answer again` };
+}
+
+// The merged binding text with only ci_shards set, so the owner's diff shows only that: an existing
+// ci_shards member is replaced, or one goes before the top-level closing brace. The result must parse
+// to the merged binding plus ci_shards; anything else is rendered whole.
+function ciShardsText(mergedText, parsed, value) {
+  const text = String(mergedText).replace(/^﻿/, '');
+  const expected = { ...parsed, ci_shards: value };
+  const matches = candidate => { try { return util.isDeepStrictEqual(JSON.parse(candidate), expected); } catch { return false; } };
+  const member = `{ "answer": ${JSON.stringify(value.answer)}${value.offered_at ? `, "offered_at": ${JSON.stringify(value.offered_at)}` : ''} }`;
+  let edited = null;
+  const existing = text.match(/"ci_shards"\s*:\s*\{[^{}]*\}/g) || [];
+  if (parsed.ci_shards !== undefined && existing.length === 1) edited = text.replace(/("ci_shards"\s*:\s*)\{[^{}]*\}/, `$1${member}`);
+  else if (parsed.ci_shards === undefined) {
+    const close = text.lastIndexOf('}');
+    const body = text.slice(0, close).replace(/\s+$/, '');
+    const newline = text.includes('\r\n') ? '\r\n' : '\n';
+    const indent = /\n([ \t]+)"/.exec(body)?.[1];
+    if (close > 0 && body.length && !body.endsWith('{')) edited = indent === undefined
+      ? `${body},"ci_shards":${member.replace(/ /g, '')}${text.slice(body.length)}`
+      : `${body},${newline}${indent}"ci_shards": ${member}${text.slice(body.length)}`;
+  }
+  return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
+}
+
+module.exports = Object.freeze({ ANSWERS, CI_SHARDS_READER, MINUTES_PER_SHARD, NODE_GLOBS, ciShardsText, detectNodeTests, estimateText, firstList, readEstimate, readersReady });

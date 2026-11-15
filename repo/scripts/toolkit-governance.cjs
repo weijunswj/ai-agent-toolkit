@@ -23,6 +23,8 @@ const hookCapability = require('./toolkit-hook-capability.cjs');
 const governanceApp = require('./toolkit-governance-app.cjs');
 const governanceBank = require('./toolkit-governance-bank.cjs');
 const adopt = require('./toolkit-governance-adopt.cjs');
+const ciOffer = require('./toolkit-ci-shards-offer.cjs');
+const governedShards = require('./governed-test-shards.cjs');
 const { GovernanceMaintenance, appendRunRecord } = require('./toolkit-governance-migration.cjs');
 
 const CMD = subcommand => `\`${governance.governanceCommand(subcommand)}\``;
@@ -63,7 +65,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #agentHost;
+  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #agentHost; #ciEstimator; #ciReaders;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -74,7 +76,7 @@ class ToolkitGovernanceCli {
   // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
   // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
   // ticket is bound to) are for tests too.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, agentHost = detectAgentHost } = {}) {
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, agentHost = detectAgentHost, ciEstimator = null, ciReaders = null } = {}) {
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
     this.#stdout = stdout;
     this.#stderr = stderr;
@@ -95,6 +97,10 @@ class ToolkitGovernanceCli {
     this.#hookReader = hookReader || (() => hookCapability.hookCapability());
     this.#appReader = appReader;
     this.#switchTransport = switchTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
+    // The sharded CI offer's minutes estimate (read-only gh) and the check that every pinned Toolkit copy
+    // reads ci_shards; offline and in tests the estimate is unknown unless one is given.
+    this.#ciEstimator = ciEstimator || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? () => null : root => ciOffer.readEstimate(root));
+    this.#ciReaders = ciReaders || (root => ciOffer.readersReady(root, path.resolve(__dirname, '..', '..')));
     this.#permissionsChecker = permissionsChecker || defaultPermissionsChecker;
     this.#agentHost = agentHost;
     this.#environment = environment || {};
@@ -353,7 +359,13 @@ class ToolkitGovernanceCli {
       try { found = this.#discovery().discover(this.#cwd); } catch { found = { status: 'unavailable', reason: 'the search failed' }; }
     }
     const adoption = found ? adopt.adoptionPlan(found) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', merged, permissions, adoption });
+    // The sharded CI offer, only where the merged binding turns governance on and has no final answer.
+    const offered = state.state === 'ENABLED' && merged && !['yes', 'never'].includes(merged.ci_shards?.answer);
+    let estimate = null;
+    if (offered) { try { estimate = this.#ciEstimator(state.root); } catch { estimate = null; } }
+    const ciShards = offered ? { estimate: ciOffer.estimateText(estimate), measured: estimate } : null;
+    this.#lastCiEstimate = estimate;
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', merged, permissions, adoption, ciShards });
     const reference = governanceBank.bankReference(specs);
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
@@ -386,6 +398,44 @@ class ToolkitGovernanceCli {
       return this.#showBank(specs, state);
     }
     return this.#applyBank(state, task, chosen, found, permissions);
+  }
+
+  #lastCiEstimate = null;
+
+  // One binding pull request for the owner's sharded CI answer, built from the exact merged text: it
+  // sets ci_shards (answer, offered_at) and, for yes, adds a first shard list when the repository has
+  // none. It waits while a pinned Toolkit copy here would read the key as invalid.
+  #prepareCiShards(root, answer) {
+    if (!this.#switchTransport) throw new GovernanceCliError('GitHub cannot be reached from here, so no pull request was prepared. Nothing was written.');
+    const ready = this.#ciReaders(root);
+    if (!ready.ok) throw new GovernanceCliError(`The parallel CI shards answer was not prepared: ${ready.reason}. Nothing was written.`);
+    const identity = governance.readIdentity(root);
+    const entry = bindingCache.readBindingCache(identity, governance.userStateDirectory(this.#registryOptions));
+    let parsed;
+    try { parsed = JSON.parse(String(entry?.text).replace(/^\uFEFF/, '')); } catch { parsed = null; }
+    if (!parsed || parsed.schema !== 'toolkit.programme-binding.v2' || parsed.governance !== 'enabled') throw new GovernanceCliError('The merged binding is not an enabled version 2 binding, so the answer cannot be recorded yet. Nothing was written.');
+    const value = { answer, offered_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') };
+    const proposal = { ...parsed, ci_shards: value };
+    if (governance.bindingProblems(proposal, identity).length) throw new GovernanceCliError('The changed binding would not be valid, so no pull request was prepared. Nothing was written.');
+    const lines = [];
+    let list = null;
+    if (answer === 'yes') {
+      if (fs.existsSync(path.join(root, ...governedShards.MANIFEST_REL.split('/')))) lines.push(`${governedShards.MANIFEST_REL} is already here, so the pull request keeps it.`);
+      else {
+        const first = ciOffer.firstList(root, this.#lastCiEstimate);
+        if (first.ok) { list = first.text; lines.push(`It adds a first ${governedShards.MANIFEST_REL} with ${first.shards} Linux shards running node --test; Shard Timings rebalances them from measured times.`); }
+        else lines.push(`It adds no shard list: ${first.reason}. The shard workflows are copied only once a usable ${governedShards.MANIFEST_REL} is merged, and only Node tests are supported for now.`);
+      }
+    }
+    let prepared;
+    try {
+      prepared = this.#switchTransport.publishCiShards(proposal.repository, entry.text, ciOffer.ciShardsText(entry.text, parsed, value), answer, list);
+    } catch (error) {
+      throw new GovernanceCliError(error.code === 'SWITCH_BASE_CHANGED'
+        ? `The binding on the default branch changed since this computer read it. Run ${CMD('status')}, then ask again. Nothing was written.`
+        : `The parallel CI shards pull request could not be prepared (${error.code || 'unavailable'}). Check GitHub access and open pull requests before retrying.`);
+    }
+    return { prepared, lines };
   }
 
   // A cloud session skips the reply check, so the owner's chat answer there can never be recorded.
@@ -438,6 +488,15 @@ class ToolkitGovernanceCli {
       const prepared = this.#prepareSwitch(state.root, switchTo);
       this.#print(false, {}, [`Prepared ${prepared.url}: it sets task auto-merge ${switchTo === 'after-gates' ? 'on' : 'off'} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine()]);
       acted = true;
+    }
+    // Parallel CI shards: yes or never is its own binding pull request; not now writes nothing and the
+    // question comes back at the next refresh.
+    if (state.state === 'ENABLED' && chosen.governance !== 'off' && ['yes', 'never'].includes(chosen.ciShards)) {
+      const { prepared, lines } = this.#prepareCiShards(state.root, chosen.ciShards);
+      this.#print(false, {}, [`Prepared ${prepared.url}: it records parallel CI shards as ${chosen.ciShards === 'yes' ? 'yes' : 'never ask'} (ci_shards) in the binding. It applies only after you merge it.`, ...lines, governance.taskSwitchVersionLine()]);
+      acted = true;
+    } else if (chosen.ciShards === 'not-now') {
+      this.#print(false, {}, ['Parallel CI shards: not now. Nothing was written; the next refresh asks again.']);
     }
     if (chosen.permissionBlocks !== 'keep') {
       const command = permissions.checked ? permissions[chosen.permissionBlocks] : null;

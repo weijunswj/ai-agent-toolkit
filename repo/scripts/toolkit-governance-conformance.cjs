@@ -314,9 +314,11 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   const workflows = require('./toolkit-cloud-workflows.cjs');
   if (workflows.isToolkitCheckout(state.root)) return [];
   let result;
+  let merged = null;
   try {
     // The check compares with this checkout's own commit; only an install needs it to be on main.
-    result = workflows.plan({ repo: state.root, root: toolkitRoot, commit: options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot) });
+    merged = (options.mergedBinding || governance.mergedBinding)(state.root, options);
+    result = workflows.plan({ repo: state.root, root: toolkitRoot, commit: options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot), ciShards: merged?.ci_shards?.answer || null });
   } catch (error) {
     return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The cloud sweep workflows could not be checked: ${error.name === 'InstallError' ? error.message : 'the Toolkit copy could not render them.'}`)];
   }
@@ -330,6 +332,13 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
   // nothing refreshes it, and the test shards copy runs a list it no longer matches.
   for (const row of result.not_copied || []) {
     for (const file of row.left || []) out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${file} is a Toolkit ${row.id === 'test-shards' ? 'test shards' : 'Shard Timings'} copy, but the shard copies are no longer copied: ${row.reason}. Repair the shard list and refresh the repository rules, or remove the shard copies in a pull request.`));
+  }
+  // A test shards copy left at an older workflow name after the list renamed it.
+  for (const row of result.renamed || []) out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is a Toolkit test shards copy at an old name; the shard list now names ${row.workflow}, so both run. Remove ${row.file} in a pull request.`));
+  // The shard gate is suggested as a required check, never set: the owner decides (info only).
+  const shards = result.rows.find(row => row.id === 'test-shards');
+  if (shards && ['current', 'outdated'].includes(shards.state) && !(merged?.required_checks || []).includes('Toolkit test shards')) {
+    out.push(finding('CI_SHARDS_GATE_NOT_REQUIRED', 'info', `${shards.file} runs the Toolkit test shards gate, but "Toolkit test shards" is not a required check here. Consider making it required on the default branch so a pull request waits for every test file to pass; Toolkit never sets it for you.`));
   }
   return out;
 }

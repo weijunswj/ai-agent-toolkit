@@ -57,8 +57,10 @@ function statusRow({ id, section, title, current, text }) {
 // The bank for one repository. `state` is the governance state, `task` the merged switch ('after-gates',
 // 'off' or 'unset'), `merged` the merged binding (or null), `permissions` { missing, checked }, and
 // `adoption` what turning governance on would make in a repository that is not prepared yet
-// (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on).
-function governanceBankSpecs({ state, task = 'unset', merged = null, permissions = { checked: false, missing: 0 }, adoption = null }) {
+// (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on), and `ciShards`
+// the sharded CI offer ({ estimate: the minutes line }) for a repository whose merged binding turns
+// governance on.
+function governanceBankSpecs({ state, task = 'unset', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
   const specs = [];
@@ -95,6 +97,28 @@ function governanceBankSpecs({ state, task = 'unset', merged = null, permissions
       bank.wizardChoice('on', 'On (needs governance on)', 'Only together with turning governance on in the same answer; the same pull request sets it.'),
     ],
   }));
+  // The sharded CI offer: asked only in a governed repository, again at each refresh after not now,
+  // never again after never (toolkit-ci-shards-offer.cjs).
+  if (state.state === 'ENABLED' && merged) {
+    const answered = merged.ci_shards?.answer;
+    if (answered === 'yes' || answered === 'never') {
+      specs.push(statusRow({ id: 'ci-shards', section, title: 'Parallel CI shards', current: answered === 'yes' ? 'Yes' : 'Never ask',
+        text: answered === 'yes' ? 'Bound in the merged programme file; the next rules refresh copies the shard workflows while the shard list is usable' : 'Bound in the merged programme file; Toolkit does not ask again' }));
+    } else {
+      specs.push(bank.resolvedQuestion({
+        id: 'ci-shards', key: 'ciShards', section, title: 'Parallel CI shards',
+        whatThisControls: `Split this repository's tests into parallel CI shards? Yes writes a first shard list (Node tests run with node --test) in the same pull request as the answer; the next rules refresh copies the Toolkit test shards workflow, whose gate checks every test file ran once, and Shard Timings. ${ciShards?.estimate || ''}`.trim(),
+        current: answered === 'not-now' ? 'Not now' : 'Not asked yet',
+        currentChoice: '',
+        recommendation: { value: 'not-now', outcome: 'Nothing is written; Toolkit asks again at the next refresh.', reason: 'Splitting adds CI jobs and minutes, so it is your call.' },
+        choices: [
+          bank.wizardChoice('not-now', 'Not now', 'Nothing is written; Toolkit asks again at the next refresh.'),
+          bank.wizardChoice('yes', 'Yes', 'Toolkit prepares one binding pull request with the answer and a first shard list. It applies only after you merge it.'),
+          bank.wizardChoice('never', 'Never ask', 'Toolkit prepares one binding pull request recording never; it does not ask again.'),
+        ],
+      }));
+    }
+  }
   if (adoption && adoption.blocked) {
     specs.push(statusRow({ id: 'setup-pieces', section, title: 'Store and parent issue', current: 'Could not be checked', text: `GitHub could not be read (${adoption.blocked}), so turning on makes nothing until it can` }));
   } else if (adoption) {
@@ -151,6 +175,7 @@ function renderGovernanceBank(specs, { card = false } = {}) {
   return [
     ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
     ...bank.renderCompactQuestionTable(specs, true),
+    ...specs.filter(spec => spec.id === 'ci-shards' && !spec.report_only).map(spec => `\n${spec.presentation.question_ref} asks: ${spec.whatThisControls}`),
     '',
     'For the full text of a question, say "explain 1.2".',
     '',
@@ -159,7 +184,7 @@ function renderGovernanceBank(specs, { card = false } = {}) {
     '- `all recommended`',
     `- only your changes, for example: \`${example}\``,
     '',
-    'Anything you do not list takes its recommendation. Every change to governance or task auto-merge is one pull request that applies only after you merge it.',
+    'Anything you do not list takes its recommendation. Every change to governance, task auto-merge or parallel CI shards is a pull request that applies only after you merge it.',
     'The permissions row covers only this app. Any other app you use needs toolkit governance run there too.',
     '',
     card ? cardInstruction(specs)
@@ -176,7 +201,8 @@ function selectionsOf(parsed, specs) {
     // A hidden twin (the choice that changes nothing) applies as Keep current.
     return spec && spec.folded_value === chosen ? spec.folded_into : chosen;
   };
-  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store') };
+  const asked = specs.some(spec => spec.id === 'ci-shards' && !spec.report_only);
+  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}) };
 }
 
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
@@ -188,6 +214,9 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
   if (chosen.taskAutoMerge === 'on' && (chosen.governance === 'off' || (!governed && chosen.governance !== 'on'))) {
     throw new Error('Task auto-merge can be on only while governance is on: turn governance on in the same answer, or leave task auto-merge as it is.');
   }
+  if (['yes', 'never'].includes(chosen.ciShards) && chosen.governance === 'off') {
+    throw new Error('Parallel CI shards are offered only while governance is on: leave them as not now when turning governance off.');
+  }
   return chosen;
 }
 
@@ -197,7 +226,7 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
 // The card carries every answerable row, its options lettered as in the bank; the tool gate lets only
 // this exact card through for the bank shown last, and the owner's taps come back as one bank answer
 // with a one-use ticket (toolkit-governance-gate.cjs PromptHold.bankPicked).
-const CARD_HEADERS = Object.freeze({ governance: 'Governance', 'task-auto-merge': 'Auto-merge', 'evidence-store': 'Store', 'permission-blocks': 'Permissions' });
+const CARD_HEADERS = Object.freeze({ governance: 'Governance', 'task-auto-merge': 'Auto-merge', 'ci-shards': 'CI shards', 'evidence-store': 'Store', 'permission-blocks': 'Permissions' });
 const CARD_KEYS = Object.freeze(['questions', 'metadata']);
 const CARD_QUESTION = /^(\d+\.\d+) /;
 const CARD_OPTION = /^([A-D])\. /;
@@ -205,7 +234,8 @@ const CARD_OPTION = /^([A-D])\. /;
 function bankCardInput(specs) {
   return {
     questions: specs.filter(spec => !spec.report_only).map(spec => ({
-      question: `${spec.presentation.question_ref} ${spec.title} (now: ${spec.current})`,
+      // The sharded CI offer carries its question and minutes estimate on the card too.
+      question: `${spec.presentation.question_ref} ${spec.title} (now: ${spec.current})${spec.id === 'ci-shards' ? `: ${spec.whatThisControls}` : ''}`,
       header: CARD_HEADERS[spec.id] || 'Governance',
       multiSelect: false,
       options: spec.choices.map(choice => ({
