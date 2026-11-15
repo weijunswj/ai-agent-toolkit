@@ -298,3 +298,40 @@ test('governance check names a governed repository the cloud sweep skips, with t
   // Toolkit no longer sweeps from a computer, so the sweep's own skip warnings never point to one.
   for (const status of ['public_state', 'foreign_store']) assert.doesNotMatch(action.skipWarning('acme/app', status), /computer/);
 });
+
+test('cloud workflows: a plugin copy with no git renders from the managed Toolkit checkout the bridge records', t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-workflows-home-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const plugin = path.join(home, 'plugin-copy');
+  fs.mkdirSync(plugin);
+  const managed = path.join(home, 'managed');
+  fs.mkdirSync(managed);
+  git(managed, ['init', '--quiet']);
+  git(managed, ['remote', 'add', 'origin', 'https://github.com/weijunswj/ai-agent-toolkit.git']);
+  const other = path.join(home, 'other');
+  fs.mkdirSync(other);
+  git(other, ['init', '--quiet']);
+  git(other, ['remote', 'add', 'origin', 'https://github.com/someone/fork.git']);
+  fs.mkdirSync(path.join(home, '.ai-agent-toolkit', 'current'), { recursive: true });
+  const state = file => fs.writeFileSync(path.join(home, '.ai-agent-toolkit', 'current', 'state.json'), JSON.stringify({ repo_path: file }));
+  state(managed);
+  assert.equal(workflows.sourceRoot({ home, self: plugin }), path.resolve(managed), 'the recorded managed checkout');
+  assert.equal(workflows.sourceRoot({ home, self: ROOT }), ROOT, 'a Toolkit git checkout renders from itself');
+  state(other);
+  assert.equal(workflows.sourceRoot({ home, self: plugin }), plugin, 'a checkout of another repository is never used');
+  const fallback = path.join(home, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  fs.mkdirSync(fallback, { recursive: true });
+  git(fallback, ['init', '--quiet']);
+  git(fallback, ['remote', 'add', 'origin', 'git@github.com:weijunswj/ai-agent-toolkit.git']);
+  assert.equal(workflows.sourceRoot({ home, self: plugin }), path.resolve(fallback), 'then the default managed place');
+});
+
+test('cloud workflows: the copy step reads the merged binding again before it uses the ci_shards answer', t => {
+  const repo = tempRepo(t);
+  const refreshed = [];
+  const out = capture(), err = capture();
+  workflows.main(['--repo', repo, '--check'], { out, err, root: ROOT, commit: COMMIT, refresh: target => refreshed.push(target) });
+  assert.deepEqual(refreshed, [path.resolve(repo)], 'refreshed once, for this repository');
+  workflows.main(['--repo', repo, '--check'], { out, err, root: ROOT, commit: COMMIT, ciShards: 'yes', refresh: target => refreshed.push(target) });
+  assert.equal(refreshed.length, 1, 'an answer given by the caller needs no read');
+});

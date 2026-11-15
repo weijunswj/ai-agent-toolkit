@@ -64,6 +64,7 @@ const PROGRAMME_ASK = Object.freeze({
   claim: 'Taking or taking over the controller role is an authority change.',
   'init-parent': 'Creating a programme parent is a one-time owner decision.',
   'migrate-state': 'Moving the state documents asks for the owner in that run.',
+  'mark-archive': 'It edits a page\'s hand-written text; agents run it through a holder order, which the cloud sweep applies.',
 });
 // Toolkit no longer creates, updates or starts scheduled tasks on a computer (the cloud runs those
 // jobs), so no task form is allowed. The old Windows-task script still runs until it is deleted, so

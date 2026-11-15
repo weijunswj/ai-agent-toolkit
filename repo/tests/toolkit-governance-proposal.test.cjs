@@ -341,7 +341,7 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   assert.equal(published.calls.filter(call => call.args[1].endsWith('/pulls') && call.input).length, 1);
   assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
   const { requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
-  assert.deepEqual(Object.keys(published.files).sort(), ['.github/toolkit-programme.json', '.github/plain-text-baseline.json', ...requiredRules()].sort(), 'the full rules set and nothing unrelated');
+  assert.deepEqual(Object.keys(published.files).sort(), ['.github/toolkit-programme.json', '.github/plain-text-baseline.json', '.github/dependabot.yml', '.github/workflows/dependency-auto-merge.yml', ...requiredRules()].sort(), 'the full rules set, the dependency security files and nothing unrelated');
   assert.equal(published.files['CLAUDE.md'], '@AGENTS.md\n');
   for (const name of ['.github/plain-text.json', '.github/workflows/plain-text.yml']) assert.equal(published.files[name], fs.readFileSync(path.join(f.cwd, name), 'utf8').replace(/\r\n/g, '\n'), name);
   // The bank writes both switches off with the turn-on, as it showed them.

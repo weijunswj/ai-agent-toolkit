@@ -45,6 +45,11 @@
 //                                                      (24 hours ahead unless given, at most 72); past due it is new again and
 //                                                      waiting on the owner; never a work-queue one
 //   dispose --finding <id> --reason <text>             dispose of one; the reason stays in the private part
+//   mark-archive --issue <n> (--before <line> | --remove <link line>)
+//                                                      the parent or an open task page: put one `## Archive`
+//                                                      line above that line, or remove a link line nothing
+//                                                      uses, after saving a copy of the page; the next
+//                                                      complete sweep moves the marked notes
 //
 // A controller that cannot run commands itself hands a session a holder order: the exact writes
 // above (never claim, takeover, init-parent or migrate-state), for the parent at its current epoch,
@@ -84,10 +89,10 @@ const { takeLock, lockState, lockMinutes, LOCK_STALE_MS, LOCK_ABANDONED_MS } = r
 const { ProgrammeError } = state;
 const VERSION_FILE = path.resolve(__dirname, '..', '..', '..', 'repo', 'contracts', 'toolkit-local-bridge', 'version.json');
 const COMMANDS = ['reconcile', 'refresh', 'show', 'init-parent', 'update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'bind', 'checkpoint',
-  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order'];
+  'inventory', 'attention', 'ack', 'dispose', 'migrate-state', 'closing-comment', 'run-order', 'mark-archive'];
 const FLAGS = new Set(['--apply', '--parent', '--include-private', '--takeover', '--route-read-back', '--json', '--controller', '--supersede', '--lane', '--refresh', '--dry-run', '--force-another', '--scheduled']);
 const VALUES = new Set(['--budget-ms', '--issue', '--parent-file', '--catalogue', '--patch', '--role', '--model', '--effort', '--record', '--consume', '--verdict', '--session',
-  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due']);
+  '--prefix', '--repo-root', '--assignment', '--reason', '--at-head', '--takeover-record', '--message-file', '--finding', '--deadline-ms', '--plan-digest', '--pr', '--body-file', '--order', '--next', '--due', '--before', '--remove']);
 const EXECUTOR_COMMANDS = ['bind', 'checkpoint'];
 const LANE_COMMANDS = ['assign', 'interrupt'];
 
@@ -183,7 +188,7 @@ function parseArgs(argv) {
 // but it is not listed: it carries no decision of its own (see commands.refresh).
 function isWrite(args) {
   if (args.command === 'reconcile' || args.command === 'init-parent' || args.command === 'migrate-state') return Boolean(args.apply);
-  return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose'].includes(args.command);
+  return ['update-parent', 'claim', 'assign', 'reopen', 'interrupt', 'update', 'return', 'ack', 'dispose', 'mark-archive'].includes(args.command);
 }
 
 function toolkitVersion(file = VERSION_FILE) {
@@ -831,6 +836,35 @@ const commands = {
     }
     log({ ...entry, finished_at: nowText(deps) });
     return { mode: 'apply', ...summary, outcome: 'DONE', results, next_action: 'Run programme.cjs refresh so the pages show these writes, then report the digest and results to the controller.' };
+  },
+
+  // The one write to a page's hand-written text (programme-page-archive markArchive): the parent's
+  // holder marks old notes for the next complete sweep to move, or removes link lines nothing uses.
+  // The page as it is is saved to the private store and read back first; the write re-reads the
+  // page and refuses on any change, then reads it back.
+  'mark-archive'(args, context, deps = {}) {
+    const parentDoc = readParent(context);
+    requireParentHolder(context, parentDoc);
+    if (!args.issue) throw usage('mark-archive needs --issue <n>.');
+    const remove = args.remove === undefined ? undefined : [].concat(args.remove);
+    const refuse = why => new ProgrammeError('ARCHIVE_MARK_REFUSED', `#${args.issue} was not marked: ${why}. Nothing was written.`);
+    const reader = new state.ProgrammeGraphReader({ transport: context.transport, repository: context.repository });
+    const page = reader.issue(args.issue);
+    if (!page) throw new ProgrammeError('ISSUE_MISSING', `#${args.issue} could not be read. Nothing was written.`);
+    const parent = args.issue === context.binding.parent_issue;
+    if (page.is_pull_request) throw refuse('it is a pull request, whose description its builder keeps to the CHANGE shape');
+    if (!parent && !(parentDoc.outcomes || []).some(outcome => outcome.issue === args.issue)) throw refuse('it is not a task of this programme');
+    if (!parent && page.state !== 'open') throw refuse('a closed task page keeps its text');
+    const next = require('./programme-page-archive.cjs').markArchive(page.body, { before: args.before, remove }, { parent });
+    if (next === page.body) return { outcome: 'NOOP', issue: args.issue, detail: 'The page is already as asked.' };
+    if (deps.rehearsal) return { outcome: 'WOULD_RUN', issue: args.issue };
+    const copy = context.store.savePageCopy(args.issue, page.body);
+    const latest = reader.issue(args.issue);
+    if (!latest || latest.body !== page.body) throw new ProgrammeError('BODY_MOVED', `#${args.issue} changed after it was read. Nothing was written; run the write again.`);
+    new state.GitHubMutator({ transport: context.transport, repository: context.repository }).writeBody(args.issue, next);
+    const after = reader.issue(args.issue);
+    if (!after || after.body !== next) throw new ProgrammeError('BODY_READBACK_MISMATCH', `#${args.issue} did not read back as written. The page as it was is saved at ${copy.path} in the private store.`);
+    return { outcome: 'DONE', issue: args.issue, copy: copy.path, next_action: 'The next complete sweep moves the marked notes.' };
   },
 
   ack(args, context, deps = {}) { return answer(args, context, deps, 'acknowledged'); },

@@ -586,13 +586,13 @@ test('a task blocked by another open task that is moving is not idle; behind a s
   assert.deepEqual(queue(), [806, 807], 'a stalled blocker surfaces, and so does the task behind it');
 });
 
-test('the parent page counts the work queue and the graph says the shown PR merged', () => {
+test('the parent page counts the work queue and the graph row is the task, its number and NOW · IN PROGRESS', () => {
   const f = idleRun({ merged: true, pr: { number: 900, state: 'MERGED' }, hours: 2 });
   f.reconciler().run({ apply: true });
   const body = f.github.issues.get(421).body;
   assert.match(body, /Attention: \d+ new, 0 acknowledged, 1 in the work queue/);
   assert.doesNotMatch(body, /\*\*Work queue\*\*/, 'CURRENT counts the work queue; the attention command lists it');
-  assert.match(body, /^\|#806[ |][^\n]*\|#900 merged\|NOW · IN PROGRESS\|/m);
+  assert.match(body, /^\|Issue 806\|#806\|NOW · IN PROGRESS\|/m);
 });
 
 // Blocks that are only shown: an example of a block inside a code fence, a quote, a list item or

@@ -103,7 +103,8 @@ class ToolkitGovernanceCli {
     // The sharded CI offer's minutes estimate (read-only gh) and the check that every pinned Toolkit copy
     // reads ci_shards; offline and in tests the estimate is unknown unless one is given.
     this.#ciEstimator = ciEstimator || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? () => null : root => ciOffer.readEstimate(root));
-    this.#ciReaders = ciReaders || (root => ciOffer.readersReady(root, path.resolve(__dirname, '..', '..')));
+    // The pinned copies are checked against the Toolkit git checkout (the managed one from a plugin copy).
+    this.#ciReaders = ciReaders || (root => ciOffer.readersReady(root, require('./toolkit-cloud-workflows.cjs').sourceRoot()));
     this.#permissionsChecker = permissionsChecker || defaultPermissionsChecker;
     this.#environment = environment || {};
     this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());
@@ -280,8 +281,9 @@ class ToolkitGovernanceCli {
   // `switches` are the task_prs members the owner's answer sets ({ auto_merge, merge_train }), or null.
   // `bank` is true only when the governance question bank publishes its own answer: a yes from anywhere
   // else (an agent's publish --run) is refused, so no turn-on pull request is ever built by hand.
-  // `app` is the bank's governance App answer ('setup' or 'keep'), or null outside the bank.
-  #publish(json, suppliedRun = null, switches = null, adopted = null, bank = false, app = null) {
+  // `shards` is the ci_shards value a turn-on answer records ({ answer, offered_at }), or null, and
+  // `app` the bank's governance App answer ('setup' or 'keep'), or null outside the bank.
+  #publish(json, suppliedRun = null, switches = null, adopted = null, bank = false, shards = null, app = null) {
     const pending = this.#proposals.pending(this.#cwd, { sessionId: process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID,
       epoch: new gate.SessionEpochs({ registryOptions: this.#registryOptions }).get(process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID) });
     const run = suppliedRun || (pending?.kind === 'preparing' ? pending.run : null);
@@ -291,6 +293,7 @@ class ToolkitGovernanceCli {
     if (!adopted) try { binding = JSON.parse(fs.readFileSync(path.join(this.#cwd, governance.BINDING_FILE), 'utf8')); } catch { /* prepare explains missing adoption */ }
     // setup governance asks the switch with yes; it joins the same proposal, never a local file.
     if (switches && binding && typeof binding === 'object') binding = { ...binding, task_prs: { ...(binding.task_prs || {}), ...switches } };
+    if (shards && binding && typeof binding === 'object') binding = { ...binding, ci_shards: shards };
     const result = this.#proposals.publish(this.#cwd, run, binding, adopted ? adopted.files : null);
     this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding, app)]);
     return 0;
@@ -382,8 +385,9 @@ class ToolkitGovernanceCli {
       try { found = this.#discovery().discover(this.#cwd); } catch { found = { status: 'unavailable', reason: 'the search failed' }; }
     }
     const adoption = found ? adopt.adoptionPlan(found) : null;
-    // The sharded CI offer, only where the merged binding turns governance on and has no final answer.
-    const offered = state.state === 'ENABLED' && merged && !['yes', 'never'].includes(merged.ci_shards?.answer);
+    // The sharded CI offer: where the merged binding turns governance on and has no final answer, and in
+    // a repository not on yet, where an answer joins the turn-on pull request.
+    const offered = state.state === 'ENABLED' ? Boolean(merged) && !['yes', 'never'].includes(merged.ci_shards?.answer) : Boolean(state.root);
     let estimate = null;
     if (offered) { try { estimate = this.#ciEstimator(state.root); } catch { estimate = null; } }
     const ciShards = offered ? { estimate: ciOffer.estimateText(estimate), measured: estimate } : null;
@@ -431,7 +435,9 @@ class ToolkitGovernanceCli {
   // One binding pull request for the owner's sharded CI answer, built from the exact merged text: it
   // sets ci_shards (answer, offered_at) and, for yes, adds a first shard list when the repository has
   // none. It waits while a pinned Toolkit copy here would read the key as invalid.
-  #prepareCiShards(root, answer) {
+  // `changes` are switch changes from the same answer ({ auto_merge, merge_train }), which join this
+  // one pull request, so the two never conflict.
+  #prepareCiShards(root, answer, changes = {}) {
     if (!this.#switchTransport) throw new GovernanceCliError('GitHub cannot be reached from here, so no pull request was prepared. Nothing was written.');
     const ready = this.#ciReaders(root);
     if (!ready.ok) throw new GovernanceCliError(`The parallel CI shards answer was not prepared: ${ready.reason}. Nothing was written.`);
@@ -441,7 +447,8 @@ class ToolkitGovernanceCli {
     try { parsed = JSON.parse(String(entry?.text).replace(/^\uFEFF/, '')); } catch { parsed = null; }
     if (!parsed || parsed.schema !== 'toolkit.programme-binding.v2' || parsed.governance !== 'enabled') throw new GovernanceCliError('The merged binding is not an enabled version 2 binding, so the answer cannot be recorded yet. Nothing was written.');
     const value = { answer, offered_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') };
-    const proposal = { ...parsed, ci_shards: value };
+    const switched = Object.keys(changes).length ? { ...parsed, task_prs: { ...(parsed.task_prs || {}), ...changes } } : parsed;
+    const proposal = { ...switched, ci_shards: value };
     if (governance.bindingProblems(proposal, identity).length) throw new GovernanceCliError('The changed binding would not be valid, so no pull request was prepared. Nothing was written.');
     const lines = [];
     let list = null;
@@ -455,7 +462,8 @@ class ToolkitGovernanceCli {
     }
     let prepared;
     try {
-      prepared = this.#switchTransport.publishCiShards(proposal.repository, entry.text, ciOffer.ciShardsText(entry.text, parsed, value), answer, list);
+      const base = Object.keys(changes).length ? switchText(entry.text, parsed, changes) : entry.text;
+      prepared = this.#switchTransport.publishCiShards(proposal.repository, entry.text, ciOffer.ciShardsText(base, switched, value), answer, list, changes);
     } catch (error) {
       throw new GovernanceCliError(error.code === 'SWITCH_BASE_CHANGED'
         ? `The binding on the default branch changed since this computer read it. Run ${CMD('status')}, then ask again. Nothing was written.`
@@ -496,12 +504,12 @@ class ToolkitGovernanceCli {
   #applyBank(state, task, chosen, found = null, permissions = { checked: false }, train = null) {
     let code = 0;
     let acted = false;
-    let switchPrepared = false;
     const switchTo = chosen.taskAutoMerge === 'on' ? 'after-gates' : chosen.taskAutoMerge === 'off' ? 'off' : null;
     const trainTo = chosen.mergeTrain === 'on' || chosen.mergeTrain === 'off' ? chosen.mergeTrain : null;
     // Turning governance on writes both switches as the bank showed them: a sub-option is off until
     // the owner turns it on, so an unanswered one is written off rather than left to its default.
     const enabling = { auto_merge: switchTo || 'off', merge_train: trainTo || 'off' };
+    let shardsDone = false;
     const app = chosen.governanceApp === 'setup' ? 'setup' : 'keep';
     let store = state.state === 'ENABLED' ? governance.mergedBinding(state.root, this.#registryOptions)?.store?.repository || null : null;
     if (chosen.governance === 'on' && state.state !== 'ENABLED') {
@@ -511,8 +519,11 @@ class ToolkitGovernanceCli {
       else if (!found && adopt.adoptionPrepared(state.root)) {
         try { store = JSON.parse(fs.readFileSync(path.join(state.root, governance.BINDING_FILE), 'utf8')).store?.repository || null; } catch { /* no --store */ }
       }
-      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, enabling, app)
-        : !found && adopt.adoptionPrepared(state.root) ? this.#preparedAndPropose(state, enabling, app) : this.#prepareDecision('yes', enabling, null, app);
+      // A shards yes or never joins the one turn-on pull request.
+      const shards = ['yes', 'never'].includes(chosen.ciShards) ? this.#turnOnShards(state.root, chosen.ciShards) : null;
+      shardsDone = Boolean(shards);
+      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, enabling, shards, app)
+        : !found && adopt.adoptionPrepared(state.root) ? this.#preparedAndPropose(state, enabling, shards, app) : this.#prepareDecision('yes', enabling, null, shards, app);
       acted = true;
     } else if (chosen.governance === 'off' && state.state !== 'DISABLED') {
       code = this.#prepareDecision('no', null);
@@ -521,7 +532,13 @@ class ToolkitGovernanceCli {
       const changes = {};
       if (switchTo && task && switchTo !== task.value) changes.auto_merge = switchTo;
       if (trainTo && train && trainTo !== train.value) changes.merge_train = trainTo;
-      if (Object.keys(changes).length) {
+      // A shards yes or never in the same answer joins the switch change: one binding pull request.
+      if (Object.keys(changes).length && ['yes', 'never'].includes(chosen.ciShards)) {
+        const { prepared, lines } = this.#prepareCiShards(state.root, chosen.ciShards, changes);
+        this.#print(false, {}, [`Prepared ${prepared.url}: it sets ${[...(changes.auto_merge ? [`task auto-merge ${changes.auto_merge === 'after-gates' ? 'on' : 'off'}`] : []), ...(changes.merge_train ? [`merge trains ${changes.merge_train}`] : [])].join(' and ')} and records parallel CI shards as ${chosen.ciShards === 'yes' ? 'yes' : 'never ask'} (ci_shards) in the binding. It applies only after you merge it.`, ...lines, governance.taskSwitchVersionLine()]);
+        acted = true;
+        shardsDone = true;
+      } else if (Object.keys(changes).length) {
         const prepared = this.#prepareSwitch(state.root, changes);
         const said = [
           ...(changes.auto_merge ? [`task auto-merge ${changes.auto_merge === 'after-gates' ? 'on' : 'off'}`] : []),
@@ -529,15 +546,12 @@ class ToolkitGovernanceCli {
         ];
         this.#print(false, {}, [`Prepared ${prepared.url}: it sets ${said.join(' and ')} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine()]);
         acted = true;
-        switchPrepared = true;
       }
     }
-    // Parallel CI shards: yes or never is its own binding pull request; not now writes nothing and the
-    // question comes back at the next refresh.
-    // Both pull requests would change the same binding, so the second would conflict once the first
-    // merges: the shards answer waits for the next refresh instead.
-    if (switchPrepared && ['yes', 'never'].includes(chosen.ciShards)) {
-      this.#print(false, {}, ['Parallel CI shards: held, because the switch pull request above changes the same binding file. Merge that one, then answer this question again at the next refresh. Nothing was written for it.']);
+    // Parallel CI shards on their own: yes or never is one binding pull request; not now writes nothing
+    // and the question comes back at the next refresh.
+    if (shardsDone) {
+      // Already in the pull request above.
     } else if (state.state === 'ENABLED' && chosen.governance !== 'off' && ['yes', 'never'].includes(chosen.ciShards)) {
       const { prepared, lines } = this.#prepareCiShards(state.root, chosen.ciShards);
       this.#print(false, {}, [`Prepared ${prepared.url}: it records parallel CI shards as ${chosen.ciShards === 'yes' ? 'yes' : 'never ask'} (ci_shards) in the binding. It applies only after you merge it.`, ...lines, governance.taskSwitchVersionLine()]);
@@ -566,9 +580,33 @@ class ToolkitGovernanceCli {
     return code;
   }
 
+  // The ci_shards value a turn-on answer records, or null when it is held. For yes it adds a first shard
+  // list to the working tree where there is none, so the list and the shard workflows rendered from it
+  // travel in the same turn-on pull request (as the plain-text check files do).
+  #turnOnShards(root, answer) {
+    const ready = this.#ciReaders(root);
+    if (!ready.ok) {
+      this.#print(false, {}, [`Parallel CI shards: held, because ${ready.reason}. Nothing was written for them; answer them again at the next refresh.`]);
+      return null;
+    }
+    const lines = [];
+    const manifest = path.join(root, ...governedShards.MANIFEST_REL.split('/'));
+    if (answer === 'yes' && fs.existsSync(manifest)) lines.push(`Parallel CI shards: ${governedShards.MANIFEST_REL} is already here, so the turn-on pull request carries it.`);
+    else if (answer === 'yes') {
+      const first = ciOffer.firstList(root, this.#lastCiEstimate);
+      if (first.ok) {
+        fs.mkdirSync(path.dirname(manifest), { recursive: true });
+        fs.writeFileSync(manifest, first.text);
+        lines.push(`Parallel CI shards: a first ${governedShards.MANIFEST_REL} with ${first.shards} Linux shards running node --test was added to the working tree and travels in the turn-on pull request with the shard workflows; Shard Timings rebalances them from measured times.`);
+      } else lines.push(`Parallel CI shards: yes is recorded, but no shard list was added: ${first.reason}. The shard workflows are copied only once a usable ${governedShards.MANIFEST_REL} is merged, and only Node tests are supported for now.`);
+    } else lines.push('Parallel CI shards: never ask is recorded in the turn-on pull request.');
+    this.#print(false, {}, lines);
+    return { answer, offered_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') };
+  }
+
   // A fresh repository: make the store and parent issue that are missing, render the governed rules,
   // then the one turn-on pull request (toolkit-governance-adopt.cjs).
-  #adoptAndPropose(state, plan, switches, app = null) {
+  #adoptAndPropose(state, plan, switches, shards = null, app = null) {
     if (!this.#adoptionWriter) {
       this.#print(false, {}, ['GitHub cannot be written from here, so nothing was made. Run toolkit governance again where gh is signed in.']);
       return 2;
@@ -586,12 +624,12 @@ class ToolkitGovernanceCli {
     const lines = [...adopted.lines];
     if (adopted.made.length) lines.push(`Made on GitHub: ${adopted.made.join(', ')}.`);
     if (lines.length) this.#print(false, {}, lines);
-    return this.#prepareDecision('yes', switches, adopted, app);
+    return this.#prepareDecision('yes', switches, adopted, shards, app);
   }
 
   // A repository prepared in the working tree: the same full rules set as a fresh one, then the one
   // turn-on pull request.
-  #preparedAndPropose(state, switches, app = null) {
+  #preparedAndPropose(state, switches, shards = null, app = null) {
     let ready;
     try {
       ready = adopt.prepared({ root: state.root, ...(this.#plainTextInstaller ? { plainText: () => this.#plainTextInstaller(state.root) } : {}) });
@@ -601,13 +639,13 @@ class ToolkitGovernanceCli {
       return 2;
     }
     if (ready.lines.length) this.#print(false, {}, ready.lines);
-    return this.#prepareDecision('yes', switches, ready, app);
+    return this.#prepareDecision('yes', switches, ready, shards, app);
   }
 
   // One governance decision pull request from the owner's bank answer (the ticket or the owner's own
   // terminal is the proof); it applies only after the owner merges it. `adopted` carries the binding
   // and rendered rules for a fresh repository.
-  #prepareDecision(answer, switches, adopted = null, app = null) {
+  #prepareDecision(answer, switches, adopted = null, shards = null, app = null) {
     const before = this.#state();
     if (before.merged?.fresh && (before.rule === 'M1' && answer === 'yes' || before.rule === 'M2' && answer === 'no')) {
       this.#print(false, {}, ['Already ' + before.state.toLowerCase() + ' on the default branch. Nothing was written.']);
@@ -615,7 +653,7 @@ class ToolkitGovernanceCli {
     }
     const sessionId = 'bank-' + crypto.randomBytes(16).toString('hex'), epoch = crypto.randomBytes(16).toString('hex');
     const request = this.#proposals.request(this.#cwd, answer, { sessionId, epoch });
-    try { return this.#publish(false, request.run, switches, adopted, true, app); }
+    try { return this.#publish(false, request.run, switches, adopted, true, shards, app); }
     catch (error) {
       this.#print(false, {}, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
         PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);
