@@ -588,3 +588,26 @@ test('links GitHub will not page past (no cursor) still leave the task incomplet
   assert.equal(plan.observed.prGraph.discovery.get(2).complete, false);
   assert.equal(plan.complete, false);
 });
+
+test('a stop for the whole pass raised while reading a later page of links stops the pass; any other failure leaves only that task incomplete', () => {
+  for (const code of ['PASS_STOPPED', 'GH_AUTH', 'OTHER']) {
+    const f = fixture([2, 3]); f.run();
+    f.github.issuePrLinks.set(2, { timeline: crossRefs(150, []) });
+    const request = f.github.request.bind(f.github);
+    f.github.request = (method, requestPath, body) => {
+      if (requestPath === 'graphql' && /more: issue/.test(body?.query || '')) throw new state.ProgrammeError(code, `${code} on a later page`);
+      return request(method, requestPath, body);
+    };
+    if (code === 'OTHER') {
+      const plan = f.pass().plan();
+      assert.equal(plan.observed.prGraph.discovery.get(2).complete, false);
+      assert.equal(plan.complete, false);
+    } else if (code === 'PASS_STOPPED') {
+      const plan = f.pass().plan();
+      assert.equal(plan.stopped, true, 'the pass stops, not just the task');
+      assert.deepEqual(plan.holds.map(hold => hold.code), ['PASS_STOPPED']);
+    } else {
+      assert.throws(() => f.pass().plan(), error => error.code === code, code);
+    }
+  }
+});
