@@ -4,7 +4,7 @@ description: "Use when running as a Claude Projects coordinator and the user app
 ---
 
 # Web Controller for Claude Projects
-Version: 2026-11-15.7
+Version: 2026-11-15.8
 
 Run Toolkit repos through Claude Projects. Global rules and coding gates apply everywhere; GitHub governance (issues, records, decision traces, evidence custody) only to ENABLED github.com repos. Keep project facts in project memory; durable work state in the branch, PR and programme comments or evidence store, mirrored in memory, never only there.
 
@@ -125,7 +125,7 @@ Whenever the user asks for anything recurring (the daily check-in, a sweep, a re
 - **Moving a task or catching up:** a move to a time already passed today skips today's run unless it already ran today, so catch it up the same turn by messaging its home thread to run its prompt; never fire_trigger a bound task from another thread (it runs with no project tools, files or memory). Never catch up a task whose entry says `stopped by owner`. Details in `reference/recurring-tasks.md`.
 - On every coordinator turn, check that each recurring task is still armed with a future next run; re-arm a missed one before ending the turn, unless its entry says `stopped by owner`.
 - The check-in and nudge load their instructions from `main` each run, so a skill update needs no swap. Swap only on TASKS OUTDATED, in place, never one marked `stopped by owner`.
-- **Every task run reaches the project chat.** Skip tasks marked `stopped by owner`; relay and finish pending runs using `.relayed` and `.done` (**Task run relay** in `reference/recurring-tasks.md`); a prefixed line is work, never `no_reply_needed`. A run outranks all in-flight work but answering the owner (**Task runs come first**).
+- **Every task run reaches the project chat.** Skip tasks marked `stopped by owner`; relay and finish pending runs using `.relayed` and `.done` (**Task run relay** in `reference/recurring-tasks.md`); a prefixed line is work, never `no_reply_needed`. Without repo access, hand the run's GitHub steps to a thread with the repos; `.done` waits for its report. A run outranks all in-flight work but answering the owner (**Task runs come first**).
 
 
 ## Daily check-in
