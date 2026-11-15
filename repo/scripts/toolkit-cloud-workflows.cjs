@@ -83,6 +83,14 @@ function sourceRoot({ home = os.homedir(), self = TOOLKIT_ROOT } = {}) {
   return self;
 }
 
+// The installer to render with for a source checkout: its own copy of this file, so the render logic
+// always matches the commit the copies are pinned to (this file for this checkout).
+// A source without its own installer file renders with this one.
+function installerAt(source) {
+  const file = source ? path.join(path.resolve(source), 'repo', 'scripts', 'toolkit-cloud-workflows.cjs') : null;
+  return file && path.resolve(source) !== TOOLKIT_ROOT && fs.existsSync(file) ? require(file) : module.exports;
+}
+
 // The Toolkit commit to pin: this checkout's HEAD, which must already be on origin/main, so a
 // governed repository's runner can fetch it from the public repository.
 function toolkitHead(root = TOOLKIT_ROOT) {
@@ -391,4 +399,4 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ sourceRoot, TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, copyCandidates, copyIdAt, markedCopies, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
+module.exports = Object.freeze({ installerAt, sourceRoot, TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, copyCandidates, copyIdAt, markedCopies, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });

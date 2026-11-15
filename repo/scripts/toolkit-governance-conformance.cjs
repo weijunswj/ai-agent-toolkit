@@ -325,7 +325,10 @@ function leftoverBlockFindings(repoRoot, toolkitRoot) {
 // shard list is only noted, since every rules refresh updates it. The Toolkit's own checkout runs its
 // own files and is skipped.
 function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
-  const workflows = require('./toolkit-cloud-workflows.cjs');
+  // From a plugin copy (no git) the check renders from the managed Toolkit checkout, with its own
+  // installer, as the turn-on and the rules refresh do.
+  if (!options.toolkitRoot) toolkitRoot = require('./toolkit-cloud-workflows.cjs').sourceRoot({ self: toolkitRoot });
+  const workflows = require('./toolkit-cloud-workflows.cjs').installerAt(toolkitRoot);
   if (workflows.isToolkitCheckout(state.root)) return [];
   let result;
   let merged = null;

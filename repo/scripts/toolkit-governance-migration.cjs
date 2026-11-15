@@ -103,6 +103,34 @@ class GovernanceMaintenance {
     return [...rulesets, ...protections, ...securities].some(entry => ['failed', 'unverified'].includes(entry.result)) ? 2 : 0;
   }
 
+  // The post-merge finish of a bank turn-on (toolkit-governance-finish.cjs): the same rulesets,
+  // default-branch protection and free security settings, for one freshly merged enabled repository,
+  // without asking again, because the owner's yes in the governance bank covers them and the bank
+  // listed them. Nothing that needs billing is turned on. { result: 'not-ready' | 'done' | 'failed' }.
+  async finish(root) {
+    const state = governance.governanceState(root, this.#registryOptions);
+    const slug = slugFor(root);
+    if (state.state !== 'ENABLED' || state.programme_records_bind !== true || !slug) return { result: 'not-ready' };
+    const rows = [{ root: path.resolve(root), state, slug }];
+    const ask = this.#ask;
+    this.#ask = async () => 'yes';
+    try {
+      const rulesets = [...await this.#offerRulesets(rows), ...await this.#offerStateRulesets(rows)];
+      const protections = await this.#offerProtection(rows);
+      const securities = await this.#applySecurity(rows);
+      if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
+      // Done only when GitHub reads back every setting (or says this plan cannot enforce it). A setting
+      // that could not be read, or that Toolkit cannot add here, keeps the finish pending.
+      const missing = [];
+      if ([...rulesets, ...protections, ...securities].some(entry => ['failed', 'unverified'].includes(entry.result))) missing.push('a GitHub write did not read back');
+      if (!['present', 'not-enforceable'].includes(ruleset.noForcePushRuleset(rows[0].root, this.#rulesetReader ? { reader: this.#rulesetReader } : {}).status)) missing.push('the no-force-push ruleset is not read back');
+      const guarded = this.#protectionFor(rows[0]);
+      if (!guarded || !['conformant', 'not-enforceable'].includes(guarded.result.status)) missing.push('default-branch protection is not read back as set');
+      if (this.#securityFor(rows[0]).status === 'unverified') missing.push('the security settings could not be read back');
+      return missing.length ? { result: 'failed', reason: missing.join('; ') } : { result: 'done' };
+    } finally { this.#ask = ask; }
+  }
+
   async #offerRulesets(rows) {
     const enabled = rows.filter(row => row.state.state === 'ENABLED');
     const missing = [];

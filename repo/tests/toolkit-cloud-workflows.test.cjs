@@ -335,3 +335,16 @@ test('cloud workflows: the copy step reads the merged binding again before it us
   workflows.main(['--repo', repo, '--check'], { out, err, root: ROOT, commit: COMMIT, ciShards: 'yes', refresh: target => refreshed.push(target) });
   assert.equal(refreshed.length, 1, 'an answer given by the caller needs no read');
 });
+
+test('cloud workflows: from a plugin copy the turn-on renders with the managed checkout\'s own installer, so render and pin always match', t => {
+  const managed = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-workflows-managed-'));
+  t.after(() => fs.rmSync(managed, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(managed, 'repo', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(managed, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'), `'use strict';
+class InstallError extends Error {}
+module.exports = { InstallError, isToolkitCheckout: () => false, plan: ({ ciShards }) => ({ rows: [{ file: '.github/workflows/managed.yml', state: 'missing', expected: 'managed render ' + ciShards + '\\n' }] }) };
+`);
+  const { cloudWorkflowFiles } = require(path.join(ROOT, 'repo/scripts/toolkit-governance-proposal.cjs'));
+  const repo = tempRepo(t);
+  assert.deepEqual(cloudWorkflowFiles(repo, { source: managed, ciShards: 'yes' }), { files: { '.github/workflows/managed.yml': 'managed render yes\n' }, warning: null });
+});

@@ -347,7 +347,15 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   // The bank writes both switches off with the turn-on, as it showed them.
   assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), { ...binding, task_prs: { auto_merge: 'off', merge_train: 'off' } });
   assert.equal(published.files['AGENTS.md'], rules.toString().replace(/\r\n/g, '\n'));
-  assert.match(stdout.join(''), /Before pulling after merge.*untracked files/);
+  // The fixed summary: what merging does, what the pull request holds and what finishes after the merge,
+  // then one closing line after the owner's commands.
+  const said = stdout.join('');
+  assert.match(said, /prepared the governance turn-on pull request: https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\./);
+  assert.match(said, /It holds: \.github\/toolkit-programme\.json, .*AGENTS\.md/);
+  assert.match(said, /the next session here finishes on its own: default-branch protection/);
+  assert.match(said, /before pulling, compare any prepared untracked files/);
+  assert.match(said, /Run the command above, then merge https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\. Nothing else is needed from you\.\n*$/);
+  assert.match(said, /already holds these answers/, 'the same answers again leave the open pull request as it is');
   // The bank's App row recommends Set up, so the owner gets the App setup command instead of the by-hand steps.
   assert.match(stdout.join(''), /^node "[^"]+toolkit-governance-app-setup\.cjs" --repo \S+\/\S+ --store \S+$/m);
   assert.doesNotMatch(stdout.join(''), /github\.com\/settings\/apps\/new\?/);
@@ -358,7 +366,44 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   assert.equal(other.pending(f.cwd).kind, 'published', 'another computer discovers the complete adoption');
   recordMerged(f.cwd, { registryPath: f.registryPath });
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'ENABLED');
-  assert.match(gate.sessionLine(f.cwd, options), /ENABLED for this repository[\s\S]*# Toolkit-Governed Repository Rules/);
+  const started = [];
+  const line = gate.sessionLine(f.cwd, { ...options, programmeDeps: { startFinish: root => started.push(root) } });
+  assert.match(line, /ENABLED for this repository[\s\S]*# Toolkit-Governed Repository Rules/);
+  // The bank's turn-on was noted as finish pending, so the first session after the merge starts the
+  // remaining GitHub settings in the background, once, and says so.
+  assert.match(line, /the governance turn-on is merged, so Toolkit is finishing its setup in the background: default-branch protection/);
+  assert.equal(started.length, 1);
+  assert.doesNotMatch(gate.sessionLine(f.cwd, { ...options, programmeDeps: { startFinish: root => started.push(root) } }), /finishing its setup/, 'not started again while it runs');
+  assert.equal(started.length, 1);
+});
+
+test('a re-run with new answers while the turn-on pull request is open updates that pull request, and never a branch someone changed', async t => {
+  const f = fixture(t), github = fakeGitHub(f);
+  prepareAdoption(f);
+  require('node:child_process').execFileSync('git', ['init', '--quiet', f.cwd], { stdio: 'ignore', windowsHide: true });
+  const stdout = [], answers = [];
+  const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
+  const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: {}, warning: null }),
+    stdout: { write: text => stdout.push(text) }, stderr: { write: text => stdout.push(text) },
+    discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true, ask: async () => answers.shift() ?? '',
+    refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
+    permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });
+  answers.push('all recommended');
+  assert.equal(await cli.main(['setup']), 0, stdout.join(''));
+  assert.equal(JSON.parse(github.read().files[governance.BINDING_FILE]).task_prs.auto_merge, 'off');
+  answers.push('1.2=B');
+  assert.equal(await cli.main(['setup']), 0, stdout.join(''));
+  const published = github.read();
+  assert.equal(published.calls.filter(call => call.args[1].endsWith('/pulls') && call.input).length, 1, 'still one pull request');
+  assert.equal(published.commits, 2, 'the new answer is one more commit on the same branch');
+  assert.equal(JSON.parse(published.files[governance.BINDING_FILE]).task_prs.auto_merge, 'after-gates', 'the open pull request carries the new answer');
+  assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
+  assert.match(stdout.join(''), /updated the open governance turn-on pull request with these answers: https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\./);
+  // A branch that also holds a file Toolkit did not put there is not ours to change.
+  fs.writeFileSync(path.join(f.root, 'github.json'), JSON.stringify({ ...published, foreign: 'product.txt' }));
+  answers.push('1.2=A');
+  assert.equal(await cli.main(['setup']), 2);
+  assert.equal(github.read().commits, 2, 'nothing was pushed to a changed branch');
 });
 
 for (const permission of ['write', 'read-only', 'unavailable']) test(`startup permission ${permission}: only a verified writer is asked for a decision`, t => {
