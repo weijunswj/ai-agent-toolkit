@@ -464,7 +464,7 @@
     {
       "file": "repo/controller/evidence-and-finish.md",
       "rule": "**Merge trains:**",
-      "covers": "The merge-train script refuses a train that holds anything but member merges at their reviewed heads, clean main catch-up merges and one reproducible bump, and its land check refuses a moved main, a moved member head or a RISKY member with no owner OK. Its eject command takes a boarded member off a pushed train with recorded reverts only, which verify accepts exactly, and land refuses while an ejected pull request still points into the train. Choosing which PRs ride together and running the merge stay instruction-only.",
+      "covers": "The merge-train script refuses a train that holds anything but member merges at their reviewed heads, clean main catch-up merges and one reproducible bump, and its land check refuses a moved main, a moved member head or a RISKY member with no owner OK. Its eject command takes a boarded member off a pushed train with recorded reverts only, which verify accepts exactly, and land refuses while an ejected pull request still points into the train. Verify, catchup and eject also refuse a train whose tree differs from a fresh build of its members on main, so no train merged onto the main land checked undoes merged work; governance's up-to-date check (P6) makes GitHub refuse a merge onto any other main. Choosing which PRs ride together and running the merge stay instruction-only.",
       "enforced_by": [
         {
           "kind": "script",
@@ -475,6 +475,21 @@
           "kind": "script",
           "path": "repo/scripts/toolkit-merge-train.cjs",
           "test": "repo/tests/toolkit-merge-train-eject.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train.cjs",
+          "test": "repo/tests/toolkit-merge-train-eject-rejoin.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train.cjs",
+          "test": "repo/tests/toolkit-merge-train-closure.test.cjs"
+        },
+        {
+          "kind": "script",
+          "path": "repo/scripts/toolkit-merge-train.cjs",
+          "test": "repo/tests/toolkit-merge-train-closure-late.test.cjs"
         }
       ]
     },
