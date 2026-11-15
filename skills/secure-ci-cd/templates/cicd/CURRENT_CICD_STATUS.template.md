@@ -42,7 +42,7 @@ List secret names only. Do not include values.
 ## Deployment And AI Observability
 
 - Baseline: privacy-safe and metadata-only
-- Daily status rollup: PASS/WARN/FAIL pending setup
+- Daily status rollup: PASS/WARN/FAIL pending setup; reader: owner, channel: pending setup, FAIL or a WARN three days running acted on the same day
 - Deployment event allowlist: CI result, deployment readiness, smoke test result, rollback readiness, manual approval state
 - AI attempt ledger: timestamp, module name, request id, provider/model identifier, status, latency, retry count, safe token or byte counts, output-shape validation result
 - AI failure taxonomy: blocked input, provider unavailable, timeout, rate limit, malformed output, validation failed, stale write skipped, user approval required

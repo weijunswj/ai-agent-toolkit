@@ -30,7 +30,7 @@ Works for any git host, local git repositories and plain folders.
 3. `CLAUDE.md` is current when it has the line `@AGENTS.md` on its own and no old Toolkit `CLAUDE.SHIM` block. Note any leftovers (above).
 4. If every expected file is current and the user did not ask to install, check, repair, refresh or bootstrap, stop here without reading templates or rewriting anything, and continue the original task.
 
-Native Toolkit startup hooks run a passive preflight: they compare only the managed blocks a repository still carries with the bundled templates (and `CLAUDE.md` by its `@AGENTS.md` line) and, where governance is ENABLED, the vendored Toolkit checks under `.github/scripts/` with the running Toolkit's sources, never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks.
+Native Toolkit startup hooks run a passive preflight: they compare only the managed blocks a repository still carries with the bundled templates (and `CLAUDE.md` by its `@AGENTS.md` line) and, where governance is ENABLED, the vendored Toolkit checks under `.github/scripts/` with the running Toolkit's sources, never write, back up or read unrelated content, stay silent outside Toolkit-managed git roots, and print at most one neutral note per finding. The note never pauses the current task; run this skill only when the user asks, except where governance is ENABLED, where the controller opens a pull request refreshing the noted files the same turn it sees the note (a leftover still waits for the owner's Clean up answer).
 
 ## Markers
 
