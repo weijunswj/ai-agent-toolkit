@@ -74,6 +74,10 @@
 // reached main by another route (the member landing alone, a pull request built on it, an identical
 // change) would be deleted on landing; the check compares results, so no route needs listing. A
 // difference, or a member that does not merge cleanly onto main, refuses: rebuild the train on main.
+// The guarantee is for a merge onto the main it checked: land requires that main inside the train,
+// and governance's up-to-date check (P6, toolkit-governance-protection.cjs) makes GitHub refuse the
+// merge once main has moved, since a commit the train holds reaching main moves the merge base and
+// lets an eject revert delete it.
 // It also lists every file two or more members change ("overlap") and the review the train needs:
 // none when there is no overlap, else a delta review of the shared files.
 // Trains run only where governance is ENABLED and the merged binding's merge train switch

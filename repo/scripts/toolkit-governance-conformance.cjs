@@ -231,6 +231,7 @@ const PROTECTION_FINDINGS = Object.freeze({
   P3: ['PROTECTION_PRODUCER', 'Exactly one workflow job must produce each required check'],
   P4: ['PROTECTION_MASKING', 'A required check must run on every pull request and must not pass while a job it waits for failed'],
   P5: ['PROTECTION_MERGE_METHODS', 'The default branch must allow merge commits only'],
+  P6: ['PROTECTION_UP_TO_DATE', 'The default branch must require branches to be up to date before merging'],
 });
 
 function protectionFindings(result) {
@@ -243,12 +244,12 @@ function protectionFindings(result) {
     const check = result.checks[id];
     if (!check || check.status === 'ok') continue;
     if (check.status === 'drift') {
-      const fix = ['P1', 'P2', 'P5'].includes(id) ? ' The one-time migration offers a Toolkit ruleset for this, with your approval; a rule in another ruleset is changed by hand.' : ' Fix the workflow through a pull request.';
+      const fix = protection.SETTINGS_CHECKS.includes(id) ? ' The one-time migration offers a Toolkit ruleset for this, with your approval; a rule in another ruleset is changed by hand.' : ' Fix the workflow through a pull request.';
       out.push(finding(code, 'drift', `${rule}: ${check.details.join('; ')}.${fix}`));
     } else if (check.status === 'not-checked') {
       out.push(finding(`${code}_NOT_CHECKED`, 'unverified', `${rule}: not checked (offline).`));
     } else if (check.status === 'unverified') {
-      out.push(finding(`${code}_UNVERIFIED`, 'unverified', `${rule}: could not be confirmed (${check.details.join('; ')}).${['P1', 'P2', 'P5'].includes(id) ? ' Sign in with `gh auth login` as a repository admin and run the check again.' : ''}`));
+      out.push(finding(`${code}_UNVERIFIED`, 'unverified', `${rule}: could not be confirmed (${check.details.join('; ')}).${protection.SETTINGS_CHECKS.includes(id) ? ' Sign in with `gh auth login` as a repository admin and run the check again.' : ''}`));
     }
   }
   return out;

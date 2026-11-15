@@ -19,6 +19,7 @@ const { ToolkitGovernanceCli } = require(path.join(scripts, 'toolkit-governance.
 const finishing = require(path.join(scripts, 'toolkit-governance-finish.cjs'));
 const governance = require(path.join(scripts, 'toolkit-governance-state.cjs'));
 const ruleset = require(path.join(scripts, 'toolkit-governance-ruleset.cjs'));
+const protection = require(path.join(scripts, 'toolkit-governance-protection.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 
 function governedRepo(t, { merged = true, requiredChecks = ['validate'], workflow = false } = {}) {
@@ -260,7 +261,7 @@ test('dependency auto-merge waiting on protection held for a by-hand fix is held
   const state = governance.governanceState(ctx.repo, ctx.registryOptions);
   finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
   const protectedRead = () => ({ ok: true, default_branch: 'main', repository: { allow_merge_commit: true, allow_squash_merge: false, allow_rebase_merge: false }, classic: null, toolkit_ruleset: null,
-    rules: [{ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge'] } }, { type: 'required_status_checks', ruleset_id: 7, parameters: { required_status_checks: [{ context: 'validate', integration_id: 15368 }] } }] });
+    rules: [{ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge'] } }, { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'validate', integration_id: 15368 }] } }] });
   const run = cli(ctx, [], [], { protectionReader: protectedRead, securityReader: () => ({ ...publicSecurity(ctx)(), allow_auto_merge: true }) });
   const code = await run.run();
   const line = finishing.entryFor(ctx.registryOptions, state.repository_id).line;
@@ -306,7 +307,7 @@ test('dependency auto-merge is held behind protection only when its policy and a
   recordMerged(ctx.repo, { registryPath: ctx.registryOptions.registryPath });
   const state = governance.governanceState(ctx.repo, ctx.registryOptions);
   const protectedRead = () => ({ ok: true, default_branch: 'main', repository: { allow_merge_commit: true, allow_squash_merge: false, allow_rebase_merge: false }, classic: null, toolkit_ruleset: null,
-    rules: [{ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge'] } }, { type: 'required_status_checks', ruleset_id: 7, parameters: { required_status_checks: [{ context: 'validate', integration_id: 15368 }] } }] });
+    rules: [{ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge'] } }, { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'validate', integration_id: 15368 }] } }] });
   for (const [label, extra] of [['allow auto-merge unreadable', { allow_auto_merge: 'unreadable' }], ['binding unreadable, so the policy is unknown', { allow_auto_merge: true, binding: { status: 'unreadable' } }]]) {
     finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
     assert.equal(await cli(ctx, [], [], { protectionReader: protectedRead, securityReader: () => ({ ...publicSecurity(ctx)(), ...extra }) }).run(), 2, label);
@@ -327,4 +328,23 @@ test('a write GitHub refuses for this account (forbidden) is held with the admin
   assert.equal(entry.status, 'done');
   assert.match(entry.line, /Waiting for you, the no-force-push ruleset: GitHub refused the write for the account Toolkit used \(forbidden\): run `node ".*toolkit-governance\.cjs" migrate` in your own terminal from an account with admin rights on the repository\./);
   assert.match(entry.line, /Waiting for you, default-branch protection: GitHub refused the write for the account Toolkit used \(forbidden\)/);
+});
+
+test('a default branch that merges heads without its latest commit gets the Toolkit ruleset, which requires them up to date', async t => {
+  const ctx = governedRepo(t, { workflow: true }), created = [], rulesets = [], wrote = [];
+  const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+  // Another ruleset already requires the check, pinned, with merge commits only, but not up to date.
+  const rules = [
+    { type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge'] } },
+    { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: false, required_status_checks: [{ context: 'validate', integration_id: 15368 }] } },
+  ];
+  let own = null;
+  const protectionReader = () => ({ ok: true, default_branch: 'main', repository: { allow_merge_commit: true, allow_squash_merge: false, allow_rebase_merge: false }, classic: null, toolkit_ruleset: own,
+    rules: own ? [...rules, ...protection.protectionRulesetBody(['validate']).rules.map(rule => ({ ...rule, ruleset_id: own.id }))] : rules });
+  const protectionWriter = (...args) => { wrote.push(args); own = { id: 9 }; return { ok: true, id: 9 }; };
+  const run = cli(ctx, rulesets, created, { protectionReader, protectionWriter, securityReader: publicSecurity(ctx) });
+  assert.equal(await run.run(), 0, run.out.join(''));
+  assert.deepEqual(wrote.map(args => args.slice(0, 2)), [['example-owner/example-repo', ['validate']]]);
+  assert.match(finishing.entryFor(ctx.registryOptions, state.repository_id).line, /On and read back: .*default-branch protection/);
 });
