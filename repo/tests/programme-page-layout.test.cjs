@@ -325,7 +325,7 @@ test('M1: a refused parent size does not block another page redraw', () => {
   assert.ok(report.holds.some(hold => hold.code === 'BODY_TOO_LARGE' && hold.target === '#12'));
   assert.equal(f.page(), hand);
   assert.equal(f.posts().length + f.edits().length, 0);
-  assert.match(state.findStateBlock(f.github.issues.get(100).body).block.body, /Status: IN PROGRESS; class: NOW; lane: G1/);
+  assert.match(state.findStateBlock(f.github.issues.get(100).body).block.body, /^IN PROGRESS · Gate: G1\b/m);
   assert.equal(f.store.read('child', 100).doc.lifecycle, 'ACTIVE');
 });
 
