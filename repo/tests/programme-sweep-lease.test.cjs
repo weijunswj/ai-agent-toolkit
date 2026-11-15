@@ -495,6 +495,49 @@ test('lease: a pass killed after its state commit is reported at phase state wit
   assert.equal(f.lifecycle(500), 'DONE', 'the committed state is kept');
 });
 
+// A pass cut in planning commits only its stop. When that commit loses the race for the state branch,
+// nothing is saved: the pass reports noWrite, the lease keeps the stop and the changed-since bookmark
+// for the next pass, and the sweep action never counts the pass as refreshed.
+test('batch: a planning stop whose commit finds the state branch busy saves nothing and says so', t => {
+  const f = fixture(t);
+  f.run({ cloud: true });
+  f.advance(HOUR);
+  const before = f.record().changed_since;
+  f.close(500);
+  // Each request takes a second, so a short budget runs out during planning.
+  let spent = 0;
+  f.github.intercept(call => {
+    spent += 1000;
+    return call.method === 'PATCH' && call.path.includes('/git/refs/heads/') ? { status: 422, json: { message: 'Reference moved' } } : undefined;
+  });
+  const result = f.run({ cloud: true, refreshBudgetMs: 5000, passClock: () => f.now() + spent });
+  f.github.hooks = [];
+  assert.equal(result.code, 1);
+  assert.ok(result.report.holds.some(hold => hold.code === 'PASS_STOPPED'), JSON.stringify(result.report.holds));
+  assert.equal(result.report.findings[0]?.diagnostics?.phase, 'planning', 'the pass was cut in planning');
+  assert.equal(result.report.writes.state, 0);
+  assert.equal(result.report.sweep.noWrite, true, JSON.stringify(result.report.sweep));
+  assert.equal(result.report.sweep.reason, 'state branch busy');
+  assert.equal(f.record().unreported?.phase, 'planning', 'the stop the state could not hold waits in the lease');
+  assert.equal(f.record().changed_since, before, 'the bookmark does not move past changes nobody saved');
+  assert.equal(f.stops().length, 0, 'nothing reached the state');
+  const action = require(path.join(ROOT, 'repo/scripts/toolkit-programme-sweep-action.cjs'));
+  const outputs = [], tags = [];
+  const runner = new action.ProgrammeSweepAction({
+    env: { GITHUB_REPOSITORY: 'example.test/app', STORE_REPOSITORY: 'example.test/store', APP_CLIENT_ID_SET: 'true', MINT_OUTCOME: 'success/success',
+      GOVERNED_TOKEN: 'example-governed', STORE_TOKEN: 'example-store', SWEEP_LOGIN: 'example[bot]' },
+    root: ROOT, refresh: () => ({ status: result.code, code: null, report: result.report }), notice: () => {}, failure: message => assert.fail(message),
+    output: (name, value) => outputs.push([name, value]), summary: () => {}, warning: (message, tag) => tags.push(tag || null) });
+  assert.equal(runner.run(), 0);
+  assert.equal(outputs.some(([name]) => name === 'refreshed'), false, 'not refreshed');
+  assert.equal(action.wroteNothing(result.report), true, 'the action reads it as a pass that saved nothing');
+  assert.deepEqual(tags, [{ title: action.HELD_TITLE, code: 'PASS_STOPPED' }]);
+  // The next pass, with the state branch free, records the stop the lease kept.
+  f.advance(HOUR);
+  assert.equal(f.run().code, 0);
+  assert.equal(f.stop()?.diagnostics.phase, 'planning', 'the kept stop is reported once the state can hold it');
+});
+
 test('batch: STATE_BRANCH_BUSY after three', t => {
   const f = fixture(t);
   f.run();
