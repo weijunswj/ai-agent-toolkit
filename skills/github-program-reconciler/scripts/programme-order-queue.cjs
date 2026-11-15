@@ -63,9 +63,21 @@ class OrderQueue {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  readText(file) {
-    const response = this.transport.request('GET', `${this.contents(file)}?ref=${encodeURIComponent(this.store.store.branch)}`);
-    if (response.status !== 200) throw new state.ProgrammeError('GH_FAILED', `Reading ${file} failed (${response.status}).`);
+  // The last commit that changed a pending file: the commit that queued it. The same bytes queued
+  // again come with a new commit; a file a run could not remove keeps its commit.
+  queuedBy(entry) {
+    const response = this.transport.request('GET', `repos/${this.store.store.repository}/commits?path=${encodeURIComponent(entry.path)}&sha=${encodeURIComponent(this.store.store.branch)}&per_page=1`);
+    const sha = response.status === 200 && Array.isArray(response.json) ? response.json[0]?.sha : null;
+    if (typeof sha !== 'string' || !/^[0-9a-f]{40}$/.test(sha)) throw new state.ProgrammeError('GH_FAILED', `Reading the history of ${entry.path} failed (${response.status}).`);
+    return sha;
+  }
+
+  // The pending file as listed, read at the commit that queued it. A file changed since it was listed
+  // waits for the next listing, so the order that runs is always the one its result names.
+  readText(entry) {
+    const response = this.transport.request('GET', `${this.contents(entry.path)}?ref=${encodeURIComponent(entry.commit)}`);
+    if (response.status !== 200) throw new state.ProgrammeError('GH_FAILED', `Reading ${entry.path} failed (${response.status}).`);
+    if (response.json?.sha !== entry.sha) throw new state.ProgrammeError('STATE_CONFLICT', `${entry.path} changed after it was listed; the next run reads it again.`);
     if (response.json?.encoding !== 'base64') return null;
     const bytes = Buffer.from(response.json.content, 'base64');
     return bytes.length > MAX_ORDER_BYTES ? null : bytes.toString('utf8').replace(/^﻿/, '');
@@ -93,6 +105,25 @@ class OrderQueue {
     }
   }
 
+  // The result an earlier run filed for this very pending file, or null. A run that filed its result
+  // but failed to take the order off the queue leaves both; the next run only finishes the removal, so
+  // an order is never run again, filed twice (DONE and REFUSED) or stripped of its receipts. A result
+  // matches only by the commit that queued the pending file: an order queued again, even with the same
+  // bytes, has a new commit and runs, and a result filed before results kept the commit never matches.
+  filed(entry) {
+    for (const folder of ['done', 'refused']) {
+      const file = `${this.dir}${folder}/${entry.name}`;
+      const response = this.transport.request('GET', `${this.contents(file)}?ref=${encodeURIComponent(this.store.store.branch)}`);
+      if (response.status === 404) continue;
+      if (response.status !== 200) throw new state.ProgrammeError('GH_FAILED', `Reading ${file} failed (${response.status}).`);
+      let doc;
+      try { doc = JSON.parse(Buffer.from(response.json?.content || '', 'base64').toString('utf8')); } catch { continue; }
+      if (doc?.schema !== RESULT_SCHEMA) continue;
+      if (doc.queued_by === entry.commit) return doc;
+    }
+    return null;
+  }
+
   remove(entry) {
     const response = this.transport.request('DELETE', this.contents(entry.path), { message: `programme order: take ${entry.name} off the queue`, sha: entry.sha, branch: this.store.store.branch });
     if (response.status !== 200 && response.status !== 404) throw new state.ProgrammeError('GH_FAILED', `Removing ${entry.path} failed (${response.status}).`);
@@ -104,9 +135,15 @@ class OrderQueue {
     const named = parseName(entry.name);
     const mode = named?.dryRun ? 'dry-run' : 'apply';
     const base = { order_id: named?.id || entry.name, mode };
+    entry = { ...entry, commit: this.queuedBy(entry) };
+    const earlier = this.filed(entry);
+    if (earlier) {
+      this.remove(entry);
+      return { ...base, outcome: earlier.outcome, ...(earlier.code ? { code: earlier.code } : {}) };
+    }
     const refuse = (code, detail, report = null, order = null) => this.settle(entry, 'refused', { ...base, outcome: report ? 'STOPPED' : 'REFUSED', code, detail: String(detail).slice(0, 300), ...(report ? { digest: report.digest, results: report.results } : {}), order });
     if (!named) return refuse('ORDER_INVALID', 'The file name must be <order_id>.json or <order_id>.dry-run.json.');
-    const text = this.readText(entry.path);
+    const text = this.readText(entry);
     if (text === null) return refuse('ORDER_INVALID', `The order file must be UTF-8 JSON of at most ${MAX_ORDER_BYTES} bytes.`);
     let order;
     try { order = JSON.parse(text); } catch { return refuse('ORDER_INVALID', 'The order file is not valid JSON.'); }
@@ -130,7 +167,7 @@ class OrderQueue {
 
   settle(entry, folder, result) {
     const { order = null, ...summary } = result;
-    this.writeResult(folder, entry.name, { schema: RESULT_SCHEMA, ...summary, run: this.runId, finished_at: this.now(), order });
+    this.writeResult(folder, entry.name, { schema: RESULT_SCHEMA, ...summary, run: this.runId, finished_at: this.now(), queued_by: entry.commit, order });
     this.remove(entry);
     return { order_id: summary.order_id, mode: summary.mode, outcome: summary.outcome, ...(summary.code ? { code: summary.code } : {}) };
   }

@@ -66,7 +66,7 @@ function fixture({ migrate = true, childText = {} } = {}) {
   if (migrate) {
     const dry = fx.run(['migrate-state', '--dry-run'], { binding: withoutState });
     assert.equal(dry.error, null, dry.error?.message);
-    const applied = fx.run(['migrate-state', '--apply', '--plan-digest', dry.result.plan_digest, '--controller', '--session', controller.session], { binding: withoutState, ask: () => 'yes' });
+    const applied = fx.run(['migrate-state', '--apply', '--plan-digest', dry.result.plan_digest, '--controller', '--session', controller.session], { binding: withoutState, confirm: () => true });
     assert.equal(applied.error, null, applied.error?.message);
     fx.migration = applied.result;
   }
@@ -100,17 +100,17 @@ test('M: the dry run prints public documents, sidecars and digests and writes no
   assert.equal(fx.github.head(REPO, BRANCH), null);
 });
 
-test('M: apply without the owner\'s typed yes in that run, or without a terminal, is refused', () => {
+test('M: apply without the owner\'s Enter in that run, or without a terminal, is refused', () => {
   const fx = fixture({ migrate: false });
   const dry = fx.run(['migrate-state', '--dry-run'], { binding: fx.withoutState }).result;
   const argv = ['migrate-state', '--apply', '--plan-digest', dry.plan_digest, '--controller', '--session', controller.session];
   const before = fx.writes().length;
-  assert.equal(fx.run(argv, { binding: fx.withoutState, ask: () => 'no' }).error.code, 'NOT_CONFIRMED');
+  assert.equal(fx.run(argv, { binding: fx.withoutState, confirm: () => false }).error.code, 'NOT_CONFIRMED');
   assert.equal(fx.run(argv, { binding: fx.withoutState }).error.code, 'NOT_CONFIRMED', 'no terminal: never asked, never written');
   assert.throws(() => cli.parseArgs(['migrate-state', '--apply', '--controller', '--session', 's']), { code: 'USAGE' }, 'apply names the dry run');
-  assert.equal(fx.run([...argv.slice(0, 3), 'a'.repeat(64), ...argv.slice(4)], { binding: fx.withoutState, ask: () => 'yes' }).error.code, 'MIGRATION_CHANGED');
-  assert.equal(fx.run(argv.slice(0, 4), { binding: fx.withoutState, ask: () => 'yes' }).error.code, 'USAGE', 'only the controller applies');
-  assert.equal(fx.run([...argv.slice(0, 5), '--session', 'someone-else-0001'], { binding: fx.withoutState, ask: () => 'yes' }).error.code, 'STALE_WRITER');
+  assert.equal(fx.run([...argv.slice(0, 3), 'a'.repeat(64), ...argv.slice(4)], { binding: fx.withoutState, confirm: () => true }).error.code, 'MIGRATION_CHANGED');
+  assert.equal(fx.run(argv.slice(0, 4), { binding: fx.withoutState, confirm: () => true }).error.code, 'USAGE', 'only the controller applies');
+  assert.equal(fx.run([...argv.slice(0, 5), '--session', 'someone-else-0001'], { binding: fx.withoutState, confirm: () => true }).error.code, 'STALE_WRITER');
   assert.equal(fx.writes().length, before);
   assert.equal(fx.github.head(REPO, BRANCH), null);
 });
@@ -156,7 +156,7 @@ test('M: a field that is not public-safe stops the whole migration, and nothing 
   assert.equal(dry.problems.length, 1);
   assert.match(dry.problems[0], /issue-12: .*address/);
   const before = fx.writes().length;
-  const applied = fx.run(['migrate-state', '--apply', '--plan-digest', dry.plan_digest, '--controller', '--session', controller.session], { binding: fx.withoutState, ask: () => 'yes' });
+  const applied = fx.run(['migrate-state', '--apply', '--plan-digest', dry.plan_digest, '--controller', '--session', controller.session], { binding: fx.withoutState, confirm: () => true });
   assert.equal(applied.error.code, 'MIGRATION_HELD');
   assert.equal(fx.writes().length, before);
   assert.equal(fx.github.head(REPO, BRANCH), null);
@@ -169,7 +169,7 @@ test('M: until the binding change merges, readers keep the private store, and th
   assert.equal(store.read('parent', 7).doc.revision, 1);
   const again = fx.run(['migrate-state', '--dry-run'], { binding: fx.withoutState }).result;
   assert.equal(again.branch_exists, true);
-  const applied = fx.run(['migrate-state', '--apply', '--plan-digest', again.plan_digest, '--controller', '--session', controller.session], { binding: fx.withoutState, ask: () => 'yes' });
+  const applied = fx.run(['migrate-state', '--apply', '--plan-digest', again.plan_digest, '--controller', '--session', controller.session], { binding: fx.withoutState, confirm: () => true });
   assert.equal(applied.error.code, 'STATE_BRANCH_EXISTS');
 });
 
@@ -530,7 +530,7 @@ test('C: when the branch is gone, the hourly refresh restores it by the same pat
 const applyAgain = (fx, binding) => {
   const dry = fx.run(['migrate-state', '--dry-run'], { binding });
   if (dry.error) return dry;
-  return fx.run(['migrate-state', '--apply', '--plan-digest', dry.result.plan_digest, '--controller', '--session', controller.session], { binding, ask: () => 'yes' });
+  return fx.run(['migrate-state', '--apply', '--plan-digest', dry.result.plan_digest, '--controller', '--session', controller.session], { binding, confirm: () => true });
 };
 
 test('M: a write that reached the private store after the move holds the first branch read; moving again carries it over', () => {
@@ -574,7 +574,7 @@ test('M: once the branch has been written, a later private-store write still hol
   assert.throws(() => other.store().read('parent', 7), error => error.code === 'STATE_MIGRATION_STALE' && /issue-13/.test(error.message));
 });
 
-test('M: the owner\'s typed yes is never asked in a shell a coding agent started', () => {
+test('M: the owner\'s Enter is never asked in a shell a coding agent started', () => {
   const fx = fixture({ migrate: false });
   const dry = fx.run(['migrate-state', '--dry-run'], { binding: fx.withoutState }).result;
   const markers = require('../scripts/toolkit-env.cjs').AGENT_MARKERS;
@@ -582,7 +582,7 @@ test('M: the owner\'s typed yes is never asked in a shell a coding agent started
   for (const marker of markers) {
     let asked = false;
     const refused = fx.run(['migrate-state', '--apply', '--plan-digest', dry.plan_digest, '--controller', '--session', controller.session],
-      { binding: fx.withoutState, environment: { [marker]: '1' }, ask: () => { asked = true; return 'yes'; } });
+      { binding: fx.withoutState, environment: { [marker]: '1' }, confirm: () => { asked = true; return true; } });
     assert.equal(refused.error?.code, 'NOT_CONFIRMED', marker);
     assert.match(refused.error.message, new RegExp(marker));
     assert.equal(asked, false, `${marker}: never asked`);

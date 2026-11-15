@@ -280,10 +280,20 @@ test('generated candidate body names the scripted carry route, its limits and th
   assert.match(body, /Anything more needs the full gates: G0, a fresh G1 and a full G2/);
   assert.match(body, /RISKY, so the owner's merge card stays/);
   assert.match(body, /Budget or generator changes.*impact assessment/);
-  assert.match(body, /^UAT: NOT_REQUIRED \(manifest-only redistribution: both CI systems exercise the entire changed surface\)$/m);
   assert.equal(uatVerdict(body).state, 'NOT_REQUIRED');
   assert.deepEqual(body.match(/^Bump: .*$/gm), ['Bump: none']);
   assert.doesNotMatch(body, /\b(passed|approved|verified)\b/i);
+});
+
+test('generated candidate body carries the UAT and Bump lines the merge check and train finder read', () => {
+  const { prBody } = loadWithCommands('refresh-shard-timings.cjs', ['prBody'], spawnSync, __dirname);
+  const { uatVerdict } = require('../scripts/toolkit-auto-merge-eligible.cjs');
+  const body = prBody({ databaseId: 123, headSha: 'a'.repeat(40) }, { findings: ['linux: trigger crossed'] });
+  const uat = uatVerdict(body);
+  assert.equal(uat.state, 'NOT_REQUIRED', uat.problem || 'no UAT line');
+  assert.ok(uat.ready);
+  // The train finder's own pattern: exactly one Bump line, and a manifest-only refresh bumps nothing.
+  assert.deepEqual([...body.matchAll(/^Bump: (patch|minor|major|none)[ \t]*$/gm)].map((match) => match[1]), ['none']);
 });
 
 for (const mode of ['after-fetch', 'before-worktree', 'fetch-failure', 'resolution-failure', 'worktree-failure', 'cleanup-failure']) {

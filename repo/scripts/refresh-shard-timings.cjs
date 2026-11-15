@@ -321,7 +321,9 @@ function prBody(run, plan, profile = V1) {
     'This is a generated candidate. Review route: scripted carry (shard-timings). The merge train finder boards it with no G2 only while it stays a manifest-only redistribution from this bot branch (measured times and the files each named shard lists; budgets and every shard unchanged) and its required checks are green on Linux and Windows. Anything more needs the full gates: G0, a fresh G1 and a full G2. The shard manifest is RISKY, so the owner\'s merge card stays.',
     'Budget or generator changes need their own impact assessment.',
     '',
-    'UAT: NOT_REQUIRED (manifest-only redistribution: both CI systems exercise the entire changed surface)',
+    // The merge check reads the UAT line and the train finder the Bump line; without them the
+    // pull request can neither auto-merge nor board a train. A manifest-only change bumps nothing.
+    'UAT: NOT_REQUIRED (manifest-only shard redistribution; both CI systems run every changed shard)',
     'Bump: none',
   ].join('\n');
 }
