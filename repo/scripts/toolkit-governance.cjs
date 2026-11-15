@@ -100,7 +100,8 @@ class ToolkitGovernanceCli {
     // The sharded CI offer's minutes estimate (read-only gh) and the check that every pinned Toolkit copy
     // reads ci_shards; offline and in tests the estimate is unknown unless one is given.
     this.#ciEstimator = ciEstimator || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? () => null : root => ciOffer.readEstimate(root));
-    this.#ciReaders = ciReaders || (root => ciOffer.readersReady(root, path.resolve(__dirname, '..', '..')));
+    // The pinned copies are checked against the Toolkit git checkout (the managed one from a plugin copy).
+    this.#ciReaders = ciReaders || (root => ciOffer.readersReady(root, require('./toolkit-cloud-workflows.cjs').sourceRoot()));
     this.#permissionsChecker = permissionsChecker || defaultPermissionsChecker;
     this.#environment = environment || {};
     this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());

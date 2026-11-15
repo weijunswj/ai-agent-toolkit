@@ -131,7 +131,12 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   assert.ok(files['AGENTS.md'].endsWith('\n\n# My own rules\n\nKeep this exactly.\n'), 'text outside the markers keeps its bytes');
   assert.equal(files['CLAUDE.md'], '@AGENTS.md\n');
   for (const name of PLAYBOOKS) assert.ok(files[`docs/agent-playbooks/${name}`], name);
-  assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the working tree is not changed');
+  // The dependency security files join the same pull request, so governance never starts with its own
+  // security check failing.
+  assert.match(files['.github/dependabot.yml'], /package-ecosystem: "?github-actions"?/);
+  assert.match(files['.github/workflows/dependency-auto-merge.yml'], /^# Toolkit dependency auto-merge v/m);
+  assert.match(result.out, /Added \.github\/dependabot\.yml and \.github\/workflows\/dependency-auto-merge\.yml to the working tree/);
+  assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the rules files in the working tree are not changed');
   assert.ok(!fs.existsSync(path.join(ctx.repo, 'CLAUDE.md')));
   assert.equal(result.plainText.length, 1);
 });

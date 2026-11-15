@@ -5,7 +5,8 @@
 // on GitHub instead of on a computer.
 //
 // The copies are rendered from the Toolkit's own workflow files at the commit this checkout is on,
-// read from git, never from the working tree. Each copy checks the Toolkit out at that same commit
+// read from git, never from the working tree (from an app plugin copy, which has no git, the managed
+// Toolkit checkout the bridge keeps current). Each copy checks the Toolkit out at that same commit
 // into `.toolkit/` (public, no token) and runs the scripts from there, while the binding and the
 // working folder stay the governed repository's own. The render itself is
 // toolkit-cloud-workflows-render.cjs; its header says what it changes. Each copy carries a managed
@@ -24,6 +25,7 @@
 // Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check] [--json]
 // Exit codes: 0 done (or no drift), 1 drift found by --check, 2 not installed (the reason is printed).
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { TOOLKIT_REPOSITORY, TOOLKIT_PATH, MARKER, SHA, SHARD_ID, InstallError, normalise, withoutPins, bodyHash, render } = require('./toolkit-cloud-workflows-render.cjs');
@@ -61,6 +63,24 @@ const isToolkitCheckout = dir => fs.existsSync(path.join(dir, 'repo', 'scripts',
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, shell: false, maxBuffer: 4 * 1024 * 1024 });
   return { ok: !result.error && result.status === 0, stdout: String(result.stdout || '') };
+}
+
+// The Toolkit git checkout the copies are rendered from and pinned to: this copy when it is one,
+// otherwise the managed checkout the bridge keeps current (its recorded path, then the default
+// place), because an app's plugin copy has no git. The first whose origin is the Toolkit repository
+// wins; with none, this copy, which then fails with the reason.
+function sourceRoot({ home = os.homedir(), self = TOOLKIT_ROOT } = {}) {
+  const candidates = [self];
+  try {
+    const saved = JSON.parse(fs.readFileSync(path.join(home, '.ai-agent-toolkit', 'current', 'state.json'), 'utf8')).repo_path;
+    if (typeof saved === 'string' && saved) candidates.push(saved);
+  } catch { /* no bridge state */ }
+  candidates.push(path.join(home, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit'));
+  for (const candidate of candidates) {
+    if (!fs.existsSync(path.join(candidate, '.git'))) continue;
+    if (TOOLKIT_REMOTE.test(git(candidate, ['remote', 'get-url', 'origin']).stdout.trim())) return path.resolve(candidate);
+  }
+  return self;
 }
 
 // The Toolkit commit to pin: this checkout's HEAD, which must already be on origin/main, so a
@@ -213,7 +233,7 @@ function parseArgs(argv) {
 // The plan for one repository: each workflow's path, expected text and current state.
 // `ciShards` is the merged binding's ci_shards answer ('yes', 'not-now', 'never' or null); by default it
 // is read from this computer's copy of the merged binding.
-function plan({ repo, ci = null, root = TOOLKIT_ROOT, commit = toolkitCommit(root), ciShards = undefined }) {
+function plan({ repo, ci = null, root = sourceRoot(), commit = toolkitCommit(root), ciShards = undefined }) {
   const target = path.resolve(repo);
   if (!fs.existsSync(path.join(target, '.git'))) throw new InstallError(`${target} is not a git checkout.`);
   if (isToolkitCheckout(target)) {
@@ -348,10 +368,13 @@ function report(result, check) {
   return lines.join('\n');
 }
 
-function main(argv = process.argv.slice(2), { out = process.stdout, err = process.stderr, root = TOOLKIT_ROOT, commit, ciShards } = {}) {
+// `refresh` reads the merged binding again before its ci_shards answer is used, so a copy step run
+// after the answer merged does not act on this computer's older read.
+function main(argv = process.argv.slice(2), { out = process.stdout, err = process.stderr, root = sourceRoot(), commit, ciShards, refresh = target => require('./toolkit-governance-state.cjs').refreshMergedBinding(target) } = {}) {
   let options;
   try { options = parseArgs(argv); } catch (error) { err.write(`Not installed: ${error.message}\n${USAGE}\n`); return 2; }
   if (options.help) { out.write(`${USAGE}\n`); return 0; }
+  if (ciShards === undefined) { try { refresh(path.resolve(options.repo)); } catch { /* the last read stays */ } }
   try {
     const result = plan({ repo: options.repo, ci: options.ci, root, ...(commit ? { commit } : {}), ...(ciShards !== undefined ? { ciShards } : {}) });
     if (!options.check) apply(result);
@@ -368,4 +391,4 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, copyCandidates, copyIdAt, markedCopies, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
+module.exports = Object.freeze({ sourceRoot, TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, WORKFLOWS, SHARD_WORKFLOWS, MARKER, InstallError, copyCandidates, copyIdAt, markedCopies, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });

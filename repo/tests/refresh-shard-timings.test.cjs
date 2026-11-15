@@ -36,10 +36,10 @@ function summary(system, times) {
 const even = Object.fromEntries(FILES.map((file) => [file, 10]));
 
 test('arguments: report by default, one of --write, --open-pr or --fail-if-due, numeric --run', () => {
-  assert.deepEqual(refresh.parseArgs([]), { run: null, write: false, openPr: false, failIfDue: false });
+  assert.deepEqual(refresh.parseArgs([]), { run: null, write: false, openPr: false, failIfDue: false, warnIfDue: false });
   assert.equal(refresh.parseArgs(['--run', '123', '--write']).run, '123');
   assert.equal(refresh.parseArgs(['--fail-if-due']).failIfDue, true);
-  for (const pair of [['--write', '--open-pr'], ['--write', '--fail-if-due'], ['--open-pr', '--fail-if-due']]) assert.throws(() => refresh.parseArgs(pair), /Use one of --write, --open-pr or --fail-if-due/);
+  for (const pair of [['--write', '--open-pr'], ['--write', '--fail-if-due'], ['--open-pr', '--fail-if-due']]) assert.throws(() => refresh.parseArgs(pair), /Use one of --write, --open-pr, --fail-if-due or --warn-if-due/);
   assert.throws(() => refresh.parseArgs(['--run', 'latest']), /numeric run id/);
   assert.throws(() => refresh.parseArgs(['--merge']), /Unknown argument/);
 });
@@ -192,6 +192,22 @@ test('--fail-if-due: a report run that cannot publish fails when a refresh is du
   errors.length = 0;
   assert.equal(refresh.main(['--repo-root', selected, '--fail-if-due'], deps), 0, 'once refreshed, nothing is due');
   assert.deepEqual(errors, []);
+});
+
+test('--warn-if-due: a run without the App stays green when a refresh is due and warns with the owner\'s step', (t) => {
+  const selected = checkout(t);
+  const before = fs.readFileSync(path.join(selected, ...shards.MANIFEST_REL.split('/')));
+  const said = [];
+  const deps = {
+    readRun: () => ({ databaseId: 123, headBranch: 'main', headSha: 'a'.repeat(40) }),
+    readSummaries: () => shards.SYSTEMS.map(system => summary(system, even)),
+    publish() { assert.fail('a report run never publishes'); },
+    out: { write(text) { said.push(text); } }, err: { write(text) { assert.fail(text); } },
+  };
+  assert.equal(refresh.main(['--repo-root', selected, '--warn-if-due'], deps), 0, 'the App is optional, so a due refresh is not a failure');
+  assert.match(said.join(''), /^::warning::A shard timing refresh is due and this run has no governance App to publish it\..*Owner: set up the governance App .+ or run node repo\/scripts\/refresh-shard-timings\.cjs --write and open the pull request by hand\./m);
+  assert.deepEqual(fs.readFileSync(path.join(selected, ...shards.MANIFEST_REL.split('/'))), before, 'it changes nothing');
+  assert.throws(() => refresh.parseArgs(['--warn-if-due', '--fail-if-due']), /Use one of/);
 });
 
 test('--open-pr: a refresh pull request open over 7 days fails the run naming it; a newer one stays a quiet skip', () => {

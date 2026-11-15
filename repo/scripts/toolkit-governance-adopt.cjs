@@ -176,14 +176,25 @@ function ensurePlainText(root, installer = null) {
   return [...said.split('\n').filter(line => line && !line.startsWith('Next:')), 'The plain-text check files were added to the working tree and travel in the turn-on pull request.'];
 }
 
+// Step 5: the dependency security files, where missing: a dependabot.yml for every package ecosystem
+// found and Toolkit's dependency auto-merge workflow. They travel in the turn-on pull request, so
+// governance never starts with its own security check failing. An existing file is never changed.
+function ensureSecurityFiles(root, writer = null) {
+  const security = require('./toolkit-governance-security.cjs');
+  const results = (writer || (dir => security.writeSecurityFiles(dir, { dependabot: true, workflow: true })))(root);
+  const failed = results.filter(entry => entry.result !== 'written');
+  if (failed.length) throw new AdoptError(`The dependency security files could not be added (${failed.map(entry => `${entry.file}: ${entry.result}`).join(', ')}).`);
+  return results.length ? [`Added ${results.map(entry => entry.file).join(' and ')} to the working tree; they travel in the turn-on pull request.`] : [];
+}
+
 // The whole turn-on: { binding, files, made, lines }. The binding still goes through the one
 // governance pull request, which decides nothing until the owner merges it.
-function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train: 'off' }, plainText = null }) {
+function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train: 'off' }, plainText = null, securityFiles = null }) {
   const made = [];
   // The local, pure steps first, so a render that fails leaves nothing made on GitHub.
   let lines;
   let files;
-  try { lines = ensurePlainText(root, plainText); files = renderedRules(root); } catch (error) { error.made = made; throw error; }
+  try { lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)]; files = renderedRules(root); } catch (error) { error.made = made; throw error; }
   const store = ensureStore(plan, writer, made);
   const issue = ensureParent(plan, writer, made);
   const [owner, name] = plan.repository.split('/');
@@ -200,8 +211,8 @@ function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train
 // nothing is made on GitHub, but the same full rules set is rendered and the plain-text check added
 // where missing, so its turn-on pull request carries exactly what a fresh one does.
 // { binding (the working tree's, or null when unreadable), files, made: [], lines }.
-function prepared({ root, plainText = null }) {
-  const lines = ensurePlainText(root, plainText);
+function prepared({ root, plainText = null, securityFiles = null }) {
+  const lines = [...ensurePlainText(root, plainText), ...ensureSecurityFiles(root, securityFiles)];
   const files = renderedRules(root);
   let binding = null;
   try { binding = JSON.parse(fs.readFileSync(path.join(root, governance.BINDING_FILE), 'utf8').replace(/^\uFEFF/, '')); } catch { binding = null; }

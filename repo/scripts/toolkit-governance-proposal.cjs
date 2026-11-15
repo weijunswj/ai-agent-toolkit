@@ -19,6 +19,8 @@ const SHA = /^[a-f0-9]{40}$/;
 const EPOCH = /^[a-f0-9]{32}$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
 const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').WORKFLOWS.map(workflow => workflow.file);
+// The dependency security files the turn-on adds where missing (toolkit-governance-adopt.cjs).
+const securityFiles = () => { const security = require('./toolkit-governance-security.cjs'); return [security.DEPENDABOT_REL, '.github/dependabot.yaml', security.WORKFLOW_REL]; };
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
 // A yes is published only by the governance question bank, whose script makes every piece itself.
 const BANK_ONLY = 'A yes is published only from the governance question bank, which makes the store, parent issue, programme file and rules itself.';
@@ -82,7 +84,7 @@ function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
   const names = ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md',
     ...playbooks.map(name => `docs/agent-playbooks/${name}`),
     ...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json',
-    ...cloudFiles(), require('./governed-test-shards.cjs').MANIFEST_REL];
+    ...cloudFiles(), require('./governed-test-shards.cjs').MANIFEST_REL, ...securityFiles()];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
     if (rendered && Object.hasOwn(rendered, name)) continue;
