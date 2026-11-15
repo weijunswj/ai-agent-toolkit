@@ -358,7 +358,7 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   assert.equal(other.pending(f.cwd).kind, 'published', 'another computer discovers the complete adoption');
   recordMerged(f.cwd, { registryPath: f.registryPath });
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'ENABLED');
-  assert.match(gate.sessionLine(f.cwd, options), /Follow.*TOOLKIT-GOVERNED-RULES/);
+  assert.match(gate.sessionLine(f.cwd, options), /ENABLED for this repository[\s\S]*# Toolkit-Governed Repository Rules/);
 });
 
 for (const permission of ['write', 'read-only', 'unavailable']) test(`startup permission ${permission}: only a verified writer is asked for a decision`, t => {
@@ -452,13 +452,39 @@ test('a busy proposal lock allows the prompt with a note, keeping the receipt in
   assert.deepEqual(fs.readFileSync(file), before);
 });
 
-test('an enabled repository missing its rules is told to prepare them, never follow an absent block', t => {
+// The turn-on set keeps exactly the playbooks repository-agent-rules lists, never the skill's README.
+test('the turn-on rules carry exactly the sixteen playbooks, as INDEX.md and fifteen named files', () => {
+  const { requiredRules } = require('../scripts/toolkit-governance-proposal.cjs');
+  assert.deepEqual(requiredRules().filter(name => name.startsWith('docs/agent-playbooks/')), [
+    'INDEX.md', 'baseline-workflow.md', 'closing-comments.md', 'decision-trace.md', 'docs-governance.md', 'fast-tests-and-sharding.md',
+    'generated-files.md', 'git-completion.md', 'invariant-models.md', 'local-docs.md', 'model-safety-flags.md', 'n8n-workflows.md',
+    'privacy-safe-checks.md', 'release-readiness-audit.md', 'safety-gates.md', 'windows-command-hygiene.md',
+  ].map(name => `docs/agent-playbooks/${name}`));
+});
+
+// The installed Toolkit delivers the governed rules, so a repository needs no copy of them.
+const GOVERNED_RULES = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'agent-rules', 'toolkit-governed-rules.md'), 'utf8').replace(/\r\n/g, '\n').trim();
+const TOOLKIT_VERSION = require('../contracts/toolkit-local-bridge/version.json').version;
+
+test('an enabled repository with no governed block gets the governed rules from the installed Toolkit', t => {
   const f = fixture(t);
   seedMerged(f.cwd, 'enable', f.options);
   const line = gate.sessionLine(f.cwd, f.options);
-  assert.match(line, /no governed rules block/);
-  assert.match(line, /repository-agent-rules/);
-  assert.doesNotMatch(line, /Follow.*and the TOOLKIT-GOVERNED-RULES block/);
+  assert.match(line, /^Toolkit governance: ENABLED for this repository\./);
+  assert.equal(line.split(GOVERNED_RULES).length, 2, 'the whole governed rules text, once');
+  assert.ok(line.includes(`Toolkit ${TOOLKIT_VERSION}`));
+  assert.doesNotMatch(line, /no governed rules block|repository-agent-rules/);
+});
+
+test('disabled, undecided and evidence-store repositories get no governed rules', t => {
+  const disabled = fixture(t);
+  seedMerged(disabled.cwd, 'disable', disabled.options);
+  const undecided = fixture(t);
+  for (const f of [disabled, undecided]) {
+    const line = gate.sessionLine(f.cwd, f.options);
+    assert.ok(!line.includes(GOVERNED_RULES.slice(0, 80)), line);
+    assert.doesNotMatch(line, /ENABLED/);
+  }
 });
 
 test('pending conformance reports the existing proposal rather than asking for another answer', t => {

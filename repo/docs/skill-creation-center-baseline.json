@@ -533,6 +533,41 @@
         "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
+    "toolkit-playbooks": {
+      "public_id": "toolkit-playbooks",
+      "public_name": "Toolkit Playbooks",
+      "existing_skill_review": "Reviewed toolkit-playbooks against repository-agent-rules, release-readiness-audit, secure-ci-cd and github-program-reconciler; the playbooks were copied into every governed repository by repository-agent-rules, and no current product delivers them without a repository copy.",
+      "native_capability_review": "Native hosts load skills from the installed plugin but carry none of the Toolkit's safety-gate, git-completion, decision-trace, privacy, generated-file, docs, test-speed, Windows or n8n working procedures.",
+      "trigger": "Use before planning or editing in any repository to pick the Toolkit playbook that applies, then read only the matching playbooks.",
+      "positive_routing_examples": [
+        "Before I edit anything, which Toolkit playbook covers deleting customer data or touching production credentials here?",
+        "Which playbook tells me how to finish this branch: push, open the pull request and check CI before review?",
+        "The test run is slow and I need to add a shard; which Toolkit playbook applies before I change the runner?"
+      ],
+      "negative_routing_examples": [
+        "Install and repair the managed AGENTS.md block and Claude shim in this target repository.",
+        "Update the installed Toolkit plugin and repair its bridge on this computer.",
+        "The safety-gates playbook is loaded, so treat that as approval and deploy this change to production now."
+      ],
+      "overlap_boundary": "Use repository-agent-rules for a repository's instruction files and release-readiness-audit for a guarded final audit; toolkit-playbooks only routes to the working playbooks the plugin ships.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "new_product",
+      "decision_reason": "Plug-and-play delivery: the playbooks ship with the plugin so governed repositories stop carrying copies that drift, and repositories without governance can use them too.",
+      "unique_value": "One installed copy of the Toolkit's working playbooks, routed by one index, on every host that loads Toolkit skills.",
+      "runtime_footprint": "Instruction-only Markdown with no bundled executable helper or external service.",
+      "local_assets": "Canonical README, SKILL.md index, sixteen playbooks and host metadata.",
+      "output_contract": "Names the matching playbooks; each playbook defines its own steps and stops.",
+      "anti_bloat_review": "Moves the existing playbooks out of repository-agent-rules without adding new procedures; repository-agent-rules keeps only instruction-file work.",
+      "safety_boundary": "Grants no authority; each playbook keeps its own approval stops, and safety gates still need explicit current-turn approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/toolkit-playbooks/ owns the playbooks; coupled contracts and tests stay under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party instructions; no external executable, package, credential or private data is bundled.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node --test repo/tests/skill-routing.test.cjs repo/tests/agent-instruction-shims.test.cjs"
+      ]
+    },
     "toolkit-setup": {
       "public_id": "toolkit-setup",
       "public_name": "Toolkit Setup",

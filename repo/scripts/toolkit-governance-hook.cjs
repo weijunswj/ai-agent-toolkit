@@ -19,7 +19,8 @@
 // state-changing tools (STATE_CHANGING_TOOLS below).
 //
 // Cloud sessions (CLAUDE_CODE_REMOTE=true) run the merge hold too, but are not asked the governance
-// question. Proven unsafe issue closures are refused everywhere; an unknown closure check is advisory in
+// question. Their session start reads the start folder's repository or, outside one, each repository
+// cloned directly under it (a Claude Projects thread), and gives the governed rules for ENABLED ones. Proven unsafe issue closures are refused everywhere; an unknown closure check is advisory in
 // the cloud. Governance still comes from
 // the repository default branch.
 
@@ -122,9 +123,10 @@ function respond(event, input, options = {}) {
     gate.startSession(input, { ...options, host: 'claude-code' });
     let text;
     if (cloud) {
-      let inside = false;
-      try { inside = gate.insideRepository(input.cwd); } catch { inside = false; }
-      text = inside ? CLOUD_LINE : '';
+      // The start folder's repository, or each repository cloned directly under it (a Projects
+      // thread starts in /home/user); the governed rules come once for the ENABLED ones.
+      const repositories = gate.cloudSessionText(input.cwd, { registryOptions: options.registryOptions, refreshBinding: options.refreshBinding });
+      text = repositories ? `${CLOUD_LINE}\n\n${repositories}` : '';
     } else text = gate.sessionLine(input.cwd, { ...options, sessionId: gate.sessionIdOf(input) });
     return text ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } } : {};
   } catch {

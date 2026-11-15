@@ -117,15 +117,15 @@ function checkConformance(cwd, options = {}) {
     if (state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_IGNORED', 'info', state.rule === 'M2' ? 'Governance is disabled for this repository, so the governed block in AGENTS.md is not followed.' : ['S1', 'R1s'].includes(state.rule) ? 'This repository is not governed, so the governed block in AGENTS.md is not followed.' : 'You disabled Toolkit governance here, so the governed block in AGENTS.md is not followed.'));
     return report(0, state, findings, toolkitRoot);
   }
-  // Whatever enabled it, an ENABLED repository needs the governed block its agents are told to follow.
-  if (state.state === 'ENABLED' && !state.materials.governed_block) findings.push(finding('GOVERNED_BLOCK_MISSING', 'drift', 'Governance is enabled but AGENTS.md has no governed block; add it through a pull request.'));
   if (state.materials.binding_present && state.materials.binding_problems.length) {
     findings.push(finding('BINDING_INVALID', 'drift', `The working tree's programme binding is invalid: ${state.materials.binding_problems.join(', ')}.`));
   }
   if (state.notes.includes('binding-belongs-to-other-repository')) findings.push(finding('BINDING_FOREIGN', 'drift', `The default branch's programme binding belongs to ${state.merged.foreign_repository}, so it does not apply here.`));
   if (state.notes.includes('merged-binding-stale')) findings.push(finding('MERGED_BINDING_STALE', 'drift', `The last read of the merged binding is over 24 hours old, so governed records, gate admission and finality hold; run \`${governance.governanceCommand('status')}\` online.`));
   if (state.notes.includes('binding-v2-migration-offered')) findings.push(finding('BINDING_V1', 'info', 'The merged binding is version 1; the next setup pull request moves it to version 2.'));
-  if (state.materials.governed_block) findings.push(...governedBlockFindings(state.root, toolkitRoot));
+  // An ENABLED repository needs no governed block: the installed Toolkit gives its sessions the governed
+  // rules. One still there is a leftover copy, not something to refresh.
+  if (state.materials.governed_block) findings.push(...(state.state === 'ENABLED' ? leftoverBlockFindings(state.root, toolkitRoot) : governedBlockFindings(state.root, toolkitRoot)));
   if (state.state === 'ENABLED') findings.push(...plainTextFindings(state.root, toolkitRoot));
   let rulesetResult = null;
   if (state.state === 'ENABLED') {
@@ -302,6 +302,20 @@ function governedBlockFindings(repoRoot, toolkitRoot) {
   const blockState = managedBlock.blockState(materials.block, expected);
   if (blockState === 'tampered') out.push(finding('GOVERNED_BLOCK_EDITED', 'drift', 'The governed block in AGENTS.md was edited by hand (its body no longer matches its digest).'));
   else if (blockState === 'stale') out.push(finding('GOVERNED_BLOCK_STALE', 'drift', 'The governed block in AGENTS.md is older than, or different from, this Toolkit copy\'s governed rules; a refresh asks first and lands through a pull request.'));
+  return out;
+}
+
+// A governed block left in an ENABLED repository's AGENTS.md. Its sessions follow the rules the
+// installed Toolkit gives them, so the block is removed by pull request once every app that works in
+// the repository runs this Toolkit version; until then it does no harm. Broken markers still block that removal.
+function leftoverBlockFindings(repoRoot, toolkitRoot) {
+  const materials = governance.readGovernedBlock(repoRoot);
+  if (!materials.present) return [];
+  const out = [];
+  if (materials.marker_errors > 0) out.push(finding('MARKERS_BROKEN', 'drift', 'The Toolkit markers in AGENTS.md are broken; fix them before the leftover governed block can be removed.'));
+  let version = 'this';
+  try { version = expectedGovernedBlock(toolkitRoot).version; } catch { /* the note still stands */ }
+  out.push(finding('GOVERNED_BLOCK_LEFTOVER', 'info', `AGENTS.md still carries a governed block. The installed Toolkit now gives sessions the governed rules, so the block is a leftover copy: remove it by pull request once every app working here runs Toolkit ${version} or later.`));
   return out;
 }
 

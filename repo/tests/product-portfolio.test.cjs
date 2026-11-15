@@ -24,6 +24,7 @@ const expectedProducts = [
   'self-hosted-service-safety',
   'skill-product-review',
   'toolkit-env',
+  'toolkit-playbooks',
   'toolkit-setup',
   'windows-local-dev-services'
 ];

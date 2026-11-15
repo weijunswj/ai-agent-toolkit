@@ -26,7 +26,7 @@ const BANK_ONLY = 'A yes is published only from the governance question bank, wh
 // them is refused, so every governed repository starts from the same full set.
 const PLAIN_TEXT_FILES = Object.freeze(['.github/plain-text.json', '.github/scripts/plain-text-check.cjs', '.github/workflows/plain-text.yml']);
 function requiredRules() {
-  const playbooks = fs.readdirSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/docs/agent-playbooks')).filter(name => name.endsWith('.md')).sort();
+  const playbooks = Object.keys(require('./toolkit-playbooks.cjs').repositoryPlaybooks());
   return ['AGENTS.md', 'CLAUDE.md', ...playbooks.map(name => `docs/agent-playbooks/${name}`), ...PLAIN_TEXT_FILES];
 }
 // The required rules files a turn-on file set lacks (CLAUDE.md counts only when it loads AGENTS.md).
@@ -76,7 +76,7 @@ function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
     const block = governance.readGovernedBlock(cwd);
     if (!block.present || block.legacy || block.marker_errors) fail('PROPOSAL_ADOPTION_INCOMPLETE');
   }
-  const playbooks = fs.readdirSync(path.join(__dirname, '../../skills/repository-agent-rules/repo-local/docs/agent-playbooks')).filter(name => name.endsWith('.md'));
+  const playbooks = Object.keys(require('./toolkit-playbooks.cjs').repositoryPlaybooks());
   const names = ['AGENTS.md', 'CLAUDE.md', '.agents/rules/00-agent-toolkit-bootstrap.md',
     ...playbooks.map(name => `docs/agent-playbooks/${name}`),
     ...['plain-text', 'personal-data-guard'].flatMap(name => [`.github/${name}.json`, `.github/scripts/${name === 'plain-text' ? 'plain-text-check' : name}.cjs`, `.github/workflows/${name}.yml`]), '.github/plain-text-baseline.json',
