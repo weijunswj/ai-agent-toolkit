@@ -17,6 +17,9 @@
 //   3. The agent sends the reply it read with that ticket: `toolkit-governance.cjs setup --answers
 //      "<reference>: all recommended" --ticket <ticket>`. The command spends the ticket (BankTickets.take)
 //      and writes or prepares nothing without it. The tool gate lets only that exact command through.
+//   4. The bank is shown once. A reply that cannot be used (unread, an unknown row, a changed row, or
+//      "explain 1.4") gets a short line, and the command notes the same bank again for the run
+//      (BankTickets.rearm), so the owner's next own message gets a new one-use ticket the same way.
 // A pull request it prepares still decides nothing until the owner merges it.
 
 const crypto = require('node:crypto');
@@ -25,6 +28,7 @@ const path = require('node:path');
 
 const governance = require('./toolkit-governance-state.cjs');
 const bank = require('./toolkit-question-bank.cjs');
+const { managedScript } = require('./toolkit-user-state.cjs');
 
 const BANK_HOST = 'governance';
 // What a yes to Turn on also covers: the settings Toolkit adds on its own after the merge
@@ -37,7 +41,17 @@ const MAX_AGE_MS = 30 * 60 * 1000;
 const MAX_SESSIONS = 32;
 const TICKET = /^[0-9a-f]{32}$/;
 const EPOCH = /^[0-9a-f]{32}$/;
-const SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
+const OWN_SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
+// The script the agent is told to run: the managed checkout's when there is one, else this copy's.
+const script = () => managedScript('toolkit-governance.cjs');
+// Each row keeps its number from run to run, whichever rows apply (a row that does not apply leaves a
+// gap), so an answer such as 1.6=A means the same row after the evidence store becomes a status row.
+const FIXED_REFS = Object.freeze({
+  governance: '1.1', 'task-auto-merge': '1.2', 'merge-train': '1.3', 'ci-shards': '1.4', 'evidence-store': '1.5', 'setup-pieces': '1.5',
+  'governance-app': '1.6', 'parent-issue': '1.7', 'required-checks': '1.8', visibility: '1.9', 'permission-blocks': '2.1',
+});
+// The line after a reply that could not be used, asking for the reply again.
+const REPLY_AGAIN = 'Reply again with all recommended or only your changes, such as 1.2=B.';
 
 // The app each permission row belongs to; every app keeps its own permission lines.
 const APP_NAMES = Object.freeze({ claude: 'Claude Code', codex: 'Codex' });
@@ -149,7 +163,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
         bank.wizardChoice('yes', governed ? 'Yes' : 'Yes (needs governance on)', yesOutcome),
         bank.wizardChoice('never', governed ? 'Never ask' : 'Never ask (needs governance on)', governed ? 'Toolkit prepares one binding pull request recording never; it does not ask again.' : 'The turn-on pull request records never; Toolkit does not ask again.'),
       ],
-    }), estimateLine: ciShards.estimate || '' });
+    }), estimateLine: ciShards.estimate || '', estimateShort: estimateShort(ciShards.measured) });
   }
   if (adoption && adoption.blocked) {
     specs.push(statusRow({ id: 'setup-pieces', section, title: 'Store and parent issue', current: 'Could not be checked', text: `GitHub could not be read (${adoption.blocked}), so turning on makes nothing until it can` }));
@@ -169,7 +183,8 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: adoption.found_store ? adoption.found_store.split('/')[1] : 'None yet', text: adoption.found_store ? 'Reused when governance turns on' : `Toolkit creates a private ${adoption.store_name} when governance turns on` }));
     }
     specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: adoption.parent.create ? 'None yet' : `#${adoption.parent.issue}`, text: adoption.parent.create ? 'Toolkit opens one when governance turns on' : 'Reused when governance turns on' }));
-    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'none yet', text: adoption.checks.length ? 'Taken from what the default branch already enforces' : `None enforced on the default branch yet, so default-branch protection waits: once a pull request adds some to required_checks, run \`${governance.governanceCommand('migrate')}\` in your own terminal to add it` }));
+    // With none yet, the turn-on result says how to add protection later (turnOnSummary).
+    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'None yet', text: adoption.checks.length ? 'Taken from what the default branch already enforces' : 'Default-branch protection waits for them' }));
     // Said before the answer, so turning on never stops afterwards to ask about it.
     if (adoption.visibility === 'public') specs.push(statusRow({ id: 'visibility', section, title: 'Repository visibility', current: 'Public', text: 'The programme file names your private evidence store (its name only, never its contents) and the parent issue is public. The store stays private' }));
   }
@@ -217,43 +232,78 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       bank.wizardChoice('remove', 'Remove', 'You get one command to run yourself that takes every Toolkit permission line out, the same way.'),
     ],
   }));
-  return bank.withPresentationMetadata(specs, BANK_HOST);
+  return bank.withPresentationMetadata(specs.map(spec => ({ ...spec, fixed_ref: FIXED_REFS[spec.id] })), BANK_HOST);
 }
 
-// The shard question's short "more" line: what Yes makes, why Not now is recommended, and the
-// display-only minutes line.
+// The minutes in a few words for the shards row's Current cell; the full line is in explain.
+function estimateShort(measured) {
+  return Number.isFinite(measured?.minutes) ? `CI about ${Math.max(1, Math.round(measured.minutes))} min` : 'CI time unknown';
+}
+
+// The shard question's longer text, shown only on "explain 1.4": what Yes makes, when it is
+// recommended, and the display-only minutes line.
 const SHARDS_MORE = `Yes adds a first shard list (Node tests) and the shard workflows, which check every test file ran once: in the turn-on pull request when governance turns on in the same answer, otherwise in its own pull request, with the workflows at the next rules refresh. Yes is recommended when the last green CI run took ${SLOW_CI_MINUTES} minutes or more.`;
 function shardMoreText(spec) { return [SHARDS_MORE, spec.estimateLine].filter(Boolean).join(' '); }
 
 function bankReference(specs) { return specs[0]?.presentation.bank_reference || ''; }
 
+// What the agent is told after every output that follows an answer: the owner sees Toolkit's own lines
+// as printed and nothing else, so the bank is never shown again in reply to an answer.
+// A command above is the owner's to run (permissions, the governance App), so it is shown, never run.
+const AGENTS_AFTER_ANSWER = 'Agents: this line is for you alone. Show the owner the lines above exactly as printed, as plain text, leaving out this line, then stop. Add nothing, ask nothing, post no card, and never show the bank again unless the owner types toolkit governance. Never put a command above in a code block of your own making, and never run it yourself. If their next own message comes back with a Toolkit ticket, send it as that ticket says.';
+
 // The bank as the owner reads it, with the one reply line. Every app takes a typed reply, the same way
-// as `setup toolkit`: the whole list at once, answered in one line.
+// as `setup toolkit`: the whole list at once, answered in one line. Status rows sit in the table under
+// their fixed numbers; the longer texts are in explain (explainText).
 function renderGovernanceBank(specs) {
   const reference = bankReference(specs);
-  const governed = specs.find(entry => entry.id === 'governance')?.folded_value === 'on';
-  const example = bank.changedOnlyExample(specs, governed ? ['governance', 'task-auto-merge'] : ['governance']);
+  // The shards row's Current cell carries the minutes in short; display only, so it is not in the
+  // bank reference (a CI run that finishes before the answer changes nothing).
+  const shown = specs.map(spec => (spec.id === 'ci-shards' && spec.estimateShort ? { ...spec, current_short: `${spec.current_short || spec.current} (${spec.estimateShort})` } : spec));
   return [
     ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
-    ...bank.renderCompactQuestionTable(specs, true),
+    ...bank.renderCompactQuestionTable(shown, true),
     // Turn on covers the post-merge settings too, so they are named whenever it is offered, not
     // only when it is the recommendation (the table shows choice text only for that one).
     ...specs.filter(spec => spec.id === 'governance').flatMap(spec => spec.choices.filter(choice => choice.value === 'on' && choice.presentation_ref !== spec.presentation.recommended_choice_ref)
       .map(choice => `${spec.presentation.question_ref} ${choice.presentation_ref}. ${choice.label}: ${choice.consequence}`)).flatMap(line => ['', line]),
-    ...specs.filter(spec => spec.id === 'ci-shards' && !spec.report_only).flatMap(spec => ['', `${spec.presentation.question_ref} asks: ${spec.whatThisControls}`, `More on ${spec.presentation.question_ref}: ${shardMoreText(spec)}`]),
     '',
-    'For the full text of a question, say "explain 1.2".',
+    'Reply all recommended, or only your changes such as 1.2=B. Rows you leave out take their recommendation; each change is a pull request you merge. Say "explain 1.4" for the full text of a row.',
     '',
-    'Reply with either:',
-    '',
-    '- `all recommended`',
-    `- only your changes, for example: \`${example}\``,
-    '',
-    'Anything you do not list takes its recommendation. Every change to governance, task auto-merge or parallel CI shards is a pull request that applies only after you merge it.',
-    'The permissions row covers only this app. Any other app you use needs toolkit governance run there too.',
-    '',
-    `Agents: this line is for you alone. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them.`,
+    `Agents: this line is for you alone. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them, and never show this bank again after they reply.`,
   ].join('\n');
+}
+
+// The full text of one row, for "explain 1.4", or null when the bank has no such row.
+function explainText(specs, ref) {
+  const spec = specs.find(entry => entry.presentation.question_ref === ref);
+  if (!spec) return null;
+  return [bank.renderQuestionRows(specs, ref).replace(/\n+---$/, ''),
+    ...(spec.id === 'ci-shards' && !spec.report_only ? ['', `**More:** ${shardMoreText(spec)}`] : [])].join('\n');
+}
+
+// The row number a reply asks to explain ("explain 1.4", with or without the bank reference), or null.
+function explainRequest(text) {
+  const match = /^\s*(?:[0-9A-Za-z-]{16,19}\s*:\s*)?explain\s+(\d+\.\d+)\s*\.?\s*$/i.exec(String(text || ''));
+  return match ? match[1] : null;
+}
+
+// A short digest of each row as shown, keyed by its number, so a reply to a bank that changed since
+// can name only the rows that changed (changedRows).
+function rowDigests(specs) {
+  const payload = bank.questionBankApprovalPayload(specs);
+  return Object.fromEntries(payload.questions.map(question => [question.question_ref, crypto.createHash('sha256').update(JSON.stringify(question)).digest('hex').slice(0, 16)]));
+}
+
+// The lines that name what changed between the bank the owner was shown (its row digests) and this
+// one, or null when rows were added or taken away (then only a new bank can be answered).
+function changedRows(before, specs) {
+  const now = rowDigests(specs);
+  const refs = Object.keys(now);
+  if (!before || typeof before !== 'object' || Object.keys(before).length !== refs.length || refs.some(ref => !Object.hasOwn(before, ref))) return null;
+  return specs.filter(spec => before[spec.presentation.question_ref] !== now[spec.presentation.question_ref]).map(spec => (spec.report_only
+    ? `${spec.presentation.question_ref} ${spec.title} changed: now ${spec.current_short || spec.current}, with nothing to answer.`
+    : `${spec.presentation.question_ref} ${spec.title} changed: now ${spec.current_short || spec.current}, recommended ${spec.presentation.recommended_choice_ref}. ${bank.choiceLabel(spec, spec.recommended)}.`));
 }
 
 // { governance, taskAutoMerge, permissionBlocks } from a parsed reply.
@@ -336,11 +386,12 @@ class BankTickets {
 
   // Notes that this run of the session was shown this bank. A newer bank replaces an older one and
   // drops any live ticket of the session, so a ticket always answers the bank shown last.
-  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference }) {
+  // `rows` are the shown rows' digests (rowDigests).
+  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, rows = {} }) {
     if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch))) return false;
     const data = this.#read();
     data.shown[sessionId] = {
-      epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, at: this.#now().toISOString(),
+      epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, rows, at: this.#now().toISOString(),
     };
     delete data.tickets[sessionId];
     this.#save(data);
@@ -369,9 +420,18 @@ class BankTickets {
     if (!this.#fresh(entry) || entry.epoch !== epoch) return null;
     const ticket = crypto.randomBytes(16).toString('hex');
     delete data.shown[sessionId];
-    data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, at: this.#now().toISOString() };
+    data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_mark: entry.repository_mark ?? null, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, rows: entry.rows || {}, at: this.#now().toISOString() };
     this.#save(data);
     return ticket;
+  }
+
+  // After the owner's reply was sent with its ticket (`entry`, from take) and could not be used, notes
+  // the bank again for the same run, repository mark and repository, so the owner's next own message
+  // answers it the same way, with a new one-use ticket, and the bank is not shown again. `bankReference`
+  // and `rows` name the bank that reply now answers (a changed bank's, once its changed rows were named).
+  rearm(sessionId, entry, { bankReference: reference, rows }) {
+    if (!entry || typeof entry !== 'object') return false;
+    return this.shown(sessionId, { epoch: entry.epoch, repositoryMark: entry.repository_mark ?? null, repositoryId: entry.repository_id, root: entry.root, bankReference: reference, rows });
   }
 
   // Ends the shown note without a ticket (the reply could not count).
@@ -403,14 +463,15 @@ class BankTickets {
   }
 }
 
-// What the agent is told with the owner's reply to a bank.
+// What the agent is told with the owner's reply to a bank. Toolkit, not the agent, checks the reply:
+// anything that may answer the bank is sent as it is, and the command prints what was wrong.
 function bankTicketContext(entry, ticket) {
   return [
-    `Toolkit governance: the user's message above is the first since you showed them governance bank ${entry.bank_reference}. It may be their answer to it, or ordinary work. Read what they mean first.`,
-    `- If it answers the bank (all recommended, or changes such as 1.2=B, in any words), turn it into that form, tell them "Sending: <answer> (bank ${entry.bank_reference})", and run exactly this once, with their answer in place of ANSWER:`,
-    `  node "${SCRIPT}" setup --answers "${entry.bank_reference}: ANSWER" --ticket ${ticket}`,
-    '- If it is unclear (a bare yes or ok, an unknown row, two choices for one row), ask one short question naming the two reply forms, then run `setup` again to show the bank before they answer.',
-    '- If it is about something else, record nothing and carry on.',
+    `Toolkit governance: the user's message above is their first since governance bank ${entry.bank_reference} was shown or Toolkit asked them to reply again. It may answer it, or be ordinary work. Read what they mean first.`,
+    `- If it may answer the bank in any way (all recommended, changes such as 1.2=B in any words, a bare yes, an unknown row, two choices for one row, or explain 1.4), put it in that form where the meaning is plain, else keep their words without quotes, $, % or backticks. Tell them "Sending: <answer> (bank ${entry.bank_reference})" and run exactly this once, with it in place of ANSWER:`,
+    `  node "${script()}" setup --answers "${entry.bank_reference}: ANSWER" --ticket ${ticket}`,
+    '- Toolkit checks it and prints what was wrong or what it did; do what its Agents line says. Never show the bank again yourself and never ask them to reply in another form.',
+    '- If it is clearly about something else, record nothing and carry on.',
     'The ticket works once, only in this session, and only for this bank. Never act as the user: never answer the bank yourself or change their answer.',
   ].join('\n');
 }
@@ -418,10 +479,12 @@ function bankTicketContext(entry, ticket) {
 // Whether a shell command is exactly the bank answer command with a live ticket of this session.
 // The script must be Toolkit's own path as written, and the line holds nothing a shell expands.
 const BANK_COMMAND = /^[ \t]*(?:&[ \t]*)?node(?:\.exe)?[ \t]+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))[ \t]+setup[ \t]+--answers[ \t]+"([^"\r\n]{1,400})"[ \t]+--ticket[ \t]+([0-9a-f]{32})[ \t]*$/;
-function sameScript(script) {
-  return process.platform === 'win32'
-    ? script.replace(/\//g, '\\').toLowerCase() === SCRIPT.replace(/\//g, '\\').toLowerCase()
-    : script === SCRIPT;
+// The script is this copy's or the managed checkout's (the one bankTicketContext names), exactly.
+function sameScript(written) {
+  const same = known => (process.platform === 'win32'
+    ? written.replace(/\//g, '\\').toLowerCase() === known.replace(/\//g, '\\').toLowerCase()
+    : written === known);
+  return same(OWN_SCRIPT) || same(script());
 }
 function bankTicketCommand(text, sessionId, tickets) {
   const command = String(text || '');
@@ -433,6 +496,6 @@ function bankTicketCommand(text, sessionId, tickets) {
 }
 
 module.exports = Object.freeze({
-  APP_NAMES, BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
-  bankTicketContext, bankTicketCommand,
+  APP_NAMES, BANK_HOST, TICKETS_BASENAME, AGENTS_AFTER_ANSWER, REPLY_AGAIN, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
+  explainText, explainRequest, rowDigests, changedRows, bankTicketContext, bankTicketCommand,
 });

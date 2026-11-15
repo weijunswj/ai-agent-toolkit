@@ -9,12 +9,13 @@
 // and got the one-key prompt instead of the editor). Every other request stays plain language, read
 // by the skills. Every typed command is on the printed list, or opens the same action as one that is.
 //
-// Advisory only: this module never blocks a prompt, reads no file and starts no process. A phrase
+// Advisory only: this module never blocks a prompt and starts no process; the only file it reads is
+// where the managed Toolkit checkout is, to name the governance command from there. A phrase
 // inside a longer message, or with other words around it, is ordinary text and gets no line.
 //
 // Usage: node repo/scripts/toolkit-commands.cjs    prints the command list
 
-const path = require('node:path');
+const { managedScript } = require('./toolkit-user-state.cjs');
 
 // Each command the printed list shows, as the user types it, its group and what it does in one
 // line. The list holds only commands a user would type themselves; the phrases in ACTIONS below are
@@ -76,9 +77,10 @@ const CONTEXT = Object.freeze({
   refresh: () => 'Treat it exactly as `refresh toolkit`: follow the toolkit-setup skill.',
   env: () => 'Open the env editor: follow the toolkit-env skill and run its `edit` route. Never run the one-key `set` prompt for this phrase, and never print a key value in chat.',
   guide: () => {
-    const command = subcommand => `node "${path.join(__dirname, 'toolkit-governance.cjs')}" ${subcommand}`;
+    const command = subcommand => `node "${managedScript('toolkit-governance.cjs')}" ${subcommand}`;
     return `Show the user Toolkit's governance question bank for this repository. Run exactly \`${command('setup')}\` in this repository, then do what its paragraph that starts with \`Agents\` says. That paragraph is for you alone: never show the user any of it. Show them the rest of the output once, as printed, as plain text and never in a code block, and never summarise, shorten or repeat it. Then stop. Run no other governance subcommand first. `
       + 'The bank works like setup toolkit\'s: the user replies `all recommended` or only their changes, such as `1.2=B`. Their next own message comes back to you with a one-use ticket and the exact command to send their answer with; every change to governance or task auto-merge is one pull request for the user to merge. '
+      + 'The bank is shown once: after their reply, show only what Toolkit prints, and never show the bank again unless they type toolkit governance. '
       + 'Never answer the bank for the user.';
   },
 });

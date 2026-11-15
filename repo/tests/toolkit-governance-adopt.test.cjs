@@ -78,11 +78,14 @@ function writePlainText(root) {
   }
 }
 
-async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, estimate = null } = {}) {
+const PROPOSAL = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/4`, state: 'open', answer: 'yes' };
+
+// `opened` is what GitHub lists as open governance pull requests when the run starts.
+async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, estimate = null, opened = [] } = {}) {
   let out = ''; let err = '';
   const published = [];
-  let open = [];
-  const proposal = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/4`, state: 'open', answer: 'yes' };
+  let open = opened;
+  const proposal = PROPOSAL;
   const plainText = [];
   const cloud = [];
   const cli = new ToolkitGovernanceCli({
@@ -105,11 +108,13 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
   const github = fakeGitHub();
   const shown = await run(ctx, ['setup', '--json'], github);
   const questions = JSON.parse(shown.out).questions;
-  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['ci-shards', false], ['governance-app', false], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
+  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['governance', false], ['task-auto-merge', false], ['merge-train', false], ['ci-shards', false], ['evidence-store', true], ['governance-app', false], ['parent-issue', true], ['required-checks', true], ['permission-blocks', false]]);
+  assert.deepEqual(questions.map(spec => spec.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '1.7', '1.8', '2.1'], 'every row has its fixed number, status rows included');
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
   assert.match(table, /\| 1\.1 \| GitHub governance \| Not decided \| B\. Turn on/);
-  assert.match(table, /Evidence store: None yet\. Toolkit creates a private TRANSPORT-fresh when governance turns on/);
-  assert.match(table, /Parent issue: None yet\. Toolkit opens one when governance turns on/);
+  assert.match(table, /\| 1\.5 \| Evidence store \| None yet \| Nothing to answer: Toolkit creates a private TRANSPORT-fresh when governance turns on \| - \|/);
+  assert.match(table, /\| 1\.7 \| Parent issue \| None yet \| Nothing to answer: Toolkit opens one when governance turns on \| - \|/);
+  assert.match(table, /\| 1\.8 \| Required checks \| None yet \| Nothing to answer: Default-branch protection waits for them \| - \|/);
   assert.equal(github.calls.length, 0, 'showing the bank makes nothing');
 
   const before = fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8');
@@ -143,7 +148,7 @@ test('a fresh repository shows what turning on makes, and all recommended makes 
 
 test('the governance App row: Not now says so once, and Set up gives no command while governance stays off', async t => {
   const ctx = fixture(t);
-  const notNow = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.5=A'] });
+  const notNow = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['1.6=A'] });
   assert.equal(notNow.code, 0, notNow.err + notNow.out);
   assert.match(notNow.out, /Governance GitHub App: not now\. Governance works without it/);
   assert.doesNotMatch(notNow.out, /toolkit-governance-app-setup|pre-filled page/);
@@ -164,7 +169,7 @@ test('a failed step stops with what was made, and answering again reuses it inst
 
   const retry = fakeGitHub({ repos: github.world.repos });
   const shown = await run(ctx, ['setup'], retry, { interactive: true, answers: [''] });
-  assert.match(shown.out, /Evidence store: TRANSPORT-fresh\. Reused when governance turns on/, 'the store made last time is found, not offered again');
+  assert.match(shown.out, /\| 1\.5 \| Evidence store \| TRANSPORT-fresh \| Nothing to answer: Reused when governance turns on \|/, 'the store made last time is found, not offered again');
   const done = await run(ctx, ['setup'], retry, { interactive: true, answers: ['all recommended'] });
   assert.equal(done.code, 0, done.err + done.out);
   assert.deepEqual(retry.calls, [['issue', SLUG, 'Programme: fresh']], 'no second store');
@@ -187,7 +192,7 @@ test('a found store is a question: keep it, or create a new private one', async 
   const keep = fakeGitHub({ repos: { [found]: { private: true, dirs: ['archives'] } }, issues: [parent] });
   const shown = await run(ctx, ['setup'], keep, { interactive: true, answers: [''] });
   assert.match(shown.out, /\| 1\.5 \| Evidence store \| fresh-evidence \| A\. Keep current \| B\. Create a new private store \|/);
-  assert.match(shown.out, /Parent issue: #3\. Reused when governance turns on/);
+  assert.match(shown.out, /\| 1\.7 \| Parent issue \| #3 \| Nothing to answer: Reused when governance turns on \|/);
   const kept = await run(ctx, ['setup'], keep, { interactive: true, answers: ['all recommended'] });
   assert.equal(kept.code, 0, kept.err + kept.out);
   assert.deepEqual(keep.calls, [], 'everything is reused');
@@ -207,7 +212,7 @@ test('when GitHub cannot be searched, turning on makes nothing and says why', as
   const github = fakeGitHub();
   const offline = { ...github, discoveryGh: () => ({ ok: false, reason: 'gh-unavailable' }) };
   const shown = await run(ctx, ['setup'], offline, { interactive: true, answers: [''] });
-  assert.match(shown.out, /Store and parent issue: Could not be checked\. GitHub could not be read/);
+  assert.match(shown.out, /\| 1\.5 \| Store and parent issue \| Could not be checked \| Nothing to answer: GitHub could not be read/);
   const answered = await run(ctx, ['setup'], offline, { interactive: true, answers: ['all recommended'] });
   assert.notEqual(answered.code, 0);
   assert.match(answered.out, /GitHub could not be read \(.+\), so the evidence store and parent issue could not be found or made\./, 'the answer says why');
@@ -240,7 +245,7 @@ test('a fresh repository with slow CI gets Yes recommended for parallel CI shard
   }
   const slow = { minutes: 25, workflow: 'CI' };
   const shown = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: [''], estimate: slow });
-  assert.match(shown.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| B\. Yes \(needs governance on\): The turn-on pull request also records yes/);
+  assert.match(shown.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI about 25 min\) \| B\. Yes \(needs governance on\): The turn-on pull request also records yes/);
   const github = fakeGitHub();
   const result = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'], estimate: slow });
   assert.equal(result.code, 0, result.err + result.out);
@@ -263,4 +268,20 @@ test('a fresh repository with slow CI gets Yes recommended for parallel CI shard
   const kept = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=A, 1.4=B'] });
   assert.match(kept.out, /Parallel CI shards can be answered only while governance is on/);
   assert.equal(kept.published.length, 0);
+});
+
+test('the bank reads the open governance pull requests again: one closed outside Toolkit no longer holds the turn-on, and an open one is named', async t => {
+  const ctx = fixture(t);
+  const first = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'] });
+  assert.equal(first.code, 0, first.err + first.out);
+  assert.equal(first.published.length, 1);
+  // The owner closed that pull request on GitHub; the last read on this computer still lists it.
+  const again = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'] });
+  assert.equal(again.code, 0, again.err + again.out);
+  assert.equal(again.published.length, 1, 'a new turn-on pull request is prepared');
+  assert.doesNotMatch(again.out + again.err, /not ready/);
+  const open = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], opened: [PROPOSAL] });
+  assert.equal(open.code, 0, open.err + open.out);
+  assert.equal(open.published.length, 0, 'never a second one');
+  assert.match(open.out, /^A governance pull request is already open, so no second one was prepared: https:\/\/github\.com\/toolkit-test-fixture\/fresh\/pull\/4 \(turns governance on\)\. Merge it, or close it and answer again\. Nothing was written\.$/m);
 });

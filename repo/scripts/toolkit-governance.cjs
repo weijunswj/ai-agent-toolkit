@@ -41,6 +41,8 @@ const COMMANDS = Object.freeze(['status', 'discover', 'enable', 'disable', 'chec
 // The exit code that means "the bank is shown; stop and wait for the owner's reply", as in setup toolkit.
 // A shown bank is a finished step, not a failure: the app would label any other exit Failed.
 const BANK_SHOWN = 0;
+// How many replies the owner's own terminal reads for one bank before it stops with nothing written.
+const TERMINAL_TRIES = 5;
 const CLOUD_BANK = `This is a cloud session, where Toolkit cannot check that a reply is the owner's own, so an answer in this chat cannot be recorded. Answer this bank from a Remote Control session on your computer, or run ${CMD('setup')} in your own terminal.`;
 const ALIASES = Object.freeze({ decline: 'disable' });
 const USAGE = `Usage: ${governance.governanceCommand('<status|discover|enable|disable|publish|security> [--json]')}\n`
@@ -85,7 +87,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #ciEstimator; #ciReaders;
+  #proposals; #proposalsLive; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #ciEstimator; #ciReaders;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -98,6 +100,8 @@ class ToolkitGovernanceCli {
   // ticket is bound to) are for tests too.
   constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, ciEstimator = null, ciReaders = null } = {}) {
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
+    // Whether the open governance pull requests can be read again (a test passes its own transport).
+    this.#proposalsLive = Boolean(proposalTransport) || !(registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1');
     this.#stdout = stdout;
     this.#stderr = stderr;
     this.#ask = ask;
@@ -173,23 +177,20 @@ class ToolkitGovernanceCli {
       if (command === 'security') return this.#security(json);
       if (command === 'finish') return await this.#finish(json);
       if (command === 'publish') return this.#publish(json, requestedRun);
-      if (command === 'setup' || command === 'refresh') return await this.#bank(json, answers, ticket);
+      if (command === 'setup' || command === 'refresh') {
+        const code = await this.#bank(json, answers, ticket);
+        // Every output that follows an answer ends with the one Agents line (the bank's own has its own).
+        if (answers !== null) this.#stdout.write(`\n${governanceBank.AGENTS_AFTER_ANSWER}\n`);
+        return code;
+      }
       return await this.#decide(command, json);
     } catch (error) {
-      if (PROPOSAL_ERRORS[error.code]) {
-        this.#stderr.write(`${PROPOSAL_ERRORS[error.code]}\n`);
-        return 2;
-      }
-      if (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE') {
-        this.#stderr.write(`${ADOPTION_NOT_READY}\n`);
-        return 2;
-      }
-      if (error instanceof GovernanceCliError) {
-        this.#stderr.write(`${error.message}\n`);
-        return error.exitCode;
-      }
-      this.#stderr.write(`Toolkit governance stopped because of an unexpected problem (${error?.name || 'Error'}${error?.code ? ` ${error.code}` : ''}). The operation did not finish or could not be verified. Read back its result before retrying.\n`);
-      return 2;
+      const [text, code] = PROPOSAL_ERRORS[error.code] ? [PROPOSAL_ERRORS[error.code], 2]
+        : error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? [ADOPTION_NOT_READY, 2]
+          : error instanceof GovernanceCliError ? [error.message, error.exitCode]
+            : [`Toolkit governance stopped because of an unexpected problem (${error?.name || 'Error'}${error?.code ? ` ${error.code}` : ''}). The operation did not finish or could not be verified. Read back its result before retrying.`, 2];
+      this.#stderr.write(`${text}\n${answers !== null ? `\n${governanceBank.AGENTS_AFTER_ANSWER}\n` : ''}`);
+      return code;
     }
   }
 
@@ -440,6 +441,9 @@ class ToolkitGovernanceCli {
       this.#print(json, { state: state.state, writes: 0 }, [`Nothing changed. The binding merged on the default branch could not be read again just now; run ${CMD('status')} online first.`]);
       return 1;
     }
+    // The open governance pull requests are read again first, so one closed outside Toolkit no longer
+    // reads as pending (it would hold the turn-on with a misleading "not ready" line).
+    if (state.state === 'UNDECIDED' && this.#proposalsLive) this.#proposals.refresh(this.#cwd);
     const merged = state.state === 'ENABLED' ? governance.mergedBinding(state.root, this.#registryOptions) : null;
     const task = state.state === 'ENABLED' && state.root ? this.#taskSwitch(state.root) : null;
     let permissions = { checked: false, missing: 0 };
@@ -465,11 +469,19 @@ class ToolkitGovernanceCli {
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
       if (this.#interactive) {
+        // In the owner's own terminal: the bank once, then a reply that cannot be used gets one line
+        // and the question again, up to TERMINAL_TRIES replies; an empty reply ends it.
         this.#stdout.write(`${governanceBank.renderGovernanceBank(specs)}\n`);
-        let chosen;
-        try { chosen = governanceBank.parseBankAnswer(String(await this.#ask('Your answer: ')), specs, { requireBankReference: false }); }
-        catch (error) { this.#print(false, {}, [`${error.message} Nothing was written.`]); return 1; }
-        return this.#applyBank(state, task, chosen, found, permissions, train);
+        for (let tries = 1; ; tries += 1) {
+          const reply = tries > TERMINAL_TRIES ? '' : String(await this.#ask('Your answer: ')).trim();
+          if (!reply) { this.#print(false, {}, ['Nothing was written.']); return 1; }
+          const explain = governanceBank.explainRequest(reply);
+          if (explain) { this.#print(false, {}, [governanceBank.explainText(specs, explain) || `This bank has no row ${explain}.`, '']); continue; }
+          let chosen;
+          try { chosen = governanceBank.parseBankAnswer(reply, specs, { requireBankReference: false }); }
+          catch (error) { this.#print(false, {}, [`${error.message} Nothing was written. ${governanceBank.REPLY_AGAIN}`]); continue; }
+          return this.#applyBank(state, task, chosen, found, permissions, train);
+        }
       }
       return this.#showBank(specs, state);
     }
@@ -480,19 +492,34 @@ class ToolkitGovernanceCli {
     let entry = null;
     try { entry = sessionId ? new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).take(ticket, sessionId, epoch) : null; } catch { entry = null; }
     if (!entry || entry.repository_id !== state.repository_id) {
-      throw new GovernanceCliError("No live reply ticket from the owner for this session and repository, so nothing was written. Show the bank (toolkit governance) and send the owner's next reply with the ticket Toolkit gives you. An agent cannot answer for the owner.");
+      throw new GovernanceCliError('No live reply ticket from the owner for this session and repository, so nothing was written. The owner can type toolkit governance to see the bank again. An agent cannot answer for the owner.');
     }
+    // The bank is shown once: a reply that cannot be used gets a short line, and the same run waits
+    // for the owner's next own message (BankTickets.rearm), never a second bank.
+    const again = lines => this.#again(sessionId, entry, specs, lines);
     if (entry.bank_reference !== reference) {
-      this.#stdout.write('The governance state changed since that bank was shown, so the answer was not used and nothing was written. Show the owner this bank instead:\n\n');
-      return this.#showBank(specs, state);
+      const changed = governanceBank.changedRows(entry.rows, specs);
+      if (!changed) {
+        this.#print(false, {}, ['The governance bank changed since it was shown (rows were added or taken away), so the answer was not used and nothing was written. Type toolkit governance to see the new bank.']);
+        return 0;
+      }
+      return again(['The governance state changed since that bank was shown, so the answer was not used and nothing was written.', ...changed]);
     }
+    const explain = governanceBank.explainRequest(answers);
+    if (explain) return again([governanceBank.explainText(specs, explain) || `This bank has no row ${explain}.`, '']);
     let chosen;
     try { chosen = governanceBank.parseBankAnswer(answers, specs); }
-    catch (error) {
-      this.#stdout.write(`${error.message} Nothing was written. Show the owner this bank again:\n\n`);
-      return this.#showBank(specs, state);
-    }
+    catch (error) { return again([`${error.message} Nothing was written.`]); }
     return this.#applyBank(state, task, chosen, found, permissions, train);
+  }
+
+  // A reply that could not be used: its lines and the one reply line, and the bank noted again for
+  // this run so the owner's next own message answers it.
+  #again(sessionId, entry, specs, lines) {
+    let noted = false;
+    try { noted = new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: governanceBank.bankReference(specs), rows: governanceBank.rowDigests(specs) }); } catch { noted = false; }
+    this.#print(false, {}, [...lines, noted ? governanceBank.REPLY_AGAIN : 'Toolkit could not keep this bank open for another reply (its user-state folder could not be written). Type toolkit governance to see it again.']);
+    return BANK_SHOWN;
   }
 
   #lastCiEstimate = null;
@@ -559,7 +586,7 @@ class ToolkitGovernanceCli {
     let noted = false;
     try {
       noted = Boolean(sessionId) && new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).shown(sessionId, {
-        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: governanceBank.bankReference(specs),
+        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: governanceBank.bankReference(specs), rows: governanceBank.rowDigests(specs),
       });
     } catch { noted = false; }
     this.#stdout.write(`${governanceBank.renderGovernanceBank(specs)}\n`);
@@ -581,6 +608,14 @@ class ToolkitGovernanceCli {
     let shardsDone = false;
     const app = chosen.governanceApp === 'setup' ? 'setup' : 'keep';
     let store = state.state === 'ENABLED' ? governance.mergedBinding(state.root, this.#registryOptions)?.store?.repository || null : null;
+    if (chosen.governance === 'on' && state.state !== 'ENABLED' && found?.status === 'pending') {
+      // A governance pull request is already open: it is the one to merge or close, never a second.
+      const open = this.#proposals.pending(this.#cwd)?.proposals || [];
+      this.#print(false, {}, [open.length
+        ? `A governance pull request is already open, so no second one was prepared: ${open.map(item => `${item.url} (turns governance ${item.answer === 'yes' ? 'on' : 'off'})`).join(', ')}. Merge it, or close it and answer again. Nothing was written.`
+        : `${String(found.reason).replace(/^Toolkit: /, '')} Nothing was written.`]);
+      return open.length ? 0 : 2;
+    }
     if (chosen.governance === 'on' && state.state !== 'ENABLED') {
       const plan = found ? adopt.adoptionPlan(found, { newStore: chosen.evidenceStore === 'new' }) : null;
       if (plan && plan.blocked) this.#print(false, {}, [`GitHub could not be read (${plan.blocked}), so the evidence store and parent issue could not be found or made.`]);
@@ -618,22 +653,19 @@ class ToolkitGovernanceCli {
       }
     }
     // Parallel CI shards on their own: yes or never is one binding pull request; not now writes nothing
-    // and the question comes back at the next refresh.
-    if (shardsDone) {
-      // Already in the pull request above.
-    } else if (state.state === 'ENABLED' && chosen.governance !== 'off' && ['yes', 'never'].includes(chosen.ciShards)) {
+    // and says nothing (it is also what a reply that leaves the row out takes), and the question comes
+    // back at the next refresh.
+    if (!shardsDone && state.state === 'ENABLED' && chosen.governance !== 'off' && ['yes', 'never'].includes(chosen.ciShards)) {
       const { prepared, lines } = this.#prepareCiShards(state.root, chosen.ciShards);
       this.#print(false, {}, [`Prepared ${prepared.url}: it records parallel CI shards as ${chosen.ciShards === 'yes' ? 'yes' : 'never ask'} (ci_shards) in the binding. It applies only after you merge it.`, ...lines, governance.taskSwitchVersionLine()]);
       acted = true;
-    } else if (chosen.ciShards === 'not-now') {
-      this.#print(false, {}, ['Parallel CI shards: not now. Nothing was written; the next refresh asks again.']);
     }
     if (chosen.permissionBlocks !== 'keep') {
       const command = permissions.checked ? permissions[chosen.permissionBlocks] : null;
       if (command) commanded += 1;
       const app = governanceBank.APP_NAMES[permissions.host] || 'this app';
       this.#print(false, {}, command
-        ? ['', `Toolkit permissions (${app}): run this once in your own PowerShell or terminal, outside any agent. It shows what changes, backs up the settings file and waits for you to press Enter.`, '', command, '', PERMISSIONS_RELAY]
+        ? ['', `Toolkit permissions (${app}): run this once in your own PowerShell or terminal, outside any agent. It shows what changes, backs up the settings file and waits for you to press Enter.`, '', command]
         : ['', 'Toolkit permissions: Toolkit could not read where this app keeps them, so there is no command to give. Run setup toolkit, then toolkit governance again.']);
       acted = true;
     }
@@ -643,7 +675,7 @@ class ToolkitGovernanceCli {
     if (chosen.governanceApp === 'setup' && !governedAfter) this.#print(false, {}, ['Governance App: not set up, because governance is not on after this answer.']);
     if (chosen.governanceApp === 'setup' && governedAfter && code === 0 && state.repository) {
       this.#print(false, {}, ['', `Governance App: run this once in your own PowerShell or terminal, outside any agent, with gh signed in. You click Create on GitHub; it saves the App's Client ID and key on ${state.repository}, opens the install page and checks the installation.`, '',
-        `node "${APP_SETUP_SCRIPT}" --repo ${state.repository}${store ? ` --store ${store}` : ''}`, '', PERMISSIONS_RELAY]);
+        `node "${APP_SETUP_SCRIPT}" --repo ${state.repository}${store ? ` --store ${store}` : ''}`]);
       acted = true;
       commanded += 1;
     }
@@ -731,7 +763,7 @@ class ToolkitGovernanceCli {
     const request = this.#proposals.request(this.#cwd, answer, { sessionId, epoch });
     try { return this.#publish(false, request.run, switches, adopted, true, shards, app); }
     catch (error) {
-      this.#print(false, {}, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
+      this.#print(false, {}, [
         PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);
       return 2;
     }
@@ -813,7 +845,6 @@ const APP_SETUP_SCRIPT = path.join(__dirname, 'toolkit-governance-app-setup.cjs'
 
 // Command output can sit folded away in the app, so the agent repeats the command in its reply. Only
 // the owner runs it (toolkit-permissions-apply.cjs refuses under an agent).
-const PERMISSIONS_RELAY = 'Agents: show the owner this command once, as printed, never in a code block of your own making; never run it yourself.';
 
 // This app's Toolkit permission lines, read from the settings files the blocks name: how many are
 // missing or stale, and the owner's one command that brings them up to date or takes them out. Only
