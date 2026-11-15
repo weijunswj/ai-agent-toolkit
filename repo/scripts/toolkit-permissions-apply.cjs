@@ -247,7 +247,9 @@ async function main(argv, deps = {}) {
       const left = options.mode === 'remove' ? plan.block.allow.length + plan.block.ask.length - report.missing.length + stale : report.missing.length + stale;
       if (left) throw new ApplyStop(`${plan.target} still ${options.mode === 'remove' ? 'holds' : 'misses or holds stale'} ${left} Toolkit lines after the write.`, 'restore the backup, then run it again.');
     }
-    out('Done. Restart Claude Code and Codex so they read the new lines. To undo, copy the backup file back over the settings file.\n');
+    // Name only the apps whose files were written.
+    const apps = [...new Set(pending.map(plan => APPS[plan.host]))];
+    out(`Done. Restart ${apps.join(' and ')} so ${apps.length === 1 ? 'it reads' : 'they read'} the new lines. To undo, copy the backup file back over the settings file.\n`);
     return 0;
   } catch (error) {
     if (!(error instanceof ApplyStop)) throw error;

@@ -171,6 +171,24 @@ test('the Codex rules file is replaced whole and the change is listed rule by ru
   assert.equal(fs.existsSync(pc.settings), false, '--host codex leaves Claude Code alone');
 });
 
+test('the restart line names only the apps whose files were written', async t => {
+  const both = computer(t);
+  assert.equal(await permissions.main(['--apply'], both.deps), 0, both.err.join(''));
+  assert.match(both.out.join(''), /Done\. Restart Claude Code and Codex so they read the new lines\./);
+  for (const [host, app, other] of [['claude', 'Claude Code', 'Codex'], ['codex', 'Codex', 'Claude Code']]) {
+    const pc = computer(t);
+    assert.equal(await permissions.main(['--apply', '--host', host], pc.deps), 0, pc.err.join(''));
+    const done = pc.out.join('').split('\n').find(line => line.startsWith('Done.'));
+    assert.equal(done, `Done. Restart ${app} so it reads the new lines. To undo, copy the backup file back over the settings file.`);
+    assert.ok(!done.includes(other), `--host ${host} never mentions ${other}`);
+  }
+  const current = computer(t);
+  assert.equal(await permissions.main(['--apply', '--host', 'codex'], current.deps), 0);
+  current.out.length = 0;
+  assert.equal(await permissions.main(['--apply'], current.deps), 0, current.err.join(''));
+  assert.match(current.out.join(''), /Done\. Restart Claude Code so it reads the new lines\./, 'an app already current is not named');
+});
+
 test('--apply goes first and takes only --host', async t => {
   const pc = computer(t);
   const quiet = { ...pc.deps, stdout: () => {}, stderr: () => {} };
