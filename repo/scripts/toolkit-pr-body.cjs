@@ -4,8 +4,9 @@
 // Pull request body pre-flight: the failure it prevents is a pull request that opens, or is edited,
 // with a body CI or the merge check refuses (an AI footer or session link, no UAT line, no Bump
 // line), which costs a full CI run and often a whole review round. Builders run it on the body
-// before every pull request open or body edit, and write the body it prints, so the first CI run of
-// a body already passes the body checks.
+// before every pull request open or body edit, and write the body it prints, so a body that reaches
+// GitHub already passes the body checks (a cloud create still gets the route's footer; the playbook's
+// update right after it clears that).
 //
 //   node repo/scripts/toolkit-pr-body.cjs --body-file <file|-> --title <text> --out <file> [--json]
 //
@@ -17,7 +18,8 @@
 //     project-thread link, the Projects attribution marker or its requested-by line), then any rule
 //     line and blank lines left dangling at the end. Nothing else is changed;
 //   - checked: the personal-data guard's own `pr` mode on the title and the cleaned body (the
-//     Validate personal-data job runs the same rules), exactly one UAT line the auto-merge check
+//     Validate personal-data job runs the same rules), with the repository's guard config or, where
+//     it has none, a default with pull request text and AI attribution on (the output says which), exactly one UAT line the auto-merge check
 //     accepts (toolkit-auto-merge-eligible.cjs, uatVerdict), and, in the Toolkit repository,
 //     exactly one `Bump: patch|minor|major|none` line (the merge train finder's rule).
 // It writes nothing to GitHub and reads no network. The merge scope (whether the pull request
@@ -27,10 +29,12 @@
 // Exit 0: the cleaned body passes every check; write it with a route that adds no footer (the
 // GitHub connector's create or update call in a cloud session; see the PR review playbook).
 // Exit 1: a problem the builder must fix by hand remains (each one named); the cleaned body is
-// still written. Exit 2: bad arguments, or the body or the guard could not be read.
+// still written; a guard block whose report cannot be read counts as one. Exit 2: bad arguments, or
+// the body or the guard could not be read.
 
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const { detectPrText } = require('../../skills/secure-ci-cd/scripts/personal-data-guard.cjs');
 const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
@@ -41,6 +45,16 @@ const BUMP = /^Bump: (patch|minor|major|none)[ \t]*$/gm;
 const RULE_LINE = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*$/;
 const TOOLKIT_MARKER = path.join('repo', 'contracts', 'agent-rules', 'global-rules.md');
 const MAX_BODY_BYTES = 512 * 1024;
+const REPO_CONFIG = path.join('.github', 'personal-data-guard.json');
+// The guard config used where the repository has none: pull request text and AI attribution
+// checked, nothing allowed. Only `pr` mode reads it, so the other scopes do not matter here.
+const DEFAULT_CONFIG = Object.freeze({
+  schema: 'personal-data-guard/v1',
+  scope: { file_content: true, paths: true, commit_messages: true, branch_names: true, pull_request_text: true, pull_request_attribution: true },
+  identity: 'excluded',
+  identity_reason: 'pull request pre-flight default: only the title and body are scanned',
+  required_check: 'none',
+});
 
 // The body minus every line that carries an AI attribution finding, and minus the rule and blank
 // lines that then dangle at its end: { body, removed: [{ line, rule }] }. Line numbers count from 1
@@ -99,15 +113,29 @@ function gitRoot(cwd) {
   return run.status === 0 ? run.stdout.trim() : null;
 }
 
-// The personal-data guard's `pr` mode on the title and body, run from the repository so it reads
-// that repository's own guard config: { code, findings: [lines] }.
-function guardFindings(root, title, body) {
-  const run = spawnSync(process.execPath, [GUARD, 'pr', '--repo', root], {
-    cwd: root, encoding: 'utf8', windowsHide: true, env: { ...process.env, PDG_PR_TITLE: title, PDG_PR_BODY: body },
-  });
-  if (run.error || ![0, 1].includes(run.status)) return { code: 2, findings: [] };
-  const findings = String(run.stderr || '').split(/\r?\n/).filter(line => /^ {2}pull request (?:title|body)\S*\s/.test(line)).map(line => line.trim());
-  return { code: run.status, findings };
+// The personal-data guard's `pr` mode on the title and body, with the repository's own guard
+// config, or DEFAULT_CONFIG where it has none: { code, findings: [lines], unread, config }. A block
+// whose finding lines cannot be read is `unread`, never a pass.
+function guardFindings(root, title, body, guard) {
+  const own = fs.existsSync(path.join(root, REPO_CONFIG));
+  const temp = own ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-pr-body-'));
+  try {
+    const args = [guard, 'pr', '--repo', root];
+    if (temp) {
+      const file = path.join(temp, 'personal-data-guard.json');
+      fs.writeFileSync(file, `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`);
+      args.push('--config', file);
+    }
+    const run = spawnSync(process.execPath, args, {
+      cwd: root, encoding: 'utf8', windowsHide: true, env: { ...process.env, PDG_PR_TITLE: title, PDG_PR_BODY: body },
+    });
+    const config = own ? 'repository' : 'default';
+    if (run.error || ![0, 1].includes(run.status)) return { code: 2, findings: [], config };
+    const findings = String(run.stderr || '').split(/\r?\n/).filter(line => /^ {2}pull request (?:title|body)\S*\s/.test(line)).map(line => line.trim());
+    return { code: run.status, findings, unread: run.status === 1 && !findings.length, config };
+  } finally {
+    if (temp) fs.rmSync(temp, { recursive: true, force: true });
+  }
 }
 
 function readBody(file, cwd, stdin) {
@@ -123,7 +151,7 @@ const USAGE = 'Usage: node repo/scripts/toolkit-pr-body.cjs --body-file <file|->
   + 'Removes AI footers, session links and attribution lines, writes the cleaned body to --out, then checks it\n'
   + 'with the personal-data guard, the UAT line rule and (in the Toolkit repository) the one-Bump-line rule.\n';
 
-function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = process.stderr, stdin } = {}) {
+function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = process.stderr, stdin, guard: guardScript = GUARD } = {}) {
   const value = (name) => { const at = argv.indexOf(name); return at >= 0 && at + 1 < argv.length ? argv[at + 1] : undefined; };
   const bodyFile = value('--body-file');
   const title = value('--title');
@@ -136,17 +164,19 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
   if (text === null) { stderr.write('The body could not be read as UTF-8 text (missing, over 512 KB, or another encoding). Save it as UTF-8 or pipe it in with --body-file -.\n'); return 2; }
   const { body, removed } = cleanBody(text);
   try { fs.writeFileSync(path.resolve(cwd, out), body); } catch (error) { stderr.write(`The cleaned body could not be written to ${out}: ${error.code || error.message}\n`); return 2; }
-  const guard = guardFindings(root, title, body);
+  const guard = guardFindings(root, title, body, guardScript);
   if (guard.code === 2) { stderr.write('The personal-data guard could not scan the title and body, so the body is not known to pass. Run it from the repository folder with a readable guard config.\n'); return 2; }
   const problems = [
     ...lineProblems(body, { toolkit: fs.existsSync(path.join(root, TOOLKIT_MARKER)) }),
     ...guard.findings.map(finding => `the personal-data guard blocks ${finding} (place, class, rule): edit that line`),
+    ...(guard.unread ? ['the personal-data guard blocked the title or body, but its report could not be read: run its pr mode directly to see why'] : []),
   ];
   const ok = problems.length === 0;
   if (json) {
-    stdout.write(`${JSON.stringify({ ok, out, removed, problems }, null, 2)}\n`);
+    stdout.write(`${JSON.stringify({ ok, out, removed, problems, guard_config: guard.config }, null, 2)}\n`);
   } else {
     const lines = [];
+    if (guard.config === 'default') lines.push(`This repository has no ${REPO_CONFIG.split(path.sep).join('/')}, so the guard ran with the pre-flight's default (pull request text and AI attribution on).`);
     if (removed.length) lines.push(`Removed ${removed.length} line(s): ${removed.map(entry => `line ${entry.line} (${entry.rule})`).join(', ')}.`);
     lines.push(ok
       ? `Body ready: ${out} passes the personal-data guard, the UAT line rule and the Bump line rule. Write it with a route that adds no footer, then read it back.`
