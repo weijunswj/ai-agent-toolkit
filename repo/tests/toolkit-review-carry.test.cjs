@@ -104,14 +104,16 @@ const refresh = (number, after, over = {}) => entry(number, {
   contents: { [`${BASE}:${MANIFEST}`]: manifest(['repo/tests/a.test.cjs', 'repo/tests/b.test.cjs']), [`${sha(number)}:${MANIFEST}`]: after, ...(over.contents || {}) },
 });
 
-test('the shard-timing bot refresh boards with no verdict when it only moves files and times', t => {
-  const { ready, skipped, members } = judge(t, [
+test("the shard-timing bot refresh boards with no verdict when it only moves files and times, rebalance included", t => {
+  const restless = JSON.stringify({ ...JSON.parse(manifest(['repo/tests/a.test.cjs'])), systems: { linux: { shards: [{ id: 'linux-1', files: ['repo/tests/a.test.cjs'] }, { id: 'linux-2', files: ['repo/tests/b.test.cjs'] }] } } });
+  const { ready, skipped } = judge(t, [
     refresh(1, manifest(['repo/tests/b.test.cjs', 'repo/tests/a.test.cjs'], { 'repo/tests/a.test.cjs': 9 })),
     refresh(2, manifest(['repo/tests/a.test.cjs'], { 'repo/tests/a.test.cjs': 9 })),
+    refresh(3, manifest(['repo/tests/a.test.cjs', 'repo/tests/b.test.cjs', 'repo/tests/c.test.cjs'])),
+    refresh(4, restless),
   ]);
-  assert.deepEqual(ready, ['#1'], skipped);
-  assert.equal(members.length, 0, 'one ready pull request makes no train');
-  assert.match(skipped, /#2: no review verdict comment .*, and no scripted carry: it changes more than measured times and which shard runs which file/);
+  assert.deepEqual(ready, ['#1', '#2', '#3'], skipped);
+  assert.match(skipped, /#4: no review verdict comment .*, and no scripted carry: it changes more than measured times and which shard runs which file/, 'the rest shard turned into a named one');
 });
 
 test('a shard refresh is refused for a budget change, another file, a human author, another branch or a fork', t => {
@@ -152,7 +154,16 @@ test("a FAIL verdict on a shard refresh keeps it off, and a carried member never
 
 const block = (body, version = '1.0.0') => `<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:BEGIN TOOLKIT-GOVERNED-RULES v2 toolkit=${version} sha256=000000000000 -->\n${body}\n<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/toolkit-governed-rules.md:END TOOLKIT-GOVERNED-RULES -->`;
 const agents = (inner, rest = 'Hand-written rules.') => `# AI Agent Toolkit Repo Rules\n\n${block(inner)}\n\n${rest}\n`;
-const sync = (number, files, contents) => entry(number, { files, contents: Object.fromEntries(Object.entries(contents).map(([key, value]) => [key.replace('HEAD', sha(number)), value])) });
+// The Toolkit's own CI: the Validate workflow runs both syncs' --check, at the merge base and the head.
+const SYNC_CI = ref => ({
+  [`${ref}:.github/workflows/validate.yml`]: 'jobs:\n  gate:\n    steps:\n      - run: |\n          node repo/scripts/sync-repo-doc-contract.cjs --check\n          node repo/scripts/sync-agent-instruction-shims.cjs --check\n',
+  [`${ref}:repo/scripts/sync-repo-doc-contract.cjs`]: "'use strict';\n",
+  [`${ref}:repo/scripts/sync-agent-instruction-shims.cjs`]: "'use strict';\n",
+});
+const sync = (number, files, contents, { ci = true, pull: over = {} } = {}) => entry(number, { files, pull: over, contents: {
+  ...(ci ? { ...SYNC_CI(BASE), ...SYNC_CI(sha(number)) } : {}),
+  ...Object.fromEntries(Object.entries(contents).map(([key, value]) => [key.replace('HEAD', sha(number)), value])),
+} });
 
 test('a generated-sync change boards when only managed blocks and whole projected files change', t => {
   const { ready, skipped } = judge(t, [
@@ -204,4 +215,56 @@ test('a high-effort G2 stamp boards only a pull request of LIGHT .md files', t =
   assert.match(skipped, /#2: its G2 route stamp is off the stack-registry pin/);
   assert.match(skipped, /#3: its G2 route stamp is off the stack-registry pin/);
   assert.match(skipped, /#4: its G2 route stamp is off the stack-registry pin/);
+});
+
+test("a generated-sync change in a repository whose CI does not run the syncs' --check needs a G2", t => {
+  const changes = { [`${BASE}:AGENTS.md`]: agents('old'), 'HEAD:AGENTS.md': agents('anything at all') };
+  // No entry here gives the shared merge base its CI files, so only the head's can be there.
+  const headOnly = number => Object.fromEntries(Object.entries(SYNC_CI(sha(number))));
+  const none = judge(t, [
+    sync(1, ['CLAUDE.md'], {}, { ci: false }),
+    sync(2, ['AGENTS.md'], changes, { ci: false }),
+    sync(3, ['AGENTS.md'], { ...changes, ...headOnly(3) }, { ci: false }),
+  ]);
+  assert.deepEqual(none.ready, []);
+  for (const number of [1, 2, 3]) assert.match(none.skipped, new RegExp(`#${number}: .*CI here does not run repo/scripts/sync-repo-doc-contract\\.cjs --check and repo/scripts/sync-agent-instruction-shims\\.cjs --check`), none.skipped);
+  const head = judge(t, [
+    sync(4, ['AGENTS.md'], { ...changes, 'HEAD:.github/workflows/validate.yml': 'jobs: {}\n' }),
+    sync(5, ['AGENTS.md'], { ...changes, 'HEAD:repo/scripts/sync-agent-instruction-shims.cjs': null }),
+  ]);
+  assert.deepEqual(head.ready, []);
+  assert.match(head.skipped, /#4: .*CI here does not run repo\/scripts\/sync-repo-doc-contract\.cjs --check and /);
+  assert.match(head.skipped, /#5: .*CI here does not run repo\/scripts\/sync-agent-instruction-shims\.cjs --check, so nothing proves/);
+});
+
+// ---- each guard on a carried path keeps the pull request off on its own ----
+
+test('a scripted carry still needs a clean title and body and an on-pin G1 stamp', t => {
+  const good = manifest(['repo/tests/b.test.cjs', 'repo/tests/a.test.cjs']);
+  const session = ['https://claude', 'ai/code/session_abc'].join('.');
+  const footer = ['\n\n', String.fromCodePoint(0x1F916), ' Generated with [Claude Code](https://claude.com/claude-code)'].join('');
+  const { ready, skipped } = judge(t, [
+    refresh(1, good, { pull: { body: `${body('NOT_REQUIRED (manifest-only redistribution)', 'none')}${footer}` } }),
+    refresh(2, good, { pull: { title: `Refresh shard timings (${session})` } }),
+    refresh(3, good, { pull: { body: body('NOT_REQUIRED (manifest-only redistribution)', 'none').replace(G1_STAMP, 'Route: host-verified opus-5.5/medium pin=owner-claude/BUILDER') } }),
+    sync(4, ['CLAUDE.md'], {}, { pull: { title: `Sync (${session})` } }),
+    sync(5, ['CLAUDE.md'], {}),
+  ]);
+  assert.deepEqual(ready, ['#5'], skipped);
+  assert.match(skipped, /#1: its title or body has text the personal-data guard reports \(PDG-AI-FOOTER\)/);
+  assert.match(skipped, /#2: its title or body has text the personal-data guard reports \(PDG-AI-SESSION-LINK\)/);
+  assert.match(skipped, /#3: its G1 route stamp is off the stack-registry pin/);
+  assert.match(skipped, /#4: its title or body has text the personal-data guard reports \(PDG-AI-SESSION-LINK\)/);
+});
+
+test('a body-only carry takes the higher of its verdict tier and the risk list, and checks the title', t => {
+  const session = ['https://claude', 'ai/code/session_abc'].join('.');
+  const { ready, skipped, members } = judge(t, [
+    bodyOnly(1, 'NOT_REQUIRED', { files: ['.github/workflows/ci.yml'] }),
+    bodyOnly(2, 'NOT_REQUIRED'),
+    bodyOnly(3, 'NOT_REQUIRED', { pull: { title: `Fix (${session})` } }),
+  ]);
+  assert.deepEqual(ready, ['#1', '#2'], skipped);
+  assert.deepEqual(members.map(member => member.tier), ['RISKY', 'NORMAL'], 'the verdict said NORMAL; the workflow file is RISKY');
+  assert.match(skipped, /#3: its title or body has text the personal-data guard reports \(PDG-AI-SESSION-LINK\)/);
 });

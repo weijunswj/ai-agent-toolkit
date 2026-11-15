@@ -10,11 +10,14 @@
 //                    line says only the description failed; the head is the reviewed commit, and the
 //                    body's UAT state is the one the reviewer named or stricter (OWNER_TEST_NEEDED).
 //   shard-timings    a bot's refresh branch (toolkit/shard-timings-*) that changes only the shard
-//                    manifest, and only its measured times and which shard runs which file: every
-//                    other key, every budget and each system's set of files stay as they were.
+//                    manifest, and only its measured times and the files each named shard lists:
+//                    every other key, every budget and every shard stay as they were. The rest
+//                    shard runs any file no named shard lists, and CI's `--verify-ci` proves each
+//                    file ran once, so moving files between shards changes only where a file runs.
 //   generated-sync   only files a sync script writes (PROJECTED_OUTPUTS of the two syncs): whole
-//                    projected files, or managed blocks with the hand-written rest unchanged. CI's
-//                    `--check` of both syncs proves the generated text matches its sources.
+//                    projected files, or managed blocks with the hand-written rest unchanged, and
+//                    only where the Validate workflow runs both syncs' `--check` (the Toolkit
+//                    repository), which proves the generated text matches its sources.
 //
 // The finder still asks for green required checks, one `Bump:` line, an accepted `UAT:` line and no
 // footer or other personal data in the title or body (attribution rules on). A RISKY member keeps
@@ -36,6 +39,9 @@ const SHARD_BRANCH = 'toolkit/shard-timings-';
 const SHARD_MANIFESTS = Object.freeze([shards.MANIFEST_REL, governedShards.MANIFEST_REL]);
 const OUTPUTS = Object.freeze(new Map([...instructionSync.PROJECTED_OUTPUTS, ...docContractSync.PROJECTED_OUTPUTS].map(entry => [entry.path, entry.blocks])));
 const { WORDING_EFFORT } = require('./toolkit-gate-route.cjs');
+// Where CI proves the generated text: the Validate workflow running each sync's `--check`.
+const SYNC_WORKFLOW = '.github/workflows/validate.yml';
+const SYNC_SCRIPTS = Object.freeze(['repo/scripts/sync-repo-doc-contract.cjs', 'repo/scripts/sync-agent-instruction-shims.cjs']);
 
 // The UAT state a body-only carry names, from the verdict comment's lines after its first; null
 // without exactly one Carry line.
@@ -57,23 +63,18 @@ function textProblem(title, body) {
   return rules.length ? `its title or body has text the personal-data guard reports (${rules.join(', ')})` : null;
 }
 
-// A shard manifest with the parts a refresh may change taken out: measured times, and each shard's
-// file list (kept per system as one sorted set).
+// A shard manifest with the parts a refresh may change taken out: measured times, and the files
+// each named shard lists (a refresh's rebalance moves files between named shards and the rest shard).
 function shardSkeleton(text) {
   const manifest = JSON.parse(text);
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error('not an object');
   const copy = JSON.parse(JSON.stringify(manifest));
   delete copy.durations_seconds;
-  const files = {};
-  for (const [system, entry] of Object.entries(copy.systems || {})) {
+  for (const entry of Object.values(copy.systems || {})) {
     const list = Array.isArray(entry) ? entry : (entry && entry.shards) || [];
-    files[system] = [];
-    for (const shard of list) {
-      if (shard && Array.isArray(shard.files)) { files[system].push(...shard.files); shard.files = []; }
-    }
-    files[system].sort();
+    for (const shard of list) if (shard && Array.isArray(shard.files)) shard.files = [];
   }
-  return JSON.stringify({ copy, files });
+  return JSON.stringify(copy);
 }
 
 // Why a pull request is not a shard-timing refresh the finder can carry, or null. `read(ref, path)`
@@ -107,11 +108,22 @@ function outsideBlocks(text, names) {
   return rest;
 }
 
+// Why CI at a commit does not prove the generated text, or null: each sync script and the Validate
+// workflow line that runs its `--check` must be there.
+function syncCheckProblem(read, ref) {
+  const workflow = read(ref, SYNC_WORKFLOW);
+  const lines = workflow === null ? [] : String(workflow).split(/\r?\n/).map(line => line.trim());
+  const missing = SYNC_SCRIPTS.filter(script => read(ref, script) === null || !lines.includes(`node ${script} --check`));
+  return missing.length ? `CI here does not run ${missing.map(script => `${script} --check`).join(' and ')}, so nothing proves the generated text` : null;
+}
+
 // Why a pull request is not a generated-sync change the finder can carry, or null.
 function generatedSyncProblem(pull, files, read, base) {
   if (!files.length) return 'it changes no file';
   const other = files.filter(file => !OUTPUTS.has(file));
   if (other.length) return `it changes files no sync writes (${other.join(', ')})`;
+  const unproved = syncCheckProblem(read, base) || syncCheckProblem(read, pull.head.sha);
+  if (unproved) return unproved;
   for (const file of files) {
     const names = OUTPUTS.get(file);
     if (names === null) continue; // the sync check compares the whole file

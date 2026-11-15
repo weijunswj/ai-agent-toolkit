@@ -318,7 +318,7 @@ function prBody(run, plan, profile = V1) {
     '',
     'Made by `node <Toolkit>/repo/scripts/refresh-shard-timings.cjs --repo-root <checkout> --open-pr`, which makes no model calls. Only the shard manifest changes; no test is added, removed or skipped.',
     '',
-    'This is a generated candidate. Review route: scripted carry (shard-timings). The merge train finder boards it with no G2 only while it stays a manifest-only redistribution from this bot branch (measured times and which shard runs which file; budgets and each system\'s set of files unchanged) and its required checks are green on Linux and Windows. Anything more needs the full gates: G0, a fresh G1 and a full G2. The shard manifest is RISKY, so the owner\'s merge card stays.',
+    'This is a generated candidate. Review route: scripted carry (shard-timings). The merge train finder boards it with no G2 only while it stays a manifest-only redistribution from this bot branch (measured times and the files each named shard lists; budgets and every shard unchanged) and its required checks are green on Linux and Windows. Anything more needs the full gates: G0, a fresh G1 and a full G2. The shard manifest is RISKY, so the owner\'s merge card stays.',
     'Budget or generator changes need their own impact assessment.',
     '',
     'UAT: NOT_REQUIRED (manifest-only redistribution: both CI systems exercise the entire changed surface)',

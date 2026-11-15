@@ -276,7 +276,7 @@ test('generated candidate body names the scripted carry route, its limits and th
   const body = prBody({ databaseId: 123, headSha: 'a'.repeat(40) }, { findings: ['linux: trigger crossed'] });
   assert.ok(body.includes('node <Toolkit>/repo/scripts/refresh-shard-timings.cjs --repo-root <checkout> --open-pr'));
   assert.match(body, /Review route: scripted carry \(shard-timings\)/);
-  assert.match(body, /manifest-only redistribution.*budgets and each system's set of files unchanged.*green on Linux and Windows/);
+  assert.match(body, /manifest-only redistribution.*budgets and every shard unchanged.*green on Linux and Windows/);
   assert.match(body, /Anything more needs the full gates: G0, a fresh G1 and a full G2/);
   assert.match(body, /RISKY, so the owner's merge card stays/);
   assert.match(body, /Budget or generator changes.*impact assessment/);

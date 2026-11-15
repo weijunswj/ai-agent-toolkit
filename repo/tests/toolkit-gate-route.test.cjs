@@ -94,6 +94,9 @@ test('a wording-only G2 may run at high on the pinned model, and only its stamp 
     ['wording-only G2 on another model', wording('G2', 'owner-claude opus sonnet-5.5/high'), { model: 'claude-sonnet-5-5', level: 'high' }, { deny: /pin is opus-5.5\/xhigh/ }],
     ['wording-only G2 whose host runs medium', wording('G2', 'owner-claude opus opus-5.5/high'), { effort: 'medium', level: 'medium' }, { deny: /runs on effort medium, but its route is opus-5.5\/high/ }],
     ['the class line does not lower a G1', wording('G1', 'owner-claude BUILDER opus-5.5/medium'), { effort: 'medium', level: 'medium' }, { deny: /pin is opus-5.5\/high/ }],
+    ['the class line does not lower a design challenge', wording('Design challenge', 'owner-claude DESIGN_CHALLENGE opus-5.5/high'), { effort: 'high', level: 'high' }, { deny: /pin is opus-5.5\/xhigh/ }],
+    ['only the exact class counts', brief('G2', 'owner-claude opus opus-5.5/high', 'Review class: not wording-only'), { effort: 'high', level: 'high' }, { deny: /pin is opus-5.5\/xhigh/ }],
+    ['a class with more after it is another class', brief('G2', 'owner-claude opus opus-5.5/high', 'Review class: wording-only and code'), { effort: 'high', level: 'high' }, { deny: /pin is opus-5.5\/xhigh/ }],
   ];
   for (const [name, text, options, want] of cases) {
     const got = run(text, options);
