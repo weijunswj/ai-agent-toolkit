@@ -8,7 +8,7 @@ Do not review from metadata alone. Inspect the relevant diff, files, tests, and 
 
 Lead review responses with findings ordered by severity. If no issues are found, say so and mention residual risk or test gaps.
 
-Follow the global Accuracy first and Tests first principles: check each claim, status and done verdict against its source, not a summary, and run each new or changed test against the old code. Flag a test that passes there, relies on data shaped to the assertion, a test-only branch or a stubbed unit under test, or duplicates another test.
+Follow the global Accuracy first and Tests first principles: check each claim, status and done verdict against its source, not a summary, and run each new or changed test against the old code. Flag a test that passes there unless it guards a real contract, or that relies on data shaped to the assertion, a test-only branch or a stubbed unit under test, duplicates another test or is a tautology.
 
 ## Managed PR Continuity
 
