@@ -627,3 +627,34 @@ test('legacy cleaner: a native denial is reported after one attempt', () => {
   assert.throws(() => scheduler.list('TOOLKIT'), /Access is denied/);
   assert.equal(attempts, 1);
 });
+
+// An earlier release's apply recorded the task's exported XML with its definition. The cleaner must
+// compare that XML: without it, an unchanged task reads as changed, and a late XML edit goes unseen.
+function withExportedXml(w, e, xml = '<Task version="1.4"><Actions><Exec/></Actions></Task>') {
+  e.live().definition_xml = xml;
+  tasks.updateRegistry(w.home, list => list.map(entry => entry.id === e.entry.id ? { ...entry, enrolled: { ...entry.enrolled, definition_xml: xml } } : entry));
+}
+
+test('a task recorded with its exported XML, still unchanged, is planned as Toolkit\'s own and removed', t => {
+  const w = world(t), e = enrol(t, w, 'widget');
+  withExportedXml(w, e);
+  const plan = owner(w).plan();
+  assert.deepEqual(plan.tasks.map(item => [item.kind, item.action]), [['toolkit', 'remove']]);
+  assert.equal(owner(w).apply(plan.code).ok, true);
+  assert.equal(e.live(), undefined);
+});
+
+test('a task whose exported XML alone changes between the plan read and its removal is left alone', t => {
+  const w = world(t), e = enrol(t, w, 'widget');
+  withExportedXml(w, e);
+  const plan = owner(w).plan();
+  const list = w.scheduler.list.bind(w.scheduler);
+  let reads = 0;
+  // The first list call belongs to apply's own fresh plan; only the XML changes just after it.
+  w.scheduler.list = folder => { const rows = list(folder); if (++reads === 1) e.live().definition_xml = '<Task version="1.4"><Actions><Exec>late</Exec></Actions></Task>'; return rows; };
+  const result = owner(w).apply(plan.code);
+  assert.equal(result.ok, false);
+  assert.match(result.tasks[0].reason, /changed after the plan was read/);
+  assert.ok(e.live());
+  assert.ok(tasks.readRegistry(w.home).tasks.some(entry => entry.id === e.entry.id));
+});
