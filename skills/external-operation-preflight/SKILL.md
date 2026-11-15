@@ -15,7 +15,7 @@ Check one live change on an outside system before the owner approves it. The ski
 4. **Run** `node <this skill>/scripts/preflight-check.cjs plan.json`. It prints a verdict, typed reasons, the date checked and the plan's SHA-256.
 5. **Ask for approval only on ALLOW or ALLOW_WITH_NOTICE**, showing the plan, verdict, notices and hash. The owner's current-turn approval covers that hash; any change to the plan goes back to step 3.
 6. **After the change,** read the result back from the provider, never from labels or your own log, and do every `required_read_back` item.
-7. **For later sessions,** keep a temporary resource's identity with `scripts/recovery-identity.cjs` ([rules](references/recovery-identity.md)); it writes only its own records, and a hold stops the work.
+7. **Temporary resources later sessions need:** follow [the recovery identity rules](references/recovery-identity.md); a hold stops the work.
 
 ## What the checker enforces
 
