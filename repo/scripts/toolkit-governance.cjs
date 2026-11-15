@@ -269,7 +269,8 @@ class ToolkitGovernanceCli {
   }
 
   // Publication uses only a live receipt from an accepted owner answer.
-  #publish(json, suppliedRun = null, switchTo = null, adopted = null) {
+  // `switches` are the task_prs members the owner's answer sets ({ auto_merge, merge_train }), or null.
+  #publish(json, suppliedRun = null, switches = null, adopted = null) {
     const pending = this.#proposals.pending(this.#cwd, { sessionId: process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID,
       epoch: new gate.SessionEpochs({ registryOptions: this.#registryOptions }).get(process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID) });
     const run = suppliedRun || (pending?.kind === 'preparing' ? pending.run : null);
@@ -277,9 +278,9 @@ class ToolkitGovernanceCli {
     let binding = adopted ? adopted.binding : null;
     if (!adopted) try { binding = JSON.parse(fs.readFileSync(path.join(this.#cwd, governance.BINDING_FILE), 'utf8')); } catch { /* prepare explains missing adoption */ }
     // setup governance asks the switch with yes; it joins the same proposal, never a local file.
-    if (switchTo && binding && typeof binding === 'object') binding = { ...binding, task_prs: { auto_merge: switchTo } };
+    if (switches && binding && typeof binding === 'object') binding = { ...binding, task_prs: { ...(binding.task_prs || {}), ...switches } };
     const result = this.#proposals.publish(this.#cwd, run, binding, adopted ? adopted.files : null);
-    this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...(switchTo ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding)]);
+    this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding)]);
     return 0;
   }
 
@@ -307,18 +308,25 @@ class ToolkitGovernanceCli {
     return { value: answer.answered ? answer.auto_merge : 'unset', answer, removed, lines };
   }
 
-  // One binding pull request that changes only task_prs.auto_merge, built from the exact merged text.
-  #prepareSwitch(root, switchTo) {
+  // The repository's merge-train switch, as merged and read back on this computer.
+  #trainSwitch(root) {
+    const train = governance.mergeTrain(root, this.#registryOptions);
+    return { value: train.on ? 'on' : 'off', fresh: train.fresh };
+  }
+
+  // One binding pull request that changes only the named task_prs members ({ auto_merge,
+  // merge_train }), built from the exact merged text.
+  #prepareSwitch(root, changes) {
     if (!this.#switchTransport) throw new GovernanceCliError('GitHub cannot be reached from here, so no pull request was prepared. Nothing was written.');
     const identity = governance.readIdentity(root);
     const entry = bindingCache.readBindingCache(identity, governance.userStateDirectory(this.#registryOptions));
     let parsed;
     try { parsed = JSON.parse(String(entry?.text).replace(/^\uFEFF/, '')); } catch { parsed = null; }
     if (!parsed || parsed.schema !== 'toolkit.programme-binding.v2' || parsed.governance !== 'enabled') throw new GovernanceCliError('The merged binding is not an enabled version 2 binding, so the switch cannot be set yet. Nothing was written.');
-    const proposal = { ...parsed, task_prs: { auto_merge: switchTo } };
+    const proposal = { ...parsed, task_prs: { ...(parsed.task_prs || {}), ...changes } };
     if (governance.bindingProblems(proposal, identity).length) throw new GovernanceCliError('The changed binding would not be valid, so no pull request was prepared. Nothing was written.');
     try {
-      return this.#switchTransport.publishSwitch(proposal.repository, entry.text, switchText(entry.text, parsed, switchTo), switchTo);
+      return this.#switchTransport.publishSwitch(proposal.repository, entry.text, switchText(entry.text, parsed, changes), changes);
     } catch (error) {
       throw new GovernanceCliError(error.code === 'SWITCH_BASE_CHANGED'
         ? `The binding on the default branch changed since this computer read it. Run ${CMD('status')}, then ask again. Nothing was written.`
@@ -353,7 +361,8 @@ class ToolkitGovernanceCli {
       try { found = this.#discovery().discover(this.#cwd); } catch { found = { status: 'unavailable', reason: 'the search failed' }; }
     }
     const adoption = found ? adopt.adoptionPlan(found) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', merged, permissions, adoption });
+    const train = state.state === 'ENABLED' && state.root ? this.#trainSwitch(state.root) : null;
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption });
     const reference = governanceBank.bankReference(specs);
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
@@ -362,7 +371,7 @@ class ToolkitGovernanceCli {
         let chosen;
         try { chosen = governanceBank.parseBankAnswer(String(await this.#ask('Your answer: ')), specs, { requireBankReference: false }); }
         catch (error) { this.#print(false, {}, [`${error.message} Nothing was written.`]); return 1; }
-        return this.#applyBank(state, task, chosen, found, permissions);
+        return this.#applyBank(state, task, chosen, found, permissions, train);
       }
       return this.#showBank(specs, state);
     }
@@ -385,7 +394,7 @@ class ToolkitGovernanceCli {
       this.#stdout.write(`${error.message} Nothing was written. Show the owner this bank again:\n\n`);
       return this.#showBank(specs, state);
     }
-    return this.#applyBank(state, task, chosen, found, permissions);
+    return this.#applyBank(state, task, chosen, found, permissions, train);
   }
 
   // A cloud session skips the reply check, so the owner's chat answer there can never be recorded.
@@ -409,35 +418,48 @@ class ToolkitGovernanceCli {
     const epochs = new gate.SessionEpochs({ registryOptions: this.#registryOptions });
     const epoch = sessionId ? epochs.get(sessionId) : null;
     // Claude Code answers on its own question card; Codex reads a typed reply.
-    const card = this.#cardHost() ? governanceBank.bankCardInput(specs) : null;
+    const cards = this.#cardHost() ? governanceBank.bankCards(specs) : null;
     let noted = false;
     try {
       noted = Boolean(sessionId) && new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).shown(sessionId, {
-        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: governanceBank.bankReference(specs), card,
+        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: governanceBank.bankReference(specs), cards,
       });
     } catch { noted = false; }
-    this.#stdout.write(`${governanceBank.renderGovernanceBank(specs, { card: noted && card !== null })}\n`);
+    this.#stdout.write(`${governanceBank.renderGovernanceBank(specs, { card: noted && cards !== null })}\n`);
     if (!noted) this.#stdout.write(`\nToolkit could not note this bank for this session (its session-start hook did not mark it, or its user-state folder could not be written), so a reply in chat cannot be recorded. Start a new session and say toolkit governance there, or run ${CMD('setup')} in your own terminal.\n`);
     return BANK_SHOWN;
   }
 
   // The owner's answer: at most one governance pull request, then the permission blocks.
-  #applyBank(state, task, chosen, found = null, permissions = { checked: false }) {
+  #applyBank(state, task, chosen, found = null, permissions = { checked: false }, train = null) {
     let code = 0;
     let acted = false;
     const switchTo = chosen.taskAutoMerge === 'on' ? 'after-gates' : chosen.taskAutoMerge === 'off' ? 'off' : null;
+    const trainTo = chosen.mergeTrain === 'on' || chosen.mergeTrain === 'off' ? chosen.mergeTrain : null;
+    // Turning governance on writes both switches as the bank showed them: a sub-option is off until
+    // the owner turns it on, so an unanswered one is written off rather than left to its default.
+    const enabling = { auto_merge: switchTo || 'off', merge_train: trainTo || 'off' };
     if (chosen.governance === 'on' && state.state !== 'ENABLED') {
       const plan = found ? adopt.adoptionPlan(found, { newStore: chosen.evidenceStore === 'new' }) : null;
       if (plan && plan.blocked) this.#print(false, {}, [`GitHub could not be read (${plan.blocked}), so the evidence store and parent issue could not be found or made.`]);
-      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, switchTo || 'off') : this.#prepareDecision('yes', switchTo || 'off');
+      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, enabling) : this.#prepareDecision('yes', enabling);
       acted = true;
     } else if (chosen.governance === 'off' && state.state !== 'DISABLED') {
       code = this.#prepareDecision('no', null);
       acted = true;
-    } else if (state.state === 'ENABLED' && switchTo && task && switchTo !== task.value) {
-      const prepared = this.#prepareSwitch(state.root, switchTo);
-      this.#print(false, {}, [`Prepared ${prepared.url}: it sets task auto-merge ${switchTo === 'after-gates' ? 'on' : 'off'} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine()]);
-      acted = true;
+    } else if (state.state === 'ENABLED') {
+      const changes = {};
+      if (switchTo && task && switchTo !== task.value) changes.auto_merge = switchTo;
+      if (trainTo && train && trainTo !== train.value) changes.merge_train = trainTo;
+      if (Object.keys(changes).length) {
+        const prepared = this.#prepareSwitch(state.root, changes);
+        const said = [
+          ...(changes.auto_merge ? [`task auto-merge ${changes.auto_merge === 'after-gates' ? 'on' : 'off'}`] : []),
+          ...(changes.merge_train ? [`merge trains ${changes.merge_train}`] : []),
+        ];
+        this.#print(false, {}, [`Prepared ${prepared.url}: it sets ${said.join(' and ')} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine()]);
+        acted = true;
+      }
     }
     if (chosen.permissionBlocks !== 'keep') {
       const command = permissions.checked ? permissions[chosen.permissionBlocks] : null;
@@ -453,14 +475,14 @@ class ToolkitGovernanceCli {
 
   // A fresh repository: make the store and parent issue that are missing, render the governed rules,
   // then the one turn-on pull request (toolkit-governance-adopt.cjs).
-  #adoptAndPropose(state, plan, switchTo) {
+  #adoptAndPropose(state, plan, switches) {
     if (!this.#adoptionWriter) {
       this.#print(false, {}, ['GitHub cannot be written from here, so nothing was made. Run toolkit governance again where gh is signed in.']);
       return 2;
     }
     let adopted;
     try {
-      adopted = adopt.adopt({ root: state.root, plan, writer: this.#adoptionWriter, switchTo, ...(this.#plainTextInstaller ? { plainText: () => this.#plainTextInstaller(state.root) } : {}) });
+      adopted = adopt.adopt({ root: state.root, plan, writer: this.#adoptionWriter, switches, ...(this.#plainTextInstaller ? { plainText: () => this.#plainTextInstaller(state.root) } : {}) });
     } catch (error) {
       if (!(error instanceof adopt.AdoptError)) throw error;
       this.#print(false, {}, [`${error.message} No pull request was prepared.`,
@@ -471,13 +493,13 @@ class ToolkitGovernanceCli {
     const lines = [...adopted.lines];
     if (adopted.made.length) lines.push(`Made on GitHub: ${adopted.made.join(', ')}.`);
     if (lines.length) this.#print(false, {}, lines);
-    return this.#prepareDecision('yes', switchTo, adopted);
+    return this.#prepareDecision('yes', switches, adopted);
   }
 
   // One governance decision pull request from the owner's bank answer (the ticket or the owner's own
   // terminal is the proof); it applies only after the owner merges it. `adopted` carries the binding
   // and rendered rules for a fresh repository.
-  #prepareDecision(answer, switchTo, adopted = null) {
+  #prepareDecision(answer, switches, adopted = null) {
     const before = this.#state();
     if (before.merged?.fresh && (before.rule === 'M1' && answer === 'yes' || before.rule === 'M2' && answer === 'no')) {
       this.#print(false, {}, ['Already ' + before.state.toLowerCase() + ' on the default branch. Nothing was written.']);
@@ -485,7 +507,7 @@ class ToolkitGovernanceCli {
     }
     const sessionId = 'bank-' + crypto.randomBytes(16).toString('hex'), epoch = crypto.randomBytes(16).toString('hex');
     const request = this.#proposals.request(this.#cwd, answer, { sessionId, epoch });
-    try { return this.#publish(false, request.run, switchTo, adopted); }
+    try { return this.#publish(false, request.run, switches, adopted); }
     catch (error) {
       this.#print(false, {}, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
         PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);
@@ -493,7 +515,7 @@ class ToolkitGovernanceCli {
     }
   }
 
-  async #decide(command, json, switchTo = null) {
+  async #decide(command, json, switches = null) {
     const before = this.#state();
     if (before.rule === 'R1' && command === 'enable') throw new GovernanceCliError('This folder is not inside a git repository, so GitHub governance is DISABLED automatically. Nothing was written.');
     if (['R1', 'R8', 'S1', 'R1s'].includes(before.rule)) {
@@ -513,7 +535,7 @@ class ToolkitGovernanceCli {
     }
     const sessionId = 'terminal-' + crypto.randomBytes(16).toString('hex'), epoch = crypto.randomBytes(16).toString('hex');
     const request = this.#proposals.request(this.#cwd, answer, { sessionId, epoch });
-    try { return this.#publish(json, request.run, switchTo); }
+    try { return this.#publish(json, request.run, switches); }
     catch (error) {
       this.#print(json, { state: before.state, pending: true, run: request.run, error: error.code || 'PROPOSAL_UNAVAILABLE' }, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
         PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);
@@ -522,24 +544,40 @@ class ToolkitGovernanceCli {
   }
 }
 
-// The merged binding text with only the switch changed, so the owner's diff shows only that: an
-// existing auto_merge value is replaced, or a task_prs member goes before the top-level closing
-// brace. The result must parse to the merged binding plus the switch; anything else is rendered whole.
-function switchText(mergedText, parsed, switchTo) {
+// The merged binding text with only the switches changed, so the owner's diff shows only that: each
+// existing value is replaced in place, or a task_prs member goes before the top-level closing brace.
+// The result must parse to the merged binding plus the switches; anything else is rendered whole.
+function switchText(mergedText, parsed, changes) {
   const text = String(mergedText).replace(/^\uFEFF/, '');
-  const expected = { ...parsed, task_prs: { auto_merge: switchTo } };
+  const expected = { ...parsed, task_prs: { ...(parsed.task_prs || {}), ...changes } };
   const matches = (candidate) => { try { return util.isDeepStrictEqual(JSON.parse(candidate), expected); } catch { return false; } };
-  const values = text.match(/"auto_merge"\s*:\s*"[^"]*"/g) || [];
   let edited = null;
-  if (parsed.task_prs !== undefined && values.length === 1) edited = text.replace(/("auto_merge"\s*:\s*)"[^"]*"/, `$1"${switchTo}"`);
-  else if (parsed.task_prs === undefined) {
+  if (parsed.task_prs !== undefined) {
+    edited = text;
+    for (const [name, value] of Object.entries(changes)) {
+      const pattern = new RegExp(`("${name}"\\s*:\\s*)"[^"]*"`, 'g');
+      const found = (text.match(pattern) || []).length;
+      if (found === 1) { edited = edited.replace(pattern, `$1"${value}"`); continue; }
+      // A switch task_prs does not hold yet goes in at the end of its (flat) object, in its layout.
+      const open = /"task_prs"\s*:\s*\{([^{}]*)\}/g;
+      const objects = [...edited.matchAll(open)];
+      if (found !== 0 || Object.hasOwn(parsed.task_prs || {}, name) || objects.length !== 1) { edited = null; break; }
+      const inner = objects[0][1];
+      const trimmed = inner.replace(/\s+$/, '');
+      const line = /(\r?\n)([ \t]+)"/.exec(inner);
+      const member = line ? `,${line[1]}${line[2]}"${name}": "${value}"` : `${trimmed.trim() ? ',' : ''} "${name}": "${value}"`;
+      const start = objects[0].index + objects[0][0].length - 1 - inner.length;
+      edited = `${edited.slice(0, start)}${trimmed}${member}${inner.slice(trimmed.length)}${edited.slice(start + inner.length)}`;
+    }
+  } else {
     const close = text.lastIndexOf('}');
     const body = text.slice(0, close).replace(/\s+$/, '');
     const newline = text.includes('\r\n') ? '\r\n' : '\n';
     const indent = /\n([ \t]+)"/.exec(body)?.[1];
+    const members = (colon) => Object.entries(changes).map(([name, value]) => `"${name}"${colon}"${value}"`).join(colon === ':' ? ',' : ', ');
     if (close > 0 && body.length && !body.endsWith('{')) edited = indent === undefined
-      ? `${body},"task_prs":{"auto_merge":"${switchTo}"}${text.slice(body.length)}`
-      : `${body},${newline}${indent}"task_prs": { "auto_merge": "${switchTo}" }${text.slice(body.length)}`;
+      ? `${body},"task_prs":{${members(':')}}${text.slice(body.length)}`
+      : `${body},${newline}${indent}"task_prs": { ${members(': ')} }${text.slice(body.length)}`;
   }
   return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
 }

@@ -177,7 +177,7 @@ function ensurePlainText(root, installer = null) {
 
 // The whole turn-on: { binding, files, made, lines }. The binding still goes through the one
 // governance pull request, which decides nothing until the owner merges it.
-function adopt({ root, plan, writer, switchTo = 'off', plainText = null }) {
+function adopt({ root, plan, writer, switches = { auto_merge: 'off', merge_train: 'off' }, plainText = null }) {
   const made = [];
   // The local, pure steps first, so a render that fails leaves nothing made on GitHub.
   let lines;
@@ -190,7 +190,7 @@ function adopt({ root, plan, writer, switchTo = 'off', plainText = null }) {
     ...plan.draft,
     parents: [{ issue, record_prefix: `INT-${discovery.initials(name)}${issue}-` }],
     store: { kind: 'github', repository: store, branch: 'main', path: `state/${owner}/${name}/` },
-    task_prs: { auto_merge: switchTo },
+    task_prs: { ...switches },
   };
   return { binding, files, made, lines };
 }

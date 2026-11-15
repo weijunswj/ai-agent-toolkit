@@ -40,7 +40,7 @@ const path = require('node:path');
 const governance = require('./toolkit-governance-state.cjs');
 const { normaliseHost } = governance;
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
-const { BankTickets, bankTicketContext, bankTicketCommand, bankCardContext, cardAnswer, cardHash } = require('./toolkit-governance-bank.cjs');
+const { BankTickets, bankTicketContext, bankTicketCommand, bankCardContext, cardAnswer, cardHash, cardNextContext } = require('./toolkit-governance-bank.cjs');
 
 // Earlier versions kept held messages in this file. Nothing is held now; the session-start hook
 // removes the file, which is Toolkit's own, because its text is never delivered again.
@@ -1075,10 +1075,11 @@ class PromptHold {
     return { context: result.action === 'pass' ? `${result.context}\nThen carry on with what the user asked.` : `Tell the user this, word for word, then carry on with what they asked: ${result.reason}${result.reason.endsWith(NEVER_OWNER) ? '' : `\n${NEVER_OWNER}`}` };
   }
 
-  // The governance bank's card (toolkit-governance-bank.cjs bankCardInput): the owner's taps count
-  // only when the tool gate let this exact card through for the bank this run was shown last, in an
-  // unchanged repository mark, and every row was tapped. They become one bank answer with a one-use
-  // ticket; anything else leaves the bank waiting for the owner's typed reply.
+  // The governance bank's cards (toolkit-governance-bank.cjs bankCards): the owner's taps count
+  // only when the tool gate let this exact next card through for the bank this run was shown last, in
+  // an unchanged repository mark, and every row was tapped. A card before the last is noted and the
+  // next card is given; the last makes all the taps one bank answer with a one-use ticket. Anything
+  // else leaves the bank waiting for the owner's typed reply.
   #bankPicked(sessionId, toolUseId, toolResponse) {
     if (typeof sessionId !== 'string' || sessionId === '') return null;
     const questions = toolResponse && Array.isArray(toolResponse.questions) ? toolResponse.questions : [];
@@ -1088,13 +1089,19 @@ class PromptHold {
     if (!shown || !Array.isArray(shown.card_questions) || !questions.some(question => question && shown.card_questions.includes(question.question))) return null;
     const noted = this.#notes.take(toolUseId);
     const answers = toolResponse.answers && typeof toolResponse.answers === 'object' ? toolResponse.answers : {};
-    const answer = cardHash({ questions }) === shown.card ? cardAnswer(questions, answers) : null;
+    const index = Array.isArray(shown.cards) && Array.isArray(shown.card_taps) ? shown.cards.indexOf(cardHash({ questions })) : -1;
+    const answer = index >= 0 && index === shown.card_taps.length ? cardAnswer(questions, answers) : null;
     const counts = answer !== null && noted !== null && !this.#launched(sessionId) && noted.session_id === sessionId && noted.session === epoch
       && noted.repository === shown.repository_mark && this.#epochs.repository(shown.repository_id) === shown.repository_mark;
     if (!counts) return { context: `${BANK_CARD_UNCOUNTED}\n${NEVER_OWNER}` };
+    if (index < shown.cards.length - 1) {
+      let tapped = null;
+      try { tapped = this.#bank.tap(sessionId, epoch, index, answer); } catch { tapped = null; }
+      return { context: tapped ? cardNextContext(tapped, index) : `${BANK_LOST}\n${NEVER_OWNER}` };
+    }
     let ticket = null;
     try { ticket = this.#bank.issue(sessionId, epoch); } catch { ticket = null; }
-    return { context: ticket ? bankCardContext(shown, ticket, answer) : `${BANK_LOST}\n${NEVER_OWNER}` };
+    return { context: ticket ? bankCardContext(shown, ticket, [...shown.card_taps, answer].join(', ')) : `${BANK_LOST}\n${NEVER_OWNER}` };
   }
 
   // The question, attached to a message that is let through: the card where the host can show it,
@@ -1439,7 +1446,8 @@ class ToolGate {
     try { shown = EPOCH.test(String(epoch)) ? this.#bank.pendingFor(sessionId, epoch) : null; } catch { shown = null; }
     if (!shown || !Array.isArray(shown.card_questions) || !questions.some(question => question && shown.card_questions.includes(question.question))) return undefined;
     const refused = { deny: `Toolkit: the governance bank's card is shown only exactly as Toolkit printed it, with no answer filled in. Show it again as given, or show the bank as plain text for a typed reply. ${NEVER_OWNER}` };
-    if (cardHash(input.tool_input) !== shown.card) return refused;
+    // Only the next card of the bank, in order.
+    if (!Array.isArray(shown.cards) || !Array.isArray(shown.card_taps) || cardHash(input.tool_input) !== shown.cards[shown.card_taps.length]) return refused;
     try { this.#notes.note(input.tool_use_id, { session_id: sessionId, session: epoch, repository: shown.repository_mark }); } catch { return refused; }
     return null;
   }
