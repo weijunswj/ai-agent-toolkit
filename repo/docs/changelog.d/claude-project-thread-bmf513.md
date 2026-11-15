@@ -1,0 +1,5 @@
+### Programme sweep
+
+- **Busy tasks no longer stall the sweep:** a task with more than 100 closing references or cross-references now reads the rest of its PR links page by page (up to 1,000 a connection). Before, one such task made every pass incomplete, so the lease never recorded a finished pass, an earlier `PASS_STOPPED` never cleared and the task's PR history stopped updating. A pass that still cannot prove its read whole records `an incomplete read` as its reason instead of none.
+- **Keep a merged task open on purpose:** `update --patch` with `{"private":{"keep_open":{"reason":"<why>"}}}` keeps a task whose PRs have all merged off the work queue's `TASK_MERGED_OPEN` until the mark is removed. The write stamps the time, and the task page's STATUS line shows `Kept open: <reason> (since <time>)`. Older Toolkit copies still read the document.
+- **Null in an update patch:** `null` on a field a candidate, UAT or review must carry (such as `candidate.head`) now sets it to null instead of removing it, which could only end in a refused write. A refused state document now names its task.
