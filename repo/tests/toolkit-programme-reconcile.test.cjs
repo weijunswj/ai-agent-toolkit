@@ -336,7 +336,7 @@ test('missing completed child is created with its merged PR and both projections
   assert.equal(store.read('child', 100).doc, null);
   assert.equal(dry.effects.find(effect => effect.kind === 'create_state').backfill.expected_pr, null);
   assert.deepEqual(reconciler().run({ apply: true }).holds, []);
-  assert.match(github.issues.get(7).body, /\|#100 Issue 100\|#200\|COMPLETED\|-\|/);
+  assert.match(github.issues.get(7).body, /^\|Issue 100\|#100\|COMPLETED\|/m);
   assert.match(github.issues.get(100).body, /PR.*#200/);
   const before = { commits: github.commits, mutations: github.mutations(), revision: store.read('child', 100).doc.revision, calls: github.calls.length };
   assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
@@ -571,7 +571,7 @@ for (const childState of ['missing', 'existing']) for (const discovery of ['sele
     assert.equal(concurrent.read('child', 100).doc.pr.number, 201);
 
     assert.deepEqual(run.run({ apply: true }).holds, []);
-    assert.match(github.issues.get(7).body, /\|#100 Issue 100\|#201\|COMPLETED\|-\|/);
+    assert.match(github.issues.get(7).body, /^\|Issue 100\|#100\|COMPLETED\|/m);
     assert.match(github.issues.get(100).body, /PR.*#201/);
     const settled = { commits: github.commits, mutations: github.mutations(), files: new Map(github.files) };
     assert.equal(run.run({ apply: true }).summary, 'No changes');
@@ -722,7 +722,7 @@ test('backfill commit-pinned readback failure never reports success and interrup
       assert.equal(report.results.some(result => result.kind === 'create_state' && result.outcome === 'DONE'), false);
     } else assert.ok(report.holds.length);
     assert.deepEqual(reconciler().run({ apply: true }).holds, []);
-  assert.match(github.issues.get(7).body, /\|#100 Issue 100\|#200\|COMPLETED\|-\|/);
+  assert.match(github.issues.get(7).body, /^\|Issue 100\|#100\|COMPLETED\|/m);
     assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
   }
 });
@@ -1003,7 +1003,7 @@ test('apply shows state writes from the same pass on the parent without a second
   const doc = store.read('child', 423).doc;
   const expected = new Date(Date.parse(doc.volatile.written_at) + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
   const parent = github.issues.get(421).body;
-  assert.ok(parent.includes(`|#423 Issue 423|#540|NOW · IN PROGRESS|-|${expected}|`), 'the parent uses the final child state time, including body and PR link intents');
+  assert.ok(parent.includes(`|Issue 423|#423|NOW · IN PROGRESS|-|${expected}|`), 'the parent uses the final child state time, including body and PR link intents');
   assert.equal(patchCount(github, 421) - before, 1, 'the parent is edited once in this pass');
   const writes = { commits: github.commits, mutations: github.mutations() };
   assert.equal(reconciler().run({ apply: true }).summary, 'No changes');
@@ -1034,7 +1034,7 @@ test('a nested reorder keeps the NOW task time unchanged with parent-owned inten
       change: doc => state.applyPatch('child', doc, { lifecycle: 'ACTIVE' }) });
     reconciler().run({ apply: true });
     assert.equal(reconciler().run().summary, 'No changes');
-    assert.ok(github.issues.get(421).body.includes('|#423 Issue 423|-|NOW · IN PROGRESS|-|2026-11-01 14:00|'));
+    assert.ok(github.issues.get(421).body.includes('|Issue 423|#423|NOW · IN PROGRESS|-|2026-11-01 14:00|'));
 
     github.issues.get(423).subs.reverse();
     store.now = () => '2026-11-01T07:00:00Z';
@@ -1049,7 +1049,7 @@ test('a nested reorder keeps the NOW task time unchanged with parent-owned inten
     assert.deepEqual(report.holds, []);
     assert.deepEqual(github.issues.get(423).subs, [424, 425]);
     assert.equal(store.read('child', 423).doc.volatile.written_at, '2026-11-01T06:00:00Z');
-    assert.ok(github.issues.get(421).body.includes('|#423 Issue 423|-|NOW · IN PROGRESS|-|2026-11-01 14:00|'), 'bookkeeping preserves the last task update time');
+    assert.ok(github.issues.get(421).body.includes('|Issue 423|#423|NOW · IN PROGRESS|-|2026-11-01 14:00|'), 'bookkeeping preserves the last task update time');
     assert.equal(patchCount(github, 421) - before, 0, 'an unchanged parent needs no edit');
     const writes = { commits: github.commits, mutations: github.mutations() };
     const again = reconciler().run({ apply: true });
@@ -1072,7 +1072,7 @@ test('an issue-scoped pass keeps every NOW task comment time and skips queued ta
   comment(github, 424, 'Second task update.', { createdAt: '2026-11-01T10:00:00Z' });
   reconciler().run({ apply: true });
   const parent = github.issues.get(421).body;
-  const sibling = '|#424 Task 424|-|NOW · IN PROGRESS|-|2026-11-01 18:00|';
+  const sibling = '|Task 424|#424|NOW · IN PROGRESS|-|2026-11-01 18:00|';
   assert.ok(parent.includes(sibling));
   for (const apply of [false, true]) {
     const start = github.calls.length;
@@ -1133,7 +1133,7 @@ test('recovering a parent-owned PR link intent preserves the NOW task time', () 
   assert.deepEqual(doc.pending_effects, []);
   const expected = new Date(Date.parse(doc.volatile.written_at) + 8 * 60 * 60 * 1000).toISOString().slice(0, 16).replace('T', ' ');
   const parent = github.issues.get(421).body;
-  assert.ok(parent.includes(`|#423 Issue 423|#540|NOW · IN PROGRESS|-|${expected}|`));
+  assert.ok(parent.includes(`|Issue 423|#423|NOW · IN PROGRESS|-|${expected}|`));
   assert.equal(patchCount(github, 421) - before, 0, 'recovery needs no unchanged parent edit');
   assert.deepEqual(store.read('parent', 421).doc.pending_effects, []);
   assert.equal(patchCount(github, 540), prPatches + 1, 'the landed PR link write is not replayed');
@@ -1174,7 +1174,7 @@ test('parent and child blocks are rendered from the same state revision', () => 
   assert.match(parentBlock.body, new RegExp(`children=[^ ]*423:${doc.revision}\\b`));
   assert.match(childBlock.body, new RegExp(`child=423@${doc.revision} -->`));
   assert.ok(github.issues.get(421).body.includes('## CURRENT\nHand-written controller prose.\n'), 'hand-written text outside the blocks is kept');
-  const rows = parentBlock.body.split('\n').filter(line => /^\|#\d+[ |]/.test(line)).map(line => /^\|(#\d+)/.exec(line)[1]);
+  const rows = parentBlock.body.split('\n').map(line => /^\|[^|\n]*\|(#\d+)\|/.exec(line)?.[1]).filter(Boolean);
   assert.deepEqual(rows, ['#423', '#467', '#469', '#470', '#499', '#425', '#459'], 'active rows by class, priority order and child number, then the latest completed work by close time');
   assert.match(parentBlock.body, /\n\n\[Retired \(1\)\]\(https:\/\/github\.com\/acme\/app\/issues\/421#issuecomment-\d+\)$/, 'retired work sits behind one link under the table');
 });
@@ -1367,7 +1367,7 @@ test('a moved PR head marks evidence STALE_HEAD and updates both projections tog
   assert.match(parentBlock, new RegExp(`423:${doc.revision}\\b`));
   assert.match(childBlock, new RegExp(`child=423@${doc.revision} -->`));
   assert.match(childBlock, /^\|#540\|OPEN\|[^|]*\|-\|$/m, 'the open PR leads the PR GRAPH; GitHub shows its head');
-  assert.match(parentBlock, /^\|#423 Issue 423\|#540\|NOW · IN PROGRESS\|-\|-\|$/m, 'an open PR means the work is in progress');
+  assert.match(parentBlock, /^\|Issue 423\|#423\|NOW · IN PROGRESS\|-\|-\|$/m, 'an open PR means the work is in progress');
 });
 
 test('a body edited between read and write is held, then completed on the next pass with the edit kept', () => {

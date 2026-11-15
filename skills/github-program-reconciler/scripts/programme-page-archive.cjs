@@ -4,7 +4,8 @@
 const crypto = require('node:crypto');
 const digest = text => crypto.createHash('sha256').update(text).digest('hex');
 const COMMENT_LIMIT = 60000;
-const GROUPS = ['RETIRED', 'COMPLETED', 'OPTIONAL', 'LATER', 'NOW'];
+// Archive groups follow the graph's Status: optional tasks show, and archive, as LATER.
+const GROUPS = ['RETIRED', 'COMPLETED', 'LATER', 'NOW'];
 const marker = key => `<!-- programme-page-archive key=${key} -->`;
 // `header` is the graph's two table header lines, from the renderer, so a copy reads like the page.
 function graphComments(rows, header) {

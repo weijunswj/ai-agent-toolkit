@@ -149,7 +149,7 @@ test('detached closed tasks wait for their rotation turn, are never re-attached 
   for (let i = 0; i < 24; i += 1) assert.equal(f.github.issues.get(700 + i).parent, null);
   assert.ok(!f.parent().attention.some(entry => entry.code.startsWith('NATIVE_')), JSON.stringify(f.parent().attention));
   // Its row is on the page or, as an older completion, in the graph archive comment the page links.
-  assert.ok([f.page(421), ...f.github.commentsOf(421).map(comment => comment.body)].some(text => /^\|#700[ |]/m.test(text)), 'the closed task keeps its graph row');
+  assert.ok([f.page(421), ...f.github.commentsOf(421).map(comment => comment.body)].some(text => /^\|[^|\n]*\|#700\|/m.test(text)), 'the closed task keeps its graph row');
   // A reopened detached task is a change, so it is read on the next pass.
   Object.assign(f.github.issues.get(705), { state: 'open', updated_at: f.tick() });
   assert.ok(f.run().report.sweep.tasks.includes(705));

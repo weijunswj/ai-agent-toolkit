@@ -1608,15 +1608,15 @@ function revisionLine(parent, children) {
   return `<!-- programme-state parent=${parent.parent_issue}@${parent.revision} children=${revs} -->`;
 }
 
-// A row's group, shown first in its Status cell, is worked out, never stored: NOW when the task is in
-// progress (an open or draft PR, or active, waiting on the owner or held), else LATER (OPTIONAL for an
-// optional task). A planned release names where the work merges; it does not change the group.
-// A finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) shows as COMPLETED,
-// or RETIRED. A task in progress shows its gate under Waiting on; review and UAT stay on its page.
+// A row's Status is worked out, never stored. A task in progress (an open or draft PR, or active,
+// waiting on the owner or held) is NOW: `NOW · IN PROGRESS`, or `NOW · QUEUED` while its state lists
+// a blocker, since it cannot move until that clears. Every other open task, optional ones too, is
+// `LATER`; a finished outcome (class COMPLETED or RETIRED, or a DONE or RETIRED lifecycle) is
+// COMPLETED or RETIRED. A planned release names where the work merges; it does not change the
+// status. Waiting on names what an active task waits for; PRs, review and UAT are on its own page,
+// which lists every PR. Optional tasks still sort after the rest of LATER.
 const GRAPH_GROUPS = Object.freeze(['NOW', 'LATER', 'OPTIONAL']);
-const GRAPH_HEADER = ['| Task | PRs | Status | Waiting on | Updated (SGT) |', '|---|---|---|---|---|'];
-// PRs a graph row names: the newest few, then a count of the rest (all of them are on the task page).
-const GRAPH_PRS_SHOWN = 3;
+const GRAPH_HEADER = ['| Task | Child # | Status | Waiting on | Last Updated (SGT) |', '|---|---|---|---|---|'];
 // The parent keeps this many COMPLETED rows, the most recent; older ones and every RETIRED row sit
 // in archive comments behind one link line.
 const GRAPH_COMPLETED_SHOWN = 10;
@@ -1678,10 +1678,6 @@ function taskName(outcome, issue) {
   return publicText(taskTitle(outcome, issue));
 }
 
-function descriptionText(outcome) {
-  return publicText(outcome.description || '') || '-';
-}
-
 // When an outcome finished: the state's completion time, else the issue's close time.
 function completedAt(child, issue) {
   return child?.completed_at || issue?.closed_at || null;
@@ -1734,24 +1730,12 @@ function orderTies(parent, children) {
     .sort((a, b) => a[0].order - b[0].order || a[0].issue - b[0].issue);
 }
 
-// The PRs cell: every PR found for the task, newest first, the first few by number and then `+n`
-// for the rest; a retired task shows none, since its PRs are no longer the way to the work. On a
-// task still open, a newest PR that already merged or closed says so, so it never reads as in progress.
-function prsCell(outcome, child) {
-  if (isRetired(outcome, child)) return '-';
-  const numbers = [...new Set([child?.pr?.number, ...(child?.prs || []).map(pr => pr.number)].filter(number => isInt(number, 1)))].sort((a, b) => b - a);
-  if (!numbers.length) return '-';
-  const rest = numbers.length - GRAPH_PRS_SHOWN;
-  const state = isFinished(outcome, child) ? null : [child?.pr, ...(child?.prs || [])].find(pr => pr?.number === numbers[0])?.state;
-  const newest = `#${numbers[0]}${state === 'MERGED' ? ' merged' : state === 'CLOSED' ? ' closed' : ''}`;
-  return `${[newest, ...numbers.slice(1, GRAPH_PRS_SHOWN).map(number => `#${number}`)].join(', ')}${rest > 0 ? ` +${rest}` : ''}`;
-}
-
-// The Status cell: the group and the status of an active row (`NOW · IN PROGRESS`), else
-// `COMPLETED` or `RETIRED`.
+// The Status cell (see above): NOW · IN PROGRESS, NOW · QUEUED, LATER, COMPLETED or RETIRED.
 function statusCell(outcome, child) {
   const cls = graphClass(outcome, child);
-  return cls === '-' ? statusText(outcome, child) : `${cls} · ${statusText(outcome, child)}`;
+  if (cls === '-') return statusText(outcome, child);
+  if (cls !== 'NOW') return 'LATER';
+  return child?.blockers?.length ? 'NOW · QUEUED' : 'NOW · IN PROGRESS';
 }
 
 // The Waiting on cell of an active row: the owner's ask, a blocker, else the gate a task in
@@ -1764,10 +1748,10 @@ function waitingCell(outcome, child) {
   return statusText(outcome, child) === 'IN PROGRESS' && child.gate?.role ? publicText(child.gate.role) : '-';
 }
 
-// The issue number a graph row names: the `#n` that leads its Task cell (alone when the task has no
-// name of its own).
+// The issue number a graph row names: its Child # cell.
 function graphRowIssue(line) {
-  const match = /^\|#(\d+)[ |]/.exec(line);
+  if (!line.startsWith('|')) return null;
+  const match = /^#(\d+)$/.exec(graphRowCells(line)[1] || '');
   return match ? Number(match[1]) : null;
 }
 
@@ -1788,14 +1772,13 @@ function renderParentBlockBody(parent, children, issues = new Map(), comments = 
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const issue = issues.get(outcome.issue);
-    const name = taskName(outcome, issue);
-    return `|#${outcome.issue}${name === `#${outcome.issue}` ? '' : ` ${name}`}|${prsCell(outcome, child)}|${statusCell(outcome, child)}|${waitingCell(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
+    return `|${taskName(outcome, issue)}|#${outcome.issue}|${statusCell(outcome, child)}|${waitingCell(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
   });
   return [
     revisionLine(parent, children),
     '# PROGRAMME GRAPH',
     '',
-    `State revision ${parent.revision}. Order: NOW, LATER by priority, OPTIONAL, ${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? 'tasks pinned last, ' : ''}then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). Gate, review and UAT are on each task page.`,
+    `State revision ${parent.revision}. Order: NOW, LATER by priority (optional tasks after the rest), ${parent.outcomes.some(outcome => pinnedLast(outcome) && !isFinished(outcome, children.get(outcome.issue))) ? 'tasks pinned last, ' : ''}then the latest ${GRAPH_COMPLETED_SHOWN} COMPLETED (most recent last). PRs, review and UAT are on each task page.`,
     '',
     ...GRAPH_HEADER,
     ...rows,
@@ -5446,7 +5429,7 @@ class Reconciler {
       const link = part => commentLink(issueUrl(this.binding.repository, number), commentId(part));
       // One link line under the table: earlier completed rows, retired rows, then any active group
       // moved for size, each with its count and further parts.
-      const summary = ['COMPLETED', 'RETIRED', 'NOW', 'LATER', 'OPTIONAL'].map(group => {
+      const summary = ['COMPLETED', 'RETIRED', 'NOW', 'LATER'].map(group => {
         const parts = graphs.filter(part => part.group === group && part.count);
         const count = parts.reduce((sum, part) => sum + part.count, 0);
         const label = { COMPLETED: 'Earlier completed', RETIRED: 'Retired' }[group] || group;
@@ -5494,7 +5477,8 @@ class Reconciler {
     let hard = projected.body.length < this.threshold && projected.budgetFits ? projected : null;
     if (projected.body.length < safe && projected.budgetFits) return projected;
     for (const group of archiveTools().GROUPS) {
-      if (group === 'OPTIONAL') {
+      // Trace pages go before any live row moves.
+      if (group === 'LATER') {
         tracePaging = true; projected = build();
         rememberFeasible();
         if (!hard && projected.body.length < this.threshold && projected.budgetFits) hard = projected;

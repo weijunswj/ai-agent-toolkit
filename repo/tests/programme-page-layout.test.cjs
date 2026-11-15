@@ -220,16 +220,16 @@ test('B-T3: overflow chooses the shortest row prefix, terminal groups before tra
   assert.ok(projected.body.length < 55000);
   assert.ok(projected.graphRows.length > 0);
   const groups = projected.archive.filter(part => part.kind === 'graph' && part.count).map(part => part.group);
-  assert.deepEqual(groups, ['OPTIONAL', 'LATER'].slice(0, groups.length));
-  const archived = projected.archive.filter(part => part.kind === 'graph').flatMap(part => part.body.match(/^\|#\d+[ |][^\n]*$/gm) || []);
-  const kept = projected.body.match(/^\|#\d+[ |][^\n]*$/gm) || [];
-  assert.equal(new Set([...kept, ...archived].map(row => /^\|#(\d+)/.exec(row)[1])).size, 84);
+  assert.deepEqual(groups, ['LATER', 'NOW'].slice(0, groups.length), 'optional tasks show, and move, as LATER');
+  const archived = projected.archive.filter(part => part.kind === 'graph').flatMap(part => part.body.match(/^\|[^|\n]*\|#\d+\|[^\n]*$/gm) || []);
+  const kept = projected.body.match(/^\|[^|\n]*\|#\d+\|[^\n]*$/gm) || [];
+  assert.equal(new Set([...kept, ...archived].map(row => /^\|[^|\n]*\|#(\d+)\|/.exec(row)[1])).size, 84);
   assert.equal(kept.length + archived.length, 84);
   const last = archived.at(-1);
   // In this fixture the last removed row stays in the same archive part. Restoring it costs exactly
   // its line and newline; the count remains one digit, so the summary costs the same.
   assert.ok(projected.body.length + last.length + 1 >= 55000, 'one fewer row cannot restore the safe limit');
-  assert.match(projected.body, /\n\n\[OPTIONAL \(\d+\)\]\(https:[^)]+\)\n/, 'one link line under the table');
+  assert.match(projected.body, /\n\n\[LATER \(\d+\)\]\(https:[^)]+\)\n/, 'one link line under the table');
   t.diagnostic(JSON.stringify({ fixture: '84 rows', moved: projected.archive.filter(part => part.kind === 'graph').map(part => [part.group, part.count]), posts: projected.posts, body: projected.body.length }));
 });
 
@@ -301,8 +301,8 @@ test('a configured redraw threshold cannot raise the hard body limit', () => {
 test('a refusal measures the smallest feasible body within the five-post budget', () => {
   const pass = new state.Reconciler({ store: null, reader: null, mutator: null,
     binding: { repository: 'example.test/app', parent_issue: 12, record_prefix: 'TEST-' }, toolkitVersion: '3.57.0' });
-  const rows = Array.from({ length: 900 }, (_, i) => `|#${1000 + i} ${'n'.repeat(400)}|-|RETIRED|-|-|`);
-  const graph = '# PROGRAMME GRAPH\n\n| Task | PRs | Status | Waiting on | Updated (SGT) |\n|---|---|---|---|---|\n' + rows.join('\n');
+  const rows = Array.from({ length: 900 }, (_, i) => `|${'n'.repeat(400)}|#${1000 + i}|RETIRED|-|-|`);
+  const graph = '# PROGRAMME GRAPH\n\n| Task | Child # | Status | Waiting on | Last Updated (SGT) |\n|---|---|---|---|---|\n' + rows.join('\n');
   const projected = pass.projectBody(12, '# Programme\n', graph, [], '3.57.0');
   assert.equal(projected.refused, true);
   assert.ok(projected.posts <= 5);
