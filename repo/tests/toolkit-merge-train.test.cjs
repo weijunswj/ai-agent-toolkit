@@ -34,7 +34,7 @@ test('verify lists files two or more members change and says which review the tr
   const one = f.branch('pr-1', { 'b.txt': 'b\n', 'shared.txt': 'from 1\n' });
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const apart = built(f, [f.member(1, one), f.member(2, two)]);
-  const clear = train.run(['verify', '--manifest', apart.out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo);
+  const clear = train.run(['verify', '--manifest', apart.out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo, f.opts);
   assert.equal(clear.ok, true, JSON.stringify(clear));
   assert.deepEqual(clear.overlap, []);
   assert.equal(clear.review, 'none: verify and green CI suffice');
@@ -56,7 +56,7 @@ test('verify lists files two or more members change and says which review the tr
   const four = edit('pr-4', 'one\ntwo\nthree\nfour\nfive\nSIX\n');
   const shared = built(f, [f.member(3, three), f.member(4, four)]);
   assert.deepEqual(shared.result.boarded, [3, 4], JSON.stringify(shared.result));
-  const flagged = train.run(['verify', '--manifest', shared.out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo);
+  const flagged = train.run(['verify', '--manifest', shared.out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo, f.opts);
   assert.equal(flagged.ok, true, JSON.stringify(flagged));
   assert.deepEqual(flagged.overlap, [{ file: 'a.txt', members: [3, 4] }]);
   assert.equal(flagged.review, 'delta review of the shared files');
@@ -67,7 +67,7 @@ test('build caps a train at six members and body carries every member\'s Pack ch
   const heads = [1, 2, 3, 4, 5, 6, 7].map(pr => f.branch(`pr-${pr}`, { [`m${pr}.txt`]: `${pr}\n` }));
   assert.equal(train.MAX_MEMBERS, 6);
   assert.throws(
-    () => train.run(['build', '--manifest', f.manifestFile({ members: heads.map((head, index) => f.member(index + 1, head)) }), '--branch', 'toolkit-train/full', '--main', 'main'], f.repo),
+    () => train.run(['build', '--manifest', f.manifestFile({ members: heads.map((head, index) => f.member(index + 1, head)) }), '--branch', 'toolkit-train/full', '--main', 'main'], f.repo, f.opts),
     /a train holds at most 6 members; board the rest on the next train/,
   );
   assert.equal(f.git('branch', '--list', 'toolkit-train/full'), '', 'a refused train creates no branch');
@@ -100,7 +100,7 @@ test('a member that conflicts is ejected, never hand-fixed, and the rest still l
   assert.match(train.body(boarded), new RegExp(`^\\| #2 \\| \`${two}\` \\| conflicts with the train[^|]* \\| land it on its own, or rejoin the next train once its review passes the head it boards at \\|$`, 'm'));
   assert.deepEqual(boarded.members.map(member => member.pr), [1, 3]);
   assert.equal(f.git('status', '--porcelain'), '', 'the aborted merge leaves a clean tree');
-  assert.equal(train.run(['verify', '--manifest', out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo).ok, true);
+  assert.equal(train.run(['verify', '--manifest', out, '--head', 'toolkit-train/one', '--main', 'main'], f.repo, f.opts).ok, true);
 });
 
 test('verify refuses a commit of its own, an unlisted merge, an edited merge, a hand-resolved merge and a wide bump', t => {
@@ -109,7 +109,7 @@ test('verify refuses a commit of its own, an unlisted merge, an edited merge, a 
   const two = f.branch('pr-2', { 'a.txt': 'one\nTWO from 2\nthree\n' });
   const stray = f.branch('stray', { 'e.txt': 'unreviewed\n' });
   const manifest = f.manifestFile({ members: [f.member(1, one), f.member(2, two)] });
-  const verify = head => train.run(['verify', '--manifest', manifest, '--head', head, '--main', 'main'], f.repo);
+  const verify = head => train.run(['verify', '--manifest', manifest, '--head', head, '--main', 'main'], f.repo, f.opts);
   const start = name => f.git('switch', '--quiet', '-C', name, f.main);
 
   start('smuggled');
@@ -154,7 +154,7 @@ test('verify refuses a commit of its own, an unlisted merge, an edited merge, a 
   f.write('g.txt', 'not a bump\n');
   f.git('add', '--all');
   f.git('commit', '--quiet', '-m', 'bump plus extra');
-  result = train.run(['verify', '--manifest', solo, '--head', 'wide-bump', '--main', 'main'], f.repo);
+  result = train.run(['verify', '--manifest', solo, '--head', 'wide-bump', '--main', 'main'], f.repo, f.opts);
   assert.ok(result.problems.some(problem => /differs from a fresh run of the bump command/.test(problem)), result.problems.join('\n'));
   assert.equal(f.git('worktree', 'list').split('\n').length, 1);
 });
@@ -163,14 +163,14 @@ test('a train with no bump command takes no plain commit at all', t => {
   const f = fixture(t);
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
   const out = path.join(f.root, 'boarded.json');
-  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)], bump_command: 'none' }), '--branch', 'toolkit-train/nb', '--main', 'main', '--out', out], f.repo);
+  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)], bump_command: 'none' }), '--branch', 'toolkit-train/nb', '--main', 'main', '--out', out], f.repo, f.opts);
   assert.equal(result.bump, null);
   assert.equal(f.git('show', `${result.head}:VERSION`), '1.0.0');
-  assert.equal(train.run(['verify', '--manifest', out, '--head', result.head, '--main', 'main'], f.repo).ok, true);
+  assert.equal(train.run(['verify', '--manifest', out, '--head', result.head, '--main', 'main'], f.repo, f.opts).ok, true);
   f.write('h.txt', 'late\n');
   f.git('add', '--all');
   f.git('commit', '--quiet', '-m', 'late');
-  const after = train.run(['verify', '--manifest', out, '--head', 'HEAD', '--main', 'main'], f.repo);
+  const after = train.run(['verify', '--manifest', out, '--head', 'HEAD', '--main', 'main'], f.repo, f.opts);
   assert.ok(after.problems.some(problem => /no bump to make, so a plain commit is not allowed/.test(problem)), after.problems.join('\n'));
 });
 
@@ -180,12 +180,12 @@ test('a train stacked on a running train combines early, takes no bump and canno
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const first = built(f, [f.member(1, one)]);
   const out = path.join(f.root, 'next.json');
-  const next = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two)] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo);
+  const next = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two)] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo, f.opts);
   assert.equal(next.stacked, true);
   assert.equal(next.bump, null);
   const live = path.join(f.root, 'live.json');
   fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: next.head }, 2: { state: 'OPEN', head: two } }));
-  const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', next.head, '--main', 'main', '--live', live], f.repo);
+  const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', next.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(landing.ok, false);
   assert.equal(landing.merge, null);
   assert.ok(landing.problems.some(problem => /neither a member's reviewed head nor main/.test(problem)), landing.problems.join('\n'));
@@ -197,7 +197,7 @@ test('once the running train lands, catchup merges main into the stacked train, 
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const first = built(f, [f.member(1, one)]);
   const out = path.join(f.root, 'next.json');
-  const next = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two, { bump: 'minor' })] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo);
+  const next = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two, { bump: 'minor' })] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo, f.opts);
   assert.equal(next.stacked, true);
   const manifest = JSON.parse(fs.readFileSync(out, 'utf8'));
   // Main moving under the stacked train refuses catch-up until the running train is in.
@@ -212,11 +212,11 @@ test('once the running train lands, catchup merges main into the stacked train, 
   assert.equal(f.git('show', `${caught.head}:VERSION`), '1.1.0', 'the bump runs on top of the landed train');
   assert.equal(f.git('show', '-s', '--format=%P', `${caught.head}~1`).split(' ')[1], f.git('rev-parse', 'main'), 'main came in as one merge commit');
   assert.equal(f.git('status', '--porcelain'), '');
-  const checked = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', 'main'], f.repo);
+  const checked = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', 'main'], f.repo, f.opts);
   assert.equal(checked.ok, true, JSON.stringify(checked));
   const live = path.join(f.root, 'live.json');
   fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: caught.head }, 2: { state: 'OPEN', head: two } }));
-  const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', caught.head, '--main', 'main', '--live', live], f.repo);
+  const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', caught.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(landing.ok, true, JSON.stringify(landing));
   assert.throws(() => train.catchup(f.repo, manifest, { main: 'main' }), /main is already inside the train/);
   // A train that already carries its bump never takes a second one.
@@ -234,9 +234,9 @@ test('a failed catch-up bump leaves the train at its pre-merge head, and verify 
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const first = built(f, [f.member(1, one)]);
   const out = path.join(f.root, 'next.json');
-  train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two)] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo);
+  train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two)] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo, f.opts);
   // A stacked train holds no bump, so verify refuses it until catchup adds one.
-  const early = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', first.result.head], f.repo);
+  const early = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', first.result.head], f.repo, f.opts);
   assert.equal(early.ok, false);
   assert.ok(early.problems.some(problem => /the train has no bump commit/.test(problem)), early.problems.join('\n'));
   f.git('switch', '--quiet', 'main');
@@ -257,7 +257,7 @@ test('catchup refuses a main that clashes with the stacked train and leaves the 
   const two = f.branch('pr-2', { 'a.txt': 'one\nTWO from 2\nthree\n' });
   const first = built(f, [f.member(1, one)]);
   const out = path.join(f.root, 'next.json');
-  train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two)] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo);
+  train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two)] }, 'next-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo, f.opts);
   f.git('switch', '--quiet', 'main');
   f.write('a.txt', 'one\nTWO on main\nthree\n');
   f.git('commit', '--quiet', '-am', 'clash on main');
@@ -280,10 +280,11 @@ test('land checks live heads, main and RISKY owner OKs before it names the one m
   fs.writeFileSync(live, JSON.stringify(facts));
   const ready = f.cli('land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live);
   assert.equal(ready.status, 0, ready.stdout);
-  assert.deepEqual(JSON.parse(ready.stdout).merge, { repository: 'example/repo', pr: 50, head: result.head, method: 'merge commit' });
+  assert.deepEqual(JSON.parse(ready.stdout).merge, { repository: 'example/repo', pr: 50, head: result.head, method: 'merge commit', route: 'owner',
+    route_reasons: ['task auto-merge is off here (no-switch-set)', "RISKY members wait for the owner's merge card: #2"] });
 
   fs.writeFileSync(live, JSON.stringify({ ...facts, 1: { state: 'OPEN', head: two } }));
-  let refused = train.run(['land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], f.repo);
+  let refused = train.run(['land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.ok(refused.problems.some(problem => /#1 moved to .* after boarding/.test(problem)), refused.problems.join('\n'));
 
   const boarded = JSON.parse(fs.readFileSync(out, 'utf8'));
@@ -291,7 +292,7 @@ test('land checks live heads, main and RISKY owner OKs before it names the one m
   const noOk = path.join(f.root, 'no-ok.json');
   fs.writeFileSync(noOk, JSON.stringify(boarded));
   fs.writeFileSync(live, JSON.stringify(facts));
-  refused = train.run(['land', '--manifest', noOk, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], f.repo);
+  refused = train.run(['land', '--manifest', noOk, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.ok(refused.problems.some(problem => /#2 is RISKY and has no owner merge OK/.test(problem)), refused.problems.join('\n'));
 
   f.git('switch', '--quiet', 'main');
@@ -385,7 +386,7 @@ test('a failed bump stops the build with a clean tree and names the cause', t =>
   const f = fixture(t);
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
   const out = path.join(f.root, 'boarded.json');
-  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)], bump_command: 'node scripts/missing-bump.cjs {level}' }), '--branch', 'toolkit-train/fail', '--main', 'main', '--out', out], f.repo);
+  const result = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)], bump_command: 'node scripts/missing-bump.cjs {level}' }), '--branch', 'toolkit-train/fail', '--main', 'main', '--out', out], f.repo, f.opts);
   assert.equal(result.ok, false);
   assert.equal(result.bump, null);
   assert.match(result.problems[0], /the bump command failed: .*must hold main's version before it boards/s);
@@ -419,7 +420,8 @@ test('the controller, the changelog guide and the repo map describe the train th
   assert.match(roles, /The train needs no G2 of its own once `verify` passes and CI is green; only files `verify` lists under `overlap` \(two or more members change them\) get a short delta review\./);
   assert.match(roles, /A train holds at most 6 members \(`build` refuses a seventh\); later ready PRs board the next\. A member that fails CI or its delta review is ejected at once and the rest carry on: once the train is pushed, `eject` adds revert commits on the same branch and PR, never a rebuild or force-push\./);
   assert.match(roles, /Never edit a train or member PR body while its CI runs; queue the edit until CI ends\./);
-  assert.match(roles, /The train's merge ask goes up where `land` and the merge run, never relayed/);
+  assert.match(roles, /`land` route `auto` \(task auto-merge on, clean scope and UAT line, no RISKY member\) merges after the effects notice, with no ask\. The train's merge ask goes up where `land` and the merge run, never relayed/);
+  assert.match(roles, /Trains run only while governance is ENABLED and `task_prs\.merge_train` is not `off`; otherwise `build`, `catchup` and `land` refuse and each ready PR merges alone\./);
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/reference/cloud-hook-parity.md'), /A merge train's merge thread is the train thread: it posts the card for the train PR at its head and runs `land` and the merge itself[\s\S]*Fallback: the owner types `merge PR N at <full SHA> as a merge commit` in the train thread\./);
   assert.match(roles, /At boarding, copy each member's `Pack changes` lines into its manifest entry \(`pack_changes`\)/);
   assert.match(roles, /A stacked train's PR targets the running train's branch \(main's version check would call its fragments unfolded\) until that train lands, then main, before `catchup`\./);
@@ -439,12 +441,12 @@ test('build refuses a branch checked out in another worktree and changes nothing
   f.git('switch', '--quiet', '--detach', f.main);
   const before = f.git('rev-parse', 'toolkit-train/busy');
   assert.throws(
-    () => train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }), '--branch', 'toolkit-train/busy', '--main', 'main'], f.repo),
+    () => train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }), '--branch', 'toolkit-train/busy', '--main', 'main'], f.repo, f.opts),
     /toolkit-train\/busy is checked out in another worktree/,
   );
   assert.equal(f.git('rev-parse', 'toolkit-train/busy'), before);
   assert.equal(f.git('rev-parse', 'HEAD'), f.main);
   assert.equal(spawnSync('git', ['status', '--porcelain'], { cwd: other, encoding: 'utf8' }).stdout, '');
-  const own = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }), '--branch', 'toolkit-train/free', '--main', 'main'], f.repo);
+  const own = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }), '--branch', 'toolkit-train/free', '--main', 'main'], f.repo, f.opts);
   assert.equal(own.ok, true, 'a branch no other worktree holds still builds');
 });

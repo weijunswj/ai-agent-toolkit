@@ -25,7 +25,7 @@ test('merge-authority paths and a major bump wait for the owner; everything else
     'repo/controller/roles-and-routes.md', 'repo/controller/gates.md', 'repo/controller/evidence-and-finish.md',
     'repo/contracts/programme-state/binding-v2.schema.json', 'skills/github-program-reconciler/scripts/programme-state.cjs',
     'repo/scripts/toolkit-merge-hold.cjs', 'repo/scripts/toolkit-shell-call.cjs', 'repo/scripts/toolkit-governance-gate.cjs',
-    'repo/scripts/toolkit-governance-state.cjs', 'repo/scripts/toolkit-auto-merge-eligible.cjs',
+    'repo/scripts/toolkit-governance-state.cjs', 'repo/scripts/toolkit-auto-merge-eligible.cjs', 'repo/scripts/toolkit-merge-train.cjs',
     'repo/scripts/toolkit-rebump-prs.cjs', 'repo/scripts/toolkit-rebump-report.cjs', 'repo/scripts/toolkit-rebump-action.sh',
     'repo/scripts/setup-toolkit-core.cjs',
     'repo/scripts/setup-core-codex.cjs', 'repo/scripts/setup-core-claude.cjs',

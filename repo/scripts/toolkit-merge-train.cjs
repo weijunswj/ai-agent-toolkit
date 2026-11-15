@@ -67,9 +67,15 @@
 // when it was made.
 // It also lists every file two or more members change ("overlap") and the review the train needs:
 // none when there is no overlap, else a delta review of the shared files.
+// Trains run only where governance is ENABLED and the merged binding's merge train switch
+// (`task_prs.merge_train`, no key meaning on) is on: build, catchup and land refuse otherwise, so
+// each ready pull request merges alone. verify, body, split and eject still check or unwind a train.
 // land refuses a stacked train, re-runs verify, requires main to be inside the train (else main moved: rebuild), every
 // member's pull request open at its boarded head, the train pull request at --head and an owner OK
-// for every RISKY member, then names the pull request and head to merge. --live reads those pull request facts from
+// for every RISKY member, then names the pull request and head to merge, with its route: `auto` when
+// the repository's task auto-merge switch is on, the train's scope and UAT line pass
+// toolkit-auto-merge-eligible.cjs at the train head and no member is RISKY; else `owner` (a merge
+// card), with the reasons. --live reads those pull request facts from
 // a JSON file ({"<number>": {"state": "OPEN", "head": "<sha>"}}) instead of `gh api` (REST).
 //
 // Exit 0: done or ready. Exit 1: refused, with every reason. Exit 2: bad arguments or unreadable input.
@@ -78,6 +84,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const governance = require('./toolkit-governance-state.cjs');
+const autoMerge = require('./toolkit-auto-merge-eligible.cjs');
 
 const SHA = /^[0-9a-f]{40}$/;
 const LEVELS = Object.freeze(['patch', 'minor', 'major']);
@@ -92,6 +100,8 @@ const EJECT_PR_TRAILER = 'Train-Eject-PR';
 // A train holds at most this many members; the next ready PRs board the next train.
 const MAX_MEMBERS = 6;
 const COMMANDS = Object.freeze(['build', 'catchup', 'verify', 'body', 'split', 'land', 'eject']);
+// The commands that start, grow or land a train; the others only check or unwind one.
+const SWITCHED = Object.freeze(['build', 'catchup', 'land']);
 
 class TrainError extends Error {
   constructor(message, code = 2) { super(message); this.code = code; }
@@ -701,8 +711,36 @@ function land(cwd, manifest, options) {
     head: options.head,
     members: checked.members,
     problems,
-    merge: problems.length ? null : { repository: manifest.repository || '', pr: options.pr, head: options.head, method: 'merge commit' },
+    merge: problems.length ? null : { repository: manifest.repository || '', pr: options.pr, head: options.head, method: 'merge commit', ...landRoute(cwd, manifest, checked.main, options) },
   };
+}
+
+// How the named head may merge: `auto` on the repository's task auto-merge switch, or `owner` (a
+// merge card), with every reason. RISKY members keep the owner gate even with an OK recorded.
+function landRoute(cwd, manifest, main, options) {
+  const reasons = [];
+  const answer = governance.taskAutoMerge(cwd, options.registryOptions || {});
+  if (answer.auto_merge !== 'after-gates') reasons.push(`task auto-merge is off here (${answer.reason})`);
+  const scope = autoMerge.eligibilityOf(cwd, main, options.head);
+  if (!scope) reasons.push('the train scope could not be read');
+  else for (const hit of scope.reasons) reasons.push(`${hit.path}: ${hit.why}`);
+  const uat = autoMerge.uatVerdict(body(manifest));
+  if (!uat.mergeable) reasons.push(`the train UAT line is ${uat.state}${uat.problem ? ` (${uat.problem})` : ''}`);
+  const risky = manifest.members.filter(member => member.tier === 'RISKY').map(member => `#${member.pr}`);
+  if (risky.length) reasons.push(`RISKY members wait for the owner's merge card: ${risky.join(', ')}`);
+  return { route: reasons.length ? 'owner' : 'auto', route_reasons: reasons };
+}
+
+// Refuses a command that starts, grows or lands a train unless merge trains are on here.
+function requireTrains(cwd, options) {
+  const state = governance.mergeTrain(cwd, options.registryOptions || {});
+  if (state.on) return;
+  // Off by the merged binding (governance off or undecided, or the switch off): each PR merges alone.
+  // Anything else (a stale or missing read, an unreadable repository) may only need a fresh read.
+  const decided = ['repository-off'].includes(state.reason) || ['DISABLED', 'UNDECIDED'].includes(governance.governanceState(cwd, options.registryOptions || {}).state);
+  throw new TrainError(decided
+    ? `merge trains are off here (${state.reason}): they run only while governance is enabled and task_prs.merge_train is not off. Merge each ready pull request alone.`
+    : `merge trains could not be confirmed on here (${state.reason}): read it again online with ${governance.governanceCommand('status')}, then retry.`, 1);
 }
 
 function parseArgs(argv) {
@@ -722,9 +760,11 @@ function parseArgs(argv) {
   return options;
 }
 
-function run(argv, cwd = process.cwd()) {
-  const options = parseArgs(argv);
+// `registryOptions` is only for tests (an isolated Toolkit user-state folder).
+function run(argv, cwd = process.cwd(), { registryOptions } = {}) {
+  const options = { ...parseArgs(argv), ...(registryOptions ? { registryOptions } : {}) };
   const manifest = readManifest(options.manifest);
+  if (SWITCHED.includes(options.command)) requireTrains(cwd, options);
   if (options.command === 'build') return build(cwd, manifest, options);
   if (options.command === 'catchup') return catchup(cwd, manifest, options);
   if (options.command === 'verify') return verify(cwd, manifest, options);
