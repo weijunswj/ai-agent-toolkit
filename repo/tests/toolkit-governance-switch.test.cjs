@@ -99,20 +99,17 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
     // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup row is asked too.
-    assert.match(result.out, /^# Toolkit governance choices - 7 questions across 2 sections/);
-    assert.match(result.out, /\| 1\.6 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
-    assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
-    assert.match(result.out, /^1\.4 asks: Run tests in parallel CI jobs so they finish faster\? It uses about the same CI minutes\.$/m);
-    assert.match(result.out, /^More on 1\.4: .*Minutes: unknown, because no green CI run could be read\./m);
+    assert.match(result.out, /^# Toolkit governance choices - 7 questions and 2 status rows across 2 sections/);
+    assert.match(result.out, /\| 1\.10 \| Toolkit instruction copies \| 1 file to clean up \| A\. Keep current \| B\. Clean up \|/);
+    assert.match(result.out, /\| 1\.4 \| Parallel CI shards \| Not asked yet \(CI time unknown\) \| A\. Not now: [^|]* \| B\. Yes<br>C\. Never ask \|/);
     assert.match(result.out, /\| # \| Question \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
     assert.match(result.out, /\| 1\.2 \| Task auto-merge \| Off \| A\. Keep current \| B\. On \|/);
-    assert.match(result.out, /Status \(nothing to answer\): Evidence store: toolkit-test-fixture\/store\./);
-    assert.match(result.out, /Status \(nothing to answer\): Required checks: validate\./);
+    assert.match(result.out, /\| 1\.5 \| Evidence store \| toolkit-test-fixture\/store \| Nothing to answer: Bound in the merged programme file \| - \|/);
+    assert.match(result.out, /\| 1\.8 \| Required checks \| validate \| Nothing to answer: Bound in the merged programme file \| - \|/);
     assert.match(result.out, /\| 2\.1 \| Toolkit permissions \(Claude Code\) \| Outdated: 6 missing \| B\. Update: .* \| A\. Keep current<br>C\. Remove \|/);
-    assert.match(result.out, /The permissions row covers only this app\. Any other app you use needs toolkit governance run there too\./);
     assert.doesNotMatch(result.out, /```/, 'the bank is never wrapped in a code block');
-    assert.match(result.out, /- `all recommended`/);
+    assert.match(result.out, /^Reply all recommended, or only your changes such as 1\.2=B\./m);
     assert.doesNotMatch(result.out, /could not note this bank/);
   }
   assert.equal(present().length, 2, 'no switch read back yet, so the old answers stay');
@@ -172,7 +169,7 @@ test('a bank answer with the owner\'s ticket prepares one binding pull request t
   assert.equal(forged.code, 2, 'an agent cannot make up a ticket');
   assert.equal(calls.length, 1);
 
-  const kept = await answerBank(ctx, '1.5=A', { switchTransport });
+  const kept = await answerBank(ctx, '1.6=A', { switchTransport });
   assert.equal(kept.code, 0, kept.err);
   assert.match(kept.out, /Nothing changed: every answer keeps things as they are\./);
   assert.equal(calls.length, 1);
@@ -189,12 +186,13 @@ test('a bank answer with the owner\'s ticket prepares one binding pull request t
   assert.equal(moved.code, 2);
   assert.match(moved.err, /changed since this computer read it/);
   const unread = await answerBank(ctx, 'maybe', { switchTransport });
-  assert.equal(unread.code, 0, 'an answer that cannot be read shows the bank again');
-  assert.match(unread.out, /answer was not read.*Nothing was written/);
+  assert.equal(unread.code, 0, 'an answer that cannot be read is not a failure');
+  assert.match(unread.out, /answer was not read.*Nothing was written\.\nReply again with all recommended or only your changes, such as 1\.2=B\./);
+  assert.doesNotMatch(unread.out, /^\| 1\.1 \||Bank reference/m, 'the bank is not shown again');
   for (const bad of [['refresh', '--set', 'on'], ['setup', '--answers', 'x'], ['setup', '--answers', 'x', '--ticket', 'nothex'], ['status', '--answers', 'x', '--ticket', 'f'.repeat(32)]]) assert.equal((await run(ctx, bad)).code, 2, bad.join(' '));
 });
 
-test('a ticket answers only the bank it was given for: a changed state shows the new bank and writes nothing', async t => {
+test('a ticket answers only the bank it was given for: a changed state names the changed row and writes nothing', async t => {
   const ctx = fixture(t);
   const calls = [];
   const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 12, url: `https://github.com/${SLUG}/pull/12`, head: 'a'.repeat(40) }; } };
@@ -207,6 +205,9 @@ test('a ticket answers only the bank it was given for: a changed state shows the
   const result = await run(ctx, ['setup', '--answers', `${reference}: 1.2=B`, '--ticket', ticket], { switchTransport });
   assert.equal(result.code, 0);
   assert.match(result.out, /governance state changed since that bank was shown.*nothing was written/);
+  assert.match(result.out, /^1\.2 Task auto-merge changed: now On, recommended A\. Keep current\.$/m, 'only the changed row is named');
+  assert.doesNotMatch(result.out, /^1\.(1|3|4|5|6|8) /m);
+  assert.doesNotMatch(result.out, /^\| 1\.1 \||Bank reference/m, 'the bank is not shown again');
   assert.equal(calls.length, 0);
   const other = await run(ctx, ['setup', '--answers', `${reference}: 1.2=B`, '--ticket', ticket], { switchTransport, environment: { TOOLKIT_HOST_SESSION: 'another-session' } });
   assert.equal(other.code, 2, 'another session cannot spend it either');
@@ -234,7 +235,8 @@ test('the permission row: Update and Remove give the owner one command to run th
   assert.equal(update.code, 0, update.err);
   assert.match(update.out, /Toolkit permissions \(Claude Code\): run this once in your own PowerShell or terminal, outside any agent\..*press Enter\./);
   assert.match(update.out, /^node fixture-apply\.cjs --apply$/m, 'the command is printed on its own line, not indented into a code block');
-  assert.match(update.out, /never in a code block of your own making; never run it yourself\./);
+  assert.match(update.out, /Never put a command above in a code block of your own making, and never run it yourself\./);
+  assert.equal(update.out.match(/^Agents: /gm).length, 1, 'one Agents line, the last');
   assert.doesNotMatch(update.out, /Paste into|Next step/);
   const remove = await answerBank(ctx, '2.1=B', { missing: 0 });
   assert.match(remove.out, /^node fixture-apply\.cjs --remove$/m);
