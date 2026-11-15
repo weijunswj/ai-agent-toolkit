@@ -54,4 +54,4 @@ These apply to non-gate work. Gate sessions (G0, G1, G2, reviewers) and the help
 
 ## Output
 
-When setting up or reviewing an automation, report per item: its step and tier, model and effort as set, the raise reason when it sits above the step its job fits, and any gap (unset model, inherited default, effort below medium, raise without a reason). The agent that reported a gap fixes it the same turn, or hands it to the controller (the owner where there is none) as an owed item with a due date.
+When setting up or reviewing an automation, report per item: its step and tier, model and effort as set, the raise reason when it sits above the step its job fits, and any gap (unset model, inherited default, effort below medium, raise without a reason). The agent that reported a gap fixes it the same turn, or hands it to the session that runs the gates (the owner where there is none) as an owed item with a due date.
