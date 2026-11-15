@@ -95,7 +95,7 @@ All development aims at these; repository rules may add, never relax:
 - **Checks over judgement:** prove results with tests, parsers and validators; a model never grades its own output.
 - **Vet outside material:** review and pin third-party code, packages and skills before use; never run upstream code to judge it.
 - **Cheapest capable route:** the cheapest model and effort that does the job; any raise states its reason.
-- **Fix the root cause:** reuse first, then the smallest real fix; any fallback narrow, visible, tested.
+- **Fix the root cause, upstream:** reuse first, then the smallest real fix; where it matters, make it in the shared source that copies, prompts and later runs inherit; any fallback narrow, visible, tested.
 - **Ship, then improve:** basics, ship, observe, improve; finish authorised work before stopping.
 - **Check by risk, not size:** review and testing follow what a change touches.
 - **Private by default:** logs and errors carry no secrets or personal data.
@@ -113,7 +113,7 @@ All development aims at these; repository rules may add, never relax:
 
 ## Scope And Hygiene
 
-Before editing, read the `toolkit-playbooks` skill index (or the repository's own) and only the smallest matching docs, never recursively; include changed workflow, setup, policy, generated-file, migration, API-contract and operations docs. Read a repo map where one exists; keep one only where an ENABLED repository's governed rules ask. Inspect targets; broaden scans only if targeted evidence falls short.
+Before editing, read the `toolkit-playbooks` skill index (or the repository's own) and only the smallest matching docs, never recursively; include changed workflow, setup, policy, generated-file, migration, API-contract and operations docs. Read a repo map where one exists; keep one only where an ENABLED repository's governed rules ask. Inspect targets; broaden scans only if that evidence falls short.
 
 Keep the diff narrow and in style. Change order: no change, reuse, smallest root-cause fix, bounded simplification, new abstraction only if needed. Never weaken validation, schemas, guardrails, approvals or error handling to pass. After editing, run the smallest validation first, fix targeted failures, rerun, and review the diff for unrelated changes.
 
@@ -141,4 +141,4 @@ Issue and PR tracking acts only on the current repository's own remote and never
 
 ## Communication
 
-Make every action-blocking question to the user (choose, approve, confirm, give a path, continue) one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly at real checkpoints, not per command. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.
+Make every action-blocking question to the user (choose, approve, confirm, give a path, continue) one fully bold sentence. Report on the coding app you run in; raise another app's state only when the user asks. On long tasks, update briefly, only at real checkpoints. Report changes, exact validation results, generated-output status, remaining risks and manual checks, the PR link and checked CI status.

@@ -71,6 +71,20 @@ test('the governance bank uses setup toolkit\'s format, folds the unchanged choi
   const table = questionBank.renderCompactQuestionTable(undecided, true).join('\n');
   assert.match(table, /\| 1\.1 \| GitHub governance \| Not decided \| B\. Turn on: .* \| A\. Keep current<br>C\. Turn off \|/);
   assert.match(table, /\| 1\.2 \| Task auto-merge \| Off \(needs governance\) \| A\. Keep current \| B\. On \(needs governance on\) \|/);
+  // Turn on also covers the settings Toolkit adds on its own after the merge, so the shown bank names
+  // them before the owner answers.
+  const shown = bank.renderGovernanceBank(undecided);
+  assert.ok(shown.includes(`After the merge, Toolkit also turns on, without asking again: ${require('../scripts/toolkit-governance-finish.cjs').WHAT}.`), shown);
+  assert.match(shown, /default-branch protection[^|]*ruleset that blocks force pushes[^|]*security settings/);
+  // On a disabled repository Keep current is recommended, so the table shows Turn on as a bare label;
+  // the bank still names the post-merge settings under it before the answer. Where Turn on is not
+  // offered (already on) nothing is added.
+  const after = `After the merge, Toolkit also turns on, without asking again: ${require('../scripts/toolkit-governance-finish.cjs').WHAT}.`;
+  const disabled = bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'DISABLED', repository: 'owner/app', root: '/x' } }));
+  assert.match(disabled, /\| 1\.1 \| GitHub governance \| Off \| A\. Keep current \| B\. Turn on \|/);
+  assert.ok(disabled.includes(`1.1 B. Turn on: Toolkit prepares one pull request that turns governance on. It applies only after you merge it. ${after}`), disabled);
+  assert.equal(shown.split(after).length, 2, 'named once where Turn on is recommended');
+  assert.ok(!bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' } })).includes(after));
   assert.match(table, /\| 2\.1 \| Toolkit permissions \(Codex\) \| Up to date \| A\. Keep current \| B\. Remove \|/);
   for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
   const reference = bank.bankReference(undecided);

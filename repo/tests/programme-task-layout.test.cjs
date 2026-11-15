@@ -245,13 +245,13 @@ test('the tracked PR\'s Status cell says UAT owed while the owner\'s test is owe
 test('a task page\'s AGENT CONTEXT links its handover file when the binding names a GitHub store', () => {
   const { handoverUrl } = require('../../skills/github-program-reconciler/scripts/programme-handover.cjs');
   const link = 'https://github.com/acme/state-store/blob/main/handover.md';
-  assert.ok(state.renderTraceBlockBody(806, [], 'acme/app', false, link).endsWith(`\nHandover: [handover file](${link}) · Decisions: \`programme.cjs trace 806\` · None yet.`));
+  assert.ok(state.renderTraceBlockBody(806, [], 'acme/app', link).endsWith(`\nHandover: [handover file](${link}) · Decisions: \`programme.cjs trace 806\` · None yet.`));
   assert.match(state.renderTraceBlockBody(806, [], 'acme/app'), /\nDecisions: `programme\.cjs trace 806` · None yet\.$/, 'no store, no handover link');
   const f = setup();
   assert.deepEqual(f.reconciler().run({ apply: true }).holds, []);
   const trace = state.findStateBlock(f.github.issues.get(806).body, 'TRACE').block.body;
   assert.ok(trace.includes(`Handover: [handover file](${handoverUrl(f.binding.store, 806)}) · Decisions: `), trace);
-  assert.equal(state.findStateBlock(f.github.issues.get(421).body, 'TRACE').block.body.includes('Handover:'), false, 'the programme page links its handover in its own AGENT CONTEXT block');
+  assert.equal(state.findStateBlock(f.github.issues.get(421).body, 'TRACE').block, null, 'the programme page has no TRACE block: its own AGENT CONTEXT block links its handover');
 });
 
 test('a task with no PR yet shows its gate on the None yet line', () => {
@@ -346,13 +346,12 @@ test('a task with no PR yet shows None yet, and its status stays out of sight', 
   assert.match(state.renderChildBlockBody(childDoc({ lifecycle: 'DONE' }), { ...OUTCOME, class: 'COMPLETED' }), /\n<!-- Task status: COMPLETED -->\n/);
 });
 
-test('a task page ends with one AGENT CONTEXT line; the programme page keeps its DECISIONS block', () => {
+test('a task page ends with one AGENT CONTEXT line; the programme page has no DECISIONS block', () => {
   const comments = [{ id: 11, body: 'Scope\n---\nA decision', created_at: '2026-11-01T00:00:00Z', user: { login: 'owner' } }];
   const task = state.renderTraceBlockBody(806, comments, 'acme/app');
   assert.equal(task, ['# AGENT CONTEXT', '<!-- programme-trace issue=806 -->',
     'Decisions: `programme.cjs trace 806` · Newest: [11](https://github.com/acme/app/issues/806#issuecomment-11)'].join('\n'));
   assert.match(state.renderTraceBlockBody(806, [], 'acme/app'), /\nDecisions: `programme\.cjs trace 806` · None yet\.$/);
-  assert.match(state.renderTraceBlockBody(421, comments, 'acme/app', true), /^# DECISIONS\n/);
 });
 
 test('a PR page status names each task on one line, then one AGENT CONTEXT line', () => {
@@ -944,7 +943,7 @@ test('a page whose text stays where it is never claims a lay-out: closed tasks a
 // Every BEGIN line with this name, wherever it sits: an independent count of what is on the page.
 const rawBlocks = body => Object.fromEntries(['NAV', 'STATE', 'TRACE', 'CURRENT', 'CONTEXT'].map(name => [name, body.split(/\r?\n/).filter(line => line.startsWith(`<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN ${name} `)).length]).filter(([, count]) => count));
 const TASK_ONCE = { NAV: 1, STATE: 1, TRACE: 1 };
-const PARENT_ONCE = { STATE: 1, TRACE: 1, CURRENT: 1, CONTEXT: 1 };
+const PARENT_ONCE = { STATE: 1, CURRENT: 1, CONTEXT: 1 };
 // Where the first `# ` line of the page (the place a block would be put) can hide.
 const ANCHORS = {
   'a details section': '<details><summary>Plan</summary>\n\n# Title\n\nPlan text.\n\n</details>\n\nBelow.\n',

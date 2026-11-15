@@ -1,5 +1,47 @@
 # Toolkit Changelog
 
+## 3.131.0
+
+### Changed
+
+- **Setup question 2.1 (Claude Code agents):** the Current cell now says what the choice does in plain words, for example `Gates: Toolkit helpers only; elsewhere one subagent layer`, instead of `Root only; subagent limit 1`. With broader native behaviour it says Toolkit repos still keep one subagent layer. It adds the Claude Code subagent limit only when that limit is not the one the choice expects (your own value, not set yet, unknown, or Toolkit's limit still set under broader native behaviour).
+- **The programme page has three generated parts:** CURRENT, PROGRAMME GRAPH and AGENT CONTEXT, then the hand-written text. The DECISIONS block, which nothing read and which linked only the newest decision comment, is gone. A page that still has one reads as before and loses it on the next write, keeping the text around it byte for byte.
+- **AGENT CONTEXT links the full decision index:** its Decisions part now links every top-level decision index comment on the parent, oldest first (`index`, or `index 1` to `index n`; a directory comment stands for its parts), before `programme.cjs trace <n>`. Bot and archive comments never count, as in the trace audit. The body itself therefore reaches every record an index lists, so hand-written index links on the page can later move to an archive comment without leaving records unlinked.
+- **A faulty index comment costs only its own link:** an index comment on the parent that links in a loop, too deep or to too many pages is left out of the Decisions part, and the healthy ones stay linked, so their records stay reachable from the body. The pass names the faulty comment in a report-only `TRACE_INDEX_INVALID` finding with the step to fix it.
+- **Re-runs update the open setup pull request:** answering the bank again while the turn-on pull request is open adds one commit with the new answers to the same branch, never a second pull request. Toolkit changes only its own turn-on branch.
+- **Rendered from the managed checkout:** the turn-on and `toolkit governance check` render the cloud workflows with the managed Toolkit checkout's own installer, so a lagging plugin copy cannot render workflows that do not match their pinned commit.
+
+### Added
+
+- **Governance post-merge finish:** after the question bank's turn-on pull request is merged, the next session starts `toolkit-governance.cjs finish` in the background. It adds default-branch protection, the ruleset that blocks force pushes and the free dependency and security settings without asking again, and the following session shows the result once, built from what actually happened: what is on, what GitHub cannot enforce on a private repository on GitHub Free, and any step left for the owner (such as adding required checks to a fresh repository before protection can be added). Only a setting GitHub could not confirm keeps it pending, with the reason, and it is tried again later. The bank names these settings whenever Turn on is offered, not only when it is recommended.
+- **One closing line for the turn-on:** the bank's setup pull request ends with a fixed summary (its link, what merging does, the files it holds, what finishes after the merge) and one line: "Merge <link>. Nothing else is needed from you."
+
+### Removed
+
+- **Shard timings `--fail-if-due`:** nothing used it; `--warn-if-due` stays.
+
+### Fixed
+
+- **Setup file wording:** the docs now say that an older Toolkit copy of the dependency auto-merge workflow is refreshed, instead of "existing files are never changed".
+
+## 3.130.0 (periodic runs hand GitHub steps to a thread with the repos and recover skipped schedules)
+
+### Fixed
+
+- **A queued holder order could be filed twice or lose its receipts:** when the cloud sweep filed an order's result and read it back but then failed to take the order off the queue, the next run ran the order again. After the order's expiry that filed a completed order as both done and refused, or replaced a stopped result and its write receipts with a bare refusal; before expiry it replaced the receipts with "done earlier". Result files now name the commit that queued the order, and the next run finds the result for that same commit and only removes the file. The same order queued again comes with a new commit and still runs, so a stopped order continues from its refused write. The sweep also runs a pending file exactly as listed, read at the commit that queued it, so a file replaced mid-run never hides the replacement or gets a result for an order that did not run.
+- A shard timing refresh pull request now ends with `UAT: NOT_REQUIRED` and `Bump: none` lines, so the auto-merge check accepts it and the merge train finder can board it once its review passes. Before, every such pull request needed both lines added by hand.
+
+### Claude Projects
+
+- **Added:** the hourly nudge and the daily check-in start their first line with `GITHUB STEPS OWED: <steps> | ` when a step could not read GitHub (the nudge's CI waits, PR sweep and programme sweep; the check-in's GitHub and checker steps), instead of only saying so.
+- **Changed:** a coordinator without repo access no longer finishes a task run by relaying it: the same turn it hands every GitHub step of the run to a thread that has the repos, and writes `.done` only after that thread reports back (**GitHub steps need repo access** in the recurring-tasks reference, and the skill's **Every task run reaches the project chat** line).
+- **Added:** the hourly nudge's PR step also reads each scheduled workflow's newest run and raises `SCHEDULE MISSED: <names> | ` when a scheduled time passed more than 30 minutes ago with no run since, because GitHub can skip a scheduled run. The coordinator re-reads the newest run, then has a thread with the repos start it by hand on the default branch only when the workflow stays inside the repository's own GitHub state or the owner approved it by name; anything else waits for the owner.
+
+### Changed
+
+- The Source Watch PR Notifier can now also be started by hand, on `main` only (a manual run on any other branch does nothing), so a skipped scheduled run can be recovered without waiting for the next schedule. A test now requires every scheduled workflow in the repository to take `workflow_dispatch`.
+- The global rules' root-cause principle now also says to fix problems upstream: where it matters, the fix goes in the shared source that copies, prompts and later runs inherit, not a local patch. The global block's byte cap rises to 21,900 to hold it.
+
 ## 3.129.0 (Enter-only owner terminal steps)
 
 ### Added

@@ -1190,8 +1190,7 @@ test('the graph replaces the hand-kept index once, sits right under the CURRENT 
   assert.match(page, /^# Programme\n+<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN CURRENT[^\n]*\n# CURRENT\n/, 'the renderer owns the CURRENT heading');
   assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END CURRENT -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE'), 'the graph follows the summary directly');
   assert.match(page, /<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN CONTEXT/);
-  assert.ok(page.includes('<!-- AI-AGENT-TOOLKIT:programme-state:END CONTEXT -->\n\nLive now.\n\n## Parent completion\n\nDone when.\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE'), 'hand-written notes come after agent context, and the DECISIONS block closes the page');
-  assert.ok(page.endsWith('<!-- AI-AGENT-TOOLKIT:programme-state:END TRACE -->\n'));
+  assert.ok(page.endsWith('<!-- AI-AGENT-TOOLKIT:programme-state:END CONTEXT -->\n\nLive now.\n\n## Parent completion\n\nDone when.\n'), 'hand-written notes come after agent context and close the page; there is no DECISIONS block');
   assert.match(github.issues.get(423).body, /^<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN NAV [^\n]*\n# PATH\n<!-- programme-nav -->\n#421 > #423\n<!-- AI-AGENT-TOOLKIT:programme-state:END NAV -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN STATE [^\n]*\n<!-- programme-state child=423@1 -->\n<!-- State revision 1 \(issue-423\.json\) -->\n<!-- Task status: [^\n]*-->\n# PR GRAPH\n[\s\S]*<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->\n\n<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN TRACE [^\n]*\n# AGENT CONTEXT\n[\s\S]*<!-- AI-AGENT-TOOLKIT:programme-state:END TRACE -->\n\n# C2 title\n\nBody of 423\n$/, 'a task page with no TASK text opens with PATH, PR GRAPH, AGENT CONTEXT, then every hand-written word under its own headings');
   assert.equal(reconciler().run().summary, 'No changes');
 
@@ -1799,7 +1798,8 @@ test('the command line binds identity, refuses writes without the controller fla
 test('a page written by a newer Toolkit is held, not rewritten, so two versions never flip a page', () => {
   const { github, store, binding, reconciler, repository } = setup();
   reconciler().run({ apply: true });
-  comment(github, 421, 'Note\n---\nA newer note');
+  // A new decision index comment changes the page's AGENT CONTEXT line.
+  comment(github, 421, '<!-- decision-trace-index -->\n## Decision index\n');
   const before = github.issues.get(421).body;
   const older = new state.Reconciler({
     store, reader: new state.ProgrammeGraphReader({ transport: github, repository }),
@@ -1817,7 +1817,7 @@ test('a page written by a newer Toolkit is held, not rewritten, so two versions 
 test('a stale body with no planned index pages reads the issue and its comments no more than before paging', () => {
   const { github, reconciler } = setup();
   reconciler().run({ apply: true });
-  comment(github, 421, 'Scope\n---\nINT-TK421-001 Decision');
+  comment(github, 421, '<!-- decision-trace-index -->\n## Decision index\n');
   const before = github.calls.length;
   assert.deepEqual(reconciler().run({ apply: true }).holds, []);
   const calls = github.calls.slice(before);
