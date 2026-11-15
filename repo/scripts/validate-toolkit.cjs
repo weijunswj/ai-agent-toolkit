@@ -277,8 +277,15 @@ function validationCommandTargets(command) {
     .map((candidate) => candidate.raw);
 }
 
+// One validation run reads the topology policy once; it checks hundreds of review fields.
+let runTopologyPolicy;
+
+function topologyPolicy() {
+  return runTopologyPolicy === undefined ? surfaceAudit.validTopologyScopePolicy() : runTopologyPolicy;
+}
+
 function retiredSkillCreationReviewFinding(value) {
-  const [atom] = surfaceAudit.detectRetiredTopologyAtoms(value);
+  const [atom] = surfaceAudit.detectRetiredTopologyAtoms(value, topologyPolicy());
   return atom ? { message: atom.message, family: atom.family, atomId: atom.id } : null;
 }
 
@@ -742,7 +749,7 @@ function validateContracts(errors) {
 
 function validateLegacyReferences(errors) {
   const excluded = new Set(['repo/scripts/validate-toolkit.cjs', 'repo/scripts/audit-published-surfaces.cjs']);
-  const scopePolicy = surfaceAudit.validTopologyScopePolicy();
+  const scopePolicy = topologyPolicy();
   for (const entry of listFiles()) {
     if (excluded.has(entry.relPath)) continue;
     if (!/\.(md|json|ya?ml|txt|cjs|mjs|js|ps1|cmd|sh|py)$/i.test(entry.relPath)) continue;
@@ -828,6 +835,15 @@ function validateContinuousCoreSources(errors) {
 }
 
 function validate() {
+  runTopologyPolicy = surfaceAudit.validTopologyScopePolicy();
+  try {
+    return validateAll();
+  } finally {
+    runTopologyPolicy = undefined;
+  }
+}
+
+function validateAll() {
   const errors = [];
   validateRootTopology(errors);
   validateForbiddenFiles(errors);

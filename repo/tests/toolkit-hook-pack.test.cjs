@@ -17,9 +17,10 @@ const hooksOf = host => JSON.parse(fs.readFileSync(path.join(ROOT, host === 'cla
 const row = (extra = {}) => ({ id: 'X1', source: 'test', kind: 'benign', hosts: ['claude'], payload: { tool_name: 'Bash', tool_input: { command: 'git status' } }, expect: { decision: 'allow' }, status: 'pass', ...extra });
 const output = (status, stdout = '', stderr = '') => ({ status, stdout, stderr });
 
-test('managed task fixtures require a repository and never execute the command', () => {
-  assert.deepEqual(pack.rowErrors(row({ fixture: { repo: { governance: 'undecided' }, managed_tasks: true } })), []);
-  for (const fixture of [{ managed_tasks: true }, { repo: { governance: 'undecided' }, managed_tasks: false }]) assert.ok(pack.rowErrors(row({ fixture })).length);
+test('old task record fixtures need a governance repository and a retired sweep job', () => {
+  assert.deepEqual(pack.rowErrors(row({ fixture: { repo: { governance: 'undecided' }, windows_tasks: ['programme-sweep'] } })), []);
+  for (const fixture of [{ windows_tasks: ['programme-sweep'] }, { repo: { governance: 'undecided' }, windows_tasks: ['task-health'] }, { repo: { governance: 'undecided' }, managed_tasks: true }])
+    assert.ok(pack.rowErrors(row({ fixture })).length, JSON.stringify(fixture));
 });
 
 test('context assertions validate and read only delivered host context, with private diagnostics', () => {

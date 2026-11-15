@@ -237,3 +237,32 @@ test('two or more comments on one page: a body edit between the posts holds the 
   assert.ok(f.linked());
   assert.match(f.github.issues.get(421).body, /Owner line added mid-run\./);
 });
+
+// The live failure: one busy task passed 100 cross-references, its links read as incomplete, and from
+// then on no scheduled pass finished: the lease never moved its last finish and the earlier stop
+// stayed open. With the links read past the first page, the sweep finishes again.
+test('busy task: more than 100 cross-references on one task no longer keep every sweep pass from finishing', t => {
+  const f = fixture(t);
+  assert.match(f.sweepRun().report.metrics, /, complete=yes$/);
+  f.github.issuePrLinks.set(500, { timeline: [...Array.from({ length: 140 }, () => ({ __typename: 'Issue' })), 900] });
+  f.store.mutate('parent', 421, { writer, change: doc => {
+    doc.attention = state.foldAttention(doc.attention, { source: 'reconcile', complete: false, now: NOW,
+      seen: [{ code: 'PASS_STOPPED', issue: 421, diagnostics: { cause: 'time_limit', phase: 'closing', done: 1, total: 72, started_at: NOW } }] });
+    return doc;
+  } });
+  f.github.issues.get(500).updated_at = new Date(Date.parse(NOW) + 90 * 60 * 1000).toISOString();
+  const busy = f.sweepRun();
+  assert.match(busy.report.metrics, /, complete=yes$/, JSON.stringify(busy.report.sweep));
+  assert.equal(f.stop().state, 'resolved');
+});
+
+test('busy task: links GitHub will not page past still leave the pass incomplete, and the lease says why', t => {
+  const f = fixture(t);
+  f.sweepRun();
+  f.github.issuePrLinks.set(500, { timeline: [900], timelineTruncated: true });
+  f.github.issues.get(500).updated_at = new Date(Date.parse(NOW) + 90 * 60 * 1000).toISOString();
+  const stuck = f.sweepRun();
+  assert.match(stuck.report.metrics, /, complete=no$/);
+  assert.equal(stuck.report.sweep.reason, 'an incomplete read');
+  assert.equal(f.github.readFile('state/sweep-lease.json').reason, 'an incomplete read');
+});

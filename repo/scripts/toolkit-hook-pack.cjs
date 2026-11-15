@@ -151,17 +151,13 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'managed_tasks', 'task_health', 'windows_deferred_auth'].includes(key)) errors.push(`fixture has unknown key ${key}`);
-  if (fixture.managed_tasks !== undefined && (fixture.managed_tasks !== true || !fixture.repo)) errors.push('fixture.managed_tasks needs a repository and true');
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.closure_cloud !== undefined && typeof fixture.closure_cloud !== 'boolean') errors.push('closure_cloud must be boolean');
   if (fixture.closure_delay_ms !== undefined && (!Number.isInteger(fixture.closure_delay_ms) || fixture.closure_delay_ms < 1 || fixture.closure_delay_ms > 60000)) errors.push('closure_delay_ms must be bounded');
   if (fixture.closure_transport !== undefined && !['missing', 'signed-out'].includes(fixture.closure_transport)) errors.push('closure_transport must name an isolated failure');
   if (fixture.issue_closure !== undefined && (!['open-child', 'closed-child', 'nested-open', 'unavailable', 'target-pr', 'missing-gone', 'retained-title'].includes(fixture.issue_closure) || !fixture.repo)) errors.push('fixture.issue_closure needs a repository and a supported native child state');
   if (fixture.windows_tasks !== undefined && (!fixture.repo || !['enabled', 'disabled', 'undecided'].includes(fixture.repo.governance)
-    || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep', 'task-health'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
-  if (fixture.windows_deferred_auth !== undefined && (fixture.windows_deferred_auth !== true || !fixture.windows_tasks?.includes('shard-timings'))) errors.push('windows_deferred_auth needs a recorded shard and true');
-  if (fixture.task_health !== undefined && (!fixture.windows_tasks || !['local-only', 'failed', 'stopped', 'health-stopped'].includes(fixture.task_health))) errors.push('task_health needs isolated Windows tasks and a supported state');
-  if (fixture.task_health === 'health-stopped' && !fixture.windows_tasks?.includes('task-health')) errors.push('health-stopped needs the computer health enrolment it stops');
+    || !Array.isArray(fixture.windows_tasks) || fixture.windows_tasks.some(job => !['programme-sweep', 'shard-timings', 'footer-sweep'].includes(job)))) errors.push('fixture.windows_tasks needs a governance repository and supported jobs');
   if (fixture.slow_proposal !== undefined && (fixture.slow_proposal !== true || fixture.repo?.governance !== 'undecided')) errors.push('fixture.slow_proposal needs an undecided repository');
   if (fixture.evidence_merge !== undefined) {
     const spec = fixture.evidence_merge;
@@ -394,7 +390,7 @@ class Fixture {
   constructor(dir, spec = {}) {
     this.dir = dir;
     this.home = path.join(dir, 'home');
-    this.work = path.join(spec.managed_tasks ? this.home : dir, 'work');
+    this.work = path.join(dir, 'work');
     this.trees = path.join(dir, 'trees');
     this.transcript = path.join(this.home, '.claude', 'projects', 'hook-pack', '11111111-1111-4111-8111-111111111111.jsonl');
     for (const folder of [this.home, this.work, path.dirname(this.transcript)]) fs.mkdirSync(folder, { recursive: true });
@@ -407,16 +403,6 @@ class Fixture {
     // A session a Toolkit launcher started for a gate carries its role.
     if (spec.gate_role) this.env.TOOLKIT_GATE_ROLE = spec.gate_role;
     if (spec.repo) this.#repo(spec.repo);
-    if (spec.managed_tasks) {
-      const stateFile = path.join(this.home, '.ai-agent-toolkit', 'current', 'state.json');
-      fs.mkdirSync(path.dirname(stateFile), { recursive: true });
-      fs.writeFileSync(stateFile, JSON.stringify({ repo_path: this.work }));
-      for (const name of ['toolkit-windows-tasks.cjs', 'toolkit-tasks.cjs']) {
-        const file = path.join(this.work, 'repo', 'scripts', name);
-        fs.mkdirSync(path.dirname(file), { recursive: true });
-        fs.writeFileSync(file, '// Isolated managed task command fixture. Never executed.\n');
-      }
-    }
     if (spec.repo?.legacy_answer) {
       const file = path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -432,33 +418,6 @@ class Fixture {
         id: `fixture-${index}`, job, host: 'windows', folder: 'FIXTURE', repository, name: job, schedule: 'hourly',
         purpose: 'Hook pack fixture', created: this.#now().toISOString(), created_by: 'fixture', model: null, effort: null,
       })));
-      if (spec.windows_deferred_auth) {
-        const index = spec.windows_tasks.indexOf('shard-timings'), at = this.#now().toISOString();
-        tasks.writeLastRun(`fixture-${index}`, { schema: 'toolkit.task-last-run.v1', id: `fixture-${index}`, job: 'shard-timings', status: 'deferred',
-          reason: 'GitHub authentication status could not be read', started: at, deferred_since: at, deferred_count: 1 }, this.home);
-      }
-      if (spec.task_health) {
-        const healthStopped = spec.task_health === 'health-stopped';
-        if (healthStopped) tasks.updateRegistry(this.home, rows => rows.map(row => row.job === 'task-health' ? { ...row, repository: null, stopped_by_owner: true, stopped_at: this.#now().toISOString() } : row));
-        const flags = spec.task_health === 'failed' ? ['footer-sweep: last run failed'] : [];
-        const doc = { schema: 'toolkit.task-health.v1', computer: 'computer-aaaaaaaaaaaa', time: new Date(this.#now().getTime() - (healthStopped ? 48 * 3600000 : 0)).toISOString(), toolkit_version: '3.52.0',
-          repos: [{ repository, jobs: [{ job: 'footer-sweep', result: spec.task_health === 'stopped' ? 'stopped' : spec.task_health === 'failed' ? 'failed' : 'ok', streak: 0 }], last_result: spec.task_health === 'failed' ? 'failed' : 'ok', streak: 0, flags }] };
-        fs.writeFileSync(path.join(tasks.userStateDir(this.home), 'task-health.json'), JSON.stringify({ document: doc, shared: !healthStopped && spec.task_health !== 'local-only', note: '' }));
-      }
-      // Test-only injection into this one reader, including Linux positive rows. Production
-      // platform and offline checks remain intact; no environment switch enters the runtime.
-      const preload = path.join(this.dir, 'fake-github', 'transport.cjs');
-      fs.appendFileSync(preload, `
-const Module = require('node:module');
-const load = Module._load;
-Module._load = function(request, parent, main) {
-  const exported = load.call(this, request, parent, main);
-  if (/(?:^|[\\\\/])toolkit-tasks\\.cjs$/.test(request) && exported.taskGovernanceLine) {
-    return { ...exported, taskGovernanceLine: (state, options) => exported.taskGovernanceLine(state, { ...options, platform: 'win32', environment: {} }) };
-  }
-  return exported;
-};
-`);
     }
     if (spec.slow_proposal) {
       const { GovernanceProposals } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-proposal.cjs'));
@@ -662,21 +621,14 @@ cp.spawnSync = function(file, args, options) {
   }
 
   // Writes the fixture's paths into a payload or transcript value.
-  expand(value, pluginRoot) {
+  expand(value) {
     if (typeof value === 'string') {
-      if (value.includes('{planner_apply}') || value.includes('{planner_remove}')) {
-        // Use the tested plugin's real output, including in --against runs. A literal
-        // hand-written command cannot detect a planner/hold disagreement.
-        const command = require(path.join(pluginRoot, 'repo', 'scripts', 'toolkit-windows-tasks.cjs'))
-          .applyCommand({ root: this.work }, { toolkitRoot: this.work });
-        value = value.replaceAll('{planner_apply}', command).replaceAll('{planner_remove}', command.replace(' apply ', ' remove '));
-      }
       return value.replaceAll('{work}', this.work).replaceAll('{home}', this.home).replaceAll('{dir}', this.dir)
         .replaceAll('{trees}', this.trees).replaceAll('{transcript}', this.transcript).replaceAll('{credential}', fakeCredential())
         .replaceAll('{head7}', (this.head || '').slice(0,7)).replaceAll('{headUpper}', (this.head || '').toUpperCase()).replaceAll('{head}', this.head || '').replaceAll('{now}', this.#now().toISOString());
     }
-    if (Array.isArray(value)) return value.map(item => this.expand(item, pluginRoot));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key.includes('{') ? this.expand(key, pluginRoot) : key, this.expand(item, pluginRoot)]));
+    if (Array.isArray(value)) return value.map(item => this.expand(item));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key.includes('{') ? this.expand(key) : key, this.expand(item)]));
     return value;
   }
 
@@ -772,7 +724,7 @@ async function runOnHost(row, host, fixture, roots) {
   }
   const pluginRoot = roots.forFault(row.fault);
   const event = row.event || 'PreToolUse';
-  const payload = { session_id: 'hook-pack', transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload, roots.base) };
+  const payload = { session_id: 'hook-pack', transcript_path: fixture.transcript, cwd: fixture.work, hook_event_name: event, ...fixture.expand(row.payload) };
   const input = row.fault?.type === 'bad-json' ? '{broken' : row.fault?.type === 'empty-input' ? '{}' : JSON.stringify(payload);
   const hooks = selectHooks(hostHooks(host, roots.base), event, event === 'SessionStart' ? payload.source : payload.tool_name);
   const shell = shellFor(host);

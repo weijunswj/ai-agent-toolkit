@@ -295,3 +295,23 @@ test('the script has no way to change a file', () => {
   const source = fs.readFileSync(SCRIPT, 'utf8');
   assert.doesNotMatch(source, /\b(?:writeFileSync|appendFileSync|rmSync|unlinkSync|renameSync|rmdirSync|mkdirSync|copyFileSync|child_process|spawn\w*|exec(?:File)?Sync)\b/);
 });
+
+test('discovery takes main checkouts at the top and one level down; a linked worktree is skipped', t => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-discover-'));
+  t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+  const main = path.join(folder, 'app'), nested = path.join(folder, 'group', 'lib'), linked = path.join(folder, 'app-worktree');
+  fs.mkdirSync(path.join(main, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(nested, '.git'), { recursive: true });
+  fs.mkdirSync(linked); fs.writeFileSync(path.join(linked, '.git'), 'gitdir: ../app/.git/worktrees/x\n');
+  assert.deepEqual(leftovers.discoverCheckouts(folder).sort(), [main, nested].sort());
+});
+
+test('discovery reports an unreadable folder as held without hiding readable neighbours', t => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-discover-'));
+  t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+  const blocked = path.join(folder, 'blocked'), good = path.join(folder, 'good');
+  fs.mkdirSync(blocked); fs.mkdirSync(path.join(good, '.git'), { recursive: true });
+  const found = leftovers.discoverCheckouts(folder, { readDir: dir => { if (dir === blocked) throw new Error('access denied'); return fs.readdirSync(dir, { withFileTypes: true }); } });
+  assert.ok(found.includes(good));
+  assert.ok(found.some(row => row.root === blocked && row.held && /could not be read/.test(row.reason)));
+});

@@ -33,7 +33,7 @@ test('budget modes: scheduled 50 minutes, after-write 10; each budget < kill < j
   assert.deepEqual([state.PAGE_RESERVE_MS, state.END_RESERVE_MS, state.AGAIN_RESERVE_MS], [3 * MINUTE, MINUTE, 6 * MINUTE]);
 });
 
-test('budget modes: the workflow, its kill and the computer task take their limits from the setting', () => {
+test('budget modes: the workflow and its kill take their limits from the setting', () => {
   const scheduled = state.PASS_BUDGETS.scheduled;
   const workflow = fs.readFileSync(path.join(ROOT, '.github/workflows/toolkit-programme-sweep.yml'), 'utf8');
   assert.match(workflow, new RegExp(`timeout-minutes: ${scheduled.jobTimeoutMs / MINUTE}\\b`));
@@ -44,35 +44,6 @@ test('budget modes: the workflow, its kill and the computer task take their limi
   action.runRefresh({ root: ROOT, env: {}, spawn: (file, args, options) => { seen.push({ args, options }); return { status: 0, stdout: '{}', stderr: '' }; } });
   assert.ok(seen[0].args.includes('--scheduled'), 'the cloud pass runs in the scheduled mode');
   assert.equal(seen[0].options.timeout, scheduled.killMs);
-  const job = require(path.join(ROOT, 'repo/scripts/toolkit-scheduled-job.cjs'));
-  assert.equal(job.WORK_BUDGET_MS, 55 * MINUTE);
-  const windows = require(path.join(ROOT, 'repo/scripts/toolkit-windows-tasks.cjs'));
-  assert.ok(windows.TASK_TIME_LIMIT_MINUTES * MINUTE > job.WORK_BUDGET_MS && windows.TASK_TIME_LIMIT_MINUTES * MINUTE < HOUR, 'the task stop-after leaves the bookkeeping minute and ends before the next hour');
-});
-
-test('budget modes: the computer refresh gets what is left before 55 minutes, less the attention step, never under 10', t => {
-  const job = require(path.join(ROOT, 'repo/scripts/toolkit-scheduled-job.cjs'));
-  const { budgetMs, killMs } = job.computerRefreshBudget(54 * MINUTE);
-  assert.equal(budgetMs, 47 * MINUTE, '54 left, less 2 for attention and 5 for the kill slack');
-  assert.equal(killMs, 52 * MINUTE);
-  assert.equal(job.computerRefreshBudget(58 * MINUTE).budgetMs, 50 * MINUTE, 'never more than the scheduled budget');
-  assert.equal(job.computerRefreshBudget(14 * MINUTE).budgetMs, 10 * MINUTE, 'never less than the after-write budget');
-  // The hourly task passes that budget to the scheduled mode.
-  const s = require('./support/windows-task-switch-world.cjs');
-  const home = s.tempHome(t), root = s.checkout(t);
-  const fake = s.fakeRun({ 'toolkit-governance.cjs': { status: 0, stdout: JSON.stringify({ state: 'ENABLED', merged: { status: 'enabled', fresh: true } }) }, 'programme.cjs': { status: 0, stdout: '{"holds":[]}' } });
-  const calls = [];
-  let clock = 0;
-  job.runJob({ job: 'programme-sweep', taskId: 'widget-programme-sweep', repoRoot: root }, { home, ghPath: s.GH, repositoryReader: s.testRepository, monotonicNow: () => clock,
-    readIdentity: dir => ({ valid: true, root: dir, remote: { host: 'github.com', path: '/example/widget.git' } }),
-    readObservation: () => ({ status: 'enabled', fresh: true, binding: s.fixtureBinding('example/widget', 'WIDGET') }),
-    run: (file, args, options) => { calls.push({ args, timeout: options.timeout }); return file === s.GH && args[0] === 'auth' ? { status: 0 } : fake.run(file, args, options); } });
-  const refresh = calls.find(call => call.args.includes('refresh'));
-  assert.ok(refresh, 'the refresh ran');
-  const at = refresh.args.indexOf('--budget-ms');
-  assert.ok(refresh.args.includes('--scheduled') && at > 0);
-  assert.equal(Number(refresh.args[at + 1]), 48 * MINUTE, '55 minutes, less attention and the kill slack');
-  assert.equal(refresh.timeout, 53 * MINUTE, 'killed five minutes after its budget');
 });
 
 // Tasks natively under #421 with their pages drawn; every request takes `slow` on the pass clock.

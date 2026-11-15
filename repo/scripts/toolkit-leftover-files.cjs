@@ -43,6 +43,32 @@ const USAGE = 'Usage: node repo/scripts/toolkit-leftover-files.cjs scan [--githu
 
 const unix = text => text.replace(/\r\n/g, '\n');
 
+// The main checkouts in the GitHub folder and one level below it. A linked worktree is not one; a
+// folder that cannot be read is returned as { root, held, reason } so readable neighbours still show.
+function gitKind(root) {
+  try { return fs.lstatSync(path.join(root, '.git')).isDirectory() ? 'main' : 'linked'; } catch { return null; }
+}
+function discoverCheckouts(folder, { readDir = dir => fs.readdirSync(dir, { withFileTypes: true }) } = {}) {
+  if (!fs.existsSync(folder)) return [];
+  if (!fs.lstatSync(folder).isDirectory() || fs.lstatSync(folder).isSymbolicLink()) throw new Error('GitHub checkout folder is not a directory');
+  const found = [];
+  for (const item of readDir(folder)) {
+    if (!item.isDirectory() || item.isSymbolicLink() || item.name.startsWith('.')) continue;
+    const root = path.join(folder, item.name), kind = gitKind(root);
+    if (kind === 'main') found.push(root);
+    else if (!kind) {
+      let children;
+      try { children = readDir(root); } catch { found.push({ root, held: true, reason: 'Checkout folder could not be read; check local folder access, then retry.' }); continue; }
+      for (const child of children) {
+        if (!child.isDirectory() || child.isSymbolicLink() || child.name.startsWith('.')) continue;
+        const candidate = path.join(root, child.name);
+        if (gitKind(candidate) === 'main') found.push(candidate);
+      }
+    }
+  }
+  return found;
+}
+
 // One file inside a checkout, read without following a symbolic link anywhere on its path.
 // Returns { text } for a readable regular file, { skipped } when it cannot be judged, null when absent.
 function readInside(root, relative) {
@@ -84,7 +110,7 @@ class LeftoverScan {
   // `history` maps a playbook name to the hashes of every copy Toolkit shipped (playbook-history.json).
   constructor({ home = os.homedir(), githubFolder, discover, governance, templates = TEMPLATES, history = null } = {}) {
     this.#githubFolder = githubFolder || path.join(home, 'GitHub');
-    this.#discover = discover || require('./toolkit-update-scheduled-task.cjs').discoverCheckouts;
+    this.#discover = discover || discoverCheckouts;
     this.#governance = governance || require('./toolkit-governance-state.cjs');
     this.#templates = templates;
     this.#history = history || JSON.parse(fs.readFileSync(HISTORY, 'utf8')).playbooks;
@@ -260,6 +286,6 @@ function main(argv = process.argv.slice(2), deps = {}) {
   return 0;
 }
 
-module.exports = Object.freeze({ LeftoverScan, describe, parseArgs, main });
+module.exports = Object.freeze({ LeftoverScan, discoverCheckouts, describe, parseArgs, main });
 
 if (require.main === module) process.exitCode = main();
