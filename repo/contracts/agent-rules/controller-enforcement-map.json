@@ -82,6 +82,11 @@
     },
     {
       "file": "repo/CONTROLLER.md",
+      "rule": "**Verify before claiming:**",
+      "instruction_only": "Whether a close, done, supersede or status claim matches its sources is a judgement over issue text, comments and code; no script can read that meaning."
+    },
+    {
+      "file": "repo/CONTROLLER.md",
       "rule": "On \"you are taking over as controller for <repo>\"",
       "covers": "The reconciler's takeover claim stops the old writer before its next write. The capability check and the journey are instruction-only.",
       "enforced_by": [
