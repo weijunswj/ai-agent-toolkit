@@ -159,7 +159,8 @@ function ensurePlainText(root, installer = null) {
 
 // Step 4: the dependency security files, where missing: a dependabot.yml for every package ecosystem
 // found and Toolkit's dependency auto-merge workflow. They travel in the turn-on pull request, so
-// governance never starts with its own security check failing. An existing file is never changed.
+// governance never starts with its own security check failing. An older Toolkit copy of the workflow
+// is refreshed; any other existing file is never changed.
 function ensureSecurityFiles(root, writer = null) {
   const security = require('./toolkit-governance-security.cjs');
   const results = (writer || (dir => security.writeSecurityFiles(dir, { dependabot: true, workflow: true })))(root);

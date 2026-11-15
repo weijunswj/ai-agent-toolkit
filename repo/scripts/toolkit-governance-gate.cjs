@@ -1484,7 +1484,8 @@ function verdictLine(verdict, registryOptions, programmeDeps) {
   if (verdict.open) {
     return `Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}`;
   }
-  const programme = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : [];
+  // A bank turn-on that just merged gets its post-merge setup once (toolkit-governance-finish.cjs).
+  const programme = state.programme_records_bind === true ? [...require('./toolkit-governance-finish.cjs').sessionLines(state, registryOptions, programmeDeps), ...programmeLines(state, registryOptions, programmeDeps)] : [];
   const line = [decidedLine(state), ...programme].join(' ');
   // The last known decision is ENABLED (even when it could not be re-read): the installed Toolkit
   // delivers the governed rules, so a repository needs no copy of them.
