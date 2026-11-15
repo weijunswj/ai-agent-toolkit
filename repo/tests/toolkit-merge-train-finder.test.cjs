@@ -12,13 +12,16 @@ const { fixture } = require('./support/merge-train-fixture.cjs');
 
 const sha = n => String(n).repeat(40).slice(0, 40);
 const at = minutes => new Date(Date.UTC(2026, 10, 15, 0, minutes)).toISOString();
-const verdict = (head, { result = 'PASS', tier = 'NORMAL', who = 'OWNER', when = 1 } = {}) => ({
-  body: `Toolkit-G2: ${result} ${head} tier=${tier}\n---\nReport: evidence/g2.md`, author_association: who, created_at: at(when), html_url: `https://example.test/c/${head.slice(0, 4)}-${when}`,
+// Route stamps (toolkit-gate-route.cjs): the G2 one is the verdict's second line, the G1 one a body line.
+const G2_STAMP = 'Route: host-verified opus-5.5/xhigh pin=owner-claude/opus';
+const G1_STAMP = 'Route: host-verified opus-5.5/high pin=owner-claude/BUILDER';
+const verdict = (head, { result = 'PASS', tier = 'NORMAL', who = 'OWNER', when = 1, route = G2_STAMP } = {}) => ({
+  body: `Toolkit-G2: ${result} ${head} tier=${tier}\n${route === null ? '' : `${route}\n`}---\nReport: evidence/g2.md`, author_association: who, created_at: at(when), html_url: `https://example.test/c/${head.slice(0, 4)}-${when}`,
 });
 const green = [{ id: 1, name: 'validate', status: 'completed', conclusion: 'success' }];
 const pull = (number, extra = {}) => ({
   number, draft: false, base: { ref: 'main' }, head: { sha: sha(number) },
-  body: `Change ${number}.\n\nBump: patch\nUAT: NOT_REQUIRED (internal)\n\nRefs #${number + 100}`, ...extra,
+  body: `Change ${number}.\n\n${G1_STAMP}\nBump: patch\nUAT: NOT_REQUIRED (internal)\n\nRefs #${number + 100}`, ...extra,
 });
 
 // A ready pull request: PASS at its head, green checks, Bump and UAT lines, no version file.
@@ -74,7 +77,7 @@ test('an edited verdict counts from its edit', () => {
 
 test('find writes the manifest of ready pull requests, oldest first, that build takes as it is', t => {
   const f = fixture(t);
-  const live = facts(f, [ready(3, { pull: { body: 'Three.\n\nBump: minor\nUAT: OWNER_TEST_NEEDED (try it)\n\nCloses #30\n\n## Pack changes\n\n- row-9: changed' } }), ready(2, { comments: [verdict(sha(2), { tier: 'RISKY' })] })]);
+  const live = facts(f, [ready(3, { pull: { body: 'Three.\n\nRoute: launcher-attested opus-5.5/high pin=owner-claude/BUILDER, self-check unavailable\nBump: minor\nUAT: OWNER_TEST_NEEDED (try it)\n\nCloses #30\n\n## Pack changes\n\n- row-9: changed' } }), ready(2, { comments: [verdict(sha(2), { tier: 'RISKY' })] })]);
   const { result, out } = find(f, live);
   assert.equal(result.written, true, JSON.stringify(result));
   const manifest = JSON.parse(fs.readFileSync(out, 'utf8'));
@@ -142,4 +145,35 @@ test('find refuses where trains are off, like build', t => {
   assert.throws(() => find(f, facts(f, [ready(1), ready(2)])), /merge trains are off here \(repository-off\)/);
   const cli = f.cli('find', '--out', path.join(f.root, 'x.json'), '--live', facts(f, [ready(1), ready(2)]));
   assert.equal(cli.status, 1);
+});
+
+test('route stamps: an off-pin stamp never boards, and a RISKY pull request needs both stamps verified or attested', t => {
+  const f = fixture(t);
+  const bodyWith = (number, stamp) => `Change ${number}.\n\n${stamp === null ? '' : `${stamp}\n`}Bump: patch\nUAT: NOT_REQUIRED (internal)`;
+  const live = facts(f, [
+    ready(1), ready(2, { comments: [verdict(sha(2), { tier: 'RISKY' })] }),
+    // The 15 November miss: a G2 at medium effort against the xhigh pin.
+    ready(3, { comments: [verdict(sha(3), { route: 'Route: host-verified opus-5.5/medium pin=owner-claude/opus' })] }),
+    ready(4, { pull: { body: bodyWith(4, 'Route: host-verified opus-5.5/xhigh pin=owner-claude/BUILDER') } }),
+    ready(5, { comments: [verdict(sha(5), { route: 'Route: host-verified opus-5.5/high pin=owner-claude/BUILDER' })] }),
+    ready(6, { comments: [verdict(sha(6), { tier: 'RISKY', route: 'Route: UNVERIFIED' })] }),
+    ready(7, { comments: [verdict(sha(7), { tier: 'RISKY', route: null })] }),
+    ready(8, { comments: [verdict(sha(8), { tier: 'RISKY' })], pull: { body: bodyWith(8, null) } }),
+    ready(9, { comments: [verdict(sha(9), { route: 'Route: UNVERIFIED' })], pull: { body: bodyWith(9, null) } }),
+    ready(10, { pull: { body: bodyWith(10, `${G1_STAMP}\nRoute: UNVERIFIED`) } }),
+    // A temporary owner change: the stamp cites the owner's record, so a non-registry model can board.
+    ready(11, { comments: [verdict(sha(11), { tier: 'RISKY' })], pull: { body: bodyWith(11, 'Route: host-verified deepseek-v4/high pin=owner-claude/BUILDER override=rec-990') } }),
+    ready(12, { comments: [verdict(sha(12), { route: 'Route: host-verified opus-5.5/xhigh' })] }),
+  ]);
+  const { result } = find(f, live);
+  assert.deepEqual(result.ready, ['#1', '#2', '#9', '#11', '#12']);
+  const reasons = Object.fromEntries(result.skipped.map(line => [line.split(':')[0], line.slice(line.indexOf(': ') + 2)]));
+  assert.match(reasons['#3'], /G2 route stamp is off the stack-registry pin: Route: host-verified opus-5.5\/medium/);
+  assert.match(reasons['#4'], /G1 route stamp is off the stack-registry pin/);
+  assert.match(reasons['#5'], /G2 route stamp is off the stack-registry pin/, 'a builder pin does not stand in for the reviewer');
+  assert.match(reasons['#6'], /RISKY pull request needs a verified or launcher-attested G2 route stamp \(unverified\)/);
+  assert.match(reasons['#7'], /RISKY pull request needs a verified or launcher-attested G2 route stamp \(missing\)/);
+  assert.match(reasons['#8'], /RISKY pull request needs a verified or launcher-attested G1 route stamp \(missing\)/);
+  assert.match(reasons['#10'], /2 route stamp lines/);
+  assert.equal(finder.verdictFor([verdict(sha(1))], sha(1)).route, G2_STAMP);
 });
