@@ -237,7 +237,7 @@ test('gate rules hold the gate mechanics every gate session reads on demand', ()
     /\*\*Route proof:\*\* pin model and effort in the launch command or config for every gate session/,
     /stop with a report when either is inherited, missing or different/,
     /Never ask the model which model it is/,
-    /the launcher's brief route line attests it \(`launcher-attested`\); with neither it is `UNVERIFIED`/,
+    /"not checkable on this host"/,
     /Gate models and effort come only from an explicitly selected stack registry revision/,
     /Run parallel builders only on disjoint files with no dependency on work still in review/,
     /No review has a dollar cap/

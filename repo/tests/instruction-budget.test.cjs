@@ -71,9 +71,8 @@ test('each block stays inside its own budget', () => {
   // Claude Projects as the third app (its switch is a project line, and its one merge thread merges),
   // then to 14,400 for merging before the owner's test and one real-host round per release batch,
   // then to 15,150 (owner OK) for the review-round limits: a blocker needs proof, rechecks after a FAIL
-  // are scope-locked, and a third FAIL round waits for the owner's card answer; then to 15,300 (owner
-  // OK, 15 November) for the route stamp: launcher-attested or UNVERIFIED where the host keeps no record.
-  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 15300, 'gate rules');
+  // are scope-locked, and a third FAIL round waits for the owner's card answer.
+  assert.ok(crlfBytes(read('repo/contracts/agent-rules/gate-rules.md')) <= 15150, 'gate rules');
 });
 
 test('the Projects controller skill fits a claude.ai skill card, with room for lanes in flight', () => {
