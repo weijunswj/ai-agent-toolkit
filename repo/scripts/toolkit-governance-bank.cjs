@@ -210,7 +210,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       : { value: 'keep', outcome: 'Nothing changes.', reason: missing === 0 ? 'They are already up to date.' : 'They could not be checked here.' },
     choices: [
       bank.wizardChoice('keep', 'Keep current', 'Nothing changes.'),
-      bank.wizardChoice('update', 'Update', 'You get one command to run yourself: it shows what changes, backs the file up and waits for you to type apply.'),
+      bank.wizardChoice('update', 'Update', 'You get one command to run yourself: it shows what changes, backs the file up and waits for you to press Enter.'),
       bank.wizardChoice('remove', 'Remove', 'You get one command to run yourself that takes every Toolkit permission line out, the same way.'),
     ],
   }));

@@ -99,7 +99,7 @@ All development aims at these; repository rules may add, never relax:
 - **Ship, then improve:** basics, ship, observe, improve; finish authorised work before stopping.
 - **Check by risk, not size:** review and testing follow what a change touches.
 - **Private by default:** logs and errors carry no secrets or personal data.
-- **Plain words:** human-facing text uses plain names and describes current behaviour.
+- **Plain words:** plain names, current behaviour; owner terminal steps short, Enter-only.
 - **Written, not remembered:** progress and decisions live in the branch, PR and records, never only in chat or memory.
 - **Feedback is input, not spec:** check it against current code first.
 - **Readers before writers:** new keys or formats reach readers before anything writes them.

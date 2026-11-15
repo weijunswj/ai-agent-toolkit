@@ -11,7 +11,7 @@
 // (GET /repos/{owner}/{repo}/rulesets, then each ruleset by id); when `gh` is missing, signed out
 // or refused, the result is `unverified`, never `present`. Adding the ruleset is a GitHub write
 // that only `ghRulesetCreator` makes, and only `toolkit governance migrate` calls it, after the
-// owner's typed yes in that run; it needs a local session signed in to GitHub. The same holds for the
+// owner's Enter in that run; it needs a local session signed in to GitHub. The same holds for the
 // keep-programme-state ruleset below.
 
 const childProcess = require('node:child_process');
@@ -116,7 +116,7 @@ function readVerdict(root, reader, verdict) {
 // The second ruleset, for a repository whose merged binding keeps its programme state on the public
 // state branch: nobody, Toolkit included, can delete that branch. Force pushes to it are already
 // blocked by the no-force-push ruleset above. Added only by `toolkit governance migrate`, after its
-// own typed yes; never on a repository without the state branch in its binding.
+// own Enter; never on a repository without the state branch in its binding.
 const STATE_BRANCH = 'DO-NOT-DELETE-IF-TOOLKIT-GOVERNANCE-IS-ENABLED';
 const KEEP_STATE_RULESET_NAME = 'Toolkit: keep programme state';
 

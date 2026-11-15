@@ -7,14 +7,14 @@
 //   node repo/scripts/toolkit-permissions.cjs --apply [--host claude|codex] [--repo-root <checkout>]
 //   node repo/scripts/toolkit-permissions.cjs --remove [--host claude|codex] [--repo-root <checkout>]
 //
-// The owner types this in their own terminal. It shows what would change, waits for the typed word
-// `apply`, backs each file up, writes it, reads it back and lists what changed. Agents never run it. The only hard block is the app's own: the computer block holds an
+// The owner types this in their own terminal. It shows what would change, waits for a fresh Enter
+// (owner-terminal.cjs), backs each file up, writes it, reads it back and lists what changed. Agents never run it. The only hard block is the app's own: the computer block holds an
 // ask line (Claude Code) and a prompt rule (Codex) for this exact command, and `--apply` must be the
 // first argument so the Codex rule matches. A command written another way (another interpreter
 // form, or a script that loads this file) matches neither. The two checks below are speed bumps,
 // not locks: a process that clears the markers and fakes a terminal gets past both.
 //   - it refuses in a shell a coding agent started (the exact markers `toolkit env show` refuses on);
-//   - it needs a terminal on stdin and stdout and the typed word; a pipe or file never answers.
+//   - it needs a terminal on stdin and stdout and a fresh Enter; a pipe, a file or a pasted blank line never answers.
 //
 // Claude Code: the user settings file. --apply adds missing lines and takes out stale Toolkit lines
 // (ones for another Toolkit folder or a retired command); --remove takes out every Toolkit line.
@@ -29,15 +29,13 @@
 
 const nodeFs = require('node:fs');
 const path = require('node:path');
-const readline = require('node:readline');
-const { AGENT_HOST_MARKER_NAMES } = require('./agent-host-markers.cjs');
+const ownerTerminal = require('./owner-terminal.cjs');
 
-const AGENT_MARKERS = Object.freeze([...AGENT_HOST_MARKER_NAMES, 'AI_AGENT']);
-const CONFIRM = 'apply';
+const { AGENT_MARKERS } = ownerTerminal;
 const APPS = Object.freeze({ claude: 'Claude Code', codex: 'Codex' });
 
 class ApplyStop extends Error {
-  constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); this.exitCode = exitCode; }
+  constructor(stopped, next, exitCode = 1) { super(`Stopped: ${stopped} Next: ${next}`); Object.assign(this, { stopped, next, exitCode }); }
 }
 
 function parseApplyArgs(argv, mode = 'apply') {
@@ -50,17 +48,6 @@ function parseApplyArgs(argv, mode = 'apply') {
     throw new ApplyStop(`--${mode} takes only --host claude|codex and --repo-root <checkout>, not ${JSON.stringify(arg)}.`, 'see the usage line.', 2);
   }
   return options;
-}
-
-// One question on the owner's terminal.
-function terminalAsk(question) {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    let answered = false;
-    // The answer resolves before close does: close (Ctrl+C, Ctrl+D or end of input) means no answer.
-    rl.question(question, (answer) => { answered = true; resolve(answer); rl.close(); });
-    rl.on('close', () => { if (!answered) resolve(''); });
-  });
 }
 
 const ruleKeys = text => [...String(text || '').matchAll(/pattern = (\[[^\n]+\]),\n {4}decision = "(\w+)"/g)].map(match => `${match[2]} ${JSON.parse(match[1]).join(' ')}`);
@@ -174,10 +161,10 @@ class PermissionsApply {
   }
 }
 
-function describePlan(plan) {
+function describePlan(plan, mode) {
   const app = plan.scope === 'repo' ? `${APPS[plan.host]} repo block` : APPS[plan.host];
   if (plan.skip) return [`${app}: skipped. ${plan.skip}`];
-  if (plan.current) return [`${app}: ${plan.target} ${plan.after === null || plan.removed ? 'holds no Toolkit lines' : 'already holds the block'}. Nothing to change.`];
+  if (plan.current) return [`${app}: ${plan.target} ${mode === 'remove' ? 'holds no Toolkit lines' : 'already holds the block'}. Nothing to change.`];
   if (plan.host === 'claude') {
     return [
       `${app}: ${plan.target}${plan.before === null ? ' (new file)' : ''}`,
@@ -226,12 +213,13 @@ async function main(argv, deps = {}) {
     const title = options.mode === 'remove'
       ? 'Toolkit permissions --remove: takes Toolkit\'s permission lines out of this computer\'s app settings.'
       : 'Toolkit permissions --apply: brings Toolkit\'s permission lines in this computer\'s app settings up to date.';
-    out(`${[title, '', ...plans.flatMap(describePlan), ...notes, ''].join('\n')}\n`);
+    const look = { stream: deps.stdout ? null : process.stdout, environment };
+    out(`${[ownerTerminal.title(title, look), '', ...plans.flatMap(plan => describePlan(plan, options.mode)), ...notes, ''].join('\n')}\n`);
     const pending = plans.filter(plan => !plan.skip && !plan.current);
     if (!pending.length) { out('Nothing to change. Nothing was written.\n'); return 0; }
 
-    const answer = await (deps.ask || terminalAsk)(`Type ${CONFIRM} to back up and write ${pending.length === 1 ? 'this file' : 'these files'}; anything else stops: `);
-    if (String(answer || '').trim().toLowerCase() !== CONFIRM) { out('Stopped. Nothing was written.\n'); return 1; }
+    const confirmed = await (deps.confirm || (effect => ownerTerminal.pressEnter(effect, { output: process.stdout, environment })))(`back up and write ${pending.length === 1 ? 'this file' : 'these files'}`);
+    if (confirmed !== true) { out('Stopped. Nothing was written.\n'); return 1; }
 
     for (const plan of pending) {
       const backup = applier.write(plan);
@@ -249,13 +237,13 @@ async function main(argv, deps = {}) {
     }
     // Name only the apps whose files were written.
     const apps = [...new Set(pending.map(plan => APPS[plan.host]))];
-    out(`Done. Restart ${apps.join(' and ')} so ${apps.length === 1 ? 'it reads' : 'they read'} the new lines. To undo, copy the backup file back over the settings file.\n`);
+    out(`${ownerTerminal.ok(`Done. Restart ${apps.join(' and ')} so ${apps.length === 1 ? 'it reads' : 'they read'} the new lines. To undo, copy the backup file back over the settings file.`, look)}\n`);
     return 0;
   } catch (error) {
     if (!(error instanceof ApplyStop)) throw error;
-    err(`${error.message}\n`);
+    err(`${ownerTerminal.stop(error.stopped, error.next, { stream: deps.stderr ? null : process.stderr, environment })}\n`);
     return error.exitCode;
   }
 }
 
-module.exports = Object.freeze({ PermissionsApply, ApplyStop, AGENT_MARKERS, CONFIRM, parseApplyArgs, ruleKeys, main });
+module.exports = Object.freeze({ PermissionsApply, ApplyStop, AGENT_MARKERS, parseApplyArgs, ruleKeys, main });

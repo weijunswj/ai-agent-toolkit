@@ -26,7 +26,7 @@ Key names look like `PROVIDER_SOLUTION_PURPOSE`, for example `COOLIFY_SWOOSHZ_MC
 | See, change, add or remove keys | `edit`, then `apply` | A private file with your keys as `NAME=value` lines, like a `.env` file, opens in the app your computer uses for `.env` files. Each save applies changes and additions within a few seconds; a deleted line is removed at "done", after your yes: see [Your keys in your editor](#your-keys-in-your-editor). When you are finished, close the tab and tell your agent "done", or run the `apply` line shown at the top of the file. It lists what was changed, added and removed, by name, and deletes the file. |
 | Set one key | `set NAME` | Asks for the value with hidden input. Run it yourself in PowerShell, as shown above. |
 | See one value | `show NAME` or `show NAME --copy` | Shows the value once, or copies it to the clipboard, in a PowerShell window you opened yourself. See [Seeing a value](#seeing-a-value). |
-| Remove a key | `remove NAME` | Asks a yes/no that names the key first. |
+| Remove a key | `remove NAME` | Asks a yes/no that names the key first: your agent asks you in chat, or, run in your own terminal, it waits for a fresh Enter. |
 | Run a command-line tool with a key | `run --names NAME -- <tool> <args>` | Starts the tool with only those keys added to its environment. It refuses unknown names and the usual commands that print the whole environment (such as `env`, `printenv`, `set` or `Get-ChildItem env:`); it cannot catch every way a program can print a variable. Programs start directly, without a shell; on Windows, npm-installed tools run through the program their command script wraps, and other `.cmd` or `.bat` scripts are refused. |
 
 ## Your keys in your editor
@@ -61,7 +61,7 @@ The Mac and Linux open commands (`open` and `xdg-open`) are written, but `toolki
 
 ## Seeing a value
 
-`show NAME` is for you, in a PowerShell window you open yourself. Run it as shown above, with `show NAME` at the end. It asks you to type the key's name again, then prints the value on its own line. Clear the window afterwards (`Clear-Host`) and never paste the value into a chat.
+`show NAME` is for you, in a PowerShell window you open yourself. Run it as shown above, with `show NAME` at the end. It asks you to press Enter (Ctrl+C stops; a pasted blank line never answers it), then prints the value on its own line. Clear the window afterwards (`Clear-Host`) and never paste the value into a chat.
 
 `show NAME --copy` puts the value on the clipboard instead and prints nothing. Toolkit marks the copy so Windows clipboard history (Win+V) and clipboard sync across devices skip it where Windows honours that mark. It may still be kept, so clear it in Settings > System > Clipboard > Clear when you are done.
 
@@ -69,7 +69,7 @@ The Mac and Linux open commands (`open` and `xdg-open`) are written, but `toolki
 
 - it runs in a shell an agent started, or in an app's built-in terminal, because those carry the agent's environment (Claude Code, Codex or a tool that sets `AI_AGENT`). The message gives you the line to run in your own PowerShell window;
 - it is not reading from and printing to a terminal (a pipe, or output sent to a file);
-- the name you retype does not match exactly. It then prints "Not shown." and reads nothing.
+- you do not press Enter at its prompt (Ctrl+C, or the input ends). It then prints "Not shown." and reads nothing.
 
 Nothing about `show` is written to the record, a log or a backup.
 
@@ -105,4 +105,4 @@ Existing layouts are checked again before use or writes. An unsafe record identi
 
 This screen cannot recognise every secret. A short password or a multi-word passphrase can look exactly like a heading and be saved as comment text. Never put a password, key or token in a comment. Retaining arbitrary comment text cannot guarantee that the layout is secret-free. The private edit file (while it is open, and any copy your editor keeps of its tab) and a retired `.env` backup intentionally contain real values and must be treated as sensitive. Agents are told never to open, read or search the edit folder.
 
-Values are protected at rest by your operating-system login, and no single plain file holds them all. Any program running as you, including an agent's shell command, can still ask the store for a value, so this is not isolation from the agent or other programs. The skill rules, `run`'s name list and the tests that check no value reaches output reduce that risk but do not remove it. The same holds for `show`: its checks stop an agent reading a value through Toolkit by accident or on a casual request, not a determined program running as you. An agent that runs commands in a pseudo-terminal could pass the terminal check; the agent-shell check and the retyped name are what stop it.
+Values are protected at rest by your operating-system login, and no single plain file holds them all. Any program running as you, including an agent's shell command, can still ask the store for a value, so this is not isolation from the agent or other programs. The skill rules, `run`'s name list and the tests that check no value reaches output reduce that risk but do not remove it. The same holds for `show`: its checks stop an agent reading a value through Toolkit by accident or on a casual request, not a determined program running as you. An agent that runs commands in a pseudo-terminal could pass the terminal check; the agent-shell check and the fresh Enter are what stop it.

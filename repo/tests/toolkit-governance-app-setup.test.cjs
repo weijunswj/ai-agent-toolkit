@@ -6,6 +6,9 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const http = require('node:http');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const setup = require('../scripts/toolkit-governance-app-setup.cjs');
@@ -41,8 +44,8 @@ function fakeGh({ ownerType = 'User', names = [], namesAfterConversion = null, c
   return { spawn, calls };
 }
 
-// The owner's terminal and browser: typed answers in order, the pages opened, GitHub sending the code back.
-function owner(t, { answers = ['create', ''], code = 'abc123', installedOn = [SLUG, STORE], environment = {}, tty = { stdin: true, stdout: true }, gh = fakeGh() } = {}) {
+// The owner's terminal and browser: Enter (true) or not, in order, the pages opened, GitHub sending the code back.
+function owner(t, { answers = [true, true], code = 'abc123', installedOn = [SLUG, STORE], environment = {}, tty = { stdin: true, stdout: true }, gh = fakeGh() } = {}) {
   const said = [];
   const opened = [];
   const asked = [];
@@ -53,7 +56,7 @@ function owner(t, { answers = ['create', ''], code = 'abc123', installedOn = [SL
     said, opened, asked, pages, fetched, gh,
     deps: {
       environment, tty: () => tty, spawn: gh.spawn, wait: 50, now: () => Date.UTC(2026, 10, 15, 8),
-      ask: question => { asked.push(question); return queue.shift() ?? ''; },
+      confirm: effect => { asked.push(effect); return queue.shift() ?? false; },
       say: line => said.push(line),
       open: url => opened.push(url),
       // GitHub answers after the browser loaded the page, which is built once the server is up.
@@ -69,11 +72,19 @@ function owner(t, { answers = ['create', ''], code = 'abc123', installedOn = [SL
 }
 
 test('the arguments are one repository and an optional store, each owner/name', () => {
-  assert.deepEqual(setup.parseArgs(['--repo', SLUG, '--store', STORE]), { repo: SLUG, store: STORE });
-  assert.deepEqual(setup.parseArgs(['--repo', SLUG]), { repo: SLUG, store: null });
-  for (const argv of [[], ['--store', STORE], ['--repo'], ['--repo', 'not a slug'], ['--repo', SLUG, '--repo', SLUG], ['--repo', SLUG, '--key', 'x'], ['--repo', 'a/b;rm']]) {
+  const none = { save: null, clientId: null, keyFile: null, replace: false };
+  assert.deepEqual(setup.parseArgs(['--repo', SLUG, '--store', STORE]), { repo: SLUG, store: STORE, ...none });
+  assert.deepEqual(setup.parseArgs(['--repo', SLUG]), { repo: SLUG, store: null, ...none });
+  assert.deepEqual(setup.parseArgs(['--repo', SLUG, '--save', 'secret', '--key-file', 'k.pem', '--replace']), { repo: SLUG, store: null, save: 'secret', clientId: null, keyFile: 'k.pem', replace: true });
+  for (const argv of [[], ['--store', STORE], ['--repo'], ['--repo', 'not a slug'], ['--repo', SLUG, '--repo', SLUG], ['--repo', SLUG, '--key', 'x'], ['--repo', 'a/b;rm'],
+    ['--repo', SLUG, '--replace'], ['--repo', SLUG, '--client-id', 'Iv1'], ['--repo', SLUG, '--save', 'both', '--client-id', 'Iv1'], ['--repo', SLUG, '--save', 'variable', '--client-id', 'Iv1', '--key-file', 'k.pem'],
+    ['--repo', SLUG, '--save', 'secret', '--key-file', 'k.pem', '--store', STORE], ['--repo', SLUG, '--save', 'all']]) {
     assert.throws(() => setup.parseArgs(argv), error => error instanceof setup.SetupStop && error.exitCode === 2, JSON.stringify(argv));
   }
+  // The stop names what is wrong: a bad value is not blamed on the flag.
+  assert.throws(() => setup.parseArgs(['--repo', 'weijunswj/<repo>']), error => error.stopped === '--repo has a value that does not fit: "weijunswj/<repo>".');
+  assert.throws(() => setup.parseArgs(['--repo']), error => error.stopped === '--repo has no value.');
+  assert.throws(() => setup.parseArgs(['--repo', SLUG, '--key', 'x']), error => error.stopped === '"--key" is not one of the flags below.');
 });
 
 test('the manifest asks for the App\'s one permission list, webhook off, installable only here, no events', () => {
@@ -98,14 +109,15 @@ test('agents and pipes are refused before anything is read', async t => {
   }
 });
 
-test('an App already on the repository, or a missing typed word, changes nothing', async t => {
+test('an App already on the repository, or no Enter, changes nothing', async t => {
   const existing = owner(t, { gh: fakeGh({ names: [app.APP.secret] }) });
   assert.equal(await setup.main(['--repo', SLUG], existing.deps), 1);
   assert.match(existing.said.join('\n'), /already holds part of an App setup.*toolkit governance check/s);
   assert.deepEqual(existing.asked, [], 'it stops before asking');
-  const declined = owner(t, { answers: ['yes'] });
+  const declined = owner(t, { answers: [false] });
   assert.equal(await setup.main(['--repo', SLUG], declined.deps), 1);
-  assert.match(declined.said.join('\n'), /you did not type create/);
+  assert.deepEqual(declined.asked, ['open GitHub and create the App']);
+  assert.match(declined.said.join('\n'), /Enter was not pressed\..*Nothing changed\./s);
   assert.deepEqual(declined.opened, [], 'no browser page opens');
   assert.ok(declined.gh.calls.every(call => call.args[0] === 'api' && !call.args.includes('-X')), 'only reads');
 });
@@ -201,4 +213,52 @@ test('the loopback server serves the form and takes only the code with the right
   assert.equal((await fetch(`${server.url}/elsewhere`)).status, 404);
   assert.equal((await fetch(`${server.url}/callback?code=abc123&state=expected-state`)).status, 200);
   assert.equal(await server.code, 'abc123');
+});
+
+// The by-hand App's save step (--save): it overwrites a name already there only with --replace and a
+// fresh Enter, stops when the names cannot be read, writes only the names it was given, and pipes
+// the key file's key into the secret on stdin.
+test('--save keeps an existing App unless --replace and Enter, and writes only the names given', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-app-save-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const keyFile = path.join(dir, 'key.pem');
+  fs.writeFileSync(keyFile, PEM);
+  const both = ['--repo', SLUG, '--save', 'both', '--client-id', 'Iv23example', '--key-file', keyFile];
+  const writes = run => run.gh.calls.filter(call => ['variable', 'secret'].includes(call.args[0])).map(call => call.args[0]);
+  const fresh = owner(t, { answers: [true] });
+  assert.equal(await setup.main(both, fresh.deps), 0, fresh.said.join('\n'));
+  assert.deepEqual(writes(fresh), ['variable', 'secret']);
+  assert.deepEqual(fresh.asked, [`save both on ${SLUG}`]);
+  const secret = fresh.gh.calls.find(call => call.args[0] === 'secret');
+  assert.deepEqual(secret.args, ['secret', 'set', app.APP.secret, '--repo', SLUG], 'the key is never on the command line');
+  assert.equal(secret.input, PEM);
+  assert.ok(!fresh.said.join('\n').includes(PEM.split('\n')[1]), 'the key is never printed');
+  for (const names of [[app.APP.variable], [app.APP.secret]]) {
+    const kept = owner(t, { gh: fakeGh({ names }) });
+    assert.equal(await setup.main(both, kept.deps), 1);
+    assert.deepEqual([writes(kept), kept.asked], [[], []], 'kept without asking');
+    assert.match(kept.said.join('\n'), /so its App was kept.*--replace.*Nothing changed\./s);
+    const declined = owner(t, { answers: [false], gh: fakeGh({ names }) });
+    assert.equal(await setup.main([...both, '--replace'], declined.deps), 1);
+    assert.deepEqual(writes(declined), [], 'no Enter, no overwrite');
+    const replaced = owner(t, { answers: [true], gh: fakeGh({ names }) });
+    assert.equal(await setup.main([...both, '--replace'], replaced.deps), 0, replaced.said.join('\n'));
+    assert.deepEqual(writes(replaced), ['variable', 'secret']);
+    assert.match(replaced.asked[0], /^replace both on /);
+  }
+  // Filling in what is missing writes only that name.
+  const missingSecret = owner(t, { answers: [true], gh: fakeGh({ names: [app.APP.variable] }) });
+  assert.equal(await setup.main(['--repo', SLUG, '--save', 'secret', '--key-file', keyFile], missingSecret.deps), 0, missingSecret.said.join('\n'));
+  assert.deepEqual(writes(missingSecret), ['secret']);
+  // A key file that is not a key, or names that cannot be read, stop before anything is asked.
+  fs.writeFileSync(path.join(dir, 'not.pem'), 'not a key\n');
+  const badKey = owner(t);
+  assert.equal(await setup.main(['--repo', SLUG, '--save', 'secret', '--key-file', path.join(dir, 'not.pem')], badKey.deps), 1);
+  assert.deepEqual([writes(badKey), badKey.asked], [[], []]);
+  const unread = owner(t, { gh: fakeGh() });
+  const spawn = unread.deps.spawn;
+  unread.deps.spawn = (command, args, options) => (/actions\/secrets\?/.test(args[1] || '') ? { status: 1, stdout: '', stderr: '' } : spawn(command, args, options));
+  assert.equal(await setup.main(both, unread.deps), 1);
+  assert.deepEqual([writes(unread), unread.asked], [[], []]);
+  assert.match(unread.said.join('\n'), /could not be read/);
 });

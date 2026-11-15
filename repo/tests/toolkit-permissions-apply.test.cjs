@@ -1,7 +1,7 @@
 'use strict';
 
 // toolkit permissions --apply: the owner's own one-command merge of the computer blocks. Agents
-// cannot run it (host ask lines, agent markers, a real terminal and a typed word), it backs up
+// cannot run it (host ask lines, agent markers, a real terminal and a fresh Enter), it backs up
 // before writing, keeps every other setting, and writes nothing on any stop.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -18,7 +18,7 @@ const slashed = file => String(file).replace(/\\/g, '/');
 const hostFs = { ...fs, existsSync: file => (slashed(file).startsWith(`${TK}/`) ? fs.existsSync(path.join(ROOT, slashed(file).slice(TK.length + 1))) : fs.existsSync(file)) };
 
 // A fake computer with Toolkit at TK, the owner's terminal, and Codex set up unless told not to.
-function computer(t, { codex = true, answer = 'apply' } = {}) {
+function computer(t, { codex = true, answer = true } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-perm-apply-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   fs.mkdirSync(path.join(home, '.ai-agent-toolkit', 'current'), { recursive: true });
@@ -33,7 +33,7 @@ function computer(t, { codex = true, answer = 'apply' } = {}) {
     rules: path.join(home, '.codex', 'rules', 'toolkit.rules'),
     deps: {
       home, platform: 'linux', environment: {}, cwd: '/work/repo', fs: hostFs, now: () => new Date('2026-11-12T11:00:00Z'),
-      tty: () => ({ stdin: true, stdout: true }), ask: question => { asked.push(question); return answer; },
+      tty: () => ({ stdin: true, stdout: true }), confirm: effect => { asked.push(effect); return answer; },
       stdout: text => out.push(text), stderr: text => err.push(text),
     },
   };
@@ -79,12 +79,14 @@ test('a second run finds nothing to change, asks nothing and writes nothing', as
   pc.out.length = 0;
   assert.equal(await permissions.main(['--apply'], pc.deps), 0);
   assert.deepEqual(pc.asked, []);
+  assert.match(pc.out.join(''), /Claude Code: .*settings\.json already holds the block\. Nothing to change\./);
+  assert.doesNotMatch(pc.out.join(''), /holds no Toolkit lines/);
   assert.match(pc.out.join(''), /Nothing to change\. Nothing was written\./);
   assert.deepEqual(files(pc.home), listed);
   assert.equal(fs.readFileSync(pc.settings, 'utf8'), text);
 });
 
-test('an agent shell, a missing terminal or any answer but apply writes nothing', async t => {
+test('an agent shell, a missing terminal or no Enter writes nothing', async t => {
   for (const marker of apply.AGENT_MARKERS) {
     const pc = computer(t);
     const listed = files(pc.home);
@@ -100,7 +102,7 @@ test('an agent shell, a missing terminal or any answer but apply writes nothing'
     assert.match(pc.err.join(''), /needs a terminal you type into/);
     assert.deepEqual(files(pc.home), listed);
   }
-  for (const answer of ['', 'y', 'yes', 'apply now', null]) {
+  for (const answer of [false, null, 'yes']) {
     const pc = computer(t, { answer });
     const listed = files(pc.home);
     assert.equal(await permissions.main(['--apply'], pc.deps), 1, String(answer));
@@ -133,8 +135,8 @@ test('a file that changes after the preview stops before writing', async t => {
   const pc = computer(t);
   fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
   fs.writeFileSync(pc.settings, '{}');
-  const ask = () => { fs.writeFileSync(pc.settings, '{"model":"changed"}'); return 'apply'; };
-  assert.equal(await permissions.main(['--apply', '--host', 'claude'], { ...pc.deps, ask }), 1);
+  const confirm = () => { fs.writeFileSync(pc.settings, '{"model":"changed"}'); return true; };
+  assert.equal(await permissions.main(['--apply', '--host', 'claude'], { ...pc.deps, confirm }), 1);
   assert.match(pc.err.join(''), /changed after the preview/);
   assert.equal(fs.readFileSync(pc.settings, 'utf8'), '{"model":"changed"}');
   assert.ok(files(pc.home).every(file => !/toolkit-backup-|toolkit-tmp-/.test(file)));
@@ -224,7 +226,7 @@ test('H1: run as a script, the --apply handoff gets the blocks class without req
   assert.match(text, /toolkit-permissions-apply\.cjs'\)\.main\(argv\.slice\(1\), \{ \.\.\.deps, PermissionBlocks, mode: argv\[0\]\.slice\(2\) \}\)/);
   let seen = null;
   const pc = computer(t);
-  return Promise.resolve(permissions.main(['--apply'], { ...pc.deps, ask: () => 'no', tty: () => { seen = 'reached'; return { stdin: true, stdout: true }; } })).then(code => {
+  return Promise.resolve(permissions.main(['--apply'], { ...pc.deps, confirm: () => false, tty: () => { seen = 'reached'; return { stdin: true, stdout: true }; } })).then(code => {
     assert.equal(code, 1);
     assert.equal(seen, 'reached');
   });
@@ -266,28 +268,34 @@ test('L2: a settings link to a missing file stops and stays a link', async t => 
   assert.deepEqual(pc.asked, []);
 });
 
-// H1 and H2 end to end: the real script in a real pseudo-terminal, with the typed word. The child
-// gets a clean environment (no agent markers) and a temp home, so it touches nothing of anyone's.
-test('H1 and H2: the real script in a terminal takes the typed apply and writes the block', { skip: (process.platform !== 'linux' || spawnSync('script', ['--version']).status !== 0) && 'needs util-linux script on Linux' }, async t => {
+// H1 and H2 end to end: the real script in a real pseudo-terminal. A blank line typed ahead (the end of
+// a pasted command block) never answers; Ctrl+C at the prompt writes nothing; a fresh Enter writes.
+// The child gets a clean environment (no agent markers) and a temp home, so it touches nothing of anyone's.
+test('H1 and H2: the real script in a terminal ignores a typed-ahead blank line, stops on Ctrl+C and writes on a fresh Enter', { skip: (process.platform !== 'linux' || spawnSync('script', ['--version']).status !== 0) && 'needs util-linux script on Linux' }, async t => {
   const pc = computer(t, { codex: false });
   fs.writeFileSync(path.join(pc.home, '.ai-agent-toolkit', 'current', 'state.json'), JSON.stringify({ repo_path: ROOT }));
   fs.mkdirSync(path.dirname(pc.settings), { recursive: true });
   fs.writeFileSync(pc.settings, '{"model":"m"}');
   const env = { PATH: process.env.PATH, HOME: pc.home, TERM: 'dumb', LANG: 'C.UTF-8' };
   const command = `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(ROOT, 'repo', 'scripts', 'toolkit-permissions.cjs'))} --apply`;
-  const child = require('node:child_process').spawn('script', ['-qec', command, '/dev/null'], { env, cwd: os.tmpdir(), stdio: ['pipe', 'pipe', 'pipe'] });
-  let output = '';
-  let typed = false;
-  const done = new Promise(resolve => child.on('close', code => resolve(code)));
-  const timer = setTimeout(() => child.kill('SIGKILL'), 30000);
-  child.stdout.on('data', chunk => {
-    output += chunk;
-    if (!typed && /Type apply/.test(output)) { typed = true; child.stdin.write('apply\r'); }
+  const run = key => new Promise(resolve => {
+    const child = require('node:child_process').spawn('script', ['-qec', command, '/dev/null'], { env, cwd: os.tmpdir(), stdio: ['pipe', 'pipe', 'pipe'] });
+    let output = '';
+    let typed = false;
+    const timer = setTimeout(() => child.kill('SIGKILL'), 30000);
+    child.on('close', code => { clearTimeout(timer); child.stdin.destroy(); resolve({ code, output }); });
+    child.stdin.write('\r');
+    child.stdout.on('data', chunk => {
+      output += chunk;
+      if (!typed && /Press Enter to back up and write/.test(output)) { typed = true; setTimeout(() => child.stdin.write(key), 1500); }
+    });
+    child.stderr.on('data', chunk => { output += chunk; });
   });
-  child.stderr.on('data', chunk => { output += chunk; });
-  const code = await done;
-  clearTimeout(timer);
-  child.stdin.destroy();
+  const stopped = await run('\x03');
+  assert.equal(stopped.code, 1, stopped.output);
+  assert.match(stopped.output, /Stopped\. Nothing was written\./);
+  assert.equal(fs.readFileSync(pc.settings, 'utf8'), '{"model":"m"}');
+  const { code, output } = await run('\r');
   assert.equal(code, 0, output);
   assert.match(output, /Claude Code: added \d+ and removed \d+ lines in/);
   const after = JSON.parse(fs.readFileSync(pc.settings, 'utf8'));
@@ -333,7 +341,7 @@ test('run from a governed repository, --apply also merges its Claude Code repo b
   const out = pc.out.join('');
   assert.match(out, /Claude Code repo block: .*settings\.local\.json/);
   assert.match(out, /Claude Code repo block: added \d+ and removed \d+ lines in/);
-  assert.equal(pc.asked.length, 1, 'one typed apply covers both files');
+  assert.equal(pc.asked.length, 1, 'one Enter covers both files');
   assert.equal(permissions.main(['--check', repo.local, '--scope', 'repo'], { ...deps, stdout: () => {} }), 0);
 });
 
@@ -372,7 +380,7 @@ test('the printed shortcut is one pasteable command that carries --repo-root whe
   const out = [];
   assert.equal(permissions.main(['--scope', 'repo', '--repo-root', repo.root], { ...repo.deps, stdout: text => out.push(text) }), 0);
   const text = out.join('');
-  assert.match(text, /Owner shortcut: paste this one command into your own PowerShell or terminal, then type apply\..*this repository's Claude Code block\. Agents never run it\./);
+  assert.match(text, /Owner shortcut: paste this one command into your own PowerShell or terminal, then press Enter\..*this repository's Claude Code block\. Agents never run it\./);
   assert.ok(text.includes(`\n    node "${TK}/repo/scripts/toolkit-permissions.cjs" --apply --repo-root "${repo.root}"\n`), text);
   assert.doesNotMatch(text, /no agent writes/);
 });
@@ -413,6 +421,7 @@ test('--remove takes every Toolkit line out, keeps the owner\'s own, and deletes
   pc.out.length = 0;
   assert.equal(await permissions.main(['--remove'], pc.deps), 0);
   assert.match(pc.out.join(''), /Nothing to change\. Nothing was written\./, 'a second run finds nothing to take out');
+  assert.match(pc.out.join(''), /Claude Code: .*settings\.json holds no Toolkit lines\./);
   const quiet = { ...pc.deps, environment: { CLAUDECODE: '1' }, stdout: () => {}, stderr: text => pc.err.push(text) };
   assert.equal(await permissions.main(['--remove'], quiet), 1);
   assert.match(pc.err.join(''), /Agents never run --remove/);

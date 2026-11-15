@@ -345,7 +345,7 @@ function describe(built, options) {
   lines.push(`Agents: write each command exactly as its line shows (node, then the full path in forward slashes inside double quotes), one command per call, so the line matches. A line with no * matches only that exact command.`);
   if (options.host === 'claude') lines.push(`To take every Toolkit line out again, run ${applyLine(built, '--remove').command} in your own terminal. Run toolkit permissions again after the Toolkit folder moves.`);
   const shortcut = applyLine(built);
-  lines.push(`Owner shortcut: paste this one command into your own PowerShell or terminal, then type apply. It shows the changes first, backs up each file and merges ${shortcut.what}. Agents never run it.`, '', `    ${shortcut.command}`);
+  lines.push(`Owner shortcut: paste this one command into your own PowerShell or terminal, then press Enter. It shows the changes first, backs up each file and merges ${shortcut.what}. Agents never run it.`, '', `    ${shortcut.command}`);
   return lines;
 }
 
