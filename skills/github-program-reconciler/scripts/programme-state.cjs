@@ -1103,7 +1103,8 @@ function validateBinding(binding) {
     // nothing acts on it in this release, so a copy that knows the key is out before any writer sets it.
     const ciShards = binding.ci_shards;
     if (ciShards !== undefined) check(errors, v2 && isObject(ciShards) && Object.keys(ciShards).every(key => ['answer', 'offered_at'].includes(key)) && ['yes', 'not-now', 'never'].includes(ciShards.answer) && optional(ciShards.offered_at, value => typeof value === 'string' && !Number.isNaN(Date.parse(value)) && /^\d{4}-\d{2}-\d{2}T/.test(value)), 'ci_shards may hold only answer (yes, not-now or never) and offered_at (a date and time), in a version 2 binding');
-    // The Windows Task Scheduler folder for this repository's no-AI tasks (toolkit-windows-tasks.cjs).
+    // Retired: the Task Scheduler folder of the old computer tasks. Nothing reads it; it stays
+    // accepted so a binding that carries it stays valid.
     check(errors, optional(binding.schedule_folder, value => typeof value === 'string' && /^[A-Z0-9][A-Z0-9-]{0,31}$/.test(value)), 'schedule_folder must be 1 to 32 capital letters, digits or hyphens, starting with a letter or digit');
     const projection = binding.projection;
     if (projection !== undefined) {
