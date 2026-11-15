@@ -1,18 +1,28 @@
 'use strict';
 
-// The fixed order of a task page: the generated blocks first, then the task's spec sections under
-// capital H1 headings, then everything else people wrote under `# More`. Pure text functions: no
-// GitHub call and no state read happens here. A page that cannot be split safely throws
-// PAGE_LAYOUT_HELD, and the caller updates the blocks where they are instead.
+// The fixed order of a task page: the PATH block, then `# TASK` holding the task's spec sections,
+// then the other generated blocks (PR GRAPH and STATUS, AGENT CONTEXT), then everything else people
+// wrote under `# More`. Pure text functions: no GitHub call and no state read happens here. A page
+// that cannot be split safely throws PAGE_LAYOUT_HELD, and the caller updates the blocks where they
+// are instead.
 //
 // Hand-written words are never changed. A label line (`**The problem:** ...`, `## Done when`)
-// becomes its section's heading; the words after or under it are kept byte for byte.
+// becomes its part of TASK; the words after or under it are kept byte for byte. Under TASK, WHAT,
+// WHY, DONE WHEN and PLAN are `##` headings; the problem, the fix, what happens if we skip it and
+// what is not in scope are bold labels inside WHY and DONE WHEN.
 
-const SPEC_SECTIONS = Object.freeze(['PROBLEM', 'FIX', 'IF WE SKIP', 'DONE WHEN', 'NOT IN SCOPE']);
+const SPEC_SECTIONS = Object.freeze(['WHAT', 'WHY', 'PROBLEM', 'FIX', 'IF WE SKIP', 'DONE WHEN', 'NOT IN SCOPE', 'PLAN']);
+const TASK_HEADING = 'TASK';
 const MORE_HEADING = 'More';
 const TASK_BLOCKS = Object.freeze(['NAV', 'STATE', 'TRACE']);
+// The generated blocks printed above TASK; the rest follow it.
+const ABOVE_TASK = Object.freeze(['NAV']);
 const KNOWN_BLOCKS = Object.freeze(['STATE', 'TRACE', 'NAV', 'CURRENT', 'CONTEXT']);
 const LABELS = new Map([...SPEC_SECTIONS.map(label => [label, label]), ['THE PROBLEM', 'PROBLEM'], ['THE FIX', 'FIX'], ['IF WE SKIP IT', 'IF WE SKIP']]);
+// Parts that only a heading opens: a bold `**Plan:**` in someone's notes stays where it is.
+const HEADING_ONLY = new Set(['WHAT', 'WHY', 'PLAN']);
+// The parts printed as bold labels, and their words.
+const LABEL_TEXT = Object.freeze({ PROBLEM: 'The problem', FIX: 'The fix', 'IF WE SKIP': 'If we skip it', 'NOT IN SCOPE': 'Not in scope' });
 // A bold label opens a section that any later heading closes.
 const LABEL_LEVEL = 7;
 
@@ -127,6 +137,11 @@ function splitPage(source, names = TASK_BLOCKS) {
     const last = lines.find(line => line.start <= block.end && block.end <= line.end);
     cuts.push({ start: block.start, end: last ? last.end : block.end });
   }
+  // A marker line closes a comment left open above it, so the hand-written text is checked with the
+  // blocks cut out: whether a page can be laid out never depends on where its blocks sit.
+  let hand = '', from = 0;
+  for (const cut of [...cuts].sort((a, b) => a.start - b.start)) { hand += text.slice(from, cut.start); from = cut.end; }
+  if (cuts.length && markdownLines(hand + text.slice(from)).unfinished) throw held('a code block, HTML block or details section is not closed');
   const extra = [];
   const specs = new Map();
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
@@ -148,11 +163,19 @@ function splitPage(source, names = TASK_BLOCKS) {
     specs.set(section, { text: joined });
   };
   let more = false;
+  // Under `# TASK` (a page this layout drew), only a part's own heading or label, an H1 or a block
+  // ends a part: a heading people write inside a part stays in it, and text under the blocks is
+  // never taken into the last part.
+  let task = false, tasks = 0;
   for (const line of lines) {
     if (!line.top) continue;
     const cut = cuts.find(span => span.start <= line.start && line.start < span.end);
     if (cut) {
-      if (cut.start === line.start) { keep(line.start, false); start = cut.end; }
+      if (cut.start === line.start) {
+        keep(line.start, task);
+        if (task) { section = null; level = 0; }
+        start = cut.end;
+      }
       continue;
     }
     const heading = /^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line.text);
@@ -160,7 +183,13 @@ function splitPage(source, names = TASK_BLOCKS) {
     if (!heading && !label) continue;
     const name = normalLabel(heading ? heading[2] : label[2]);
     const depth = heading ? heading[1].length : LABEL_LEVEL;
-    const known = (depth <= 2 || depth === LABEL_LEVEL) && LABELS.get(name) || null;
+    const known = (depth <= 2 || depth === LABEL_LEVEL && !HEADING_ONLY.has(LABELS.get(name))) && LABELS.get(name) || null;
+    if (depth === 1 && name === TASK_HEADING) {
+      if ((tasks += 1) > 1) throw held('the TASK heading appears more than once');
+      keep(line.start);
+      task = true; section = null; level = 0; start = line.end;
+      continue;
+    }
     if (known) {
       keep(line.start);
       if (specs.has(known)) throw held(`the ${known} section appears more than once`);
@@ -174,7 +203,12 @@ function splitPage(source, names = TASK_BLOCKS) {
       if (more) throw held('the More heading appears more than once');
       more = true;
       keep(line.start);
-      section = null; level = 0; start = line.end;
+      task = false; section = null; level = 0; start = line.end;
+      continue;
+    }
+    if (task) {
+      if (depth > 1) continue;
+      keep(line.start); task = false; section = null; level = 0; start = line.start;
       continue;
     }
     // Someone's own heading ends a spec section opened at its level or deeper; the heading and
@@ -185,7 +219,12 @@ function splitPage(source, names = TASK_BLOCKS) {
   return { specs, extra, eol };
 }
 
-// The page in its fixed order. `generated` lists [block name, block body] in the order to print.
+// A part's words follow its label on the same line when they start as a plain paragraph; a list,
+// heading, code, quote, table, HTML or link definition starts on its own line under the label.
+const BLOCK_START = /^(?:[-+*][ \t]|\d{1,9}[.)](?:[ \t]|$)|#|>|`{3}|~{3}|\||<|\[[^\]]*\]:|\*\*[^*]+\*\*|(?:[-*_][ \t]*){3,}$)/;
+
+// The page in its fixed order. `generated` lists [block name, block body] in the order to print;
+// PATH goes above TASK and the others below it.
 function buildPage(layout, generated, version, render = null) {
   const draw = render || ((name, content) => state().renderBlock(content, version, name));
   const { specs, extra, eol } = layout;
@@ -194,12 +233,23 @@ function buildPage(layout, generated, version, render = null) {
     const breaks = (/(?:\r?\n){1,2}$/.exec(left)?.[0].match(/\n/g) || []).length;
     return left + eol.repeat(2 - breaks) + right.replace(/^(?:[ \t]*\r?\n)+/, '');
   };
-  const under = (heading, body) => `# ${heading}${eol}${eol}${body.replace(/^(?:[ \t]*\r?\n)+/, '')}`;
-  let text = generated.reduce((body, [name, content]) => append(body, draw(name, content).replace(/\n/g, eol)), '');
-  for (const name of SPEC_SECTIONS) {
-    const span = specs.get(name);
-    if (span) text = append(text, under(name, span.text));
-  }
+  const words = body => body.replace(/^(?:[ \t]*\r?\n)+/, '');
+  const under = (heading, body, level = 1) => `${'#'.repeat(level)} ${heading}${eol}${eol}${words(body)}`;
+  const labelled = name => {
+    const body = words(specs.get(name).text);
+    const first = body.split(/\r?\n/, 1)[0];
+    return /^\S/.test(first) && !BLOCK_START.test(first) ? `**${LABEL_TEXT[name]}:** ${body}` : `**${LABEL_TEXT[name]}:**${eol}${eol}${body}`;
+  };
+  const part = (name, labels) => {
+    if (![name, ...labels].some(key => specs.has(key))) return '';
+    const head = specs.has(name) ? under(name, specs.get(name).text, 2) : `## ${name}`;
+    return labels.filter(key => specs.has(key)).reduce((body, key) => append(body, labelled(key)), head);
+  };
+  const blocks = names => generated.filter(([name]) => names(name)).reduce((body, [name, content]) => append(body, draw(name, content).replace(/\n/g, eol)), '');
+  let text = blocks(name => ABOVE_TASK.includes(name));
+  const parts = [part('WHAT', []), part('WHY', ['PROBLEM', 'FIX', 'IF WE SKIP']), part('DONE WHEN', ['NOT IN SCOPE']), part('PLAN', [])].filter(Boolean);
+  if (parts.length) text = append(text, parts.reduce(append, `# ${TASK_HEADING}`));
+  text = append(text, blocks(name => !ABOVE_TASK.includes(name)));
   if (extra.length) text = append(text, under(MORE_HEADING, extra.reduce((body, span) => append(body, span.text), '')));
   // The page ends with one line ending, whatever blank lines the last piece of text carried.
   return text.replace(/(?:\r?\n[ \t]*)+$/, '') + eol;
@@ -252,4 +302,4 @@ function layoutTaskPage(source, generated, version) {
   return { body, sections: [...layout.specs.keys()], more: layout.extra.length > 0, moves: withoutBlocks(body) !== withoutBlocks(source) };
 }
 
-module.exports = Object.freeze({ SPEC_SECTIONS, MORE_HEADING, TASK_BLOCKS, markdownLines, splitPage, buildPage, inOrder, authoredText, withoutBlocks, layoutTaskPage });
+module.exports = Object.freeze({ SPEC_SECTIONS, TASK_HEADING, MORE_HEADING, TASK_BLOCKS, markdownLines, splitPage, buildPage, inOrder, authoredText, withoutBlocks, layoutTaskPage });

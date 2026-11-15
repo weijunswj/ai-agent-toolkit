@@ -77,7 +77,7 @@ test('A-T3: a short budget redraws all saved rows, reports the stop and resumes'
   const report = f.make(budget(() => Date.parse(NOW) + elapsed, 200000)).run({ apply: true });
   assert.ok(report.holds.some(entry => entry.code === 'PASS_STOPPED'));
   assert.equal(openStop(f)?.diagnostics.cause, 'time_limit');
-  assert.equal((f.github.issues.get(421).body.match(/^\|[^\n]*\|#\d+\|/gm) || []).length, 84);
+  assert.equal((f.github.issues.get(421).body.match(/^\|#\d+[ |]/gm) || []).length, 84);
   assert.match(f.github.issues.get(421).body, /PASS_STOPPED #421: the last refresh stopped at/);
   assert.equal(f.github.calls.slice(f.before.calls).filter(call => call.method === 'PATCH' && !call.path.endsWith('/issues/421') && !call.path.startsWith(`repos/${f.github.storeRepository}/`)).length, 0, 'queue skipped');
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
@@ -738,7 +738,6 @@ const readCache = require(path.join(ROOT, 'skills/github-program-reconciler/scri
 
 function readFixture(t, { count = 24, groups = ['COMPLETED'], cached = true } = {}) {
   const fx = pageFixture(state, { count, groups, width: 5 });
-  fx.github.commentsMoveIssue = true;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-reads-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = cached ? path.join(dir, 'pass.lock') : null;
@@ -836,10 +835,12 @@ test('reads: a changed settled child is read live', t => {
   assert.equal(f.gets(changed.calls, new RegExp(`^${APP}/issues/102/sub_issues`)) > 0, true, 'the new sub-issue is found');
   assert.ok(changed.report.effects.some(effect => effect.kind === 'add_native_children'), 'and adopted, as on a full read');
   // A deleted comment moves no update time, so GitHub's changed list cannot show it: #101 is read
-  // again on its rotation turn, within twelve passes.
-  let turn = live(changed, 101) ? changed : null;
+  // again on its rotation turn, within twelve passes (its comment count is now 0, so no comment list
+  // is asked for). Its page is closed and shows the task finished, so it is frozen: never written.
+  let turn = changed.report.sweep.tasks.includes(101) ? changed : null;
   for (let pass = 0; !turn && pass < 12; pass++) { const result = f.run(); if (result.report.sweep.tasks.includes(101)) turn = result; }
-  assert.ok(turn && live(turn, 101), 'the deleted comment reaches #101 within its rotation');
+  assert.ok(turn, 'the deleted comment reaches #101 within its rotation');
+  assert.equal(turn.calls.some(call => call.method === 'PATCH' && call.path.endsWith('/issues/101')), false, 'a frozen page is not written');
   // A reopened child is no longer settled: nothing kept is used for it.
   Object.assign(f.github.issues.get(103), { state: 'open', closed_at: null, state_reason: null, updated_at: f.github.tick() });
   const reopened = f.run();

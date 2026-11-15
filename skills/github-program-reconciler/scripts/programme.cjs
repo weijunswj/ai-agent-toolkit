@@ -67,7 +67,7 @@ const state = require('./programme-state.cjs');
 const checkpoint = require('./programme-checkpoint.cjs');
 const attentionCache = require('./programme-attention-cache.cjs');
 const { SweepNotes, replaceOwnedNote } = require('./programme-sweep-notes.cjs');
-const { SweepRequests, passCap, capText } = require('./programme-sweep.cjs');
+const { SweepRequests, passCap } = require('./programme-sweep.cjs');
 const { SweepLease } = require('./programme-sweep-lease.cjs');
 // Issues changed up to this long before the predecessor started (by GitHub's clock) are read again.
 const SWEEP_OVERLAP_MS = 5 * 60 * 1000;
@@ -709,7 +709,7 @@ const commands = {
     // nothing keeps the old start, so the next pass reads those changes again.
     if (report.sweep) context.sweepOutcome = { changedSince: report.sweep.noWrite ? null : report.sweep.changedComplete ? context.requests?.serverStart || null : report.sweep.changedCursor || null, completeAt: report.sweep.board_time,
       complete: report.sweep.complete && !report.holds.length, noWrite: report.sweep.noWrite, reason: report.sweep.reason, read: report.sweep.read ?? 0, left: report.sweep.left ?? 0 };
-    if (context.requests) report.metrics = `Sweep: requests=${context.requests.count}, cap=${capText(context.requests.cap)}, tasks read=${report.sweep?.read ?? 0}, queue left=${report.sweep?.left ?? 0}, complete=${context.sweepOutcome?.complete ? 'yes' : 'no'}`;
+    if (context.requests) report.metrics = `Sweep: requests=${context.requests.count}, cap=${context.requests.cap}, tasks read=${report.sweep?.read ?? 0}, queue left=${report.sweep?.left ?? 0}, complete=${context.sweepOutcome?.complete ? 'yes' : 'no'}`;
     cacheAttention(context, context.store.read('parent', context.binding.parent_issue).doc, inventory.complete, deps);
     if (orders) report.orders = orders;
     return report;
@@ -1009,7 +1009,7 @@ function formatBodyDiagnostics(d) {
   if (!d) return [];
   if (d.cause) return [`  ${d.cause}: stopped at ${d.phase.replace(/_/g, ' ')} (${d.done} of ${d.total} done); started ${d.started_at}. Run refresh again.`];
   if (d.reason) return [`  Archive comment: ${d.reason.replace(/_/g, ' ')}.`];
-  const labels = { CURRENT: 'Generated CURRENT', STATE: 'Generated status or graph', CONTEXT: 'Generated agent context', TRACE: 'Generated DECISIONS block', NAV: 'Generated navigation' };
+  const labels = { CURRENT: 'Generated CURRENT', STATE: 'Generated status or graph', CONTEXT: 'Generated agent context', TRACE: 'Generated DECISIONS or AGENT CONTEXT block', NAV: 'Generated navigation' };
   return [`  UTF-16 units: projected ${d.projected_total}; threshold ${d.threshold}; reduce by ${d.required_reduction}.`,
     ...d.largest_sections.map(part => `  ${part.kind === 'hand_written' ? `Hand-written section ${part.section}` : labels[part.kind]}: ${part.size}`),
     `  Other sections and formatting remainder: ${d.remainder}`];

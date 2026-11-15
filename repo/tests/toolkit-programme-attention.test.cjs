@@ -323,7 +323,7 @@ test('E2: an attention-only change is written without a revision bump, and the C
   const after = fx.parentDoc();
   assert.ok(fx.github.commits > commits, 'the store was written');
   assert.equal(after.revision, before.revision, 'revision unchanged');
-  assert.match(fx.github.issues.get(421).body, /\*\*Attention: 1 new, 0 acknowledged\*\*\n- NEEDS_PLACEMENT #470: Controller: place the issue/);
+  assert.match(fx.github.issues.get(421).body, /\*\*Attention: 1 new, 0 acknowledged\*\* · Holds: 0 · Full list: `programme\.cjs attention`/);
   assert.equal(fx.run(['refresh']).result.summary, 'No changes', 'and then it settles');
 });
 
@@ -828,11 +828,11 @@ test('work queue: a disposed stalled-task finding that is still seen stays dispo
   assert.equal(state.workQueue(still).length, 0);
 });
 
-test('work queue: an older acknowledged stalled-task finding keeps its marker on CURRENT', () => {
+test('work queue: an older acknowledged stalled-task finding still counts on CURRENT', () => {
   const now = '2026-11-13T10:00:00.000Z';
   const entry = { id: state.findingId('reconcile', 'TASK_IDLE', 835, ''), source: 'reconcile', code: 'TASK_IDLE', issue: 835, head: null, state: 'acknowledged', first_seen: now, changed_at: now };
   const body = state.renderCurrentBlockBody({ revision: 1, outcomes: [], attention: [entry] }, new Map(), new Map(), now);
-  assert.match(body, /\*\*Work queue\*\* \(the controller acts on each now\)\n- \(acknowledged\) TASK_IDLE #835: /);
+  assert.match(body, /\*\*Attention: 0 new, 1 acknowledged, 1 in the work queue\*\* · Holds: 0 · /);
 });
 
 test('E3: the session-start line names the longest-stalled work-queue task and its next step', () => {
