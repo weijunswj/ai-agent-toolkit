@@ -1,0 +1,90 @@
+#!/usr/bin/env node
+'use strict';
+
+// The cleanup route for a repository whose governance is on. The installed Toolkit gives its sessions
+// the governed rules and the playbooks, so the copies older setups wrote are leftovers. This removes
+// exactly what the leftover scan (toolkit-leftover-files.cjs) proves is Toolkit's, in the working tree:
+//   - a governed-rules block in AGENTS.md, or the Antigravity bootstrap block, keeping every byte
+//     outside the markers; a file left with nothing of the owner's is deleted;
+//   - a one-line CLAUDE.md, only when AGENTS.md has nothing of its own left;
+//   - docs/agent-playbooks/ files that are a copy Toolkit shipped, now or earlier.
+// It also sets `min_toolkit` in the programme file, so a Toolkit copy too old to deliver the rules
+// says to update instead of running without them. The checks and workflow copies governance uses,
+// and anything not proven Toolkit's, stay. It never runs git: the changes go to the owner in one pull
+// request per repository, which the owner merges (never task auto-merge, because it deletes files).
+//
+// Usage: node repo/scripts/toolkit-governance-cleanup.cjs [--repo <folder>] [--write]
+// Without --write it only shows what would change.
+
+const fs = require('node:fs');
+const path = require('node:path');
+const blocks = require('./toolkit-managed-block.cjs');
+const { LeftoverScan } = require('./toolkit-leftover-files.cjs');
+
+// The first release whose installed Toolkit gives sessions the governed rules. A copy that knows the
+// key and is older says to update; a copy older than the key reads the binding as ERROR, which also
+// holds governance effects while ordinary work continues.
+const MIN_TOOLKIT = '3.127.0';
+const BINDING_FILE = '.github/toolkit-programme.json';
+const USAGE = 'Usage: node repo/scripts/toolkit-governance-cleanup.cjs [--repo <folder>] [--write]';
+
+const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
+
+// { ok, changes: [{ file, action, text? }], lines }. `governance` is for tests.
+function run({ root, write = false, governance = null }) {
+  if (!fs.existsSync(path.join(root, '.git'))) return { ok: false, changes: [], lines: [`Nothing was changed: ${root} is not the top folder of a git checkout.`] };
+  const scan = new LeftoverScan({ discover: () => [], ...(governance ? { governance } : {}) }).inspect(root);
+  if (!scan.scanned) return { ok: false, changes: [], lines: [`Nothing was changed: ${scan.reason}.`] };
+  if (!scan.governed) return { ok: false, changes: [], lines: [`Nothing was changed: governance is not on here (${scan.governance}). Use the leftover scan's report; removing Toolkit files from a repository without governance is the owner's choice.`] };
+
+  const changes = [];
+  const byFile = new Map();
+  for (const item of scan.files) (byFile.get(item.file) || byFile.set(item.file, []).get(item.file)).push(item);
+  for (const [file, items] of byFile) {
+    if (items[0].kind !== 'block' || items[0].empties) { changes.push({ file, action: 'delete' }); continue; }
+    let text = fs.readFileSync(path.join(root, file), 'utf8');
+    for (const item of items) text = blocks.removeBlock(text, item.block);
+    changes.push({ file, action: 'remove-block', text });
+  }
+
+  let binding;
+  try { binding = JSON.parse(fs.readFileSync(path.join(root, BINDING_FILE), 'utf8').replace(/^﻿/, '')); } catch { binding = null; }
+  if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
+    return { ok: false, changes: [], lines: [`Nothing was changed: ${BINDING_FILE} could not be read, so min_toolkit cannot be set. Fix it first.`] };
+  }
+  if (!binding.min_toolkit || newer(MIN_TOOLKIT, binding.min_toolkit)) {
+    changes.push({ file: BINDING_FILE, action: 'set-min-toolkit', text: `${JSON.stringify({ ...binding, min_toolkit: MIN_TOOLKIT }, null, 2)}\n` });
+  }
+
+  const words = { delete: 'remove the file', 'remove-block': 'remove the Toolkit block, keeping the rest of the file', 'set-min-toolkit': `set min_toolkit to ${MIN_TOOLKIT}` };
+  const lines = [changes.length ? `${write ? 'Changed' : 'Would change'} in ${scan.name}:` : `Nothing to clean in ${scan.name}.`,
+    ...changes.map(change => `- ${change.file}: ${words[change.action]}.`),
+    ...scan.unproven.map(item => `- Left in place: ${item.file}, because ${item.reason}.`)];
+  if (write) {
+    for (const change of changes) {
+      const file = path.join(root, change.file);
+      if (change.action === 'delete') fs.rmSync(file, { force: true });
+      else fs.writeFileSync(file, change.text);
+    }
+  }
+  if (changes.length) lines.push(write
+    ? 'Next: commit these on a new branch and open one pull request for the owner to merge. It deletes files, so it never goes through task auto-merge.'
+    : 'Run again with --write to make these changes in the working tree.');
+  return { ok: true, changes: changes.map(({ file, action }) => ({ file, action })), lines };
+}
+
+function main(argv = process.argv.slice(2), { log = console.log, error = console.error } = {}) {
+  let root = process.cwd(), write = false;
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] === '--write') write = true;
+    else if (argv[index] === '--repo' && argv[index + 1]) root = path.resolve(argv[++index]);
+    else { error(USAGE); return 2; }
+  }
+  const result = run({ root, write });
+  for (const line of result.lines) log(line);
+  return result.ok ? 0 : 1;
+}
+
+module.exports = Object.freeze({ MIN_TOOLKIT, run, main });
+
+if (require.main === module) process.exitCode = main();

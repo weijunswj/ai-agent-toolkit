@@ -18,7 +18,7 @@ const {
   readLatestReport
 } = require('./support/toolkit-local-bridge-fixture.cjs');
 
-test('agent-rules preflight checks Claude shim content in Claude hook mode', () => {
+test('agent-rules preflight leaves CLAUDE.md alone outside a Toolkit source checkout in Claude hook mode', () => {
   const templateDir = path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local');
   assert.equal(fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8'), '@AGENTS.md\n');
   const oldMarkedShim = [
@@ -31,15 +31,14 @@ test('agent-rules preflight checks Claude shim content in Claude hook mode', () 
     '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md:END CLAUDE.SHIM -->',
     ''
   ].join('\n');
+  // CLAUDE.md is the repository's own file there: only the governed-rules copy in AGENTS.md is named.
   const cases = [
-    ['@AGENTS.md\n', []],
-    ['@AGENTS.md\r\n', []],
-    ['# Our notes\n\n@AGENTS.md\n\nMore of our own text.\n', []],
-    [oldMarkedShim, ['CLAUDE.md:stale-block']],
-    ['@./AGENTS.md\n', ['CLAUDE.md:unmanaged']],
-    ['See `@AGENTS.md` for the rules.\n', ['CLAUDE.md:unmanaged']],
-    ['# Notes\n\n```text\n@AGENTS.md\n```\n', ['CLAUDE.md:unmanaged']],
-    ['@AGENTS.md\n<!-- AI-AGENT-TOOLKIT:other.md:BEGIN OTHER v2 toolkit=3.6.0 sha256=000000000000 -->\n', ['CLAUDE.md:broken-marker']]
+    ['@AGENTS.md\n', ['AGENTS.md:leftover']],
+    ['@AGENTS.md\r\n', ['AGENTS.md:leftover']],
+    ['# Our notes\n\n@AGENTS.md\n\nMore of our own text.\n', ['AGENTS.md:leftover']],
+    [oldMarkedShim, ['AGENTS.md:leftover']],
+    ['@./AGENTS.md\n', ['AGENTS.md:leftover']],
+    ['@AGENTS.md\n<!-- AI-AGENT-TOOLKIT:other.md:BEGIN OTHER v2 toolkit=3.6.0 sha256=000000000000 -->\n', ['AGENTS.md:leftover']]
   ];
   for (const [claudeText, expected] of cases) {
     const root = tmpRoot();

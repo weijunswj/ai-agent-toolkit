@@ -22,7 +22,7 @@ When this skill is selected for an n8n task, automatically check the current tar
 
 - `AGENTS.md`
 
-Root `AGENTS.md` is the only repo-local target for the n8n adapter. `CLAUDE.md` (the one-line `@AGENTS.md` shim) and `.agents/rules/00-agent-toolkit-bootstrap.md` are platform shims owned by `repository-agent-rules`; do not append the n8n adapter to those shim files, or to a `GEMINI.md`, which belongs to the repository.
+Root `AGENTS.md` is the only repo-local target for the n8n adapter. `CLAUDE.md` (the one-line `@AGENTS.md` shim) and an older `.agents/rules/00-agent-toolkit-bootstrap.md` are platform shims; do not append the n8n adapter to those shim files, or to a `GEMINI.md`, which belongs to the repository.
 
 In the canonical Toolkit source repository the installer reports that no adapter is needed; accept that and continue.
 
@@ -38,13 +38,12 @@ If `AGENTS.md` does not exist, stop and ask the adapter-target question before c
 
 Present these options neutrally:
 
-- Install or repair repo-local `AGENTS.md` with `repository-agent-rules`.
 - Create or update only `AGENTS.md` with the n8n adapter.
 - `none`.
 
 The answer `none` is allowed and must be respected.
 
-If Claude Code or Antigravity shim files are missing, stale, or unmanaged, use `repository-agent-rules` to install or repair those shims. Do not use this n8n adapter installer for shim repair.
+If Claude Code needs a `CLAUDE.md` that loads `AGENTS.md`, use `repository-agent-rules` for that one-line shim; Antigravity reads `AGENTS.md` itself. Do not use this n8n adapter installer for shim repair.
 
 ## Boundaries
 
