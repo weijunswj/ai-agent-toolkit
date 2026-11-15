@@ -68,7 +68,7 @@ test('controller bootstrap is explicit-only and depends on accepted live governa
   assert.match(host, /allow_implicit_invocation: false/);
   assert.match(skill, /root agent must not infer that it owns the controller role/);
   assert.match(skill, /must not self-verify root admission/);
-  assert.match(skill, /Read the authoritative current state first \(there is no handover packet\)/);
+  assert.match(skill, /Read the authoritative current state first \(there is no handover packet: the generated handover file is evidence, not authority\)/);
   assert.match(skill, /existing CURRENT carrier where applicable/);
   assert.match(skill, /Service tier is controller\/launcher metadata/);
   assert.match(skill, /Standard for future launches, never a semantic worker\/helper admission condition/);

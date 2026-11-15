@@ -34,6 +34,10 @@ function pageLayout() {
 function archiveTools() {
   return require('./programme-page-archive.cjs');
 }
+// Drift checks run in reconcile passes and child writes only.
+function drift() {
+  return require('./programme-drift.cjs');
+}
 
 const SCHEMA = Object.freeze({
   binding: 'toolkit.programme-binding.v1',
@@ -404,6 +408,12 @@ const FINDING_CODES = Object.freeze({
   CLASS_LEGACY: { source: 'reconcile', next_action: 'Controller: migrate the old classes with the patch from reconcile --json' },
   ORDER_TIE: { source: 'reconcile', next_action: 'Controller: give the tied tasks distinct priorities' },
   DUPLICATE_HIERARCHY: { source: 'reconcile', next_action: 'Controller: decide which registered parent owns the issue; nothing was moved' },
+  // Drift: part of the programme fell behind its state with nothing to fix it (programme-drift.cjs).
+  CHILD_NOT_NATIVE: { source: 'reconcile', next_action: 'Controller: an open task PR names this closed issue, but it is not under the programme parent; attach it natively, mark it outside the programme, or dispose with a reason' },
+  BLOCKS_MISSING: { source: 'reconcile', next_action: 'Controller: this open task page has no generated blocks and nothing redraws it; run refresh, and if it stays, check what holds the page' },
+  BLOCK_BEHIND: { source: 'reconcile', next_action: 'Controller: this open task page shows an older state than the stored one and nothing redraws it; settle any effect left in flight (the pass report names it), then run refresh' },
+  PR_NAV_MISSING: { source: 'reconcile', next_action: 'Controller: this open task PR has no readable PATH block and nothing redraws it; repair or remove the broken markers on the PR page, then run refresh' },
+  NEXT_ACTION_STALE: { source: 'reconcile', next_action: "Controller: the task's next action was set before its latest merge or close; set the next step with update --patch" },
   // inventory source: open issues and registered parents.
   NEEDS_PLACEMENT: { source: 'inventory', next_action: 'Controller: place the issue under a registered parent, or mark it programme:outside' },
   CLOSED_PARENT_OPEN_CHILD: { source: 'inventory', next_action: 'Controller: reopen the parent, or move or close its open descendants' },
@@ -2852,34 +2862,49 @@ class StateStore {
     return assertValid(kind, doc);
   }
 
-  // The whole page as it stood, kept in the private store before marked notes can leave it. The
-  // file is named by its content, so a retry finds the same file. It is read back before use, and a
-  // store that is not private, or text shaped like a secret, saves nothing.
-  noteCopyPath(issue, digest) { return `${this.store.path}page-copies/issue-${issue}/${digest}.md`; }
+  // One page-copy format for every caller: the whole page as it stood, as its exact text, at
+  // page-copies/issue-<n>/<sha256>.md in the private store, saved before any write that moves
+  // hand-written text off the page (marked notes leaving it, or a task page re-laid). The file is
+  // named by its content, so a retry finds the same file. It is read back before use, and a store
+  // that is not private, or text shaped like a secret, saves nothing.
+  pageCopyPath(issue, digest) { return `${this.store.path}page-copies/issue-${issue}/${digest}.md`; }
 
-  saveNoteCopy(issue, text) {
+  savePageCopy(issue, text) {
     if (secretShaped(text)) throw new ProgrammeError('PAGE_COPY_REFUSED', 'The page holds text shaped like a secret, so no copy was saved and nothing was moved.');
     const repo = this.transport.request('GET', `repos/${this.store.repository}`);
     if (repo.status !== 200) throw ghFailure(repo, 'Reading the private store');
     if (repo.json?.private !== true) throw new ProgrammeError('STORE_NOT_PRIVATE', `The store ${this.store.repository} is not private, so no page copy was saved and nothing was moved.`);
     const digest = sha256(text);
-    const docPath = this.noteCopyPath(issue, digest);
-    const decoded = response => (response.json?.encoding === 'base64' ? Buffer.from(response.json.content, 'base64').toString('utf8') : null);
-    const existing = this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(this.store.branch)}`);
-    if (existing.status === 200) {
-      if (decoded(existing) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} exists with other content.`);
+    const docPath = this.pageCopyPath(issue, digest);
+    const existing = this.readCopyText(docPath);
+    if (existing !== null) {
+      if (existing !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} exists with other content.`);
       return { digest, path: docPath, outcome: 'EXISTS' };
     }
-    if (existing.status !== 404) throw ghFailure(existing, `Reading ${docPath}`);
     const response = this.transport.request('PUT', this.encodedContents(docPath), {
       message: `programme page copy: issue-${issue} ${digest.slice(0, 12)}`, content: Buffer.from(text, 'utf8').toString('base64'), branch: this.store.branch,
     });
     if (!okStatus(response.status)) throw ghFailure(response, `Writing ${docPath}`);
     this.writes += 1;
     const commit = response.json?.commit?.sha;
-    const readback = commit ? this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(commit)}`) : null;
-    if (!readback || readback.status !== 200 || decoded(readback) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} did not read back as written.`);
+    if (!commit || this.readCopyText(docPath, commit) !== text) throw new ProgrammeError('STATE_READBACK_MISMATCH', `${docPath} did not read back as written.`);
     return { digest, path: docPath, outcome: 'WRITTEN' };
+  }
+
+  // The text of one saved copy, or null when there is none. A copy an older Toolkit saved as JSON
+  // (page-copies/issue-<n>-<first 16 hex>.json) still reads, but only when its text has that digest.
+  readPageCopy(issue, digest) {
+    const text = this.readCopyText(this.pageCopyPath(issue, digest));
+    if (text !== null) return sha256(text) === digest ? text : null;
+    const legacy = this.readPath(`${this.store.path}page-copies/issue-${issue}-${digest.slice(0, 16)}.json`, 'page_copy');
+    return legacy.doc && legacy.doc.issue === issue && legacy.doc.sha256 === digest ? legacy.doc.body : null;
+  }
+
+  readCopyText(docPath, ref = this.store.branch) {
+    const response = this.transport.request('GET', `${this.encodedContents(docPath)}?ref=${encodeURIComponent(ref)}`);
+    if (response.status === 404) return null;
+    if (response.status !== 200) throw ghFailure(response, `Reading ${docPath}`);
+    return response.json?.encoding === 'base64' ? Buffer.from(response.json.content, 'base64').toString('utf8') : null;
   }
 
   // PUT with compare-and-swap, then read back. A stale sha (409) or a create over an existing file
@@ -2905,23 +2930,6 @@ class StateStore {
     this.ownWrites.set(docPath, { replaced: sha || null, doc: clone(readback.doc), sha: blob });
     this.lastCommit = commit;
     return { outcome: 'WRITTEN', doc: readback.doc, sha: blob };
-  }
-
-  // A copy of a page as it was before a write that moves hand-written text, kept in the private
-  // store under the page's own digest and read back. Saving the same page twice writes once.
-  pageCopyPath(number, digest) { return `${this.store.path}page-copies/issue-${number}-${digest.slice(0, 16)}.json`; }
-
-  savePageCopy(number, page) {
-    const digest = sha256(page.body);
-    const file = this.pageCopyPath(number, digest);
-    const existing = this.readPath(file, 'page_copy');
-    if (existing.doc) {
-      if (existing.doc.issue !== number || existing.doc.body !== page.body) throw new ProgrammeError('STATE_CONFLICT', `${file} holds a different page.`);
-      return { outcome: 'NOOP', path: file };
-    }
-    const doc = { schema: PAGE_COPY_SCHEMA, issue: number, sha256: digest, updated_at: page.updated_at || null, saved_at: this.now(), body: page.body };
-    this.putVerified(file, 'page_copy', canonicalText(doc), null, `programme page copy: issue-${number}`);
-    return { outcome: 'WRITTEN', path: file };
   }
 
   listJournals(issue) {
@@ -2963,6 +2971,7 @@ class StateStore {
     if (previous) requireVersionToken(sha, this.docPath(kind, number));
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
+    if (kind === 'child') drift().stampNextAction(previous, doc, this.now());
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -3082,6 +3091,7 @@ class StateBatch {
       if (!entry.doc || (entry.base && sameState(entry.base, entry.doc))) continue;
       const doc = clone(entry.doc);
       if (entry.kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
+      if (entry.kind === 'child') drift().stampNextAction(entry.base, doc, store.now());
       doc.revision = entry.base ? entry.base.revision + (contentDigest(entry.base) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
       doc.volatile = { written_at: store.now(), ...(store.toolkitVersion ? { toolkit: store.toolkitVersion } : {}) };
       assertValid(entry.kind, doc);
@@ -3388,8 +3398,10 @@ class BranchStateStore extends StateStore {
     this.sessions = new Set();
   }
 
-  // Page copies hold whole pages, so they stay in the private store.
-  savePageCopy(number, page) { return this.private.savePageCopy(number, page); }
+  // Page copies hold whole pages and hand-written text, so they go to the private store, never the
+  // public branch, and only while that store is still private.
+  savePageCopy(issue, text) { this.requirePrivateStore(); return this.private.savePageCopy(issue, text); }
+  readPageCopy(issue, digest) { return this.private.readPageCopy(issue, digest); }
 
   // The public file holds only what validatePublic allows.
   validateRead(kind, doc) { return validatePublic(kind, doc); }
@@ -3398,8 +3410,6 @@ class BranchStateStore extends StateStore {
   // bindRepository; the branch itself by the read path.
   verify() { return this.private.verify(); }
 
-  // Page copies hold hand-written text, so they go to the private store, never the public branch.
-  saveNoteCopy(issue, text) { this.requirePrivateStore(); return this.private.saveNoteCopy(issue, text); }
 
   // Journals stay in the private store, unchanged.
   journalDir(issue) { return this.private.journalDir(issue); }
@@ -3671,6 +3681,7 @@ class BranchStateStore extends StateStore {
     }
     const doc = clone(next);
     if (kind === 'child' && doc.schema === SCHEMA.child) { doc.schema = SCHEMA.childV2; if (doc.prs === undefined) doc.prs = []; }
+    if (kind === 'child') drift().stampNextAction(previous, doc, this.now());
     doc.revision = previous ? previous.revision + (contentDigest(previous) === contentDigest(doc) ? 0 : 1) : Math.max(1, doc.revision || 0);
     doc.volatile = { written_at: this.now(), ...(this.toolkitVersion ? { toolkit: this.toolkitVersion } : {}) };
     assertValid(kind, doc);
@@ -5094,6 +5105,62 @@ class Reconciler {
     }
   }
 
+  // Drift (programme-drift.cjs): what fell behind its state with nothing in this pass to fix it. Open
+  // task pages and task PR pages are checked from the bodies this pass already holds; a task the
+  // sweep left queued for a later pass is not checked until it is read.
+  diffDrift(parent, docs, observed, effects, findings, holds) {
+    const outcomes = new Map(parent.outcomes.map(outcome => [outcome.issue, outcome]));
+    const queued = new Set([...(observed.sweep?.left || []), ...(observed.sweep?.failed || [])]);
+    const explained = number => holds.some(hold => hold.target === `#${number}`)
+      || findings.some(finding => finding.issue === number && drift().EXPLAINING_CODES.has(finding.code));
+    const planned = (kind, test) => effects.some(effect => effect.kind === kind && test(effect.target));
+    const inFlight = number => [parent, docs.get(number)].flatMap(doc => doc?.pending_effects || [])
+      .filter(effect => effect.state !== 'DONE' && effect.target?.issue === number).map(effect => effect.kind);
+    const pages = [];
+    for (const [number, doc] of docs) {
+      const outcome = outcomes.get(number);
+      const issue = observed.issues.get(number);
+      if (!outcome || !issue || issue.is_pull_request || issue.state !== 'open' || queued.has(number)) continue;
+      const found = findStateBlock(issue.body);
+      if (found.error) continue;
+      const block = !found.block ? 'missing'
+        : normalizeBlockBody(found.block.body) === normalizeBlockBody(renderChildBlockBody(doc, outcome)) && !found.block.tampered ? 'current' : 'behind';
+      pages.push({ number, block, planned: planned('replace_block', target => target.issue === number), explained: explained(number), holding: inFlight(number) });
+    }
+    findings.push(...drift().pageDrift(pages));
+    const taskPrs = this.prTasks(parent, docs, observed, null);
+    const prs = [];
+    for (const [pr] of taskPrs) {
+      const page = observed.prPages?.get(pr);
+      if (!page || !page.is_pull_request || page.state !== 'open') continue;
+      const nav = findStateBlock(page.body, NAV_BLOCK_NAME);
+      prs.push({ number: pr, nav: nav.error ? 'broken' : nav.block ? 'present' : 'missing', planned: planned('replace_pr_nav', target => target.pr === pr) });
+    }
+    findings.push(...drift().prNavDrift(prs));
+    const context = { parentIssue: parent.parent_issue, catalogued: new Set(outcomes.keys()), registered: new Set(registeredParents(this.binding)) };
+    const candidates = drift().referenceCandidates({ references: observed.references, taskPrs: new Set(taskPrs.keys()), knownPrs: new Set(observed.prPages?.keys() || []), ...context })
+      .slice(0, drift().REFERENCE_READS)
+      .map(candidate => ({ ...candidate, facts: observed.issues.get(candidate.number) || this.readReference(candidate.number) }));
+    findings.push(...drift().referenceDrift(candidates, context));
+    const tasks = [];
+    for (const [number, doc] of docs) {
+      const outcome = outcomes.get(number);
+      if (!outcome || isFinished(outcome, doc) || /^None:/.test(doc.next_action)) continue;
+      const pr = observed.prs.get(number);
+      const issue = observed.issues.get(number);
+      const events = [pr?.merged_at ? { at: pr.merged_at, what: `the merge of PR #${pr.number}` } : null, issue?.closed_at ? { at: issue.closed_at, what: 'the issue close' } : null]
+        .filter(Boolean).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+      tasks.push({ number, nextAction: doc.next_action, since: doc.private?.next_action_at || null, latest: events[0] || null });
+    }
+    findings.push(...drift().nextActionDrift(tasks));
+  }
+
+  // One issue a task PR names, read for the drift check; an issue that cannot be read is skipped.
+  readReference(number) {
+    try { return this.reader.issue(number); }
+    catch (error) { if (!error.code || error.code === 'GH_AUTH' || STOPS_PASS.has(error.code)) throw error; return null; }
+  }
+
   // Every journal file for a child; only the live assignment's journals are read in full.
   readJournals(doc) {
     const live = LIVE_GATE_STATES.includes(doc.gate.state) ? doc.gate.assignment?.id : null;
@@ -5617,6 +5684,12 @@ class Reconciler {
     }
   }
 
+  // Whether a saved page copy can still be read; a failed read counts as not there.
+  copySaved(issue, digest) {
+    try { return this.store.readPageCopy(issue, digest) !== null; }
+    catch (error) { if (!error.code || STOPS_PASS.has(error.code)) throw error; return false; }
+  }
+
   archiveTrust(entry) {
     const comment = this.reader.archiveComment(entry.comment_id);
     if (!comment) return { reason: 'missing' };
@@ -5905,6 +5978,8 @@ class Reconciler {
       const existing = children.get(number)?.doc;
       const copy = clone(doc);
       copy.revision = existing ? existing.revision + (contentDigest(existing) === contentDigest(doc) ? 0 : 1) : 1;
+      // A next action this pass sets counts as set now, as the write will stamp it.
+      drift().stampNextAction(existing || null, copy, this.now());
       return [number, copy];
     }));
     const blockHoldStart = holds.length;
@@ -5912,6 +5987,7 @@ class Reconciler {
     const blockHolds = new Set(holds.slice(blockHoldStart));
     this.diffUntracked(parent, desiredDocs, observed, only, findings);
     this.diffIdle(parent, desiredDocs, observed, only, findings);
+    if (!only) this.diffDrift(parent, projected, observed, effects, findings, holds);
     const legacy = parent.outcomes.filter(outcome => LEGACY_CLASSES.includes(outcome.class) && (!only || outcome.issue === only));
     if (legacy.length) findings.push({ code: 'CLASS_LEGACY', issue: parent.parent_issue, patch: legacyMigrationPatch(parent),
       detail: `${legacy.map(outcome => `#${outcome.issue} ${outcome.class}`).join(', ')} read as COMMITTED and sort like any other task, by group, priority (order) and child number; to migrate, save this finding's patch (reconcile --json) and apply it whole with update-parent, which sets COMMITTED and renumbers order in the old CORE, HARDENING, LATER sequence` });
@@ -6428,7 +6504,8 @@ class Reconciler {
           const reason = reported ? null : this.archiveTrust(entry).reason;
           if (!reported && !reason) continue;
           if (reason) reportedCopies.add(entry.copy);
-          const diagnostics = reason ? { reason, ...(reportedCopies.size === 1 ? { copy: entry.copy } : {}) } : null;
+          // The finding names the copy only while that copy is really in the store.
+          const diagnostics = reason ? { reason, ...(reportedCopies.size === 1 && this.copySaved(parentNumber, entry.copy) ? { copy: entry.copy } : {}) } : null;
           if (snapshot.next.noteKeys.includes(entry.key)) {
             // The owner put the same notes back under the marker (as the saved copy holds them):
             // the damaged comment is let go and a fresh one is posted for them on this full pass.
@@ -6470,7 +6547,7 @@ class Reconciler {
             // A note comment is never edited: its key is bound to its exact text.
             const prior = part.kind !== 'note' && entry?.comment_id && entry.login === login ? trust(entry) : null;
             // Saved copy first: the whole page as it stands, before any marked text is posted.
-            const copy = part.kind === 'note' ? this.store.saveNoteCopy(parentNumber, snapshot.before.body).digest : null;
+            const copy = part.kind === 'note' ? this.store.savePageCopy(parentNumber, snapshot.before.body).digest : null;
             if (!entry) {
               entry = { key: part.key, kind: part.kind, group: part.group, title: part.title.slice(0, 200), comment_id: null, login: null,
                 digest, state: 'pending', ...(copy ? { copy } : {}) };
@@ -6590,7 +6667,7 @@ class Reconciler {
       const state = findStateBlock(next.body).block, trace = findStateBlock(next.body, TRACE_BLOCK_NAME).block, context = findStateBlock(next.body, CONTEXT_BLOCK_NAME).block;
       if (!state || !trace || !context) throw new ProgrammeError('MANAGED_BLOCK_BROKEN', `#${parentNumber}: a block of the programme page cannot be read back, so nothing was written to this page`);
       // Saved copy first (again): the exact page this write replaces, before marked text leaves it.
-      if (next.noteCut) cutCopy = this.store.saveNoteCopy(parentNumber, before.body).digest;
+      if (next.noteCut) cutCopy = this.store.savePageCopy(parentNumber, before.body).digest;
       effect.target = { issue: parentNumber, digest: state.digest, trace: trace.digest, current: blockDigest(currentBody), context: context.digest, body_digest: sha256(next.body) };
       withIntent(effect, () => {
         // Recording the body intent can take time. Recheck custody after that write as well, so a
@@ -6754,7 +6831,7 @@ class Reconciler {
           if (next.relaid && next.moves) {
             // Hand-written text is about to move: the page as it is now is saved and read back
             // first. Without that copy nothing is written.
-            try { guard(); const copy = this.store.savePageCopy(number, before); relays += 1; done = `the page was laid out in the fixed order; the page as it was is saved at ${copy.path} in the state store`; }
+            try { guard(); const copy = this.store.savePageCopy(number, before.body); relays += 1; done = `the page was laid out in the fixed order; the page as it was is saved at ${copy.path} in the private store`; }
             catch (error) {
               if (!error.code || STOPS_PASS.has(error.code)) throw error;
               record(effect, 'HELD', 'the copy of the page could not be saved');

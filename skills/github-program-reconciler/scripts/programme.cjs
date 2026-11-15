@@ -11,6 +11,11 @@
 //   inventory [--deadline-ms <n>]                      classify every open issue (read-only)
 //   attention [--refresh] [--deadline-ms <n>]          the parent's attention findings; --refresh first runs
 //                                                      the refresh pass below
+//   trace <n>                                          the decision records on issue n (and on the parent)
+//
+// Any session, executors included, may write a task's handover file in the private store (evidence,
+// not programme state; programme-handover.cjs):
+//   handover --issue <n> [--gate <gate>] [--plan <url>] [--evidence <url>]... [--note <text>] [--apply]
 //
 // Any session in a governed checkout, executors included, may bring the pages up to date:
 //   refresh [--scheduled [--budget-ms <n>]]            the full reconcile --apply pass with the inventory,
@@ -90,7 +95,7 @@ const usage = message => new ProgrammeError('USAGE', message);
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (!COMMANDS.includes(command)) throw usage(`Usage: programme.cjs <${[...COMMANDS, 'trace'].join('|')}> [options]`);
+  if (!COMMANDS.includes(command)) throw usage(`Usage: programme.cjs <${[...COMMANDS, 'trace', 'handover'].join('|')}> [options]`);
   const args = { command };
   for (let index = 0; index < rest.length; index += 1) {
     const flag = rest[index];
@@ -1075,6 +1080,8 @@ function traceCommand(rest, deps, out) {
 function main(argv = process.argv.slice(2), deps = {}) {
   const out = deps.stdout || process.stdout;
   if (argv[0] === 'trace') return traceCommand(argv.slice(1), deps, out);
+  // The task's handover file is evidence, not programme state, so executor sessions may write it too.
+  if (argv[0] === 'handover') return require('./programme-handover.cjs').command(argv.slice(1), deps, out, openContext);
   const args = parseArgs(argv);
   if (args.command === 'closing-comment') {
     const repoRoot=args['repo-root'] || deps.repoRoot || process.cwd();
