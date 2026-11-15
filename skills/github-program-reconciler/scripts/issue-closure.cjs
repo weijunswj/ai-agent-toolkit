@@ -179,16 +179,19 @@ class IssueClosureGuard {
   // A table and merge times can still be pasted. Each member must have merged at the head its row
   // names (one PR read each), and the train's own commits must prove it is a train (trainShape).
   carriedHeads(repository, train, rows, backing, budget) {
-    for (const row of backing) {
-      const member = this.get(`repos/${repository}/pulls/${row.pr}`, budget);
-      if (member?.merged !== true || String(member.head?.sha || '').toLowerCase() !== row.head) return false;
-    }
+    for (const row of backing) if (!this.mergedAt(repository, row, budget)) return false;
     return this.trainShape(repository, train, rows, backing, budget);
+  }
+  // Whether the row's pull request exists and GitHub shows it merged at the head the row names.
+  mergedAt(repository, row, budget) {
+    const member = this.get(`repos/${repository}/pulls/${row.pr}`, budget, { missing: true });
+    return member?.merged === true && String(member.head?.sha || '').toLowerCase() === row.head;
   }
 
   // A merged train is a train only when its first-parent commits, from its head back to the main it
-  // landed on, are each one of: a member merge (its second parent is a row's reviewed head; a row
-  // boards at most once and every member the release relies on boards), a catch-up merge (its second
+  // landed on, are each one of: a member merge (its second parent is a row's reviewed head, the row
+  // names another pull request GitHub shows merged at that head, a row boards at most once, and every
+  // member the release relies on boards), a catch-up merge (its second
   // parent is already in that main), an eject revert (Train-Eject-Head and Train-Eject-PR trailers)
   // that exactly undoes an earlier merge of that head,
   // or a commit the `trainBump` reader accepts as changing only version stamps and changelog notes
@@ -226,7 +229,13 @@ class IssueClosureGuard {
       if (ups.length > 2) return false;
       if (ups.length === 2) {
         const row = rowByHead.get(ups[1]);
-        if (row) { if (boarded.has(row.pr)) return false; boarded.add(row.pr); continue; }
+        if (row) {
+          // A table row proves nothing alone: it must name another pull request that GitHub shows
+          // merged at exactly that head (backing members were read so already).
+          if (row.pr === train || boarded.has(row.pr) || !backing.includes(row) && !this.mergedAt(repository, row, budget)) return false;
+          boarded.add(row.pr);
+          continue;
+        }
         if (this.holds(repository, main, ups[1], budget)) continue;
         if (unreverted.has(ups[1])) return false;
         unreverted.set(ups[1], sha);

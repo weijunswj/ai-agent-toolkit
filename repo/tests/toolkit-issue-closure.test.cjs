@@ -674,8 +674,11 @@ function mergedTrain(github, number, { chain, start = MAIN, squash = false, comm
   return head;
 }
 // Each source may set `head` (its real head; a member defaults to the head its train row names); a
-// train may set `chain` and the other mergedTrain options (default: every row boarded, then a bump).
+// train may set `chain` and the other mergedTrain options (default: every row boarded, then a bump),
+// and `pulls` ({ <number>: { merged, head: { sha } } | null }) overrides how GitHub answers a row's
+// pull request (null: not found). A row that is no source otherwise reads as merged at its row head.
 function timelineGuard(sources, { trainBump = adapter.trainBumpFiles } = {}) {
+  const pulls = Object.assign({}, ...sources.map(source => source.pulls || {}));
   const github = new FakeGitHub({ repository: repo });
   github.addIssue(1);
   const events = sources.map(({ number, body, merged = true, at = '2026-11-12T10:00:00Z' }) => ({ event: 'cross-referenced', source: { issue: { number, body,
@@ -688,7 +691,10 @@ function timelineGuard(sources, { trainBump = adapter.trainBumpFiles } = {}) {
     if (call.method !== 'GET') return undefined;
     if (/\/issues\/1\/timeline\?/.test(call.path)) return { status: 200, json: events };
     const pull = /\/pulls\/(\d+)$/.exec(call.path);
-    if (pull && heads.has(Number(pull[1])) && !mergeTrainRows(sources.find(source => source.number === Number(pull[1])).body)) return { status: 200, json: { number: Number(pull[1]), merged: true, head: { sha: heads.get(Number(pull[1])) } } };
+    const number = pull && Number(pull[1]);
+    if (pull && Object.hasOwn(pulls, number)) return pulls[number] ? { status: 200, json: { number, ...pulls[number] } } : { status: 404, json: {} };
+    if (pull && heads.has(number) && !mergeTrainRows(sources.find(source => source.number === number).body)) return { status: 200, json: { number, merged: true, head: { sha: heads.get(number) } } };
+    if (pull && !heads.has(number) && rowHead.has(number)) return { status: 200, json: { number, merged: true, head: { sha: rowHead.get(number) } } };
     return undefined;
   });
   for (const source of sources) {
@@ -751,6 +757,9 @@ test('a merged train releases its hold through a carried member whose UAT is PAS
 const H948 = '8'.repeat(40); const H947 = '7'.repeat(40); const EJECTED = hex('ejected-949');
 const MEMBER_947 = { number: 947, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', at: MEMBER_LATER };
 const TRAIN_970 = { number: 970, body: TRAIN_BODY([948, 947]) };
+// A pasted table can also list a sibling branch's head as a row of its own.
+const SIBLING = hex('sibling-branch');
+const SIBLING_ROW = pr => TRAIN_970.body.replace(/^(\| #947 .*)$/m, `$1\n| ${pr} | \`${SIBLING}\` | NORMAL | patch | PASS |`);
 for (const [label, train, expected, reason] of [
   ['member merges only, last commit a version-only bump', { chain: [['board', H948], ['board', H947], ['bump']] }, 'allowed'],
   ['plus a main catch-up merge', { chain: [['board', H948], ['catchup'], ['board', H947], ['bump']] }, 'allowed'],
@@ -763,6 +772,11 @@ for (const [label, train, expected, reason] of [
   ['a last commit that changes a changelog fragment folder README', { chain: [['board', H948], ['board', H947], ['code', 'repo/docs/changelog.d/README.md']] }, 'refused'],
   ['a bump that also changes a code line', { chain: [['board', H948], ['board', H947], ['bumpWithCode']] }, 'refused'],
   ['a bump before a member merge', { chain: [['board', H948], ['bump'], ['board', H947]] }, 'refused'],
+  ['a sibling merge whose head the table adds under a pull request that does not exist', { body: SIBLING_ROW('#9999'), pulls: { 9999: null }, chain: [['board', H948], ['sibling'], ['board', H947], ['bump']] }, 'refused'],
+  ['a sibling merge whose head the table adds under an open pull request', { body: SIBLING_ROW('#9998'), pulls: { 9998: { merged: false, head: { sha: SIBLING } } }, chain: [['board', H948], ['sibling'], ['board', H947], ['bump']] }, 'refused'],
+  ['a sibling merge whose head the table adds under a pull request merged at another head', { body: SIBLING_ROW('#9997'), pulls: { 9997: { merged: true, head: { sha: 'd'.repeat(40) } } }, chain: [['board', H948], ['sibling'], ['board', H947], ['bump']] }, 'refused'],
+  ['a sibling merge whose head the table names as the train itself', { body: SIBLING_ROW('#970'), chain: [['board', H948], ['sibling'], ['board', H947], ['bump']] }, 'refused'],
+  ['a sibling merge whose head is listed only in the Ejected table', { body: `${TRAIN_970.body}\n\n### Ejected\n\n| Pull request | Head | Reason | Next step |\n|---|---|---|---|\n| #949 | \`${SIBLING}\` | failed CI | rejoin later |`, pulls: { 949: { merged: false, head: { sha: SIBLING } } }, chain: [['board', H948], ['sibling'], ['board', H947], ['bump']] }, 'refused'],
   ['a merged head the table does not list and nothing reverts', { chain: [['board', H948], ['board', EJECTED], ['board', H947], ['bump']] }, 'refused'],
   ['an eject revert that is not the exact undo of its boarding', { chain: [['board', H948], ['board', EJECTED], ['board', H947], ['eject', EJECTED, true], ['bump']] }, 'refused'],
   ['an eject revert of a head the train never merged', { chain: [['board', H948], ['board', H947], ['eject', EJECTED], ['bump']] }, 'refused'],
@@ -792,7 +806,7 @@ test('closure matrix B: without a bump reader no train with a bump releases', ()
   const result = timelineGuard([{ ...TRAIN_970, chain: [['board', H948], ['board', H947], ['bump']] }, MEMBER_947], { trainBump: null }).checkTexts(['Closes #1']);
   assert.equal(result.status, 'refused');
 });
-test('closure matrix B: a six-member train is proven in ten reads beyond the task itself', () => {
+test('closure matrix B: a six-member train is proven in eleven reads beyond the task itself', () => {
   const prs = [941, 942, 943, 944, 945, 946];
   const body = TRAIN_BODY(prs).replace(/^UAT: .*$/m, 'UAT: OWNER_TEST_NEEDED (each member\'s own test after the merge: #946)');
   const members = prs.slice(0, 5).map(number => ({ number, body: 'Refs #1\n\nUAT: NOT_REQUIRED (x)', at: MEMBER_LATER }));
@@ -800,8 +814,9 @@ test('closure matrix B: a six-member train is proven in ten reads beyond the tas
   const before = guard.github.calls.length;
   assert.deepEqual(guard.ownerTestPrs(repo, 1, guard.budget()), [], 'the train releases the task');
   const reads = guard.github.calls.slice(before).map(call => call.path);
-  // One timeline page, five member PRs, then the train: its PR, merge commit, commit page and bump.
-  assert.equal(reads.length, 10, reads.join('\n'));
+  // One timeline page, five member PRs, then the train: its PR, merge commit, commit page, the PR of
+  // the member that does not back the task (#946) and the bump.
+  assert.equal(reads.length, 11, reads.join('\n'));
 });
 test('mergeTrainMembers reads only a train body', () => {
   const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
