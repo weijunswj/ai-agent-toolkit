@@ -432,7 +432,64 @@ function bankTicketCommand(text, sessionId, tickets) {
   try { return tickets.peek(match[5], sessionId) !== null; } catch { return false; }
 }
 
+// ---- the hook's approval ----------------------------------------------------------------------
+// Claude Code's PreToolUse hook approves exactly two command lines, so neither a permission prompt
+// nor auto mode stops the bank: showing it (`node "<script>" setup`, which reads GitHub and notes the
+// bank for this session) and sending the owner's reply with this session's live bank ticket
+// (bankTicketCommand). Each runs alone, with no other argument and nothing a shell expands.
+// <script> is this copy's toolkit-governance.cjs, which runs this hook too, or the managed
+// checkout's when it lies outside the session's repository: a copy an agent can edit in its own
+// workspace never gets a script run unasked.
+const SETUP_COMMAND = /^[ \t]*(?:&[ \t]*)?node(?:\.exe)?[ \t]+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))[ \t]+setup[ \t]*$/;
+
+function samePath(written, expected) {
+  return process.platform === 'win32'
+    ? written.replace(/\//g, '\\').toLowerCase() === expected.replace(/\//g, '\\').toLowerCase()
+    : written === expected;
+}
+
+// The managed checkout's governance script (<home>/.ai-agent-toolkit/current/state.json repo_path),
+// or null when none is recorded or it does not hold the script.
+function managedGovernanceScript(home) {
+  try {
+    const recorded = JSON.parse(fs.readFileSync(path.join(home, '.ai-agent-toolkit', 'current', 'state.json'), 'utf8').replace(/^﻿/, '')).repo_path;
+    if (typeof recorded !== 'string' || !path.isAbsolute(recorded)) return null;
+    const script = path.join(recorded, 'repo', 'scripts', 'toolkit-governance.cjs');
+    return fs.existsSync(script) ? script : null;
+  } catch { return null; }
+}
+
+// Whether a file lies outside the repository (or, outside one, the folder) of every given folder:
+// the session's folder and its project folder. False when no folder is known.
+function outsideRepositories(file, folders) {
+  const known = folders.filter(folder => typeof folder === 'string' && path.isAbsolute(folder));
+  if (!known.length) return false;
+  return known.every(folder => {
+    let root;
+    try { root = governance.findGitRoot(folder) || folder; } catch { return false; }
+    const relative = path.relative(root, file);
+    return relative.startsWith('..') || path.isAbsolute(relative);
+  });
+}
+
+function approvedScript(script, folders, home) {
+  if (samePath(script, SCRIPT)) return true;
+  const managed = managedGovernanceScript(home);
+  return managed !== null && samePath(script, managed) && outsideRepositories(managed, folders);
+}
+
+// Whether the hook approves this shell command: true only for the two lines above. `folders` are the
+// session's folder and its project folder.
+function bankRunApproved(text, sessionId, tickets, { folders = [], home = require('node:os').homedir() } = {}) {
+  const command = String(text || '');
+  if (/[$`%]/.test(command)) return false;
+  const setup = SETUP_COMMAND.exec(command);
+  const match = setup || BANK_COMMAND.exec(command);
+  if (!match || !approvedScript(match[1] ?? match[2] ?? match[3], folders, home)) return false;
+  return setup !== null || bankTicketCommand(command, sessionId, tickets);
+}
+
 module.exports = Object.freeze({
   APP_NAMES, BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
-  bankTicketContext, bankTicketCommand,
+  bankTicketContext, bankTicketCommand, bankRunApproved,
 });
