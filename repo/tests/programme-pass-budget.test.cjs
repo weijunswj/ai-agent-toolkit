@@ -738,7 +738,6 @@ const readCache = require(path.join(ROOT, 'skills/github-program-reconciler/scri
 
 function readFixture(t, { count = 24, groups = ['COMPLETED'], cached = true } = {}) {
   const fx = pageFixture(state, { count, groups, width: 5 });
-  fx.github.commentsMoveIssue = true;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'programme-reads-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = cached ? path.join(dir, 'pass.lock') : null;

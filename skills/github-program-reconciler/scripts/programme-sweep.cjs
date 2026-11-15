@@ -6,20 +6,23 @@
 const state = require('./programme-state.cjs');
 
 const CAP = 300;
-// The cap per pass, by host and mode. On GitHub a scheduled pass has no cap of its own: it runs under
-// the governance App's own hourly allowance, one App per governed repository, and reads until GitHub's
-// remaining count reaches the safety margin below. It then saves where it got to and the next run
-// resumes, changed and new tasks first. On a computer the pass shares the signed-in account's limit
-// with everything else that account does, so it keeps 600. A refresh a session starts after its own
-// write stays small, at CAP, on both hosts, so it never spends the hour's allowance.
-const GITHUB_LIMIT = Infinity;
+// What one request takes while GitHub answers normally: a full pass on the live parent sent 260 to
+// 340 requests in 4 to 5 minutes, under a second each, one at a time.
+const REQUEST_MS = 1000;
+// A scheduled pass on GitHub sends at most as many requests as fit in half its 50-minute budget at
+// that pace, so a full pass leaves the other half for a slow GitHub. It runs under the governance
+// App's own hourly allowance, one App per governed repository, and also stops reading when GitHub's
+// remaining count reaches the safety margin below. Stopped at either, it saves where it got to and
+// the next run resumes, changed and new tasks first: at once after the cap, after the reset at the
+// margin. On a computer the pass shares the signed-in account's limit with everything else that
+// account does, so it keeps 600. A refresh a session starts after its own write stays small, at CAP,
+// on both hosts, so it never spends the hour's allowance.
+const HALF_BUDGET_CAP = Math.floor(state.PASS_BUDGETS.scheduled.budgetMs / 2 / REQUEST_MS);
 const PASS_CAPS = Object.freeze({
-  cloud: Object.freeze({ scheduled: GITHUB_LIMIT, 'after-write': CAP }),
+  cloud: Object.freeze({ scheduled: HALF_BUDGET_CAP, 'after-write': CAP }),
   computer: Object.freeze({ scheduled: 600, 'after-write': CAP }),
 });
 const passCap = ({ host, scheduled }) => (PASS_CAPS[host] || PASS_CAPS.computer)[scheduled === true ? 'scheduled' : 'after-write'];
-// How a cap reads in the pass's metrics line.
-const capText = cap => (Number.isFinite(cap) ? String(cap) : 'GitHub limit');
 const RESERVE = 60;
 const LOW_REMAINING = 200;
 // The safety margin: a pass stops reading while this share of GitHub's hourly limit (its own
@@ -130,4 +133,4 @@ class SweepRequests {
   }
 }
 
-module.exports = { SweepRequests, CAP, GITHUB_LIMIT, PASS_CAPS, passCap, capText, RESERVE, LOW_REMAINING, MARGIN_SHARE, margin, TASK_COST, PAGE_COST, SETTLE_FLOOR, LAST_REQUESTS };
+module.exports = { SweepRequests, CAP, REQUEST_MS, HALF_BUDGET_CAP, PASS_CAPS, passCap, RESERVE, LOW_REMAINING, MARGIN_SHARE, margin, TASK_COST, PAGE_COST, SETTLE_FLOOR, LAST_REQUESTS };

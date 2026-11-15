@@ -21,7 +21,6 @@ const controller = { session: 'fixture-controller', prefix: 'TEST-' };
 // linked from the tasks' timelines and a parent discussion of `discussion` comments.
 function fixture(t, { count = 6, prs = 0, discussion = 0, cached = true, closed = 0 } = {}) {
   const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
-  github.commentsMoveIssue = true;
   const binding = { schema: state.SCHEMA.binding, repository: github.repository, parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
     store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: [] };
   github.addIssue(421, { body: '# Programme\n' });
@@ -289,7 +288,6 @@ test('page budget: a capped first pass on a large parent draws pages and finishe
   // The parent never drew its task pages: every one is planned. Reading every task first and then
   // drawing none, the same way every pass, is the failure this guards.
   const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
-  github.commentsMoveIssue = true;
   const binding = { schema: state.SCHEMA.binding, repository: github.repository, parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
     store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: [] };
   github.addIssue(421, { body: '# Programme\n' });
