@@ -208,6 +208,32 @@ function indexErrorText(errors) {
   return `Invalid comment index: ${list}. ${indexRecoveryText(errors.map(entry => entry.code))}`;
 }
 
+// The top-level index comments a page body can link, and the structural faults of the index graph.
+// An index is faulty when the audit's walk from it would fail: it links in a loop, goes more than
+// MAX_INDEX_DEPTH hops deep, or lists more than MAX_INDEX_COMMENTS generated pages. A healthy index is
+// top level unless a healthy generated index lists it, so a faulty comment (anyone who can comment
+// can post one) never takes the links of the healthy ones. With no fault, `roots` is the graph's own.
+function linkableIndexRoots(comments, repository = '', issue = null) {
+  const graph = indexGraph({ comments, repository, issue, all: true });
+  const ids = new Set(graph.indexes.map(comment => String(comment.id)));
+  const below = new Map([...ids].map(id => [id, graph.strictIds.has(id) ? [...new Set(graph.localLinks.get(id).map(link => link.id).filter(target => ids.has(target)))] : []]));
+  // A walk fails when MAX_INDEX_DEPTH hops can be taken from the index (a loop always allows them).
+  const memo = new Map();
+  const reaches = (id, hops) => {
+    if (!hops) return true;
+    const key = `${id} ${hops}`;
+    if (!memo.has(key)) memo.set(key, below.get(id).some(child => reaches(child, hops - 1)));
+    return memo.get(key);
+  };
+  const faulty = new Set([...ids].filter(id => reaches(id, MAX_INDEX_DEPTH)
+    || below.get(id).filter(child => graph.strictIds.has(child)).length + (graph.strictIds.has(id) ? 1 : 0) > MAX_INDEX_COMMENTS));
+  const listed = new Set([...ids].filter(id => !faulty.has(id)).flatMap(id => below.get(id)));
+  const seen = new Set();
+  const errors = graph.errors.filter(entry => !PROJECTION_TOLERATED.has(entry.code))
+    .filter(entry => { const key = `${entry.code} ${entry.id} ${entry.target || ''}`; return !seen.has(key) && seen.add(key); });
+  return { roots: graph.indexes.filter(comment => !faulty.has(String(comment.id)) && !listed.has(String(comment.id))), faulty: [...faulty], errors };
+}
+
 function traceEntries(comments, recordPrefix = null, repository = '', issue = null) {
   const people = comments.filter(comment => !isBot(comment));
   const graph = indexGraph({ comments, repository, issue, all: true });
@@ -403,4 +429,4 @@ if (require.main === module) {
   catch (error) { console.error(`FAIL: ${error.message}`); process.exitCode = 2; }
 }
 
-module.exports = Object.freeze({ indexErrorText, indexRecoveryText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, ledgerTopics, repairedBody, parseArgs, isBot, recordId });
+module.exports = Object.freeze({ indexErrorText, indexRecoveryText, DEFAULT_THRESHOLD, INDEX_COMMENT_MARKER, DIRECTORY_COMMENT_MARKER, MAX_INDEX_DEPTH, MAX_INDEX_COMMENTS, INDEX_BEGIN, INDEX_END, auditDecisionTraces, commentSummary, commentLink, markedIds, issueUrl, indexLines, markLines, traceEntries, linkableIndexRoots, ledgerTopics, repairedBody, parseArgs, isBot, recordId });

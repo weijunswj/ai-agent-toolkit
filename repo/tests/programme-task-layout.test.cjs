@@ -151,13 +151,12 @@ test('a task with no PR yet and a wait on the owner says so on its STATUS line',
   assert.equal(state.renderChildBlockBody(childDoc({ lifecycle: 'DONE' }), { ...OUTCOME, class: 'COMPLETED' }).split('\n').at(-1), 'COMPLETED · Next: Controller: admit and plan this outcome');
 });
 
-test('a task page ends with one AGENT CONTEXT line; the programme page keeps its DECISIONS block', () => {
+test('a task page ends with one AGENT CONTEXT line; the programme page has no DECISIONS block', () => {
   const comments = [{ id: 11, body: 'Scope\n---\nA decision', created_at: '2026-11-01T00:00:00Z', user: { login: 'owner' } }];
   const task = state.renderTraceBlockBody(806, comments, 'acme/app');
   assert.equal(task, ['# AGENT CONTEXT', '<!-- programme-trace issue=806 -->',
     'Decisions: `programme.cjs trace 806` · Newest: [11](https://github.com/acme/app/issues/806#issuecomment-11)'].join('\n'));
   assert.match(state.renderTraceBlockBody(806, [], 'acme/app'), /\nDecisions: `programme\.cjs trace 806` · None yet\.$/);
-  assert.match(state.renderTraceBlockBody(421, comments, 'acme/app', true), /^# DECISIONS\n/);
 });
 
 test('a PR page status names each task on one line, then one AGENT CONTEXT line', () => {
@@ -749,7 +748,7 @@ test('a page whose text stays where it is never claims a lay-out: closed tasks a
 // Every BEGIN line with this name, wherever it sits: an independent count of what is on the page.
 const rawBlocks = body => Object.fromEntries(['NAV', 'STATE', 'TRACE', 'CURRENT', 'CONTEXT'].map(name => [name, body.split(/\r?\n/).filter(line => line.startsWith(`<!-- AI-AGENT-TOOLKIT:programme-state:BEGIN ${name} `)).length]).filter(([, count]) => count));
 const TASK_ONCE = { NAV: 1, STATE: 1, TRACE: 1 };
-const PARENT_ONCE = { STATE: 1, TRACE: 1, CURRENT: 1, CONTEXT: 1 };
+const PARENT_ONCE = { STATE: 1, CURRENT: 1, CONTEXT: 1 };
 // Where the first `# ` line of the page (the place a block would be put) can hide.
 const ANCHORS = {
   'a details section': '<details><summary>Plan</summary>\n\n# Title\n\nPlan text.\n\n</details>\n\nBelow.\n',
