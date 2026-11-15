@@ -61,11 +61,11 @@ There is no handover packet: state lives in the pushed branch, the PR or brief, 
 
 ## 8. G2 Review and finding disposition
 
-G2 starts after G1's working version is accepted; user UAT follows the merge. Review depth follows the risk tier: RISKY work gets the full G2, NORMAL one independent review and LIGHT the builder's diff read. G2 uses fresh independent reviewer contexts, the actual candidate, the complete approved scope and its evidence. G2 does not spawn subagents. Every assigned reviewer independently reviews the complete approved scope and implementation, with execution, evidence, installation, authority, security, privacy and recovery; reviewers never split scope from execution. The selected stack fixes the set (section 10), and the gate rules hold launch ownership, delta reviews and rechecks.
+G2 starts after G1's working version is accepted; user UAT follows the merge. Review depth follows the risk tier: RISKY work gets the full G2, NORMAL one independent review and LIGHT the builder's diff read. G2 uses fresh independent reviewer contexts, the actual candidate, the complete approved scope and its evidence. G2 does not spawn subagents. Every assigned reviewer independently reviews the complete approved scope and implementation, with execution, evidence, installation, authority, security, privacy and recovery; reviewers never split scope from execution. The selected stack fixes the set (section 10), and the gate rules hold launch ownership, delta reviews and rechecks. Rechecks after a FAIL are scope-locked to the fix, and after two FAIL verdicts on one PR no further round starts until the owner answers the gate rules' round-cap card.
 
 | Disposition | Required explanation and action |
 |---|---|
-| Current ship blocker (High or Medium) | The criterion or safety invariant broken, the concrete failure or absent proof, and the smallest fix. |
+| Current ship blocker (High or Medium) | The criterion or safety invariant broken, the failing test or trace proving it (an unproven Medium is a follow-up; an unproven High goes to the owner), and the smallest fix. |
 | Follow-up (Low) | The added protection and why acceptance still holds; kept out of the current release. It joins an existing or new outcome child (section 4), placed in Later by its priority. |
 | Later or optional (Low) | The new outcome and its queue; never silently added to the Core. |
 | Unsupported or duplicate | The evidence problem or the existing finding. |
