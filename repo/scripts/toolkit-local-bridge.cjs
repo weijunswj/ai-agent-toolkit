@@ -1417,13 +1417,18 @@ function runAgentRulesPreflight(args, options = {}) {
   const pluginRoot = agentRulesPluginRoot(args, options);
   const runningVersion = options.runningVersion || BRIDGE_VERSION;
   const base = { targetRoot, gitRoot, gitRepoDetected: Boolean(gitRoot), pluginRoot, runningVersion, findings: [] };
-  if (!gitRoot || !agentRulesRootIsManaged(gitRoot, specs, options.state)) return { ...base, status: 'not-managed' };
+  if (!gitRoot) return { ...base, status: 'not-managed' };
+  // A governed repository is managed even with no Toolkit block: turn-on no longer writes one, and
+  // the installed Toolkit delivers the governed rules. There only its vendored checks are compared.
+  const governed = () => (options.governanceEnabled || governanceEnabledAt)(gitRoot);
+  const rulesManaged = agentRulesRootIsManaged(gitRoot, specs, options.state);
+  if (!rulesManaged && !governed()) return { ...base, status: 'not-managed' };
 
   const sourceVersion = toolkitSourceCheckoutVersion(targetRoot);
   const reference = sourceVersion ? 'source-checkout' : 'installed-plugin';
   const templateRoot = path.join(sourceVersion ? targetRoot : pluginRoot, AGENT_RULES_TEMPLATE_DIR);
   const findings = [];
-  for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
+  if (rulesManaged) for (const spec of specs) findings.push(...compareAgentRuleFile({ targetRoot, templateRoot, spec }));
   if (!sourceVersion) findings.push(...compareVendoredRepoChecks({ targetRoot, pluginRoot, governanceEnabled: options.governanceEnabled }));
   const authorVersion = sourceVersion || newestKnownToolkitVersion(options.state);
   const newer = Boolean(authorVersion) && compareBridgeVersions(runningVersion, authorVersion) < 0;
@@ -1432,7 +1437,7 @@ function runAgentRulesPreflight(args, options = {}) {
   // its own templates: the installed copy is the stale side.
   if (sourceVersion && newer) return { ...result, status: 'needs-attention', direction: 'newer' };
   if (!findings.length) return { ...result, status: 'ok' };
-  return { ...result, status: 'needs-attention', direction: sourceVersion ? 'drift' : newer ? 'newer' : 'differs' };
+  return { ...result, status: 'needs-attention', direction: sourceVersion ? 'drift' : newer && rulesManaged ? 'newer' : 'differs' };
 }
 
 // One neutral line. Never an instruction to halt work or to question the user; it names the step and
