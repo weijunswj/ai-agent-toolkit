@@ -149,7 +149,8 @@ test('detached closed tasks wait for their rotation turn, are never re-attached 
   assert.equal(f.github.calls.filter(call => call.method === 'POST' && /\/sub_issues$/.test(call.path)).length, 0, 'nothing is attached');
   for (let i = 0; i < 24; i += 1) assert.equal(f.github.issues.get(700 + i).parent, null);
   assert.ok(!f.parent().attention.some(entry => entry.code.startsWith('NATIVE_')), JSON.stringify(f.parent().attention));
-  assert.ok(f.page(421).includes('#700'), 'the closed task keeps its graph row');
+  // Its row is on the page or, as an older completion, in the graph archive comment the page links.
+  assert.ok([f.page(421), ...f.github.commentsOf(421).map(comment => comment.body)].some(text => /^\|#700[ |]/m.test(text)), 'the closed task keeps its graph row');
   // A reopened detached task is a change, so it is read on the next pass.
   Object.assign(f.github.issues.get(705), { state: 'open', updated_at: f.tick() });
   assert.ok(f.run().report.sweep.tasks.includes(705));
@@ -214,6 +215,22 @@ test('stuck-task / I1 I2: a task that cannot be read goes to the back; three in 
   f.github.hooks = [];
   f.run();
   assert.equal(f.parent().sweep.failures['501'], undefined, 'a successful read clears the count');
+});
+
+test('page queue: a frozen closed page is no drift reason, whatever revision it shows', t => {
+  const f = fixture(t, { count: 4 });
+  f.run();
+  const parent = f.parent();
+  f.store.mutate('child', 502, { writer: controller, parentDoc: parent, change: doc => { doc.lifecycle = 'DONE'; doc.completed_at = '2026-11-01T00:00:00Z'; return doc; } });
+  f.store.mutate('parent', parent.parent_issue, { writer: controller, change: doc => { doc.outcomes.find(outcome => outcome.issue === 502).class = 'COMPLETED'; return doc; } });
+  Object.assign(f.github.issues.get(502), { state: 'closed', state_reason: 'completed', closed_at: f.tick(), updated_at: f.tick() });
+  f.run();
+  const frozen = f.page(502);
+  assert.match(state.findStateBlock(frozen).block.body, /\nCOMPLETED\b/);
+  f.store.mutate('child', 502, { writer: controller, parentDoc: f.parent(), change: doc => { doc.next_action = 'None: closed later'; return doc; } });
+  const result = f.run();
+  assert.equal(result.report.sweep.why.drifted, 0, 'a frozen page drawn at an older revision is not re-read for it');
+  assert.equal(f.page(502), frozen, 'and it is not drawn again');
 });
 
 test('page queue: a changed blob id redraws the task and PR pages', t => {
