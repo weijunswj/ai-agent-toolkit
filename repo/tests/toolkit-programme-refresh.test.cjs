@@ -98,7 +98,7 @@ test('refresh automatically backfills a completed task and the next sweep makes 
   assert.equal(saved.gate.role, null, 'refresh records observations without gate acceptance');
   assert.equal(fx.store.read('parent', 421).doc.fence.holder_session, controller.session);
   assert.match(fx.github.issues.get(421).body, /^\|[^|\n]*\|#423\|COMPLETED\|/m);
-  assert.match(fx.github.issues.get(423).body, /^\|#800\|MERGED\|-\|\[aaaaaaa\]/m);
+  assert.match(fx.github.issues.get(423).body, /^\|[^|\n]*\|#800\|MERGED\|\[aaaaaaa\]/m);
   const before = { commits: fx.github.commits, mutations: fx.github.mutations(), calls: fx.github.calls.length };
   const leaseWrites = () => fx.github.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/sweep-lease.json')).length;
   const leaseBefore = leaseWrites();
