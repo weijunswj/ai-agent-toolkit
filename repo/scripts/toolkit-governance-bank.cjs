@@ -169,7 +169,7 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: adoption.found_store ? adoption.found_store.split('/')[1] : 'None yet', text: adoption.found_store ? 'Reused when governance turns on' : `Toolkit creates a private ${adoption.store_name} when governance turns on` }));
     }
     specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: adoption.parent.create ? 'None yet' : `#${adoption.parent.issue}`, text: adoption.parent.create ? 'Toolkit opens one when governance turns on' : 'Reused when governance turns on' }));
-    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'none yet', text: 'Taken from what the default branch already enforces' }));
+    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'none yet', text: adoption.checks.length ? 'Taken from what the default branch already enforces' : 'None enforced on the default branch yet, so default-branch protection waits until a pull request adds some' }));
     // Said before the answer, so turning on never stops afterwards to ask about it.
     if (adoption.visibility === 'public') specs.push(statusRow({ id: 'visibility', section, title: 'Repository visibility', current: 'Public', text: 'The programme file names your private evidence store (its name only, never its contents) and the parent issue is public. The store stays private' }));
   }
@@ -236,6 +236,10 @@ function renderGovernanceBank(specs) {
   return [
     ...bank.renderQuestionBankHeader(specs, true, false, BANK_TITLE),
     ...bank.renderCompactQuestionTable(specs, true),
+    // Turn on covers the post-merge settings too, so they are named whenever it is offered, not
+    // only when it is the recommendation (the table shows choice text only for that one).
+    ...specs.filter(spec => spec.id === 'governance').flatMap(spec => spec.choices.filter(choice => choice.value === 'on' && choice.presentation_ref !== spec.presentation.recommended_choice_ref)
+      .map(choice => `${spec.presentation.question_ref} ${choice.presentation_ref}. ${choice.label}: ${choice.consequence}`)).flatMap(line => ['', line]),
     ...specs.filter(spec => spec.id === 'ci-shards' && !spec.report_only).flatMap(spec => ['', `${spec.presentation.question_ref} asks: ${spec.whatThisControls}`, `More on ${spec.presentation.question_ref}: ${shardMoreText(spec)}`]),
     '',
     'For the full text of a question, say "explain 1.2".',

@@ -6,8 +6,10 @@
 // publishes a turn-on pull request it notes the repository here as finish pending. Once that binding
 // is merged and read back, the session-start line starts the finish once in the background
 // (`toolkit-governance.cjs finish`, which asks nothing: the owner's yes in the bank covers these
-// settings and the bank listed them) and a later session shows its result in one line. A failed
-// finish stays pending and is tried again, at most once per FINISH_GAP_MS.
+// settings and the bank listed them) and a later session shows its result in one line. Each setting
+// ends as on (read back), not enforceable here (GitHub Free private repositories), held for an owner
+// step Toolkit cannot take itself, or retry. Only retry keeps the finish pending, tried again at most
+// once per FINISH_GAP_MS; the others are final and the result names each one.
 //
 // The file holds only repository ids, proposal numbers, times and result lines, never a token.
 
@@ -23,7 +25,7 @@ const FINISH_GAP_MS = 15 * 60 * 1000;
 const MAX_ENTRIES = 32;
 const SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // What the finish turns on, as the bank's end lines and the session line say it.
-const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, and the free dependency and security settings';
+const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, and the free dependency and security settings';
 
 function fileOf(registryOptions = {}) { return path.join(userStateDirectory(registryOptions), BASENAME); }
 
@@ -60,15 +62,35 @@ function markPending(registryOptions, repositoryId, { proposal = null, now = new
 
 function entryFor(registryOptions, repositoryId) { return read(registryOptions).repositories[repositoryId] || null; }
 
-// The finish result: 'done' is shown once by the next session and then dropped; 'failed' stays pending.
-// `files` are security files the finish wrote into this working tree, which still need a pull request.
-function record(registryOptions, repositoryId, result, lines, { now = new Date(), files = [] } = {}) {
-  const wrote = files.length ? ` It also wrote ${files.join(', ')} in this working tree; commit ${files.length > 1 ? 'them' : 'it'} through a pull request.` : '';
+function listed(items) { return items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : items[0] || ''; }
+
+// The finish result, built from what actually happened (GovernanceMaintenance.finish):
+// { result: 'done' | 'failed', reason, on, unavailable, held: [{ name, step }], files }.
+// 'done' is final and shown once by the next session, then dropped; 'failed' (something to retry)
+// stays pending. `files` are security files the finish wrote into this working tree, which still
+// need a pull request.
+function resultLine(outcome) {
+  const on = outcome.on || [], unavailable = outcome.unavailable || [], held = outcome.held || [], files = outcome.files || [];
+  const parts = [outcome.result === 'done'
+    ? `Toolkit: governance setup finished here${held.length ? ', apart from what waits for you below' : ''}.`
+    : `Toolkit: governance setup could not finish here yet (${outcome.reason || 'GitHub could not be written'}); it is tried again in a later session.`];
+  if (on.length) parts.push(`On and read back: ${listed(on)}.`);
+  if (unavailable.length) parts.push(`Not set: GitHub cannot enforce ${listed(unavailable)} on a private repository on GitHub Free, so nothing was written for ${unavailable.length > 1 ? 'them' : 'it'}; the local guards stay the fallback.`);
+  for (const entry of held) parts.push(`Waiting for you, ${entry.name}: ${entry.step}`);
+  if (files.length) parts.push(`It also wrote ${files.join(', ')} in this working tree; commit ${files.length > 1 ? 'them' : 'it'} through a pull request.`);
+  return parts.join(' ');
+}
+
+function record(registryOptions, repositoryId, outcome, { now = new Date() } = {}) {
   return update(registryOptions, repositoryId, entry => entry && ({
-    ...entry, status: result === 'done' ? 'done' : 'pending', finished_at: now.toISOString(),
-    line: result === 'done' ? `Toolkit: governance setup finished here: ${WHAT} are on and read back.${wrote}`
-      : `Toolkit: governance setup could not finish here yet (${lines.filter(Boolean).slice(-1)[0] || 'GitHub could not be written'}); it is tried again in a later session.${wrote}`,
+    ...entry, status: outcome.result === 'done' ? 'done' : 'pending', finished_at: now.toISOString(), line: resultLine(outcome),
   }));
+}
+
+// A run that ended without a result to record (not merged yet, or another run held the lock) still
+// notes when it ended, so the next session does not report it as a run that died.
+function touch(registryOptions, repositoryId, { now = new Date() } = {}) {
+  return update(registryOptions, repositoryId, entry => entry && ({ ...entry, finished_at: now.toISOString() }));
 }
 
 // One finish at a time per repository on this computer: two sessions starting together start it
@@ -126,4 +148,4 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
   } catch { return []; }
 }
 
-module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, claim, entryFor, markPending, record, sessionLines, startFinish });
+module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, claim, entryFor, markPending, record, sessionLines, startFinish, touch });

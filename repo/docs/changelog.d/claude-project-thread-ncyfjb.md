@@ -1,6 +1,6 @@
 ### Added
 
-- **Governance post-merge finish:** after the question bank's turn-on pull request is merged, the next session starts `toolkit-governance.cjs finish` in the background. It adds default-branch protection, the ruleset that blocks force pushes and the free dependency and security settings without asking again, and the following session shows the result once. A setting GitHub cannot read back keeps it pending, with the reason, and it is tried again later.
+- **Governance post-merge finish:** after the question bank's turn-on pull request is merged, the next session starts `toolkit-governance.cjs finish` in the background. It adds default-branch protection, the ruleset that blocks force pushes and the free dependency and security settings without asking again, and the following session shows the result once, built from what actually happened: what is on, what GitHub cannot enforce on a private repository on GitHub Free, and any step left for the owner (such as adding required checks to a fresh repository before protection can be added). Only a setting GitHub could not confirm keeps it pending, with the reason, and it is tried again later. The bank names these settings whenever Turn on is offered, not only when it is recommended.
 - **One closing line for the turn-on:** the bank's setup pull request ends with a fixed summary (its link, what merging does, the files it holds, what finishes after the merge) and one line: "Merge <link>. Nothing else is needed from you."
 
 ### Changed

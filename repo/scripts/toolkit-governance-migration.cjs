@@ -106,7 +106,10 @@ class GovernanceMaintenance {
   // The post-merge finish of a bank turn-on (toolkit-governance-finish.cjs): the same rulesets,
   // default-branch protection and free security settings, for one freshly merged enabled repository,
   // without asking again, because the owner's yes in the governance bank covers them and the bank
-  // listed them. Nothing that needs billing is turned on. { result: 'not-ready' | 'done' | 'failed' }.
+  // listed them. Nothing that needs billing is turned on. Each setting ends as on (read back),
+  // unavailable (GitHub cannot enforce it on this plan), held (an owner step Toolkit cannot take
+  // itself, named in the result) or retry; only retry keeps the finish pending.
+  // { result: 'not-ready' } or { result: 'done' | 'failed', reason, on, unavailable, held, files }.
   async finish(root) {
     const state = governance.governanceState(root, this.#registryOptions);
     const slug = slugFor(root);
@@ -119,20 +122,48 @@ class GovernanceMaintenance {
       const protections = await this.#offerProtection(rows);
       const securities = await this.#applySecurity(rows);
       if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
-      // Done only when GitHub reads back every setting (or says this plan cannot enforce it). A setting
-      // that could not be read, or that Toolkit cannot add here, keeps the finish pending.
-      const missing = [];
-      if ([...rulesets, ...protections, ...securities].some(entry => ['failed', 'unverified'].includes(entry.result))) missing.push('a GitHub write did not read back');
-      if (!['present', 'not-enforceable'].includes(ruleset.noForcePushRuleset(rows[0].root, this.#rulesetReader ? { reader: this.#rulesetReader } : {}).status)) missing.push('the no-force-push ruleset is not read back');
-      const guarded = this.#protectionFor(rows[0]);
-      if (!guarded || !['conformant', 'not-enforceable'].includes(guarded.result.status)) missing.push('default-branch protection is not read back as set');
-      if (governance.mergedBinding(rows[0].root, this.#registryOptions)?.state
-        && !['present', 'not-enforceable'].includes(ruleset.keepStateRuleset(rows[0].root, this.#rulesetReader ? { reader: this.#rulesetReader } : {}).status)) missing.push('the ruleset that keeps the programme state branch is not read back');
-      if (this.#securityFor(rows[0]).status === 'unverified') missing.push('the security settings could not be read back');
+      const on = [], unavailable = [], held = [], retry = [];
+      const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
+      const rulesetEnd = (name, read) => {
+        if (read.status === 'present') on.push(name);
+        else if (read.status === 'not-enforceable') unavailable.push(name);
+        else retry.push(`${name} is not read back`);
+      };
+      rulesetEnd('the no-force-push ruleset', ruleset.noForcePushRuleset(rows[0].root, reader));
+      if (governance.mergedBinding(rows[0].root, this.#registryOptions)?.state) rulesetEnd('the ruleset that keeps the programme state branch', ruleset.keepStateRuleset(rows[0].root, reader));
+      const failed = entries => entries.some(entry => ['failed', 'unverified'].includes(entry.result));
+      // A write that did not read back is retried; only what is left after a clean write is held.
+      if (failed(protections)) retry.push('default-branch protection did not read back after the write');
+      else this.#protectionEnd(rows[0], { on, unavailable, held, retry });
+      const sec = this.#securityFor(rows[0]);
+      const unread = Object.values(sec.checks || {}).some(check => check.status === 'unverified');
+      if (sec.status === 'conformant') on.push('the free dependency and security settings');
+      else if (sec.status === 'drift' && !unread && !failed(securities)) held.push({ name: 'some dependency and security settings', step: `change by hand: ${Object.values(sec.checks || {}).filter(check => check.status === 'drift').flatMap(check => check.details).join('; ')}.` });
+      else if (sec.status !== 'not-applicable') retry.push(securities.some(entry => entry.result === 'failed') ? 'a security setting did not read back after the write' : 'the security settings could not be read back');
       // Security files written into this working tree still need a pull request; the result says so.
       const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
-      return missing.length ? { result: 'failed', reason: missing.join('; '), files } : { result: 'done', files };
+      return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, files };
     } finally { this.#ask = ask; }
+  }
+
+  // Where default-branch protection ended after the finish's write. A binding with no required checks
+  // has nothing to require yet, and drift Toolkit's own ruleset cannot fix (or a required check no
+  // workflow produces) needs the owner: both are held with the step, never retried in the background.
+  #protectionEnd(row, { on, unavailable, held, retry }) {
+    const name = 'default-branch protection';
+    const read = this.#protectionFor(row);
+    if (!read) { retry.push('the binding\'s required checks could not be read'); return; }
+    const { result } = read;
+    const then = `then run \`${governance.governanceCommand('migrate')}\` in your own terminal`;
+    if (result.status === 'conformant') on.push(name);
+    else if (result.status === 'not-enforceable') unavailable.push(name);
+    else if (result.reason === 'binding-has-no-required-checks') {
+      held.push({ name, step: `the programme file lists no required checks yet, so there is nothing for it to require. Add the check names every pull request must pass to required_checks in ${governance.BINDING_FILE} through a pull request, merge it, ${then} to add the protection.` });
+    } else if (['P1', 'P2', 'P5'].some(id => result.checks[id]?.status === 'unverified')) retry.push(`${name} could not be read back`);
+    else {
+      const notes = ['P1', 'P2', 'P3', 'P4', 'P5'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details : []));
+      held.push({ name, step: `change by hand: ${notes.join('; ') || 'reading it back still shows drift'}; ${then} to check it again.` });
+    }
   }
 
   async #offerRulesets(rows) {

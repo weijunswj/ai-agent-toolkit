@@ -60,14 +60,17 @@ const RULES_TEXT = Object.freeze({
 
 // The fixed summary of a bank turn-on pull request: what merging it does, what it holds and what
 // Toolkit finishes after the merge. The closing line follows the owner's commands (#applyBank).
-function turnOnSummary(result) {
+// `binding` is the binding the pull request proposes: with no required checks, protection waits.
+function turnOnSummary(result, binding) {
   const url = result.proposal.url;
+  const noChecks = Array.isArray(binding?.required_checks) && binding.required_checks.length === 0;
   return [
     result.reused ? (result.updated ? `Toolkit: updated the open governance turn-on pull request with these answers: ${url}.` : `Toolkit: the open governance turn-on pull request already holds these answers: ${url}.`)
       : `Toolkit: prepared the governance turn-on pull request: ${url}.`,
     'Merging it turns governance on for this repository on every computer. It changes no credentials or deployment, and nothing applies before you merge it.',
     ...(result.files?.length ? [`It holds: ${result.files.join(', ')}.`] : []),
-    `After the merge, the next session here finishes on its own: ${finishing.WHAT}. On a private repository on GitHub Free, GitHub cannot enforce the protection or the ruleset; that session says so and the local guards stay the fallback.`,
+    `After the merge, the next session here finishes on its own: ${finishing.WHAT}. On a private repository on GitHub Free, GitHub cannot enforce the protection or the rulesets; that session says so and the local guards stay the fallback.`,
+    ...(noChecks ? [`This repository has no required checks yet, so default-branch protection waits: once a pull request adds the check names to required_checks in ${governance.BINDING_FILE} and merges, run ${CMD('migrate')} in your own terminal to add it.`] : []),
     'After the merge, before pulling, compare any prepared untracked files with the merged copies; keep local differences and clear only verified duplicates.',
   ];
 }
@@ -303,6 +306,7 @@ class ToolkitGovernanceCli {
     }
     const lock = finishing.claim(this.#registryOptions, state.repository_id);
     if (!lock) {
+      finishing.touch(this.#registryOptions, state.repository_id);
       this.#print(json, { result: 'running' }, ['Another governance setup run is already working here. Nothing more was started.']);
       return 0;
     }
@@ -320,11 +324,12 @@ class ToolkitGovernanceCli {
     }).finish(state.root || this.#cwd);
     const lines = said.split('\n').map(line => line.trim()).filter(Boolean);
     if (outcome.result === 'not-ready') {
+      finishing.touch(this.#registryOptions, state.repository_id);
       this.#print(json, { result: 'not-ready' }, ['Not finished yet: the turn-on pull request is not merged and read back here. Nothing was changed; the next session tries again.']);
       return 0;
     }
-    const recorded = finishing.record(this.#registryOptions, state.repository_id, outcome.result, outcome.reason ? [outcome.reason] : lines, { files: outcome.files || [] });
-    this.#print(json, { result: outcome.result }, [...lines, recorded?.line || '']);
+    const recorded = finishing.record(this.#registryOptions, state.repository_id, outcome);
+    this.#print(json, { result: outcome.result, on: outcome.on, unavailable: outcome.unavailable, held: outcome.held }, [...lines, recorded?.line || '']);
     return outcome.result === 'done' ? 0 : 2;
   }
 
@@ -352,7 +357,7 @@ class ToolkitGovernanceCli {
     }
     const turnOn = bank && result.proposal?.answer === 'yes';
     if (turnOn) this.#turnOnUrl = result.proposal.url;
-    this.#print(json, result, [...(turnOn ? turnOnSummary(result) : [result.text]), ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding, app)]);
+    this.#print(json, result, [...(turnOn ? turnOnSummary(result, binding) : [result.text]), ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding, app)]);
     return 0;
   }
 
