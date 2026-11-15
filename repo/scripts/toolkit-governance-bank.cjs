@@ -58,9 +58,10 @@ function statusRow({ id, section, title, current, text }) {
 // 'off' or 'unset'), `merged` the merged binding (or null), `permissions` { missing, checked }, and
 // `adoption` what turning governance on would make in a repository that is not prepared yet
 // (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on), `train` the
-// merged merge trains switch ('on' or 'off'), and `ciShards` the sharded CI offer ({ estimate: the
-// minutes line }) for a repository whose merged binding turns governance on.
-function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null }) {
+// merged merge trains switch ('on' or 'off'), `ciShards` the sharded CI offer ({ estimate: the
+// minutes line }) for a repository whose merged binding turns governance on, and `app` the governance
+// App's variable and secret on GitHub (toolkit-governance-app.cjs presence; null when not read).
+function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null }) {
   const section = `Governance for ${state.repository || path.basename(state.root || '') || 'this repository'}`;
   const decided = state.state === 'ENABLED' || state.state === 'DISABLED';
   const specs = [];
@@ -161,13 +162,35 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
     specs.push(statusRow({ id: 'evidence-store', section, title: 'Evidence store', current: merged.store.repository, text: 'Bound in the merged programme file' }));
     specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: merged.required_checks.length ? merged.required_checks.join(', ') : 'none listed', text: 'Bound in the merged programme file' }));
   }
-  const app = APP_NAMES[permissions.host] || 'this app';
+  // The governance App: Set up is recommended whenever governance is on or being turned on. The owner
+  // runs the App setup command; Toolkit never makes the App or saves its key.
+  const appSet = app && app.variable === 'found' && app.secret === 'found';
+  const appPart = app && !appSet && (app.variable === 'found' || app.secret === 'found');
+  if (appSet || appPart) {
+    specs.push(statusRow({ id: 'governance-app', section, title: 'Governance App', current: appSet ? 'Set up' : 'Partly set up',
+      text: appSet ? 'Its variable and secret are on GitHub' : 'toolkit governance check shows how to finish or replace it' }));
+  } else {
+    const off = state.state === 'DISABLED';
+    specs.push(bank.resolvedQuestion({
+      id: 'governance-app', key: 'governanceApp', section, title: 'Governance App',
+      whatThisControls: "This repository's own GitHub App, which the governance jobs on GitHub use to open pull requests and keep records. It applies only while governance is on.",
+      current: off ? 'Off (needs governance)' : app && app.variable === 'missing' && app.secret === 'missing' ? 'Not set up' : 'Not checked',
+      recommendation: off
+        ? { value: 'keep', outcome: 'No App is made.', reason: 'Governance is off.' }
+        : { value: 'setup', outcome: 'You get one command to run yourself that makes the App and saves its key on this repository.', reason: 'Without it the governance jobs on GitHub cannot open pull requests.' },
+      choices: [
+        bank.wizardChoice('keep', 'Keep current', 'Not now: no App is made. Governance works without it, and toolkit governance check keeps showing how to add it.'),
+        bank.wizardChoice('setup', off ? 'Set up (needs governance on)' : 'Set up', 'You get one command to run yourself in your own PowerShell or terminal: you click Create on GitHub, and it saves the App\'s Client ID and key on this repository and opens its install page.'),
+      ],
+    }));
+  }
+  const appName = APP_NAMES[permissions.host] || 'this app';
   const missing = permissions.checked ? permissions.missing : null;
   const stale = permissions.checked ? permissions.stale || 0 : 0;
   const outdated = missing !== null && (missing > 0 || stale > 0);
   specs.push(bank.resolvedQuestion({
-    id: 'permission-blocks', key: 'permissionBlocks', section: 'This computer', title: `Toolkit permissions (${app})`,
-    whatThisControls: `The Toolkit permission lines that let ${app} run Toolkit's own commands without asking each time. Other apps keep their own.`,
+    id: 'permission-blocks', key: 'permissionBlocks', section: 'This computer', title: `Toolkit permissions (${appName})`,
+    whatThisControls: `The Toolkit permission lines that let ${appName} run Toolkit's own commands without asking each time. Other apps keep their own.`,
     current: missing === null ? 'Not checked' : outdated ? `Outdated: ${[missing ? `${missing} missing` : '', stale ? `${stale} old` : ''].filter(Boolean).join(', ')}` : 'Up to date',
     currentChoice: missing !== null && !outdated ? 'update' : '',
     recommendation: outdated
@@ -223,7 +246,7 @@ function selectionsOf(parsed, specs) {
     return spec && spec.folded_value === chosen ? spec.folded_into : chosen;
   };
   const asked = specs.some(spec => spec.id === 'ci-shards' && !spec.report_only);
-  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}) };
+  return { governance: value('governance'), taskAutoMerge: value('task-auto-merge'), mergeTrain: value('merge-train'), governanceApp: value('governance-app'), permissionBlocks: value('permission-blocks'), evidenceStore: value('evidence-store'), ...(asked ? { ciShards: value('ci-shards') } : {}) };
 }
 
 function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
@@ -251,7 +274,7 @@ function parseBankAnswer(text, specs, { requireBankReference = true } = {}) {
 // rows a card; the tool gate lets only the next exact card through for the bank shown last, and once
 // every card is tapped the taps come back as one bank answer with a one-use ticket
 // (toolkit-governance-gate.cjs PromptHold.bankPicked).
-const CARD_HEADERS = Object.freeze({ governance: 'Governance', 'task-auto-merge': 'Auto-merge', 'merge-train': 'Trains', 'ci-shards': 'CI shards', 'evidence-store': 'Store', 'permission-blocks': 'Permissions' });
+const CARD_HEADERS = Object.freeze({ governance: 'Governance', 'task-auto-merge': 'Auto-merge', 'merge-train': 'Trains', 'ci-shards': 'CI shards', 'evidence-store': 'Store', 'governance-app': 'App', 'permission-blocks': 'Permissions' });
 // The app's card holds at most four questions; a bank with more is split over several cards.
 const CARD_MAX = 4;
 const CARD_KEYS = Object.freeze(['questions', 'metadata']);

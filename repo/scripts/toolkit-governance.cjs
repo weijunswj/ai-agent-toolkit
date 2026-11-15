@@ -276,7 +276,8 @@ class ToolkitGovernanceCli {
 
   // Publication uses only a live receipt from an accepted owner answer.
   // `switches` are the task_prs members the owner's answer sets ({ auto_merge, merge_train }), or null.
-  #publish(json, suppliedRun = null, switches = null, adopted = null) {
+  // `app` is the bank's governance App answer ('setup' or 'keep'), or null outside the bank.
+  #publish(json, suppliedRun = null, switches = null, adopted = null, app = null) {
     const pending = this.#proposals.pending(this.#cwd, { sessionId: process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID,
       epoch: new gate.SessionEpochs({ registryOptions: this.#registryOptions }).get(process.env.TOOLKIT_HOST_SESSION || process.env.CODEX_THREAD_ID) });
     const run = suppliedRun || (pending?.kind === 'preparing' ? pending.run : null);
@@ -286,15 +287,24 @@ class ToolkitGovernanceCli {
     // setup governance asks the switch with yes; it joins the same proposal, never a local file.
     if (switches && binding && typeof binding === 'object') binding = { ...binding, task_prs: { ...(binding.task_prs || {}), ...switches } };
     const result = this.#proposals.publish(this.#cwd, run, binding, adopted ? adopted.files : null);
-    this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding)]);
+    this.#print(json, result, [result.text, ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding, app)]);
     return 0;
   }
 
-  // The governance App steps that follow a published decision: setup for yes, removal for no.
-  #appLines(proposal, binding) {
-    const slug = proposal.repository;
-    const read = { reader: this.#appReader || governanceApp.ghReader,
+  // How the governance App's variable and secret are read.
+  #appRead() {
+    return { reader: this.#appReader || governanceApp.ghReader,
       offline: !this.#appReader && (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1') };
+  }
+
+  // The governance App steps that follow a published decision: setup for yes, removal for no. A yes
+  // from the bank answered the App row already: Set up prints the owner's command after the bank's
+  // other steps, so only Keep current (not now) says anything here.
+  #appLines(proposal, binding, app = null) {
+    if (proposal.answer === 'yes' && app === 'setup') return [];
+    if (proposal.answer === 'yes' && app === 'keep') return [`Governance GitHub App: not now. Governance works without it; run ${CMD('check')} to see how to add it later.`];
+    const slug = proposal.repository;
+    const read = this.#appRead();
     const state = governanceApp.presence(slug, read);
     // The owner type picks the App page, so it is read only when the setup steps will show.
     if (proposal.answer === 'yes') return governanceApp.setupLines(slug, binding?.store?.repository || null, state,
@@ -374,7 +384,9 @@ class ToolkitGovernanceCli {
     const ciShards = offered ? { estimate: ciOffer.estimateText(estimate), measured: estimate } : null;
     this.#lastCiEstimate = estimate;
     const train = state.state === 'ENABLED' && state.root ? this.#trainSwitch(state.root) : null;
-    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards });
+    // The App row reads its variable and secret only where governance is on or can be turned on here.
+    const app = state.state !== 'DISABLED' && state.repository ? governanceApp.presence(state.repository, this.#appRead()) : null;
+    const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: train ? train.value : 'off', merged, permissions, adoption, ciShards, app });
     const reference = governanceBank.bankReference(specs);
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
@@ -490,10 +502,13 @@ class ToolkitGovernanceCli {
     // Turning governance on writes both switches as the bank showed them: a sub-option is off until
     // the owner turns it on, so an unanswered one is written off rather than left to its default.
     const enabling = { auto_merge: switchTo || 'off', merge_train: trainTo || 'off' };
+    const app = chosen.governanceApp === 'setup' ? 'setup' : 'keep';
+    let store = state.state === 'ENABLED' ? governance.mergedBinding(state.root, this.#registryOptions)?.store?.repository || null : null;
     if (chosen.governance === 'on' && state.state !== 'ENABLED') {
       const plan = found ? adopt.adoptionPlan(found, { newStore: chosen.evidenceStore === 'new' }) : null;
       if (plan && plan.blocked) this.#print(false, {}, [`GitHub could not be read (${plan.blocked}), so the evidence store and parent issue could not be found or made.`]);
-      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, enabling) : this.#prepareDecision('yes', enabling);
+      if (plan && !plan.blocked) store = plan.store.repository;
+      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, enabling, app) : this.#prepareDecision('yes', enabling, null, app);
       acted = true;
     } else if (chosen.governance === 'off' && state.state !== 'DISABLED') {
       code = this.#prepareDecision('no', null);
@@ -534,13 +549,22 @@ class ToolkitGovernanceCli {
         : ['', 'Toolkit permissions: Toolkit could not read where this app keeps them, so there is no command to give. Run setup toolkit, then toolkit governance again.']);
       acted = true;
     }
+    // The governance App command, next to the permissions command; only the owner runs it. Set up is
+    // recommended, so an answer that leaves governance off takes it too: it then gives no command.
+    const governedAfter = chosen.governance === 'on' || (state.state === 'ENABLED' && chosen.governance !== 'off');
+    if (chosen.governanceApp === 'setup' && !governedAfter) this.#print(false, {}, ['Governance App: not set up, because governance is not on after this answer.']);
+    if (chosen.governanceApp === 'setup' && governedAfter && code === 0 && state.repository) {
+      this.#print(false, {}, ['', `Governance App: run this once in your own PowerShell or terminal, outside any agent, with gh signed in. You click Create on GitHub; it saves the App's Client ID and key on ${state.repository}, opens the install page and checks the installation.`, '',
+        `node "${APP_SETUP_SCRIPT}" --repo ${state.repository}${store ? ` --store ${store}` : ''}`, '', PERMISSIONS_RELAY]);
+      acted = true;
+    }
     if (!acted) this.#print(false, {}, ['Nothing changed: every answer keeps things as they are.']);
     return code;
   }
 
   // A fresh repository: make the store and parent issue that are missing, render the governed rules,
   // then the one turn-on pull request (toolkit-governance-adopt.cjs).
-  #adoptAndPropose(state, plan, switches) {
+  #adoptAndPropose(state, plan, switches, app = null) {
     if (!this.#adoptionWriter) {
       this.#print(false, {}, ['GitHub cannot be written from here, so nothing was made. Run toolkit governance again where gh is signed in.']);
       return 2;
@@ -558,13 +582,13 @@ class ToolkitGovernanceCli {
     const lines = [...adopted.lines];
     if (adopted.made.length) lines.push(`Made on GitHub: ${adopted.made.join(', ')}.`);
     if (lines.length) this.#print(false, {}, lines);
-    return this.#prepareDecision('yes', switches, adopted);
+    return this.#prepareDecision('yes', switches, adopted, app);
   }
 
   // One governance decision pull request from the owner's bank answer (the ticket or the owner's own
   // terminal is the proof); it applies only after the owner merges it. `adopted` carries the binding
   // and rendered rules for a fresh repository.
-  #prepareDecision(answer, switches, adopted = null) {
+  #prepareDecision(answer, switches, adopted = null, app = null) {
     const before = this.#state();
     if (before.merged?.fresh && (before.rule === 'M1' && answer === 'yes' || before.rule === 'M2' && answer === 'no')) {
       this.#print(false, {}, ['Already ' + before.state.toLowerCase() + ' on the default branch. Nothing was written.']);
@@ -572,7 +596,7 @@ class ToolkitGovernanceCli {
     }
     const sessionId = 'bank-' + crypto.randomBytes(16).toString('hex'), epoch = crypto.randomBytes(16).toString('hex');
     const request = this.#proposals.request(this.#cwd, answer, { sessionId, epoch });
-    try { return this.#publish(false, request.run, switches, adopted); }
+    try { return this.#publish(false, request.run, switches, adopted, app); }
     catch (error) {
       this.#print(false, {}, [this.#proposals.pending(this.#cwd, { sessionId, epoch }).text,
         PROPOSAL_ERRORS[error.code] || (error.code === 'PROPOSAL_ADOPTION_INCOMPLETE' ? ADOPTION_NOT_READY : 'Proposal publication is unverified (' + (error.code || 'PROPOSAL_UNAVAILABLE') + '). Check GitHub access and matching open proposals before retrying. No local governance decision was written.')]);
@@ -646,6 +670,9 @@ function switchText(mergedText, parsed, changes) {
   }
   return edited !== null && matches(edited) ? edited : `${JSON.stringify(expected, null, 2)}\n`;
 }
+
+// The owner's governance App setup command (it refuses under an agent).
+const APP_SETUP_SCRIPT = path.join(__dirname, 'toolkit-governance-app-setup.cjs');
 
 // Command output can sit folded away in the app, so the agent repeats the command in its reply. Only
 // the owner runs it (toolkit-permissions-apply.cjs refuses under an agent).
