@@ -12,7 +12,8 @@
 # follows a CI workflow), or when six hours have passed. A green run that made no pass (queued behind
 # another sweep's lease, main moved, off the default branch) is not a sweep here; one paused at
 # GitHub's hourly App limit still is, so its reset wait holds. A start from activity waits until an hour
-# after the newest sweep run, one that made no pass included; the hourly start then picks the change up. Activity during a running sweep
+# after the newest sweep run, one that made no pass included; the hourly start then picks the change up. A closed issue starts the
+# sweep at once instead, unless the last pass paused at GitHub's hourly App limit before it reset. Activity during a running sweep
 # queues one more behind it. Nothing starts while a sweep is already queued.
 #
 # Activity from bots, the sweep's own App included, is ignored before a runner starts, so the
@@ -74,5 +75,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
           CI_WORKFLOW: validate.yml
         run: node repo/scripts/toolkit-programme-sweep-gate.cjs

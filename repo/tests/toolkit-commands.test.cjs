@@ -41,11 +41,11 @@ test('the governance guide runs setup, then offers the next step without answeri
     assert.ok(context.includes(`Run exactly \`node "${script}" setup\``), phrase);
     assert.match(context, /works like setup toolkit's: the user replies `all recommended` or only their changes, such as `1\.2=B`/);
     assert.match(context, /one-use ticket/);
-    // The bank's Agents paragraph (and the card input in it) is for the agent alone; in Claude Code the
-    // owner sees only the card. A guide that said "show its output in full" put the paragraph on the owner's screen.
-    assert.match(context, /do what its paragraph that starts with `Agents` says\. That paragraph is for you alone: never show the user any of it, nor the card input in it\./);
-    assert.match(context, /Where it gives you a question card, call it and show the user nothing else of the output but the Status lines/);
-    assert.match(context, /otherwise show them the rest of the output once, as printed, as plain text and never in a code block/);
+    // The bank's Agents line is for the agent alone; every app shows the owner the typed bank. A guide
+    // that said "show its output in full" put the Agents line on the owner's screen.
+    assert.match(context, /do what its paragraph that starts with `Agents` says\. That paragraph is for you alone: never show the user any of it\./);
+    assert.match(context, /Show them the rest of the output once, as printed, as plain text and never in a code block/);
+    assert.doesNotMatch(context, /question card|card input/, 'the bank is never put on a card');
     assert.doesNotMatch(context, /in full and as printed|every permission block/, 'never asks for the whole output, Agents paragraph included');
     assert.doesNotMatch(context, /--set|own terminal|toolkit governance enable/, 'no terminal hop and no switch flag');
     assert.match(context, /Never answer the bank for the user\.$/);
