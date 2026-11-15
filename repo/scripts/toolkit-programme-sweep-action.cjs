@@ -224,7 +224,8 @@ function refreshLanded(report) {
 }
 
 // When the next run should start after this pass, or 0 when the hourly start is enough. A pass that
-// read something and left tasks follows up, so a pass that cannot make progress never loops. A pass
+// read something and left tasks follows up, so a pass that cannot make progress never loops: at once
+// after its own time limit or request cap, once the limit has reset after GitHub's App limit. A pass
 // that found GitHub's hourly App count already at the margin read nothing, yet its run still counts
 // as the last sweep for the gate, so changes just before it would wait for the six-hour refresh: it
 // follows up once the limit has reset, which is at most once an hour.
@@ -236,7 +237,7 @@ function followUpAt(report, started, now) {
   if (sweep?.noWrite === true && atAppLimit(report)) return started + RESET_WAIT_MS;
   if (!sweep || !(sweep.left > 0) || !(sweep.read > 0)) return 0;
   if (sweep.reason === 'GitHub rate limit') return started + RESET_WAIT_MS;
-  if (sweep.reason === 'time limit') return now;
+  if (sweep.reason === 'time limit' || sweep.reason === 'request cap') return now;
   return 0;
 }
 

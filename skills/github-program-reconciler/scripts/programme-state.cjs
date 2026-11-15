@@ -6348,6 +6348,18 @@ class Reconciler {
     const postsByIssue = new Map();
     const postsLeft = number => MAX_TOPIC_COMMENTS_PER_PASS - (postsByIssue.get(number) || 0);
     const posted = number => postsByIssue.set(number, (postsByIssue.get(number) || 0) + 1);
+    // GitHub moves an issue's update time to that of a comment posted or edited on it. The times of
+    // this pass's own comment writes are kept per issue, so a page check tells them apart from
+    // anyone else's change: the body must be as read, and the update time either the one read or
+    // exactly the time of one of this pass's own comments on that issue.
+    const ownCommentTimes = new Map();
+    const commented = (number, response) => {
+      const at = Date.parse(response?.json?.updated_at || response?.json?.created_at);
+      if (Number.isFinite(at)) ownCommentTimes.set(number, new Set([...(ownCommentTimes.get(number) || []), at]));
+      return response;
+    };
+    const pageMoved = (number, latest, before) => !latest || latest.body !== before.body
+      || (latest.updated_at !== before.updated_at && !ownCommentTimes.get(number)?.has(Date.parse(latest.updated_at)));
     const notePageFinding = (number, code, diagnostics) => {
       const finding = { code, issue: number, diagnostics, detail: FINDING_CODES[code].next_action };
       const previous = plan.findings.find(entry => entry.code === code && entry.issue === number);
@@ -6471,12 +6483,12 @@ class Reconciler {
               const registered = parentDoc.page_archive?.find(entry => entry.key === part.key);
               if (!registered) return { outcome: 'UNKNOWN', detail: 'The archive registry entry disappeared.' };
               const page = this.reader.issue(parentNumber);
-              if (!page || page.body !== snapshot.before.body || page.updated_at !== snapshot.before.updated_at) return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'The owner changed the page; the next pass updates the pending archive comment.' };
+              if (pageMoved(parentNumber, page, snapshot.before)) return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'The owner changed the page; the next pass updates the pending archive comment.' };
               let id = prior?.id;
               if (prior) {
                 const fresh = trust(registered);
                 if (!fresh || archiveTools().digest(fresh.body) !== target.before) return { outcome: 'UNKNOWN' };
-                guard(); this.mutator.editComment(id, part.body);
+                guard(); commented(parentNumber, this.mutator.editComment(id, part.body));
               } else {
                 // A lost successful response is found under the pending key, never posted twice.
                 const candidates = this.reader.comments(parentNumber).filter(comment => comment.body.startsWith(`${archiveTools().marker(part.key)}\n`)
@@ -6494,7 +6506,7 @@ class Reconciler {
                 else {
                   if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent.' };
                   guard(); posted(parentNumber);
-                  const response = this.mutator.postComment(parentNumber, part.body); id = response.json?.id;
+                  const response = commented(parentNumber, this.mutator.postComment(parentNumber, part.body)); id = response.json?.id;
                   if (!id) return { outcome: 'UNKNOWN' };
                 }
               }
@@ -6535,8 +6547,8 @@ class Reconciler {
             if (this.reader.comments(parentNumber).some(comment => comment.body === text)) continue;
             if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE' };
             const latest = this.reader.issue(parentNumber);
-            if (!latest || latest.body !== snapshot.before.body || latest.updated_at !== snapshot.before.updated_at) return { outcome: 'NOT_DONE', code: 'BODY_MOVED' };
-            guard(); posted(parentNumber); this.mutator.postComment(parentNumber, text);
+            if (pageMoved(parentNumber, latest, snapshot.before)) return { outcome: 'NOT_DONE', code: 'BODY_MOVED' };
+            guard(); posted(parentNumber); commented(parentNumber, this.mutator.postComment(parentNumber, text));
             if (!this.reader.comments(parentNumber).some(comment => comment.body === text)) return { outcome: 'UNKNOWN' };
           }
           return { outcome: indexReadback(this.reader.comments(parentNumber), intent, post.target.parts) === true ? 'DONE' : 'UNKNOWN' };
@@ -6589,7 +6601,7 @@ class Reconciler {
           if (entry.comment_id && !archiveUntrusted(entry, entry.comment_id) && !trust(entry)) return { outcome: 'UNKNOWN', detail: 'An archive disappeared before the body write.' };
         }
         const latest = this.reader.issue(parentNumber);
-        if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'The issue changed immediately before the write.' };
+        if (pageMoved(parentNumber, latest, before)) return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'The issue changed immediately before the write.' };
         guard(); const response = this.mutator.writeBody(parentNumber, next.body);
         const after = this.reader.issue(parentNumber);
         if (after?.body === next.body) { finish(); return { outcome: 'DONE' }; }
@@ -6682,7 +6694,7 @@ class Reconciler {
                 if (postsLeft(number) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent.' };
                 guard();
                 posted(number);
-                this.mutator.postComment(number, text);
+                commented(number, this.mutator.postComment(number, text));
                 // Stop on the first uncertain response, including a lost successful response.
                 // The next pass reads it back before choosing the remaining pages.
                 if (!this.reader.comments(number).some(comment => comment.body === text)) return { outcome: 'UNKNOWN', detail: 'an index page did not read back exactly as written' };
@@ -6753,7 +6765,7 @@ class Reconciler {
           withIntent(effect, () => {
             // Issue PATCH has no compare-and-swap: re-read immediately before writing and refuse on change.
             const latest = this.reader.issue(number);
-            if (!latest || latest.body !== before.body || latest.updated_at !== before.updated_at) {
+            if (pageMoved(number, latest, before)) {
               return { outcome: 'NOT_DONE', code: 'BODY_MOVED', detail: 'the issue changed between the read and the write; the next pass re-plans it' };
             }
             guard();
@@ -6912,7 +6924,7 @@ class Reconciler {
           if (postsLeft(parentNumber) <= 0) return { outcome: 'NOT_DONE', detail: 'The five-comment budget is spent; the repair notice remains owed.' };
           guard();
           posted(parentNumber);
-          this.mutator.postComment(parentNumber, effect.target.body);
+          commented(parentNumber, this.mutator.postComment(parentNumber, effect.target.body));
         }
         return { outcome: this.reader.comments(parentNumber).some(comment => comment.body.includes(effect.target.marker)) ? 'DONE' : 'UNKNOWN' };
       });
