@@ -861,15 +861,18 @@ function executableCommands(text, depth = 0, context = {}) {
   return [...result, ...nested.flatMap(script => executableCommands(typeof script === 'string' ? script : script.text, depth + 1, { ...context, hidden: context.hidden || script.hidden, movesTarget }).map(command => ({ ...command, nested: true })))];
 }
 
-function closureCommands(input, { host } = {}) {
+// closingReferences, when given, reads the closing references of PR text for the two-reading key
+// (the issue-closure decision passes it). Without it the key leaves PR text out; callers without it
+// refuse every guarded write anyway, since they run only when that decision is unavailable.
+function closureCommands(input, { host, closingReferences } = {}) {
   const text = ShellCall.from(input).text; const context = scriptContext(input, { host });
   const commands = executableCommands(text, 0, context);
   if ((context.uncertainShell || context.codexBash) && /\\"/.test(text)) {
     const alternate = executableCommands(text, 0, { ...context, powershell: true });
-    const writes = list => list.filter(command => command.unreadableGh || guardedGh(ghCommand(command.words))).map(writeKey);
+    const writes = list => list.filter(command => command.unreadableGh || guardedGh(ghCommand(command.words))).map(command => writeKey(command, closingReferences));
     const judged = new Set(writes(commands)); const other = writes(alternate);
-    // The judged reading must see every write the other reading runs: as many, and each one by
-    // noun, verb and target. A write only the judged reading sees is judged as usual.
+    // The judged reading must see every write the other reading runs: as many, and each one by the
+    // facts that decide closure (writeFacts). A write only the judged reading sees is judged as usual.
     if (other.length > writes(commands).length || other.some(key => !judged.has(key))) throw Object.assign(new Error('The shell quoting around this GitHub write can be read two ways, so it was refused. Run the GitHub write as its own command, without backslash-escaped quotes around it.'), { complete: true });
   }
   return commands;
@@ -878,7 +881,7 @@ function closureCommands(input, { host } = {}) {
 // What decides a guarded write's closure effect: noun, verb, repository and target (the issue or
 // PR number, or the API endpoint), the API method and the fields it sends, and the closing
 // references, UAT line and body files of PR text. Two readings of the same text compare these.
-function writeFacts(command) {
+function writeFacts(command, closingReferences) {
   const gh = ghCommand(command.words);
   let repository = gh.inherited || ''; const targets = []; let method = ''; const fields = []; const files = [];
   const valueOf = (word, i, short, long) => word === short || word === long ? [gh.rest[i + 1] ?? '', i + 1] : [word.startsWith('--') ? word.slice(long.length + 1) : word.slice(word[2] === '=' ? 3 : 2), i];
@@ -894,6 +897,7 @@ function writeFacts(command) {
     else if (gh.noun === 'api' ? /^(?:https:\/\/api\.github\.com\/)?\/?(?:repos\/|graphql$)/.test(word) : /^#?\d+$/.test(word)) targets.push(word.replace(/^#/, ''));
   }
   const references = text => {
+    if (!closingReferences) return [];
     try { return [...new Set(closingReferences(text, 'x/x').map(ref => `${ref.repository}#${ref.number}`))].sort(); } catch { return ['unreadable']; }
   };
   const facts = { noun: gh.noun, verb: gh.verb, repository: repository.toLowerCase(), target: targets[0] ?? null };
@@ -915,14 +919,10 @@ function writeFacts(command) {
   }
   return facts;
 }
-function writeKey(command) {
+function writeKey(command, closingReferences) {
   if (command.unreadableGh) return 'unreadable';
   if (ghCommand(command.words).variable) return 'variable';
-  return JSON.stringify(writeFacts(command));
-}
-// The closing-reference reader lives with the issue-closure guard; load it only when needed.
-function closingReferences(text, repository) {
-  return require('../../skills/github-program-reconciler/scripts/issue-closure.cjs').closingReferences(text, repository);
+  return JSON.stringify(writeFacts(command, closingReferences));
 }
 
 function ghCommand(words) {
