@@ -209,27 +209,30 @@ for (const eol of ['\n', '\r\n']) for (const shape of ['four backticks', 'tildes
   });
 }
 
+// Active groups only: RETIRED and older COMPLETED rows always move, so size alone moves these.
+const SIZE_GROUPS = ['OPTIONAL', 'LATER', 'NOW'];
+
 test('B-T3: overflow chooses the shortest row prefix, terminal groups before trace and live groups', t => {
-  const f = pageFixture(state, { count: 84, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
+  const f = pageFixture(state, { count: 84, groups: SIZE_GROUPS, hand: '# Programme\n\n' + 'Notes. '.repeat(5700) });
   const projected = f.project();
   assert.ok(projected.body.length < 55000);
   assert.ok(projected.graphRows.length > 0);
   const groups = projected.archive.filter(part => part.kind === 'graph' && part.count).map(part => part.group);
-  assert.deepEqual(groups, ['RETIRED', 'COMPLETED'].slice(0, groups.length));
-  const archived = projected.archive.filter(part => part.kind === 'graph').flatMap(part => part.body.match(/^\|[^\n]*\|#\d+\|[^\n]*$/gm) || []);
-  const kept = projected.body.match(/^\|[^\n]*\|#\d+\|[^\n]*$/gm) || [];
-  assert.equal(new Set([...kept, ...archived].map(row => row.split('|')[3])).size, 84);
+  assert.deepEqual(groups, ['OPTIONAL', 'LATER'].slice(0, groups.length));
+  const archived = projected.archive.filter(part => part.kind === 'graph').flatMap(part => part.body.match(/^\|#\d+[ |][^\n]*$/gm) || []);
+  const kept = projected.body.match(/^\|#\d+[ |][^\n]*$/gm) || [];
+  assert.equal(new Set([...kept, ...archived].map(row => /^\|#(\d+)/.exec(row)[1])).size, 84);
   assert.equal(kept.length + archived.length, 84);
   const last = archived.at(-1);
   // In this fixture the last removed row stays in the same archive part. Restoring it costs exactly
   // its line and newline; the count remains one digit, so the summary costs the same.
   assert.ok(projected.body.length + last.length + 1 >= 55000, 'one fewer row cannot restore the safe limit');
-  assert.match(projected.body, /Archived: \[\d+ retired\]/);
+  assert.match(projected.body, /\n\n\[OPTIONAL \(\d+\)\]\(https:[^)]+\)\n/, 'one link line under the table');
   t.diagnostic(JSON.stringify({ fixture: '84 rows', moved: projected.archive.filter(part => part.kind === 'graph').map(part => [part.group, part.count]), posts: projected.posts, body: projected.body.length }));
 });
 
 test('B-T6: retained text above the safe limit moves only the hard-limit prefix and reports near-limit', () => {
-  const f = pageFixture(state, { count: 5, hand: '# Programme\n' + 'n'.repeat(55000) });
+  const f = pageFixture(state, { count: 5, groups: SIZE_GROUPS, hand: '# Programme\n' + 'n'.repeat(55000) });
   const report = f.make().run({ apply: true });
   assert.deepEqual(report.holds, []);
   assert.ok(f.page().length >= 55000 && f.page().length < 60000);
@@ -296,8 +299,8 @@ test('a configured redraw threshold cannot raise the hard body limit', () => {
 test('a refusal measures the smallest feasible body within the five-post budget', () => {
   const pass = new state.Reconciler({ store: null, reader: null, mutator: null,
     binding: { repository: 'example.test/app', parent_issue: 12, record_prefix: 'TEST-' }, toolkitVersion: '3.57.0' });
-  const rows = Array.from({ length: 900 }, (_, i) => `|${i}${'n'.repeat(195)}|${'d'.repeat(200)}|#${1000 + i}|-|-|RETIRED|-|`);
-  const graph = '# PROGRAMME GRAPH\n\n| Task | Task Description | Child # | PR # | Class | Status | Last updated (SGT) |\n|---|---|---|---|---|---|---|\n' + rows.join('\n');
+  const rows = Array.from({ length: 900 }, (_, i) => `|#${1000 + i} ${'n'.repeat(400)}|-|RETIRED|-|-|`);
+  const graph = '# PROGRAMME GRAPH\n\n| Task | PRs | Status | Waiting on | Updated (SGT) |\n|---|---|---|---|---|\n' + rows.join('\n');
   const projected = pass.projectBody(12, '# Programme\n', graph, [], '3.57.0');
   assert.equal(projected.refused, true);
   assert.ok(projected.posts <= 5);
@@ -307,8 +310,8 @@ test('a refusal measures the smallest feasible body within the five-post budget'
 test('the smaller CONTEXT stub retains an exact disjoint size span and 5000 units of safe headroom', () => {
   const f = pageFixture(state);
   const projected = f.project(), context = state.findStateBlock(projected.body, 'CONTEXT').block;
-  assert.equal(context.body, state.renderContextBlockBody());
-  assert.match(context.body, /Toolkit moves only notes under one `## Archive` heading: unchanged, to linked comments shown here\./);
+  assert.equal(context.body, state.renderContextBlockBody(12));
+  assert.equal(context.body.split('\n')[2], 'Agent context: none yet · Decisions: `programme.cjs trace 12`', 'one line');
   assert.doesNotMatch(context.body, /ARCHIVE_SECTION_UNSAFE|Archived notes:|Notes archived|\]\(https/);
   const sizes = state.bodySizeDiagnostics(projected.body, state.SAFE_LIMIT);
   assert.equal(sizes.largest_sections.find(part => part.kind === 'CONTEXT').size, context.end - context.start);
@@ -343,7 +346,7 @@ test('one Agent context comment shows under AGENT CONTEXT and is never the DECIS
   const report = f.make().run({ apply: true });
   assert.deepEqual(report.holds, []);
   const { context, trace } = contextBlocks(f);
-  assert.equal(context, `${state.renderContextBlockBody()}\n\n- [Agent context](${contextLink(id)})`);
+  assert.equal(context, `# AGENT CONTEXT\n<!-- programme-context -->\nAgent context: [comment ${id}](${contextLink(id)}) · Decisions: \`programme.cjs trace 12\``);
   assert.doesNotMatch(trace, new RegExp(String(id)));
   assert.doesNotMatch(trace, /Agent context/);
   assert.match(trace, new RegExp(`Newest: \\[${decision}\\]`), 'the newest tagged decision is the one link');
@@ -361,18 +364,18 @@ test('two Agent context comments hold: the block names both, and neither becomes
   const second = f.github.addComment(12, { body: 'agent  context\r\n---\r\nSecond, other spelling.' });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const { context, trace } = contextBlocks(f);
-  assert.match(context, /^- Held: 2 comments have "Agent context" as their topic, so none is listed here: /m);
+  assert.match(context, /^Agent context: held, 2 comments have that topic \(/m);
   for (const id of [first, second]) {
-    assert.ok(context.includes(`[${id}](${contextLink(id)})`));
+    assert.ok(context.includes(`[comment ${id}](${contextLink(id)})`));
     assert.doesNotMatch(trace, new RegExp(String(id)));
   }
-  assert.doesNotMatch(context, /^- \[Agent context\]/m);
+  assert.equal(context.split('\n').length, 3, 'still one line');
   assert.equal(f.make().run({ apply: true }).summary, 'No changes');
   // Retitle one and the next redraw lists the other.
   f.github.comments.get(second).body = 'Other topic\n---\nSecond.';
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const after = contextBlocks(f);
-  assert.ok(after.context.endsWith(`- [Agent context](${contextLink(first)})`));
+  assert.ok(after.context.includes(`Agent context: [comment ${first}](${contextLink(first)}) · `));
   assert.doesNotMatch(after.trace, new RegExp(String(first)));
   assert.match(after.trace, new RegExp(String(second)));
 });
@@ -380,15 +383,15 @@ test('two Agent context comments hold: the block names both, and neither becomes
 test('a long Agent context hold names five comments and counts the rest', () => {
   const comments = Array.from({ length: 7 }, (_, i) => ({ id: 9000 + i, user: { login: 'owner', type: 'User' }, body: 'Agent context\n---\nNote.' }));
   const body = state.renderContextBlockBody(12, comments, 'example.test/app');
-  assert.match(body, /Held: 7 comments/);
+  assert.match(body, /held, 7 comments have that topic/);
   assert.equal(body.match(/#issuecomment-/g).length, 5);
-  assert.match(body, / and 2 more\. They stay in the comments\./);
+  assert.match(body, / and 2 more\); keep it on one and the next redraw links it · /);
 });
 
 test('no Agent context comment keeps the fixed lines; bot, index, archive and untagged comments never count', () => {
   const f = pageFixture(state);
-  const fixed = state.renderContextBlockBody();
-  assert.equal(fixed.split('\n').length, 4);
+  const fixed = state.renderContextBlockBody(12);
+  assert.equal(fixed.split('\n').length, 3);
   f.github.addComment(12, { body: 'Agent context\n---\nFrom a bot.', login: 'helper[bot]', type: 'Bot' });
   f.github.addComment(12, { body: 'Agent context without the rule line.' });
   f.github.addComment(12, { body: 'Agent context notes\n---\nAnother topic.' });
@@ -418,7 +421,7 @@ test('a long comment history on a large page posts no index comments and keeps t
   for (let i = 0; i < 120; i += 1) f.github.addComment(12, { body: `Topic ${i % 3}\n---\nNote ${i}.` });
   assert.deepEqual(f.make().run({ apply: true }).holds, []);
   const { context, trace } = contextBlocks(f);
-  assert.ok(context.endsWith(`- [Agent context](${contextLink(id)})`));
+  assert.ok(context.includes(`Agent context: [comment ${id}](${contextLink(id)})`));
   assert.doesNotMatch(trace, new RegExp(String(id)));
   const pages = f.github.commentsOf(12).filter(comment => comment.body.includes('<!-- decision-trace-index -->'));
   assert.equal(pages.length, 0, 'nothing pages into index comments');
