@@ -7,6 +7,7 @@
 const path = require('node:path');
 const { detectAgentHost } = require('./agent-host-markers.cjs');
 const readline = require('node:readline');
+const ownerTerminal = require('./owner-terminal.cjs');
 
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -84,7 +85,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #stdout; #stderr; #ask; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #ciEstimator; #ciReaders;
+  #proposals; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #ciEstimator; #ciReaders;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -95,11 +96,13 @@ class ToolkitGovernanceCli {
   // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
   // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
   // ticket is bound to) are for tests too.
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, ciEstimator = null, ciReaders = null } = {}) {
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, ciEstimator = null, ciReaders = null } = {}) {
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport()) });
     this.#stdout = stdout;
     this.#stderr = stderr;
     this.#ask = ask;
+    // `confirm(effect)` resolves true only on the owner's fresh Enter (owner-terminal.cjs).
+    this.#confirm = confirm || (effect => ownerTerminal.pressEnter(effect, { environment }));
     this.#interactive = interactive === true;
     this.#cwd = cwd;
     this.#registryOptions = registryOptions;
@@ -159,7 +162,7 @@ class ToolkitGovernanceCli {
     }
     try {
       if (command === 'migrate') return await new GovernanceMaintenance({
-        stdout: this.#stdout, ask: this.#ask, interactive: this.#interactive, registryOptions: this.#registryOptions,
+        stdout: this.#stdout, confirm: this.#confirm, interactive: this.#interactive, registryOptions: this.#registryOptions,
         rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator, stateRulesetCreator: this.#stateRulesetCreator,
         protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter,
         securityReader: this.#securityReader, securityWriter: this.#securityWriter, securityFileWriter: this.#securityFileWriter,
@@ -630,7 +633,7 @@ class ToolkitGovernanceCli {
       if (command) commanded += 1;
       const app = governanceBank.APP_NAMES[permissions.host] || 'this app';
       this.#print(false, {}, command
-        ? ['', `Toolkit permissions (${app}): run this once in your own PowerShell or terminal, outside any agent. It shows what changes, backs up the settings file and waits for you to type apply.`, '', command, '', PERMISSIONS_RELAY]
+        ? ['', `Toolkit permissions (${app}): run this once in your own PowerShell or terminal, outside any agent. It shows what changes, backs up the settings file and waits for you to press Enter.`, '', command, '', PERMISSIONS_RELAY]
         : ['', 'Toolkit permissions: Toolkit could not read where this app keeps them, so there is no command to give. Run setup toolkit, then toolkit governance again.']);
       acted = true;
     }
@@ -751,7 +754,8 @@ class ToolkitGovernanceCli {
       this.#print(json, { state: before.state, writes: 0 }, ['Already ' + before.state.toLowerCase() + ' on the default branch. Nothing was written.']);
       return 0;
     }
-    if (String(await this.#ask('Prepare a pull request setting repository governance off on every computer? It applies only after the owner merges it. Type yes: ')).trim().toLowerCase() !== 'yes') {
+    this.#stderr.write(`${ownerTerminal.facts([['Turns off', 'repository governance, on every computer'], ['Applies', 'only after the owner merges the pull request']])}\n`);
+    if (await this.#confirm('prepare that pull request') !== true) {
       this.#print(json, { state: before.state, writes: 0 }, ['Not confirmed. Nothing was written.']);
       return 1;
     }

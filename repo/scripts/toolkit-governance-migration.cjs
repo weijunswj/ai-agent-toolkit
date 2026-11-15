@@ -69,11 +69,11 @@ function slugFor(root) {
 // It never reads, copies, repairs or writes a historical local governance answer. Keep the command
 // name for existing operators until the explicit migration route separates inventory and maintenance.
 class GovernanceMaintenance {
-  #stdout; #ask; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #now;
+  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #now;
 
-  constructor({ stdout, ask, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, now = () => new Date() }) {
+  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, now = () => new Date() }) {
     this.#stdout = stdout;
-    this.#ask = ask;
+    this.#confirm = confirm;
     this.#interactive = interactive === true;
     this.#registryOptions = registryOptions;
     this.#rulesetReader = rulesetReader;
@@ -177,8 +177,7 @@ class GovernanceMaintenance {
     }
     if (missing.length === 0) return [];
     this.#say(['These governed GitHub repositories have no ruleset blocking force pushes:', ...missing.map(row => `- ${row.slug} (${row.root})`)]);
-    const answer = String(await this.#ask(`Add a "${ruleset.RULESET_NAME}" ruleset (every branch, no bypass) to these ${missing.length} repositories on GitHub? Type yes to confirm: `) || '').trim().toLowerCase();
-    if (answer !== 'yes') {
+    if (await this.#confirm(`add a "${ruleset.RULESET_NAME}" ruleset (every branch, no bypass) to these ${missing.length} repositories on GitHub`) !== true) {
       this.#say('Rulesets not added.');
       return [];
     }
@@ -194,7 +193,7 @@ class GovernanceMaintenance {
   }
 
   // Repositories whose merged binding keeps programme state on the public state branch get a second
-  // ruleset that stops anyone deleting that branch, after its own typed yes.
+  // ruleset that stops anyone deleting that branch, after its own Enter.
   async #offerStateRulesets(rows) {
     const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
     const missing = [];
@@ -208,8 +207,7 @@ class GovernanceMaintenance {
     }
     if (missing.length === 0) return [];
     this.#say(['These governed GitHub repositories keep programme state on the branch ' + ruleset.STATE_BRANCH + ', and nothing stops it being deleted:', ...missing.map(row => `- ${row.slug} (${row.root})`)]);
-    const answer = String(await this.#ask(`Add a "${ruleset.KEEP_STATE_RULESET_NAME}" ruleset (that branch only, no deletion, no bypass) to these ${missing.length} repositories on GitHub? Type yes to confirm: `) || '').trim().toLowerCase();
-    if (answer !== 'yes') {
+    if (await this.#confirm(`add a "${ruleset.KEEP_STATE_RULESET_NAME}" ruleset (that branch only, no deletion, no bypass) to these ${missing.length} repositories on GitHub`) !== true) {
       this.#say('Programme state rulesets not added.');
       return [];
     }
@@ -279,8 +277,8 @@ class GovernanceMaintenance {
       // Workflow problems the ruleset does not fix, shown before the question.
       ...['P3', 'P4'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details.map(detail => `  - workflow (${result.checks[id].status}, fix by hand): ${detail}`) : [])),
     ])]);
-    const answer = String(await this.#ask(`Add or update a "${protection.RULESET_NAME}" ruleset on these ${candidates.length} repositories? It covers the default branch: every change needs a pull request, the binding's required checks must pass (pinned to GitHub Actions), merge commits only, and nobody can bypass it. Updating it replaces any rules already in that ruleset. Type yes to confirm: `) || '').trim().toLowerCase();
-    if (answer !== 'yes') {
+    this.#say([`The "${protection.RULESET_NAME}" ruleset covers the default branch:`, '- every change needs a pull request, and the binding\'s required checks must pass (pinned to GitHub Actions);', '- merge commits only, and nobody can bypass it;', '- updating it replaces any rules already in that ruleset.']);
+    if (await this.#confirm(`add or update it on these ${candidates.length} repositories`) !== true) {
       this.#say('Default-branch rulesets not added.');
       return [];
     }
