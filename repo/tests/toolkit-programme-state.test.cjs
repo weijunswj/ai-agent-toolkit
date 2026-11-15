@@ -259,7 +259,8 @@ test('with no readable time or app, a cancelled check run counts only when it is
 
 // A required check's runs from one app, oldest first in each row: the newest result decides. GitHub
 // names a required check by its name and, optionally, the app that must set it (never a workflow),
-// so runs are grouped by app. A run with no readable time or app keeps the rule above.
+// so runs are grouped by app (two workflows of one app are the same input as one workflow's reruns:
+// the reader carries no workflow). A run with no readable time or app keeps the rule above.
 test('the newest result of a required check decides, per app, when every run has a readable time', () => {
   const at = minute => `2026-11-15T10:${String(minute).padStart(2, '0')}:00Z`;
   const run = (conclusion, minute, extra = {}) => ({ kind: 'CheckRun', name: 'validate', status: 'COMPLETED', conclusion, required: false, app: 15368, completed_at: at(minute), ...extra });
@@ -278,8 +279,8 @@ test('the newest result of a required check decides, per app, when every run has
     ['listed newest first', [run('SUCCESS', 2), run('FAILURE', 1)], 'GREEN'],
     ['failure, then success, one run with no time', [run('FAILURE', 1), run('SUCCESS', 2, { completed_at: null })], 'RED'],
     ['failure, then success, one run with no app', [run('FAILURE', 1), run('SUCCESS', 2, { app: null })], 'RED'],
+    ['failure, then success, every run with no app', [run('FAILURE', 1, { app: null }), run('SUCCESS', 2, { app: null })], 'RED'],
     ['success and failure completed at the same time', [run('SUCCESS', 1), run('FAILURE', 1)], 'RED'],
-    ['two workflows of one app: older failure, newer success', [run('FAILURE', 1), run('SUCCESS', 2)], 'GREEN'],
     ['two apps: older failure from one, newer success from another', [run('FAILURE', 1, { app: 1 }), run('SUCCESS', 2, { app: 2 })], 'RED'],
     ['two apps: each newest passed', [run('FAILURE', 1, { app: 1 }), run('SUCCESS', 2, { app: 1 }), run('SUCCESS', 1, { app: 2 })], 'GREEN'],
     ['a status context failure beside a newer passing run', [{ kind: 'StatusContext', context: 'validate', state: 'FAILURE', required: true }, run('SUCCESS', 2)], 'RED'],
