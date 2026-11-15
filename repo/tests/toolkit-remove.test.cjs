@@ -587,3 +587,43 @@ test('the setup skill routes remove toolkit to the full plan, never the app unin
   assert.equal(section.split("an app's own uninstall tool may do this step").length, 2, 'the allowance appears once');
   assert.match(afterYes.split('. ')[0], /an app's own uninstall tool may do this step for that app/, 'the allowance sits in the step after the yes');
 });
+
+// The legacy cleaner's own guards. The fake scheduler above stands in for Task Scheduler, so these
+// read the real PowerShell scripts and the checks that run before PowerShell starts.
+test('legacy cleaner: unregister removes the exact task object only while it still carries the marker and matches the plan', () => {
+  const script = windows.SCRIPTS.unregister;
+  assert.match(script, /IndexOf\(\$p\.marker\) -lt 0\) \{ throw/);
+  assert.match(script, /expected_xml[\s\S]*Task changed before removal/);
+  assert.match(script, /Export-ScheduledTask -InputObject \$t\[0\]/);
+  assert.match(script, /Unregister-ScheduledTask -InputObject \$t\[0\] -Confirm:\$false/);
+  assert.doesNotMatch(script, /-TaskName \$p\.name/);
+});
+
+test('legacy cleaner: a folder goes only when it holds no task and no subfolder', () => {
+  assert.match(windows.SCRIPTS['remove-folder'], /GetTasks\(1\)\.Count -eq 0 -and \$f\.GetFolders\(0\)\.Count -eq 0/);
+});
+
+test('legacy cleaner: list reads every field the exact-match removal compares, with the exported XML', () => {
+  const script = windows.SCRIPTS.list;
+  assert.match(script, /\$actions = @\(\$t\.Actions/);
+  for (const field of ['EndBoundary', 'WeeksInterval', 'DaysInterval', 'StopAtDurationEnd', 'RunLevel', 'ExecutionTimeLimit']) assert.ok(script.includes(field), field);
+  assert.match(script, /definition_xml = \(Export-ScheduledTask -TaskPath \$path -TaskName \$t\.TaskName\)/);
+});
+
+test('legacy cleaner: a bad task name or folder is refused before any PowerShell call', () => {
+  const spawned = [];
+  const scheduler = windows.powerShellScheduler({ run: (...args) => { spawned.push(args); return { status: 0, stdout: '{"removed":true}' }; } });
+  for (const name of ['TOOLKIT: SWEEP', 'TOOLKIT - SWEEP ', ' TOOLKIT', 'A/B', 'A\\B', 'A*B', 'A?B', 'A"B', 'A<B', 'A>B', 'A|B', '.', '..'])
+    assert.throws(() => scheduler.unregister('TOOLKIT', name, 'demo', { definition_xml: '<Task/>' }), /task name/, name);
+  for (const folder of ['toolkit', '-X', 'A B', 'A'.repeat(33), '..']) assert.throws(() => scheduler.list(folder), /folder/, folder);
+  assert.deepEqual(spawned, []);
+  assert.deepEqual(scheduler.unregister('TOOLKIT', 'TOOLKIT - PROGRAMME SWEEP', 'demo', { definition_xml: '<Task/>' }), { removed: true });
+  assert.equal(spawned.length, 1);
+});
+
+test('legacy cleaner: a native denial is reported after one attempt', () => {
+  let attempts = 0;
+  const scheduler = windows.powerShellScheduler({ run: () => { attempts += 1; return { status: 1, stderr: 'Access is denied' }; } });
+  assert.throws(() => scheduler.list('TOOLKIT'), /Access is denied/);
+  assert.equal(attempts, 1);
+});
